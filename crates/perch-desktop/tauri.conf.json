@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "perch",
+  "version": "0.0.1",
+  "identifier": "dev.perch.app",
+  "build": {
+    "frontendDist": "../../packages/web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "perch",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  }
+}
