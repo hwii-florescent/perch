@@ -6,7 +6,17 @@ import type { AgentKind } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { onTerminalData } from "../terminalBus";
 
-export function AgentCliTerminal({ sessionId, agent }: { sessionId: string; agent: AgentKind }) {
+export function AgentCliTerminal({
+  sessionId,
+  agent,
+  cliError,
+  onExitCli,
+}: {
+  sessionId: string;
+  agent: AgentKind;
+  cliError?: string | null;
+  onExitCli?: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -20,8 +30,8 @@ export function AgentCliTerminal({ sessionId, agent }: { sessionId: string; agen
   );
 
   // Create (or reattach to) the PTY exactly once per mount. `attachAgentCli`
-  // itself caches by sessionId in the store, so remounting this component
-  // (toggling Hosted -> CLI -> Hosted) reattaches instead of respawning.
+  // itself caches by sessionId in the store (evicting dead PTYs), so toggling
+  // Hosted -> CLI -> Hosted reattaches the live PTY but re-spawns after exit.
   useEffect(() => {
     if (!containerRef.current) return;
     const term = new Terminal({
@@ -56,7 +66,8 @@ export function AgentCliTerminal({ sessionId, agent }: { sessionId: string; agen
       term.dispose();
     };
     // Deliberately run once per mount: sessionId/agent are fixed for the
-    // lifetime of this component instance.
+    // lifetime of this component instance (key prop in Chat.tsx ensures a
+    // remount when session or agent changes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -83,8 +94,13 @@ export function AgentCliTerminal({ sessionId, agent }: { sessionId: string; agen
   return (
     <div className="terminal">
       <div className="terminal__surface" ref={containerRef} />
+      {cliError && (
+        <div className="terminal__cli-error">{cliError}</div>
+      )}
       {exitCode !== null && (
-        <div className="terminal__exited">process exited (code {exitCode})</div>
+        <div className="terminal__exited" onClick={onExitCli} style={onExitCli ? { cursor: "pointer" } : undefined}>
+          process exited (code {exitCode})
+        </div>
       )}
     </div>
   );

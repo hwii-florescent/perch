@@ -121,13 +121,105 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
   "remember 7" → CLI mode correctly answers "7" → back to Hosted still answers "7"; Codex fresh-CLI
   fallback with no prior thread also verified clean).
 
+### Phase 2.8 — Session sidebar, agent status, environment header — ✅ done
+- New WS protocol messages (kept field-for-field in `protocol.rs` + `packages/shared/protocol.ts`):
+  `session.list` (client request + server response with `SessionSummary[]`: id, title = first-user-message
+  snippet via SQL correlated subquery, cwd, createdAt, lastAgent?, lastModel?, status running|idle);
+  `session.updated` (pushed on turn start/done/error/cancel and session create/resume);
+  `server.info` (one-shot on connect: hostname, isSsh from `SSH_CONNECTION`, platform).
+- Rust core: `HistoryDb::list_sessions()`; `status::get_server_info()`; `AppState` gained
+  `running_sessions: Arc<Mutex<HashSet>>` + a `tokio::sync::broadcast` channel (capacity 64) so all
+  connections' sidebars get live status (per-connection forwarder task rebuilds `SessionSummary` per
+  event); `ConnState` refactored to hold `app: AppState`; `session.subscribe` skips ring-buffer replay
+  for mid-turn sessions (documented v1 limitation: switching to a session mid-turn shows history only
+  up to the last completed turn).
+- Web UI: left `Sidebar.tsx` — env header with LOCAL/REMOTE/SSH badge (isSsh from server wins, else
+  `window.location.hostname` decides local; hostname / platform / cwd / branch; "+ New session";
+  session list with pulsing running dot, title snippet, agent·model, relative time,
+  click-to-switch via existing `session.resume` path); store grew
+  `sessions[]`/`serverInfo`/`listSessions`/`createSession`/`switchSession`; `App.tsx` `.app__body`
+  row layout.
+- Bug found & fixed during verification: env badge used the server's machine hostname for the locality
+  check so it always showed REMOTE once `server.info` arrived — fixed to use `window.location.hostname`
+  only.
+- New committed Playwright e2e suite at `e2e/` (chromium; webServer boots
+  `cargo run -p perch-core -- --port 7799`): 7 tests — env header LOCAL, first session active,
+  + new session, chat turn flips indicator running→idle (real claude-haiku-4-5 turn), title snippet,
+  session switch with history swap both ways, cross-tab live status via broadcast channel.
+  All 7 green; screenshots in `e2e/artifacts/`.
+- **Milestone: sidebar lists sessions with live agent status from any tab, click-to-switch preserves
+  history, env header shows where the core runs.** ✅ verified (Playwright, 7/7).
+
+### Phase 2.9 — Core UX: CLI/model sync, model catalogue, Codex-style UI, Settings — ✅ done
+- CLI/Hosted sync fixes: `sessions` table gained `last_agent`/`last_model` (persisted on every turn
+  via `update_session_last_model`, restored into the runner on resume) — fixes post-restart CLI attach
+  spawning without `--model` (proxy 404 on dated snapshot ids); dead CLI PTYs evicted from
+  `cliTerminalIds` on exit → fresh respawn on CLI re-entry; CLI attach errors surface as an
+  in-terminal `.terminal__cli-error` banner (previously invisible); `key={sessionId-agent}` remount on
+  `AgentCliTerminal`; model selector follows the active session (`switchSession` + `session.history`
+  both set agent/model).
+- Model catalogue: new `models.rs` static catalogue served via `server.info` `claudeModels`/`codexModels`
+  (7 claude entries fable-5→haiku-4-5, 2 codex) — deliberately NOT version-gated per user decision;
+  custom models merge from `~/.perch/settings.json`; client `availableModels` replaces the hardcoded
+  `models.ts` list.
+- Codex-style UI: sidebar Projects grouping keyed `(hostId="local", cwd)` (federation seam) with
+  nested sessions + gear footer; assistant markdown via `marked`+`DOMPurify`; per-turn collapsible
+  "Worked for Xs" (client-timed) wrapping thinking+tools; user bubbles Codex radius; agent-bar removed
+  — compact `ModelChip` popover lives in the input row, HOSTED MODE ONLY (user decision: zero
+  provider/model chrome in CLI mode); `ModeSwitch` always reachable; model-chip popover rendered via
+  portal with click-time positioning (dockview clipping fix found during verification).
+- Settings: new `settings.rs`/`hosts.rs` (`~/.perch/settings.json` + `hosts.json`, all-`serde(default)`,
+  atomic temp+rename writes); WS protocol `settings.get`/`update` (double-Option patch semantics),
+  `hosts.list`/`upsert`/`delete` → `settings.current`/`hosts.list`/`hosts.updated`; `SettingsModal`
+  (SSH hosts CRUD — connecting ships with federation; custom models per agent; default cwd, applied at
+  server start).
+- **Milestone: CLI mode survives restarts and model switches; model list is server-owned; UI is
+  Codex-shaped with Projects sidebar, markdown chat, input-row model chip; settings modal manages
+  custom models + saved SSH hosts.** ✅ verified (Playwright headless, 19 passed / 1 documented skip
+  across sidebar, cli-sync, models, restyle, settings suites).
+
+### Phase 3.0 — Hub federation — ✅ done
+- New `hub.rs`: `HubManager` — per enabled host a connection state machine: health-check over ssh →
+  SSH tunnel `ssh -A -L <local>:127.0.0.1:<port>` with `ExitOnForwardFailure`/`BatchMode` → auto-start
+  remote perch via `tmux new-session -A -d -s perch-core` when down → poll via local tunnel port →
+  `tokio-tungstenite` WS connect → connected; backoff 500 ms×2 cap 30 s; kill-on-drop tunnel guard;
+  watch-channel shutdown; self-connection guard. Remote replies parsed as the same `ServerMessage`
+  protocol (perch↔perch).
+- Routing: `remote_sessions`/`remote_terminals` maps route session/terminal-scoped client messages to
+  the owning host; streaming relayed to the originating connection via `pending_unicast` (Session→Terminal
+  key swap under one lock; cleared on `chat.done`/`terminal.exit`/connection close); `host.info` +
+  tagged `session.updated` + merged `session.list` broadcast to all connections via a second channel
+  (`hub_events_tx`, full pre-built messages). `hosts.updated` now broadcast (was writer-only).
+- Protocol: `SessionSummary.hostId` (default `"local"`), `session.create.hostId?`, new `host.info
+  {hostId, name, state connecting|connected|error|disabled, error?, hostname?, platform?, isSsh?,
+  claudeModels?, codexModels?}`, `SshHostEntry += directUrl?` (skip ssh; e2e/LAN) `+ remoteCmd?`
+  (auto-start template, `{port}` placeholder). New flags `--db-path`/`PERCH_DB`,
+  `--hosts-path`/`PERCH_HOSTS`.
+- UI: sidebar host sections (Local first, then each configured host with live state dot incl. connecting
+  pulse / error tooltip / disabled dimming), per-host "+ new session", per-host model lists feeding the
+  chip (`hostModels[activeHostId]`), live host state in SettingsModal.
+- Two real bugs found & fixed during verification: (1) `hosts.list` was never sent on WS connect so
+  host sections only appeared after opening Settings; (2) remote auto-start ran with a minimal
+  non-interactive PATH and a dead `SSH_AUTH_SOCK` — fixed by prepending `~/.local/bin` to PATH at
+  perch startup AND having the tunnel ssh (`-A`) maintain a stable `~/.ssh/perch_auth_sock` symlink
+  that the tmux-spawned perch exports, so claude's apiKeyHelper auths for as long as a tunnel lives.
+- e2e: second isolated `webServer` :7800 (`direct_url` federation) + `federation.spec.ts` E1–E5
+  (connected section, remote create, remote chat relay, remote CLI relay, disable/re-enable). Suite: 24
+  passed / 1 documented skip.
+- Real-devpod F4 verified end-to-end (headless): deploy → hub auto-start via tmux → tunnel →
+  `devpod-pong` streamed through hub → kill remote → error→connecting→connected recovery in ~15 s with
+  fresh tmux session. Screenshots in `e2e/screenshots-federation/`.
+- **Milestone: one sidebar shows Local + devpod projects/sessions live; chat and CLI terminals route
+  through hub-owned SSH tunnels; remote perch auto-starts and self-heals.** ✅ verified (two-instance
+  Playwright + real devpod).
+
+### Phase 3.1 — Tauri desktop shell (approved) — ⬜
+- App-first: `perch-desktop` boots the core on a free localhost port and opens a window; web delivery
+  remains for devpods only.
+
 ### Phase 3 — Headless + phone integration — ✅ done
 - Wire web build into axum static-serve; verify end-to-end via the gateway URL; reconnect/replay on
   refresh (ring buffer). **Milestone: fully usable from the phone browser.** ✅ verified.
-
-### Phase 4 — Tauri desktop shell (`perch-desktop`) — ⬜ (Mac, not started)
-- Thin Tauri crate boots the core WS on localhost and opens a window on the web app.
-- **Milestone: launch perch as a native desktop app that boots its own Rust core.**
 
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
@@ -138,8 +230,7 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
   live only for the browser tab's WS session) — swap the spawn mechanism inside `TerminalManager`
   for a tmux-attach, protocol surface unchanged.
 - Side panel (file tree, fuzzy search, diff by branch / last changes); full status bar
-  (context + cost); devpod fleet CLI (`perch start <devpod>` via SSH+tmux → gateway URL);
-  local vs SSH-devpod environment selector; open-source vs corp-internal split.
+  (context + cost); open-source vs corp-internal split.
 
 ---
 

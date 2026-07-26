@@ -35,6 +35,32 @@ pub struct SessionRow {
     /// codex turn — what gets passed to `codex resume` to restore context.
     /// `None` if no codex turn has completed yet.
     pub codex_thread_id: Option<String>,
+    /// Agent name ("claude" | "codex") from the most recently completed turn.
+    /// Persisted so that after a server restart, entering CLI mode can restore
+    /// the correct model alias via `update_session_last_model` / `get_session`.
+    pub last_agent: Option<String>,
+    /// Model alias from the most recently completed turn (e.g.
+    /// "claude-haiku-4-5"). Persisted alongside `last_agent` so that CLI
+    /// attach after a server restart passes the correct `--model` flag,
+    /// preventing the GenAI proxy 404 that occurs when claude falls back to
+    /// the dated snapshot id recorded in its transcript.
+    pub last_model: Option<String>,
+}
+
+/// Lightweight row returned by [`HistoryDb::list_sessions`], used to populate
+/// `session.list` and `session.updated` wire messages without reading full
+/// message content.
+pub struct SessionListRow {
+    pub id: String,
+    pub cwd: String,
+    pub created_at: i64,
+    /// First user-message snippet (up to 40 chars) via a correlated subquery,
+    /// or empty string if the session has no user messages yet.
+    pub title: String,
+    /// Agent name from the most recent assistant message, if any.
+    pub last_agent: Option<String>,
+    /// Model from the most recent assistant message, if any.
+    pub last_model: Option<String>,
 }
 
 pub struct HistoryDb {
@@ -119,6 +145,12 @@ impl HistoryDb {
         if !existing_session_columns.contains("codex_thread_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT", [])?;
         }
+        if !existing_session_columns.contains("last_agent") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_agent TEXT", [])?;
+        }
+        if !existing_session_columns.contains("last_model") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_model TEXT", [])?;
+        }
         Ok(())
     }
 
@@ -133,13 +165,15 @@ impl HistoryDb {
     pub fn get_session(&self, id: &str) -> anyhow::Result<Option<SessionRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt =
-            conn.prepare("SELECT cwd, claude_session_id, codex_thread_id FROM sessions WHERE id = ?1")?;
+            conn.prepare("SELECT cwd, claude_session_id, codex_thread_id, last_agent, last_model FROM sessions WHERE id = ?1")?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             Ok(Some(SessionRow {
                 cwd: row.get(0)?,
                 claude_session_id: row.get(1)?,
                 codex_thread_id: row.get(2)?,
+                last_agent: row.get(3)?,
+                last_model: row.get(4)?,
             }))
         } else {
             Ok(None)
@@ -162,6 +196,24 @@ impl HistoryDb {
         self.conn.lock().unwrap().execute(
             "UPDATE sessions SET codex_thread_id = ?2 WHERE id = ?1",
             params![id, codex_thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// Persist the agent name and model alias used for the most recently
+    /// completed turn. Called from `persist_turn` in `server.rs` so that after
+    /// a server restart, entering CLI mode can reconstruct `--model <alias>`
+    /// from the DB row rather than letting claude fall back to the dated
+    /// snapshot id in its transcript (which the GenAI proxy 404s).
+    pub fn update_session_last_model(
+        &self,
+        id: &str,
+        agent: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET last_agent = ?2, last_model = ?3 WHERE id = ?1",
+            params![id, agent, model],
         )?;
         Ok(())
     }
@@ -228,6 +280,50 @@ impl HistoryDb {
                 created_at: Some(row.created_at),
             })
             .collect())
+    }
+
+    /// Return all sessions ordered newest-first, with title (first user
+    /// message snippet) and last-agent/model via correlated subqueries.
+    /// Used to build `session.list` and `session.updated` wire messages.
+    pub fn list_sessions(&self) -> anyhow::Result<Vec<SessionListRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                s.id,
+                s.cwd,
+                s.created_at,
+                COALESCE(
+                    (SELECT SUBSTR(content, 1, 40)
+                     FROM messages
+                     WHERE session_id = s.id AND role = 'user'
+                     ORDER BY id ASC LIMIT 1),
+                    ''
+                ) AS title,
+                (SELECT agent
+                 FROM messages
+                 WHERE session_id = s.id AND role = 'assistant'
+                 ORDER BY id DESC LIMIT 1) AS last_agent,
+                (SELECT model
+                 FROM messages
+                 WHERE session_id = s.id AND role = 'assistant'
+                 ORDER BY id DESC LIMIT 1) AS last_model
+             FROM sessions s
+             ORDER BY s.created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SessionListRow {
+                    id: row.get(0)?,
+                    cwd: row.get(1)?,
+                    created_at: row.get(2)?,
+                    title: row.get(3)?,
+                    last_agent: row.get(4)?,
+                    last_model: row.get(5)?,
+                })
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
     }
 }
 

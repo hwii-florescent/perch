@@ -108,6 +108,31 @@ class PerchSocket {
     }
   }
 
+  /** Switch to an existing session: update internal state, persist to
+   * localStorage, and tell the server to resume+subscribe. The server will
+   * reply with `session.created` (echoing the id) + `session.history`, which
+   * the existing message handler already handles — it stores the id and
+   * fires session.subscribe, so history repopulates the message list. */
+  switchSession(sessionId: string): void {
+    this.sessionId = sessionId;
+    storeSessionId(sessionId);
+    this.send({ type: "session.resume", sessionId });
+  }
+
+  /** Start a completely new session. Clears the stored session id so that
+   * if the WS reconnects before session.created arrives it won't try to
+   * resurrect the old session. The server will reply with session.created
+   * carrying the new id, and the existing handler will persist it. */
+  newSession(): void {
+    this.sessionId = null;
+    try {
+      localStorage.removeItem("perch.sessionId");
+    } catch {
+      // ignore
+    }
+    this.send({ type: "session.create" });
+  }
+
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }

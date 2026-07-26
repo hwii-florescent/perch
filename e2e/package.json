@@ -1,0 +1,12 @@
+{
+  "name": "perch-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Playwright e2e tests for perch",
+  "scripts": {
+    "test:e2e": "npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

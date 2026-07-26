@@ -17,6 +17,47 @@ pub struct StatusInfo {
     pub cost_usd: Option<f64>,
 }
 
+/// Static server identity sent once per connection as `server.info`.
+pub struct ServerInfoData {
+    pub hostname: String,
+    pub is_ssh: bool,
+    pub platform: &'static str,
+}
+
+/// Collect hostname, SSH indicator, and OS name.
+///
+/// Hostname resolution order:
+/// 1. `$HOSTNAME` env var
+/// 2. `/etc/hostname` file (Linux; may not exist on macOS)
+/// 3. `hostname` binary output (works on macOS)
+/// 4. `"unknown"` fallback
+pub fn get_server_info() -> ServerInfoData {
+    let hostname = std::env::var("HOSTNAME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    ServerInfoData {
+        hostname,
+        is_ssh: std::env::var("SSH_CONNECTION").is_ok(),
+        platform: std::env::consts::OS,
+    }
+}
+
 /// Reads the current branch by walking up from `cwd` to find `.git/HEAD`.
 pub fn get_branch(cwd: &str) -> String {
     let Some(head_path) = find_git_head(Path::new(cwd)) else {

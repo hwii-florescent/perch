@@ -1,0 +1,1035 @@
+//! Hub federation — manages WS connections to remote perch instances.
+//!
+//! Each enabled `SshHost` gets a `connection_task` that runs a state machine:
+//! Connecting → (direct_url? skip ssh tunnel) → ws connect → Connected.
+//! On connect, the hub sends `session.list` to the remote, caches replies,
+//! tags them with a `host_id` and re-broadcasts via `hub_events_tx` so every
+//! browser connection gets live federated state.
+//!
+//! Routing: `server.rs` asks `HubManager` whether a session/terminal belongs
+//! to a remote; if yes, it registers a unicast sender for the originating
+//! connection and calls `forward(host_id, raw_json)`. The hub relays replies
+//! from the remote back through the unicast sender.
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+
+use futures::{SinkExt, StreamExt};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{broadcast, watch};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+use crate::hosts::SshHost;
+use crate::protocol::{ModelEntry, ServerMessage, SessionSummary};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// Identifies whose unicast slot holds a pending reply sender.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PendingKey {
+    /// Waiting on session-scoped replies (chat.*, session.history, …).
+    Session(String),
+    /// Waiting on terminal-scoped replies (terminal.data, terminal.exit).
+    Terminal(String),
+}
+
+/// A pending reply sender: the browser connection-id that opened the request
+/// plus the channel to send replies back to that connection's out task.
+struct PendingUnicast {
+    conn_id: String,
+    tx: UnboundedSender<ServerMessage>,
+}
+
+/// Cached `server.info` metadata from a successfully connected remote.
+#[derive(Clone)]
+struct RemoteInfo {
+    hostname: String,
+    platform: String,
+    is_ssh: bool,
+    claude_models: Vec<ModelEntry>,
+    codex_models: Vec<ModelEntry>,
+}
+
+/// What the hub knows about a single remote host at any instant.
+#[derive(Clone)]
+enum HostState {
+    Connecting,
+    Connected(RemoteInfo),
+    Error(String),
+    Disabled,
+}
+
+impl HostState {
+    fn label(&self) -> &'static str {
+        match self {
+            HostState::Connecting => "connecting",
+            HostState::Connected(_) => "connected",
+            HostState::Error(_) => "error",
+            HostState::Disabled => "disabled",
+        }
+    }
+}
+
+/// One outgoing WS sender to a connected remote, shared by the connection task
+/// and `forward()`.
+struct HubConnection {
+    #[allow(dead_code)] // retained for logging / future diagnostics
+    host_id: String,
+    /// Sends raw JSON strings to the remote's WS.
+    ws_tx: UnboundedSender<String>,
+}
+
+// ---------------------------------------------------------------------------
+// HubManager
+// ---------------------------------------------------------------------------
+
+pub struct HubManager {
+    /// Live WS senders to remote instances.
+    connections: Mutex<HashMap<String, Arc<HubConnection>>>,
+    /// session_id → host_id for sessions owned by a remote.
+    remote_sessions: Mutex<HashMap<String, String>>,
+    /// terminal_id → host_id for terminals owned by a remote.
+    remote_terminals: Mutex<HashMap<String, String>>,
+    /// Cached `SessionSummary` rows received from remotes (tagged with host_id).
+    remote_session_cache: Mutex<HashMap<String, SessionSummary>>,
+    /// Per-outstanding-request unicast slot.  Key is Session(id) or Terminal(id).
+    pending_unicast: Mutex<HashMap<PendingKey, PendingUnicast>>,
+    /// Events broadcast to every browser connection: `host.info`, merged
+    /// `session.list`, `session.updated`, `session.created`, relayed chat, …
+    pub hub_events_tx: broadcast::Sender<Arc<ServerMessage>>,
+    /// Current state of each configured host.
+    host_states: Mutex<HashMap<String, HostState>>,
+    /// Cached display names for hosts.
+    host_names: Mutex<HashMap<String, String>>,
+    /// Shutdown-flag channels per host (watch<bool> where `true` = shut down).
+    shutdown_flags: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// The port this perch instance is listening on — used for self-connection guard.
+    own_port: u16,
+}
+
+impl HubManager {
+    pub fn new(own_port: u16) -> Arc<Self> {
+        let (hub_events_tx, _) = broadcast::channel(128);
+        Arc::new(Self {
+            connections: Mutex::new(HashMap::new()),
+            remote_sessions: Mutex::new(HashMap::new()),
+            remote_terminals: Mutex::new(HashMap::new()),
+            remote_session_cache: Mutex::new(HashMap::new()),
+            pending_unicast: Mutex::new(HashMap::new()),
+            hub_events_tx,
+            host_states: Mutex::new(HashMap::new()),
+            host_names: Mutex::new(HashMap::new()),
+            shutdown_flags: Mutex::new(HashMap::new()),
+            own_port,
+        })
+    }
+
+    /// Subscribe to hub events (returns a broadcast receiver).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<Arc<ServerMessage>> {
+        self.hub_events_tx.subscribe()
+    }
+
+    /// Snapshot all known host states as `host.info` messages (for sending to
+    /// a newly connected browser).
+    pub fn snapshot_host_states(&self) -> Vec<ServerMessage> {
+        let states = self.host_states.lock().unwrap();
+        let names = self.host_names.lock().unwrap();
+        states
+            .iter()
+            .map(|(id, state)| build_host_info(id, names.get(id).map(|s| s.as_str()).unwrap_or(""), state))
+            .collect()
+    }
+
+    /// Called when `hosts.upsert` / `hosts.delete` is received. Diffs the new
+    /// host list against the previous one and starts/stops tasks accordingly.
+    pub fn reload_hosts(self: &Arc<Self>, hosts: &[SshHost]) {
+        // Collect the new enabled host ids.
+        let new_enabled: HashMap<String, SshHost> = hosts
+            .iter()
+            .filter(|h| h.enabled)
+            .map(|h| (h.id.clone(), h.clone()))
+            .collect();
+
+        let new_disabled: Vec<String> = hosts
+            .iter()
+            .filter(|h| !h.enabled)
+            .map(|h| h.id.clone())
+            .collect();
+
+        // Remove hosts that are completely gone (not in the new list at all).
+        let current_ids: Vec<String> = {
+            let states = self.host_states.lock().unwrap();
+            states.keys().cloned().collect()
+        };
+        let new_all_ids: std::collections::HashSet<&str> =
+            hosts.iter().map(|h| h.id.as_str()).collect();
+
+        for id in &current_ids {
+            if !new_all_ids.contains(id.as_str()) {
+                let name = self.host_names.lock().unwrap().get(id).cloned().unwrap_or_default();
+                self.stop_host_task(id);
+                self.host_states.lock().unwrap().remove(id);
+                self.host_names.lock().unwrap().remove(id);
+                // Broadcast a "disabled" host.info so browsers remove it from
+                // the sidebar.
+                let msg = Arc::new(build_host_info(id, &name, &HostState::Disabled));
+                let _ = self.hub_events_tx.send(msg);
+            }
+        }
+
+        // Handle disabled hosts.
+        for id in &new_disabled {
+            let was_running = {
+                let states = self.host_states.lock().unwrap();
+                !matches!(states.get(id), Some(HostState::Disabled))
+            };
+            if was_running {
+                self.stop_host_task(id);
+                let name = hosts.iter().find(|h| &h.id == id).map(|h| h.name.clone()).unwrap_or_default();
+                self.set_host_state(id, &name, HostState::Disabled);
+            }
+        }
+
+        // Handle enabled hosts: start task if new or changed.
+        for (id, host) in &new_enabled {
+            self.host_names.lock().unwrap().insert(id.clone(), host.name.clone());
+            let current_state = {
+                let states = self.host_states.lock().unwrap();
+                states.get(id).cloned()
+            };
+            let should_start = match &current_state {
+                None | Some(HostState::Disabled) | Some(HostState::Error(_)) => true,
+                Some(HostState::Connecting) | Some(HostState::Connected(_)) => false,
+            };
+            if should_start {
+                self.stop_host_task(id); // ensure any old task is gone
+                self.spawn_connection_task(host.clone());
+            } else {
+                // Already connecting/connected — re-emit the current state so
+                // any newly-connected browser client receives confirmation.
+                if let Some(state) = current_state {
+                    let msg = Arc::new(build_host_info(id, &host.name, &state));
+                    let _ = self.hub_events_tx.send(msg);
+                }
+            }
+        }
+    }
+
+    /// Stop the connection task for a host by sending `true` on its shutdown flag.
+    fn stop_host_task(&self, host_id: &str) {
+        let tx = self.shutdown_flags.lock().unwrap().remove(host_id);
+        if let Some(tx) = tx {
+            let _ = tx.send(true);
+        }
+        // Remove the active WS sender so forward() fails cleanly.
+        self.connections.lock().unwrap().remove(host_id);
+    }
+
+    /// Update the state for a host and broadcast a `host.info` event.
+    fn set_host_state(&self, host_id: &str, name: &str, state: HostState) {
+        self.host_states.lock().unwrap().insert(host_id.to_string(), state.clone());
+        let msg = Arc::new(build_host_info(host_id, name, &state));
+        let _ = self.hub_events_tx.send(msg);
+    }
+
+    /// Spawn a background task that manages the WS connection to `host`.
+    fn spawn_connection_task(self: &Arc<Self>, host: SshHost) {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        self.shutdown_flags.lock().unwrap().insert(host.id.clone(), shutdown_tx);
+
+        let hub = self.clone();
+        tokio::spawn(async move {
+            hub.connection_task(host, shutdown_rx).await;
+        });
+    }
+
+    /// The connection task state machine for one host.
+    async fn connection_task(
+        self: &Arc<Self>,
+        host: SshHost,
+        mut shutdown_rx: watch::Receiver<bool>,
+    ) {
+        let host_id = host.id.clone();
+        let host_name = host.name.clone();
+        let own_port = self.own_port;
+
+        let mut backoff_ms: u64 = 500;
+        const MAX_BACKOFF_MS: u64 = 30_000;
+
+        loop {
+            // Check for shutdown before each attempt.
+            if *shutdown_rx.borrow() {
+                tracing::info!("[hub] {host_id}: shutdown requested");
+                return;
+            }
+
+            self.set_host_state(&host_id, &host_name, HostState::Connecting);
+            tracing::info!("[hub] {host_id}: connecting…");
+
+            // Resolve the WS URL to connect to.
+            let ws_url = if let Some(direct) = &host.direct_url {
+                // Self-connection guard for direct_url.
+                if is_self_url(direct, own_port) {
+                    let err = "refusing to connect to self".to_string();
+                    tracing::warn!("[hub] {host_id}: {err}");
+                    self.set_host_state(&host_id, &host_name, HostState::Error(err));
+                    return; // permanent error — don't retry
+                }
+                direct.clone()
+            } else {
+                // SSH tunnel path: health-check → tunnel (agent-fwd + symlink)
+                //   → auto-start (if needed) → health-poll via local port → connect.
+                match self.setup_ssh_tunnel(&host, own_port, &mut shutdown_rx).await {
+                    Some(url) => url,
+                    None => {
+                        // setup_ssh_tunnel already set state or shutdown was requested.
+                        if *shutdown_rx.borrow() {
+                            return;
+                        }
+                        // Back off and retry.
+                        let sleep = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
+                        tokio::select! {
+                            _ = sleep => {}
+                            _ = shutdown_rx.changed() => { return; }
+                        }
+                        backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+                        continue;
+                    }
+                }
+            };
+
+            // Attempt WS connection.
+            let connect_result = tokio::select! {
+                r = tokio_tungstenite::connect_async(&ws_url) => r,
+                _ = shutdown_rx.changed() => { return; }
+            };
+
+            let (ws_stream, _) = match connect_result {
+                Ok(r) => r,
+                Err(e) => {
+                    let err = format!("ws connect failed: {e}");
+                    tracing::warn!("[hub] {host_id}: {err}");
+                    self.set_host_state(&host_id, &host_name, HostState::Error(err));
+                    let sleep = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
+                    tokio::select! {
+                        _ = sleep => {}
+                        _ = shutdown_rx.changed() => { return; }
+                    }
+                    backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+                    continue;
+                }
+            };
+
+            tracing::info!("[hub] {host_id}: WS connected to {ws_url}");
+            // Reset backoff on successful connect.
+            backoff_ms = 500;
+
+            let (mut ws_sink, mut ws_stream) = ws_stream.split();
+
+            // Channel for forward() → WS sink.
+            let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let conn = Arc::new(HubConnection {
+                host_id: host_id.clone(),
+                ws_tx: ws_tx.clone(),
+            });
+            self.connections.lock().unwrap().insert(host_id.clone(), conn);
+
+            // Sink task: forward queued messages to remote.
+            let sink_task = tokio::spawn(async move {
+                while let Some(text) = ws_rx.recv().await {
+                    if ws_sink.send(WsMessage::Text(text)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            // Request session list immediately on connect.
+            let _ = ws_tx.send(r#"{"type":"session.list"}"#.to_string());
+
+            // Receive loop.
+            let disconnect_reason;
+            loop {
+                tokio::select! {
+                    maybe_msg = ws_stream.next() => {
+                        match maybe_msg {
+                            Some(Ok(WsMessage::Text(text))) => {
+                                self.handle_remote_message(&host_id, &host_name, &text).await;
+                            }
+                            Some(Ok(WsMessage::Close(_))) | None => {
+                                disconnect_reason = "remote closed".to_string();
+                                break;
+                            }
+                            Some(Err(e)) => {
+                                disconnect_reason = format!("ws error: {e}");
+                                break;
+                            }
+                            Some(Ok(_)) => {} // ping/pong/binary: ignore
+                        }
+                    }
+                    _ = shutdown_rx.changed() => {
+                        sink_task.abort();
+                        return;
+                    }
+                }
+            }
+
+            sink_task.abort();
+            self.connections.lock().unwrap().remove(&host_id);
+
+            tracing::warn!("[hub] {host_id}: disconnected ({disconnect_reason}), reconnecting…");
+            self.set_host_state(&host_id, &host_name, HostState::Error(disconnect_reason));
+
+            let sleep = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
+            tokio::select! {
+                _ = sleep => {}
+                _ = shutdown_rx.changed() => { return; }
+            }
+            backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+        }
+    }
+
+    /// SSH-path setup: health check, tunnel (with agent forwarding + stable
+    /// symlink), optional auto-start, health poll via local port. Returns the
+    /// `ws://127.0.0.1:<localPort>/ws` URL to connect to, or `None` on failure.
+    ///
+    /// New state-machine order (fixes dead SSH_AUTH_SOCK in tmux-spawned perch):
+    ///   1. Health check via ssh (is remote perch already up?)
+    ///   2. Bind a free local port.
+    ///   3. Start tunnel with `-A` — the remote command creates
+    ///      `~/.ssh/perch_auth_sock → $SSH_AUTH_SOCK` (stable symlink) and then
+    ///      sleeps so the port-forward lifetime equals the process lifetime.
+    ///   4. Poll until the local tunnel port accepts TCP (tunnel ready).
+    ///   5. If remote was NOT already up: auto-start via a separate ssh exec
+    ///      that exports SSH_AUTH_SOCK pointing at the stable symlink.
+    ///   6. If auto-started: poll health via the LOCAL tunnel port (HTTP GET).
+    ///   7. Return the ws URL.
+    async fn setup_ssh_tunnel(
+        self: &Arc<Self>,
+        host: &SshHost,
+        own_port: u16,
+        shutdown_rx: &mut watch::Receiver<bool>,
+    ) -> Option<String> {
+        let ssh_host = &host.ssh_host;
+        let remote_port = host.remote_port;
+
+        if ssh_host.is_empty() {
+            tracing::warn!("[hub] {}: no sshHost and no directUrl — cannot connect", host.id);
+            self.set_host_state(&host.id, &host.name, HostState::Error("no sshHost configured".to_string()));
+            return None;
+        }
+
+        // 1. Health check: is the remote perch already running?
+        tracing::info!("[hub] {}: checking if remote perch is already up", host.id);
+        let health_ok = {
+            let check = tokio::process::Command::new("ssh")
+                .args([
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    ssh_host,
+                    &format!("curl -s --max-time 3 http://localhost:{remote_port}/"),
+                ])
+                .output();
+            let check_result = tokio::select! {
+                r = check => r,
+                _ = shutdown_rx.changed() => { return None; }
+            };
+            matches!(check_result, Ok(out) if out.status.success())
+        };
+
+        // 2. Bind a free local port (before spawning the tunnel).
+        let local_port = {
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!("[hub] {}: failed to bind free port: {e}", host.id);
+                    self.set_host_state(&host.id, &host.name, HostState::Error(format!("bind failed: {e}")));
+                    return None;
+                }
+            };
+            let addr: SocketAddr = listener.local_addr().ok()?;
+            // Drop the listener so SSH can bind to the same port.
+            drop(listener);
+            addr.port()
+        };
+
+        // Self-connection guard for tunnel.
+        if local_port == own_port {
+            let err = "refusing to connect to self (port collision)".to_string();
+            tracing::warn!("[hub] {}: {err}", host.id);
+            self.set_host_state(&host.id, &host.name, HostState::Error(err));
+            return None;
+        }
+
+        // 3. Start the SSH tunnel with agent forwarding (-A).
+        //    The remote command:
+        //      • creates ~/.ssh/ if needed
+        //      • atomically re-points ~/.ssh/perch_auth_sock at the live
+        //        SSH_AUTH_SOCK that was forwarded for THIS connection
+        //      • then exec-sleeps so the process (and thus the tunnel) lives
+        //        until we kill it.
+        //    $SSH_AUTH_SOCK is intentionally NOT expanded by the local shell —
+        //    the single-quote wrapper around the outer arg and the escaped $
+        //    inside ensure the remote shell expands it.
+        //
+        //    Resulting ssh invocation (tokio::process::Command passes each
+        //    element as a separate argv entry — no local shell involved):
+        //      ssh -A -L <lp>:127.0.0.1:<rp> \
+        //          -o ExitOnForwardFailure=yes -o BatchMode=yes <host> \
+        //          "mkdir -p ~/.ssh; ln -sf \"$SSH_AUTH_SOCK\" ~/.ssh/perch_auth_sock; exec sleep infinity"
+        let tunnel_remote_cmd = format!(
+            r#"mkdir -p ~/.ssh; ln -sf "$SSH_AUTH_SOCK" ~/.ssh/perch_auth_sock; exec sleep infinity"#
+        );
+        tracing::info!(
+            "[hub] {}: starting SSH tunnel (agent-forwarded) :{}→{}:{}",
+            host.id, local_port, ssh_host, remote_port
+        );
+        let mut tunnel_child = match tokio::process::Command::new("ssh")
+            .args([
+                "-A",
+                "-L", &format!("{local_port}:127.0.0.1:{remote_port}"),
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "BatchMode=yes",
+                ssh_host,
+                &tunnel_remote_cmd,
+            ])
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) => {
+                tracing::warn!("[hub] {}: tunnel spawn failed: {e}", host.id);
+                self.set_host_state(&host.id, &host.name, HostState::Error(format!("tunnel failed: {e}")));
+                return None;
+            }
+        };
+
+        // 4. Poll until the local tunnel port accepts TCP connections (up to 5s).
+        {
+            let mut tunnel_ready = false;
+            for _ in 0..25 {
+                // Check for early exit first.
+                match tunnel_child.try_wait() {
+                    Ok(Some(status)) => {
+                        let err = format!("SSH tunnel exited early ({})", status);
+                        tracing::warn!("[hub] {}: {err}", host.id);
+                        self.set_host_state(&host.id, &host.name, HostState::Error(err));
+                        return None;
+                    }
+                    _ => {}
+                }
+                // Try a non-blocking TCP connect to the local forwarded port.
+                if std::net::TcpStream::connect(format!("127.0.0.1:{local_port}")).is_ok() {
+                    tunnel_ready = true;
+                    break;
+                }
+                let delay = tokio::time::sleep(std::time::Duration::from_millis(200));
+                tokio::select! {
+                    _ = delay => {}
+                    _ = shutdown_rx.changed() => {
+                        let _ = tunnel_child.kill().await;
+                        return None;
+                    }
+                }
+            }
+            if !tunnel_ready {
+                let err = "SSH tunnel did not bind local port in time".to_string();
+                tracing::warn!("[hub] {}: {err}", host.id);
+                let _ = tunnel_child.kill().await;
+                self.set_host_state(&host.id, &host.name, HostState::Error(err));
+                return None;
+            }
+            tracing::info!("[hub] {}: SSH tunnel ready on :{local_port} (symlink refreshed)", host.id);
+        }
+
+        // 5. Auto-start if remote perch was not already running.
+        //    The tmux inner command exports SSH_AUTH_SOCK pointing at the stable
+        //    symlink created by the tunnel above, so the spawned perch (and every
+        //    claude/codex it forks) can reach a live agent socket.
+        //
+        //    $HOME is expanded by the REMOTE shell (ssh passes this as a single
+        //    argv element; the remote sh -c receives it verbatim).
+        if !health_ok {
+            let remote_cmd_template = host
+                .remote_cmd
+                .clone()
+                .unwrap_or_else(|| "cd ~/perch && ./target/debug/perch-core --port {port}".to_string());
+            let remote_cmd = remote_cmd_template.replace("{port}", &remote_port.to_string());
+
+            // Prefix with stable-socket export so tmux child inherits a live agent.
+            let tmux_inner = format!(
+                r#"export SSH_AUTH_SOCK=$HOME/.ssh/perch_auth_sock; {remote_cmd}"#
+            );
+
+            tracing::info!("[hub] {}: auto-starting remote perch via tmux (with agent socket)", host.id);
+            let start = tokio::process::Command::new("ssh")
+                .args([
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=10",
+                    ssh_host,
+                    &format!("tmux new-session -A -d -s perch-core '{tmux_inner}'"),
+                ])
+                .output();
+            let start_result = tokio::select! {
+                r = start => r,
+                _ = shutdown_rx.changed() => {
+                    let _ = tunnel_child.kill().await;
+                    return None;
+                }
+            };
+            if let Err(e) = start_result {
+                tracing::warn!("[hub] {}: tmux start failed: {e}", host.id);
+                self.set_host_state(&host.id, &host.name, HostState::Error(format!("auto-start failed: {e}")));
+                let _ = tunnel_child.kill().await;
+                return None;
+            }
+
+            // 6. Poll up to 15 s for the remote to become healthy — via the
+            //    LOCAL tunnel port (no extra ssh round-trips needed).
+            tracing::info!("[hub] {}: waiting for remote perch to come up on tunnel :{local_port}", host.id);
+            let mut polls = 0u32;
+            loop {
+                if *shutdown_rx.borrow() {
+                    let _ = tunnel_child.kill().await;
+                    return None;
+                }
+                polls += 1;
+                if polls > 30 {
+                    tracing::warn!("[hub] {}: remote perch did not come up in time", host.id);
+                    self.set_host_state(&host.id, &host.name, HostState::Error("remote startup timeout".to_string()));
+                    let _ = tunnel_child.kill().await;
+                    return None;
+                }
+                let delay = tokio::time::sleep(std::time::Duration::from_millis(500));
+                tokio::select! {
+                    _ = delay => {}
+                    _ = shutdown_rx.changed() => {
+                        let _ = tunnel_child.kill().await;
+                        return None;
+                    }
+                }
+                // HTTP health check through the local tunnel port — no ssh needed.
+                let health = tokio::process::Command::new("curl")
+                    .args([
+                        "-s",
+                        "--max-time", "2",
+                        &format!("http://127.0.0.1:{local_port}/"),
+                    ])
+                    .output()
+                    .await;
+                if matches!(health, Ok(out) if out.status.success()) {
+                    break;
+                }
+            }
+        }
+
+        // Spawn a watcher that triggers state→error when the tunnel exits
+        // unexpectedly while we are still connected.
+        let hub = self.clone();
+        let hid = host.id.clone();
+        let hname = host.name.clone();
+        let hub_tx = self.hub_events_tx.clone();
+        tokio::spawn(async move {
+            let _ = tunnel_child.wait().await;
+            // If we're still connected, the unexpected exit warrants an error.
+            let is_connected = {
+                let s = hub.host_states.lock().unwrap();
+                matches!(s.get(&hid), Some(HostState::Connected(_)))
+            };
+            if is_connected {
+                tracing::warn!("[hub] {hid}: SSH tunnel exited unexpectedly");
+                hub.host_states.lock().unwrap().insert(hid.clone(), HostState::Error("SSH tunnel exited".to_string()));
+                let msg = Arc::new(build_host_info(&hid, &hname, &HostState::Error("SSH tunnel exited".to_string())));
+                let _ = hub_tx.send(msg);
+            }
+        });
+
+        Some(format!("ws://127.0.0.1:{local_port}/ws"))
+    }
+
+    /// Process one message received from a remote perch instance.
+    pub async fn handle_remote_message(&self, host_id: &str, host_name: &str, text: &str) {
+        let msg: ServerMessage = match serde_json::from_str(text) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("[hub] {host_id}: unparseable message: {e}");
+                return;
+            }
+        };
+
+        match msg {
+            // ----------------------------------------------------------------
+            // server.info → cache metadata, transition to Connected
+            // ----------------------------------------------------------------
+            ServerMessage::ServerInfo { hostname, is_ssh, platform, claude_models, codex_models } => {
+                let info = RemoteInfo {
+                    hostname: hostname.clone(),
+                    platform: platform.clone(),
+                    is_ssh,
+                    claude_models: claude_models.clone(),
+                    codex_models: codex_models.clone(),
+                };
+                self.set_host_state(host_id, host_name, HostState::Connected(info));
+            }
+
+            // ----------------------------------------------------------------
+            // session.list → tag host_id, update caches, broadcast merged list
+            // ----------------------------------------------------------------
+            ServerMessage::SessionList { sessions } => {
+                {
+                    let mut remote_sessions = self.remote_sessions.lock().unwrap();
+                    let mut cache = self.remote_session_cache.lock().unwrap();
+                    // Remove stale entries for this host.
+                    remote_sessions.retain(|_, hid| hid != host_id);
+                    cache.retain(|_, s| s.host_id != host_id);
+                    for mut session in sessions {
+                        session.host_id = host_id.to_string();
+                        remote_sessions.insert(session.id.clone(), host_id.to_string());
+                        cache.insert(session.id.clone(), session);
+                    }
+                }
+                // Broadcast a merged session.list (hub sends the snapshot;
+                // per-connection handler merges with local sessions when it
+                // assembles the actual response for `session.list` from the
+                // client — here we simply broadcast the remote portion).
+                self.broadcast_merged_session_list();
+            }
+
+            // ----------------------------------------------------------------
+            // session.created → register mapping + relay via unicast + broadcast
+            // ----------------------------------------------------------------
+            ServerMessage::SessionCreated { ref session_id } => {
+                {
+                    let mut remote_sessions = self.remote_sessions.lock().unwrap();
+                    remote_sessions.insert(session_id.clone(), host_id.to_string());
+                }
+                // Relay to any unicast that was registered for this session,
+                // AND broadcast to all connections so the initiating browser
+                // (which forwarded session.create without a registered unicast)
+                // also receives session.created.
+                self.relay_unicast(&PendingKey::Session(session_id.clone()), Arc::new(msg.clone()));
+                let _ = self.hub_events_tx.send(Arc::new(msg));
+            }
+
+            // ----------------------------------------------------------------
+            // session.updated → tag + cache + broadcast
+            // ----------------------------------------------------------------
+            ServerMessage::SessionUpdated { mut session } => {
+                session.host_id = host_id.to_string();
+                {
+                    let mut remote_sessions = self.remote_sessions.lock().unwrap();
+                    remote_sessions.insert(session.id.clone(), host_id.to_string());
+                    let mut cache = self.remote_session_cache.lock().unwrap();
+                    cache.insert(session.id.clone(), session.clone());
+                }
+                let tagged = ServerMessage::SessionUpdated { session };
+                let _ = self.hub_events_tx.send(Arc::new(tagged));
+            }
+
+            // ----------------------------------------------------------------
+            // session.history → relay via Session unicast
+            // ----------------------------------------------------------------
+            ServerMessage::SessionHistory { ref session_id, .. } => {
+                let key = PendingKey::Session(session_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+            }
+
+            // ----------------------------------------------------------------
+            // chat.* → relay via Session unicast; chat.done also clears it
+            // ----------------------------------------------------------------
+            ServerMessage::ChatChunk { ref session_id, .. }
+            | ServerMessage::ChatThinking { ref session_id, .. }
+            | ServerMessage::ChatToolUse { ref session_id, .. }
+            | ServerMessage::ChatToolResult { ref session_id, .. } => {
+                let key = PendingKey::Session(session_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+            }
+            ServerMessage::ChatDone { ref session_id, .. } => {
+                let sid = session_id.clone();
+                self.relay_unicast(&PendingKey::Session(sid.clone()), Arc::new(msg));
+                // Clear the pending unicast so the sender doesn't leak.
+                self.pending_unicast.lock().unwrap().remove(&PendingKey::Session(sid));
+            }
+
+            // ----------------------------------------------------------------
+            // error → relay via whichever unicast makes sense (best-effort)
+            // ----------------------------------------------------------------
+            ServerMessage::Error { ref message } => {
+                // Broadcast to hub channel so all connections see it.
+                tracing::warn!("[hub] {host_id}: remote error: {message}");
+                let _ = self.hub_events_tx.send(Arc::new(msg));
+            }
+
+            // ----------------------------------------------------------------
+            // status.update → relay via hub broadcast (tagged? ignore for now)
+            // ----------------------------------------------------------------
+            ServerMessage::StatusUpdate { .. } => {
+                // Status updates are per-host; we don't relay them in v1.
+            }
+
+            // ----------------------------------------------------------------
+            // terminal.created → swap Session→Terminal pending key + relay
+            // ----------------------------------------------------------------
+            ServerMessage::TerminalCreated { ref terminal_id } => {
+                let tid = terminal_id.clone();
+                // The session_id that initiated this request was stored as
+                // PendingKey::Session(_). We need to find it, swap the key to
+                // PendingKey::Terminal, and relay.
+                //
+                // The server.rs caller must have registered a Session unicast
+                // before forwarding the terminal.create.  The session_id is
+                // NOT in this message — we look for a session whose Session key
+                // was placed by this connection.  Since terminal.create always
+                // carries a session_id via agentAttach, server.rs will have
+                // set a Session key.  We do the swap atomically under one lock.
+                let session_id_for_terminal = {
+                    // Find the session_id from remote_sessions that spawned this terminal.
+                    // Actually, the session_id was embedded in the forwarded message by server.rs.
+                    // We stored it in a "pending terminal create" slot.
+                    // For now: find any Session key whose sender this terminal belongs to,
+                    // looking at our pending_terminal_creates map.
+                    // Simpler approach: server.rs stores PendingKey::Session(session_id)
+                    // before forwarding terminal.create. We swap it to Terminal(terminal_id).
+                    self.swap_session_to_terminal_key(&tid)
+                };
+                // Register the remote terminal → host mapping.
+                self.remote_terminals.lock().unwrap().insert(tid.clone(), host_id.to_string());
+
+                // Relay the terminal.created message.
+                if let Some(conn_id_tx) = session_id_for_terminal {
+                    let _ = conn_id_tx.send(msg.clone());
+                } else {
+                    let _ = self.hub_events_tx.send(Arc::new(msg));
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // terminal.data / terminal.exit → relay via Terminal unicast
+            // ----------------------------------------------------------------
+            ServerMessage::TerminalData { ref terminal_id, .. } => {
+                let key = PendingKey::Terminal(terminal_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+            }
+            ServerMessage::TerminalExit { ref terminal_id, .. } => {
+                let tid = terminal_id.clone();
+                self.relay_unicast(&PendingKey::Terminal(tid.clone()), Arc::new(msg));
+                // Clear the terminal unicast to avoid leaks.
+                self.pending_unicast.lock().unwrap().remove(&PendingKey::Terminal(tid));
+            }
+
+            // ----------------------------------------------------------------
+            // Drop messages that should not propagate to browsers.
+            // ----------------------------------------------------------------
+            ServerMessage::SettingsCurrent { .. }
+            | ServerMessage::HostsList { .. }
+            | ServerMessage::HostsUpdated { .. }
+            | ServerMessage::HostInfo { .. } => {
+                // Remote settings/hosts are not propagated to our clients.
+            }
+        }
+    }
+
+    /// Broadcast the full merged session list (remote-only portion) on the hub
+    /// events channel.  Server.rs merges local sessions on top when responding
+    /// to `session.list` client requests; here we broadcast so all connections'
+    /// sidebars update.
+    fn broadcast_merged_session_list(&self) {
+        let sessions: Vec<SessionSummary> = self
+            .remote_session_cache
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        // Sort: by host_id then by createdAt descending.
+        let mut sessions = sessions;
+        sessions.sort_by(|a, b| {
+            a.host_id.cmp(&b.host_id).then(b.created_at.cmp(&a.created_at))
+        });
+        let _ = self
+            .hub_events_tx
+            .send(Arc::new(ServerMessage::SessionList { sessions }));
+    }
+
+    /// Find a Session unicast key that was registered by `register_terminal_create`
+    /// and atomically move it to a Terminal key.  Returns the sender for the found entry.
+    fn swap_session_to_terminal_key(&self, terminal_id: &str) -> Option<UnboundedSender<ServerMessage>> {
+        let mut map = self.pending_unicast.lock().unwrap();
+        // We look for a key stored as PendingKey::Session("__terminal_create__:<anything>")
+        // Actually the convention (set in server.rs) is that for terminal.create the
+        // Session key holds the source session_id.  We need to swap it.
+        // To find it we stored a sentinel: server.rs calls register_unicast with
+        // PendingKey::Session("__tcreate__:<tid_placeholder>"), which we set to
+        // a known value.  But since terminal_id is only known after the remote
+        // responds, we can't key by it up front.
+        //
+        // Revised approach: server.rs stores PendingKey::Session("<session_id>__tc")
+        // to distinguish terminal-create pending from chat pending, and we find the
+        // entry with that suffix.  But that's brittle.
+        //
+        // Final approach: server.rs uses PendingKey::Terminal("<session_id>") as
+        // a "pending terminal create" slot (meaning: swap to Terminal(terminal_id)
+        // when terminal.created arrives).  We find ANY Terminal key that doesn't
+        // yet have a real terminal_id registered in remote_terminals.
+        let pending_tc_key = map.keys().find(|k| {
+            if let PendingKey::Terminal(ref id) = k {
+                // A real terminal id won't collide with a session_id because
+                // terminal ids generated by remotes are UUIDs, as are session ids —
+                // but we registered this slot BEFORE the remote assigned the terminal_id,
+                // so the stored key contains the session_id.
+                // Heuristic: if it's NOT in remote_terminals, it's a pending-create slot.
+                !self.remote_terminals.lock().unwrap().contains_key(id.as_str())
+            } else {
+                false
+            }
+        }).cloned();
+
+        if let Some(old_key) = pending_tc_key {
+            let entry = map.remove(&old_key)?;
+            let tx = entry.tx;
+            // Insert under the real terminal_id.
+            map.insert(PendingKey::Terminal(terminal_id.to_string()), PendingUnicast {
+                conn_id: entry.conn_id,
+                tx: tx.clone(),
+            });
+            Some(tx)
+        } else {
+            None
+        }
+    }
+
+    /// Relay a message to the unicast receiver registered for `key`, without
+    /// removing the entry (callers that want to clear must do so explicitly).
+    fn relay_unicast(&self, key: &PendingKey, msg: Arc<ServerMessage>) {
+        let tx = {
+            let map = self.pending_unicast.lock().unwrap();
+            map.get(key).map(|u| u.tx.clone())
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send((*msg).clone());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Public API for server.rs
+    // -----------------------------------------------------------------------
+
+    /// Return the host_id for a session known to the hub, or `None` if local.
+    pub fn route_for_session(&self, session_id: &str) -> Option<String> {
+        self.remote_sessions.lock().unwrap().get(session_id).cloned()
+    }
+
+    /// Return the host_id for a terminal known to the hub, or `None` if local.
+    pub fn route_for_terminal(&self, terminal_id: &str) -> Option<String> {
+        self.remote_terminals.lock().unwrap().get(terminal_id).cloned()
+    }
+
+    /// Send raw JSON to a connected remote host.
+    pub fn forward(&self, host_id: &str, json: &str) {
+        let conn = self.connections.lock().unwrap().get(host_id).cloned();
+        if let Some(conn) = conn {
+            let _ = conn.ws_tx.send(json.to_string());
+        } else {
+            tracing::warn!("[hub] forward: host {host_id} not connected");
+        }
+    }
+
+    /// Register a unicast receiver for the given key.  `conn_id` is the
+    /// browser connection that should receive the replies.
+    pub fn register_unicast(&self, key: PendingKey, conn_id: String, tx: UnboundedSender<ServerMessage>) {
+        self.pending_unicast.lock().unwrap().insert(key, PendingUnicast { conn_id, tx });
+    }
+
+    /// Remove the unicast registration for `key`.
+    pub fn unregister_unicast(&self, key: &PendingKey) {
+        self.pending_unicast.lock().unwrap().remove(key);
+    }
+
+    /// Remove all unicast registrations for the given connection id (called on
+    /// socket close to prevent leaking senders to dead connections).
+    pub fn unregister_all_for_connection(&self, conn_id: &str) {
+        self.pending_unicast.lock().unwrap().retain(|_, u| u.conn_id != conn_id);
+    }
+
+    /// Return all remote session summaries (tagged with host_id).
+    pub fn remote_sessions_snapshot(&self) -> Vec<SessionSummary> {
+        self.remote_session_cache.lock().unwrap().values().cloned().collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Build a `host.info` ServerMessage from a state snapshot.
+fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessage {
+    match state {
+        HostState::Connecting => ServerMessage::HostInfo {
+            host_id: host_id.to_string(),
+            name: name.to_string(),
+            state: state.label().to_string(),
+            error: None,
+            hostname: None,
+            platform: None,
+            is_ssh: None,
+            claude_models: None,
+            codex_models: None,
+        },
+        HostState::Connected(info) => ServerMessage::HostInfo {
+            host_id: host_id.to_string(),
+            name: name.to_string(),
+            state: state.label().to_string(),
+            error: None,
+            hostname: Some(info.hostname.clone()),
+            platform: Some(info.platform.clone()),
+            is_ssh: Some(info.is_ssh),
+            claude_models: Some(info.claude_models.clone()),
+            codex_models: Some(info.codex_models.clone()),
+        },
+        HostState::Error(err) => ServerMessage::HostInfo {
+            host_id: host_id.to_string(),
+            name: name.to_string(),
+            state: state.label().to_string(),
+            error: Some(err.clone()),
+            hostname: None,
+            platform: None,
+            is_ssh: None,
+            claude_models: None,
+            codex_models: None,
+        },
+        HostState::Disabled => ServerMessage::HostInfo {
+            host_id: host_id.to_string(),
+            name: name.to_string(),
+            state: state.label().to_string(),
+            error: None,
+            hostname: None,
+            platform: None,
+            is_ssh: None,
+            claude_models: None,
+            codex_models: None,
+        },
+    }
+}
+
+/// Return `true` if the given URL resolves to this instance's own port on
+/// 127.0.0.1 or localhost — prevents the hub from connecting to itself.
+fn is_self_url(url: &str, own_port: u16) -> bool {
+    // Parse just the host:port part.
+    let url = url.trim_start_matches("ws://").trim_start_matches("wss://");
+    let host_part = url.split('/').next().unwrap_or("");
+    let (host, port_str) = if let Some(idx) = host_part.rfind(':') {
+        (&host_part[..idx], &host_part[idx + 1..])
+    } else {
+        (host_part, "")
+    };
+    let is_local_host = host == "127.0.0.1" || host == "localhost" || host == "::1";
+    if !is_local_host {
+        return false;
+    }
+    if let Ok(port) = port_str.parse::<u16>() {
+        port == own_port
+    } else {
+        false
+    }
+}

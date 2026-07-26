@@ -1,7 +1,9 @@
 import { useCallback, useRef } from "react";
 import type { DockviewApi } from "dockview-react";
 import { StatusBar } from "./StatusBar";
+import { Sidebar } from "./Sidebar";
 import { DockviewShell } from "./dockview/DockviewShell";
+import { SettingsModal } from "./components/SettingsModal";
 
 function newPanelId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -41,11 +43,15 @@ export default function App() {
         </button>
       </div>
 
-      <main className="dock-area">
-        <DockviewShell onReady={handleReady} />
-      </main>
+      <div className="app__body">
+        <Sidebar />
+        <main className="dock-area">
+          <DockviewShell onReady={handleReady} />
+        </main>
+      </div>
 
       <StatusBar />
+      <SettingsModal />
     </div>
   );
 }

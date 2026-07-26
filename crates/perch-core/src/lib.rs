@@ -1,7 +1,11 @@
 pub mod agent;
 pub mod db;
+pub mod hosts;
+pub mod hub;
+pub mod models;
 pub mod protocol;
 pub mod registry;
 pub mod server;
+pub mod settings;
 pub mod status;
 pub mod terminal;

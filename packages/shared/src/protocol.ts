@@ -10,11 +10,85 @@
 // Shared value types
 // ---------------------------------------------------------------------------
 
+/** A single model entry from the server's discovered model list.
+ * Clients must use these server-provided lists rather than any hardcoded
+ * catalogue — different machines expose different model sets. */
+export interface ModelEntry {
+  id: string;
+  label: string;
+}
+
 export interface ChatUsage {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
   contextTokens: number;
+}
+
+// ---------------------------------------------------------------------------
+// Stage D: Settings & SSH hosts value types
+// ---------------------------------------------------------------------------
+
+export interface CustomModelsData {
+  claude: ModelEntry[];
+  codex: ModelEntry[];
+}
+
+export interface SettingsData {
+  customModels: CustomModelsData;
+  /** `null` means no default set (use process cwd). */
+  defaultCwd: string | null;
+}
+
+/**
+ * Patch for `settings.update`. Absent fields = no change.
+ * - `customModels` absent → unchanged; present → replace whole struct.
+ * - `defaultCwd` absent → unchanged; `null` → clear; string → set.
+ */
+export interface SettingsPatch {
+  customModels?: CustomModelsData;
+  defaultCwd?: string | null;
+}
+
+export interface SshHostEntry {
+  id: string;
+  name: string;
+  sshHost: string;
+  /** Defaults to 7788 when omitted. */
+  remotePort: number;
+  /** Defaults to true when omitted. */
+  enabled: boolean;
+  /** If set, skip SSH tunnelling and connect directly to this WebSocket URL
+   * (e.g. "ws://127.0.0.1:7800/ws").  Useful for LAN peers and e2e tests. */
+  directUrl?: string;
+  /** Shell command to auto-start the remote perch instance over SSH when it
+   * is not already running.  The placeholder `{port}` is substituted with
+   * the remote port.  Defaults to `~/perch/target/debug/perch-core --port {port}`. */
+  remoteCmd?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Stage F: Hub federation value types
+// ---------------------------------------------------------------------------
+
+/** Live connection state for a remote host managed by the hub. */
+export type HostConnectionState = "connecting" | "connected" | "error" | "disabled";
+
+/** Pushed by the server once per known host after `server.info` on connect,
+ * and again on every state change.  The `hostname`, `platform`, `isSsh`,
+ * `claudeModels`, and `codexModels` fields are only present when the host
+ * is in the `connected` state. */
+export interface HostInfoMessage {
+  type: "host.info";
+  hostId: string;
+  name: string;
+  state: HostConnectionState;
+  error?: string;
+  hostname?: string;
+  platform?: string;
+  isSsh?: boolean;
+  claudeModels?: ModelEntry[];
+  codexModels?: ModelEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -24,6 +98,9 @@ export interface ChatUsage {
 export interface SessionCreateMessage {
   type: "session.create";
   cwd?: string;
+  /** If set to a non-"local" host id, create the session on that remote host.
+   * Omit or set to "local" for the local instance. */
+  hostId?: string;
 }
 
 export interface SessionSubscribeMessage {
@@ -42,6 +119,27 @@ export interface SessionResumeMessage {
 
 /** Which backend a `chat.send` should be routed to. Defaults to "claude". */
 export type AgentKind = "claude" | "codex";
+
+// ---------------------------------------------------------------------------
+// Session list / host info value types
+// ---------------------------------------------------------------------------
+
+export type SessionStatus = "running" | "idle";
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  cwd: string;
+  createdAt: number;
+  /** Omitted when no agent has been used in this session yet. */
+  lastAgent?: AgentKind;
+  /** Omitted when no model has been recorded for this session yet. */
+  lastModel?: string;
+  status: SessionStatus;
+  /** Which hub host owns this session.  "local" (or absent) means the
+   * session lives on the directly-connected server instance. */
+  hostId?: string;
+}
 
 /** Requests that `terminal.create` spawn the given session's *interactive*
  * agent CLI (resumed from whatever conversation state that session already
@@ -87,15 +185,54 @@ export interface TerminalResizeMessage {
   rows: number;
 }
 
+/** Request the server to push a fresh `session.list` response.
+ * Note: "session.list" appears in both directions — as a client request here
+ * and as a server response (SessionListResponseMessage). The union context
+ * disambiguates which direction is intended. */
+export interface SessionListMessage {
+  type: "session.list";
+}
+
+// Stage D — settings & hosts client messages
+
+export interface SettingsGetMessage {
+  type: "settings.get";
+}
+
+export interface SettingsUpdateMessage {
+  type: "settings.update";
+  patch: SettingsPatch;
+}
+
+export interface HostsListMessage {
+  type: "hosts.list";
+}
+
+export interface HostsUpsertMessage {
+  type: "hosts.upsert";
+  host: SshHostEntry;
+}
+
+export interface HostsDeleteMessage {
+  type: "hosts.delete";
+  id: string;
+}
+
 export type ClientMessage =
   | SessionCreateMessage
   | SessionSubscribeMessage
   | SessionResumeMessage
+  | SessionListMessage
   | ChatSendMessage
   | ChatCancelMessage
   | TerminalCreateMessage
   | TerminalInputMessage
-  | TerminalResizeMessage;
+  | TerminalResizeMessage
+  | SettingsGetMessage
+  | SettingsUpdateMessage
+  | HostsListMessage
+  | HostsUpsertMessage
+  | HostsDeleteMessage;
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -188,9 +325,61 @@ export interface ErrorMessage {
   message: string;
 }
 
+/** Server response to a client `session.list` request — carries the full
+ * list of sessions known to the server. Note: "session.list" appears in
+ * both directions; here it is the server response form. */
+export interface SessionListResponseMessage {
+  type: "session.list";
+  sessions: SessionSummary[];
+}
+
+/** Pushed by the server whenever a session's metadata changes (e.g. status
+ * transitions idle→running on first chat.send, or lastAgent/lastModel is
+ * recorded after a turn completes). Also sent after session.created. */
+export interface SessionUpdatedMessage {
+  type: "session.updated";
+  session: SessionSummary;
+}
+
+/** Sent once per connection after the WS handshake so the client knows
+ * where it is connected and can display the correct environment badge.
+ * Also carries the server-discovered model lists — clients must populate
+ * their model dropdowns from these rather than any hardcoded catalogue. */
+export interface ServerInfoMessage {
+  type: "server.info";
+  hostname: string;
+  isSsh: boolean;
+  platform: string;
+  claudeModels: ModelEntry[];
+  codexModels: ModelEntry[];
+}
+
+// Stage D — settings & hosts server messages
+
+/** Sent in response to `settings.get` and `settings.update`. */
+export interface SettingsCurrentMessage {
+  type: "settings.current";
+  settings: SettingsData;
+}
+
+/** Sent in response to `hosts.list`. */
+export interface HostsListResponseMessage {
+  type: "hosts.list";
+  hosts: SshHostEntry[];
+}
+
+/** Sent after `hosts.upsert` or `hosts.delete` — contains the full updated list. */
+export interface HostsUpdatedMessage {
+  type: "hosts.updated";
+  hosts: SshHostEntry[];
+}
+
 export type ServerMessage =
   | SessionCreatedMessage
   | SessionHistoryMessage
+  | SessionListResponseMessage
+  | SessionUpdatedMessage
+  | ServerInfoMessage
   | ChatChunkMessage
   | ChatThinkingMessage
   | ChatToolUseMessage
@@ -200,4 +389,8 @@ export type ServerMessage =
   | TerminalDataMessage
   | TerminalExitMessage
   | StatusUpdateMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | SettingsCurrentMessage
+  | HostsListResponseMessage
+  | HostsUpdatedMessage
+  | HostInfoMessage;
