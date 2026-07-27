@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod boot;
 pub mod db;
 pub mod hosts;
 pub mod hub;

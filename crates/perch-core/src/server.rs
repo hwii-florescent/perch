@@ -125,6 +125,11 @@ pub struct ServerOptions {
     pub db_path: Option<PathBuf>,
     /// Override hosts.json path (from `--hosts-path` / `PERCH_HOSTS`).
     pub hosts_path: Option<PathBuf>,
+    /// If `Some`, fired with the bound `SocketAddr` right after the TCP
+    /// listener is created (before `axum::serve` blocks).  Lets the Tauri
+    /// shell learn the actual port when port 0 is used.  The headless binary
+    /// passes `None`.
+    pub ready_tx: Option<tokio::sync::oneshot::Sender<std::net::SocketAddr>>,
 }
 
 /// Fired on the broadcast channel whenever a session's running status changes
@@ -166,6 +171,17 @@ pub async fn run(
     let base_path = normalize_base_path(&options.base_path);
     let ws_path = format!("{base_path}ws");
 
+    // Bind the TCP listener first so we know the actual port (important when
+    // port 0 is requested — the OS assigns a free port).
+    let bind_addr = if options.port == 0 {
+        // Port 0: bind loopback only so the OS picks a free port.
+        SocketAddr::from(([127, 0, 0, 1], 0))
+    } else {
+        SocketAddr::from(([0, 0, 0, 0], options.port))
+    };
+    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+    let bound_addr = listener.local_addr()?;
+
     let (session_events_tx, _) = tokio::sync::broadcast::channel(64);
 
     // Load the static model catalogue once at startup.
@@ -190,8 +206,8 @@ pub async fn run(
     // Prefer settings.default_cwd over the process cwd when set.
     let effective_cwd = settings.get().default_cwd.unwrap_or(default_cwd);
 
-    // Construct the hub and seed it with the currently configured hosts.
-    let hub = HubManager::new(options.port);
+    // Construct the hub with the actual bound port and seed it with hosts.
+    let hub = HubManager::new(bound_addr.port());
     let initial_hosts = hosts.list();
     hub.reload_hosts(&initial_hosts);
 
@@ -226,12 +242,15 @@ pub async fn run(
         });
     }
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], options.port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
         "[perch] listening on port {} (base path {base_path}, ws at {ws_path})",
-        options.port
+        bound_addr.port()
     );
+    // Notify the Tauri shell (or any other caller) of the actual bound address
+    // before we hand control to axum::serve.
+    if let Some(tx) = options.ready_tx {
+        let _ = tx.send(bound_addr);
+    }
     axum::serve(listener, router).await?;
     Ok(())
 }

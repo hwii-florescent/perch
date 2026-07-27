@@ -2350,10 +2350,13 @@ dependencies = [
 name = "perch-desktop"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "perch-core",
  "tauri",
  "tauri-build",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

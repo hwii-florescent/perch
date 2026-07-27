@@ -213,9 +213,31 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
   through hub-owned SSH tunnels; remote perch auto-starts and self-heals.** ✅ verified (two-instance
   Playwright + real devpod).
 
-### Phase 3.1 — Tauri desktop shell (approved) — ⬜
-- App-first: `perch-desktop` boots the core on a free localhost port and opens a window; web delivery
-  remains for devpods only.
+### Phase 3.1 — Tauri desktop shell — ✅ done
+- New `boot.rs` in `perch-core`: shared boot recipe extracted from `main.rs` —
+  `boot(args, web_dist_dir, ready_tx?)` (db open honoring `--db-path`, registry, `server::run`);
+  `resolve_web_dist_dir()` (`PERCH_WEB_DIST` env override → exe-relative
+  `../../../packages/web/dist` → cwd fallback); `augment_path_with_local_bin()` moved here;
+  headless binary is now a thin wrapper, behavior unchanged.
+- `server.rs`: `ServerOptions.ready_tx: Option<oneshot::Sender<SocketAddr>>`; `run()` binds FIRST
+  (so `HubManager` gets the real port) and fires `ready_tx` with the bound addr before serving;
+  port 0 binds `127.0.0.1:0` (desktop), explicit ports keep `0.0.0.0`.
+- `perch-desktop` implemented (Tauri v2, plain `cargo build`, no cargo-tauri CLI): spawns `boot()`
+  with port 0 on a dedicated tokio runtime, blocks ≤10 s on the ready oneshot, prints
+  `perch-desktop: core ready at http://127.0.0.1:<port>/`, then opens a `WebviewWindowBuilder`
+  window at that External URL (1280×800, min 800×600, title "perch"). `PERCH_DESKTOP_TEST=1`
+  builds the window `.visible(false).focused(false)` for automated checks. `PERCH_DB`/`PERCH_HOSTS`
+  honored. `tauri.conf.json` moved to v2 schema (identifier `dev.hwii.perch`, windows created
+  programmatically); minimal generated icon set (`icons/` PNGs + `icon.icns` via `iconutil`).
+- Verified on Mac, all background/unfocused: both crates build clean; hidden-window launch against
+  an isolated `/tmp` db — the WebView auto-created its own session over WS (proof the UI loaded
+  inside the Tauri window); external WS `session.create` round-trip through the desktop binary OK;
+  frontmost app never changed. Full e2e suite re-run: 21 passed / 1 documented skip / 2 failures
+  confirmed GenAI-proxy latency flakes (haiku turns ~30 s that day; both tests pass in isolation in
+  ~10 s — not a regression).
+- **Milestone: `cargo run -p perch-desktop` boots the core in-process on a free localhost port and
+  opens a native window on the same UI; test mode verifies it headlessly without stealing focus.**
+  ✅ verified.
 
 ### Phase 3 — Headless + phone integration — ✅ done
 - Wire web build into axum static-serve; verify end-to-end via the gateway URL; reconnect/replay on

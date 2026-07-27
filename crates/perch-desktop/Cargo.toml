@@ -2,13 +2,16 @@
 name = "perch-desktop"
 version.workspace = true
 edition.workspace = true
-description = "Tauri desktop shell for perch. NOT buildable on this devpod (no webkit2gtk/display) — build on Mac. See Phase 4 in plans.md."
+description = "Tauri desktop shell for perch. Boots the perch-core axum server in-process, then opens a native window. Build on macOS."
 build = "build.rs"
 
 [dependencies]
 perch-core = { path = "../perch-core" }
 tauri = { version = "2", features = [] }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
