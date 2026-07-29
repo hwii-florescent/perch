@@ -12,6 +12,37 @@ use crate::db::HistoryDb;
 use crate::registry::SessionRegistry;
 use crate::server::{run, CliArgs, ServerOptions};
 
+/// Remove Claude Code nesting markers from the current process environment
+/// so that any agent subprocess or PTY terminal spawned by perch does NOT
+/// inherit them. Without this, `claude` CLIs spawned inside a perch session
+/// that was itself started from inside a Claude Code shell would print
+/// "⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker".
+///
+/// Must be called before any subprocess is spawned (including the axum
+/// server which later forks terminals/agents). Idempotent — calling it more
+/// than once is safe.
+pub fn scrub_nested_agent_env() {
+    let vars = [
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_SSE_PORT",
+    ];
+    let mut removed = Vec::new();
+    for var in vars {
+        if std::env::var(var).is_ok() {
+            std::env::remove_var(var);
+            removed.push(var);
+        }
+    }
+    if !removed.is_empty() {
+        tracing::info!(
+            "[perch] scrubbed Claude Code nesting env vars: {}",
+            removed.join(", ")
+        );
+    }
+}
+
 /// Ensure `~/.local/bin` is on `PATH` so tools like `claude` and `codex`
 /// installed there are reachable from headless launches (tmux auto-start,
 /// launchd, Tauri) that inherit a minimal PATH without sourcing

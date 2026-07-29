@@ -157,8 +157,9 @@ async function freshSession(page: Page): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
+  // With Fix 3 (lazy DB insert) the sidebar may have zero items on a fresh DB.
+  // Only wait for the sidebar wrapper itself, not for session items.
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-  await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
 }
 
 /** Take a screenshot to the federation-specific directory. */
@@ -173,6 +174,21 @@ async function selectAgentModel(page: Page, agentId: string, modelId: string): P
   await chip.click();
   await page.locator(`[data-testid="agent-option-${agentId}"]`).click();
   await page.locator(`[data-testid="model-option-${modelId}"]`).click();
+}
+
+/**
+ * Open the new-session picker for the given hostId and choose "No project".
+ * This is the Fix 2 flow: clicking "+" opens a popover instead of directly
+ * creating a session.
+ */
+async function createRemoteSessionViaPicker(page: Page, hostId: string): Promise<void> {
+  const newBtn = page.locator(`[data-testid="new-session-${hostId}"]`);
+  await expect(newBtn).toBeEnabled({ timeout: 5000 });
+  await newBtn.click();
+  const noneOpt = page.locator('[data-testid="project-option-none"]');
+  await expect(noneOpt).toBeVisible({ timeout: 5000 });
+  await noneOpt.click();
+  await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
 }
 
 /** Open the settings modal via the gear button. */
@@ -251,26 +267,59 @@ test.describe("Stage F3: federation e2e", () => {
   // -------------------------------------------------------------------------
   // E2 — "+" on remote section creates a session under test-remote
   // -------------------------------------------------------------------------
-  test("E2. new-session button creates remote session", async ({ page }) => {
+  test("E2. new-session picker creates remote session", async ({ page }) => {
+    test.setTimeout(120000);
     await freshSession(page);
 
     const hostSection = page.locator(".sidebar__host-section", { hasText: REMOTE_HOST_NAME });
     await expect(hostSection).toBeVisible({ timeout: 15000 });
     await expect(hostSection.locator(".host-state--connected")).toBeVisible({ timeout: 15000 });
 
-    const remoteItems = hostSection.locator(".session-item");
-    const countBefore = await remoteItems.count();
+    // Capture session id before creating the remote session.
+    const idBefore = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
 
-    const newBtn = page.locator(`[data-testid="new-session-${REMOTE_HOST_ID}"]`);
-    await expect(newBtn).toBeEnabled({ timeout: 5000 });
-    await newBtn.click();
+    // Open picker via the remote host's "+" button and choose "No project".
+    // Fix 2: clicking "+" opens a popover (not direct creation).
+    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
 
-    // New session item appears under the remote section.
-    await expect(remoteItems).toHaveCount(countBefore + 1, { timeout: 15000 });
+    // The server sends back session.created — localStorage must be updated.
+    await page.waitForFunction(
+      (before: string | null) => localStorage.getItem("perch.sessionId") !== before,
+      idBefore,
+      { timeout: 10000 },
+    );
 
-    // Active session must be under the remote section.
-    const activeInRemote = hostSection.locator(".session-item--active");
-    await expect(activeInRemote).toBeVisible({ timeout: 10000 });
+    const newId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+    expect(newId).toBeTruthy();
+
+    // Fix 3: blank remote session is NOT inserted into the remote DB yet, so
+    // it does NOT appear in the sidebar.  We verify the active session belongs
+    // to the remote host by checking the active session item when it does appear
+    // (after a message is sent), OR simply verify the session.created handshake
+    // completed (localStorage updated above).
+    //
+    // If claude is available, send a quick message so the session persists and
+    // appears under the remote section.
+    if (claudeAvailable) {
+      const countBeforeMsg = await hostSection.locator(".session-item").count();
+      await selectAgentModel(page, "claude", "claude-haiku-4-5");
+      const textarea = page.locator(".chat__input textarea");
+      await expect(textarea).toBeEnabled({ timeout: 8000 });
+      await textarea.fill("Reply with exactly: e2-remote");
+      await page.locator(".chat__send").click();
+
+      // Wait for session to appear under the remote host section.
+      const remoteItems = hostSection.locator(".session-item");
+      await expect(remoteItems).toHaveCount(countBeforeMsg + 1, { timeout: 15000 });
+
+      // Active session must be under the remote section.
+      const activeInRemote = hostSection.locator(".session-item--active");
+      await expect(activeInRemote).toBeVisible({ timeout: 10000 });
+
+      const runningDot = hostSection.locator(".session-item--active .session-status--running");
+      await expect(runningDot).toBeVisible({ timeout: 20000 });
+      await expect(runningDot).not.toBeVisible({ timeout: 90000 });
+    }
 
     await shot(page, "fed-e2-remote-session.png");
   });
@@ -292,20 +341,24 @@ test.describe("Stage F3: federation e2e", () => {
     await expect(hostSection).toBeVisible({ timeout: 15000 });
     await expect(hostSection.locator(".host-state--connected")).toBeVisible({ timeout: 15000 });
 
-    // Create a remote session.
-    const newBtn = page.locator(`[data-testid="new-session-${REMOTE_HOST_ID}"]`);
-    await expect(newBtn).toBeEnabled({ timeout: 5000 });
-    await newBtn.click();
-
-    await expect(hostSection.locator(".session-item--active")).toBeVisible({ timeout: 15000 });
+    // Create a remote session via picker (Fix 2 flow).
+    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
 
     // Select claude-haiku-4-5.
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
 
     const textarea = page.locator(".chat__input textarea");
     await expect(textarea).toBeEnabled({ timeout: 10000 });
+
+    // Capture count before sending — E2 may have already left a remote session row.
+    const remoteItems = hostSection.locator(".session-item");
+    const countBeforeE3 = await remoteItems.count();
+
     await textarea.fill("Reply with exactly: remote-pong");
     await page.locator(".chat__send").click();
+
+    // Session persists after first message — count must increase by 1.
+    await expect(remoteItems).toHaveCount(countBeforeE3 + 1, { timeout: 15000 });
 
     // Running dot appears on the remote session.
     const runningDot = hostSection.locator(".session-item--active .session-status--running");
@@ -322,7 +375,7 @@ test.describe("Stage F3: federation e2e", () => {
     const msgText = await assistantMsg.textContent();
     expect(msgText).toMatch(/remote-pong/i);
 
-    await shot(page, "fed-e3-remote-chat.png");
+    await shot(page, "fed-e3-remote-chat-done.png");
   });
 
   // -------------------------------------------------------------------------
@@ -342,20 +395,23 @@ test.describe("Stage F3: federation e2e", () => {
     await expect(hostSection).toBeVisible({ timeout: 15000 });
     await expect(hostSection.locator(".host-state--connected")).toBeVisible({ timeout: 15000 });
 
-    // Create a remote session and run a hosted turn so there's a claude session
-    // id for the CLI to attach to.
-    const newBtn = page.locator(`[data-testid="new-session-${REMOTE_HOST_ID}"]`);
-    await expect(newBtn).toBeEnabled({ timeout: 5000 });
-    await newBtn.click();
-    await expect(hostSection.locator(".session-item--active")).toBeVisible({ timeout: 15000 });
+    // Create a remote session via picker (Fix 2 flow) and run a hosted turn so
+    // there's a claude session id for the CLI to attach to.
+    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
 
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
 
     const textarea = page.locator(".chat__input textarea");
     await expect(textarea).toBeEnabled({ timeout: 10000 });
+
+    // Capture count before sending — previous tests may have left remote session rows.
+    const countBeforeE4 = await hostSection.locator(".session-item").count();
+
     await textarea.fill("Reply with exactly: cli-ready");
     await page.locator(".chat__send").click();
 
+    // Wait for the session to appear in the remote section and the turn to complete.
+    await expect(hostSection.locator(".session-item")).toHaveCount(countBeforeE4 + 1, { timeout: 15000 });
     const runningDot = hostSection.locator(".session-item--active .session-status--running");
     await expect(runningDot).toBeVisible({ timeout: 20000 });
     await expect(runningDot).not.toBeVisible({ timeout: 90000 });
@@ -375,16 +431,28 @@ test.describe("Stage F3: federation e2e", () => {
 
     await shot(page, "fed-e4-cli-relay.png");
 
+    // xterm.js captures keyboard input via a hidden textarea (.xterm-helper-textarea).
+    // Click it to focus, then interact with the CLI.
+    const xtermInput = page.locator(".xterm-helper-textarea");
+    await expect(xtermInput).toBeAttached({ timeout: 10000 });
+    await xtermInput.click({ force: true });
+
+    // The CLI may show a trust dialog on first attach — press Enter to accept
+    // ("Yes, I trust this folder"), then wait for the interactive prompt.
+    await page.waitForTimeout(1000);
+    await xtermInput.press("Enter"); // dismiss trust dialog if present
+    await page.waitForTimeout(2000); // let the CLI reach its interactive prompt
+
     // Send /exit — proves terminal.input relay.
-    await termSurface.click();
+    await xtermInput.click({ force: true });
     await page.keyboard.type("/exit");
     await page.keyboard.press("Enter");
 
     // Exited banner must appear — proves terminal.exit relay.
     const exitedBanner = page.locator(".terminal__exited");
-    await expect(exitedBanner).toBeVisible({ timeout: 30000 });
+    await expect(exitedBanner).toBeVisible({ timeout: 40000 });
 
-    await shot(page, "fed-e4-cli-relay.png");
+    await shot(page, "fed-e4-cli-exited.png");
 
     // Return to Hosted mode.
     await modeSwitch.click();

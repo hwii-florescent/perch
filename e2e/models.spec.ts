@@ -77,7 +77,8 @@ test.describe("Stage B: model catalogue + agent-bar", () => {
     await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
     await page.reload({ waitUntil: "networkidle" });
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+    // With lazy DB insert the sidebar may have zero session items on a fresh DB —
+    // do NOT wait for .session-item here.
     // Wait for the model chip to appear (hosted mode, server.info received)
     await expect(page.locator('[data-testid="model-chip"]')).toBeVisible({ timeout: 15000 });
   }

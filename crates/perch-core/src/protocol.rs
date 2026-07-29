@@ -29,6 +29,16 @@ pub struct CustomModelsData {
 pub struct SettingsData {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
+    /// Selected theme name (key into the client's `THEMES` table). Defaults
+    /// to `"perch"` — perch's own look, kept as the default palette so
+    /// existing installs (with no `theme` key in `~/.perch/settings.json`)
+    /// see no visual change.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "perch".to_string()
 }
 
 /// Patch applied via `settings.update`. Fields absent from JSON → no change.
@@ -42,6 +52,9 @@ pub struct SettingsPatch {
     /// `Some(Some(_))` = field present with a value (set).
     #[serde(default, deserialize_with = "deserialize_some")]
     pub default_cwd: Option<Option<String>>,
+    /// Absent = unchanged; present = set. No "clear" case needed — a theme
+    /// name is never nullable, unlike `default_cwd`.
+    pub theme: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -140,6 +153,24 @@ pub struct SessionSummary {
     /// instance; a host `id` for any federated remote.
     #[serde(default = "default_local_host_id")]
     pub host_id: String,
+    /// Whether this session has been archived.  Defaults to `false` when the
+    /// field is absent on the wire (older remote perch instances).
+    #[serde(default)]
+    pub archived: bool,
+    /// Whether this session finished a turn while no connected client was
+    /// actively viewing it (herdr's `done` state = `Idle && !seen`). Cleared
+    /// as soon as any client subscribes/switches to the session. Defaults to
+    /// `false` when absent (older remote perch instances).
+    #[serde(default)]
+    pub unseen: bool,
+    /// Whether the session's agent is blocked on an approval prompt, detected
+    /// by scanning recent CLI-attached terminal output for known approval-
+    /// prompt patterns (see `blocked_patterns` in `server.rs`). Only
+    /// meaningful for sessions with a live CLI-attached terminal; otherwise
+    /// always `false`. Defaulted for backward federation-compat with older
+    /// remotes.
+    #[serde(default)]
+    pub blocked: bool,
 }
 
 fn default_local_host_id() -> String {
@@ -270,6 +301,20 @@ pub enum ClientMessage {
 
     #[serde(rename = "hosts.delete", rename_all = "camelCase")]
     HostsDelete { id: String },
+
+    #[serde(rename = "session.archive", rename_all = "camelCase")]
+    SessionArchive { session_id: String, archived: bool },
+
+    /// Request the persisted dockview layout blob for a session (Phase 3:
+    /// Workspace → Tab → Pane model). The server never interprets the JSON —
+    /// it's an opaque `dockview` `api.toJSON()` snapshot, only persisted and
+    /// echoed back.
+    #[serde(rename = "session.layout.get", rename_all = "camelCase")]
+    SessionLayoutGet { session_id: String },
+
+    /// Persist a session's dockview layout blob. Debounced client-side.
+    #[serde(rename = "session.layout.set", rename_all = "camelCase")]
+    SessionLayoutSet { session_id: String, layout: Value },
 }
 
 // ---------------------------------------------------------------------------
@@ -384,5 +429,33 @@ pub enum ServerMessage {
         claude_models: Option<Vec<ModelEntry>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         codex_models: Option<Vec<ModelEntry>>,
+    },
+
+    /// Reply to `session.layout.get` (and echoed to the requester when
+    /// forwarded through the hub for a remote session). `layout` is `None`
+    /// when the session has never had a layout saved — the client falls back
+    /// to its default single-Chat-panel layout in that case.
+    #[serde(rename = "session.layout", rename_all = "camelCase")]
+    SessionLayout {
+        session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        layout: Option<Value>,
+    },
+
+    /// Git branch + ahead/behind status for a project (host, cwd) pair.
+    /// Pushed by the background poll task in `server.rs` whenever the
+    /// computed value changes for a local session's cwd, and once to every
+    /// newly-connected client per known cwd (cached snapshot). For federated
+    /// hosts, the remote perch instance emits this with `hostId: "local"`
+    /// from its own point of view; the hub rewrites `hostId` to the
+    /// federated host's id before fanning it out (see `hub.rs`).
+    #[serde(rename = "workspace.git", rename_all = "camelCase")]
+    WorkspaceGit {
+        host_id: String,
+        cwd: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        ahead: u32,
+        behind: u32,
     },
 }

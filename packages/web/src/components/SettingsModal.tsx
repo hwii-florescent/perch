@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
 import type { SshHostEntry, ModelEntry, HostConnectionState } from "@perch/shared";
+import { THEME_NAMES, applyTheme } from "../themes";
 
 // ---------------------------------------------------------------------------
 // HostStateDot (reusable in the modal host rows)
@@ -25,6 +26,54 @@ function hostStateDotClass(state: HostConnectionState): string {
     case "disabled": return "host-state host-state--disabled";
     default: return "host-state host-state--disabled";
   }
+}
+
+// ---------------------------------------------------------------------------
+// ThemeSection
+// ---------------------------------------------------------------------------
+
+function ThemeSection() {
+  const settings = usePerchStore((s) => s.settings);
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+
+  if (!settings) return null;
+  const current = settings.theme;
+
+  const handleSelect = (name: string) => {
+    // Live preview immediately, then persist. If the save round-trip fails
+    // or comes back with a different value, the next settings.current
+    // message (handled in store.ts) re-applies the authoritative theme.
+    applyTheme(name);
+    updateSettings({ theme: name });
+  };
+
+  return (
+    <section className="settings-modal__section">
+      <h3 className="settings-modal__section-title">Theme</h3>
+      <ul className="settings-modal__theme-list">
+        {THEME_NAMES.map((name) => (
+          <li key={name}>
+            <button
+              type="button"
+              className={
+                "settings-modal__theme-option" +
+                (name === current ? " settings-modal__theme-option--active" : "")
+              }
+              data-testid={`theme-option-${name}`}
+              onClick={() => handleSelect(name)}
+            >
+              <span className="settings-modal__theme-option-name">{name}</span>
+              {name === current && (
+                <span className="settings-modal__theme-option-check" aria-hidden="true">
+                  ✓
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +422,7 @@ export function SettingsModal() {
         </div>
 
         <div className="settings-modal__body">
+          <ThemeSection />
           <SshHostsSection />
           <CustomModelsSection />
           <DefaultCwdSection />

@@ -100,3 +100,38 @@ pub fn get_status(cwd: &str, last: Option<&LastUsage>) -> StatusInfo {
         cost_usd: last.and_then(|l| l.cost_usd),
     }
 }
+
+/// Ahead/behind commit counts between `HEAD` and its upstream tracking
+/// branch, for the sidebar's `↑n`/`↓n` git-status glyphs.
+///
+/// This is the *one* intentional exception to this module's "parse `.git`
+/// directly, never shell out to `git`" policy (see `get_branch` above).
+/// Reading `HEAD` is a single small file read; computing how far two commits
+/// have diverged requires walking the commit graph through loose *and*
+/// packed, delta-compressed objects — reimplementing a meaningful slice of
+/// git's object model for a "nice to have" sidebar decoration isn't a
+/// reasonable tradeoff. Shelling out to `git rev-list` is the pragmatic
+/// choice (herdr's own git-status polling does the same).
+///
+/// Returns `None` when `cwd` isn't a git repo, `HEAD` has no upstream
+/// configured, or the `git` binary isn't available — all normal, not
+/// error-worthy conditions for a sidebar decoration.
+pub async fn get_ahead_behind(cwd: &str) -> Option<(u32, u32)> {
+    // `--left-right --count @{u}...HEAD`: left side counts commits reachable
+    // from the upstream but not HEAD (i.e. how far behind we are); right side
+    // counts commits reachable from HEAD but not the upstream (ahead).
+    let output = tokio::process::Command::new("git")
+        .args(["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut parts = text.split_whitespace();
+    let behind: u32 = parts.next()?.parse().ok()?;
+    let ahead: u32 = parts.next()?.parse().ok()?;
+    Some((ahead, behind))
+}

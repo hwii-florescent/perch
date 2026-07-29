@@ -1,4 +1,4 @@
-use perch_core::boot::{augment_path_with_local_bin, boot, resolve_web_dist_dir};
+use perch_core::boot::{augment_path_with_local_bin, boot, resolve_web_dist_dir, scrub_nested_agent_env};
 use perch_core::server::CliArgs;
 
 #[tokio::main]
@@ -20,6 +20,9 @@ async fn main() -> anyhow::Result<()> {
         })
         .unwrap_or(false);
     augment_path_with_local_bin();
+    // Scrub Claude Code nesting markers so spawned agents/terminals don't
+    // inherit them and print transcript-saving warnings.
+    scrub_nested_agent_env();
     if !had_local_bin {
         if let Ok(home) = std::env::var("HOME") {
             let local_bin = format!("{home}/.local/bin");

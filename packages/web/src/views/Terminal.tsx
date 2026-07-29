@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { usePerchStore } from "../store";
 import { onTerminalData } from "../terminalBus";
+import { xtermThemeFromTokens } from "../themes";
 
 export function TerminalView({ active }: { active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,7 +29,7 @@ export function TerminalView({ active }: { active: boolean }) {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-      theme: { background: "#0b0d10", foreground: "#e6e6e6" },
+      theme: xtermThemeFromTokens(),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);

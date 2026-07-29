@@ -239,9 +239,134 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
   opens a native window on the same UI; test mode verifies it headlessly without stealing focus.**
   ✅ verified.
 
+### Phase 3.2 — Session lifecycle & spawn-env fixes — ✅ done
+- `boot.rs` `scrub_nested_agent_env()`: strips `CLAUDE_CODE_CHILD_SESSION`/`CLAUDECODE`/
+  `CLAUDE_CODE_ENTRYPOINT`/`CLAUDE_CODE_SSE_PORT` at startup in both binaries — spawned claude CLIs
+  no longer inherit nesting markers ("Transcript saving is off" warning gone when perch itself is
+  launched from a Claude Code session).
+- New-session project picker: `session.create` += `cwd?` (validated server-side, `~` expansion;
+  error, not create, on bad path); per-host "+" opens a portal popover — known project dirs on that
+  host / "No project" (home) / free-text path.
+- No empty-session clutter: session rows are inserted lazily on first user message (or CLI attach);
+  `list_sessions` excludes zero-message rows; a fresh blank session lives in memory only and never
+  shows in any sidebar; "+" reuses the active empty session instead of stacking new ones.
+- Archive: `sessions.archived` column (guarded ALTER migration), `session.archive` client message
+  both protocol sides, hub-routed for remote sessions, broadcast via `session.updated`; sidebar ⋯
+  menu Archive/Unarchive, hidden by default, "Show archived" footer toggle reveals dimmed rows;
+  active session never yanked while open.
+- e2e: new `sessions.spec.ts` (S1 picker, S2 blank invisible until first message across tabs, S3
+  "+"×2 no dupes, S4 archive round-trip); all pre-existing specs reworked for the new lifecycle AND
+  for running against an empty db (seed-by-sending pattern, relative counts, claude trust-prompt
+  handling in CLI tests). Suite: 28 passed / 1 documented skip.
+- **Milestone: fresh app shows a clean sidebar that only ever lists real conversations; new chats
+  choose their project; sessions archive; CLI mode is warning-free under nested launches.** ✅
+  verified (Playwright headless, 28/1).
+
 ### Phase 3 — Headless + phone integration — ✅ done
 - Wire web build into axum static-serve; verify end-to-end via the gateway URL; reconnect/replay on
   refresh (ring buffer). **Milestone: fully usable from the phone browser.** ✅ verified.
+
+### Phase 4 — herdr UI/feature parity — ✅ done
+Ported the subset of herdr's UI/UX (theme system, status glyphs, workspace/tab/pane model,
+keybindings, pane splitting, mobile layout, git status, toasts) identified as worth adapting in
+`/tmp/herdr-parity-plan.md`'s gap analysis; items marked "skip" there (plugin system, JSON control
+API, full worktree CRUD, screen-scraping agent detection, lifecycle hooks) are intentionally not
+present — perch's existing architecture (native CLI spawn, structured headless events, SQLite
+persistence, hub federation) already covers the same ground more robustly. Landed as sub-phases
+4.0–4.6 below; each kept the protocol-parity invariant (`protocol.rs` ↔ `protocol.ts` field-for-field)
+and was e2e-verified before the next started.
+
+- **4.0 — Semantic theme tokens + theme system.** `styles.css` `:root` gained the 16-token semantic
+  palette (`--accent/--panel-bg/--surface-0/--surface-1/--surface-dim/--overlay-0/--overlay-1/--text/
+  --subtext-0/--mauve/--green/--yellow/--red/--blue/--teal/--peach`) with the old names (`--bg/
+  --surface/--border/--muted/--danger`) kept as aliases so no component CSS broke; new
+  `packages/web/src/themes.ts` (`Palette` type, `PERCH_DEFAULT`, `THEMES` table, `THEME_NAMES`,
+  `applyTheme()`) ships **19 themes**: `perch` (default) plus the full 18-theme herdr catalogue
+  (`catppuccin`, `catppuccin-latte`, `terminal`, `tokyo-night`, `tokyo-night-day`, `dracula`, `nord`,
+  `gruvbox`, `gruvbox-light`, `one-dark`, `one-light`, `solarized`, `solarized-light`, `kanagawa`,
+  `kanagawa-lotus`, `rose-pine`, `rose-pine-dawn`, `vesper`), transcribed verbatim from
+  `herdr-analysis-report.md` §5.15's palette table — no scope reduction from the plan.
+  Protocol: `SettingsData.theme: string` (default `"perch"`) and `SettingsPatch.theme?: string`
+  added to both `protocol.rs`/`protocol.ts` and mirrored in `settings.rs`'s own `Settings`/
+  `SettingsPatch`; `server.rs` passes it through `settings.get`/`settings.update`. `SettingsModal.tsx`
+  gained a Theme section (click-to-preview + persist, checkmark on the active entry). `store.ts` calls
+  `applyTheme("perch")` at module load (no flash-of-unstyled-content) and re-applies from
+  `settings.current` on every settings push. Verified: `theme.spec.ts`.
+- **4.1 — Status glyph system (unseen/blocked).** `SessionSummary` gained `unseen: bool` and
+  `blocked: bool` (both `#[serde(default)]`/optional, backward-compatible with older federated
+  remotes) in both protocol files. Server: `AppState` gained `session_viewers` (session→viewing
+  conn-ids), `unseen_sessions`, `blocked_sessions`; `ConnState.active_session_id` tracks what a
+  connection is looking at; session subscribe/create/resume move viewer membership and clear
+  `unseen`; turn completion marks a session unseen only if no connection is currently viewing it.
+  Web: new `statusDot.ts` (`sessionDotState()`, mirrors herdr's `pane_agent_status(state, seen)`
+  exactly: blocked > working > done(unseen) > idle) and `components/StatusDot.tsx`; `Sidebar.tsx` and
+  `StatusBar.tsx` render it. The old pulsing `.session-status--running` animation was removed —
+  herdr's dots are static; `.session-status`/`.agent-status-dot--*` in `styles.css` are static-only,
+  confirmed no `@keyframes` remain on the status dot. Verified: `status-glyphs.spec.ts`.
+- **4.2 — Workspace → Tab → Pane model.** New opaque-JSON protocol trio `session.layout.get` /
+  `session.layout.set` (client→server) / `session.layout` (server→client) in both protocol files —
+  the server never interprets the dockview `api.toJSON()` blob, only stores/echoes it. `db.rs` added
+  a guarded `sessions.pane_layout TEXT` column migration plus `get_session_layout`/
+  `set_session_layout` (UPDATE-only, matching the existing lazy-row-insert design from Phase 3.2's
+  Fix 3 — a session row doesn't exist until its first message). `server.rs`'s `SessionLayoutSet`
+  handler materializes the row first (`db.create_session`, `INSERT OR IGNORE`, cwd read from the
+  in-memory `SessionRuntime` that's always populated by `session.create`/`subscribe`/`resume` before
+  a layout can be set) so a pane rename/split on a still-blank session isn't a silent no-op — this
+  was flagged as an open caveat going into the integration gate and was **confirmed correct in code**
+  during this gate's audit: `list_sessions()`'s `WHERE EXISTS (SELECT 1 FROM messages ...)` filter
+  means a materialized-but-still-message-less row stays invisible in the sidebar, so no ghost
+  sessions are introduced. No code change was needed here. Both remote-routed through the hub the
+  same way `chat.send`/`session.archive` are. Web: new `components/TabBar.tsx` (session strip scoped
+  to the active project), `DockviewShell.tsx` fetches/restores/debounce-saves the active session's
+  layout via `store.ts`'s `sessionLayouts`/`fetchSessionLayout`/`saveSessionLayout`. Verified:
+  `workspace-tabs.spec.ts` (including a persisted-split round trip).
+- **4.3 — Keybindings + Navigator (no protocol changes).** New `keybinds.ts` (`Ctrl+Space` leader
+  chord + `Ctrl/Cmd+K` and plain `?` shortcuts, input/xterm-aware so typing never triggers a chord),
+  `components/Navigator.tsx` (fuzzy session finder with state-filter chips, reuses `statusDot.ts`),
+  `components/KeybindHelp.tsx` (searchable shortcut reference). `store.ts` gained
+  `sidebarCollapsed`/`toggleSidebar()` and `switchSessionRelative(dir)`; `activeProjectSessions()`
+  extracted as a shared export so `keybinds.ts` and `store.ts` scope "next/prev session" identically
+  to `TabBar`. Verified: `keybindings.spec.ts` (K1–K5: Navigator open/filter/switch, help toggle,
+  sidebar collapse, session cycling, pane keybinds).
+- **4.4 — Pane context menu + mobile narrow-width collapse (no protocol changes).**
+  `components/PaneContextMenu.tsx` (portal-rendered, same pattern as `ModelChip`'s popover) wired into
+  `DockviewShell.tsx` for split/rename/zoom/close via dockview's native `addPanel`/`maximize`/
+  `panel.api.close()`. New `responsive.ts` (`MOBILE_WIDTH_BREAKPOINT = 700`, `useIsMobileWidth()`);
+  below it `App.tsx` swaps `Sidebar`+`TabBar` for new `components/MobileHeader.tsx` +
+  `components/MobileSwitcher.tsx` (slide-over unifying sessions/projects/settings). Verified:
+  `pane-splitting.spec.ts` (P1–P3, including a zoom/unzoom round trip through Phase 4.2's layout
+  persistence) and `responsive.spec.ts` (R1–R2 collapse/switcher; desktop viewport unaffected).
+- **4.5 — Git ahead/behind + toasts + blocked-state detection.** New `ServerMessage::WorkspaceGit
+  {hostId, cwd, branch?, ahead, behind}` in both protocol files, hub-rewritten to the federated
+  host's id before fan-out (`hub.rs`). `status.rs` added `get_ahead_behind()`, the one intentional
+  `git` subprocess shell-out in the codebase (`git rev-list --left-right --count @{u}...HEAD` —
+  ahead/behind against a remote-tracking branch isn't reconstructable from pure `.git/*` parsing);
+  a background poll task in `server.rs` fingerprints `(cwd, branch)` to skip redundant subprocess
+  calls and pushes on change. Blocked-state detection: `server.rs` scans CLI-attached terminal output
+  (ANSI-stripped tail) against three regexes (`blocked_patterns()` — generic "do you want to proceed"/
+  "would you like to"/"allow command?"/"action required" approval-prompt phrasing covering both
+  claude's and codex's prompt styles) and maintains `blocked_sessions`, feeding Phase 4.1's `blocked`
+  field. Web: `store.ts`'s `workspaceGit` map renders ahead/behind badges in `Sidebar.tsx`'s project
+  headers; new `components/Toast.tsx` shows a dismissible toast, driven purely from
+  `session.updated` running→idle transitions on a non-active session (no new protocol needed for
+  toasts themselves). Verified: `workspace-git.spec.ts`, `toasts.spec.ts`; blocked-pattern matching
+  verified via inline unit tests in `server.rs` against realistic ANSI-laden prompt text (documented
+  as manual/unit-level verification only, consistent with this repo's existing tolerance for
+  CLI-prompt-timing e2e flakiness).
+- **4.6 — Final integration gate.** Consistency sweep across all of the above: `styles.css` checked
+  for duplicate/conflicting selectors and stray raw hex (found none outside the pre-existing,
+  deliberately theme-independent `.mode-switch` block and black-only `rgba(0,0,0,*)` shadows —
+  no leftover pulsing status-dot CSS); `store.ts` fields/actions checked for naming consistency and
+  dead code (none found — every new field/action added in 4.0–4.5 is consumed by at least one
+  component); full protocol parity re-diffed field-for-field between `protocol.rs` and `protocol.ts`
+  for every message touched (`SettingsData`/`SettingsPatch.theme`, `SessionSummary.unseen`/`blocked`,
+  the `session.layout*` trio, `WorkspaceGit`) — all camelCase wire names match exactly. Full
+  `testMatch` suite (54 tests incl. federation against the real devpod SSH host), `cargo clippy
+  --workspace --all-targets`, `cargo build -p perch-core`, `cargo build -p perch-desktop`, and
+  `npm run build` all run clean with no new warnings/failures attributable to this effort.
+- **Milestone: herdr's theme/status/tab/keybind/pane/mobile/git/toast UX is ported into perch's
+  Rust-core/thin-TS architecture with zero protocol drift and no regressions in the pre-existing
+  suite.** ✅ verified.
 
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
@@ -256,19 +381,29 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
 
 ---
 
-## How to run (after Phase 1)
+## How to run
+
+**Devpod headless:**
 ```bash
 source $HOME/.cargo/env
 cd /home/user/perch
-cargo run -p perch-core -- --port 7788 --base-path /proxy/dev-personal/7788/
+cargo run -p perch-core -- --port 7788
 ```
-Phone (after Phase 2/3): `https://devpod-gateway.internal.example.com/proxy/dev-personal/7788/`.
+Phone access: run `devpod serve :7788/` on the devpod (with `DEVPOD_NAME` and `DEVPOD_REGION` exported); it assigns a port and prints the gateway URL (`https://devpod-gateway.internal.example.com/proxy/<user>/<assigned-port>/`). The old `/proxy/dev-personal/7788/` static path is no longer used.
+
+**Mac desktop:**
+```bash
+cargo run -p perch-desktop   # boots core in-process on a free port, opens a window
+```
+`PERCH_DESKTOP_TEST=1` runs the window hidden and unfocused (for automation).
+
+**Usual federation flow:** run the app locally, add devpod hosts in Settings; the hub auto-starts the remote perch in a tmux session and keeps it connected.
 
 ## Verification approach
-- **Core (this pass):** cargo build; headless boot; WS smoke test (session/terminal/chat); real
-  claude turn persisted to SQLite.
-- **Phone (Phase 2/3):** open gateway URL on desktop + phone; chat + terminal; PWA install; replay.
-- **App (Phase 4, Mac):** launch Tauri; confirm it boots the embedded Rust core.
+- **Core:** cargo build + WS smoke test (session/terminal/chat) + real claude turn persisted to SQLite. ✅ done (Phase 1).
+- **Web/phone:** gateway URL + chat + terminal + PWA install. ✅ done (Phase 2/3).
+- **Desktop (Mac):** hidden-window launch via `PERCH_DESKTOP_TEST=1`; WebView auto-created session over WS. ✅ done (Phase 3.1).
+- **Ongoing:** committed Playwright e2e suite in `e2e/` (hub `:7799` + federated remote `:7800`).
 
 ## Constraints
 - Repo control via `gh` only; no `git`/arc shell-outs (read repo state from `.git/*`). No commit/push

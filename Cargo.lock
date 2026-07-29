@@ -2335,6 +2335,7 @@ dependencies = [
  "axum",
  "futures",
  "portable-pty",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

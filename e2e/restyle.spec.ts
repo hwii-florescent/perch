@@ -49,7 +49,8 @@ async function freshSession(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-  await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+  // With lazy DB insert the sidebar may have zero session items on a fresh DB —
+  // do NOT wait for .session-item here.
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,28 @@ test.describe("Stage C: restyle", () => {
   // ---------------------------------------------------------------------------
   test("C1. sidebar projects grouping", async ({ page }) => {
     await freshSession(page);
+
+    // Seed a real session so a sidebar row (and project group) exists.
+    // Use the picker flow: "+" → project-option-none → send a message.
+    const newBtn = page.locator('[data-testid="new-session-local"]');
+    await expect(newBtn).toBeEnabled({ timeout: 10000 });
+    await newBtn.click();
+    const noneOpt = page.locator('[data-testid="project-option-none"]');
+    await expect(noneOpt).toBeVisible({ timeout: 5000 });
+    await noneOpt.click();
+    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
+
+    // Capture count before sending (DB may already have sessions from prior runs).
+    const countBefore = await page.locator(".session-item").count();
+
+    // Send a message to trigger the lazy DB insert so the row appears.
+    const textarea = page.locator(".chat__input textarea");
+    await expect(textarea).toBeEnabled({ timeout: 10000 });
+    await textarea.fill("c1-seed-restyle-" + Date.now());
+    await page.locator(".chat__send").click();
+
+    // Wait for the session row to appear in the sidebar.
+    await expect(page.locator(".session-item")).toHaveCount(countBefore + 1, { timeout: 15000 });
 
     // At least one project group exists
     const projects = page.locator(".sidebar__project");
@@ -172,12 +195,14 @@ test.describe("Stage C: restyle", () => {
 
     await freshSession(page);
 
-    // Start a fresh session
-    await page.locator(".sidebar__new-btn").click();
-    await expect(page.locator(".session-item--active .session-item__title")).toHaveText(
-      "(new session)",
-      { timeout: 8000 },
-    );
+    // Start a fresh session via picker
+    const newBtn = page.locator('[data-testid="new-session-local"]');
+    await expect(newBtn).toBeEnabled({ timeout: 10000 });
+    await newBtn.click();
+    const noneOpt = page.locator('[data-testid="project-option-none"]');
+    await expect(noneOpt).toBeVisible({ timeout: 5000 });
+    await noneOpt.click();
+    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
 
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
 
@@ -217,11 +242,14 @@ test.describe("Stage C: restyle", () => {
 
     await freshSession(page);
 
-    await page.locator(".sidebar__new-btn").click();
-    await expect(page.locator(".session-item--active .session-item__title")).toHaveText(
-      "(new session)",
-      { timeout: 8000 },
-    );
+    // Start a fresh session via picker
+    const newBtn = page.locator('[data-testid="new-session-local"]');
+    await expect(newBtn).toBeEnabled({ timeout: 10000 });
+    await newBtn.click();
+    const noneOpt = page.locator('[data-testid="project-option-none"]');
+    await expect(noneOpt).toBeVisible({ timeout: 5000 });
+    await noneOpt.click();
+    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
 
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
 

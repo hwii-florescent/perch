@@ -26,3 +26,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 tokio-tungstenite = "0.24"
+# Used only for CLI-attached terminal blocked-state (approval-prompt)
+# detection in server.rs — see `blocked_patterns`/`strip_ansi`.
+regex = "1"

@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { AgentKind } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { onTerminalData } from "../terminalBus";
+import { xtermThemeFromTokens } from "../themes";
 
 export function AgentCliTerminal({
   sessionId,
@@ -39,7 +40,7 @@ export function AgentCliTerminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-      theme: { background: "#0b0d10", foreground: "#e6e6e6" },
+      theme: xtermThemeFromTokens(),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);

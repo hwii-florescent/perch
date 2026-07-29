@@ -38,16 +38,21 @@ export interface SettingsData {
   customModels: CustomModelsData;
   /** `null` means no default set (use process cwd). */
   defaultCwd: string | null;
+  /** Selected theme name (key into the client's `THEMES` table).
+   * Defaults to `"perch"` — perch's own look. */
+  theme: string;
 }
 
 /**
  * Patch for `settings.update`. Absent fields = no change.
  * - `customModels` absent → unchanged; present → replace whole struct.
  * - `defaultCwd` absent → unchanged; `null` → clear; string → set.
+ * - `theme` absent → unchanged; string → set (no "clear" case).
  */
 export interface SettingsPatch {
   customModels?: CustomModelsData;
   defaultCwd?: string | null;
+  theme?: string;
 }
 
 export interface SshHostEntry {
@@ -139,6 +144,18 @@ export interface SessionSummary {
   /** Which hub host owns this session.  "local" (or absent) means the
    * session lives on the directly-connected server instance. */
   hostId?: string;
+  /** Whether this session has been archived.  Defaults to false when absent. */
+  archived?: boolean;
+  /** Whether this session finished a turn while no connected client was
+   * actively viewing it (herdr's `done` state = `Idle && !seen`). Cleared as
+   * soon as any client subscribes/switches to the session. Defaults to false
+   * when absent. */
+  unseen?: boolean;
+  /** Whether the session's agent is blocked on an approval prompt, detected
+   * by scanning recent CLI-attached terminal output for known approval-
+   * prompt patterns. Only meaningful for sessions with a live CLI-attached
+   * terminal; otherwise always false. Defaults to false when absent. */
+  blocked?: boolean;
 }
 
 /** Requests that `terminal.create` spawn the given session's *interactive*
@@ -218,6 +235,28 @@ export interface HostsDeleteMessage {
   id: string;
 }
 
+export interface SessionArchiveMessage {
+  type: "session.archive";
+  sessionId: string;
+  archived: boolean;
+}
+
+/** Request the persisted dockview layout blob for a session (Phase 3:
+ * Workspace → Tab → Pane model). The server never interprets this JSON — it
+ * is an opaque `dockview` `api.toJSON()` snapshot, only persisted/echoed. */
+export interface SessionLayoutGetMessage {
+  type: "session.layout.get";
+  sessionId: string;
+}
+
+/** Persist a session's dockview layout blob. Callers should debounce (see
+ * `store.ts`'s `saveSessionLayout`). */
+export interface SessionLayoutSetMessage {
+  type: "session.layout.set";
+  sessionId: string;
+  layout: unknown;
+}
+
 export type ClientMessage =
   | SessionCreateMessage
   | SessionSubscribeMessage
@@ -232,7 +271,10 @@ export type ClientMessage =
   | SettingsUpdateMessage
   | HostsListMessage
   | HostsUpsertMessage
-  | HostsDeleteMessage;
+  | HostsDeleteMessage
+  | SessionArchiveMessage
+  | SessionLayoutGetMessage
+  | SessionLayoutSetMessage;
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -374,6 +416,29 @@ export interface HostsUpdatedMessage {
   hosts: SshHostEntry[];
 }
 
+/** Reply to `session.layout.get`. `layout` is absent when the session has
+ * never had a layout saved — the client falls back to its default
+ * single-Chat-panel layout in that case. */
+export interface SessionLayoutMessage {
+  type: "session.layout";
+  sessionId: string;
+  layout?: unknown;
+}
+
+/** Git branch + ahead/behind status for a project (host, cwd) pair. Pushed
+ * whenever the computed value changes for a local session's cwd, and once to
+ * every newly-connected client per known cwd (cached snapshot). For
+ * federated hosts, `hostId` is rewritten by the hub to the federated host's
+ * id before this reaches the browser. */
+export interface WorkspaceGitMessage {
+  type: "workspace.git";
+  hostId: string;
+  cwd: string;
+  branch?: string;
+  ahead: number;
+  behind: number;
+}
+
 export type ServerMessage =
   | SessionCreatedMessage
   | SessionHistoryMessage
@@ -393,4 +458,6 @@ export type ServerMessage =
   | SettingsCurrentMessage
   | HostsListResponseMessage
   | HostsUpdatedMessage
-  | HostInfoMessage;
+  | HostInfoMessage
+  | SessionLayoutMessage
+  | WorkspaceGitMessage;

@@ -3,6 +3,7 @@ import type { AgentAttach, AgentKind, ChatUsage, ModelEntry, ServerMessage, Sess
 import { socket } from "./ws";
 import { emitTerminalData } from "./terminalBus";
 import { defaultModel } from "./models";
+import { applyTheme } from "./themes";
 
 export interface ToolCallEntry {
   name: string;
@@ -43,6 +44,15 @@ export interface StatusInfo {
   branch: string;
   contextTokens?: number;
   costUsd?: number;
+}
+
+/** A single "session finished" toast (Phase 6). Created client-side when a
+ * `session.updated` push shows a running→idle transition for a session that
+ * isn't the one currently being viewed. */
+export interface ToastEntry {
+  id: string;
+  sessionId: string;
+  title: string;
 }
 
 interface PendingTerminal {
@@ -100,6 +110,28 @@ interface PerchState {
    * remote session is switched to or created.  Updated by switchSession and
    * session.history (via the session's hostId). */
   activeHostId: string;
+  /** Whether archived sessions are visible in the sidebar. */
+  showArchived: boolean;
+  setShowArchived: (show: boolean) => void;
+  /** Cache of persisted dockview layout blobs, keyed by sessionId. Populated
+   * from `session.layout` server replies (Phase 3: Workspace → Tab → Pane
+   * model). A key mapped to `null` means the server has confirmed there is
+   * no saved layout for that session (as opposed to "not fetched yet",
+   * i.e. the key being absent entirely). */
+  sessionLayouts: Record<string, unknown | null>;
+  /** Whether the sidebar is collapsed to a compact icon rail (Phase 4:
+   * Keybindings + Navigator, leader,b). */
+  sidebarCollapsed: boolean;
+  /** Last known git branch + ahead/behind for each (hostId,cwd) project,
+   * populated from `workspace.git` server pushes. Keyed by
+   * `${hostId}:${cwd}` — the same key `Sidebar.tsx`'s `ProjectGroup` uses. */
+  workspaceGit: Record<string, { branch?: string; ahead: number; behind: number }>;
+  /** "Session finished" toasts (Phase 6), derived client-side from
+   * `session.updated` running→idle transitions on non-active sessions.
+   * Rendered by `components/Toast.tsx`; dismissed on click or timeout. */
+  toasts: ToastEntry[];
+  /** Dismiss a toast by id (click or auto-dismiss timeout). */
+  dismissToast: (id: string) => void;
 
   sendChat: (text: string) => void;
   cancelChat: () => void;
@@ -126,8 +158,27 @@ interface PerchState {
   /** Delete an SSH host by id. */
   deleteHost: (id: string) => void;
   /** Create a new session on a specific hub host.  Passes hostId in the
-   * session.create message; "local" omits the field (backward-compatible). */
-  createSessionOnHost: (hostId: string) => void;
+   * session.create message; "local" omits the field (backward-compatible).
+   * If `cwd` is provided it is sent to the server for validation. If the
+   * active session on that host is already empty (no messages) and no
+   * different cwd is requested, just focuses the composer instead. */
+  createSessionOnHost: (hostId: string, cwd?: string) => void;
+  /** Archive or unarchive a session. */
+  archiveSession: (sessionId: string, archived: boolean) => void;
+  /** Request the persisted dockview layout blob for a session. Reply lands
+   * in `sessionLayouts[sessionId]` via the `session.layout` server message. */
+  fetchSessionLayout: (sessionId: string) => void;
+  /** Persist a session's dockview layout blob. Callers (DockviewShell) are
+   * responsible for debouncing — this sends immediately. */
+  saveSessionLayout: (sessionId: string, layout: unknown) => void;
+  /** Toggle the sidebar between full and compact-rail (`.sidebar--collapsed`)
+   * display (Phase 4, leader,b). */
+  toggleSidebar: () => void;
+  /** Switch to the next (`dir=1`) or previous (`dir=-1`) session within the
+   * *active project* — the same (hostId,cwd) grouping `TabBar` uses. Wraps
+   * around; no-op if the active project has no other sessions. Used by
+   * leader,n / leader,p (Phase 4). */
+  switchSessionRelative: (dir: 1 | -1) => void;
   createTerminal: (
     cols: number,
     rows: number,
@@ -144,6 +195,25 @@ function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** Sessions belonging to the same (hostId,cwd) project as the currently
+ * active session, sorted oldest-first — the same grouping/ordering `TabBar`
+ * uses. Falls back to a single-element list containing just the active
+ * session when its cwd is unknown (e.g. a brand-new session with no
+ * persisted DB row yet, per Fix 3's lazy-insert). Exported so `keybinds.ts`
+ * (leader,n/p/1-9) can reuse the exact same project scoping without
+ * duplicating the grouping logic. */
+export function activeProjectSessions(
+  state: Pick<PerchState, "sessions" | "sessionId" | "activeHostId" | "status">,
+): SessionSummary[] {
+  const current = state.sessions.find((s) => s.id === state.sessionId);
+  const hostId = current?.hostId ?? state.activeHostId;
+  const cwd = current?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined) ?? null;
+  if (!cwd) return current ? [current] : [];
+  return state.sessions
+    .filter((s) => (s.hostId ?? "local") === hostId && s.cwd === cwd)
+    .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export const usePerchStore = create<PerchState>((set, get) => ({
@@ -167,6 +237,15 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   hostStates: {},
   hostModels: { local: { claude: [], codex: [] } },
   activeHostId: "local",
+  showArchived: false,
+  sessionLayouts: {},
+  sidebarCollapsed: false,
+  workspaceGit: {},
+  toasts: [],
+
+  dismissToast: (id) => {
+    set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
+  },
 
   sendChat: (text) => {
     const { sessionId, agent, model } = get();
@@ -219,10 +298,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   createSession: () => {
-    // Clear local UI state so the view is blank while we wait for the
-    // server's session.created + session.history pair to arrive.
-    set({ messages: [], streamingMessageId: null });
-    socket.newSession();
+    // Delegate to createSessionOnHost("local") — it applies the Fix 3 smart-
+    // create guard (no duplicate blank sessions) and uses the unified path.
+    get().createSessionOnHost("local");
   },
 
   switchSession: (sessionId) => {
@@ -265,18 +343,69 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     socket.send({ type: "hosts.delete", id });
   },
 
-  createSessionOnHost: (hostId) => {
+  createSessionOnHost: (hostId, cwd) => {
+    // Fix 3: If the active session on this host has no messages (empty) and
+    // no different cwd is requested, just focus the composer — don't create
+    // another blank session.
+    const state = get();
+    const currentSession = state.sessions.find((s) => s.id === state.sessionId);
+    const currentHostId = currentSession?.hostId ?? "local";
+    const isCurrentHostMatch = currentHostId === hostId || (hostId === "local" && currentHostId === "local");
+    if (isCurrentHostMatch && state.messages.length === 0 && !cwd) {
+      // Already on an empty session for this host — just focus the composer.
+      return;
+    }
     // Clear local UI state so the view is blank while waiting for
     // session.created + session.history.
     set({ messages: [], streamingMessageId: null, activeHostId: hostId });
     if (hostId === "local") {
-      socket.newSession();
+      // Clear stored session id so a mid-flight reconnect doesn't resume the
+      // old session before session.created arrives (same as socket.newSession()).
+      try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
+      const msg: { type: "session.create"; cwd?: string } = { type: "session.create" };
+      if (cwd) msg.cwd = cwd;
+      socket.send(msg);
     } else {
       // Clear the stored sessionId so a mid-flight reconnect doesn't try
       // to resume the old session before session.created arrives.
       try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
-      socket.send({ type: "session.create", hostId });
+      const msg: { type: "session.create"; hostId: string; cwd?: string } = {
+        type: "session.create",
+        hostId,
+      };
+      if (cwd) msg.cwd = cwd;
+      socket.send(msg);
     }
+  },
+
+  archiveSession: (sessionId, archived) => {
+    socket.send({ type: "session.archive", sessionId, archived });
+  },
+
+  fetchSessionLayout: (sessionId) => {
+    socket.send({ type: "session.layout.get", sessionId });
+  },
+
+  saveSessionLayout: (sessionId, layout) => {
+    socket.send({ type: "session.layout.set", sessionId, layout });
+  },
+
+  toggleSidebar: () => {
+    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
+  },
+
+  switchSessionRelative: (dir) => {
+    const state = get();
+    const projectSessions = activeProjectSessions(state);
+    if (projectSessions.length < 2) return;
+    const idx = projectSessions.findIndex((s) => s.id === state.sessionId);
+    const base = idx === -1 ? 0 : idx;
+    const next = projectSessions[(base + dir + projectSessions.length) % projectSessions.length];
+    if (next && next.id !== state.sessionId) get().switchSession(next.id);
+  },
+
+  setShowArchived: (show) => {
+    set({ showArchived: show });
   },
 
   createTerminal: (cols, rows, options) => {
@@ -360,11 +489,27 @@ function handleServerMessage(msg: ServerMessage): void {
     }
     case "session.updated": {
       usePerchStore.setState((state) => {
-        const exists = state.sessions.some((s) => s.id === msg.session.id);
-        const sessions = exists
+        const prev = state.sessions.find((s) => s.id === msg.session.id);
+        const sessions = prev
           ? state.sessions.map((s) => (s.id === msg.session.id ? msg.session : s))
           : [msg.session, ...state.sessions];
-        return { sessions };
+
+        // Phase 6: a turn finished (running→idle) on a session that isn't
+        // the one currently being viewed — surface a dismissible toast
+        // rather than relying on the user to notice the sidebar dot.
+        let toasts = state.toasts;
+        if (
+          prev &&
+          prev.status === "running" &&
+          msg.session.status === "idle" &&
+          msg.session.id !== state.sessionId
+        ) {
+          toasts = [
+            ...toasts,
+            { id: newId(), sessionId: msg.session.id, title: msg.session.title },
+          ];
+        }
+        return { sessions, toasts };
       });
       break;
     }
@@ -561,6 +706,7 @@ function handleServerMessage(msg: ServerMessage): void {
     }
     case "settings.current": {
       usePerchStore.setState({ settings: msg.settings });
+      applyTheme(msg.settings.theme);
       break;
     }
     case "hosts.list": {
@@ -592,6 +738,22 @@ function handleServerMessage(msg: ServerMessage): void {
       }
       break;
     }
+    case "session.layout": {
+      usePerchStore.setState((state) => ({
+        sessionLayouts: { ...state.sessionLayouts, [msg.sessionId]: msg.layout ?? null },
+      }));
+      break;
+    }
+    case "workspace.git": {
+      const key = `${msg.hostId}:${msg.cwd}`;
+      usePerchStore.setState((state) => ({
+        workspaceGit: {
+          ...state.workspaceGit,
+          [key]: { branch: msg.branch, ahead: msg.ahead, behind: msg.behind },
+        },
+      }));
+      break;
+    }
   }
 }
 
@@ -601,4 +763,8 @@ socket.onConnectionChange((connected) => {
   // session.create/subscribe handshake runs on reconnect (see ws.ts).
   usePerchStore.setState(connected ? { connected } : { connected, sessionId: null });
 });
+// Apply perch's own look immediately so there's no flash of unstyled (or
+// browser-default) content before the server's settings.current message
+// (holding the actual persisted theme, if not "perch") arrives.
+applyTheme("perch");
 socket.connect();

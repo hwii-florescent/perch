@@ -4,7 +4,7 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts"],
+  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts"],
   outputDir: "artifacts",
   timeout: 120000,
   use: {

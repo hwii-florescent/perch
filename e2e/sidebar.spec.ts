@@ -49,9 +49,6 @@ test.describe("Perch sidebar", () => {
 
   // Shared state across the serial block
   let claudeAvailable = false;
-  let sessionCountAfterNewSession = 0;
-  let firstSessionId = ""; // the session that existed before we clicked New
-  let newSessionTitle = "";
 
   // ---------------------------------------------------------------------------
   // Setup: fresh session before the suite runs
@@ -75,9 +72,24 @@ test.describe("Perch sidebar", () => {
     // Clear stored session so we always start fresh
     await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
     await page.reload({ waitUntil: "networkidle" });
-    // Wait until the sidebar is in the DOM and connected (at least one session item)
+    // Wait until the sidebar is in the DOM and connected.
+    // NOTE: With Fix 3 (lazy DB insert) the sidebar may have zero session items
+    // on a fresh DB — do NOT wait for .session-item here.
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: open the local picker and choose "No project"
+  // ---------------------------------------------------------------------------
+  async function createSessionViaPicker(page: Page): Promise<void> {
+    const newBtn = page.locator('[data-testid="new-session-local"]');
+    await expect(newBtn).toBeEnabled({ timeout: 10000 });
+    await newBtn.click();
+    const noneOpt = page.locator('[data-testid="project-option-none"]');
+    await expect(noneOpt).toBeVisible({ timeout: 5000 });
+    await noneOpt.click();
+    // Popover closes; active session is now blank (not in sidebar list yet)
+    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
   }
 
   // ---------------------------------------------------------------------------
@@ -115,12 +127,31 @@ test.describe("Perch sidebar", () => {
   test("2. First session listed + active", async ({ page }) => {
     await waitForSidebar(page);
 
-    // At least one session item
-    const items = page.locator(".session-item");
-    const count = await items.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    // New design (lazy DB insert): fresh page load may show zero .session-item
+    // rows if the DB has no persisted sessions.  The composer must still be
+    // usable.  Assert the empty-sidebar state first, then seed a session via
+    // picker + message and confirm the row appears and is --active.
 
-    // Exactly one active item
+    // Composer must be available (model chip visible → hosted mode active).
+    await expect(page.locator('[data-testid="model-chip"]')).toBeVisible({ timeout: 15000 });
+
+    // Seed a persisted session so we can verify the sidebar row behaviour.
+    await createSessionViaPicker(page);
+
+    // Blank session is NOT in the sidebar yet.
+    await page.waitForTimeout(500);
+    const countAfterCreate = await page.locator(".session-item").count();
+
+    // Now send a message to trigger the lazy DB insert.
+    const textarea = page.locator(".chat__input textarea");
+    await expect(textarea).toBeEnabled({ timeout: 8000 });
+    await textarea.fill("sidebar-test2-seed-" + Date.now());
+    await page.locator(".chat__send").click();
+
+    // Row must appear after first message.
+    await expect(page.locator(".session-item")).toHaveCount(countAfterCreate + 1, { timeout: 10000 });
+
+    // Exactly one active item.
     const active = page.locator(".session-item--active");
     await expect(active).toBeVisible({ timeout: 5000 });
     const activeCount = await active.count();
@@ -130,28 +161,25 @@ test.describe("Perch sidebar", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 3 — New session
+  // Test 3 — New session (via picker)
   // ---------------------------------------------------------------------------
-  test("3. New session", async ({ page }) => {
+  test("3. New session via picker", async ({ page }) => {
     await waitForSidebar(page);
 
     const countBefore = await page.locator(".session-item").count();
 
-    // Remember which session is currently active (to switch back later in test 6)
-    const activeItem = page.locator(".session-item--active");
-    firstSessionId = await activeItem.getAttribute("data-session-id") ?? "";
-    // data-session-id may not exist — fall back to positional tracking
+    // Open picker and choose "No project" — Fix 3: blank session is NOT inserted
+    // into the DB yet, so the sidebar count must NOT increase immediately.
+    await createSessionViaPicker(page);
 
-    // Click new session
-    await page.locator(".sidebar__new-btn").click();
+    // Brief settle — count must stay ≤ countBefore (blank session not in list).
+    await page.waitForTimeout(800);
+    const countAfterCreate = await page.locator(".session-item").count();
+    expect(countAfterCreate).toBeLessThanOrEqual(countBefore);
 
-    // Count should increase by 1
-    await expect(page.locator(".session-item")).toHaveCount(countBefore + 1, { timeout: 10000 });
-    sessionCountAfterNewSession = countBefore + 1;
-
-    // Active item shows "(new session)"
-    const activeTitle = page.locator(".session-item--active .session-item__title");
-    await expect(activeTitle).toHaveText("(new session)", { timeout: 8000 });
+    // The composer must be ready (active in-memory session assigned).
+    const storedId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+    expect(storedId).toBeTruthy();
 
     await page.screenshot({ path: "artifacts/03-new-session.png" });
   });
@@ -167,12 +195,10 @@ test.describe("Perch sidebar", () => {
 
     await waitForSidebar(page);
 
-    // Ensure we're on a fresh new session (click New Session to avoid any pre-existing state)
-    await page.locator(".sidebar__new-btn").click();
-    await expect(page.locator(".session-item--active .session-item__title")).toHaveText(
-      "(new session)",
-      { timeout: 8000 }
-    );
+    // Create a fresh session via picker (blank — not in sidebar until first message).
+    await createSessionViaPicker(page);
+
+    const countBeforeMsg = await page.locator(".session-item").count();
 
     // Select agent: claude, model: claude-haiku-4-5 via ModelChip
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
@@ -182,8 +208,11 @@ test.describe("Perch sidebar", () => {
     await expect(textarea).toBeEnabled({ timeout: 8000 });
     await textarea.fill(PROMPT_TEXT);
 
-    // Send
+    // Send — this triggers the lazy DB insert.
     await page.locator(".chat__send").click();
+
+    // Session now has a message → should appear in sidebar.
+    await expect(page.locator(".session-item")).toHaveCount(countBeforeMsg + 1, { timeout: 10000 });
 
     // Expect running indicator to appear on the active session item
     const runningDot = page.locator(".session-item--active .session-status--running");
@@ -212,18 +241,18 @@ test.describe("Perch sidebar", () => {
 
     await waitForSidebar(page);
 
-    // Re-run the chat turn on a fresh session to get a title
-    await page.locator(".sidebar__new-btn").click();
-    await expect(page.locator(".session-item--active .session-item__title")).toHaveText(
-      "(new session)",
-      { timeout: 8000 }
-    );
+    // Create a fresh session via picker, then send a message to trigger DB insert.
+    await createSessionViaPicker(page);
+    const countBeforeMsg = await page.locator(".session-item").count();
 
     // Select claude + haiku via ModelChip for session 5
     await selectAgentModel(page, "claude", "claude-haiku-4-5");
     const textarea = page.locator(".chat__input textarea");
     await textarea.fill(PROMPT_TEXT);
     await page.locator(".chat__send").click();
+
+    // Session appears in sidebar after first message.
+    await expect(page.locator(".session-item")).toHaveCount(countBeforeMsg + 1, { timeout: 10000 });
 
     // Wait for the turn to complete (running dot disappears)
     const runningDot = page.locator(".session-item--active .session-status--running");
@@ -235,10 +264,8 @@ test.describe("Perch sidebar", () => {
     await expect(activeTitle).not.toHaveText("(new session)", { timeout: 10000 });
     const titleText = await activeTitle.textContent();
     // Server truncates to 40 chars; the title is taken from the first user message
-    const promptPrefix = PROMPT_TEXT.slice(0, 40);
-    expect(PROMPT_TEXT.startsWith(titleText?.trim() ?? "X")).toBeTruthy();
-    // Also accept that the full prompt (if <=40 chars) appears verbatim
     // PROMPT_TEXT.length is 24, so it should appear in full
+    expect(PROMPT_TEXT.startsWith(titleText?.trim() ?? "X")).toBeTruthy();
     await page.screenshot({ path: "artifacts/05b-title-snippet.png" });
   });
 
@@ -248,38 +275,53 @@ test.describe("Perch sidebar", () => {
   test("6. Switch session", async ({ page }) => {
     await waitForSidebar(page);
 
-    // Start with 2 sessions: the one from fresh load, plus a new one
-    const countBefore = await page.locator(".session-item").count();
+    // Count persisted sessions (only those with messages appear — Fix 3).
+    let countBefore = await page.locator(".session-item").count();
 
-    // If there's only one session, create another so we have two to switch between
+    // If there's only one (or zero) visible session we need another persisted one.
+    // Create a session via picker and send a short message so it persists.
     if (countBefore < 2) {
-      await page.locator(".sidebar__new-btn").click();
-      await expect(page.locator(".session-item")).toHaveCount(countBefore + 1, { timeout: 8000 });
+      await createSessionViaPicker(page);
+      if (!claudeAvailable) {
+        test.skip(true, "claude binary not found — need 2 persisted sessions to switch");
+        return;
+      }
+      await selectAgentModel(page, "claude", "claude-haiku-4-5");
+      const ta = page.locator(".chat__input textarea");
+      await ta.fill("Reply with exactly: switch-ready");
+      await page.locator(".chat__send").click();
+      // Wait for the new session to appear in the sidebar.
+      await expect(page.locator(".session-item")).toHaveCount(countBefore + 1, { timeout: 10000 });
+      const runningDot = page.locator(".session-item--active .session-status--running");
+      await expect(runningDot).toBeVisible({ timeout: 15000 });
+      await expect(runningDot).not.toBeVisible({ timeout: 90000 });
+      countBefore = await page.locator(".session-item").count();
     }
 
-    // The active session is the newest (top of list or last clicked)
-    const activeItem = page.locator(".session-item--active");
-    await expect(activeItem).toBeVisible({ timeout: 5000 });
-
-    // Find a different (non-active) session to switch to
     const allItems = page.locator(".session-item");
     const total = await allItems.count();
     expect(total).toBeGreaterThanOrEqual(2);
 
-    // Click the second item (index 1) if active is 0, otherwise click index 0
+    // After a fresh page load without a stored session ID there may be no --active
+    // item. Click the first row to establish an active session.
+    let activeItem = page.locator(".session-item--active");
+    const hasActive = await activeItem.count();
+    if (hasActive === 0) {
+      await allItems.nth(0).click();
+      await expect(allItems.nth(0)).toHaveClass(/session-item--active/, { timeout: 5000 });
+    }
+
+    // Now find a non-active item to switch to.
     const firstItem = allItems.nth(0);
     const firstItemClass = await firstItem.getAttribute("class") ?? "";
     const targetIndex = firstItemClass.includes("session-item--active") ? 1 : 0;
     const targetItem = allItems.nth(targetIndex);
 
-    // Capture the text of the current chat to verify it changes
-    const chatListBefore = await page.locator(".chat__list").textContent();
-
     await targetItem.click();
 
     // Active class moves to the clicked item
     await expect(targetItem).toHaveClass(/session-item--active/, { timeout: 5000 });
-    // Original active item loses active class
+    // Exactly one active item
     const newActiveCount = await page.locator(".session-item--active").count();
     expect(newActiveCount).toBe(1);
 
@@ -310,56 +352,69 @@ test.describe("Perch sidebar", () => {
     const page2 = await ctx2.newPage();
 
     try {
-      // Bring up page1 and start a fresh session
+      // Bring up page1 and start a fresh session via picker.
       await page1.goto(BASE_URL, { waitUntil: "networkidle" });
       await page1.evaluate(() => localStorage.removeItem("perch.sessionId"));
       await page1.reload({ waitUntil: "networkidle" });
-      await expect(page1.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+      await expect(page1.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 
-      // Create a new session on page1 to have a clean, known active session
-      await page1.locator(".sidebar__new-btn").click();
-      await expect(page1.locator(".session-item--active .session-item__title")).toHaveText(
-        "(new session)",
-        { timeout: 8000 }
-      );
+      // Create a blank session via picker (not in sidebar until message sent).
+      const newBtn1 = page1.locator('[data-testid="new-session-local"]');
+      await expect(newBtn1).toBeEnabled({ timeout: 10000 });
+      await newBtn1.click();
+      const noneOpt1 = page1.locator('[data-testid="project-option-none"]');
+      await expect(noneOpt1).toBeVisible({ timeout: 5000 });
+      await noneOpt1.click();
+      await expect(noneOpt1).not.toBeVisible({ timeout: 3000 });
 
-      // Bring up page2 (different session, fresh context — it will get its own new session)
+      const countOnPage1Before = await page1.locator(".session-item").count();
+
+      // Bring up page2 (different session, fresh context).
       await page2.goto(BASE_URL, { waitUntil: "networkidle" });
       await page2.evaluate(() => localStorage.removeItem("perch.sessionId"));
       await page2.reload({ waitUntil: "networkidle" });
-      await expect(page2.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+      await expect(page2.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 
       // Both pages are now observing the session list via the broadcast channel.
-      // Record current session count on page2
+      // Record current session count on page2.
       const countOnPage2Before = await page2.locator(".session-item").count();
 
-      // Send a chat turn from page1 — select via ModelChip
+      // Send a chat turn from page1 — select via ModelChip.
       const chip1 = page1.locator('[data-testid="model-chip"]');
       await expect(chip1).toBeVisible({ timeout: 10000 });
       await chip1.click();
       await page1.locator('[data-testid="agent-option-claude"]').click();
       await page1.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
-      const textarea = page1.locator(".chat__input textarea");      await textarea.fill("Reply with exactly: ping");
+      const textarea = page1.locator(".chat__input textarea");
+      await textarea.fill("Reply with exactly: ping");
       await page1.locator(".chat__send").click();
 
-      // Wait for the running dot to appear on page1's active session
+      // After first message the session appears in page1's sidebar.
+      await expect(page1.locator(".session-item")).toHaveCount(countOnPage1Before + 1, { timeout: 10000 });
+
+      // Wait for the running dot to appear on page1's active session.
       await expect(page1.locator(".session-item--active .session-status--running")).toBeVisible({
         timeout: 15000,
       });
 
-      // Page2 should see the same session in a running state (via broadcast)
-      // The session exists in page2's sidebar list (it was broadcasted as session.updated)
-      // We wait up to 15s for page2 to show any running dot (may be on any session item)
-      const runningOnPage2 = page2.locator(".session-status--running");
+      // Capture the new session's id so we can scope page2's locator precisely.
+      const newSessionId = await page1.locator(".session-item--active").getAttribute("data-session-id");
+
+      // Page2 should see the same session in a running state (via broadcast).
+      await expect(page2.locator(".session-item")).toHaveCount(countOnPage2Before + 1, { timeout: 15000 });
+      const sessionOnPage2 = newSessionId
+        ? page2.locator(`.session-item[data-session-id="${newSessionId}"]`)
+        : page2.locator(".session-item").last();
+      const runningOnPage2 = sessionOnPage2.locator(".session-status--running");
       await expect(runningOnPage2).toBeVisible({ timeout: 15000 });
 
       await page2.screenshot({ path: "artifacts/08-second-tab-live.png" });
 
-      // Wait for the turn to finish on both pages
+      // Wait for the turn to finish on both pages.
       await expect(page1.locator(".session-item--active .session-status--running")).not.toBeVisible({
         timeout: 90000,
       });
-      await expect(page2.locator(".session-status--running")).not.toBeVisible({ timeout: 90000 });
+      await expect(runningOnPage2).not.toBeVisible({ timeout: 90000 });
     } finally {
       await ctx1.close();
       await ctx2.close();

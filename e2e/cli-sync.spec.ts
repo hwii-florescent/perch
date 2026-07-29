@@ -77,8 +77,22 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
     await page.reload({ waitUntil: "networkidle" });
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+    // With lazy DB insert the sidebar may have zero session items on a fresh DB —
+    // do NOT wait for .session-item here.
     await expect(page.locator('[data-testid="model-chip"]')).toBeVisible({ timeout: 15000 });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: create a session via picker (new-session-local → project-option-none)
+  // ---------------------------------------------------------------------------
+  async function createSessionViaPicker(page: Page): Promise<void> {
+    const newBtn = page.locator('[data-testid="new-session-local"]');
+    await expect(newBtn).toBeEnabled({ timeout: 10000 });
+    await newBtn.click();
+    const noneOpt = page.locator('[data-testid="project-option-none"]');
+    await expect(noneOpt).toBeVisible({ timeout: 5000 });
+    await noneOpt.click();
+    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
   }
 
   // ---------------------------------------------------------------------------
@@ -96,18 +110,19 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await freshSession(page);
 
-    // --- Session 1: run a claude-haiku-4-5 turn ---
+    // --- Session 1: create via picker, select haiku, send a message to persist ---
+    await createSessionViaPicker(page);
     await selectAgentModel(page, "claude", MODEL_HAIKU);
 
     const textarea = page.locator(".chat__input textarea");
     await expect(textarea).toBeEnabled({ timeout: 10000 });
-    await textarea.fill("Reply with exactly: sync");
+    await textarea.fill("A3-session1-" + Date.now());
     await page.locator(".chat__send").click();
 
-    // Wait for turn to complete.
-    const runningDot = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot).toBeVisible({ timeout: 20000 });
-    await expect(runningDot).not.toBeVisible({ timeout: 90000 });
+    // Row appears after first message; wait for the running dot then idle.
+    const runningDot1 = page.locator(".session-item--active .session-status--running");
+    await expect(runningDot1).toBeVisible({ timeout: 20000 });
+    await expect(runningDot1).not.toBeVisible({ timeout: 90000 });
 
     // Confirm chip still shows haiku after the turn.
     await assertChipModel(page, MODEL_HAIKU);
@@ -118,15 +133,20 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await page.screenshot({ path: "artifacts/A3-01-session1-done.png" });
 
-    // --- Session 2: create a new session, pick a different model ---
-    await page.locator(".sidebar__new-btn").click();
-    await expect(page.locator(".session-item--active .session-item__title")).toHaveText(
-      "(new session)",
-      { timeout: 8000 },
-    );
-
-    // Change to sonnet in session 2.
+    // --- Session 2: create via picker, pick sonnet, send a message to persist ---
+    await createSessionViaPicker(page);
     await selectAgentModel(page, "claude", MODEL_SONNET);
+
+    const textarea2 = page.locator(".chat__input textarea");
+    await expect(textarea2).toBeEnabled({ timeout: 10000 });
+    await textarea2.fill("A3-session2-" + Date.now());
+    await page.locator(".chat__send").click();
+
+    // Wait for session 2 row and turn.
+    const runningDot2 = page.locator(".session-item--active .session-status--running");
+    await expect(runningDot2).toBeVisible({ timeout: 20000 });
+    await expect(runningDot2).not.toBeVisible({ timeout: 90000 });
+
     await assertChipModel(page, MODEL_SONNET);
 
     await page.screenshot({ path: "artifacts/A3-02-session2-sonnet.png" });
@@ -166,6 +186,9 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await freshSession(page);
 
+    // Create a fresh session via picker (blank — not in sidebar until first message).
+    await createSessionViaPicker(page);
+
     // Run a hosted claude turn so there is a claude_session_id to resume in CLI.
     await selectAgentModel(page, "claude", MODEL_HAIKU);
 
@@ -192,13 +215,27 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await page.screenshot({ path: "artifacts/A2-01-cli-open.png" });
 
-    // Exit the claude interactive CLI.
-    await termSurface.click();
+    // xterm.js captures keyboard input via a hidden textarea (.xterm-helper-textarea).
+    // Click it to focus, then interact with the CLI.
+    const xtermInput = page.locator(".xterm-helper-textarea");
+    await expect(xtermInput).toBeAttached({ timeout: 10000 });
+    await xtermInput.click({ force: true });
+
+    // The CLI may show a trust dialog ("Is this a project you trust?").
+    // Press Enter to confirm option 1 ("Yes, I trust this folder") if present,
+    // then wait for the interactive prompt before sending /exit.
+    // We wait up to 10 s for either the prompt indicator or send Enter proactively.
+    await page.waitForTimeout(1000);
+    await xtermInput.press("Enter"); // dismiss trust dialog if present
+    await page.waitForTimeout(2000); // let the CLI reach its interactive prompt
+
+    // Send /exit to quit the claude CLI.
+    await xtermInput.click({ force: true });
     await page.keyboard.type("/exit");
     await page.keyboard.press("Enter");
 
     const exitedBanner = page.locator(".terminal__exited");
-    await expect(exitedBanner).toBeVisible({ timeout: 20000 });
+    await expect(exitedBanner).toBeVisible({ timeout: 30000 });
 
     await page.screenshot({ path: "artifacts/A2-02-exited-banner.png" });
 

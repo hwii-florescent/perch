@@ -61,6 +61,8 @@ pub struct SessionListRow {
     pub last_agent: Option<String>,
     /// Model from the most recent assistant message, if any.
     pub last_model: Option<String>,
+    /// Whether this session has been archived.
+    pub archived: bool,
 }
 
 pub struct HistoryDb {
@@ -151,6 +153,12 @@ impl HistoryDb {
         if !existing_session_columns.contains("last_model") {
             conn.execute("ALTER TABLE sessions ADD COLUMN last_model TEXT", [])?;
         }
+        if !existing_session_columns.contains("archived") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", [])?;
+        }
+        if !existing_session_columns.contains("pane_layout") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN pane_layout TEXT", [])?;
+        }
         Ok(())
     }
 
@@ -196,6 +204,39 @@ impl HistoryDb {
         self.conn.lock().unwrap().execute(
             "UPDATE sessions SET codex_thread_id = ?2 WHERE id = ?1",
             params![id, codex_thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_archived(&self, id: &str, archived: bool) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET archived = ?2 WHERE id = ?1",
+            params![id, archived as i32],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch the persisted dockview layout blob (raw JSON text) for a
+    /// session, Phase 3's Workspace → Tab → Pane model. `None` when the
+    /// session row doesn't exist or has never had a layout saved.
+    pub fn get_session_layout(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT pane_layout FROM sessions WHERE id = ?1")?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(row.get::<_, Option<String>>(0)?)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Persist a session's dockview layout blob as raw JSON text. The server
+    /// never interprets this value — it's opaque to Rust, only stored and
+    /// echoed back verbatim via `session.layout`.
+    pub fn set_session_layout(&self, id: &str, layout_json: &str) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET pane_layout = ?2 WHERE id = ?1",
+            params![id, layout_json],
         )?;
         Ok(())
     }
@@ -284,6 +325,9 @@ impl HistoryDb {
 
     /// Return all sessions ordered newest-first, with title (first user
     /// message snippet) and last-agent/model via correlated subqueries.
+    /// Sessions with zero messages are excluded (Fix 3: blank sessions are
+    /// not inserted into the DB until the first message arrives, but any
+    /// pre-existing zero-message rows from before this change are also hidden).
     /// Used to build `session.list` and `session.updated` wire messages.
     pub fn list_sessions(&self) -> anyhow::Result<Vec<SessionListRow>> {
         let conn = self.conn.lock().unwrap();
@@ -306,8 +350,12 @@ impl HistoryDb {
                 (SELECT model
                  FROM messages
                  WHERE session_id = s.id AND role = 'assistant'
-                 ORDER BY id DESC LIMIT 1) AS last_model
+                 ORDER BY id DESC LIMIT 1) AS last_model,
+                s.archived
              FROM sessions s
+             WHERE EXISTS (
+                 SELECT 1 FROM messages WHERE session_id = s.id
+             )
              ORDER BY s.created_at DESC",
         )?;
         let rows = stmt
@@ -319,6 +367,7 @@ impl HistoryDb {
                     title: row.get(3)?,
                     last_agent: row.get(4)?,
                     last_model: row.get(5)?,
+                    archived: row.get::<_, i32>(6).unwrap_or(0) != 0,
                 })
             })?
             .filter_map(Result::ok)

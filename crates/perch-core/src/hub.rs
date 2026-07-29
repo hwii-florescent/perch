@@ -736,6 +736,15 @@ impl HubManager {
             }
 
             // ----------------------------------------------------------------
+            // session.layout → reply to session.layout.get, relay via Session
+            // unicast (same key session.subscribe/chat.send already register).
+            // ----------------------------------------------------------------
+            ServerMessage::SessionLayout { ref session_id, .. } => {
+                let key = PendingKey::Session(session_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+            }
+
+            // ----------------------------------------------------------------
             // chat.* → relay via Session unicast; chat.done also clears it
             // ----------------------------------------------------------------
             ServerMessage::ChatChunk { ref session_id, .. }
@@ -816,6 +825,22 @@ impl HubManager {
                 self.relay_unicast(&PendingKey::Terminal(tid.clone()), Arc::new(msg));
                 // Clear the terminal unicast to avoid leaks.
                 self.pending_unicast.lock().unwrap().remove(&PendingKey::Terminal(tid));
+            }
+
+            // ----------------------------------------------------------------
+            // workspace.git → rewrite host_id to the federated host's id,
+            // then fan out to all connections (host-wide state, like
+            // session.updated — NOT a per-connection unicast reply).
+            // ----------------------------------------------------------------
+            ServerMessage::WorkspaceGit { cwd, branch, ahead, behind, .. } => {
+                let tagged = ServerMessage::WorkspaceGit {
+                    host_id: host_id.to_string(),
+                    cwd,
+                    branch,
+                    ahead,
+                    behind,
+                };
+                let _ = self.hub_events_tx.send(Arc::new(tagged));
             }
 
             // ----------------------------------------------------------------

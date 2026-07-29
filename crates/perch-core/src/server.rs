@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -20,12 +20,13 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::Router;
 use futures::{SinkExt, StreamExt};
+use regex::Regex;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
 use crate::agent::{AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions};
-use crate::db::{HistoryDb, SessionListRow};
+use crate::db::HistoryDb;
 use crate::hosts::HostsStore;
 use crate::hub::{HubManager, PendingKey};
 use crate::models::{self, ModelLists};
@@ -141,6 +142,9 @@ struct SessionUpdatedEvent {
     session_id: String,
 }
 
+/// `(branch, ahead, behind)` — cached last-known git status for one cwd.
+type GitStatus = (Option<String>, u32, u32);
+
 #[derive(Clone)]
 struct AppState {
     registry: Arc<SessionRegistry>,
@@ -148,6 +152,23 @@ struct AppState {
     default_cwd: String,
     /// Session ids that currently have an agent turn in flight.
     running_sessions: Arc<Mutex<HashSet<String>>>,
+    /// For each local session id, the set of connection ids (`ConnState::conn_id`)
+    /// currently viewing it (i.e. it's their `active_session_id`). A session
+    /// with no entry, or an entry with an empty set, has no viewers.
+    session_viewers: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    /// Local session ids that finished a turn while unviewed (herdr's `done`
+    /// state). Cleared the moment any connection views the session again.
+    unseen_sessions: Arc<Mutex<HashSet<String>>>,
+    /// Local session ids whose CLI-attached terminal output currently matches
+    /// an approval-prompt pattern (see `blocked_patterns`). Cleared on the
+    /// next `terminal.input` to that terminal, or when the terminal exits.
+    blocked_sessions: Arc<Mutex<HashSet<String>>>,
+    /// Last known git branch + ahead/behind for each local session cwd,
+    /// populated by the background poll task spawned in `run()`. Keyed by
+    /// cwd (local host only — "local" is implicit). Used both to detect
+    /// changes worth broadcasting and to snapshot current values to
+    /// newly-connected clients.
+    workspace_git: Arc<Mutex<HashMap<String, GitStatus>>>,
     /// Broadcast channel — one sender, many per-connection receivers. Capacity
     /// 64: if a slow receiver falls behind it gets `Lagged` and catches up on
     /// the next event rather than blocking the sender.
@@ -216,12 +237,18 @@ pub async fn run(
         db,
         default_cwd: effective_cwd,
         running_sessions: Arc::new(Mutex::new(HashSet::new())),
+        session_viewers: Arc::new(Mutex::new(HashMap::new())),
+        unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
+        blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
+        workspace_git: Arc::new(Mutex::new(HashMap::new())),
         session_events_tx,
         model_lists,
         settings,
         hosts,
         hub,
     };
+
+    spawn_git_poll_task(state.clone());
 
     let mut router = Router::new().route(&ws_path, get(ws_upgrade)).with_state(state);
 
@@ -253,6 +280,59 @@ pub async fn run(
     }
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+/// Background task (Phase 6): every 5s, recompute the git branch +
+/// ahead/behind status for every distinct cwd among local sessions, and
+/// broadcast `workspace.git` to all connections whenever a cwd's value
+/// changes. Runs an initial pass immediately (before the first sleep) so the
+/// `workspace_git` cache is warm by the time the first client connects,
+/// letting `handle_socket` push a snapshot without waiting up to 5s.
+///
+/// Uses `tokio::process::Command` (async) for the one `git rev-list`
+/// subprocess per cwd per tick (see `status::get_ahead_behind`) so this never
+/// blocks the async runtime.
+fn spawn_git_poll_task(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            let cwds: HashSet<String> = state
+                .db
+                .list_sessions()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|row| row.cwd)
+                .collect();
+
+            for cwd in cwds {
+                let branch = crate::status::get_branch(&cwd);
+                let branch = if branch.is_empty() { None } else { Some(branch) };
+                let (ahead, behind) = crate::status::get_ahead_behind(&cwd).await.unwrap_or((0, 0));
+                let fingerprint = (branch.clone(), ahead, behind);
+
+                let changed = {
+                    let mut cache = state.workspace_git.lock().unwrap();
+                    if cache.get(&cwd) == Some(&fingerprint) {
+                        false
+                    } else {
+                        cache.insert(cwd.clone(), fingerprint.clone());
+                        true
+                    }
+                };
+
+                if changed {
+                    let _ = state.hub.hub_events_tx.send(Arc::new(ServerMessage::WorkspaceGit {
+                        host_id: "local".to_string(),
+                        cwd: cwd.clone(),
+                        branch,
+                        ahead,
+                        behind,
+                    }));
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
 }
 
 fn placeholder_response(base_path: &str, url: &str) -> axum::response::Response {
@@ -318,6 +398,18 @@ struct ConnState {
     out_tx: UnboundedSender<ServerMessage>,
     runtimes: Mutex<HashMap<String, SessionRuntime>>,
     terminals: TerminalManager,
+    /// The local session id this connection is currently viewing (its most
+    /// recent `session.create`/`session.resume`/`session.subscribe` target).
+    /// `None` before the first such message. Drives `session_viewers` /
+    /// `unseen_sessions` bookkeeping in [`set_active_session`].
+    active_session_id: Mutex<Option<String>>,
+    /// Maps CLI-attached terminal ids to the session they're attached to, so
+    /// `TerminalInput` can clear that session's blocked state on user input,
+    /// and the `on_data`/`on_exit` closures (created before this struct
+    /// exists — see `handle_socket`) can scan output and clean up on exit.
+    /// Shared (not owned) with those closures via the same `Arc`. Plain
+    /// terminals (no `agentAttach`) never get an entry.
+    terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 async fn handle_socket(socket: WebSocket, app: AppState) {
@@ -340,11 +432,45 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     });
 
     let terminal_tx = out_tx.clone();
+    let terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    // Rolling ANSI-stripped output tail per CLI-attached terminal, used only
+    // for blocked-state (approval-prompt) detection — see `blocked_patterns`.
+    let terminal_tails: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let on_data_app = app.clone();
+    let on_data_agent_sessions = terminal_agent_sessions.clone();
+    let on_data_tails = terminal_tails.clone();
     let on_data = Arc::new(move |terminal_id: String, data: String| {
+        // Phase 6: blocked-state detection — only for terminals created via
+        // `agentAttach` (real interactive CLI mode), never plain shells.
+        if let Some(session_id) = on_data_agent_sessions.lock().unwrap().get(&terminal_id).cloned() {
+            let newly_blocked = {
+                let mut tails = on_data_tails.lock().unwrap();
+                let tail = tails.entry(terminal_id.clone()).or_default();
+                append_tail(tail, &data);
+                let already_blocked = on_data_app.blocked_sessions.lock().unwrap().contains(&session_id);
+                !already_blocked && blocked_patterns().iter().any(|re| re.is_match(tail))
+            };
+            if newly_blocked {
+                on_data_app.blocked_sessions.lock().unwrap().insert(session_id.clone());
+                notify_session_updated(&on_data_app, &session_id);
+            }
+        }
         let _ = terminal_tx.send(ServerMessage::TerminalData { terminal_id, data });
     });
     let terminal_tx = out_tx.clone();
+    let on_exit_app = app.clone();
+    let on_exit_agent_sessions = terminal_agent_sessions.clone();
+    let on_exit_tails = terminal_tails.clone();
     let on_exit = Arc::new(move |terminal_id: String, code: i32| {
+        on_exit_tails.lock().unwrap().remove(&terminal_id);
+        // PTY end clears any blocked flag for the session it was attached to
+        // — there's no longer a live prompt to answer.
+        if let Some(session_id) = on_exit_agent_sessions.lock().unwrap().remove(&terminal_id) {
+            let was_blocked = on_exit_app.blocked_sessions.lock().unwrap().remove(&session_id);
+            if was_blocked {
+                notify_session_updated(&on_exit_app, &session_id);
+            }
+        }
         let _ = terminal_tx.send(ServerMessage::TerminalExit { terminal_id, code });
     });
 
@@ -354,6 +480,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         out_tx,
         runtimes: Mutex::new(HashMap::new()),
         terminals: TerminalManager::new(on_data, on_exit),
+        active_session_id: Mutex::new(None),
+        terminal_agent_sessions,
     });
 
     // Send initial status.update and server.info once per connection.
@@ -385,10 +513,35 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         }).collect(),
     });
 
+    // Send current settings (including the selected theme) immediately on
+    // connect — same rationale as the HostsList fix above: without this the
+    // page would render with the default "perch" palette until the user
+    // opened the Settings modal (which is the only other place fetchSettings
+    // is called), even if they'd previously picked a different theme.
+    let _ = state.out_tx.send(ServerMessage::SettingsCurrent {
+        settings: settings_to_wire(&state.app.settings.get()),
+    });
+
     // Send current hub host states so the browser knows connection status of
     // all configured remote hosts immediately on connect.
     for msg in state.app.hub.snapshot_host_states() {
         let _ = state.out_tx.send(msg);
+    }
+
+    // Send the currently-known git branch/ahead-behind for every local cwd
+    // already polled by `spawn_git_poll_task`, so a newly-connected client
+    // doesn't wait up to 5s for the first broadcast (Phase 6).
+    {
+        let cache = state.app.workspace_git.lock().unwrap();
+        for (cwd, (branch, ahead, behind)) in cache.iter() {
+            let _ = state.out_tx.send(ServerMessage::WorkspaceGit {
+                host_id: "local".to_string(),
+                cwd: cwd.clone(),
+                branch: branch.clone(),
+                ahead: *ahead,
+                behind: *behind,
+            });
+        }
     }
 
     // Spawn a task that forwards session-updated broadcast events to this
@@ -398,6 +551,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let event_out_tx = state.out_tx.clone();
     let event_db = app.db.clone();
     let event_running = app.running_sessions.clone();
+    let event_unseen = app.unseen_sessions.clone();
+    let event_blocked = app.blocked_sessions.clone();
     tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
@@ -409,8 +564,12 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                         continue;
                     };
                     let running = event_running.lock().unwrap();
-                    let summary = build_session_summary(row, &running);
+                    let unseen = event_unseen.lock().unwrap();
+                    let blocked = event_blocked.lock().unwrap();
+                    let summary = build_session_summary(row, &running, &unseen, &blocked);
                     drop(running);
+                    drop(unseen);
+                    drop(blocked);
                     if event_out_tx.send(ServerMessage::SessionUpdated { session: summary }).is_err() {
                         // out channel closed — connection gone, stop leaking.
                         break;
@@ -463,6 +622,18 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // registrations so no sender leaks to this dead connection.
     state.terminals.dispose_all();
     state.app.hub.unregister_all_for_connection(&conn_id);
+    // Remove this connection from whichever session's viewer set it was in —
+    // otherwise a stale conn_id would keep that session looking "viewed"
+    // forever, and it would never become eligible for the unseen/"done" dot.
+    if let Some(active) = state.active_session_id.lock().unwrap().take() {
+        let mut viewers = state.app.session_viewers.lock().unwrap();
+        if let Some(set) = viewers.get_mut(&active) {
+            set.remove(&conn_id);
+            if set.is_empty() {
+                viewers.remove(&active);
+            }
+        }
+    }
     for runtime in state.runtimes.lock().unwrap().values() {
         if let Some(runner) = runtime.active_runner.lock().unwrap().as_ref() {
             runner.cancel();
@@ -480,8 +651,16 @@ fn status_message(status: crate::status::StatusInfo) -> ServerMessage {
     }
 }
 
-/// Build a `SessionSummary` from a DB row and the current running set.
-fn build_session_summary(row: SessionListRow, running: &HashSet<String>) -> SessionSummary {
+/// Build a `SessionSummary` from a DB row and the current running/unseen/
+/// blocked snapshots. `unseen`/`blocked` are only meaningful for local
+/// sessions — remote summaries are built elsewhere (`hub.rs`) and always
+/// report `false` unless the remote itself set them.
+fn build_session_summary(
+    row: crate::db::SessionListRow,
+    running: &std::collections::HashSet<String>,
+    unseen: &std::collections::HashSet<String>,
+    blocked: &std::collections::HashSet<String>,
+) -> SessionSummary {
     let status = if running.contains(&row.id) {
         SessionStatus::Running
     } else {
@@ -493,7 +672,7 @@ fn build_session_summary(row: SessionListRow, running: &HashSet<String>) -> Sess
         _ => None,
     });
     SessionSummary {
-        id: row.id,
+        id: row.id.clone(),
         title: row.title,
         cwd: row.cwd,
         created_at: row.created_at,
@@ -501,6 +680,62 @@ fn build_session_summary(row: SessionListRow, running: &HashSet<String>) -> Sess
         last_model: row.last_model,
         status,
         host_id: "local".to_string(),
+        archived: row.archived,
+        unseen: unseen.contains(&row.id),
+        blocked: blocked.contains(&row.id),
+    }
+}
+
+/// Move `state`'s connection to viewing `session_id`: remove it from
+/// whichever session it was previously viewing (if different), add it to the
+/// new session's viewer set, and clear `unseen_sessions` for the newly-viewed
+/// session — a connection actively viewing a session has, by definition,
+/// "seen" it. Broadcasts `session.updated` when that clears a real unseen
+/// flag so all clients repaint the dot immediately (a no-op broadcast is
+/// avoided when there was nothing to clear, e.g. a brand-new blank session).
+fn set_active_session(state: &Arc<ConnState>, session_id: &str) {
+    let previous = {
+        let mut active = state.active_session_id.lock().unwrap();
+        let previous = active.clone();
+        *active = Some(session_id.to_string());
+        previous
+    };
+    {
+        let mut viewers = state.app.session_viewers.lock().unwrap();
+        if let Some(prev_id) = previous.as_deref() {
+            if prev_id != session_id {
+                if let Some(set) = viewers.get_mut(prev_id) {
+                    set.remove(&state.conn_id);
+                    if set.is_empty() {
+                        viewers.remove(prev_id);
+                    }
+                }
+            }
+        }
+        viewers.entry(session_id.to_string()).or_default().insert(state.conn_id.clone());
+    }
+    let was_unseen = state.app.unseen_sessions.lock().unwrap().remove(session_id);
+    if was_unseen {
+        notify_session_updated(&state.app, session_id);
+    }
+}
+
+/// Called when a turn finishes (`chat.done` or a terminal error) and
+/// `session_id` is removed from `running_sessions`. If no connection is
+/// currently viewing the session, mark it unseen (herdr's `done` state) so
+/// `build_session_summary` reports it on the next broadcast. Callers already
+/// broadcast `session.updated` right after removing from `running_sessions`,
+/// so this doesn't need to trigger its own notify.
+fn mark_unseen_if_unviewed(app: &AppState, session_id: &str) {
+    let has_viewer = app
+        .session_viewers
+        .lock()
+        .unwrap()
+        .get(session_id)
+        .map(|set| !set.is_empty())
+        .unwrap_or(false);
+    if !has_viewer {
+        app.unseen_sessions.lock().unwrap().insert(session_id.to_string());
     }
 }
 
@@ -579,18 +814,42 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 state.app.hub.forward(target, &forward_json);
                 return;
             }
-            // Local session creation.
+            // Local session creation — Fix 2: validate the requested cwd.
+            let resolved_cwd = if let Some(raw_cwd) = cwd {
+                // Expand a leading `~` to the user's home directory.
+                let expanded = if raw_cwd == "~" || raw_cwd.starts_with("~/") {
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    if raw_cwd == "~" {
+                        home
+                    } else {
+                        format!("{home}{}", &raw_cwd[1..])
+                    }
+                } else {
+                    raw_cwd
+                };
+                // Validate that it's an existing directory.
+                if !std::path::Path::new(&expanded).is_dir() {
+                    let _ = state.out_tx.send(ServerMessage::Error {
+                        message: format!("cwd is not an existing directory: {expanded}"),
+                    });
+                    return;
+                }
+                expanded
+            } else {
+                state.app.default_cwd.clone()
+            };
             let session_id = Uuid::new_v4().to_string();
-            let cwd = cwd.unwrap_or_else(|| state.app.default_cwd.clone());
-            state.app.registry.create(&session_id, &cwd);
-            let _ = state.app.db.create_session(&session_id, &cwd);
-            insert_runtime(state, &session_id, &cwd, None, None, None);
+            // Fix 3: register in-memory only; DB row is deferred until first message.
+            state.app.registry.create(&session_id, &resolved_cwd);
+            insert_runtime(state, &session_id, &resolved_cwd, None, None, None);
+            set_active_session(state, &session_id);
             let _ = state.out_tx.send(ServerMessage::SessionCreated {
                 session_id: session_id.clone(),
             });
-            let _ = state.out_tx.send(status_message(get_status(&cwd, None)));
-            // Notify all connections that this session now exists.
-            notify_session_updated(&state.app, &session_id);
+            let _ = state.out_tx.send(status_message(get_status(&resolved_cwd, None)));
+            // Do NOT broadcast session.updated yet — session has no messages,
+            // so it won't appear in list_sessions(). It lives only in memory
+            // until the first chat.send or terminal.create agentAttach.
         }
         ClientMessage::SessionResume { session_id } => {
             match state.app.db.get_session(&session_id) {
@@ -604,6 +863,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         row.last_agent.as_deref(),
                         row.last_model.as_deref(),
                     );
+                    set_active_session(state, &session_id);
                     let _ = state.out_tx.send(ServerMessage::SessionCreated {
                         session_id: session_id.clone(),
                     });
@@ -625,6 +885,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     state.app.registry.create(&new_id, &cwd);
                     let _ = state.app.db.create_session(&new_id, &cwd);
                     insert_runtime(state, &new_id, &cwd, None, None, None);
+                    set_active_session(state, &new_id);
                     let _ = state.out_tx.send(ServerMessage::SessionCreated {
                         session_id: new_id.clone(),
                     });
@@ -656,6 +917,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 .lock()
                 .unwrap()
                 .contains(&session_id);
+            set_active_session(state, &session_id);
             if !is_running {
                 for event in state.app.registry.replay(&session_id) {
                     let _ = state.out_tx.send(event);
@@ -665,11 +927,15 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         ClientMessage::SessionList {} => {
             let rows = state.app.db.list_sessions().unwrap_or_default();
             let running = state.app.running_sessions.lock().unwrap();
+            let unseen = state.app.unseen_sessions.lock().unwrap();
+            let blocked = state.app.blocked_sessions.lock().unwrap();
             let mut sessions: Vec<SessionSummary> = rows
                 .into_iter()
-                .map(|row| build_session_summary(row, &running))
+                .map(|row| build_session_summary(row, &running, &unseen, &blocked))
                 .collect();
             drop(running);
+            drop(unseen);
+            drop(blocked);
             // Append remote sessions (tagged with their host_id), sorted by
             // host then by createdAt desc within each host.
             let mut remote = state.app.hub.remote_sessions_snapshot();
@@ -734,6 +1000,15 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 });
                 runner
             };
+            // Fix 3: lazily insert the sessions row on first user message.
+            // If the row already exists (e.g. resumed session), INSERT OR IGNORE is a no-op.
+            let cwd_for_insert = {
+                state.runtimes.lock().unwrap()
+                    .get(&session_id)
+                    .map(|r| r.cwd.clone())
+                    .unwrap_or_else(|| state.app.default_cwd.clone())
+            };
+            let _ = state.app.db.create_session(&session_id, &cwd_for_insert);
             let _ = state.app.db.add_message(
                 &session_id,
                 "user",
@@ -911,8 +1186,20 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 }
             };
 
-            match state.terminals.create(cols, rows, Some(runtime_cwd), Some(argv)) {
+            match state.terminals.create(cols, rows, Some(runtime_cwd.clone()), Some(argv)) {
                 Ok(terminal_id) => {
+                    // Fix 3: lazily insert the sessions row on first terminal activity
+                    // (same as on first chat.send). INSERT OR IGNORE is a no-op if the
+                    // row already exists.
+                    let _ = state.app.db.create_session(&attach.session_id, &runtime_cwd);
+                    // Phase 6: remember this is a CLI-attached (agentAttach)
+                    // terminal so the on_data/on_exit closures and
+                    // TerminalInput below can do blocked-state bookkeeping.
+                    state
+                        .terminal_agent_sessions
+                        .lock()
+                        .unwrap()
+                        .insert(terminal_id.clone(), attach.session_id.clone());
                     let _ = state.out_tx.send(ServerMessage::TerminalCreated { terminal_id });
                 }
                 Err(err) => {
@@ -927,6 +1214,15 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             if let Some(host_id) = state.app.hub.route_for_terminal(&terminal_id) {
                 state.app.hub.forward(&host_id, raw_text);
                 return;
+            }
+            // Phase 6: user input to a CLI-attached terminal is treated as an
+            // answer to whatever prompt it was showing — clear blocked state
+            // (if set) so the dot flips back before the next poll/output.
+            if let Some(session_id) = state.terminal_agent_sessions.lock().unwrap().get(&terminal_id).cloned() {
+                let was_blocked = state.app.blocked_sessions.lock().unwrap().remove(&session_id);
+                if was_blocked {
+                    notify_session_updated(&state.app, &session_id);
+                }
             }
             state.terminals.input(&terminal_id, &data);
         }
@@ -954,6 +1250,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let store_patch = crate::settings::SettingsPatch {
                 custom_models: patch.custom_models.map(custom_models_to_store),
                 default_cwd: patch.default_cwd,
+                theme: patch.theme,
             };
             match state.app.settings.update(store_patch) {
                 Ok(updated) => {
@@ -1009,6 +1306,73 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         message: format!("hosts.delete failed: {e}"),
                     });
                 }
+            }
+        }
+
+        // Fix 4: Archive / unarchive a session.
+        ClientMessage::SessionArchive { session_id, archived } => {
+            // Route remote sessions through the hub.
+            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            match state.app.db.set_archived(&session_id, archived) {
+                Ok(()) => {
+                    // Broadcast a session.updated so all tabs update immediately.
+                    notify_session_updated(&state.app, &session_id);
+                }
+                Err(e) => {
+                    let _ = state.out_tx.send(ServerMessage::Error {
+                        message: format!("session.archive failed: {e}"),
+                    });
+                }
+            }
+        }
+
+        // Phase 3: Workspace → Tab → Pane model — per-session dockview layout
+        // persistence. The layout blob is opaque JSON; the server only stores
+        // and echoes it.
+        ClientMessage::SessionLayoutGet { session_id } => {
+            // Route remote sessions through the hub. Register a unicast
+            // BEFORE forwarding (same pattern as chat.send / session.subscribe)
+            // so the session.layout reply routes back to this connection.
+            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
+                state.app.hub.register_unicast(
+                    PendingKey::Session(session_id.clone()),
+                    state.conn_id.clone(),
+                    state.out_tx.clone(),
+                );
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            let layout = state
+                .app
+                .db
+                .get_session_layout(&session_id)
+                .unwrap_or(None)
+                .and_then(|raw| serde_json::from_str(&raw).ok());
+            let _ = state.out_tx.send(ServerMessage::SessionLayout { session_id, layout });
+        }
+
+        ClientMessage::SessionLayoutSet { session_id, layout } => {
+            // Route remote sessions through the hub — fire-and-forget, same
+            // as session.archive (no reply is expected by the caller).
+            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            // A layout can be saved for a brand-new session before its first
+            // chat message (Fix 3 defers the `sessions` row insert until then)
+            // — materialize the row here too so the UPDATE below isn't a
+            // silent no-op. INSERT OR IGNORE, same as chat.send's lazy insert.
+            if let Some(cwd) = state.runtimes.lock().unwrap().get(&session_id).map(|r| r.cwd.clone()) {
+                let _ = state.app.db.create_session(&session_id, &cwd);
+            }
+            let layout_str = serde_json::to_string(&layout).unwrap_or_default();
+            if let Err(e) = state.app.db.set_session_layout(&session_id, &layout_str) {
+                let _ = state.out_tx.send(ServerMessage::Error {
+                    message: format!("session.layout.set failed: {e}"),
+                });
             }
         }
     }
@@ -1076,13 +1440,16 @@ fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEven
                     .unwrap_or_default()
             };
             emit(state, session_id, status_message(get_status(&cwd, Some(&last_usage))));
-            // Turn complete — mark idle and broadcast to all connections.
+            // Turn complete — mark idle, mark unseen if no one is watching
+            // (herdr's `done` state), and broadcast to all connections.
             state.app.running_sessions.lock().unwrap().remove(session_id);
+            mark_unseen_if_unviewed(&state.app, session_id);
             notify_session_updated(&state.app, session_id);
         }
         AgentEvent::Error(message) => {
             // Error also ends the turn — ensure running status can't get stuck.
             state.app.running_sessions.lock().unwrap().remove(session_id);
+            mark_unseen_if_unviewed(&state.app, session_id);
             notify_session_updated(&state.app, session_id);
             emit(state, session_id, ServerMessage::Error { message });
         }
@@ -1195,6 +1562,7 @@ fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
             codex: s.custom_models.codex.clone(),
         },
         default_cwd: s.default_cwd.clone(),
+        theme: s.theme.clone(),
     }
 }
 
@@ -1226,5 +1594,162 @@ fn wire_to_host(h: SshHostEntry) -> crate::hosts::SshHost {
         enabled: h.enabled,
         direct_url: h.direct_url,
         remote_cmd: h.remote_cmd,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6: CLI-attached terminal blocked-state (approval-prompt) detection
+// ---------------------------------------------------------------------------
+
+/// Strips ANSI escape sequences from `input` so `blocked_patterns` can match
+/// on plain text regardless of the CLI's cursor movement / color codes.
+///
+/// CSI sequences (cursor moves, colors) and short two-byte escapes carry no
+/// text signal, so they're deleted outright. OSC sequences are handled
+/// differently: their *payload* (e.g. a window-title string) can carry real
+/// signal — Codex flips its title to "Action Required" while waiting on
+/// approval — so only the `ESC ] ... BEL/ST` framing is stripped and the
+/// payload text is kept, appearing in the tail as plain text.
+fn strip_ansi(input: &str) -> String {
+    static OSC_RE: OnceLock<Regex> = OnceLock::new();
+    static REST_RE: OnceLock<Regex> = OnceLock::new();
+    let osc_re = OSC_RE.get_or_init(|| {
+        Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)")
+            .expect("static ANSI OSC-strip regex must compile")
+    });
+    let rest_re = REST_RE.get_or_init(|| {
+        Regex::new(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])")
+            .expect("static ANSI-strip regex must compile")
+    });
+    let payload_kept = osc_re.replace_all(input, "$1");
+    rest_re.replace_all(&payload_kept, "").into_owned()
+}
+
+/// Appends `data` (ANSI-stripped) to `tail`, capping it at a few KB so
+/// blocked-state matching stays cheap and unbounded PTY chatter can't grow
+/// the buffer forever. Only the trailing bytes matter for prompt detection.
+fn append_tail(tail: &mut String, data: &str) {
+    tail.push_str(&strip_ansi(data));
+    const MAX_TAIL: usize = 4096;
+    if tail.len() > MAX_TAIL {
+        let cutoff = tail.len() - MAX_TAIL;
+        let start = (cutoff..=tail.len()).find(|&i| tail.is_char_boundary(i)).unwrap_or(0);
+        tail.drain(..start);
+    }
+}
+
+/// Approval-prompt detection patterns for CLI-attached terminals (Phase 6,
+/// "keep simple" per the herdr-parity plan). Adapted down from herdr's much
+/// larger per-agent manifests (`detect/manifests/{claude,codex}.toml`, which
+/// use dozens of `contains`/`line_regex` rules per agent) into a handful of
+/// substring/regex checks run case-insensitively against the terminal's
+/// recent ANSI-stripped output tail (`append_tail`):
+///
+/// 1. Claude's bash/tool permission prompt: "Do you want to proceed?"
+///    followed by a numbered/arrow-highlighted "Yes" option.
+/// 2. Claude's older/generic "Do you want to…" / "Would you like to…" prompts
+///    with a "yes" option or `❯` selection cursor nearby (herdr's
+///    `legacy_no_prompt_blocker` fallback).
+/// 3. Codex's exec-approval prompt ("Allow command?"), its OSC-title
+///    "Action Required" flag, or its enter-to-confirm footer.
+///
+/// Not exhaustive — herdr's manifests cover many more edge cases (MCP tool
+/// prompts, plan-mode confirmations, etc.) that were deliberately left out to
+/// keep this a "2-3 regex" detector rather than a full rule engine.
+fn blocked_patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        vec![
+            Regex::new(r"(?is)do you want to proceed\?.{0,400}(?:\byes\b|❯)")
+                .expect("static blocked-pattern regex must compile"),
+            Regex::new(r"(?is)(?:do you want to|would you like to)\b.{0,200}(?:\byes\b|❯)")
+                .expect("static blocked-pattern regex must compile"),
+            Regex::new(r"(?i)allow command\?|action required|press enter to confirm or esc to cancel")
+                .expect("static blocked-pattern regex must compile"),
+        ]
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Manual verification: blocked_patterns/strip_ansi against realistic,
+// ANSI-laden approval-prompt output. These are the samples used to hand-check
+// the regexes chosen above (no e2e spec triggers a real CLI approval prompt —
+// too flaky/slow to script reliably — so this unit test is the documented
+// verification method; see the Phase 6 final report).
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod blocked_pattern_tests {
+    use super::*;
+
+    fn matches_any(tail: &str) -> bool {
+        blocked_patterns().iter().any(|re| re.is_match(tail))
+    }
+
+    /// Claude's real bash-tool permission box: a boxed prompt drawn with
+    /// cursor-position/color ANSI codes, "Do you want to proceed?" followed by
+    /// a `❯ 1. Yes` / `2. No` menu — adapted from herdr's
+    /// `bash_permission_prompt` / `generic_permission_prompt` rules.
+    #[test]
+    fn claude_bash_permission_prompt_is_blocked() {
+        let raw = "\x1b[2K\x1b[1A\x1b[2K\r\x1b[36mBash command\x1b[0m\r\n\
+            \x1b[1mDo you want to proceed?\x1b[0m\r\n\
+            \x1b[32m❯ 1. Yes\x1b[0m\r\n\
+            \x1b[90m  2. No, and tell Claude what to do differently\x1b[0m\r\n\
+            \x1b[2m(esc to cancel)\x1b[0m\r\n";
+        let tail = strip_ansi(raw);
+        assert!(!tail.contains('\x1b'), "ANSI codes must be stripped: {tail:?}");
+        assert!(matches_any(&tail), "expected a match on: {tail:?}");
+    }
+
+    /// Claude's older/generic "Do you want to make this edit…" prompt, no
+    /// boxed menu — adapted from herdr's `legacy_no_prompt_blocker` fallback.
+    #[test]
+    fn claude_legacy_edit_prompt_is_blocked() {
+        let raw = "\x1b[1mDo you want to make this edit to main.rs?\x1b[0m\r\n\
+            \x1b[32m❯ Yes\x1b[0m\r\n  No\r\n";
+        let tail = strip_ansi(raw);
+        assert!(matches_any(&tail), "expected a match on: {tail:?}");
+    }
+
+    /// Codex's exec-approval prompt — adapted from herdr's `live_strong_blocker`.
+    #[test]
+    fn codex_allow_command_prompt_is_blocked() {
+        let raw = "\x1b[1mAllow command?\x1b[0m\r\n  $ rm -rf build/\r\n\
+            \x1b[2mpress enter to confirm or esc to cancel\x1b[0m\r\n";
+        let tail = strip_ansi(raw);
+        assert!(matches_any(&tail), "expected a match on: {tail:?}");
+    }
+
+    /// Codex's OSC window-title flag ("Action Required") — a title-bar signal
+    /// rather than visible transcript text, but perch scans raw PTY output
+    /// (which includes the OSC sequence's payload once ANSI-stripped) so this
+    /// still lands in the tail buffer verbatim.
+    #[test]
+    fn codex_action_required_osc_title_is_blocked() {
+        let raw = "\x1b]0;Action Required\x07\r\nWaiting on your input…\r\n";
+        let tail = strip_ansi(raw);
+        assert!(matches_any(&tail), "expected a match on: {tail:?}");
+    }
+
+    /// Ordinary streaming output (no prompt) must never match — otherwise
+    /// every session would flip to "blocked" spuriously.
+    #[test]
+    fn ordinary_output_is_not_blocked() {
+        let raw = "\x1b[32mRunning tests...\x1b[0m\r\n\
+            \x1b[1m3 passed, 0 failed\x1b[0m\r\n\
+            Do you want a summary? Not really a prompt, just chatter about it.\r\n";
+        let tail = strip_ansi(raw);
+        assert!(!matches_any(&tail), "did not expect a match on: {tail:?}");
+    }
+
+    /// `append_tail` must cap growth and never panic on a UTF-8 boundary
+    /// while trimming (multi-byte glyphs like ❯/⠋ are common in this output).
+    #[test]
+    fn append_tail_caps_length_without_panicking() {
+        let mut tail = String::new();
+        for _ in 0..2000 {
+            append_tail(&mut tail, "chunk-❯-chunk ");
+        }
+        assert!(tail.len() <= 4096 + "chunk-❯-chunk ".len());
     }
 }

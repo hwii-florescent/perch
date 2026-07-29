@@ -13,7 +13,8 @@
 //!     "claude": [{"id": "my-model", "label": "My Model"}],
 //!     "codex":  []
 //!   },
-//!   "defaultCwd": "/home/user/projects"
+//!   "defaultCwd": "/home/user/projects",
+//!   "theme": "perch"
 //! }
 //! ```
 
@@ -35,11 +36,30 @@ pub struct CustomModelsData {
     pub codex: Vec<ModelEntry>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
+    /// Selected theme name (key into the web client's `THEMES` table).
+    /// Defaults to `"perch"` so existing settings files (predating this
+    /// field) and a fresh install both see perch's own look.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            custom_models: CustomModelsData::default(),
+            default_cwd: None,
+            theme: default_theme(),
+        }
+    }
+}
+
+fn default_theme() -> String {
+    "perch".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +74,9 @@ pub struct Settings {
 /// - `default_cwd: None` → leave current default_cwd alone
 /// - `default_cwd: Some(None)` → clear (set to null)
 /// - `default_cwd: Some(Some("..."))` → set to that path
+/// - `theme: None` → leave current theme alone
+/// - `theme: Some("...")` → set to that theme (no "clear" case — a theme
+///   name is never nullable, unlike `default_cwd`)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
@@ -67,6 +90,7 @@ pub struct SettingsPatch {
         deserialize_with = "deserialize_option_option_string"
     )]
     pub default_cwd: Option<Option<String>>,
+    pub theme: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -140,6 +164,9 @@ impl SettingsStore {
             None => {}                         // absent → unchanged
             Some(None) => guard.default_cwd = None,  // null → clear
             Some(Some(v)) => guard.default_cwd = Some(v),
+        }
+        if let Some(theme) = patch.theme {
+            guard.theme = theme;
         }
         let snapshot = guard.clone();
         drop(guard);
