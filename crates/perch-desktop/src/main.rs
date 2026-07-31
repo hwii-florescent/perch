@@ -5,7 +5,10 @@
 //! `http://127.0.0.1:<port>/`.  All logic lives in perch-core; Tauri only
 //! supplies the native window chrome.
 
-use perch_core::boot::{augment_path_with_local_bin, boot, resolve_web_dist_dir, scrub_nested_agent_env};
+use perch_core::boot::{
+    adopt_login_shell_path, augment_path_with_local_bin, boot, resolve_web_dist_dir,
+    scrub_nested_agent_env,
+};
 use perch_core::server::CliArgs;
 
 fn main() {
@@ -17,11 +20,15 @@ fn main() {
         )
         .init();
 
-    // Prepend ~/.local/bin so claude/codex are found in minimal-PATH launches.
-    augment_path_with_local_bin();
+    // PATH/env fixups first — a Dock/Finder launch gives us a bare PATH and
+    // nothing may spawn a subprocess before these run.
     // Scrub Claude Code nesting markers so spawned agents/terminals don't
     // inherit them and print transcript-saving warnings.
     scrub_nested_agent_env();
+    // Adopt the user's real login-shell PATH (brew tools, auth helpers).
+    adopt_login_shell_path();
+    // Prepend ~/.local/bin so claude/codex are found in minimal-PATH launches.
+    augment_path_with_local_bin();
 
     // Build CliArgs from env vars only (no CLI argv in a GUI app).
     // CliArgs::parse reads PERCH_PORT / PERCH_DB / PERCH_HOSTS etc. from env;

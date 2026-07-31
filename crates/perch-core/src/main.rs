@@ -1,4 +1,7 @@
-use perch_core::boot::{augment_path_with_local_bin, boot, resolve_web_dist_dir, scrub_nested_agent_env};
+use perch_core::boot::{
+    adopt_login_shell_path, augment_path_with_local_bin, boot, resolve_web_dist_dir,
+    scrub_nested_agent_env,
+};
 use perch_core::server::CliArgs;
 
 #[tokio::main]
@@ -10,9 +13,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // Prepend ~/.local/bin to PATH before any subprocess spawning so that
-    // tools like claude/codex are found under minimal-PATH launches (tmux,
-    // launchd, Tauri).  Safe to call multiple times; idempotent.
+    // PATH/env fixups must all happen before any subprocess spawning.
+    // Scrub Claude Code nesting markers so spawned agents/terminals don't
+    // inherit them and print transcript-saving warnings.
+    scrub_nested_agent_env();
+    // Adopt the user's login-shell PATH so brew tools and auth helpers are
+    // found even when perch is launched with a bare PATH (Finder, launchd).
+    adopt_login_shell_path();
+    // Then prepend ~/.local/bin as the final guarantee that claude/codex
+    // resolve.  Safe to call multiple times; idempotent.
     let had_local_bin = std::env::var("PATH")
         .map(|p| {
             let home = std::env::var("HOME").unwrap_or_default();
@@ -20,9 +29,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .unwrap_or(false);
     augment_path_with_local_bin();
-    // Scrub Claude Code nesting markers so spawned agents/terminals don't
-    // inherit them and print transcript-saving warnings.
-    scrub_nested_agent_env();
     if !had_local_bin {
         if let Ok(home) = std::env::var("HOME") {
             let local_bin = format!("{home}/.local/bin");

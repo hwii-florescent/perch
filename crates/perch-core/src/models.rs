@@ -1,14 +1,26 @@
-//! Static model catalogue for perch.
+//! Model catalogue for perch.
 //!
-//! Returns the full built-in model list unconditionally — no CLI probing, no
-//! semver gating. This is a deliberate design decision: version-gating is not
-//! practical across environments (devpods, local macs, CI, SSH targets), and
-//! the overhead of shelling out to `claude --version` at startup is not
-//! justified when the model aliases used here work on any current proxy.
+//! Two lists with deliberately different sourcing strategies:
+//!
+//! * **Claude** — a static list of bare aliases. There is no machine-local
+//!   file that enumerates them, and version-gating via `claude --version` is
+//!   not practical across environments (devpods, local macs, CI, SSH
+//!   targets), so the aliases below are used unconditionally.
+//! * **Codex** — read at boot from the local codex installation
+//!   (`~/.codex/config.toml` → `model_catalog_json`, defaulting to
+//!   `~/.codex/model-catalog.json`) so the picker mirrors whatever the codex
+//!   CLI on *this* machine actually serves, rather than a list copied from
+//!   one developer's laptop. `CODEX_CATALOGUE` remains as the fallback for
+//!   machines with no readable catalog file.
+//!
+//! Neither list is ever probed per host: model lists are resolved once at
+//! startup for the local host only, and federated hosts report their own.
 //!
 //! Custom models can be appended via `~/.perch/settings.json` (see
 //! `append_custom_models`). Stage D will replace that ad-hoc reader with a
 //! formal `settings.rs` module.
+
+use std::path::PathBuf;
 
 use crate::protocol::ModelEntry;
 
@@ -31,17 +43,19 @@ const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
     ("claude-haiku-4-5",  "Haiku 4.5"),
 ];
 
-/// Built-in Codex models, sourced from the installed `codex` CLI's own model
-/// catalogue (`~/.codex/model-catalog.json`, referenced by `config.toml`'s
-/// `model_catalog_json`) rather than guessed — that file lists every model
-/// slug/display-name corp's `corp-gateway` codex provider currently serves, all with
-/// `visibility: "list"`. Slugs (e.g. `gpt-5.6-terra`) are already the stable
-/// identifiers codex expects via `-m`/`--model`, so no alias translation is
-/// needed here (unlike Claude's dated-snapshot problem above).
+/// Fallback Codex models, used only when the local codex installation has no
+/// readable model catalogue (see `load_codex_models`).
+///
+/// This snapshot was taken from a machine whose `codex` CLI is backed by
+/// corp's `corp-gateway` provider; the slugs (e.g. `gpt-5.6-terra`) are already the
+/// stable identifiers codex expects via `-m`/`--model`, so no alias
+/// translation is needed here (unlike Claude's dated-snapshot problem above).
 ///
 /// `gpt-5.4-mini` is kept first (i.e. the default — `defaultModel()` in
-/// `packages/web/src/models.ts` picks index 0) to preserve the pre-existing
-/// default; the rest follow the catalogue's own best-first ordering.
+/// `packages/web/src/models.ts` picks index 0) to preserve the historical
+/// default; the rest follow the catalogue's own best-first ordering. When the
+/// runtime catalogue *is* readable, index 0 is instead the slug configured as
+/// `model` in `~/.codex/config.toml`.
 const CODEX_CATALOGUE: &[(&str, &str)] = &[
     ("gpt-5.4-mini",   "GPT-5.4 Mini"),
     ("gpt-5.6-sol",    "GPT-5.6 Sol"),
@@ -52,6 +66,151 @@ const CODEX_CATALOGUE: &[(&str, &str)] = &[
     ("gpt-5.4-nano",   "GPT-5.4 Nano"),
     ("gpt-5.3-codex",  "GPT-5.3 Codex"),
 ];
+
+// ---------------------------------------------------------------------------
+// Runtime codex catalogue (~/.codex)
+// ---------------------------------------------------------------------------
+
+/// Default catalogue filename inside `~/.codex` when `config.toml` does not
+/// point somewhere else via `model_catalog_json`.
+const CODEX_CATALOG_FILE: &str = "model-catalog.json";
+
+/// Extract the two `~/.codex/config.toml` top-level keys perch cares about:
+/// `model` (the slug the codex CLI itself defaults to) and
+/// `model_catalog_json` (absolute path to the catalogue file).
+///
+/// Pure so it can be unit-tested without touching `$HOME`. Any parse failure
+/// is treated as "neither key present" — a broken/unfamiliar codex config
+/// must never stop perch from booting.
+fn parse_codex_config(toml_text: &str) -> (Option<String>, Option<PathBuf>) {
+    let value: toml::Value = match toml_text.parse() {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
+    let model = value
+        .get("model")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let catalog = value
+        .get("model_catalog_json")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    (model, catalog)
+}
+
+/// Read `priority` as an integer, tolerating a JSON float.
+fn catalog_priority(entry: &serde_json::Value) -> i64 {
+    match entry.get("priority") {
+        Some(v) => v
+            .as_i64()
+            .or_else(|| v.as_f64().map(|f| f as i64))
+            .unwrap_or(0),
+        None => 0,
+    }
+}
+
+/// Whether a catalogue entry should be shown in the picker: codex marks
+/// hidden/experimental models with a `visibility` other than `"list"`; the
+/// key being absent means "listed".
+fn catalog_visible(entry: &serde_json::Value) -> bool {
+    match entry.get("visibility") {
+        None | Some(serde_json::Value::Null) => true,
+        Some(v) => v.as_str() == Some("list"),
+    }
+}
+
+/// Parse a codex `model-catalog.json` into perch model entries.
+///
+/// Shape: `{"models": [{"slug", "display_name", "visibility", "priority"}]}`.
+/// Entries without a `slug` are skipped, `display_name` falls back to the
+/// slug, duplicates (by slug) are dropped, and the result is sorted by
+/// `priority` ascending (codex's own best-first ordering; missing = 0).
+///
+/// If `default_slug` is present in the list it is moved to the front, because
+/// index 0 is perch's default (`defaultModel()` in the web client picks it) —
+/// so perch's default mirrors the codex CLI's configured default.
+///
+/// Pure: returns an empty vec on any malformed input, and the caller decides
+/// whether to fall back to [`CODEX_CATALOGUE`].
+fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -> Vec<ModelEntry> {
+    let value: serde_json::Value = match serde_json::from_str(json_text) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let Some(models) = value.get("models").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut collected: Vec<(i64, ModelEntry)> = Vec::new();
+    for entry in models {
+        if !catalog_visible(entry) {
+            continue;
+        }
+        let Some(slug) = entry.get("slug").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if slug.is_empty() || collected.iter().any(|(_, m)| m.id == slug) {
+            continue;
+        }
+        let label = entry
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(slug);
+        collected.push((
+            catalog_priority(entry),
+            ModelEntry {
+                id: slug.to_string(),
+                label: label.to_string(),
+            },
+        ));
+    }
+
+    // Stable sort keeps file order for equal priorities.
+    collected.sort_by_key(|(priority, _)| *priority);
+    let mut list: Vec<ModelEntry> = collected.into_iter().map(|(_, m)| m).collect();
+
+    if let Some(default_slug) = default_slug {
+        if let Some(pos) = list.iter().position(|m| m.id == default_slug) {
+            let entry = list.remove(pos);
+            list.insert(0, entry);
+        }
+    }
+
+    list
+}
+
+/// Load the codex model list from the local codex installation.
+///
+/// `~/.codex/config.toml` supplies the default model slug and (optionally) an
+/// override path for the catalogue; otherwise `~/.codex/model-catalog.json`
+/// is used. Returns `None` when anything is missing or unusable, in which
+/// case the caller falls back to the static [`CODEX_CATALOGUE`].
+fn load_codex_models() -> Option<Vec<ModelEntry>> {
+    let codex_dir = PathBuf::from(std::env::var("HOME").ok()?).join(".codex");
+
+    let (default_slug, catalog_override) = std::fs::read_to_string(codex_dir.join("config.toml"))
+        .ok()
+        .map(|text| parse_codex_config(&text))
+        .unwrap_or((None, None));
+
+    let catalog_path = catalog_override.unwrap_or_else(|| codex_dir.join(CODEX_CATALOG_FILE));
+    let json_text = std::fs::read_to_string(&catalog_path).ok()?;
+
+    let models = parse_codex_catalog(&json_text, default_slug.as_deref());
+    if models.is_empty() {
+        return None;
+    }
+    tracing::info!(
+        "[perch] codex models from {}: {} entries (default {})",
+        catalog_path.display(),
+        models.len(),
+        models[0].id
+    );
+    Some(models)
+}
 
 // ---------------------------------------------------------------------------
 // Custom models from ~/.perch/settings.json
@@ -130,10 +289,15 @@ fn dirs_path() -> Option<std::path::PathBuf> {
 
 /// Return the full model catalogue for this server instance.
 ///
-/// The built-in lists are static by design (user decision — per-environment
-/// version-gating via `claude --version` is not practical). Custom entries
-/// from `~/.perch/settings.json` are appended after the built-ins and
-/// deduplicated by id. Stage D formalises custom-model configuration.
+/// Claude is static by design (user decision — per-environment version-gating
+/// via `claude --version` is not practical). Codex is read at boot from the
+/// local codex installation so the picker mirrors what *this* machine's codex
+/// actually serves, falling back to [`CODEX_CATALOGUE`] when no catalogue file
+/// is readable. Custom entries from `~/.perch/settings.json` are appended
+/// after the built-ins and deduplicated by id.
+///
+/// Resolved once at startup for the local host only — federated hosts report
+/// their own lists, so nothing here is ever probed per host.
 pub fn catalogue() -> ModelLists {
     let mut claude: Vec<ModelEntry> = CLAUDE_CATALOGUE
         .iter()
@@ -143,15 +307,190 @@ pub fn catalogue() -> ModelLists {
         })
         .collect();
 
-    let mut codex: Vec<ModelEntry> = CODEX_CATALOGUE
-        .iter()
-        .map(|(id, label)| ModelEntry {
-            id: id.to_string(),
-            label: label.to_string(),
-        })
-        .collect();
+    let mut codex: Vec<ModelEntry> = match load_codex_models() {
+        Some(list) => list,
+        None => {
+            tracing::info!(
+                "[perch] no readable codex model catalogue (~/.codex) — \
+                 falling back to the built-in codex model list"
+            );
+            CODEX_CATALOGUE
+                .iter()
+                .map(|(id, label)| ModelEntry {
+                    id: id.to_string(),
+                    label: label.to_string(),
+                })
+                .collect()
+        }
+    };
 
     append_custom_models(&mut claude, &mut codex);
 
     ModelLists { claude, codex }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Trimmed-down shape of a real `~/.codex/model-catalog.json`.
+    const CATALOG: &str = r#"{
+      "models": [
+        {"slug": "gpt-5.4", "display_name": "GPT-5.4", "visibility": "list", "priority": -10},
+        {"slug": "gpt-5.6-sol", "display_name": "GPT-5.6 Sol", "visibility": "list", "priority": -30},
+        {"slug": "gpt-5.6-luna", "display_name": "GPT-5.6 Luna", "visibility": "list", "priority": -29},
+        {"slug": "gpt-5.3-codex", "display_name": "GPT-5.3 Codex", "visibility": "list", "priority": -2}
+      ]
+    }"#;
+
+    fn ids(list: &[ModelEntry]) -> Vec<&str> {
+        list.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn catalog_sorted_by_priority_ascending() {
+        let list = parse_codex_catalog(CATALOG, None);
+        assert_eq!(
+            ids(&list),
+            vec!["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.3-codex"]
+        );
+        assert_eq!(list[0].label, "GPT-5.6 Sol");
+    }
+
+    #[test]
+    fn default_model_is_promoted_to_front() {
+        let list = parse_codex_catalog(CATALOG, Some("gpt-5.6-luna"));
+        assert_eq!(
+            ids(&list),
+            vec!["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.4", "gpt-5.3-codex"]
+        );
+    }
+
+    #[test]
+    fn unknown_default_model_leaves_order_untouched() {
+        let list = parse_codex_catalog(CATALOG, Some("gpt-9-nope"));
+        assert_eq!(ids(&list), ids(&parse_codex_catalog(CATALOG, None)));
+    }
+
+    #[test]
+    fn hidden_models_and_slugless_entries_are_skipped() {
+        let json = r#"{
+          "models": [
+            {"slug": "shown", "priority": -5},
+            {"slug": "hidden", "visibility": "hidden", "priority": -9},
+            {"slug": "internal", "visibility": "none", "priority": -8},
+            {"display_name": "No slug", "priority": -7}
+          ]
+        }"#;
+        assert_eq!(ids(&parse_codex_catalog(json, None)), vec!["shown"]);
+    }
+
+    #[test]
+    fn missing_visibility_counts_as_listed_and_missing_priority_is_zero() {
+        let json = r#"{
+          "models": [
+            {"slug": "no-priority", "display_name": "No Priority"},
+            {"slug": "negative", "display_name": "Negative", "priority": -1},
+            {"slug": "positive", "display_name": "Positive", "priority": 5}
+          ]
+        }"#;
+        assert_eq!(
+            ids(&parse_codex_catalog(json, None)),
+            vec!["negative", "no-priority", "positive"]
+        );
+    }
+
+    #[test]
+    fn duplicate_slugs_are_dropped_keeping_the_first() {
+        let json = r#"{
+          "models": [
+            {"slug": "dup", "display_name": "First", "priority": -1},
+            {"slug": "dup", "display_name": "Second", "priority": -9},
+            {"slug": "other", "display_name": "Other", "priority": -5}
+          ]
+        }"#;
+        let list = parse_codex_catalog(json, None);
+        assert_eq!(ids(&list), vec!["other", "dup"]);
+        assert_eq!(list[1].label, "First");
+    }
+
+    #[test]
+    fn display_name_falls_back_to_slug() {
+        let json = r#"{"models": [{"slug": "bare-slug"}, {"slug": "empty", "display_name": ""}]}"#;
+        let list = parse_codex_catalog(json, None);
+        assert_eq!(list[0].label, "bare-slug");
+        assert_eq!(list[1].label, "empty");
+    }
+
+    #[test]
+    fn malformed_or_shapeless_catalog_yields_nothing() {
+        assert!(parse_codex_catalog("", None).is_empty());
+        assert!(parse_codex_catalog("not json at all", None).is_empty());
+        assert!(parse_codex_catalog("{}", None).is_empty());
+        assert!(parse_codex_catalog(r#"{"models": "nope"}"#, None).is_empty());
+        assert!(parse_codex_catalog(r#"{"models": []}"#, None).is_empty());
+    }
+
+    #[test]
+    fn config_yields_model_and_catalog_path() {
+        let toml_text = r#"
+model = "gpt-5.6-luna"
+model_catalog_json = "/Users/someone/.codex/model-catalog.json"
+model_provider = "corp-gateway"
+
+[features]
+js_repl = false
+"#;
+        let (model, path) = parse_codex_config(toml_text);
+        assert_eq!(model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(
+            path,
+            Some(PathBuf::from("/Users/someone/.codex/model-catalog.json"))
+        );
+    }
+
+    #[test]
+    fn config_without_the_keys_or_malformed_yields_none() {
+        let (model, path) = parse_codex_config("model_provider = \"corp-gateway\"\n");
+        assert!(model.is_none() && path.is_none());
+
+        let (model, path) = parse_codex_config("this is [not valid toml");
+        assert!(model.is_none() && path.is_none());
+
+        // Empty strings are treated as absent.
+        let (model, path) = parse_codex_config("model = \"\"\nmodel_catalog_json = \"\"\n");
+        assert!(model.is_none() && path.is_none());
+    }
+
+    #[test]
+    fn real_shaped_catalog_matches_expected_runtime_order() {
+        // Mirrors this machine's ~/.codex catalogue (8 models, all "list").
+        let json = r#"{
+          "models": [
+            {"slug": "gpt-5.6-sol", "display_name": "GPT-5.6 Sol", "visibility": "list", "priority": -30},
+            {"slug": "gpt-5.6-luna", "display_name": "GPT-5.6 Luna", "visibility": "list", "priority": -29},
+            {"slug": "gpt-5.6-terra", "display_name": "GPT-5.6 Terra", "visibility": "list", "priority": -28},
+            {"slug": "gpt-5.5", "display_name": "GPT-5.5", "visibility": "list", "priority": -20},
+            {"slug": "gpt-5.4", "display_name": "GPT-5.4", "visibility": "list", "priority": -10},
+            {"slug": "gpt-5.4-mini", "display_name": "GPT-5.4 Mini", "visibility": "list", "priority": -6},
+            {"slug": "gpt-5.4-nano", "display_name": "GPT-5.4 Nano", "visibility": "list", "priority": -4},
+            {"slug": "gpt-5.3-codex", "display_name": "GPT-5.3 Codex", "visibility": "list", "priority": -2}
+          ]
+        }"#;
+        let (model, _) = parse_codex_config("model = \"gpt-5.6-luna\"\n");
+        let list = parse_codex_catalog(json, model.as_deref());
+        assert_eq!(
+            ids(&list),
+            vec![
+                "gpt-5.6-luna",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.4-nano",
+                "gpt-5.3-codex",
+            ]
+        );
+    }
 }
