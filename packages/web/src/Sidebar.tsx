@@ -283,17 +283,13 @@ function HostSwitcherPopover({
 interface SessionItemProps {
   session: SessionSummary;
   isActive: boolean;
-  showArchived: boolean;
   onSwitch: (id: string) => void;
   onArchive: (sessionId: string, archived: boolean) => void;
   onDelete: (sessionId: string) => void;
 }
 
-function SessionItem({ session, isActive, showArchived, onSwitch, onArchive, onDelete }: SessionItemProps) {
-  let itemClass = isActive ? "session-item session-item--active" : "session-item";
-  if (session.archived && showArchived) {
-    itemClass += " session-item--archived";
-  }
+function SessionItem({ session, isActive, onSwitch, onArchive, onDelete }: SessionItemProps) {
+  const itemClass = isActive ? "session-item session-item--active" : "session-item";
 
   return (
     <div className="session-item__wrapper">
@@ -313,18 +309,21 @@ function SessionItem({ session, isActive, showArchived, onSwitch, onArchive, onD
           </div>
         </div>
       </button>
+      {/* Archiving always makes the row vanish (archived sessions never render
+       * in the nav) — restoring one happens from Settings → Archived sessions,
+       * so this button is archive-only, never a toggle. */}
       <button
         type="button"
         className="session-item__archive-btn"
         data-testid={`session-archive-icon-${session.id}`}
-        title={session.archived ? "Unarchive session" : "Archive session"}
-        aria-label={session.archived ? "Unarchive session" : "Archive session"}
+        title="Archive session"
+        aria-label="Archive session"
         onClick={(e) => {
           e.stopPropagation();
-          onArchive(session.id, !session.archived);
+          onArchive(session.id, true);
         }}
       >
-        {session.archived ? "📤" : "📦"}
+        📦
       </button>
       {/* No confirmation: the user asked for a one-click, immediate delete
        * (unlike the multi-tab terminal-group close and worktree-remove
@@ -423,7 +422,6 @@ function ProjectRow({
   hostId,
   isActiveProject,
   sessionId,
-  showArchived,
   onSelectProject,
   onSwitch,
   onArchive,
@@ -433,7 +431,6 @@ function ProjectRow({
   hostId: string;
   isActiveProject: boolean;
   sessionId: string | null;
-  showArchived: boolean;
   onSelectProject: (cwd: string) => void;
   onSwitch: (id: string) => void;
   onArchive: (sessionId: string, archived: boolean) => void;
@@ -480,7 +477,6 @@ function ProjectRow({
             key={s.id}
             session={s}
             isActive={s.id === sessionId}
-            showArchived={showArchived}
             onSwitch={onSwitch}
             onArchive={onArchive}
             onDelete={onDelete}
@@ -595,7 +591,6 @@ export function Sidebar() {
   const hostStates = usePerchStore((s) => s.hostStates);
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const activeProject = usePerchStore((s) => s.activeProject);
-  const showArchived = usePerchStore((s) => s.showArchived);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const switchSession = usePerchStore((s) => s.switchSession);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
@@ -623,7 +618,7 @@ export function Sidebar() {
           ? "connecting"
           : "disabled";
 
-  const navState = { sessions, sessionId, activeHostId, activeProject, showArchived };
+  const navState = { sessions, sessionId, activeHostId, activeProject };
   const projects = projectsForHost(navState, activeHostId);
   const active = effectiveActiveProject(navState);
 
@@ -726,7 +721,6 @@ export function Sidebar() {
                 hostId={activeHostId}
                 isActiveProject={active != null && active.cwd === group.cwd}
                 sessionId={sessionId}
-                showArchived={showArchived}
                 onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
                 onSwitch={switchSession}
                 onArchive={archiveSession}

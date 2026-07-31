@@ -7,8 +7,9 @@
  *   S3 — clicking "+" twice with an empty active session does not produce
  *         two sessions
  *   S4 — archive: archive the S2 session via the row's hover archive icon →
- *         row disappears; the Settings "show archived sessions" toggle shows
- *         it dimmed; unarchive restores it
+ *         row disappears from the sidebar and is listed in Settings →
+ *         Archived sessions, where Restore brings it back and Delete removes
+ *         it permanently
  *   S5 — delete: hover trash icon deletes a session immediately (no
  *         confirmation) and permanently (survives reload), for both a
  *         non-active and the currently-active session
@@ -239,9 +240,11 @@ test.describe("Session lifecycle fixes", () => {
   });
 
   // -------------------------------------------------------------------------
-  // S4 — archive the S2 session; the Settings show-archived toggle reveals it dimmed; unarchive
+  // S4 — archive hides the row everywhere; Settings → Archived sessions is the
+  //      only place it shows up, and the only place it can be restored from or
+  //      permanently deleted
   // -------------------------------------------------------------------------
-  test("S4. archive session via row icon, Settings toggle shows/hides it", async ({ page }) => {
+  test("S4. archive hides the row; Settings archived panel restores or deletes it", async ({ page }) => {
     if (!claudeAvailable) {
       test.skip(true, "claude binary not found — S2 skipped so no session to archive");
       return;
@@ -258,53 +261,86 @@ test.describe("Session lifecycle fixes", () => {
     const sessionItem = page.locator(`.session-item[data-session-id="${s2SessionId}"]`);
     await expect(sessionItem).toBeVisible({ timeout: 10000 });
 
-    // Hover to reveal the row's archive icon.
-    const wrapper = page.locator(`.session-item__wrapper:has([data-session-id="${s2SessionId}"])`);
-    await wrapper.hover();
+    // Remember which project row the session lives under: archiving can move
+    // the nav's active project (the archived session's project drops out of
+    // the sidebar entirely), so restoring needs to re-select it explicitly.
+    const projectCwd = await page
+      .locator(`.sidebar__project:has(.session-item[data-session-id="${s2SessionId}"]) [data-testid="project-row"]`)
+      .getAttribute("data-project-cwd");
+    expect(projectCwd).toBeTruthy();
 
-    const archiveBtn = page.locator(`[data-testid="session-archive-icon-${s2SessionId}"]`);
-    await expect(archiveBtn).toBeVisible({ timeout: 5000 });
-    await archiveBtn.click();
+    /** Hover the row and click its archive icon. */
+    async function archiveViaRow(): Promise<void> {
+      const wrapper = page.locator(`.session-item__wrapper:has([data-session-id="${s2SessionId}"])`);
+      await wrapper.hover();
+      const archiveBtn = page.locator(`[data-testid="session-archive-icon-${s2SessionId}"]`);
+      await expect(archiveBtn).toBeVisible({ timeout: 5000 });
+      // Archiving is never a toggle any more — archived rows don't render, so
+      // the icon can only ever mean "archive".
+      await expect(archiveBtn).toHaveAttribute("title", "Archive session");
+      await archiveBtn.click();
+    }
 
-    // Row disappears from sidebar (not showing archived by default).
-    await expect(sessionItem).not.toBeVisible({ timeout: 10000 });
+    /** Open Settings → Archived sessions and wait for the panel. */
+    async function openArchivedPanel(): Promise<void> {
+      await page.locator('[data-testid="settings-gear"]').click();
+      await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+      await page.locator('[data-testid="settings-archived-open"]').click();
+      await expect(page.locator('[data-testid="settings-archived-panel"]')).toBeVisible({
+        timeout: 5000,
+      });
+    }
 
+    async function closeSettings(): Promise<void> {
+      // First Escape backs out of the subpage, second closes the modal.
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
+    }
+
+    // --- Archive → the row vanishes from the sidebar immediately ------------
+    await archiveViaRow();
+    await expect(sessionItem).toHaveCount(0, { timeout: 10000 });
     await page.screenshot({ path: "artifacts/s4-archived-hidden.png" });
 
-    // Open Settings and enable "Show archived sessions" — row reappears, dimmed.
-    await page.locator('[data-testid="settings-gear"]').click();
-    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
-    const showArchivedToggle = page.locator('[data-testid="settings-show-archived"]');
-    await expect(showArchivedToggle).toBeVisible({ timeout: 5000 });
-    await expect(showArchivedToggle).not.toBeChecked();
-    await showArchivedToggle.check();
-    await page.keyboard.press("Escape");
-    await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
+    // --- ...and shows up in Settings → Archived sessions --------------------
+    await openArchivedPanel();
+    const archivedRow = page.locator(`[data-testid="archived-row-${s2SessionId}"]`);
+    await expect(archivedRow).toBeVisible({ timeout: 5000 });
+    await page.screenshot({ path: "artifacts/s4-archived-panel.png" });
 
+    // --- Restore → gone from the panel, back in the sidebar -----------------
+    await page.locator(`[data-testid="archived-restore-${s2SessionId}"]`).click();
+    await expect(archivedRow).toHaveCount(0, { timeout: 5000 });
+    await closeSettings();
+
+    // Re-select the project the session belongs to (the sidebar only lists the
+    // active project's sessions) and confirm the row is back.
+    await page.locator(`[data-testid="project-row"][data-project-cwd="${projectCwd}"]`).click();
     await expect(sessionItem).toBeVisible({ timeout: 8000 });
-    await expect(sessionItem).toHaveClass(/session-item--archived/, { timeout: 5000 });
+    await page.screenshot({ path: "artifacts/s4-restored.png" });
 
-    await page.screenshot({ path: "artifacts/s4-archived-visible.png" });
+    // --- Archive again, then Delete from the panel → gone everywhere --------
+    await archiveViaRow();
+    await expect(sessionItem).toHaveCount(0, { timeout: 10000 });
 
-    // Unarchive: hover the row's archive icon again — it now unarchives.
-    await wrapper.hover();
-    await expect(archiveBtn).toBeVisible({ timeout: 5000 });
-    await expect(archiveBtn).toHaveAttribute("title", "Unarchive session");
-    await archiveBtn.click();
+    await openArchivedPanel();
+    await expect(archivedRow).toBeVisible({ timeout: 5000 });
+    await page.locator(`[data-testid="archived-delete-${s2SessionId}"]`).click();
+    // Immediate, no confirmation dialog (same as the sidebar's trash icon).
+    await expect(page.locator('[data-testid="confirm-dialog"]')).toHaveCount(0);
+    await expect(archivedRow).toHaveCount(0, { timeout: 8000 });
+    await page.screenshot({ path: "artifacts/s4-deleted-from-panel.png" });
+    await closeSettings();
 
-    // Hide archived again via Settings.
-    await page.locator('[data-testid="settings-gear"]').click();
-    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
-    await expect(showArchivedToggle).toBeChecked();
-    await showArchivedToggle.uncheck();
-    await page.keyboard.press("Escape");
-    await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
-
-    // Session now restored — should appear even without showArchived.
-    await expect(sessionItem).toBeVisible({ timeout: 8000 });
-    await expect(sessionItem).not.toHaveClass(/session-item--archived/);
-
-    await page.screenshot({ path: "artifacts/s4-unarchived.png" });
+    // Really deleted server-side: survives a reload, and never reappears in
+    // the sidebar even after re-selecting its project.
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
+    await expect(sessionItem).toHaveCount(0, { timeout: 10000 });
+    await openArchivedPanel();
+    await expect(archivedRow).toHaveCount(0);
+    await closeSettings();
   });
 
   // -------------------------------------------------------------------------

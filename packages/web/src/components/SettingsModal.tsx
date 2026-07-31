@@ -7,10 +7,13 @@
  *    (with optional directUrl and remoteCmd inputs).
  *  - Custom models: per agent, list + add.
  *  - Default working directory: text input + Save.
+ *  - Archived sessions: opens a subpage (the modal body swaps out) listing
+ *    every archived session across hosts, with Restore / Delete per row.
+ *    Archived sessions render nowhere else in the UI.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { usePerchStore } from "../store";
+import { usePerchStore, archivedSessions } from "../store";
 import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
@@ -518,8 +521,7 @@ function NotificationsSection() {
 }
 
 // ---------------------------------------------------------------------------
-// InterfaceSection — Wave 2 item 12: pane-labels (agent badge) toggle, plus
-// the "show archived sessions" toggle moved out of the sidebar footer.
+// InterfaceSection — Wave 2 item 12: pane-labels (agent badge) toggle.
 // ---------------------------------------------------------------------------
 
 function InterfaceSection() {
@@ -528,14 +530,6 @@ function InterfaceSection() {
   // here, just a direct read/write against that module (mirrors how
   // `dockviewController.ts`'s state is module-level rather than store state).
   const [paneLabels, setPaneLabels] = useState(getPaneLabelsEnabled);
-
-  // "Show archived sessions" used to live as a "Show archived" link in the
-  // sidebar footer; it's a client-only preference too, but it already lives
-  // in the zustand store (unlike paneLabels, which needs its own module-level
-  // pub/sub because it's read by a dockview-react-rendered tree outside
-  // `App`) — so it's just a normal store-connected checkbox here.
-  const showArchived = usePerchStore((s) => s.showArchived);
-  const setShowArchived = usePerchStore((s) => s.setShowArchived);
 
   const handleChange = (checked: boolean) => {
     setPaneLabels(checked);
@@ -554,15 +548,131 @@ function InterfaceSection() {
         />
         Show the active agent on the chat pane's tab (e.g. "Chat · claude")
       </label>
-      <label className="settings-modal__checkbox-row">
-        <input
-          type="checkbox"
-          data-testid="settings-show-archived"
-          checked={showArchived}
-          onChange={(e) => setShowArchived(e.target.checked)}
-        />
-        Show archived sessions in the sidebar
-      </label>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Archived sessions — entry row + subpage
+// ---------------------------------------------------------------------------
+
+/** Last path segment of a cwd, for the project column. */
+function projectName(cwd: string): string {
+  const parts = cwd.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || cwd;
+}
+
+/**
+ * The entry point for the archived-sessions subpage. Archived sessions are
+ * hidden from every navigation surface (sidebar, tab bar, navigator), so this
+ * panel is the only place they can be seen — and the only place they can be
+ * restored from or permanently deleted.
+ */
+function ArchivedSessionsSection({ onOpen }: { onOpen: () => void }) {
+  const sessions = usePerchStore((s) => s.sessions);
+  const count = sessions.filter((s) => s.archived).length;
+
+  return (
+    <section className="settings-modal__section">
+      <h3 className="settings-modal__section-title">Archived Sessions</h3>
+      <div className="settings-modal__field-row">
+        <span className="settings-modal__field-label">
+          {count === 0 ? "None archived" : `${count} archived session${count === 1 ? "" : "s"}`}
+        </span>
+        <button
+          type="button"
+          className="settings-modal__btn settings-modal__btn--primary"
+          data-testid="settings-archived-open"
+          onClick={onOpen}
+        >
+          Manage…
+        </button>
+      </div>
+      <p className="settings-modal__muted">
+        Archiving a session hides it from the sidebar and tab bar. Restore it here to bring
+        it back, or delete it permanently.
+      </p>
+    </section>
+  );
+}
+
+/** The archived-sessions subpage itself: every archived session across every
+ * host, with per-row Restore / Delete. */
+function ArchivedSessionsPanel() {
+  const sessions = usePerchStore((s) => s.sessions);
+  const hosts = usePerchStore((s) => s.hosts);
+  const archiveSession = usePerchStore((s) => s.archiveSession);
+  const deleteSession = usePerchStore((s) => s.deleteSession);
+
+  const rows = archivedSessions(sessions);
+
+  const hostLabel = (hostId: string | undefined): string | null => {
+    const id = hostId ?? "local";
+    if (id === "local") return null;
+    return hosts.find((h) => h.id === id)?.name ?? id;
+  };
+
+  return (
+    <section className="settings-modal__section" data-testid="settings-archived-panel">
+      {rows.length === 0 ? (
+        <p className="settings-modal__empty" data-testid="settings-archived-empty">
+          No archived sessions.
+        </p>
+      ) : (
+        <ul className="settings-modal__archived-list">
+          {rows.map((s) => {
+            const host = hostLabel(s.hostId);
+            return (
+              <li
+                key={s.id}
+                className="settings-modal__archived-row"
+                data-testid={`archived-row-${s.id}`}
+                data-session-id={s.id}
+              >
+                <div className="settings-modal__archived-body">
+                  <span className="settings-modal__archived-title">
+                    {s.title || "(untitled session)"}
+                  </span>
+                  <span className="settings-modal__archived-meta">
+                    {host && (
+                      <span className="settings-modal__archived-host" title={host}>
+                        {host}
+                      </span>
+                    )}
+                    <span className="settings-modal__archived-project" title={s.cwd}>
+                      {projectName(s.cwd)}
+                    </span>
+                    <span className="settings-modal__archived-date">
+                      {new Date(s.createdAt).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="settings-modal__btn settings-modal__btn--primary"
+                  data-testid={`archived-restore-${s.id}`}
+                  onClick={() => archiveSession(s.id, false)}
+                >
+                  Restore
+                </button>
+                {/* No confirmation, matching the sidebar's one-click delete. */}
+                <button
+                  type="button"
+                  className="settings-modal__btn settings-modal__btn--danger"
+                  data-testid={`archived-delete-${s.id}`}
+                  onClick={() => deleteSession(s.id)}
+                >
+                  Delete
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
@@ -571,6 +681,11 @@ function InterfaceSection() {
 // SettingsModal
 // ---------------------------------------------------------------------------
 
+/** Which view the modal body is showing. The modal is a flat scrolling list of
+ * sections by default; "archived" swaps the body for the archived-sessions
+ * subpage (reached from the Archived Sessions section's "Manage…" button). */
+type SettingsView = "main" | "archived";
+
 export function SettingsModal() {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
@@ -578,24 +693,28 @@ export function SettingsModal() {
   const fetchHosts = usePerchStore((s) => s.fetchHosts);
 
   const panelRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<SettingsView>("main");
 
-  // Fetch data every time the modal opens.
+  // Fetch data every time the modal opens, and always open on the main view.
   useEffect(() => {
     if (settingsOpen) {
+      setView("main");
       fetchSettings();
       fetchHosts();
     }
   }, [settingsOpen, fetchSettings, fetchHosts]);
 
-  // Close on Escape.
+  // Escape: back out of the subpage first, close the modal from the main view.
   useEffect(() => {
     if (!settingsOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSettingsOpen(false);
+      if (e.key !== "Escape") return;
+      if (view === "main") setSettingsOpen(false);
+      else setView("main");
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [settingsOpen, setSettingsOpen]);
+  }, [settingsOpen, setSettingsOpen, view]);
 
   if (!settingsOpen) return null;
 
@@ -611,7 +730,20 @@ export function SettingsModal() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="settings-modal__header">
-          <h2 className="settings-modal__title">Settings</h2>
+          {view === "archived" && (
+            <button
+              type="button"
+              className="settings-modal__back"
+              data-testid="settings-archived-back"
+              aria-label="Back to settings"
+              onClick={() => setView("main")}
+            >
+              ‹
+            </button>
+          )}
+          <h2 className="settings-modal__title">
+            {view === "archived" ? "Archived Sessions" : "Settings"}
+          </h2>
           <button
             type="button"
             className="settings-modal__close"
@@ -623,13 +755,20 @@ export function SettingsModal() {
         </div>
 
         <div className="settings-modal__body">
-          <ThemeSection />
-          <ChatModeSection />
-          <NotificationsSection />
-          <InterfaceSection />
-          <SshHostsSection />
-          <CustomModelsSection />
-          <DefaultCwdSection />
+          {view === "archived" ? (
+            <ArchivedSessionsPanel />
+          ) : (
+            <>
+              <ThemeSection />
+              <ChatModeSection />
+              <NotificationsSection />
+              <InterfaceSection />
+              <ArchivedSessionsSection onOpen={() => setView("archived")} />
+              <SshHostsSection />
+              <CustomModelsSection />
+              <DefaultCwdSection />
+            </>
+          )}
         </div>
       </div>
     </div>

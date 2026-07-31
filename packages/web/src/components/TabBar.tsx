@@ -40,7 +40,6 @@ export function TabBar() {
   const sessions = usePerchStore((s) => s.sessions);
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const activeProject = usePerchStore((s) => s.activeProject);
-  const showArchived = usePerchStore((s) => s.showArchived);
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
@@ -56,7 +55,7 @@ export function TabBar() {
   // state change — including this one — is enough to reflect a fresh order.
   const [, setOrderVersion] = useState(0);
 
-  const navState = { sessions, sessionId, activeHostId, activeProject, showArchived };
+  const navState = { sessions, sessionId, activeHostId, activeProject };
   const project = effectiveActiveProject(navState);
   const hostId = project?.hostId ?? activeHostId;
   const cwd = project?.cwd ?? null;

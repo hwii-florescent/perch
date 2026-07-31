@@ -46,7 +46,6 @@ function projectLabel(s: SessionSummary): string {
 export function Navigator({ open, onClose }: NavigatorProps) {
   const sessions = usePerchStore((s) => s.sessions);
   const sessionId = usePerchStore((s) => s.sessionId);
-  const showArchived = usePerchStore((s) => s.showArchived);
   const switchSession = usePerchStore((s) => s.switchSession);
 
   const [query, setQuery] = useState("");
@@ -69,11 +68,11 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sessions
-      .filter((s) => showArchived || !s.archived)
+      .filter((s) => !s.archived)
       .filter((s) => filter === "all" || sessionDotState(s) === filter)
       .filter((s) => !q || s.title.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [sessions, showArchived, filter, query]);
+  }, [sessions, filter, query]);
 
   // Clamp selection whenever the filtered row set shrinks/grows.
   useEffect(() => {

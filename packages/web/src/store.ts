@@ -125,11 +125,6 @@ interface PerchState {
   setActiveHost: (hostId: string) => void;
   /** Pin the sidebar/tab bar to a project (also makes its host active). */
   setActiveProject: (hostId: string, cwd: string) => void;
-  /** Whether archived sessions are visible in the sidebar. Client-only
-   * preference (toggled from Settings → Interface), persisted in
-   * localStorage — see `SHOW_ARCHIVED_STORAGE_KEY` below. */
-  showArchived: boolean;
-  setShowArchived: (show: boolean) => void;
   /** Cache of persisted dockview layout blobs, keyed by sessionId. Populated
    * from `session.layout` server replies (Phase 3: Workspace → Tab → Pane
    * model). A key mapped to `null` means the server has confirmed there is
@@ -192,7 +187,10 @@ interface PerchState {
    * active session on that host is already empty (no messages) and no
    * different cwd is requested, just focuses the composer instead. */
   createSessionOnHost: (hostId: string, cwd?: string) => void;
-  /** Archive or unarchive a session. */
+  /** Archive or unarchive a session. Archiving hides it everywhere in the
+   * nav (sidebar, tab bar, navigator) immediately; the only place archived
+   * sessions are listed is Settings → Archived sessions, which is also where
+   * they are restored (`archived: false`) or permanently deleted from. */
   archiveSession: (sessionId: string, archived: boolean) => void;
   /** Permanently delete a session. Irreversible — unlike archiveSession there
    * is no undo. Server-side cleanup (DB rows, in-flight turn, CLI-attached
@@ -339,39 +337,15 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** "Show archived sessions" is a client-only preference (no server round
- * trip) — same localStorage-backed pattern as `paneLabels.ts`'s pane-label
- * toggle. Unlike paneLabels there's no need for a separate pub/sub module:
- * `showArchived` already lives in this zustand store and every reader goes
- * through `usePerchStore`, so a plain localStorage mirror on read/write is
- * enough to survive a reload. */
-const SHOW_ARCHIVED_STORAGE_KEY = "perch.showArchived.enabled";
-
-function readShowArchivedStored(): boolean {
-  try {
-    return localStorage.getItem(SHOW_ARCHIVED_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeShowArchivedStored(value: boolean): void {
-  try {
-    localStorage.setItem(SHOW_ARCHIVED_STORAGE_KEY, value ? "1" : "0");
-  } catch {
-    // ignore — worst case the preference doesn't survive a reload
-  }
-}
-
 /** The sidebar/tab-bar "active project" pin — a `(hostId, cwd)` pair. */
 export interface ActiveProject {
   hostId: string;
   cwd: string;
 }
 
-/** localStorage keys backing `activeHostId` / `activeProject`. Same
- * client-only-preference pattern as `SHOW_ARCHIVED_STORAGE_KEY` above: the
- * navigation scope is pure view state, so it never round-trips the protocol. */
+/** localStorage keys backing `activeHostId` / `activeProject`. These are
+ * client-only preferences: the navigation scope is pure view state, so it
+ * never round-trips the protocol. */
 const ACTIVE_HOST_STORAGE_KEY = "perch.activeHostId";
 const ACTIVE_PROJECT_STORAGE_KEY = "perch.activeProject";
 
@@ -456,21 +430,20 @@ export interface ProjectGroup {
 /** The slice of store state every project-navigation helper below reads. */
 export type ProjectNavState = Pick<
   PerchState,
-  "sessions" | "sessionId" | "activeHostId" | "activeProject" | "showArchived"
+  "sessions" | "sessionId" | "activeHostId" | "activeProject"
 >;
 
 /**
- * Projects belonging to `hostId`, newest-first. Archived sessions are
- * excluded (so a project whose sessions were all archived drops out of the
- * nav entirely) unless `showArchived` is on — with the usual exception for
- * the currently-active session, which must never be yanked out from under an
- * open chat.
+ * Projects belonging to `hostId`, newest-first. Archived sessions are always
+ * excluded — archiving is the "make it disappear" action, so a project whose
+ * sessions were all archived drops out of the nav entirely. Archived sessions
+ * are only reachable from Settings → Archived sessions (restore / delete).
  */
 export function projectsForHost(state: ProjectNavState, hostId: string): ProjectGroup[] {
   const map = new Map<string, ProjectGroup>();
   for (const s of state.sessions) {
     if ((s.hostId ?? "local") !== hostId) continue;
-    if (s.archived && !state.showArchived && s.id !== state.sessionId) continue;
+    if (s.archived) continue;
     const cwd = s.cwd ?? "(unknown)";
     const key = `${hostId}:${cwd}`;
     let group = map.get(key);
@@ -515,17 +488,25 @@ export function effectiveActiveProject(state: ProjectNavState): ActiveProject | 
 /** Sessions of the effective active project, sorted oldest-first — the
  * ordering `TabBar` renders (before any stored drag order) and the one
  * `keybinds.ts` (leader,n/p/1-9) cycles through, so both always agree.
- * Archived sessions are omitted unless shown or currently active. */
+ * Archived sessions are always omitted. */
 export function activeProjectSessions(state: ProjectNavState): SessionSummary[] {
   const project = effectiveActiveProject(state);
   if (!project) {
     const current = state.sessions.find((s) => s.id === state.sessionId);
-    return current ? [current] : [];
+    return current && !current.archived ? [current] : [];
   }
   return state.sessions
     .filter((s) => (s.hostId ?? "local") === project.hostId && s.cwd === project.cwd)
-    .filter((s) => !s.archived || state.showArchived || s.id === state.sessionId)
+    .filter((s) => !s.archived)
     .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Every archived session known to the client, newest-first. The one place
+ * archived sessions surface in the UI is Settings → Archived sessions, which
+ * renders straight from this. Spans all hosts (the sidebar's host/project
+ * scoping deliberately does not apply — the panel is a global recycle bin). */
+export function archivedSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return sessions.filter((s) => s.archived).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export const usePerchStore = create<PerchState>((set, get) => ({
@@ -550,7 +531,6 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   hostModels: { local: { claude: [], codex: [] } },
   activeHostId: readActiveHostStored(),
   activeProject: readActiveProjectStored(),
-  showArchived: readShowArchivedStored(),
   sessionLayouts: {},
   sidebarCollapsed: false,
   workspaceGit: {},
@@ -823,11 +803,6 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (next && next.id !== state.sessionId) get().switchSession(next.id);
   },
 
-  setShowArchived: (show) => {
-    writeShowArchivedStored(show);
-    set({ showArchived: show });
-  },
-
   createTerminal: (cols, rows, options) => {
     return new Promise<string>((resolve) => {
       pendingTerminals.push({ cols, rows, resolve });
@@ -907,6 +882,38 @@ function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void
   if (!streamingMessageId) return;
   usePerchStore.setState({
     messages: messages.map((m) => (m.id === streamingMessageId ? update(m) : m)),
+  });
+}
+
+/**
+ * The active session just went away — it was deleted, or archived (archiving
+ * hides a session everywhere, so an open archived chat must be closed exactly
+ * the way a deleted one is). Switch to the most recent remaining session on
+ * the same host, else the most recent on any host, else fall back to a
+ * blank/empty state. `candidates` must already exclude the departing session
+ * (and any other session that is no longer selectable, i.e. archived ones).
+ */
+function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string): void {
+  const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
+  const sameHost = candidates
+    .filter((s) => (s.hostId ?? "local") === activeHostId)
+    .sort(byRecency);
+  const anyHost = candidates.slice().sort(byRecency);
+  const next = sameHost[0] ?? anyHost[0];
+  if (next) {
+    usePerchStore.getState().switchSession(next.id);
+    return;
+  }
+  try {
+    localStorage.removeItem("perch.sessionId");
+  } catch {
+    // ignore
+  }
+  usePerchStore.setState({
+    sessionId: null,
+    messages: [],
+    streamingMessageId: null,
+    cliError: null,
   });
 }
 
@@ -1009,6 +1016,18 @@ function handleServerMessage(msg: ServerMessage): void {
 
         return { sessions, toasts, activeProject, activeHostId };
       });
+      // Archiving hides a session everywhere, so archiving the *open* one has
+      // to close it exactly the way deleting it does — otherwise the chat
+      // stays mounted on a session with no row anywhere in the nav. The check
+      // lives here (rather than in `archiveSession`) so it also fires when the
+      // archive came from another tab or from the Settings panel.
+      if (msg.session.archived && usePerchStore.getState().sessionId === msg.session.id) {
+        const state = usePerchStore.getState();
+        switchAwayFromActiveSession(
+          state.sessions.filter((s) => s.id !== msg.session.id && !s.archived),
+          state.activeHostId
+        );
+      }
       break;
     }
     case "session.deleted": {
@@ -1023,30 +1042,10 @@ function handleServerMessage(msg: ServerMessage): void {
         cliTerminalIds: restCli,
       });
       if (wasActive) {
-        // Prefer the most recent remaining session on the same host; fall
-        // back to the most recent session on any host; fall back to a
-        // blank/empty state (no active session) if nothing remains at all.
-        const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
-        const sameHost = remainingSessions
-          .filter((s) => (s.hostId ?? "local") === state.activeHostId)
-          .sort(byRecency);
-        const anyHost = remainingSessions.slice().sort(byRecency);
-        const next = sameHost[0] ?? anyHost[0];
-        if (next) {
-          usePerchStore.getState().switchSession(next.id);
-        } else {
-          try {
-            localStorage.removeItem("perch.sessionId");
-          } catch {
-            // ignore
-          }
-          usePerchStore.setState({
-            sessionId: null,
-            messages: [],
-            streamingMessageId: null,
-            cliError: null,
-          });
-        }
+        switchAwayFromActiveSession(
+          remainingSessions.filter((s) => !s.archived),
+          state.activeHostId
+        );
       }
       break;
     }

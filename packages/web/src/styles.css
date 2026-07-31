@@ -2103,6 +2103,99 @@ body {
   flex-shrink: 0;
 }
 
+/* Archived-sessions subpage */
+
+.settings-modal__back {
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.1rem 0.4rem 0.25rem;
+  margin-right: 0.4rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.settings-modal__back:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
+/* The title sits between the back button and the close button, so let it take
+ * the slack in the header's space-between layout. */
+.settings-modal__back + .settings-modal__title {
+  flex: 1;
+}
+
+.settings-modal__archived-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.settings-modal__archived-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+}
+
+.settings-modal__archived-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-modal__archived-title {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-modal__archived-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  color: var(--subtext-0);
+  min-width: 0;
+}
+
+.settings-modal__archived-host {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.settings-modal__archived-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-modal__archived-date {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* `--danger` has `margin-left: auto` for the host/model rows; here the body
+ * already takes the slack, so the two action buttons stay side by side. */
+.settings-modal__archived-row .settings-modal__btn--danger {
+  margin-left: 0;
+}
+
 /* Add row */
 
 .settings-modal__add-row {
@@ -2235,11 +2328,6 @@ body {
 .session-item__delete-btn:hover {
   color: var(--red);
   background: var(--surface-1);
-}
-
-/* Archived session styling */
-.session-item--archived {
-  opacity: 0.45;
 }
 
 /* --- New-session picker popover (Fix 2) ---------------------------------- */
