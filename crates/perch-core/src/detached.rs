@@ -664,13 +664,14 @@ impl DetachedManager {
                 Err(e) => tracing::debug!("[detached] {}: stat failed: {e}", run.run_id),
             }
 
-            let mut child = match ssh::spawn_tail(&run.ssh_host, &run.log_path, offset) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("[detached] {}: tail spawn failed: {e}", run.run_id);
-                    break 'outer;
-                }
-            };
+            let mut child =
+                match ssh::spawn_tail_checked(&run.ssh_host, &run.log_path, offset).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("[detached] {}: tail spawn failed: {e}", run.run_id);
+                        break 'outer;
+                    }
+                };
             let Some(stdout) = child.stdout.take() else {
                 break 'outer;
             };
@@ -966,6 +967,14 @@ impl DetachedManager {
 /// Two perch clients attaching the same session share one tmux window (tmux
 /// mirrors input as well as output). That is a deliberate accepted behaviour,
 /// matching what `tmux attach` does everywhere else.
+///
+/// Rides the same shared control master as every other operation on this
+/// host (`ssh::mux_opts`) — an attach right after a browse/probe/launch
+/// skips the handshake entirely. Unlike the tail path this has no automatic
+/// no-mux fallback if the master's `MaxSessions` cap is saturated: it is a
+/// one-shot, user-triggered action (not a retry loop), so a failure here
+/// just surfaces ssh's own error text in the terminal, which the user can
+/// read and retry.
 pub fn cli_attach_argv(
     ssh_host: &str,
     session_id: &str,
@@ -1005,16 +1014,18 @@ pub fn cli_attach_argv(
         q(&format!("perch-cli-{session_id}")),
         q(&inner)
     );
-    vec![
+    let mut argv = vec![
         "ssh".to_string(),
         "-tt".to_string(),
         "-o".to_string(),
         "BatchMode=yes".to_string(),
         "-o".to_string(),
         "ServerAliveInterval=15".to_string(),
-        ssh_host.to_string(),
-        tmux,
-    ]
+    ];
+    argv.extend(ssh::mux_opts());
+    argv.push(ssh_host.to_string());
+    argv.push(tmux);
+    argv
 }
 
 /// Kill the CLI-mode tmux session for `session_id` on a direct host —

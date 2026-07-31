@@ -163,6 +163,14 @@ pub struct HubManager {
     host_names: Mutex<HashMap<String, String>>,
     /// Shutdown-flag channels per host (watch<bool> where `true` = shut down).
     shutdown_flags: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// The `SshHost` config each currently-running connection task was last
+    /// spawned with. Compared against incoming `hosts.upsert` configs in
+    /// `reload_hosts` so a config change (e.g. `sshHost`) that arrives while
+    /// the previous task is still `Connecting`/`Connected` isn't silently
+    /// dropped — without this, `reload_hosts` only restarts on
+    /// `None`/`Disabled`/`Error` states, so a task spawned moments earlier
+    /// (still `Connecting`) would keep probing the *old* target forever.
+    running_hosts: Mutex<HashMap<String, SshHost>>,
     /// The port this perch instance is listening on — used for self-connection guard.
     own_port: u16,
 }
@@ -180,6 +188,7 @@ impl HubManager {
             host_states: Mutex::new(HashMap::new()),
             host_names: Mutex::new(HashMap::new()),
             shutdown_flags: Mutex::new(HashMap::new()),
+            running_hosts: Mutex::new(HashMap::new()),
             own_port,
         })
     }
@@ -245,7 +254,22 @@ impl HubManager {
             };
             if was_running {
                 self.stop_host_task(id);
-                let name = hosts.iter().find(|h| &h.id == id).map(|h| h.name.clone()).unwrap_or_default();
+                let host = hosts.iter().find(|h| &h.id == id);
+                let name = host.map(|h| h.name.clone()).unwrap_or_default();
+                // Best-effort: drop this host's ssh control master right
+                // away instead of waiting out its ControlPersist window —
+                // only possible here (not in the "removed entirely" branch
+                // above) because the host's ssh_host is still in hand. See
+                // `ssh::close_master`'s doc comment for why there's no
+                // equivalent on perch's own process exit.
+                if let Some(ssh_host) = host
+                    .filter(|h| h.is_direct() && !h.ssh_host.is_empty())
+                    .map(|h| h.ssh_host.clone())
+                {
+                    tokio::spawn(async move {
+                        crate::ssh::close_master(&ssh_host).await;
+                    });
+                }
                 self.set_host_state(id, &name, HostState::Disabled);
             }
         }
@@ -259,7 +283,15 @@ impl HubManager {
             };
             let should_start = match &current_state {
                 None | Some(HostState::Disabled) | Some(HostState::Error(_)) => true,
-                Some(HostState::Connecting) | Some(HostState::Connected(_)) => false,
+                Some(HostState::Connecting) | Some(HostState::Connected(_)) => {
+                    // The task is still connecting/connected, but its config
+                    // may be stale (e.g. `sshHost` just changed underneath
+                    // it). Restart if what's actually running differs from
+                    // what was just upserted — otherwise the new config is
+                    // silently dropped and the old task keeps running
+                    // against the old target indefinitely.
+                    self.running_hosts.lock().unwrap().get(id) != Some(host)
+                }
             };
             if should_start {
                 self.stop_host_task(id); // ensure any old task is gone
@@ -283,6 +315,10 @@ impl HubManager {
         }
         // Remove the active WS sender so forward() fails cleanly.
         self.connections.lock().unwrap().remove(host_id);
+        // Forget the config it was running so a later re-upsert with the
+        // same config (after the host was fully removed) is treated as a
+        // fresh start rather than a stale no-op comparison.
+        self.running_hosts.lock().unwrap().remove(host_id);
     }
 
     /// Update the state for a host and broadcast a `host.info` event.
@@ -296,6 +332,7 @@ impl HubManager {
     fn spawn_connection_task(self: &Arc<Self>, host: SshHost) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         self.shutdown_flags.lock().unwrap().insert(host.id.clone(), shutdown_tx);
+        self.running_hosts.lock().unwrap().insert(host.id.clone(), host.clone());
 
         let hub = self.clone();
         tokio::spawn(async move {
