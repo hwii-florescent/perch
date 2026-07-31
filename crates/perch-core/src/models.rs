@@ -31,10 +31,26 @@ const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
     ("claude-haiku-4-5",  "Haiku 4.5"),
 ];
 
-/// Built-in Codex models.
+/// Built-in Codex models, sourced from the installed `codex` CLI's own model
+/// catalogue (`~/.codex/model-catalog.json`, referenced by `config.toml`'s
+/// `model_catalog_json`) rather than guessed — that file lists every model
+/// slug/display-name corp's `corp-gateway` codex provider currently serves, all with
+/// `visibility: "list"`. Slugs (e.g. `gpt-5.6-terra`) are already the stable
+/// identifiers codex expects via `-m`/`--model`, so no alias translation is
+/// needed here (unlike Claude's dated-snapshot problem above).
+///
+/// `gpt-5.4-mini` is kept first (i.e. the default — `defaultModel()` in
+/// `packages/web/src/models.ts` picks index 0) to preserve the pre-existing
+/// default; the rest follow the catalogue's own best-first ordering.
 const CODEX_CATALOGUE: &[(&str, &str)] = &[
-    ("gpt-5.4-mini",  "GPT-5.4 mini"),
-    ("gpt-5.6-terra", "GPT-5.6 terra"),
+    ("gpt-5.4-mini",   "GPT-5.4 Mini"),
+    ("gpt-5.6-sol",    "GPT-5.6 Sol"),
+    ("gpt-5.6-luna",   "GPT-5.6 Luna"),
+    ("gpt-5.6-terra",  "GPT-5.6 Terra"),
+    ("gpt-5.5",        "GPT-5.5"),
+    ("gpt-5.4",        "GPT-5.4"),
+    ("gpt-5.4-nano",   "GPT-5.4 Nano"),
+    ("gpt-5.3-codex",  "GPT-5.3 Codex"),
 ];
 
 // ---------------------------------------------------------------------------
