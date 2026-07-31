@@ -30,15 +30,42 @@ pub struct SettingsData {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the client's `THEMES` table). Defaults
-    /// to `"perch"` — perch's own look, kept as the default palette so
-    /// existing installs (with no `theme` key in `~/.perch/settings.json`)
-    /// see no visual change.
+    /// to `"catppuccin"` — herdr's own default theme (Catppuccin Mocha; see
+    /// `reference/herdr/src/app/state.rs::Palette::catppuccin()` and
+    /// `AppState`'s default `theme_name`), so perch matches herdr's look out
+    /// of the box. `"perch"` (perch's original hardcoded look) remains a
+    /// selectable theme, just no longer the default.
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Play a short WebAudio-generated tone when a session finishes a turn
+    /// unseen (done) or becomes blocked on an approval prompt (request).
+    /// Defaults to `false` (opt-in).
+    #[serde(default)]
+    pub sound_enabled: bool,
+    /// How toast notifications are delivered: `"off"` (none), `"app"`
+    /// (in-app toast stack, the original behavior), or `"system"` (OS
+    /// notifications via the Web Notifications API, falling back to `"app"`
+    /// when permission is denied). Defaults to `"app"`.
+    #[serde(default = "default_toast_delivery")]
+    pub toast_delivery: String,
+    /// Global chat rendering mode: `"hosted"` (structured chat UI) or
+    /// `"cli"` (xterm attached to the real interactive CLI PTY). Used to be
+    /// per-chat client state (a footer toggle); now a single global setting
+    /// so every open chat pane renders the same way. Defaults to `"hosted"`.
+    #[serde(default = "default_chat_mode")]
+    pub chat_mode: String,
 }
 
 fn default_theme() -> String {
-    "perch".to_string()
+    "catppuccin".to_string()
+}
+
+fn default_toast_delivery() -> String {
+    "app".to_string()
+}
+
+fn default_chat_mode() -> String {
+    "hosted".to_string()
 }
 
 /// Patch applied via `settings.update`. Fields absent from JSON → no change.
@@ -55,6 +82,13 @@ pub struct SettingsPatch {
     /// Absent = unchanged; present = set. No "clear" case needed — a theme
     /// name is never nullable, unlike `default_cwd`.
     pub theme: Option<String>,
+    /// Absent = unchanged; present = set.
+    pub sound_enabled: Option<bool>,
+    /// Absent = unchanged; present = set. No "clear" case needed.
+    pub toast_delivery: Option<String>,
+    /// Absent = unchanged; present = set. No "clear" case needed — a chat
+    /// mode is never nullable, unlike `default_cwd`.
+    pub chat_mode: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -78,6 +112,17 @@ pub struct SshHostEntry {
     pub remote_port: u16,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// `"perch"` (default) or `"direct"`.
+    ///
+    /// `"perch"` is classic federation: the remote runs its own perch, reached
+    /// through an ssh tunnel. `"direct"` requires **only** `claude`/`codex` +
+    /// `tmux` on the remote — perch drives the CLIs over ssh with each hosted
+    /// turn detached (so it survives both the laptop closing and perch
+    /// quitting), and the sessions live in the *local* DB tagged with this
+    /// host's id. Absent on the wire ⇒ `"perch"`, so older clients and older
+    /// `hosts.json` files keep their exact current behaviour.
+    #[serde(default = "default_mode")]
+    pub mode: String,
     /// Skip SSH tunnel; connect directly to this WS URL (e.g. `ws://127.0.0.1:7800/ws`).
     /// Used in e2e tests and LAN scenarios where an SSH tunnel is unnecessary.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +142,7 @@ impl Default for SshHostEntry {
             ssh_host: String::new(),
             remote_port: default_remote_port(),
             enabled: default_enabled(),
+            mode: default_mode(),
             direct_url: None,
             remote_cmd: None,
         }
@@ -105,6 +151,7 @@ impl Default for SshHostEntry {
 
 fn default_remote_port() -> u16 { 7788 }
 fn default_enabled() -> bool { true }
+fn default_mode() -> String { "perch".to_string() }
 
 // ---------------------------------------------------------------------------
 // Shared value types
@@ -175,6 +222,36 @@ pub struct SessionSummary {
 
 fn default_local_host_id() -> String {
     "local".to_string()
+}
+
+/// A single directory entry returned by `fs.browse`. Directories only — the
+/// browser is for picking a session's cwd, never individual files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsEntry {
+    pub name: String,
+    pub path: String,
+    /// True when `path/.git` exists (one bounded `Path::exists()` check per
+    /// visible entry at the current level — never recursive).
+    pub is_git_repo: bool,
+}
+
+/// One git worktree of a repo, as reported by `worktree.list.result`.
+/// Mirrors `worktree::WorktreeInfo` (see that module for the git plumbing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeEntry {
+    pub path: String,
+    /// Short branch name; absent for a detached HEAD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Commit sha at the worktree's HEAD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// The repo's main checkout (never removable — git refuses).
+    pub is_primary: bool,
+    /// Has uncommitted or untracked files (drives the remove guard).
+    pub is_dirty: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +364,14 @@ pub enum ClientMessage {
         rows: u16,
     },
 
+    /// Force-terminate a single terminal's backing PTY/process. Used when a
+    /// CLI-mode (`agentAttach`) terminal is torn down — e.g. leaving CLI mode
+    /// for Hosted, or deleting the session it's attached to — so the spawned
+    /// `claude --resume`/`codex resume` process doesn't keep running (and
+    /// blocking a fresh attach) after the view that owned it is gone.
+    #[serde(rename = "terminal.kill", rename_all = "camelCase")]
+    TerminalKill { terminal_id: String },
+
     #[serde(rename = "settings.get")]
     SettingsGet {},
 
@@ -305,6 +390,12 @@ pub enum ClientMessage {
     #[serde(rename = "session.archive", rename_all = "camelCase")]
     SessionArchive { session_id: String, archived: bool },
 
+    /// Permanently delete a session: its messages, its DB row, any in-flight
+    /// turn, and any CLI-attached terminal. Irreversible — unlike
+    /// `session.archive`, there is no `deleted: bool` toggle.
+    #[serde(rename = "session.delete", rename_all = "camelCase")]
+    SessionDelete { session_id: String },
+
     /// Request the persisted dockview layout blob for a session (Phase 3:
     /// Workspace → Tab → Pane model). The server never interprets the JSON —
     /// it's an opaque `dockview` `api.toJSON()` snapshot, only persisted and
@@ -315,6 +406,72 @@ pub enum ClientMessage {
     /// Persist a session's dockview layout blob. Debounced client-side.
     #[serde(rename = "session.layout.set", rename_all = "camelCase")]
     SessionLayoutSet { session_id: String, layout: Value },
+
+    /// User-set title override for a session (see `db::title_override`).
+    /// Persists across the auto-title-from-first-message logic — once set,
+    /// the user title always wins.
+    #[serde(rename = "session.rename", rename_all = "camelCase")]
+    SessionRename { session_id: String, title: String },
+
+    /// List directories at `path` (or the user's home directory when absent)
+    /// on the given host (local when absent/`"local"`), for the new-session
+    /// cwd picker. `requestId` is echoed back on `fs.browse.result` so the
+    /// client can match replies to in-flight requests (also relayed as a
+    /// single-shot unicast through the hub for federated hosts).
+    #[serde(rename = "fs.browse", rename_all = "camelCase")]
+    FsBrowse {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+    },
+
+    /// List every git worktree of the repo containing `repoPath` (Wave 2 —
+    /// ported from herdr, see `worktree.rs`). Request-correlated exactly like
+    /// `fs.browse`: `requestId` comes back on `worktree.list.result`, and the
+    /// hub relays the single reply to the originating connection via
+    /// `PendingKey::Worktree`.
+    #[serde(rename = "worktree.list", rename_all = "camelCase")]
+    WorktreeList {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        repo_path: String,
+    },
+
+    /// Create a linked worktree for `branch`. `newBranch` is a hint: when the
+    /// branch already exists locally the existing-branch form is used anyway
+    /// (herdr's `run_worktree_add_command` behavior). `path` overrides the
+    /// default `~/.perch/worktrees/<repo-name>/<branch-slug>` location.
+    /// Replies with `worktree.done` or `worktree.error`.
+    #[serde(rename = "worktree.create", rename_all = "camelCase")]
+    WorktreeCreate {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        repo_path: String,
+        branch: String,
+        #[serde(default)]
+        new_branch: bool,
+        #[serde(default)]
+        path: Option<String>,
+    },
+
+    /// Remove the worktree checked out at `path`. Refused with
+    /// `worktree.error { dirty: true }` when the checkout has uncommitted or
+    /// untracked files and `force` is false (herdr's dirty guard). `repoPath`
+    /// identifies the owning repo (`git -C <repoPath> worktree remove …`).
+    #[serde(rename = "worktree.remove", rename_all = "camelCase")]
+    WorktreeRemove {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        repo_path: String,
+        path: String,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +489,14 @@ pub enum ServerMessage {
 
     #[serde(rename = "session.updated", rename_all = "camelCase")]
     SessionUpdated { session: SessionSummary },
+
+    /// Broadcast to every connection (mirrors `hosts.updated`'s fan-out via
+    /// `hub_events_tx`) when a session is permanently deleted, since the row
+    /// backing a normal `session.updated` no longer exists to look up. Client
+    /// state removes the session from its local list on receipt regardless
+    /// of which tab/connection issued the `session.delete`.
+    #[serde(rename = "session.deleted", rename_all = "camelCase")]
+    SessionDeleted { session_id: String },
 
     #[serde(rename = "server.info", rename_all = "camelCase")]
     ServerInfo {
@@ -457,5 +622,57 @@ pub enum ServerMessage {
         branch: Option<String>,
         ahead: u32,
         behind: u32,
+    },
+
+    /// Reply to `fs.browse`. `parent` is absent when `path` is already the
+    /// filesystem root. `home` is always the resolved home directory for the
+    /// target host, so the client can offer a "home" shortcut regardless of
+    /// where the current listing is.
+    #[serde(rename = "fs.browse.result", rename_all = "camelCase")]
+    FsBrowseResult {
+        request_id: String,
+        host_id: String,
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+        home: String,
+        entries: Vec<FsEntry>,
+    },
+
+    /// Reply to `worktree.list`. `repoPath` echoes the request so the client
+    /// can key its cache by `${hostId}:${repoPath}`. `defaultRoot` is
+    /// `~/.perch/worktrees/<repo-name>` on the *target* host, letting the
+    /// create form prefill a sensible custom-path default.
+    #[serde(rename = "worktree.list.result", rename_all = "camelCase")]
+    WorktreeListResult {
+        request_id: String,
+        host_id: String,
+        repo_path: String,
+        default_root: String,
+        worktrees: Vec<WorktreeEntry>,
+    },
+
+    /// Success reply to `worktree.create` / `worktree.remove`. `path` is the
+    /// created checkout (create) or the removed checkout (remove).
+    #[serde(rename = "worktree.done", rename_all = "camelCase")]
+    WorktreeDone {
+        request_id: String,
+        host_id: String,
+        /// `"create"` | `"remove"`.
+        action: String,
+        path: String,
+    },
+
+    /// Failure reply to any `worktree.*` request. `dirty` is true only when
+    /// the operation was refused by the dirty-checkout guard — the client
+    /// escalates that into a "force remove?" confirmation rather than showing
+    /// it as a hard error (herdr's `force_confirmation` two-step).
+    #[serde(rename = "worktree.error", rename_all = "camelCase")]
+    WorktreeError {
+        request_id: String,
+        host_id: String,
+        message: String,
+        #[serde(default)]
+        dirty: bool,
     },
 }

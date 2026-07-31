@@ -129,10 +129,13 @@ async function createSessionWithCwd(page: Page, cwd: string): Promise<void> {
   const newBtn = page.locator('[data-testid="new-session-local"]');
   await expect(newBtn).toBeEnabled({ timeout: 10000 });
   await newBtn.click();
+  // Wave 1: the picker now opens in "Browse" mode by default — switch to the
+  // "Type path" fallback to enter an arbitrary cwd directly (same as before).
+  await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
   const input = page.locator('[data-testid="project-path-input"]');
   await expect(input).toBeVisible({ timeout: 5000 });
   await input.fill(cwd);
-  await page.locator('[data-testid="project-create"]').click();
+  await page.locator('[data-testid="dir-browser-use"]').click();
   await expect(input).not.toBeVisible({ timeout: 3000 });
 
   const textarea = page.locator(".chat__input textarea");

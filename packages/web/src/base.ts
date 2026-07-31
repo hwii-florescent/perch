@@ -23,3 +23,12 @@ export function getWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}${getBasePath()}ws`;
 }
+
+/** The `{base}clipboard-image` HTTP upload URL (see server.rs's
+ * `clipboard_image_upload` handler) — Wave 2 item 9's clipboard image paste.
+ * Local host only: this always targets *this* perch instance's own HTTP
+ * server, never a federated remote's (there is no HTTP route to a remote
+ * perch — only its WS traffic is tunneled through the hub). */
+export function getClipboardImageUploadUrl(ext: string): string {
+  return `${window.location.origin}${getBasePath()}clipboard-image?ext=${encodeURIComponent(ext)}`;
+}

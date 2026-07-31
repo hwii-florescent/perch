@@ -14,10 +14,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures::{SinkExt, StreamExt};
 use regex::Regex;
@@ -27,10 +29,11 @@ use uuid::Uuid;
 
 use crate::agent::{AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions};
 use crate::db::HistoryDb;
+use crate::detached::{DetachedManager, FinishedTurn, TurnRequest, TurnSink};
 use crate::hosts::HostsStore;
 use crate::hub::{HubManager, PendingKey};
 use crate::models::{self, ModelLists};
-use crate::protocol::{AgentKind, ChatUsage, ClientMessage, CustomModelsData, ServerMessage, SessionStatus, SessionSummary, SettingsData, SshHostEntry};
+use crate::protocol::{AgentKind, ChatUsage, ClientMessage, CustomModelsData, FsEntry, ServerMessage, SessionStatus, SessionSummary, SettingsData, SshHostEntry, WorktreeEntry};
 use crate::registry::SessionRegistry;
 use crate::settings::SettingsStore;
 use crate::status::{get_server_info, get_status, LastUsage};
@@ -181,6 +184,68 @@ struct AppState {
     hosts: Arc<HostsStore>,
     /// Hub manager: owns WS connections to remote perch instances.
     hub: Arc<HubManager>,
+    /// Detached-turn manager: owns turns running on `mode: "direct"` hosts,
+    /// which have no perch of their own (see `detached.rs`). Lives in
+    /// `AppState` rather than `ConnState` on purpose — a detached turn
+    /// outlives the WS connection that started it, and must not be cancelled
+    /// when that connection closes.
+    detached: Arc<DetachedManager>,
+}
+
+/// `AppState`'s implementation of the detached-turn callback interface.
+///
+/// It exists so `detached.rs` can stream and finalize turns without owning any
+/// of the server's session bookkeeping: every method here is the same code
+/// path a local turn takes (`emit`-equivalent recording into the replay ring
+/// buffer, `running_sessions` + unseen dots, `persist_turn`'s single
+/// `messages` row), just reached from a task that has no `ConnState`.
+struct DetachedSink {
+    app: AppState,
+}
+
+impl TurnSink for DetachedSink {
+    fn emit(&self, session_id: &str, msg: ServerMessage) {
+        // Record for ring-buffer replay, exactly like the local `emit`, then
+        // fan out to *every* connection rather than one. A detached turn has
+        // no single "initiating connection" worth privileging — the whole
+        // point is that it outlives whoever started it.
+        self.app.registry.record(session_id, msg.clone());
+        let _ = self.app.hub.hub_events_tx.send(Arc::new(msg));
+    }
+
+    fn set_running(&self, session_id: &str, running: bool) {
+        if running {
+            self.app.running_sessions.lock().unwrap().insert(session_id.to_string());
+        } else {
+            self.app.running_sessions.lock().unwrap().remove(session_id);
+            mark_unseen_if_unviewed(&self.app, session_id);
+        }
+        notify_session_updated(&self.app, session_id);
+    }
+
+    fn persist_turn(&self, session_id: &str, turn: FinishedTurn) {
+        if turn.text.is_empty() && turn.thinking.is_empty() {
+            return;
+        }
+        let thinking = if turn.thinking.is_empty() {
+            None
+        } else {
+            Some(turn.thinking.as_str())
+        };
+        let _ = self.app.db.add_message(
+            session_id,
+            "assistant",
+            &turn.text,
+            Some(agent_str(turn.agent)),
+            turn.model.as_deref(),
+            thinking,
+        );
+        let _ = self.app.db.update_session_last_model(
+            session_id,
+            agent_str(turn.agent),
+            turn.model.as_deref(),
+        );
+    }
 }
 
 pub async fn run(
@@ -191,6 +256,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let base_path = normalize_base_path(&options.base_path);
     let ws_path = format!("{base_path}ws");
+    let clipboard_image_path = format!("{base_path}clipboard-image");
 
     // Bind the TCP listener first so we know the actual port (important when
     // port 0 is requested — the OS assigns a free port).
@@ -232,6 +298,8 @@ pub async fn run(
     let initial_hosts = hosts.list();
     hub.reload_hosts(&initial_hosts);
 
+    let detached = DetachedManager::new(db.clone());
+
     let state = AppState {
         registry,
         db,
@@ -246,11 +314,25 @@ pub async fn run(
         settings,
         hosts,
         hub,
+        detached,
     };
+
+    // The detached manager needs `AppState` to report turn progress, and
+    // `AppState` holds the manager — hence the deferred wire-up. Recovery is
+    // kicked off immediately afterwards, before the listener starts accepting
+    // connections, so a turn that survived a perch restart is already being
+    // re-tailed by the time the first client asks for the session list.
+    state
+        .detached
+        .attach_sink(Arc::new(DetachedSink { app: state.clone() }));
+    state.detached.recover_all();
 
     spawn_git_poll_task(state.clone());
 
-    let mut router = Router::new().route(&ws_path, get(ws_upgrade)).with_state(state);
+    let mut router = Router::new()
+        .route(&ws_path, get(ws_upgrade))
+        .route(&clipboard_image_path, post(clipboard_image_upload))
+        .with_state(state);
 
     if options.web_dist_dir.is_dir() {
         let index = options.web_dist_dir.join("index.html");
@@ -352,8 +434,47 @@ async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+/// `POST {base}clipboard-image?ext=png` — Wave 2 item 9: stages a pasted
+/// clipboard image so the client can paste its on-disk path into a
+/// terminal/CLI pane's PTY (most CLI agents accept a file path for image
+/// input). No `AppState` needed — this is a pure filesystem operation
+/// against `~/.perch/clipboard-images/` (see `clipboard_image.rs`).
+///
+/// v1 scope: local host only. There is no HTTP route from the browser to a
+/// *remote* (federated) perch instance — only its WS traffic is tunneled
+/// through the hub — so this endpoint only ever stages to the local
+/// machine's `~/.perch/`; pasting into a remote terminal pane is a
+/// documented no-op on the client side for now.
+async fn clipboard_image_upload(
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const MAX_BYTES: usize = 10 * 1024 * 1024;
+    if body.len() > MAX_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "image too large (max 10MB)").into_response();
+    }
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type.starts_with("image/") {
+        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "expected an image/* content type").into_response();
+    }
+    let ext = params.get("ext").map(|s| s.as_str()).unwrap_or("");
+    match crate::clipboard_image::stage(&body, ext) {
+        Ok(path) => axum::Json(serde_json::json!({ "path": path.to_string_lossy() })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to stage clipboard image: {e}")).into_response(),
+    }
+}
+
 struct SessionRuntime {
     cwd: String,
+    /// `"local"`, or the id of the `mode: "direct"` host this session runs on.
+    /// Direct sessions never touch `claude_runner`/`active_runner`: their turns
+    /// are launched detached over ssh by `detached.rs` and deliberately are
+    /// *not* cancelled when this connection closes.
+    host_id: String,
     /// Persistent across turns so claude's `--resume` continuity survives
     /// multiple `chat.send`s in the same session (see `agent.rs`). The
     /// model to use is set per-turn via `ClaudeRunner::set_model`.
@@ -502,15 +623,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // Bug fix (F3): previously hosts were only sent in response to hosts.list;
     // the sidebar would show no remote sections until Settings was opened.
     let _ = state.out_tx.send(ServerMessage::HostsList {
-        hosts: state.app.hosts.list().into_iter().map(|h| SshHostEntry {
-            id: h.id,
-            name: h.name,
-            ssh_host: h.ssh_host,
-            remote_port: h.remote_port,
-            enabled: h.enabled,
-            direct_url: h.direct_url,
-            remote_cmd: h.remote_cmd,
-        }).collect(),
+        hosts: state.app.hosts.list().into_iter().map(host_to_wire).collect(),
     });
 
     // Send current settings (including the selected theme) immediately on
@@ -588,11 +701,26 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // session.list / session.updated, relayed chat frames, …) to this connection.
     let mut hub_rx = app.hub.subscribe_events();
     let hub_out_tx = state.out_tx.clone();
+    let hub_app = app.clone();
     tokio::spawn(async move {
         loop {
             match hub_rx.recv().await {
                 Ok(msg) => {
-                    if hub_out_tx.send((*msg).clone()).is_err() {
+                    // `session.list` from the hub is the *remote-only*
+                    // snapshot (the hub has no DB handle — see
+                    // `broadcast_merged_session_list`). Forwarding it verbatim
+                    // would make the browser drop every local session from its
+                    // list until the next client-initiated `session.list`, so
+                    // merge the local rows back on top here.
+                    let out = match &*msg {
+                        ServerMessage::SessionList { sessions } => {
+                            let mut merged = local_sessions_snapshot(&hub_app);
+                            merged.extend(sessions.iter().cloned());
+                            ServerMessage::SessionList { sessions: merged }
+                        }
+                        other => other.clone(),
+                    };
+                    if hub_out_tx.send(out).is_err() {
                         break;
                     }
                 }
@@ -651,6 +779,22 @@ fn status_message(status: crate::status::StatusInfo) -> ServerMessage {
     }
 }
 
+/// Every local (this-host) session as a `SessionSummary`, newest-first — the
+/// same rows `session.list` replies with before the hub's remote sessions are
+/// appended. Factored out because the hub's own `session.list` broadcast
+/// carries *only* the remote portion (`hub.rs::broadcast_merged_session_list`
+/// has no DB handle), so the per-connection hub forwarder has to merge the
+/// local rows back in before the message reaches a browser.
+fn local_sessions_snapshot(app: &AppState) -> Vec<SessionSummary> {
+    let rows = app.db.list_sessions().unwrap_or_default();
+    let running = app.running_sessions.lock().unwrap();
+    let unseen = app.unseen_sessions.lock().unwrap();
+    let blocked = app.blocked_sessions.lock().unwrap();
+    rows.into_iter()
+        .map(|row| build_session_summary(row, &running, &unseen, &blocked))
+        .collect()
+}
+
 /// Build a `SessionSummary` from a DB row and the current running/unseen/
 /// blocked snapshots. `unseen`/`blocked` are only meaningful for local
 /// sessions — remote summaries are built elsewhere (`hub.rs`) and always
@@ -679,7 +823,11 @@ fn build_session_summary(
         last_agent,
         last_model: row.last_model,
         status,
-        host_id: "local".to_string(),
+        // Local *storage*, but not necessarily the local *host*: a direct-mode
+        // session's row lives here while its cwd and agent live on a remote
+        // with no perch of its own, and the sidebar must group it under that
+        // host (see `db.rs`'s `sessions.host_id`).
+        host_id: row.host_id,
         archived: row.archived,
         unseen: unseen.contains(&row.id),
         blocked: blocked.contains(&row.id),
@@ -769,6 +917,19 @@ fn insert_runtime(
     last_agent: Option<&str>,
     last_model: Option<&str>,
 ) {
+    insert_runtime_on_host(state, session_id, cwd, "local", claude_session_id, last_agent, last_model)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_runtime_on_host(
+    state: &Arc<ConnState>,
+    session_id: &str,
+    cwd: &str,
+    host_id: &str,
+    claude_session_id: Option<String>,
+    last_agent: Option<&str>,
+    last_model: Option<&str>,
+) {
     let claude_runner = Arc::new(ClaudeRunner::new(ClaudeRunnerOptions {
         cwd: cwd.to_string(),
         claude_bin: None,
@@ -790,6 +951,7 @@ fn insert_runtime(
         session_id.to_string(),
         SessionRuntime {
             cwd: cwd.to_string(),
+            host_id: host_id.to_string(),
             claude_runner,
             active_runner: Mutex::new(None),
             last_codex_runner: Mutex::new(None),
@@ -804,6 +966,14 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // Route to remote host if host_id is set and non-local.
             let target = host_id.as_deref().unwrap_or("local");
             if target != "local" && !target.is_empty() {
+                // Direct-mode host: there is no perch on the other end to
+                // forward to. The session row lives *here*, tagged with the
+                // host id; only the cwd, the agent process and the transcript
+                // are remote.
+                if let Some(host) = direct_host(state, target) {
+                    create_direct_session(state, &host, cwd);
+                    return;
+                }
                 // Forward a stripped message (no hostId) so the remote creates a
                 // local session rather than trying to route further.
                 let forward_json = match &cwd {
@@ -855,10 +1025,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             match state.app.db.get_session(&session_id) {
                 Ok(Some(row)) => {
                     state.app.registry.create(&session_id, &row.cwd);
-                    insert_runtime(
+                    insert_runtime_on_host(
                         state,
                         &session_id,
                         &row.cwd,
+                        &row.host_id,
                         row.claude_session_id.clone(),
                         row.last_agent.as_deref(),
                         row.last_model.as_deref(),
@@ -925,17 +1096,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             }
         }
         ClientMessage::SessionList {} => {
-            let rows = state.app.db.list_sessions().unwrap_or_default();
-            let running = state.app.running_sessions.lock().unwrap();
-            let unseen = state.app.unseen_sessions.lock().unwrap();
-            let blocked = state.app.blocked_sessions.lock().unwrap();
-            let mut sessions: Vec<SessionSummary> = rows
-                .into_iter()
-                .map(|row| build_session_summary(row, &running, &unseen, &blocked))
-                .collect();
-            drop(running);
-            drop(unseen);
-            drop(blocked);
+            let mut sessions = local_sessions_snapshot(&state.app);
             // Append remote sessions (tagged with their host_id), sorted by
             // host then by createdAt desc within each host.
             let mut remote = state.app.hub.remote_sessions_snapshot();
@@ -967,6 +1128,51 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let session_id = session_id.clone();
             let text = text.clone();
             let model = model.clone();
+
+            // Direct-mode host: launch the turn detached over ssh instead of
+            // spawning a local child. Everything after this point (persisting
+            // the user row, marking the session running) is identical — only
+            // the runner differs, and it lives in `AppState` so the turn
+            // survives this connection going away.
+            let session_host = {
+                let map = state.runtimes.lock().unwrap();
+                map.get(&session_id).map(|r| (r.host_id.clone(), r.cwd.clone()))
+            };
+            if let Some((host_id, cwd)) = session_host {
+                if host_id != "local" {
+                    let Some(host) = direct_host(state, &host_id) else {
+                        let _ = state.out_tx.send(ServerMessage::Error {
+                            message: format!("host {host_id} is no longer configured"),
+                        });
+                        return;
+                    };
+                    let _ = state.app.db.create_session_on_host(&session_id, &cwd, &host_id);
+                    let _ = state.app.db.add_message(
+                        &session_id,
+                        "user",
+                        &text,
+                        Some(agent_str(agent)),
+                        model.as_deref(),
+                        None,
+                    );
+                    let row = state.app.db.get_session(&session_id).ok().flatten();
+                    state.app.running_sessions.lock().unwrap().insert(session_id.clone());
+                    notify_session_updated(&state.app, &session_id);
+                    state.app.detached.start_turn(TurnRequest {
+                        session_id,
+                        host_id,
+                        ssh_host: host.ssh_host,
+                        cwd,
+                        agent,
+                        model,
+                        prompt: text,
+                        claude_session_id: row.as_ref().and_then(|r| r.claude_session_id.clone()),
+                        codex_thread_id: row.as_ref().and_then(|r| r.codex_thread_id.clone()),
+                    });
+                    return;
+                }
+            }
+
             let runner = {
                 let map = state.runtimes.lock().unwrap();
                 let Some(runtime) = map.get(&session_id) else {
@@ -1045,6 +1251,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     runner.cancel();
                 }
             }
+            // Direct-mode host: the turn is a detached remote process group,
+            // so cancel is `kill -TERM -<pgid>` over ssh (see `detached.rs`).
+            // Unconditional — the manager is a no-op when this session has no
+            // running detached run, and queues the cancel when the launch
+            // round trip is still in flight.
+            state.app.detached.cancel(&session_id);
             // Remove from running immediately on cancel — the agent may still
             // emit a trailing Done/Error, but remove here to be safe.
             state.app.running_sessions.lock().unwrap().remove(&session_id);
@@ -1099,6 +1311,85 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 };
                 runtime.cwd.clone()
             };
+
+            // Direct-mode host (CLI mode over ssh): the local pty's child is
+            // `ssh -tt <host> tmux new-session -A …` rather than the CLI
+            // itself. tmux keeps the TUI (and its scrollback) alive across a
+            // dropped connection, and `terminal.resize` still works because
+            // ssh propagates SIGWINCH from the local pty.
+            let runtime_host = {
+                let map = state.runtimes.lock().unwrap();
+                map.get(&attach.session_id).map(|r| r.host_id.clone()).unwrap_or_default()
+            };
+            if runtime_host != "local" && !runtime_host.is_empty() {
+                let Some(host) = direct_host(state, &runtime_host) else {
+                    let _ = state.out_tx.send(ServerMessage::Error {
+                        message: format!("host {runtime_host} is no longer configured"),
+                    });
+                    return;
+                };
+                let row = state.app.db.get_session(&attach.session_id).ok().flatten();
+                let (provider_id, model) = match attach.agent {
+                    AgentKind::Claude => {
+                        // Mint the claude session id up front when the session
+                        // has never run a turn, so CLI mode and a later hosted
+                        // turn share one conversation.
+                        let id = row.as_ref().and_then(|r| r.claude_session_id.clone());
+                        let id = match id {
+                            Some(id) => id,
+                            None => {
+                                let fresh = Uuid::new_v4().to_string();
+                                let _ = state.app.db.create_session_on_host(
+                                    &attach.session_id,
+                                    &runtime_cwd,
+                                    &runtime_host,
+                                );
+                                let _ = state
+                                    .app
+                                    .db
+                                    .set_claude_session_id(&attach.session_id, &fresh);
+                                fresh
+                            }
+                        };
+                        (Some(id), row.as_ref().and_then(claude_model_of))
+                    }
+                    AgentKind::Codex => (
+                        row.as_ref().and_then(|r| r.codex_thread_id.clone()),
+                        row.as_ref().and_then(codex_model_of),
+                    ),
+                };
+                let argv = crate::detached::cli_attach_argv(
+                    &host.ssh_host,
+                    &attach.session_id,
+                    &runtime_cwd,
+                    attach.agent,
+                    provider_id.as_deref(),
+                    model.as_deref(),
+                );
+                // cwd is `None`: the *local* pty just runs ssh, and the remote
+                // cd happens inside the tmux command.
+                match state.terminals.create(cols, rows, None, Some(argv)) {
+                    Ok(terminal_id) => {
+                        let _ = state.app.db.create_session_on_host(
+                            &attach.session_id,
+                            &runtime_cwd,
+                            &runtime_host,
+                        );
+                        state
+                            .terminal_agent_sessions
+                            .lock()
+                            .unwrap()
+                            .insert(terminal_id.clone(), attach.session_id.clone());
+                        let _ = state.out_tx.send(ServerMessage::TerminalCreated { terminal_id });
+                    }
+                    Err(err) => {
+                        let _ = state.out_tx.send(ServerMessage::Error {
+                            message: format!("failed to create terminal: {err}"),
+                        });
+                    }
+                }
+                return;
+            }
 
             let argv = match attach.agent {
                 AgentKind::Claude => {
@@ -1235,6 +1526,26 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             state.terminals.resize(&terminal_id, cols, rows);
         }
 
+        ClientMessage::TerminalKill { terminal_id } => {
+            // Route remote terminals through the hub.
+            if let Some(host_id) = state.app.hub.route_for_terminal(&terminal_id) {
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            // Best-effort: clear any blocked-state bookkeeping tied to this
+            // terminal up front. `on_exit` (fired once the killed process
+            // actually dies) does this too, but doing it here as well means a
+            // fast follow-up session.delete doesn't race a still-in-flight
+            // kill.
+            if let Some(session_id) = state.terminal_agent_sessions.lock().unwrap().remove(&terminal_id) {
+                let was_blocked = state.app.blocked_sessions.lock().unwrap().remove(&session_id);
+                if was_blocked {
+                    notify_session_updated(&state.app, &session_id);
+                }
+            }
+            state.terminals.kill(&terminal_id);
+        }
+
         // -----------------------------------------------------------------------
         // Settings & hosts (Stage D)
         // -----------------------------------------------------------------------
@@ -1251,6 +1562,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 custom_models: patch.custom_models.map(custom_models_to_store),
                 default_cwd: patch.default_cwd,
                 theme: patch.theme,
+                sound_enabled: patch.sound_enabled,
+                toast_delivery: patch.toast_delivery,
+                chat_mode: patch.chat_mode,
             };
             match state.app.settings.update(store_patch) {
                 Ok(updated) => {
@@ -1329,6 +1643,83 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             }
         }
 
+        // Permanently delete a session: cancel any in-flight turn, kill any
+        // CLI-attached terminal, drop it from every in-memory bookkeeping
+        // structure, delete its DB rows, then fan the deletion out to every
+        // connection (not just this one — there is no DB row left for the
+        // usual session.updated broadcast path to look up).
+        ClientMessage::SessionDelete { session_id } => {
+            // Route remote sessions through the hub.
+            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+
+            // Cancel any in-flight turn and drop this connection's runtime
+            // for the session (claude_runner, pending_turn, etc.).
+            if let Some(runtime) = state.runtimes.lock().unwrap().remove(&session_id) {
+                if let Some(runner) = runtime.active_runner.lock().unwrap().as_ref() {
+                    runner.cancel();
+                }
+                // Direct-mode session: kill the detached remote turn and the
+                // remote CLI-mode tmux session too, or they would outlive the
+                // session they belong to — which is exactly the property that
+                // makes detached mode useful, and exactly the wrong one here.
+                if runtime.host_id != "local" {
+                    state.app.detached.cancel(&session_id);
+                    if let Some(host) = direct_host(state, &runtime.host_id) {
+                        let sid = session_id.clone();
+                        tokio::spawn(async move {
+                            crate::detached::kill_cli_session(&host.ssh_host, &sid).await;
+                        });
+                    }
+                }
+            }
+
+            // Kill any CLI-attached (agentAttach) terminal(s) for this
+            // session on this connection — a dangling `claude --resume`
+            // process would otherwise keep running (and fighting a future
+            // fresh attach) after the session it belongs to is gone.
+            let attached_terminal_ids: Vec<String> = {
+                let map = state.terminal_agent_sessions.lock().unwrap();
+                map.iter()
+                    .filter(|(_, sid)| **sid == session_id)
+                    .map(|(tid, _)| tid.clone())
+                    .collect()
+            };
+            for terminal_id in attached_terminal_ids {
+                state.terminal_agent_sessions.lock().unwrap().remove(&terminal_id);
+                state.terminals.kill(&terminal_id);
+            }
+
+            // Drop every other piece of in-memory bookkeeping keyed by this
+            // session id.
+            state.app.registry.remove(&session_id);
+            state.app.running_sessions.lock().unwrap().remove(&session_id);
+            state.app.unseen_sessions.lock().unwrap().remove(&session_id);
+            state.app.blocked_sessions.lock().unwrap().remove(&session_id);
+            state.app.session_viewers.lock().unwrap().remove(&session_id);
+            if state.active_session_id.lock().unwrap().as_deref() == Some(session_id.as_str()) {
+                *state.active_session_id.lock().unwrap() = None;
+            }
+
+            match state.app.db.delete_session(&session_id) {
+                Ok(()) => {
+                    // Fan out to every connection (this one included) via the
+                    // same broadcast channel hosts.upsert/delete use, since
+                    // the row a normal session.updated event looks up is gone.
+                    let _ = state.app.hub.hub_events_tx.send(Arc::new(ServerMessage::SessionDeleted {
+                        session_id: session_id.clone(),
+                    }));
+                }
+                Err(e) => {
+                    let _ = state.out_tx.send(ServerMessage::Error {
+                        message: format!("session.delete failed: {e}"),
+                    });
+                }
+            }
+        }
+
         // Phase 3: Workspace → Tab → Pane model — per-session dockview layout
         // persistence. The layout blob is opaque JSON; the server only stores
         // and echoes it.
@@ -1375,7 +1766,329 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 });
             }
         }
+
+        // User-set title override (item 2: session rename). Persists across
+        // the auto-title-from-first-message logic — see db.rs::list_sessions.
+        ClientMessage::SessionRename { session_id, title } => {
+            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            match state.app.db.set_title_override(&session_id, title.trim()) {
+                Ok(()) => {
+                    notify_session_updated(&state.app, &session_id);
+                }
+                Err(e) => {
+                    let _ = state.out_tx.send(ServerMessage::Error {
+                        message: format!("session.rename failed: {e}"),
+                    });
+                }
+            }
+        }
+
+        // Item 1: directory browser for new-session cwd picker.
+        ClientMessage::FsBrowse { request_id, host_id, path } => {
+            let target = host_id.as_deref().unwrap_or("local");
+            if target != "local" && !target.is_empty() {
+                // Direct-mode host: no perch to forward to — list over ssh.
+                // Bounded and on a spawned task, so a slow devpod can't block
+                // this connection's message loop.
+                if let Some(host) = direct_host(state, target) {
+                    let out_tx = state.out_tx.clone();
+                    let target = target.to_string();
+                    tokio::spawn(async move {
+                        match crate::detached::browse_remote(&host.ssh_host, path.as_deref(), 30).await {
+                            Ok((resolved, parent, home, entries)) => {
+                                let _ = out_tx.send(ServerMessage::FsBrowseResult {
+                                    request_id,
+                                    host_id: target,
+                                    path: resolved,
+                                    parent,
+                                    home,
+                                    entries,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = out_tx.send(ServerMessage::Error {
+                                    message: format!("browse failed on {target}: {e}"),
+                                });
+                            }
+                        }
+                    });
+                    return;
+                }
+                state.app.hub.register_unicast(
+                    PendingKey::Browse(request_id.clone()),
+                    state.conn_id.clone(),
+                    state.out_tx.clone(),
+                );
+                state.app.hub.forward(target, &strip_host_id(raw_text));
+                return;
+            }
+            let home = std::env::var("HOME").unwrap_or_default();
+            let requested = path.unwrap_or_else(|| home.clone());
+            let expanded = if requested == "~" || requested.starts_with("~/") {
+                if requested == "~" {
+                    home.clone()
+                } else {
+                    format!("{home}{}", &requested[1..])
+                }
+            } else {
+                requested
+            };
+            // Never hard-fail: fall back to home on any invalid/inaccessible
+            // path so the browser always has something to show.
+            let resolved = if std::path::Path::new(&expanded).is_dir() {
+                expanded
+            } else {
+                home.clone()
+            };
+            let resolved_path = std::path::Path::new(&resolved);
+            let parent = resolved_path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| p.to_string_lossy().to_string());
+            let mut entries: Vec<FsEntry> = Vec::new();
+            if let Ok(read_dir) = std::fs::read_dir(resolved_path) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with('.') {
+                        continue; // skip hidden dotdirs
+                    }
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    if !is_dir {
+                        continue;
+                    }
+                    let full_path = entry.path();
+                    let is_git_repo = full_path.join(".git").exists();
+                    entries.push(FsEntry {
+                        name,
+                        path: full_path.to_string_lossy().to_string(),
+                        is_git_repo,
+                    });
+                }
+            }
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            let _ = state.out_tx.send(ServerMessage::FsBrowseResult {
+                request_id,
+                host_id: "local".to_string(),
+                path: resolved,
+                parent,
+                home,
+                entries,
+            });
+        }
+
+        // -------------------------------------------------------------------
+        // Wave 2: git worktree management (ported from herdr — see
+        // `worktree.rs` for the git plumbing and the herdr provenance).
+        //
+        // All three arms share the same shape:
+        //   1. hub-route to the owning host when `hostId` is non-local,
+        //      registering a single-shot `PendingKey::Worktree(requestId)`
+        //      slot so the reply comes back to *this* connection only;
+        //   2. otherwise run the (async, timeout-bounded) git operation on a
+        //      spawned task so the connection's message loop never blocks on
+        //      a subprocess;
+        //   3. reply with exactly one message — `worktree.list.result` /
+        //      `worktree.done` / `worktree.error` — always echoing requestId.
+        // -------------------------------------------------------------------
+        ClientMessage::WorktreeList { request_id, host_id, repo_path } => {
+            if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
+                return;
+            }
+            let out_tx = state.out_tx.clone();
+            tokio::spawn(async move {
+                match crate::worktree::list(&repo_path).await {
+                    Ok(listing) => {
+                        let _ = out_tx.send(ServerMessage::WorktreeListResult {
+                            request_id,
+                            host_id: "local".to_string(),
+                            repo_path,
+                            default_root: listing.default_root,
+                            worktrees: listing
+                                .worktrees
+                                .into_iter()
+                                .map(|w| WorktreeEntry {
+                                    path: w.path,
+                                    branch: w.branch,
+                                    head: w.head,
+                                    is_primary: w.is_primary,
+                                    is_dirty: w.is_dirty,
+                                })
+                                .collect(),
+                        });
+                    }
+                    Err(message) => {
+                        let _ = out_tx.send(ServerMessage::WorktreeError {
+                            request_id,
+                            host_id: "local".to_string(),
+                            message,
+                            dirty: false,
+                        });
+                    }
+                }
+            });
+        }
+
+        ClientMessage::WorktreeCreate {
+            request_id,
+            host_id,
+            repo_path,
+            branch,
+            new_branch,
+            path,
+        } => {
+            if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
+                return;
+            }
+            let out_tx = state.out_tx.clone();
+            tokio::spawn(async move {
+                let result =
+                    crate::worktree::create(&repo_path, &branch, new_branch, path.as_deref()).await;
+                let _ = out_tx.send(match result {
+                    Ok(created) => ServerMessage::WorktreeDone {
+                        request_id,
+                        host_id: "local".to_string(),
+                        action: "create".to_string(),
+                        path: created,
+                    },
+                    Err(err) => ServerMessage::WorktreeError {
+                        request_id,
+                        host_id: "local".to_string(),
+                        message: err.message,
+                        dirty: err.dirty,
+                    },
+                });
+            });
+        }
+
+        ClientMessage::WorktreeRemove {
+            request_id,
+            host_id,
+            repo_path,
+            path,
+            force,
+        } => {
+            if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
+                return;
+            }
+            let out_tx = state.out_tx.clone();
+            tokio::spawn(async move {
+                let result = crate::worktree::remove(&repo_path, &path, force).await;
+                let _ = out_tx.send(match result {
+                    Ok(()) => ServerMessage::WorktreeDone {
+                        request_id,
+                        host_id: "local".to_string(),
+                        action: "remove".to_string(),
+                        path,
+                    },
+                    Err(err) => ServerMessage::WorktreeError {
+                        request_id,
+                        host_id: "local".to_string(),
+                        message: err.message,
+                        dirty: err.dirty,
+                    },
+                });
+            });
+        }
     }
+}
+
+/// Look up a configured host and return it only if it is a `mode: "direct"`
+/// host. Every direct-mode branch in `handle_message` funnels through this, so
+/// a host whose mode is `"perch"` (or that has been deleted) always falls
+/// through to the pre-existing hub path unchanged.
+fn direct_host(state: &Arc<ConnState>, host_id: &str) -> Option<crate::hosts::SshHost> {
+    state
+        .app
+        .hosts
+        .get(host_id)
+        .filter(|h| h.is_direct() && !h.ssh_host.is_empty())
+}
+
+/// Create a session that lives in *this* DB but runs on a direct host.
+///
+/// Deliberately does **not** validate the cwd: doing so would cost an ssh
+/// round trip on the message loop for every new session, and the cwd is
+/// already chosen from the remote directory browser (`fs.browse` over ssh).
+/// A bad path fails on the first turn with the remote shell's own message.
+fn create_direct_session(state: &Arc<ConnState>, host: &crate::hosts::SshHost, cwd: Option<String>) {
+    let Some(cwd) = cwd.filter(|c| !c.trim().is_empty()) else {
+        let _ = state.out_tx.send(ServerMessage::Error {
+            message: format!("pick a directory on {} to start a session there", host.name),
+        });
+        return;
+    };
+    let session_id = Uuid::new_v4().to_string();
+    state.app.registry.create(&session_id, &cwd);
+    insert_runtime_on_host(state, &session_id, &cwd, &host.id, None, None, None);
+    set_active_session(state, &session_id);
+    let _ = state.out_tx.send(ServerMessage::SessionCreated {
+        session_id: session_id.clone(),
+    });
+}
+
+/// Model alias to pass on a claude CLI attach, from the session's last
+/// completed turn — only meaningful when that turn *was* claude (aliases are
+/// per-agent). Without it claude falls back to the dated snapshot id in its
+/// transcript, which the GenAI proxy rejects.
+fn claude_model_of(row: &crate::db::SessionRow) -> Option<String> {
+    if row.last_agent.as_deref() == Some("claude") {
+        row.last_model.clone()
+    } else {
+        None
+    }
+}
+
+/// Codex counterpart of [`claude_model_of`].
+fn codex_model_of(row: &crate::db::SessionRow) -> Option<String> {
+    if row.last_agent.as_deref() == Some("codex") {
+        row.last_model.clone()
+    } else {
+        None
+    }
+}
+
+/// Strip the `hostId` field from a raw client-message JSON before forwarding
+/// it to the owning remote, so the remote handles the request *locally*
+/// instead of trying to route it onward to a host id it has never heard of.
+/// Same reasoning as the hand-built forward JSON in the `SessionCreate` arm,
+/// generalized so any request-correlated `hostId`-carrying message can reuse
+/// it (`fs.browse`, `worktree.*`).
+fn strip_host_id(raw_text: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(raw_text) {
+        Ok(serde_json::Value::Object(mut map)) => {
+            map.remove("hostId");
+            serde_json::to_string(&serde_json::Value::Object(map))
+                .unwrap_or_else(|_| raw_text.to_string())
+        }
+        _ => raw_text.to_string(),
+    }
+}
+
+/// Hub-routing preamble shared by the request-correlated `worktree.*` family.
+/// Registers a single-shot unicast slot keyed by `requestId` (so the remote's
+/// one reply reaches only the connection that asked) and forwards the
+/// host-stripped request. Returns `true` when the message was routed — the
+/// caller must return immediately in that case.
+fn route_worktree_request(
+    state: &Arc<ConnState>,
+    host_id: Option<&str>,
+    request_id: &str,
+    raw_text: &str,
+) -> bool {
+    let target = host_id.unwrap_or("local");
+    if target == "local" || target.is_empty() {
+        return false;
+    }
+    state.app.hub.register_unicast(
+        PendingKey::Worktree(request_id.to_string()),
+        state.conn_id.clone(),
+        state.out_tx.clone(),
+    );
+    state.app.hub.forward(target, &strip_host_id(raw_text));
+    true
 }
 
 fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEvent) {
@@ -1563,6 +2276,9 @@ fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         },
         default_cwd: s.default_cwd.clone(),
         theme: s.theme.clone(),
+        sound_enabled: s.sound_enabled,
+        toast_delivery: s.toast_delivery.clone(),
+        chat_mode: s.chat_mode.clone(),
     }
 }
 
@@ -1580,6 +2296,7 @@ fn host_to_wire(h: crate::hosts::SshHost) -> SshHostEntry {
         ssh_host: h.ssh_host,
         remote_port: h.remote_port,
         enabled: h.enabled,
+        mode: h.mode,
         direct_url: h.direct_url,
         remote_cmd: h.remote_cmd,
     }
@@ -1592,6 +2309,10 @@ fn wire_to_host(h: SshHostEntry) -> crate::hosts::SshHost {
         ssh_host: h.ssh_host,
         remote_port: h.remote_port,
         enabled: h.enabled,
+        // An unrecognised value from a client degrades to `"perch"` rather
+        // than being stored verbatim, so a typo can't leave a host in a mode
+        // nothing handles (see `hosts::HostMode`).
+        mode: if h.mode == "direct" { h.mode } else { "perch".to_string() },
         direct_url: h.direct_url,
         remote_cmd: h.remote_cmd,
     }

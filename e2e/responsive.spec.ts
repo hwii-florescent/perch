@@ -138,7 +138,11 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     sessionAId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
     expect(sessionAId).toBeTruthy();
 
+    // Wave 1 item 1: tab-bar "+" opens a directory-browser popover; the
+    // current project's cwd is preselected as the first quick-pick option.
     await page.locator('[data-testid="tab-new"]').click();
+    await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible({ timeout: 5000 });
+    await page.locator('[data-testid="project-option-0"]').click();
     await sendAndWait(page, "Reply with exactly: RESP-BETA");
     sessionBId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
     expect(sessionBId).toBeTruthy();

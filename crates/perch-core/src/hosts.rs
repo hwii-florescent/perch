@@ -34,6 +34,38 @@ fn default_enabled() -> bool {
     true
 }
 
+fn default_mode() -> String {
+    "perch".to_string()
+}
+
+/// How perch talks to a host.
+///
+/// * `"perch"` (default, and what every pre-existing `hosts.json` entry
+///   deserializes to) — full federation: ssh tunnel to a *perch install* on
+///   the remote, which owns its own sessions and DB. See `hub.rs`.
+/// * `"direct"` — the remote has **no perch**, only `claude`/`codex` + `tmux`.
+///   perch drives the CLIs itself over ssh, running each hosted turn detached
+///   so it survives the laptop closing *and* perch quitting. Sessions live in
+///   the *local* DB tagged with this host's id. See `detached.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMode {
+    Perch,
+    Direct,
+}
+
+impl SshHost {
+    pub fn mode_kind(&self) -> HostMode {
+        match self.mode.as_str() {
+            "direct" => HostMode::Direct,
+            _ => HostMode::Perch,
+        }
+    }
+
+    pub fn is_direct(&self) -> bool {
+        self.mode_kind() == HostMode::Direct
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SshHost {
@@ -44,6 +76,12 @@ pub struct SshHost {
     pub remote_port: u16,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// `"perch"` (default) or `"direct"` — see [`HostMode`]. A plain `String`
+    /// rather than an enum so an unknown value written by a newer perch
+    /// degrades to `"perch"` instead of failing the whole file's parse (the
+    /// store's error path drops *every* host on a parse error).
+    #[serde(default = "default_mode")]
+    pub mode: String,
     /// Skip SSH tunnel; connect directly to this WS URL (e.g. `ws://127.0.0.1:7800/ws`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct_url: Option<String>,
@@ -61,6 +99,7 @@ impl Default for SshHost {
             ssh_host: String::new(),
             remote_port: default_remote_port(),
             enabled: default_enabled(),
+            mode: default_mode(),
             direct_url: None,
             remote_cmd: None,
         }
@@ -115,6 +154,14 @@ impl HostsStore {
     /// Return the current list of hosts.
     pub fn list(&self) -> Vec<SshHost> {
         self.inner.lock().unwrap().hosts.clone()
+    }
+
+    /// Look up a single host by id. Used by the direct-mode (`detached.rs`)
+    /// paths in `server.rs`, which need the host's `sshHost` and `mode` to
+    /// decide whether a session is driven over ssh rather than through the
+    /// hub's WS connection.
+    pub fn get(&self, id: &str) -> Option<SshHost> {
+        self.inner.lock().unwrap().hosts.iter().find(|h| h.id == id).cloned()
     }
 
     /// Insert or update a host by id (upsert).

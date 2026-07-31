@@ -30,7 +30,7 @@
  * changing which element actually holds focus.
  */
 import { useEffect, useRef } from "react";
-import { usePerchStore, activeProjectSessions } from "./store";
+import { usePerchStore, activeProjectSessions, effectiveActiveProject } from "./store";
 import { getDockviewController } from "./dockview/dockviewController";
 
 const LEADER_TIMEOUT_MS = 1500;
@@ -56,6 +56,7 @@ export const KEYBINDS: KeybindEntry[] = [
   { keys: "Ctrl+Space, b", description: "Toggle sidebar collapse", group: "navigation" },
   { keys: "Ctrl+Space, s", description: "Open Settings", group: "navigation" },
   { keys: "Ctrl+Space, w", description: "Jump to the next project's most recent session", group: "navigation" },
+  { keys: "Ctrl+Space, W", description: "Open the worktree menu for the current project", group: "navigation" },
   { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "navigation" },
   { keys: "Ctrl+Space, c", description: "New session in the current project", group: "sessions" },
   { keys: "Ctrl+Space, n", description: "Next session in the current project", group: "sessions" },
@@ -63,8 +64,13 @@ export const KEYBINDS: KeybindEntry[] = [
   { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current project", group: "sessions" },
   { keys: "Ctrl+Space, x", description: "Close the current terminal pane", group: "panes" },
   { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "panes" },
-  { keys: "Ctrl+Space, -", description: "Split pane horizontally (new terminal below)", group: "panes" },
+  { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "panes" },
   { keys: "Ctrl+Space, z", description: "Maximize / restore the focused pane", group: "panes" },
+  { keys: "Ctrl+Space, h/j/k/l", description: "Focus the pane to the left/below/above/right", group: "panes" },
+  { keys: "Ctrl+Space, o", description: "Cycle focus to the next pane", group: "panes" },
+  { keys: "Ctrl+Space, }", description: "Swap the focused pane with the next one", group: "panes" },
+  { keys: "Ctrl+Space, +", description: "Grow the focused pane", group: "panes" },
+  { keys: "Ctrl+Space, -", description: "Shrink the focused pane", group: "panes" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -120,8 +126,8 @@ function jumpToNextProject(): void {
   for (const g of groups.values()) g.sessions.sort((a, b) => b.createdAt - a.createdAt);
   const ordered = [...groups.entries()].sort((a, b) => b[1].newestAt - a[1].newestAt);
 
-  const current = state.sessions.find((s) => s.id === state.sessionId);
-  const currentKey = current ? `${current.hostId ?? "local"}:${current.cwd ?? "(unknown)"}` : null;
+  const current = effectiveActiveProject(state);
+  const currentKey = current ? `${current.hostId}:${current.cwd}` : null;
   const idx = ordered.findIndex(([key]) => key === currentKey);
   const nextIdx = idx === -1 ? 0 : (idx + 1) % ordered.length;
   const target = ordered[nextIdx]?.[1].sessions[0];
@@ -130,10 +136,28 @@ function jumpToNextProject(): void {
 
 function newSessionInCurrentProject(): void {
   const state = usePerchStore.getState();
-  const current = state.sessions.find((s) => s.id === state.sessionId);
-  const hostId = current?.hostId ?? state.activeHostId;
-  const cwd = current?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined);
+  const project = effectiveActiveProject(state);
+  const hostId = project?.hostId ?? state.activeHostId;
+  const cwd = project?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined);
   state.createSessionOnHost(hostId, cwd);
+}
+
+/**
+ * Worktree menu for the active project (leader,W — capital, so it does not
+ * collide with leader,w's next-project jump). Resolves the active session's
+ * `(hostId, cwd)` project key and asks that project's `WorktreeMenu` in the
+ * sidebar to open itself (see `worktreeMenuRequest` in the store). No-op when
+ * there is no active project cwd, or when the cwd is not a git repo — in the
+ * latter case the sidebar never renders a menu for that project, so nothing
+ * consumes the request and it is simply ignored.
+ */
+function openWorktreeMenuForActiveProject(): void {
+  const state = usePerchStore.getState();
+  const project = effectiveActiveProject(state);
+  const hostId = project?.hostId ?? state.activeHostId;
+  const cwd = project?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined);
+  if (!cwd) return;
+  state.requestWorktreeMenu(`${hostId}:${cwd}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +176,29 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   p: () => usePerchStore.getState().switchSessionRelative(-1),
   x: () => getDockviewController()?.closeActiveTerminalPanel(),
   v: () => getDockviewController()?.addTerminalPanel("right"),
-  "-": () => getDockviewController()?.addTerminalPanel("below"),
+  // Wave 2 item 8: split-horizontal moved from leader,- to leader,_ (shift+-)
+  // to free up leader,-/leader,+ for the new grow/shrink resize chords below
+  // — a plain minus/equals pair mirrors how resize is usually spoken about
+  // ("shrink"/"grow"), and `s` was already taken by Settings so `_`/`-`/`+`
+  // (all reachable off the same physical key) was the cleanest free slot.
+  "_": () => getDockviewController()?.addTerminalPanel("below"),
   z: () => getDockviewController()?.toggleMaximizeActive(),
   b: () => usePerchStore.getState().toggleSidebar(),
   s: () => usePerchStore.getState().setSettingsOpen(true),
   "?": (h) => h.openKeybindHelp(),
   w: () => jumpToNextProject(),
+  // Capital W (shift+w) — deliberately a *separate* binding from lowercase w,
+  // resolved by the exact-key lookup in `handleKeyDown` below.
+  W: () => openWorktreeMenuForActiveProject(),
+  // Directional pane focus (Wave 2 item 8) — mirrors vim/tmux h/j/k/l.
+  h: () => getDockviewController()?.focusPaneDirection("left"),
+  j: () => getDockviewController()?.focusPaneDirection("down"),
+  k: () => getDockviewController()?.focusPaneDirection("up"),
+  l: () => getDockviewController()?.focusPaneDirection("right"),
+  o: () => getDockviewController()?.cycleToNextPane(),
+  "}": () => getDockviewController()?.swapActivePaneWithNext(),
+  "+": () => getDockviewController()?.growActivePane(),
+  "-": () => getDockviewController()?.shrinkActivePane(),
 };
 for (let i = 1; i <= 9; i++) {
   CHORD_ACTIONS[String(i)] = () => jumpToNthProjectSession(i);
@@ -199,7 +240,10 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       if (armedRef.current) {
         if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
         disarm();
-        const action = CHORD_ACTIONS[e.key.toLowerCase()];
+        // Exact-key lookup first so shifted bindings (leader,W → worktree
+        // menu) stay distinct from their lowercase counterparts (leader,w →
+        // next project); everything else still resolves case-insensitively.
+        const action = CHORD_ACTIONS[e.key] ?? CHORD_ACTIONS[e.key.toLowerCase()];
         if (action) {
           e.preventDefault();
           action(handlersRef.current);

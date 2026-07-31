@@ -8,13 +8,51 @@
  *
  * B2 "model chip absent in CLI mode, present in Hosted":
  *   Run a quick hosted turn so there is a claude_session_id for CLI attach.
- *   Toggle ModeSwitch to CLI — assert model chip is NOT visible.
- *   Toggle back to Hosted — assert model chip IS visible again.
+ *   Flip the global chat mode setting to CLI — assert model chip is NOT visible.
+ *   Flip back to Hosted — assert model chip IS visible again.
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 const BASE_URL = "http://127.0.0.1:7799";
+
+// ---------------------------------------------------------------------------
+// Chat mode settings helpers (global setting lives in ~/.perch/settings.json,
+// not isolated per e2e server — must reset so later specs see Hosted default)
+// ---------------------------------------------------------------------------
+
+const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+
+function resetChatMode(): void {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) return;
+    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    data.chatMode = "hosted";
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+  } catch {
+    /* leave alone */
+  }
+}
+
+/** Flip the global chat mode via the Settings modal and wait for it to apply. */
+async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
+  await page.locator('[data-testid="settings-gear"]').click();
+  await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+  const toggle = page.locator('[data-testid="settings-chat-mode"]');
+  await expect(toggle).toBeVisible({ timeout: 5000 });
+  const wantChecked = mode === "cli" ? "true" : "false";
+  const current = await toggle.getAttribute("aria-checked");
+  if (current !== wantChecked) {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", wantChecked, { timeout: 5000 });
+  }
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +98,7 @@ test.describe("Stage B: model catalogue + agent-bar", () => {
   let claudeAvailable = false;
 
   test.beforeAll(async () => {
+    resetChatMode();
     const { execSync } = await import("child_process");
     try {
       execSync("which claude", { encoding: "utf8" });
@@ -67,6 +106,10 @@ test.describe("Stage B: model catalogue + agent-bar", () => {
     } catch {
       claudeAvailable = false;
     }
+  });
+
+  test.afterAll(() => {
+    resetChatMode();
   });
 
   // ---------------------------------------------------------------------------
@@ -129,20 +172,16 @@ test.describe("Stage B: model catalogue + agent-bar", () => {
 
     await page.screenshot({ path: "artifacts/B2-01-hosted-bar-visible.png" });
 
-    // Toggle to CLI mode.
-    const modeSwitch = page.locator(".mode-switch");
-    await expect(modeSwitch).toBeVisible({ timeout: 5000 });
-    await modeSwitch.click();
-    await expect(modeSwitch).toHaveAttribute("aria-checked", "true", { timeout: 5000 });
+    // Flip global chat mode to CLI via Settings.
+    await setChatMode(page, "cli");
 
     // Model chip must be hidden/absent in CLI mode.
     await expect(chip).not.toBeVisible({ timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/B2-02-cli-bar-hidden.png" });
 
-    // Toggle back to Hosted mode.
-    await modeSwitch.click();
-    await expect(modeSwitch).toHaveAttribute("aria-checked", "false", { timeout: 5000 });
+    // Flip back to Hosted mode.
+    await setChatMode(page, "hosted");
 
     // Model chip must be visible again.
     await expect(chip).toBeVisible({ timeout: 5000 });

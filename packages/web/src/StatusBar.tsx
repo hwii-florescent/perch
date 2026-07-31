@@ -42,6 +42,13 @@ export function StatusBar() {
       <span className="status-item">{status?.branch ?? ""}</span>
       <span className="status-item">ctx {formatTokens(status?.contextTokens)}</span>
       <span className="status-item">{formatCost(status?.costUsd)}</span>
+      {/* herdr renders its bottom bars as "key" (accent, bold) + "description"
+       * (dim) pairs — see `reference/herdr/src/ui/navigator.rs::render_footer`.
+       * This mirrors that for the always-visible leader-key hint; the full
+       * table lives behind `?` / KeybindHelp (see keybinds.ts). */}
+      <span className="status-item status-hint" title="Open the keybind help overlay">
+        <kbd className="status-hint__key">ctrl+space</kbd> leader
+      </span>
     </footer>
   );
 }

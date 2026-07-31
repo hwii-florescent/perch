@@ -4,12 +4,30 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts"],
+  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "nav.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts", "wave1.spec.ts", "worktrees.spec.ts", "wave2.spec.ts", "chat-ui.spec.ts", "chat-mode.spec.ts", "detached.spec.ts"],
   outputDir: "artifacts",
   timeout: 120000,
   use: {
     baseURL: "http://127.0.0.1:7799",
     screenshot: "on",
+    // Wave 2 item 11 (onboarding modal) shows once per fresh browser
+    // profile — but Playwright gives every test its own brand-new,
+    // fully-isolated context by default, so *every* test's first page load
+    // would otherwise be a fresh profile and get the modal (a fixed,
+    // very-high-z-index overlay) blocking all interaction. Pre-seed the
+    // "already seen" flag globally here so the existing suite (and wave2's
+    // own X1/X2/X3/X5 tests) never see it; wave2.spec.ts's X4 test (which
+    // specifically exercises the onboarding flow) overrides this back to an
+    // empty storageState for just that one test via `test.use(...)`.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: "http://127.0.0.1:7799",
+          localStorage: [{ name: "perch.onboarding.seen", value: "1" }],
+        },
+      ],
+    },
   },
   projects: [
     {
@@ -20,16 +38,20 @@ export default defineConfig({
   workers: 1,
   webServer: [
     {
-      // Instance A — the hub (UI runs against this one)
-      command: "cargo run -p perch-core -- --port 7799",
+      // Instance A — the hub (UI runs against this one). Isolated /tmp
+      // db+hosts (same pattern as instance B below) so e2e runs never touch
+      // the developer's real ~/.perch/history.sqlite or hosts.json — a
+      // previous version of this config pointed at the real paths and a
+      // flaky run left ~165 junk sessions in the real DB.
+      command: "cargo run -p perch-core -- --port 7799 --db-path /tmp/perch-e2e-hub.sqlite --hosts-path /tmp/perch-e2e-hub-hosts.json",
       cwd: path.resolve(__dirname, ".."),
       url: "http://127.0.0.1:7799/",
       reuseExistingServer: true,
       timeout: 60000,
       env: {
         // Point at real HOME so the claude CLI can find its credentials.
-        // Pre-existing sessions are treated as background noise — tests assert
-        // on relative count changes and specific new items, not absolute counts.
+        // Sessions are created fresh by each test run against the isolated
+        // db above — no more "pre-existing sessions are background noise".
         HOME: os.homedir(),
         // Include ~/.cargo/bin so cargo/rustc are on PATH for the webServer command.
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,

@@ -6,8 +6,12 @@
  *         message is sent (real claude-haiku-4-5 turn, 90 s timeout)
  *   S3 — clicking "+" twice with an empty active session does not produce
  *         two sessions
- *   S4 — archive: archive the S2 session via ⋯ menu → row disappears;
- *         toggle-archived shows it dimmed; unarchive restores it
+ *   S4 — archive: archive the S2 session via the row's hover archive icon →
+ *         row disappears; the Settings "show archived sessions" toggle shows
+ *         it dimmed; unarchive restores it
+ *   S5 — delete: hover trash icon deletes a session immediately (no
+ *         confirmation) and permanently (survives reload), for both a
+ *         non-active and the currently-active session
  *
  * All tests are headless (no --headed / --ui).  Tests that require a real
  * agent turn require `claude` on PATH (same pattern as sidebar.spec.ts).
@@ -88,29 +92,32 @@ test.describe("Session lifecycle fixes", () => {
     const noneBtn = page.locator('[data-testid="project-option-none"]');
     await expect(noneBtn).toBeVisible({ timeout: 5000 });
 
-    // Also check for free-text input and Create button.
+    // Also check for the directory browser (Wave 1) and its "Type path"
+    // fallback (free-text input + confirm button).
+    await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible();
+    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
     await expect(page.locator('[data-testid="project-path-input"]')).toBeVisible();
-    await expect(page.locator('[data-testid="project-create"]')).toBeVisible();
+    await expect(page.locator('[data-testid="dir-browser-use"]')).toBeVisible();
+    // Switch back to Browse mode before continuing with the "No project" flow.
+    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
 
     // Click "No project" — sends session.create with cwd "~".
-    const countBefore = await page.locator(".session-item").count();
     await noneBtn.click();
 
     // Popover closes.
     await expect(noneBtn).not.toBeVisible({ timeout: 3000 });
 
-    // The blank session is in-memory only — the sidebar should NOT immediately
-    // show a new row (Fix 3). Instead, the active session is the new blank one.
-    // No count increase in the sidebar until a message is sent.
+    // The blank session is in-memory only — it must NOT get a sidebar row
+    // (Fix 3). Asserted per-id rather than by comparing list lengths: the
+    // sidebar lists only the *active project's* sessions, so switching
+    // projects legitimately changes how many rows are on screen.
     await page.waitForTimeout(1000); // brief settle
-    const countAfter = await page.locator(".session-item").count();
-    // Either no change, or at most the same count (blank session not in list).
-    expect(countAfter).toBeLessThanOrEqual(countBefore);
 
     // Composer should be focused / ready (we have an active session).
     // Verify a session.created came back by checking sessionId in localStorage.
     const storedId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     expect(storedId).toBeTruthy();
+    await expect(page.locator(`.session-item[data-session-id="${storedId}"]`)).toHaveCount(0);
 
     await page.screenshot({ path: "artifacts/s1-picker-no-project.png" });
   });
@@ -136,23 +143,27 @@ test.describe("Session lifecycle fixes", () => {
       await freshPage(page1);
       await waitForSessionList(page1);
 
-      const countBefore1 = await page1.locator(".session-item").count();
-
       await openLocalPicker(page1);
       await page1.locator('[data-testid="project-option-none"]').click();
-
-      // Blank session: sidebar count must NOT increase yet.
       await page1.waitForTimeout(800);
-      const countAfterCreate1 = await page1.locator(".session-item").count();
-      expect(countAfterCreate1).toBeLessThanOrEqual(countBefore1);
 
-      // --- Page 2: connect independently, record its session count ---
+      // Blank session: no sidebar row yet (Fix 3). Per-id, because the
+      // sidebar only lists the active project's sessions.
+      const blankId = await page1.evaluate(() => localStorage.getItem("perch.sessionId"));
+      expect(blankId).toBeTruthy();
+      await expect(page1.locator(`.session-item[data-session-id="${blankId}"]`)).toHaveCount(0);
+
+      // --- Page 2: connect independently, scoped to the same project ---
       await freshPage(page2);
       await waitForSessionList(page2);
-      const countOnPage2Before = await page2.locator(".session-item").count();
+      // Create its own blank "No project" session so page2's sidebar is
+      // scoped to the same (home-dir) project page1 is working in.
+      await openLocalPicker(page2);
+      await page2.locator('[data-testid="project-option-none"]').click();
+      await page2.waitForTimeout(800);
 
-      // Blank session not in page2's sidebar either.
-      expect(countOnPage2Before).toBeLessThanOrEqual(countBefore1);
+      // Page1's blank session is not in page2's sidebar either.
+      await expect(page2.locator(`.session-item[data-session-id="${blankId}"]`)).toHaveCount(0);
 
       // --- Page 1: send a real turn → triggers lazy DB insert ---
       // Select claude-haiku-4-5 via ModelChip.
@@ -174,14 +185,18 @@ test.describe("Session lifecycle fixes", () => {
 
       // --- Now the session has messages — it should appear in BOTH sidebars ---
 
-      // Page1: session count must be >= countBefore1 + 1.
-      await expect(page1.locator(".session-item")).toHaveCount(countBefore1 + 1, { timeout: 10000 });
+      // Page1: the previously-blank session now has a row.
+      await expect(page1.locator(`.session-item[data-session-id="${blankId}"]`)).toBeVisible({
+        timeout: 10000,
+      });
 
       // Capture the new session's id for S4.
-      s2SessionId = await page1.locator(".session-item--active").getAttribute("data-session-id") ?? "";
+      s2SessionId = blankId as string;
 
       // Page2: session.updated broadcast should make the row appear.
-      await expect(page2.locator(".session-item")).toHaveCount(countOnPage2Before + 1, { timeout: 15000 });
+      await expect(page2.locator(`.session-item[data-session-id="${blankId}"]`)).toBeVisible({
+        timeout: 15000,
+      });
 
       await page1.screenshot({ path: "artifacts/s2-after-first-message.png" });
       await page2.screenshot({ path: "artifacts/s2-page2-sees-session.png" });
@@ -224,9 +239,9 @@ test.describe("Session lifecycle fixes", () => {
   });
 
   // -------------------------------------------------------------------------
-  // S4 — archive the S2 session; toggle-archived shows it dimmed; unarchive
+  // S4 — archive the S2 session; the Settings show-archived toggle reveals it dimmed; unarchive
   // -------------------------------------------------------------------------
-  test("S4. archive session via ⋯ menu, toggle-archived shows/hides it", async ({ page }) => {
+  test("S4. archive session via row icon, Settings toggle shows/hides it", async ({ page }) => {
     if (!claudeAvailable) {
       test.skip(true, "claude binary not found — S2 skipped so no session to archive");
       return;
@@ -243,16 +258,11 @@ test.describe("Session lifecycle fixes", () => {
     const sessionItem = page.locator(`.session-item[data-session-id="${s2SessionId}"]`);
     await expect(sessionItem).toBeVisible({ timeout: 10000 });
 
-    // Hover to reveal the ⋯ menu button.
+    // Hover to reveal the row's archive icon.
     const wrapper = page.locator(`.session-item__wrapper:has([data-session-id="${s2SessionId}"])`);
     await wrapper.hover();
 
-    const menuBtn = page.locator(`[data-testid="session-menu-${s2SessionId}"]`);
-    await expect(menuBtn).toBeVisible({ timeout: 5000 });
-    await menuBtn.click();
-
-    // Archive option must appear.
-    const archiveBtn = page.locator(`[data-testid="session-archive-${s2SessionId}"]`);
+    const archiveBtn = page.locator(`[data-testid="session-archive-icon-${s2SessionId}"]`);
     await expect(archiveBtn).toBeVisible({ timeout: 5000 });
     await archiveBtn.click();
 
@@ -261,34 +271,140 @@ test.describe("Session lifecycle fixes", () => {
 
     await page.screenshot({ path: "artifacts/s4-archived-hidden.png" });
 
-    // Click "Show archived" toggle — row reappears, dimmed.
-    const toggleBtn = page.locator('[data-testid="toggle-archived"]');
-    await expect(toggleBtn).toBeVisible({ timeout: 5000 });
-    await toggleBtn.click();
+    // Open Settings and enable "Show archived sessions" — row reappears, dimmed.
+    await page.locator('[data-testid="settings-gear"]').click();
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+    const showArchivedToggle = page.locator('[data-testid="settings-show-archived"]');
+    await expect(showArchivedToggle).toBeVisible({ timeout: 5000 });
+    await expect(showArchivedToggle).not.toBeChecked();
+    await showArchivedToggle.check();
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
 
     await expect(sessionItem).toBeVisible({ timeout: 8000 });
     await expect(sessionItem).toHaveClass(/session-item--archived/, { timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/s4-archived-visible.png" });
 
-    // Unarchive: hover + ⋯ again.
+    // Unarchive: hover the row's archive icon again — it now unarchives.
     await wrapper.hover();
-    await expect(menuBtn).toBeVisible({ timeout: 5000 });
-    await menuBtn.click();
+    await expect(archiveBtn).toBeVisible({ timeout: 5000 });
+    await expect(archiveBtn).toHaveAttribute("title", "Unarchive session");
+    await archiveBtn.click();
 
-    const unarchiveBtn = page.locator(`[data-testid="session-archive-${s2SessionId}"]`);
-    await expect(unarchiveBtn).toBeVisible({ timeout: 5000 });
-    // Should now say "Unarchive"
-    await expect(unarchiveBtn).toHaveText("Unarchive", { timeout: 3000 });
-    await unarchiveBtn.click();
-
-    // Hide archived again.
-    await toggleBtn.click();
+    // Hide archived again via Settings.
+    await page.locator('[data-testid="settings-gear"]').click();
+    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+    await expect(showArchivedToggle).toBeChecked();
+    await showArchivedToggle.uncheck();
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
 
     // Session now restored — should appear even without showArchived.
     await expect(sessionItem).toBeVisible({ timeout: 8000 });
     await expect(sessionItem).not.toHaveClass(/session-item--archived/);
 
     await page.screenshot({ path: "artifacts/s4-unarchived.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // S5 — delete: hover trash icon deletes a session immediately (no
+  //      confirmation), whether or not it's the active session
+  // -------------------------------------------------------------------------
+  test("S5. delete session via hover trash icon — immediate, no confirmation", async ({ page }) => {
+    test.setTimeout(150000);
+
+    if (!claudeAvailable) {
+      test.skip(true, "claude binary not found — S5 needs real sessions (require a first message to appear in the sidebar)");
+      return;
+    }
+
+    /** Create a session via the picker, send one message, and wait for the
+     * turn to finish so the row is persisted and visible in the sidebar.
+     * Returns the new session's id. */
+    async function createAndFinishSession(label: string): Promise<string> {
+      await openLocalPicker(page);
+      await page.locator('[data-testid="project-option-none"]').click();
+
+      const chip = page.locator('[data-testid="model-chip"]');
+      await expect(chip).toBeVisible({ timeout: 10000 });
+      await chip.click();
+      await page.locator('[data-testid="agent-option-claude"]').click();
+      await page.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
+
+      const textarea = page.locator(".chat__input textarea");
+      await expect(textarea).toBeEnabled({ timeout: 8000 });
+      await textarea.fill(`S5-${label}-${Date.now()}`);
+      await page.locator(".chat__send").click();
+
+      const runningDot = page.locator(".session-item--active .session-status--running");
+      await expect(runningDot).toBeVisible({ timeout: 20000 });
+      await expect(runningDot).not.toBeVisible({ timeout: 90000 });
+
+      const id = await page.locator(".session-item--active").getAttribute("data-session-id");
+      expect(id).toBeTruthy();
+      return id as string;
+    }
+
+    await freshPage(page);
+    await waitForSessionList(page);
+
+    // Two real, persisted sessions: A (created first, will be inactive once B
+    // is created) and B (active — created second, so it's the current session).
+    const sessionAId = await createAndFinishSession("A");
+    const sessionBId = await createAndFinishSession("B");
+
+    const rowA = page.locator(`.session-item[data-session-id="${sessionAId}"]`);
+    const rowB = page.locator(`.session-item[data-session-id="${sessionBId}"]`);
+    await expect(rowA).toBeVisible({ timeout: 10000 });
+    await expect(rowB).toBeVisible({ timeout: 10000 });
+    // B is the session we just finished sending from, so it's active.
+    await expect(rowB).toHaveClass(/session-item--active/);
+
+    // --- Delete A (non-active) via the one-click hover trash icon: this is
+    // an immediate delete — no confirmation dialog gates it (unlike worktree
+    // removal or a multi-tab terminal-group close).
+    const wrapperA = page.locator(`.session-item__wrapper:has([data-session-id="${sessionAId}"])`);
+    await wrapperA.hover();
+    const deleteIconA = page.locator(`[data-testid="session-delete-icon-${sessionAId}"]`);
+    await expect(deleteIconA).toBeVisible({ timeout: 5000 });
+    await deleteIconA.click();
+
+    await expect(page.locator('[data-testid="confirm-dialog"]')).toHaveCount(0);
+    await expect(rowA).not.toBeVisible({ timeout: 10000 });
+    // B (untouched, and not the one deleted) must remain active — deleting a
+    // non-active session must not disturb the current session.
+    await expect(rowB).toHaveClass(/session-item--active/);
+
+    await page.screenshot({ path: "artifacts/s5-01-icon-deleted-a.png" });
+
+    // Deletion is a real server-side delete, not just a client-side hide:
+    // reload and confirm A never comes back.
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
+    await expect(page.locator(`.session-item[data-session-id="${sessionAId}"]`)).toHaveCount(0, { timeout: 10000 });
+    // B should still be there (and still the resumed active session).
+    await expect(page.locator(`.session-item[data-session-id="${sessionBId}"]`)).toBeVisible({ timeout: 10000 });
+
+    // --- Delete B (the ACTIVE session), also via the one-click hover trash
+    // icon — no confirmation this time either.
+    const wrapperB = page.locator(`.session-item__wrapper:has([data-session-id="${sessionBId}"])`);
+    await wrapperB.hover();
+    const deleteIconB = page.locator(`[data-testid="session-delete-icon-${sessionBId}"]`);
+    await expect(deleteIconB).toBeVisible({ timeout: 5000 });
+    await deleteIconB.click();
+
+    // Row gone.
+    await expect(page.locator(`.session-item[data-session-id="${sessionBId}"]`)).toHaveCount(0, { timeout: 10000 });
+
+    // Deleting the active session must not leave the app stuck on a dead
+    // session id: either another session became active, or we landed on a
+    // clean empty state (no `.session-item--active` at all). Both are valid;
+    // what's invalid is the UI still pointing at the now-deleted B.
+    await page.waitForTimeout(500);
+    const storedId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+    expect(storedId).not.toBe(sessionBId);
+
+    await page.screenshot({ path: "artifacts/s5-02-icon-deleted-b.png" });
   });
 });

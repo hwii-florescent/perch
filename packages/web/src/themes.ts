@@ -4,9 +4,16 @@
  * `Palette` is the 16-token semantic color system lifted from herdr
  * (`herdr-analysis-report.md` §5.15: `accent, panel_bg, surface0, surface1,
  * surface_dim, overlay0, overlay1, text, subtext0, mauve, green, yellow,
- * red, blue, teal, peach`). `THEMES` holds perch's own look (`"perch"`,
- * the default) plus all 18 herdr built-in themes, transcribed verbatim
- * (RGB -> hex) from that report's palette table.
+ * red, blue, teal, peach`). `THEMES` holds all 18 herdr built-in themes,
+ * transcribed verbatim (RGB -> hex) from that report's palette table, plus
+ * perch's own original look (`"perch"`) as a 19th, non-default entry.
+ *
+ * The default theme is `"catppuccin"` (Catppuccin Mocha) — herdr's own
+ * default, see `reference/herdr/src/app/state.rs::Palette::catppuccin()`
+ * and `AppState`'s default `theme_name` — so perch matches herdr's look out
+ * of the box. See `default_theme()` in `crates/perch-core/src/{protocol,
+ * settings}.rs` for the Rust side of this default, and `applyTheme()`'s
+ * fallback below for the client-side one.
  *
  * `applyTheme(name)` sets each token as a CSS custom property on
  * `document.documentElement.style`, which is all `styles.css` needs since
@@ -32,8 +39,10 @@ export interface Palette {
   peach: string;
 }
 
-/** perch's own look — Phase 0's default, matching the original hardcoded
- * `:root` values in `styles.css` before the token system existed. */
+/** perch's own original look — the app's default before herdr-parity
+ * restyling (see module doc above); kept as a selectable, non-default
+ * theme. Matches the original hardcoded `:root` values in `styles.css`
+ * before the token system existed. */
 export const PERCH_DEFAULT: Palette = {
   accent: "#58e6a8",
   panelBg: "#0b0d10",
@@ -55,8 +64,8 @@ export const PERCH_DEFAULT: Palette = {
 
 /**
  * All 18 herdr built-in themes, transcribed verbatim (RGB -> hex) from
- * `herdr-analysis-report.md` §5.15's palette table, plus `"perch"` as the
- * 19th (default) entry.
+ * `herdr-analysis-report.md` §5.15's palette table, plus `"perch"` as a
+ * 19th, non-default entry (perch's own original look).
  *
  * Note on `terminal`: herdr's 16-color "terminal" theme is defined via named
  * ANSI colors (`Blue`, `Reset`, `DarkGray`, `Gray`, `White`, `LightRed`, …)
@@ -67,14 +76,22 @@ export const PERCH_DEFAULT: Palette = {
  * and maps `Reset` to a plain black background / light gray foreground —
  * the closest sane approximation of "whatever the terminal's default is".
  */
+/** Catppuccin Mocha — herdr's own default theme (see module doc above),
+ * and perch's default too. Kept as a standalone typed constant (rather than
+ * read back out of `THEMES.catppuccin`) so `applyTheme`/`xtermThemeFromTokens`
+ * below have a `Palette`-typed fallback: `Record<string, Palette>` indexing
+ * (including `THEMES.catppuccin`) is always `Palette | undefined` under
+ * `noUncheckedIndexedAccess`, which a `??` fallback can't itself resolve. */
+export const CATPPUCCIN_DEFAULT: Palette = {
+  accent: "#89b4fa", panelBg: "#181825", surface0: "#313244", surface1: "#45475a",
+  surfaceDim: "#1e1e2e", overlay0: "#6c7086", overlay1: "#7f849c", text: "#cdd6f4",
+  subtext0: "#a6adc8", mauve: "#cba6f7", green: "#a6e3a1", yellow: "#f9e2af",
+  red: "#f38ba8", blue: "#89b4fa", teal: "#94e2d5", peach: "#fab387",
+};
+
 export const THEMES: Record<string, Palette> = {
   perch: PERCH_DEFAULT,
-  catppuccin: {
-    accent: "#89b4fa", panelBg: "#181825", surface0: "#313244", surface1: "#45475a",
-    surfaceDim: "#1e1e2e", overlay0: "#6c7086", overlay1: "#7f849c", text: "#cdd6f4",
-    subtext0: "#a6adc8", mauve: "#cba6f7", green: "#a6e3a1", yellow: "#f9e2af",
-    red: "#f38ba8", blue: "#89b4fa", teal: "#94e2d5", peach: "#fab387",
-  },
+  catppuccin: CATPPUCCIN_DEFAULT,
   "catppuccin-latte": {
     accent: "#1e66f5", panelBg: "#eff1f5", surface0: "#ccd0da", surface1: "#bcc0cc",
     surfaceDim: "#e6e9ef", overlay0: "#9ca0b0", overlay1: "#8c8fa1", text: "#4c4f69",
@@ -179,8 +196,11 @@ export const THEMES: Record<string, Palette> = {
   },
 };
 
-/** Ordered list of theme names for the Settings UI (perch first, then the
- * 18 herdr themes in the same order as herdr-analysis-report.md §5.15). */
+/** Ordered list of theme names for the Settings UI. `"perch"` is listed
+ * first (it's declared first in `THEMES` above) even though it's no longer
+ * the default theme — reordering the list is cosmetic and out of scope for
+ * the herdr-parity restyle; the default is controlled by `default_theme()`
+ * in Rust and `applyTheme()`'s fallback below, not by list position. */
 export const THEME_NAMES: string[] = Object.keys(THEMES);
 
 const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
@@ -203,10 +223,11 @@ const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
 };
 
 /** Set every semantic token as a CSS custom property on `<html>`. Falls
- * back to `PERCH_DEFAULT` for an unknown/unset theme name so a stale or
- * corrupted `settings.theme` value never leaves the app unstyled. */
+ * back to the default theme (catppuccin) for an unknown/unset theme name so
+ * a stale or corrupted `settings.theme` value never leaves the app
+ * unstyled. */
 export function applyTheme(name: string): void {
-  const palette = THEMES[name] ?? PERCH_DEFAULT;
+  const palette = THEMES[name] ?? CATPPUCCIN_DEFAULT;
   const root = document.documentElement.style;
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
     root.setProperty(TOKEN_CSS_VARS[key], palette[key]);
@@ -217,10 +238,10 @@ export function applyTheme(name: string): void {
  * for xterm's `theme` constructor option. xterm has no CSS-variable support
  * of its own, so PTY-backed terminals (`TerminalView`, `AgentCliTerminal`)
  * read the live token values once at construction time instead of
- * hardcoding perch's old default colors. */
+ * hardcoding a default theme's colors. */
 export function xtermThemeFromTokens(): { background: string; foreground: string } {
   const style = getComputedStyle(document.documentElement);
-  const background = style.getPropertyValue("--panel-bg").trim() || PERCH_DEFAULT.panelBg;
-  const foreground = style.getPropertyValue("--text").trim() || PERCH_DEFAULT.text;
+  const background = style.getPropertyValue("--panel-bg").trim() || CATPPUCCIN_DEFAULT.panelBg;
+  const foreground = style.getPropertyValue("--text").trim() || CATPPUCCIN_DEFAULT.text;
   return { background, foreground };
 }

@@ -1,8 +1,39 @@
+/**
+ * Sidebar.tsx — herdr-style "spaces" navigation.
+ *
+ * Three stacked levels, top to bottom:
+ *
+ *  1. **Host switcher** — the environment chip is a button; clicking it opens
+ *     a popover listing "local" plus every configured federated host with its
+ *     live connection state. Picking one makes it the *active host*; the rest
+ *     of the sidebar (and the tab bar) re-scopes to it. This replaces the old
+ *     layout, which stacked one section per host vertically and showed every
+ *     host's sessions at once.
+ *  2. **Project list** — one row per distinct session cwd on the active host,
+ *     styled after herdr's spaces list (aggregate status dot, project name,
+ *     dimmer second line carrying the git branch, or a shortened cwd when the
+ *     project isn't a git checkout). Clicking a row makes it the *active
+ *     project*.
+ *  3. **Sessions of the active project** — rendered inline under that row;
+ *     every other project stays a compact one-row entry.
+ *
+ * `activeHostId` / `activeProject` live in the zustand store (persisted to
+ * localStorage) so the tab bar, the leader-key chords and the sidebar all
+ * agree on one scope — see `effectiveActiveProject` in `store.ts`.
+ *
+ * Host add/remove/enable/disable still live in Settings → SSH Hosts (they
+ * always have); the switcher popover carries an inline enabled checkbox per
+ * remote host plus a "Manage hosts…" shortcut into that section so nothing
+ * became less reachable when the per-host sidebar sections went away.
+ */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePerchStore } from "./store";
+import { usePerchStore, projectsForHost, effectiveActiveProject, type ProjectGroup } from "./store";
 import { StatusDot } from "./components/StatusDot";
-import type { SessionSummary, SshHostEntry, HostInfoMessage, HostConnectionState } from "@perch/shared";
+import { DirectoryBrowser } from "./components/DirectoryBrowser";
+import { WorktreeMenu } from "./components/WorktreeMenu";
+import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
+import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,46 +56,16 @@ function basename(cwd: string): string {
   return parts[parts.length - 1] || cwd;
 }
 
-// ---------------------------------------------------------------------------
-// Project grouping
-// ---------------------------------------------------------------------------
-
-interface ProjectGroup {
-  /** Grouping key: (hostId, cwd). */
-  key: string;
-  cwd: string;
-  sessions: SessionSummary[];
-  /** Newest session's createdAt — used to order groups newest-first. */
-  newestAt: number;
-}
-
-function groupSessionsByProject(sessions: SessionSummary[], hostId: string): ProjectGroup[] {
-  const map = new Map<string, ProjectGroup>();
-
-  for (const s of sessions) {
-    // Only include sessions belonging to this host.
-    const sHostId = s.hostId ?? "local";
-    if (sHostId !== hostId) continue;
-    const cwd = s.cwd ?? "(unknown)";
-    const key = `${hostId}:${cwd}`;
-    let group = map.get(key);
-    if (!group) {
-      group = { key, cwd, sessions: [], newestAt: 0 };
-      map.set(key, group);
-    }
-    group.sessions.push(s);
-    if (s.createdAt > group.newestAt) group.newestAt = s.createdAt;
-  }
-
-  // Sort sessions within each group newest-first, then sort groups newest-first.
-  for (const group of map.values()) {
-    group.sessions.sort((a, b) => b.createdAt - a.createdAt);
-  }
-  return [...map.values()].sort((a, b) => b.newestAt - a.newestAt);
+/** Compact fallback for a project row's second line when no git branch is
+ * known (non-git cwd, or the server's poll hasn't reported one yet). */
+function shortCwd(cwd: string): string {
+  const parts = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (parts.length <= 2) return cwd;
+  return `…/${parts.slice(-2).join("/")}`;
 }
 
 // ---------------------------------------------------------------------------
-// EnvHeader (compact, now used as the Local section header content)
+// EnvHeader — the local host's chip content (badge + hostname + os + cwd)
 // ---------------------------------------------------------------------------
 
 interface EnvHeaderProps {
@@ -113,203 +114,6 @@ function EnvHeader({ hostname, isSsh, platform, cwd, branch }: EnvHeaderProps) {
 }
 
 // ---------------------------------------------------------------------------
-// SessionMenu — hover "⋯" button with portal popover (Fix 4)
-// ---------------------------------------------------------------------------
-
-interface SessionMenuProps {
-  session: SessionSummary;
-  onArchive: (sessionId: string, archived: boolean) => void;
-}
-
-function SessionMenu({ session, onArchive }: SessionMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      if (btnRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      setOpen(false);
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
-
-  function handleBtnClick(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (open) { setOpen(false); return; }
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setPopoverStyle({
-        position: "fixed",
-        top: rect.bottom + 4,
-        left: rect.left,
-        zIndex: 9999,
-      });
-    }
-    setOpen(true);
-  }
-
-  const popover = open ? createPortal(
-    <div
-      className="session-menu__popover"
-      ref={popoverRef}
-      style={popoverStyle}
-    >
-      <button
-        type="button"
-        className="session-menu__item"
-        data-testid={`session-archive-${session.id}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onArchive(session.id, !session.archived);
-          setOpen(false);
-        }}
-      >
-        {session.archived ? "Unarchive" : "Archive"}
-      </button>
-    </div>,
-    document.body
-  ) : null;
-
-  return (
-    <>
-      <button
-        type="button"
-        className="session-item__menu-btn"
-        data-testid={`session-menu-${session.id}`}
-        onClick={handleBtnClick}
-        title="Session options"
-        aria-label="Session options"
-      >
-        ⋯
-      </button>
-      {popover}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// SessionItem
-// ---------------------------------------------------------------------------
-
-interface SessionItemProps {
-  session: SessionSummary;
-  isActive: boolean;
-  showArchived: boolean;
-  onSwitch: (id: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
-}
-
-function SessionItem({ session, isActive, showArchived, onSwitch, onArchive }: SessionItemProps) {
-  let itemClass = isActive ? "session-item session-item--active" : "session-item";
-  if (session.archived && showArchived) {
-    itemClass += " session-item--archived";
-  }
-
-  return (
-    <div className="session-item__wrapper">
-      <button
-        type="button"
-        className={itemClass}
-        data-session-id={session.id}
-        onClick={() => onSwitch(session.id)}
-      >
-        <StatusDot session={session} />
-        <div className="session-item__body">
-          <div className="session-item__title">
-            {session.title || "(new session)"}
-          </div>
-          <div className="session-item__meta">
-            <span className="session-item__time">{relativeTime(session.createdAt)}</span>
-          </div>
-        </div>
-      </button>
-      <SessionMenu session={session} onArchive={onArchive} />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ProjectGroup component
-// ---------------------------------------------------------------------------
-
-/** Renders `branch` (if known) plus `↑n`/`↓n` glyphs (ahead/behind), only
- * showing the glyphs when non-zero. Returns `null` entirely when no git
- * status has been received yet for this project (e.g. non-git cwd, or the
- * poll hasn't run yet). */
-function ProjectGitStatus({ projectKey, hostId }: { projectKey: string; hostId: string }) {
-  const git = usePerchStore((s) => s.workspaceGit[projectKey]);
-  if (!git || !git.branch) return null;
-  return (
-    <span className="sidebar__project-git" data-testid={`workspace-git-${hostId}`} title={git.branch}>
-      <span className="sidebar__project-branch">{git.branch}</span>
-      {git.ahead > 0 && (
-        <span className="sidebar__project-ahead" style={{ color: "var(--green)" }}>
-          ↑{git.ahead}
-        </span>
-      )}
-      {git.behind > 0 && (
-        <span className="sidebar__project-behind" style={{ color: "var(--red)" }}>
-          ↓{git.behind}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function ProjectGroupBlock({
-  group,
-  hostId,
-  sessionId,
-  showArchived,
-  onSwitch,
-  onArchive,
-}: {
-  group: ProjectGroup;
-  hostId: string;
-  sessionId: string | null;
-  showArchived: boolean;
-  onSwitch: (id: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
-}) {
-  return (
-    <div className="sidebar__project">
-      <div className="sidebar__project-header">
-        <span
-          className="sidebar__project-name"
-          title={group.cwd}
-        >
-          {basename(group.cwd)}
-        </span>
-        <ProjectGitStatus projectKey={group.key} hostId={hostId} />
-        <span className="sidebar__project-count">{group.sessions.length}</span>
-      </div>
-      {group.sessions.map((s) => (
-        <SessionItem
-          key={s.id}
-          session={s}
-          isActive={s.id === sessionId}
-          showArchived={showArchived}
-          onSwitch={onSwitch}
-          onArchive={onArchive}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // HostStateDot — colored dot showing host connection state
 // ---------------------------------------------------------------------------
 
@@ -333,10 +137,364 @@ function HostStateDot({ state, error }: { state: HostConnectionState; error?: st
 }
 
 // ---------------------------------------------------------------------------
-// NewSessionPopover — portal popover for the "+" button (Fix 2)
+// Host switcher
 // ---------------------------------------------------------------------------
 
-interface NewSessionPopoverProps {
+interface HostChoice {
+  id: string;
+  name: string;
+  state: HostConnectionState;
+  error?: string;
+  /** Secondary line: ssh target / direct URL for remotes, platform for local. */
+  detail?: string;
+  /** Remote hosts only — drives the inline enabled checkbox. */
+  entry?: SshHostEntry;
+  /** True for `mode: "direct"` hosts (no perch on the remote; hosted turns
+   *  run detached over SSH). Surfaced as a badge so it's obvious *which*
+   *  kind of remote a session is about to be created on — the two behave
+   *  very differently on disconnect. */
+  direct?: boolean;
+}
+
+function HostSwitcherPopover({
+  choices,
+  activeHostId,
+  anchorRect,
+  onClose,
+  onSelect,
+  onToggleEnabled,
+  onManage,
+}: {
+  choices: HostChoice[];
+  activeHostId: string;
+  anchorRect: DOMRect;
+  onClose: () => void;
+  onSelect: (hostId: string) => void;
+  onToggleEnabled: (entry: SshHostEntry) => void;
+  onManage: () => void;
+}) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const top = anchorRect.bottom + 4;
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top,
+    left: anchorRect.left,
+    zIndex: 9999,
+    minWidth: Math.max(anchorRect.width, 200),
+    maxHeight: `min(70vh, calc(100vh - ${top}px - 12px))`,
+  };
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (popoverRef.current?.contains(e.target as Node)) return;
+      onClose();
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="host-switcher-popover" data-testid="host-switcher-popover" ref={popoverRef} style={style}>
+      <div className="host-switcher-popover__list">
+        {choices.map((choice) => (
+          <div
+            key={choice.id}
+            className={
+              "host-switcher-popover__row" +
+              (choice.id === activeHostId ? " host-switcher-popover__row--active" : "")
+            }
+          >
+            <div className="host-switcher-popover__row-top">
+              <button
+                type="button"
+                className="host-switcher-popover__item"
+                data-testid={`host-option-${choice.id}`}
+                title={choice.detail ?? choice.name}
+                onClick={() => {
+                  onSelect(choice.id);
+                  onClose();
+                }}
+              >
+                <HostStateDot state={choice.state} error={choice.error} />
+                <span className="host-switcher-popover__name">{choice.name}</span>
+                {choice.direct && (
+                  <span
+                    className="host-switcher-popover__badge"
+                    data-testid={`host-direct-badge-${choice.id}`}
+                    title="Direct mode: no perch on the remote — turns run detached over SSH and survive disconnects"
+                  >
+                    direct
+                  </span>
+                )}
+                <span className="host-switcher-popover__state">{choice.state}</span>
+              </button>
+              {choice.entry && (
+                <label className="host-switcher-popover__enabled" title="Enabled">
+                  <input
+                    type="checkbox"
+                    data-testid={`host-toggle-${choice.id}`}
+                    checked={choice.entry.enabled}
+                    onChange={() => onToggleEnabled(choice.entry as SshHostEntry)}
+                  />
+                </label>
+              )}
+            </div>
+            {choice.state === "error" && choice.error && (
+              <div
+                className="host-switcher-popover__error"
+                data-testid={`host-error-${choice.id}`}
+                title={choice.error}
+              >
+                {choice.error}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="host-switcher-popover__divider" />
+      <button
+        type="button"
+        className="host-switcher-popover__manage"
+        data-testid="host-switcher-manage"
+        onClick={() => {
+          onManage();
+          onClose();
+        }}
+      >
+        Manage hosts…
+      </button>
+    </div>,
+    document.body
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SessionItem
+// ---------------------------------------------------------------------------
+
+interface SessionItemProps {
+  session: SessionSummary;
+  isActive: boolean;
+  showArchived: boolean;
+  onSwitch: (id: string) => void;
+  onArchive: (sessionId: string, archived: boolean) => void;
+  onDelete: (sessionId: string) => void;
+}
+
+function SessionItem({ session, isActive, showArchived, onSwitch, onArchive, onDelete }: SessionItemProps) {
+  let itemClass = isActive ? "session-item session-item--active" : "session-item";
+  if (session.archived && showArchived) {
+    itemClass += " session-item--archived";
+  }
+
+  return (
+    <div className="session-item__wrapper">
+      <button
+        type="button"
+        className={itemClass}
+        data-session-id={session.id}
+        onClick={() => onSwitch(session.id)}
+      >
+        <StatusDot session={session} />
+        <div className="session-item__body">
+          <div className="session-item__title">
+            {session.title || "(new session)"}
+          </div>
+          <div className="session-item__meta">
+            <span className="session-item__time">{relativeTime(session.createdAt)}</span>
+          </div>
+        </div>
+      </button>
+      <button
+        type="button"
+        className="session-item__archive-btn"
+        data-testid={`session-archive-icon-${session.id}`}
+        title={session.archived ? "Unarchive session" : "Archive session"}
+        aria-label={session.archived ? "Unarchive session" : "Archive session"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onArchive(session.id, !session.archived);
+        }}
+      >
+        {session.archived ? "📤" : "📦"}
+      </button>
+      {/* No confirmation: the user asked for a one-click, immediate delete
+       * (unlike the multi-tab terminal-group close and worktree-remove
+       * confirmations, which still route through ConfirmDialog). */}
+      <button
+        type="button"
+        className="session-item__delete-btn"
+        data-testid={`session-delete-icon-${session.id}`}
+        title="Delete session"
+        aria-label="Delete session"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(session.id);
+        }}
+      >
+        🗑
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Project rows
+// ---------------------------------------------------------------------------
+
+/** Renders `branch` (if known) plus `↑n`/`↓n` glyphs (ahead/behind), only
+ * showing the glyphs when non-zero. Returns `null` entirely when no git
+ * status has been received yet for this project (e.g. non-git cwd, or the
+ * poll hasn't run yet) — the row then falls back to a shortened cwd. */
+function ProjectGitStatus({ projectKey, hostId }: { projectKey: string; hostId: string }) {
+  const git = usePerchStore((s) => s.workspaceGit[projectKey]);
+  if (!git || !git.branch) return null;
+  return (
+    <span className="sidebar__project-git" data-testid={`workspace-git-${hostId}`} title={git.branch}>
+      <span className="sidebar__project-branch">{git.branch}</span>
+      {git.ahead > 0 && (
+        <span className="sidebar__project-ahead" style={{ color: "var(--green)" }}>
+          ↑{git.ahead}
+        </span>
+      )}
+      {git.behind > 0 && (
+        <span className="sidebar__project-behind" style={{ color: "var(--red)" }}>
+          ↓{git.behind}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The dimmer second line of a project row: git branch when the project is a
+ * git checkout, a shortened cwd otherwise (herdr's spaces list always has a
+ * subtitle, so never leave the row a lone name). */
+function ProjectSubline({ projectKey, hostId, cwd }: { projectKey: string; hostId: string; cwd: string }) {
+  const git = usePerchStore((s) => s.workspaceGit[projectKey]);
+  if (git?.branch) return <ProjectGitStatus projectKey={projectKey} hostId={hostId} />;
+  return (
+    <span className="sidebar__project-sub" title={cwd}>
+      {shortCwd(cwd)}
+    </span>
+  );
+}
+
+/** Renders the Wave 2 worktree affordance for a project, but only when the
+ * project cwd is inside a git repo. `workspaceGit[projectKey].branch` is the
+ * signal: the server's background poll only reports a branch for a cwd that
+ * resolves to a `.git` (see `status::get_branch`), so its presence is exactly
+ * "this project is a git checkout" — no extra probe needed. Rendered on every
+ * project row, active or not, so the menu (and leader,W) stays reachable
+ * without first switching projects. */
+function ProjectWorktrees({ projectKey, hostId, cwd }: { projectKey: string; hostId: string; cwd: string }) {
+  const git = usePerchStore((s) => s.workspaceGit[projectKey]);
+  if (!git || !git.branch) return null;
+  return <WorktreeMenu hostId={hostId} cwd={cwd} projectKey={projectKey} />;
+}
+
+/** Urgency ordering for the project's aggregate dot — the most attention-
+ * needing session in the project wins, mirroring herdr's per-space glyph. */
+const DOT_URGENCY: AgentDotState[] = ["blocked", "working", "done", "idle", "unknown"];
+
+function aggregateDotState(sessions: SessionSummary[]): AgentDotState {
+  let best: AgentDotState = "unknown";
+  let bestRank = DOT_URGENCY.length;
+  for (const s of sessions) {
+    const state = sessionDotState(s);
+    const rank = DOT_URGENCY.indexOf(state);
+    if (rank !== -1 && rank < bestRank) {
+      best = state;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+function ProjectRow({
+  group,
+  hostId,
+  isActiveProject,
+  sessionId,
+  showArchived,
+  onSelectProject,
+  onSwitch,
+  onArchive,
+  onDelete,
+}: {
+  group: ProjectGroup;
+  hostId: string;
+  isActiveProject: boolean;
+  sessionId: string | null;
+  showArchived: boolean;
+  onSelectProject: (cwd: string) => void;
+  onSwitch: (id: string) => void;
+  onArchive: (sessionId: string, archived: boolean) => void;
+  onDelete: (sessionId: string) => void;
+}) {
+  const dotState = aggregateDotState(group.sessions);
+  const { glyph, color } = DOT_GLYPH[dotState];
+
+  return (
+    <div className={"sidebar__project" + (isActiveProject ? " sidebar__project--active" : "")}>
+      <div className="sidebar__project-header">
+        <button
+          type="button"
+          className="sidebar__project-select"
+          data-testid="project-row"
+          data-project-cwd={group.cwd}
+          aria-current={isActiveProject ? "true" : undefined}
+          title={group.cwd}
+          onClick={() => onSelectProject(group.cwd)}
+        >
+          <span
+            className={`agent-status-dot agent-status-dot--${dotState} sidebar__project-dot`}
+            style={{ color }}
+            title={`status: ${dotState}`}
+            aria-hidden="true"
+          >
+            {glyph}
+          </span>
+          <span className="sidebar__project-body">
+            <span className="sidebar__project-name" title={group.cwd}>
+              {basename(group.cwd)}
+            </span>
+            <span className="sidebar__project-subline">
+              <ProjectSubline projectKey={group.key} hostId={hostId} cwd={group.cwd} />
+            </span>
+          </span>
+          <span className="sidebar__project-count">{group.sessions.length}</span>
+        </button>
+        <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
+      </div>
+      {isActiveProject &&
+        group.sessions.map((s) => (
+          <SessionItem
+            key={s.id}
+            session={s}
+            isActive={s.id === sessionId}
+            showArchived={showArchived}
+            onSwitch={onSwitch}
+            onArchive={onArchive}
+            onDelete={onDelete}
+          />
+        ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NewSessionPopover — portal popover for the "+" buttons (also used by TabBar)
+// ---------------------------------------------------------------------------
+
+export interface NewSessionPopoverProps {
   hostId: string;
   /** Known project cwds for this host, derived from existing sessions. */
   projectCwds: string[];
@@ -345,17 +503,25 @@ interface NewSessionPopoverProps {
   onSelect: (cwd?: string) => void;
 }
 
-function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
-  const [pathInput, setPathInput] = useState("");
+export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Position: open below the anchor button, left-aligned.
+  // Position: open below the anchor button, left-aligned. Clamped to the
+  // viewport: the known-projects quick-pick list grows one row per distinct
+  // cwd seen in the DB (e2e fixture leftovers, long-lived real usage, ...),
+  // and combined with the embedded DirectoryBrowser it can exceed the
+  // viewport height, stranding the "Use this folder" button below the fold.
+  // `.new-session-popover` is a flex column (see styles.css); this cap makes
+  // its internal regions (`__projects` list, DirectoryBrowser's folder list)
+  // scroll internally while the breadcrumb/filter/footer stay pinned.
+  const top = anchorRect.bottom + 4;
   const style: React.CSSProperties = {
     position: "fixed",
-    top: anchorRect.bottom + 4,
+    top,
     left: anchorRect.left,
     zIndex: 9999,
     minWidth: 200,
+    maxHeight: `min(70vh, calc(100vh - ${top}px - 12px))`,
   };
 
   useEffect(() => {
@@ -376,19 +542,23 @@ function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect 
 
   return createPortal(
     <div className="new-session-popover" ref={popoverRef} style={style}>
-      {projectCwds.map((cwd, i) => (
-        <button
-          key={cwd}
-          type="button"
-          className="new-session-popover__item"
-          data-testid={`project-option-${i}`}
-          onClick={() => { onSelect(cwd); onClose(); }}
-          title={cwd}
-        >
-          {basename(cwd)}
-          <span className="new-session-popover__item-cwd">{cwd}</span>
-        </button>
-      ))}
+      {projectCwds.length > 0 && (
+        <div className="new-session-popover__projects">
+          {projectCwds.map((cwd, i) => (
+            <button
+              key={cwd}
+              type="button"
+              className="new-session-popover__item"
+              data-testid={`project-option-${i}`}
+              onClick={() => { onSelect(cwd); onClose(); }}
+              title={cwd}
+            >
+              {basename(cwd)}
+              <span className="new-session-popover__item-cwd">{cwd}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <button
         type="button"
         className="new-session-popover__item new-session-popover__item--none"
@@ -399,250 +569,15 @@ function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect 
         <span className="new-session-popover__item-cwd">~</span>
       </button>
       <div className="new-session-popover__divider" />
-      <div className="new-session-popover__custom">
-        <input
-          type="text"
-          className="new-session-popover__input"
-          data-testid="project-path-input"
-          placeholder="/path/to/project"
-          value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && pathInput.trim()) {
-              onSelect(pathInput.trim());
-              onClose();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="new-session-popover__create-btn"
-          data-testid="project-create"
-          disabled={!pathInput.trim()}
-          onClick={() => {
-            if (pathInput.trim()) { onSelect(pathInput.trim()); onClose(); }
-          }}
-        >
-          Create
-        </button>
-      </div>
+      <DirectoryBrowser
+        hostId={hostId}
+        onUseFolder={(path) => {
+          onSelect(path);
+          onClose();
+        }}
+      />
     </div>,
     document.body
-  );
-}
-
-// ---------------------------------------------------------------------------
-// HostSection — one section per configured host
-// ---------------------------------------------------------------------------
-
-interface HostSectionProps {
-  hostId: string;
-  name: string;
-  /** If undefined, no host.info has arrived yet. */
-  hostInfo: HostInfoMessage | undefined;
-  /** Whether the host is enabled in the hosts config. */
-  enabled: boolean;
-  sessions: SessionSummary[];
-  sessionId: string | null;
-  connected: boolean;
-  showArchived: boolean;
-  onSwitch: (id: string) => void;
-  onNewSession: (hostId: string, cwd?: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
-}
-
-function HostSection({
-  hostId,
-  name,
-  hostInfo,
-  enabled,
-  sessions,
-  sessionId,
-  connected,
-  showArchived,
-  onSwitch,
-  onNewSession,
-  onArchive,
-}: HostSectionProps) {
-  const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
-  const newBtnRef = useRef<HTMLButtonElement>(null);
-
-  // If we have a host.info, use its state; otherwise infer from enabled flag.
-  const state: HostConnectionState = hostInfo
-    ? hostInfo.state
-    : enabled
-      ? "connecting"
-      : "disabled";
-
-  // Collect distinct cwds from this host's sessions for the picker.
-  const projectCwds = [...new Set(
-    sessions
-      .filter((s) => (s.hostId ?? "local") === hostId)
-      .map((s) => s.cwd)
-      .filter(Boolean)
-  )];
-
-  // Filter sessions for display.
-  const visibleSessions = sessions.filter((s) => {
-    const sHostId = s.hostId ?? "local";
-    if (sHostId !== hostId) return false;
-    if (s.archived && !showArchived) {
-      // Keep visible if it's the active session (don't yank open chat).
-      return s.id === sessionId;
-    }
-    return true;
-  });
-
-  const groups = groupSessionsByProject(visibleSessions, hostId);
-  const isDisabled = state === "disabled";
-
-  function handleNewClick(e: React.MouseEvent<HTMLButtonElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPopoverAnchor(rect);
-  }
-
-  return (
-    <div className={`sidebar__host-section${isDisabled ? " sidebar__host-section--disabled" : ""}`}>
-      <div className="sidebar__host-header">
-        <HostStateDot state={state} error={hostInfo?.error} />
-        <span className="sidebar__host-name" title={name}>{name}</span>
-        <button
-          type="button"
-          className="sidebar__host-new-btn"
-          ref={newBtnRef}
-          data-testid={`new-session-${hostId}`}
-          disabled={!connected || state !== "connected"}
-          onClick={handleNewClick}
-          title="New session on this host"
-        >
-          +
-        </button>
-      </div>
-      <div className="sidebar__host-sessions">
-        {groups.map((group) => (
-          <ProjectGroupBlock
-            key={group.key}
-            group={group}
-            hostId={hostId}
-            sessionId={sessionId}
-            showArchived={showArchived}
-            onSwitch={onSwitch}
-            onArchive={onArchive}
-          />
-        ))}
-      </div>
-      {popoverAnchor && (
-        <NewSessionPopover
-          hostId={hostId}
-          projectCwds={projectCwds}
-          anchorRect={popoverAnchor}
-          onClose={() => setPopoverAnchor(null)}
-          onSelect={(cwd) => onNewSession(hostId, cwd)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// LocalSection — the local host section (Fix 2: also uses the picker)
-// ---------------------------------------------------------------------------
-
-interface LocalSectionProps {
-  serverInfo: { hostname: string; isSsh: boolean; platform: string } | null;
-  status: { cwd: string; branch: string } | null;
-  sessions: SessionSummary[];
-  sessionId: string | null;
-  connected: boolean;
-  showArchived: boolean;
-  onSwitch: (id: string) => void;
-  onNewSession: (cwd?: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
-}
-
-function LocalSection({
-  serverInfo,
-  status,
-  sessions,
-  sessionId,
-  connected,
-  showArchived,
-  onSwitch,
-  onNewSession,
-  onArchive,
-}: LocalSectionProps) {
-  const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
-
-  const projectCwds = [...new Set(
-    sessions
-      .filter((s) => (s.hostId ?? "local") === "local")
-      .map((s) => s.cwd)
-      .filter(Boolean)
-  )];
-
-  // Filter sessions: hide archived (unless showArchived) except the active one.
-  const visibleSessions = sessions.filter((s) => {
-    const sHostId = s.hostId ?? "local";
-    if (sHostId !== "local") return false;
-    if (s.archived && !showArchived) {
-      return s.id === sessionId;
-    }
-    return true;
-  });
-
-  const localGroups = groupSessionsByProject(visibleSessions, "local");
-
-  function handleNewClick(e: React.MouseEvent<HTMLButtonElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPopoverAnchor(rect);
-  }
-
-  return (
-    <div className="sidebar__local-section">
-      <EnvHeader
-        hostname={serverInfo?.hostname}
-        isSsh={serverInfo?.isSsh}
-        platform={serverInfo?.platform}
-        cwd={status?.cwd}
-        branch={status?.branch}
-      />
-
-      <div className="sidebar__local-actions">
-        <button
-          type="button"
-          className="sidebar__new-btn"
-          data-testid="new-session-local"
-          disabled={!connected}
-          onClick={handleNewClick}
-        >
-          + New session
-        </button>
-      </div>
-
-      <div className="sidebar__list">
-        {localGroups.map((group) => (
-          <ProjectGroupBlock
-            key={group.key}
-            group={group}
-            hostId="local"
-            sessionId={sessionId}
-            showArchived={showArchived}
-            onSwitch={onSwitch}
-            onArchive={onArchive}
-          />
-        ))}
-      </div>
-
-      {popoverAnchor && (
-        <NewSessionPopover
-          hostId="local"
-          projectCwds={projectCwds}
-          anchorRect={popoverAnchor}
-          onClose={() => setPopoverAnchor(null)}
-          onSelect={(cwd) => { onNewSession(cwd); }}
-        />
-      )}
-    </div>
   );
 }
 
@@ -658,60 +593,151 @@ export function Sidebar() {
   const status = usePerchStore((s) => s.status);
   const hosts = usePerchStore((s) => s.hosts);
   const hostStates = usePerchStore((s) => s.hostStates);
+  const activeHostId = usePerchStore((s) => s.activeHostId);
+  const activeProject = usePerchStore((s) => s.activeProject);
+  const showArchived = usePerchStore((s) => s.showArchived);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const switchSession = usePerchStore((s) => s.switchSession);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
+  const setActiveHost = usePerchStore((s) => s.setActiveHost);
+  const setActiveProject = usePerchStore((s) => s.setActiveProject);
+  const upsertHost = usePerchStore((s) => s.upsertHost);
   const archiveSession = usePerchStore((s) => s.archiveSession);
-  const showArchived = usePerchStore((s) => s.showArchived);
-  const setShowArchived = usePerchStore((s) => s.setShowArchived);
+  const deleteSession = usePerchStore((s) => s.deleteSession);
   const sidebarCollapsed = usePerchStore((s) => s.sidebarCollapsed);
   const toggleSidebar = usePerchStore((s) => s.toggleSidebar);
+
+  const [hostAnchor, setHostAnchor] = useState<DOMRect | null>(null);
+  const [newAnchor, setNewAnchor] = useState<DOMRect | null>(null);
+
+  const activeHostEntry = hosts.find((h: SshHostEntry) => h.id === activeHostId);
+  const activeHostInfo = hostStates[activeHostId];
+  const activeHostState: HostConnectionState =
+    activeHostId === "local"
+      ? connected
+        ? "connected"
+        : "connecting"
+      : activeHostInfo
+        ? activeHostInfo.state
+        : activeHostEntry?.enabled
+          ? "connecting"
+          : "disabled";
+
+  const navState = { sessions, sessionId, activeHostId, activeProject, showArchived };
+  const projects = projectsForHost(navState, activeHostId);
+  const active = effectiveActiveProject(navState);
+
+  const projectCwds = [
+    ...new Set(
+      sessions
+        .filter((s) => (s.hostId ?? "local") === activeHostId)
+        .map((s) => s.cwd)
+        .filter(Boolean)
+    ),
+  ];
+
+  const choices: HostChoice[] = [
+    {
+      id: "local",
+      name: serverInfo?.hostname ? `local (${serverInfo.hostname})` : "local",
+      state: connected ? "connected" : "connecting",
+      detail: serverInfo?.platform,
+    },
+    ...hosts.map((h: SshHostEntry) => {
+      const info = hostStates[h.id];
+      const state: HostConnectionState = info ? info.state : h.enabled ? "connecting" : "disabled";
+      return {
+        id: h.id,
+        name: h.name,
+        state,
+        error: info?.error,
+        detail:
+          h.mode === "direct"
+            ? `${h.sshHost} (direct)`
+            : h.directUrl || `${h.sshHost}:${h.remotePort}`,
+        entry: h,
+        direct: h.mode === "direct",
+      };
+    }),
+  ];
+
+  const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
   return (
     <aside className={"sidebar" + (sidebarCollapsed ? " sidebar--collapsed" : "")}>
       <div className="sidebar__body">
-        {/* ---- Local section ---- */}
-        <LocalSection
-          serverInfo={serverInfo}
-          status={status}
-          sessions={sessions}
-          sessionId={sessionId}
-          connected={connected}
-          showArchived={showArchived}
-          onSwitch={switchSession}
-          onNewSession={(cwd) => createSessionOnHost("local", cwd)}
-          onArchive={archiveSession}
-        />
+        <button
+          type="button"
+          className="sidebar__host-switcher"
+          data-testid="host-switcher"
+          title="Switch host"
+          aria-haspopup="true"
+          aria-expanded={hostAnchor != null}
+          onClick={(e) => setHostAnchor(e.currentTarget.getBoundingClientRect())}
+        >
+          {activeHostId === "local" ? (
+            <EnvHeader
+              hostname={serverInfo?.hostname}
+              isSsh={serverInfo?.isSsh}
+              platform={serverInfo?.platform}
+              cwd={status?.cwd}
+              branch={status?.branch}
+            />
+          ) : (
+            <div className="sidebar__env">
+              <div className="sidebar__env-row">
+                <span className="sidebar__env-badge sidebar__env-badge--ssh">HOST</span>
+                <span className="sidebar__env-host">{activeHostEntry?.name ?? activeHostId}</span>
+                <span className="sidebar__env-platform">{activeHostState}</span>
+              </div>
+              <div
+                className="sidebar__env-cwd"
+                title={activeHostInfo?.error ?? activeHostEntry?.directUrl ?? activeHostEntry?.sshHost}
+              >
+                {activeHostInfo?.error ??
+                  activeHostEntry?.directUrl ??
+                  (activeHostEntry ? `${activeHostEntry.sshHost}:${activeHostEntry.remotePort}` : "")}
+              </div>
+            </div>
+          )}
+          <span className="sidebar__host-switcher-caret" aria-hidden="true">▾</span>
+        </button>
 
-        {/* ---- Remote host sections ---- */}
-        {hosts.map((host: SshHostEntry) => (
-          <HostSection
-            key={host.id}
-            hostId={host.id}
-            name={host.name}
-            hostInfo={hostStates[host.id]}
-            enabled={host.enabled}
-            sessions={sessions}
-            sessionId={sessionId}
-            connected={connected}
-            showArchived={showArchived}
-            onSwitch={switchSession}
-            onNewSession={createSessionOnHost}
-            onArchive={archiveSession}
-          />
-        ))}
+        <div className="sidebar__local-actions">
+          <button
+            type="button"
+            className="sidebar__new-btn"
+            data-testid={`new-session-${activeHostId}`}
+            disabled={!canCreate}
+            onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
+          >
+            + New session
+          </button>
+        </div>
+
+        <div className="sidebar__list" data-testid="project-list">
+          {projects.length === 0 ? (
+            <p className="sidebar__empty">No projects yet.</p>
+          ) : (
+            projects.map((group) => (
+              <ProjectRow
+                key={group.key}
+                group={group}
+                hostId={activeHostId}
+                isActiveProject={active != null && active.cwd === group.cwd}
+                sessionId={sessionId}
+                showArchived={showArchived}
+                onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
+                onSwitch={switchSession}
+                onArchive={archiveSession}
+                onDelete={deleteSession}
+              />
+            ))
+          )}
+        </div>
       </div>
 
       <div className="sidebar__footer">
-        <button
-          type="button"
-          className="sidebar__toggle-archived"
-          data-testid="toggle-archived"
-          title={showArchived ? "Hide archived sessions" : "Show archived sessions"}
-          onClick={() => setShowArchived(!showArchived)}
-        >
-          {showArchived ? "Hide archived" : "Show archived"}
-        </button>
         <button
           type="button"
           className="sidebar__collapse-toggle"
@@ -733,6 +759,27 @@ export function Sidebar() {
           ⚙
         </button>
       </div>
+
+      {hostAnchor && (
+        <HostSwitcherPopover
+          choices={choices}
+          activeHostId={activeHostId}
+          anchorRect={hostAnchor}
+          onClose={() => setHostAnchor(null)}
+          onSelect={setActiveHost}
+          onToggleEnabled={(entry) => upsertHost({ ...entry, enabled: !entry.enabled })}
+          onManage={() => setSettingsOpen(true)}
+        />
+      )}
+      {newAnchor && (
+        <NewSessionPopover
+          hostId={activeHostId}
+          projectCwds={projectCwds}
+          anchorRect={newAnchor}
+          onClose={() => setNewAnchor(null)}
+          onSelect={(cwd) => createSessionOnHost(activeHostId, cwd)}
+        />
+      )}
     </aside>
   );
 }

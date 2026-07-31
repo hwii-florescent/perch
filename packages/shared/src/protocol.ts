@@ -39,8 +39,24 @@ export interface SettingsData {
   /** `null` means no default set (use process cwd). */
   defaultCwd: string | null;
   /** Selected theme name (key into the client's `THEMES` table).
-   * Defaults to `"perch"` — perch's own look. */
+   * Defaults to `"catppuccin"` — herdr's own default theme. `"perch"`
+   * (perch's original hardcoded look) remains a selectable theme. */
   theme: string;
+  /** Play a short WebAudio-generated tone when a session finishes a turn
+   * unseen (done) or becomes blocked on an approval prompt (request).
+   * Defaults to `false` (opt-in). */
+  soundEnabled: boolean;
+  /** How toast notifications are delivered: `"off"` (none), `"app"` (in-app
+   * toast stack, the original behavior), or `"system"` (OS notifications via
+   * the Web Notifications API, falling back to `"app"` when permission is
+   * denied). Defaults to `"app"`. */
+  toastDelivery: "off" | "app" | "system";
+  /** Global chat rendering mode: `"hosted"` (structured chat UI) or `"cli"`
+   * (xterm attached to the real interactive CLI PTY). Used to be per-chat
+   * client state (a footer toggle in the chat pane); now a single global
+   * setting controlled from Settings, applying to every open chat pane.
+   * Defaults to `"hosted"`. */
+  chatMode: "hosted" | "cli";
 }
 
 /**
@@ -48,12 +64,20 @@ export interface SettingsData {
  * - `customModels` absent → unchanged; present → replace whole struct.
  * - `defaultCwd` absent → unchanged; `null` → clear; string → set.
  * - `theme` absent → unchanged; string → set (no "clear" case).
+ * - `soundEnabled` absent → unchanged; boolean → set.
+ * - `toastDelivery` absent → unchanged; string → set.
+ * - `chatMode` absent → unchanged; string → set (no "clear" case).
  */
 export interface SettingsPatch {
   customModels?: CustomModelsData;
   defaultCwd?: string | null;
   theme?: string;
+  soundEnabled?: boolean;
+  toastDelivery?: "off" | "app" | "system";
+  chatMode?: "hosted" | "cli";
 }
+
+export type HostMode = "perch" | "direct";
 
 export interface SshHostEntry {
   id: string;
@@ -63,6 +87,18 @@ export interface SshHostEntry {
   remotePort: number;
   /** Defaults to true when omitted. */
   enabled: boolean;
+  /**
+   * How perch talks to this host. Defaults to `"perch"` when omitted, so
+   * every pre-existing host entry keeps its exact current behaviour.
+   *
+   * - `"perch"` — classic federation: the remote runs its own perch instance,
+   *   reached through an SSH tunnel; its sessions live in *its* database.
+   * - `"direct"` — the remote has no perch at all, only `claude`/`codex` +
+   *   `tmux`. perch drives the CLIs over SSH and runs every hosted turn
+   *   detached, so work survives closing the laptop *and* quitting perch;
+   *   the sessions live in the *local* database, tagged with this host's id.
+   */
+  mode: HostMode;
   /** If set, skip SSH tunnelling and connect directly to this WebSocket URL
    * (e.g. "ws://127.0.0.1:7800/ws").  Useful for LAN peers and e2e tests. */
   directUrl?: string;
@@ -158,6 +194,30 @@ export interface SessionSummary {
   blocked?: boolean;
 }
 
+/** A single directory entry returned by `fs.browse`. Directories only — the
+ * browser is for picking a session's cwd, never individual files. */
+export interface FsEntry {
+  name: string;
+  path: string;
+  /** True when `path/.git` exists (one bounded check per visible entry at
+   * the current level — never recursive). */
+  isGitRepo: boolean;
+}
+
+/** One git worktree of a repo, as reported by `worktree.list.result`.
+ * Mirrors `WorktreeEntry` in `crates/perch-core/src/protocol.rs`. */
+export interface WorktreeEntry {
+  path: string;
+  /** Short branch name; absent for a detached HEAD. */
+  branch?: string;
+  /** Commit sha at the worktree's HEAD. */
+  head?: string;
+  /** The repo's main checkout (never removable — git refuses). */
+  isPrimary: boolean;
+  /** Has uncommitted or untracked files (drives the remove guard). */
+  isDirty: boolean;
+}
+
 /** Requests that `terminal.create` spawn the given session's *interactive*
  * agent CLI (resumed from whatever conversation state that session already
  * has) instead of a plain shell. The client only names the session + agent;
@@ -202,6 +262,16 @@ export interface TerminalResizeMessage {
   rows: number;
 }
 
+/** Force-terminate a single terminal's backing PTY/process. Used when a
+ * CLI-mode (agentAttach) terminal is torn down — e.g. leaving CLI mode for
+ * Hosted, or deleting the session it's attached to — so the spawned
+ * `claude --resume`/`codex resume` process doesn't keep running (and
+ * blocking a fresh attach) after the view that owned it is gone. */
+export interface TerminalKillMessage {
+  type: "terminal.kill";
+  terminalId: string;
+}
+
 /** Request the server to push a fresh `session.list` response.
  * Note: "session.list" appears in both directions — as a client request here
  * and as a server response (SessionListResponseMessage). The union context
@@ -241,6 +311,14 @@ export interface SessionArchiveMessage {
   archived: boolean;
 }
 
+/** Permanently delete a session: its messages, its DB row, any in-flight
+ * turn, and any CLI-attached terminal. Irreversible — unlike
+ * SessionArchiveMessage, there is no `deleted: boolean` toggle. */
+export interface SessionDeleteMessage {
+  type: "session.delete";
+  sessionId: string;
+}
+
 /** Request the persisted dockview layout blob for a session (Phase 3:
  * Workspace → Tab → Pane model). The server never interprets this JSON — it
  * is an opaque `dockview` `api.toJSON()` snapshot, only persisted/echoed. */
@@ -257,6 +335,63 @@ export interface SessionLayoutSetMessage {
   layout: unknown;
 }
 
+/** User-set title override for a session (see `db.rs`'s `title_override`
+ * column). Persists across the auto-title-from-first-message logic — once
+ * set, the user title always wins. */
+export interface SessionRenameMessage {
+  type: "session.rename";
+  sessionId: string;
+  title: string;
+}
+
+/** List directories at `path` (or the user's home directory when absent) on
+ * the given host (local when absent/`"local"`), for the new-session cwd
+ * picker. `requestId` is echoed back on `FsBrowseResultMessage` so the client
+ * can match replies to in-flight requests. */
+export interface FsBrowseMessage {
+  type: "fs.browse";
+  requestId: string;
+  hostId?: string;
+  path?: string;
+}
+
+/** List every git worktree of the repo containing `repoPath` (Wave 2 — ported
+ * from herdr, see `crates/perch-core/src/worktree.rs`). Request-correlated
+ * exactly like `fs.browse`: `requestId` comes back on
+ * `WorktreeListResultMessage`, hub-relayed for federated hosts. */
+export interface WorktreeListMessage {
+  type: "worktree.list";
+  requestId: string;
+  hostId?: string;
+  repoPath: string;
+}
+
+/** Create a linked worktree for `branch`. `newBranch` is a hint: when the
+ * branch already exists locally the existing-branch form is used anyway.
+ * `path` overrides the default `~/.perch/worktrees/<repo-name>/<branch-slug>`
+ * location. Replies with `worktree.done` or `worktree.error`. */
+export interface WorktreeCreateMessage {
+  type: "worktree.create";
+  requestId: string;
+  hostId?: string;
+  repoPath: string;
+  branch: string;
+  newBranch?: boolean;
+  path?: string;
+}
+
+/** Remove the worktree checked out at `path`. Refused with
+ * `worktree.error { dirty: true }` when the checkout has uncommitted or
+ * untracked files and `force` is false (herdr's dirty guard). */
+export interface WorktreeRemoveMessage {
+  type: "worktree.remove";
+  requestId: string;
+  hostId?: string;
+  repoPath: string;
+  path: string;
+  force?: boolean;
+}
+
 export type ClientMessage =
   | SessionCreateMessage
   | SessionSubscribeMessage
@@ -267,14 +402,21 @@ export type ClientMessage =
   | TerminalCreateMessage
   | TerminalInputMessage
   | TerminalResizeMessage
+  | TerminalKillMessage
   | SettingsGetMessage
   | SettingsUpdateMessage
   | HostsListMessage
   | HostsUpsertMessage
   | HostsDeleteMessage
   | SessionArchiveMessage
+  | SessionDeleteMessage
   | SessionLayoutGetMessage
-  | SessionLayoutSetMessage;
+  | SessionLayoutSetMessage
+  | SessionRenameMessage
+  | FsBrowseMessage
+  | WorktreeListMessage
+  | WorktreeCreateMessage
+  | WorktreeRemoveMessage;
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -383,6 +525,16 @@ export interface SessionUpdatedMessage {
   session: SessionSummary;
 }
 
+/** Broadcast to every connection (mirrors HostsUpdatedMessage's fan-out) when
+ * a session is permanently deleted, since the row backing a normal
+ * `session.updated` no longer exists to look up. Client state removes the
+ * session from its local list on receipt regardless of which tab/connection
+ * issued the `session.delete`. */
+export interface SessionDeletedMessage {
+  type: "session.deleted";
+  sessionId: string;
+}
+
 /** Sent once per connection after the WS handshake so the client knows
  * where it is connected and can display the correct environment badge.
  * Also carries the server-discovered model lists — clients must populate
@@ -439,11 +591,61 @@ export interface WorkspaceGitMessage {
   behind: number;
 }
 
+/** Reply to `fs.browse`. `parent` is absent when `path` is already the
+ * filesystem root. `home` is always the resolved home directory for the
+ * target host, so the client can offer a "home" shortcut regardless of where
+ * the current listing is. */
+export interface FsBrowseResultMessage {
+  type: "fs.browse.result";
+  requestId: string;
+  hostId: string;
+  path: string;
+  parent?: string;
+  home: string;
+  entries: FsEntry[];
+}
+
+/** Reply to `worktree.list`. `repoPath` echoes the request so the client can
+ * key its cache by `${hostId}:${repoPath}`. `defaultRoot` is
+ * `~/.perch/worktrees/<repo-name>` on the *target* host, letting the create
+ * form prefill a sensible custom-path default. */
+export interface WorktreeListResultMessage {
+  type: "worktree.list.result";
+  requestId: string;
+  hostId: string;
+  repoPath: string;
+  defaultRoot: string;
+  worktrees: WorktreeEntry[];
+}
+
+/** Success reply to `worktree.create` / `worktree.remove`. `path` is the
+ * created checkout (create) or the removed checkout (remove). */
+export interface WorktreeDoneMessage {
+  type: "worktree.done";
+  requestId: string;
+  hostId: string;
+  action: "create" | "remove";
+  path: string;
+}
+
+/** Failure reply to any `worktree.*` request. `dirty` is true only when the
+ * operation was refused by the dirty-checkout guard — the client escalates
+ * that into a "force remove?" confirmation rather than showing it as a hard
+ * error (herdr's `force_confirmation` two-step). */
+export interface WorktreeErrorMessage {
+  type: "worktree.error";
+  requestId: string;
+  hostId: string;
+  message: string;
+  dirty?: boolean;
+}
+
 export type ServerMessage =
   | SessionCreatedMessage
   | SessionHistoryMessage
   | SessionListResponseMessage
   | SessionUpdatedMessage
+  | SessionDeletedMessage
   | ServerInfoMessage
   | ChatChunkMessage
   | ChatThinkingMessage
@@ -460,4 +662,8 @@ export type ServerMessage =
   | HostsUpdatedMessage
   | HostInfoMessage
   | SessionLayoutMessage
-  | WorkspaceGitMessage;
+  | WorkspaceGitMessage
+  | FsBrowseResultMessage
+  | WorktreeListResultMessage
+  | WorktreeDoneMessage
+  | WorktreeErrorMessage;

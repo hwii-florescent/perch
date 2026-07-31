@@ -56,6 +56,13 @@ impl SessionRegistry {
             .map(|s| s.buffer.iter().cloned().collect())
             .unwrap_or_default()
     }
+
+    /// Drop a session's ring buffer entirely — called on `session.delete` so
+    /// a stale in-memory replay buffer can't outlive the (now-deleted) SQLite
+    /// row.
+    pub fn remove(&self, session_id: &str) {
+        self.sessions.lock().unwrap().remove(session_id);
+    }
 }
 
 impl Default for SessionRegistry {

@@ -27,8 +27,46 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 const BASE_URL = "http://127.0.0.1:7799";
+
+// ---------------------------------------------------------------------------
+// Chat mode settings helpers (global setting lives in ~/.perch/settings.json,
+// not isolated per e2e server — must reset so later specs see Hosted default)
+// ---------------------------------------------------------------------------
+
+const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+
+function resetChatMode(): void {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) return;
+    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    data.chatMode = "hosted";
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+  } catch {
+    /* leave alone */
+  }
+}
+
+/** Flip the global chat mode via the Settings modal and wait for it to apply. */
+async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
+  await page.locator('[data-testid="settings-gear"]').click();
+  await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+  const toggle = page.locator('[data-testid="settings-chat-mode"]');
+  await expect(toggle).toBeVisible({ timeout: 5000 });
+  const wantChecked = mode === "cli" ? "true" : "false";
+  const current = await toggle.getAttribute("aria-checked");
+  if (current !== wantChecked) {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", wantChecked, { timeout: 5000 });
+  }
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
+}
 
 // ---------------------------------------------------------------------------
 // Helper: select agent + model via ModelChip
@@ -62,6 +100,7 @@ test.describe("Stage C: restyle", () => {
   let claudeAvailable = false;
 
   test.beforeAll(async () => {
+    resetChatMode();
     const { execSync } = await import("child_process");
     try {
       execSync("which claude", { encoding: "utf8" });
@@ -69,6 +108,10 @@ test.describe("Stage C: restyle", () => {
     } catch {
       claudeAvailable = false;
     }
+  });
+
+  test.afterAll(() => {
+    resetChatMode();
   });
 
   // ---------------------------------------------------------------------------
@@ -168,19 +211,16 @@ test.describe("Stage C: restyle", () => {
     await expect(runningDot).toBeVisible({ timeout: 20000 });
     await expect(runningDot).not.toBeVisible({ timeout: 90000 });
 
-    // Toggle to CLI mode
-    const modeSwitch = page.locator(".mode-switch");
-    await modeSwitch.click();
-    await expect(modeSwitch).toHaveAttribute("aria-checked", "true", { timeout: 5000 });
+    // Flip global chat mode to CLI via Settings.
+    await setChatMode(page, "cli");
 
     // Model chip must NOT be visible in CLI mode
     await expect(chip).not.toBeVisible({ timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/restyle-cli-no-chip.png" });
 
-    // Toggle back to Hosted
-    await modeSwitch.click();
-    await expect(modeSwitch).toHaveAttribute("aria-checked", "false", { timeout: 5000 });
+    // Flip back to Hosted
+    await setChatMode(page, "hosted");
     await expect(chip).toBeVisible({ timeout: 5000 });
   });
 
@@ -276,8 +316,12 @@ test.describe("Stage C: restyle", () => {
     const count = await workedFor.count();
 
     if (count > 0) {
-      // Assert summary text matches "Worked for"
-      const summary = workedFor.locator("summary");
+      // Assert summary text matches "Worked for". Scoped to the *direct*
+      // child <summary> — the chat-UI restyle wave nests a collapsible
+      // tool-call timeline (its own <details>/<summary> rows) inside
+      // .message__worked-for, so an unscoped "summary" locator would match
+      // multiple elements and violate Playwright's strict mode.
+      const summary = workedFor.locator("> summary");
       const summaryText = await summary.textContent();
       expect(summaryText).toMatch(/Worked for/);
 

@@ -34,6 +34,14 @@ pub enum PendingKey {
     Session(String),
     /// Waiting on terminal-scoped replies (terminal.data, terminal.exit).
     Terminal(String),
+    /// Waiting on a single `fs.browse` reply, keyed by the request's
+    /// `requestId`. Single-shot — unregistered immediately on reply, unlike
+    /// `Session`'s multi-message lifecycle.
+    Browse(String),
+    /// Waiting on a single `worktree.*` reply (`worktree.list.result`,
+    /// `worktree.done`, or `worktree.error`), keyed by the request's
+    /// `requestId`. Same single-shot lifecycle as `Browse`.
+    Worktree(String),
 }
 
 /// A pending reply sender: the browser connection-id that opened the request
@@ -81,6 +89,55 @@ struct HubConnection {
     /// Sends raw JSON strings to the remote's WS.
     ws_tx: UnboundedSender<String>,
 }
+
+/// RAII guard around the ssh tunnel child spawned in `setup_ssh_tunnel`.
+///
+/// That function has many early-return failure paths (precheck, bounded ssh
+/// calls, health polls, shutdown races, …), and used to require a manual
+/// `tunnel_child.kill().await` before every single one of them. That's
+/// exactly the shape of bug that regresses silently: a newly-added failure
+/// path (the "remote precheck fails fast" branch) forgot its kill call and
+/// leaked one orphaned `ssh -A -L … sleep infinity` process per retry cycle
+/// against any reachable-but-not-provisioned host — observed as dozens of
+/// accumulated tunnels in production.
+///
+/// Wrapping the child here makes that class of bug structurally impossible:
+/// any early return while the guard is still armed drops it, and dropping a
+/// `tokio::process::Child` created with `kill_on_drop(true)` kills the
+/// process. Call [`TunnelGuard::disarm`] exactly once, only on the success
+/// path, to hand the child to the long-lived watcher task that owns the
+/// tunnel's lifetime for as long as the connection stays up.
+///
+/// Known limitation (not fixed here): none of this helps if perch-core
+/// itself is SIGKILLed — there's no Drop, no async runtime, nothing runs.
+/// Tunnels spawned by a SIGKILLed perch-core orphan to `launchd`/`init` and
+/// keep running (observed in the wild). Only a graceful shutdown (which
+/// drives `shutdown_rx` and hits the paths below) reliably tears them down.
+struct TunnelGuard(Option<tokio::process::Child>);
+
+impl TunnelGuard {
+    fn new(child: tokio::process::Child) -> Self {
+        Self(Some(child))
+    }
+
+    /// Access the child for `try_wait()`/polling while the guard stays armed.
+    fn get_mut(&mut self) -> &mut tokio::process::Child {
+        self.0.as_mut().expect("TunnelGuard used after disarm")
+    }
+
+    /// Hand ownership of the child to the caller without killing it — the
+    /// tunnel is healthy and a watcher task is about to take over its
+    /// lifetime. After this call the guard is inert (its `Drop` is a no-op).
+    fn disarm(mut self) -> tokio::process::Child {
+        self.0.take().expect("TunnelGuard already disarmed")
+    }
+}
+
+// No explicit `Drop` impl needed: letting `Option<Child>` drop normally
+// already kills the still-armed child, because it was spawned with
+// `kill_on_drop(true)`. Keeping this implicit (rather than re-implementing
+// kill-on-drop by hand) means we inherit tokio's own kill+reap behavior
+// instead of subtly diverging from it.
 
 // ---------------------------------------------------------------------------
 // HubManager
@@ -252,12 +309,27 @@ impl HubManager {
         host: SshHost,
         mut shutdown_rx: watch::Receiver<bool>,
     ) {
+        // `mode: "direct"` hosts have no perch on the other end and therefore
+        // no WS state machine at all — see `direct_connection_task`.
+        if host.is_direct() {
+            self.direct_connection_task(host, shutdown_rx).await;
+            return;
+        }
         let host_id = host.id.clone();
         let host_name = host.name.clone();
         let own_port = self.own_port;
 
-        let mut backoff_ms: u64 = 500;
-        const MAX_BACKOFF_MS: u64 = 30_000;
+        // Backoff starts at 5s (not aggressive-fast — the auto-start path can
+        // be expensive to retry: precheck + 15s health poll) and doubles up
+        // to a 60s cap, resetting to the floor on a successful connect. The
+        // host state is set to `Error(msg)` before every backoff sleep and
+        // only flips back to `Connecting` when the next attempt actually
+        // begins (top of the loop) — so the UI shows the real error for the
+        // whole backoff window instead of bouncing straight back to
+        // "connecting".
+        let mut backoff_ms: u64 = 5_000;
+        const MIN_BACKOFF_MS: u64 = 5_000;
+        const MAX_BACKOFF_MS: u64 = 60_000;
 
         loop {
             // Check for shutdown before each attempt.
@@ -325,7 +397,7 @@ impl HubManager {
 
             tracing::info!("[hub] {host_id}: WS connected to {ws_url}");
             // Reset backoff on successful connect.
-            backoff_ms = 500;
+            backoff_ms = MIN_BACKOFF_MS;
 
             let (mut ws_sink, mut ws_stream) = ws_stream.split();
 
@@ -391,6 +463,132 @@ impl HubManager {
         }
     }
 
+    /// The connection state machine for a `mode: "direct"` host.
+    ///
+    /// There is no perch on the other end, so there is nothing to tunnel to,
+    /// nothing to auto-start and no WS to hold open — "connected" here means
+    /// *"ssh works and the host has the CLIs we need"*. The task therefore
+    /// reduces to: probe → publish `host.info` → re-probe periodically so a
+    /// devpod that goes away is reflected in the sidebar.
+    ///
+    /// The model lists published for the host come from perch's own static
+    /// catalogue (`models.rs`), filtered to the CLIs the probe actually found.
+    /// That is deliberate and consistent with the rest of perch: the
+    /// catalogue is not version-gated or probed per host — but advertising
+    /// codex models on a box with no `codex` would be a lie the user pays for
+    /// only when their turn fails.
+    ///
+    /// Sessions on a direct host are *not* fetched from the remote (it has no
+    /// DB); they live in the local DB tagged with this host id, so the normal
+    /// `session.list` path already returns them and no `remote_sessions`
+    /// routing entry is ever created for them.
+    async fn direct_connection_task(
+        self: &Arc<Self>,
+        host: SshHost,
+        mut shutdown_rx: watch::Receiver<bool>,
+    ) {
+        let host_id = host.id.clone();
+        let host_name = host.name.clone();
+        let ssh_host = host.ssh_host.clone();
+
+        if ssh_host.is_empty() {
+            self.set_host_state(
+                &host_id,
+                &host_name,
+                HostState::Error("no sshHost configured".to_string()),
+            );
+            return;
+        }
+
+        let mut backoff_ms: u64 = 5_000;
+        const MIN_BACKOFF_MS: u64 = 5_000;
+        const MAX_BACKOFF_MS: u64 = 60_000;
+        // Re-probe cadence once healthy. Cheap (one ssh round trip) but not
+        // free on a devpod behind a ProxyCommand, hence minutes not seconds.
+        const HEALTHY_REPROBE_SECS: u64 = 120;
+        let mut healthy = false;
+
+        loop {
+            if *shutdown_rx.borrow() {
+                return;
+            }
+            // Only announce "connecting" when we aren't already known-good:
+            // the periodic re-probe of a healthy host must not make the
+            // sidebar flash back to connecting every two minutes.
+            if !healthy {
+                self.set_host_state(&host_id, &host_name, HostState::Connecting);
+            }
+
+            let probe = crate::ssh::probe_host(&ssh_host);
+            let result = tokio::select! {
+                r = probe => r,
+                _ = shutdown_rx.changed() => return,
+            };
+
+            let wait_secs = match result {
+                Ok(prereqs) => match prereqs.missing() {
+                    Some(missing) => {
+                        tracing::warn!("[hub] {host_id}: {missing}");
+                        self.set_host_state(&host_id, &host_name, HostState::Error(missing));
+                        healthy = false;
+                        let wait = backoff_ms / 1000;
+                        backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+                        wait
+                    }
+                    None => {
+                        let catalogue = crate::models::catalogue();
+                        let info = RemoteInfo {
+                            hostname: if prereqs.hostname.is_empty() {
+                                ssh_host.clone()
+                            } else {
+                                prereqs.hostname.clone()
+                            },
+                            platform: prereqs.platform.clone(),
+                            is_ssh: true,
+                            claude_models: if prereqs.claude_version.is_some() {
+                                catalogue.claude.clone()
+                            } else {
+                                Vec::new()
+                            },
+                            codex_models: if prereqs.codex_version.is_some() {
+                                catalogue.codex.clone()
+                            } else {
+                                Vec::new()
+                            },
+                        };
+                        tracing::info!(
+                            "[hub] {host_id}: direct host ready (claude={:?} codex={:?} tmux={:?})",
+                            prereqs.claude_version,
+                            prereqs.codex_version,
+                            prereqs.tmux_version,
+                        );
+                        self.set_host_state(&host_id, &host_name, HostState::Connected(info));
+                        healthy = true;
+                        backoff_ms = MIN_BACKOFF_MS;
+                        // Explicit retention policy for run dirs perch has
+                        // already ingested (see `detached.rs`).
+                        crate::detached::prune_old_runs(&ssh_host).await;
+                        HEALTHY_REPROBE_SECS
+                    }
+                },
+                Err(err) => {
+                    tracing::warn!("[hub] {host_id}: direct probe failed: {err}");
+                    self.set_host_state(&host_id, &host_name, HostState::Error(err));
+                    healthy = false;
+                    let wait = backoff_ms / 1000;
+                    backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+                    wait
+                }
+            };
+
+            let sleep = tokio::time::sleep(std::time::Duration::from_secs(wait_secs.max(1)));
+            tokio::select! {
+                _ = sleep => {}
+                _ = shutdown_rx.changed() => return,
+            }
+        }
+    }
+
     /// SSH-path setup: health check, tunnel (with agent forwarding + stable
     /// symlink), optional auto-start, health poll via local port. Returns the
     /// `ws://127.0.0.1:<localPort>/ws` URL to connect to, or `None` on failure.
@@ -402,10 +600,24 @@ impl HubManager {
     ///      `~/.ssh/perch_auth_sock → $SSH_AUTH_SOCK` (stable symlink) and then
     ///      sleeps so the port-forward lifetime equals the process lifetime.
     ///   4. Poll until the local tunnel port accepts TCP (tunnel ready).
-    ///   5. If remote was NOT already up: auto-start via a separate ssh exec
-    ///      that exports SSH_AUTH_SOCK pointing at the stable symlink.
-    ///   6. If auto-started: poll health via the LOCAL tunnel port (HTTP GET).
+    ///   5. If remote was NOT already up:
+    ///      - 5a. Cheap remote precheck (prerequisites for the auto-start
+    ///        command — see `precheck_remote_prereqs`) so a broken remote
+    ///        (e.g. no perch checkout) fails in ~seconds with an
+    ///        actionable message instead of silently burning the full
+    ///        15s health-poll window every retry.
+    ///      - 5b. Auto-start via a separate ssh exec that exports
+    ///        SSH_AUTH_SOCK pointing at the stable symlink.
+    ///   6. If auto-started: poll health via the LOCAL tunnel port (HTTP GET)
+    ///      for up to 15s. On timeout, capture best-effort tmux diagnostics
+    ///      (`capture_start_diagnostics`) and fold them into the error.
     ///   7. Return the ws URL.
+    ///
+    /// Every ssh subprocess spawned in this function is bounded by
+    /// `run_ssh_bounded`'s overall `tokio::time::timeout` (in addition to any
+    /// `-o ConnectTimeout=`) — devpod ProxyCommand wrappers can stall well
+    /// past TCP connect, and a hung ssh child must not wedge the state
+    /// machine.
     async fn setup_ssh_tunnel(
         self: &Arc<Self>,
         host: &SshHost,
@@ -424,14 +636,14 @@ impl HubManager {
         // 1. Health check: is the remote perch already running?
         tracing::info!("[hub] {}: checking if remote perch is already up", host.id);
         let health_ok = {
-            let check = tokio::process::Command::new("ssh")
-                .args([
-                    "-o", "BatchMode=yes",
-                    "-o", "ConnectTimeout=5",
-                    ssh_host,
-                    &format!("curl -s --max-time 3 http://localhost:{remote_port}/"),
-                ])
-                .output();
+            let curl_cmd = format!("curl -s --max-time 3 http://localhost:{remote_port}/");
+            let args = [
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=5",
+                ssh_host.as_str(),
+                curl_cmd.as_str(),
+            ];
+            let check = run_ssh_bounded(&args, 20, "health check");
             let check_result = tokio::select! {
                 r = check => r,
                 _ = shutdown_rx.changed() => { return None; }
@@ -477,7 +689,7 @@ impl HubManager {
         //    Resulting ssh invocation (tokio::process::Command passes each
         //    element as a separate argv entry — no local shell involved):
         //      ssh -A -L <lp>:127.0.0.1:<rp> \
-        //          -o ExitOnForwardFailure=yes -o BatchMode=yes <host> \
+        //          -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -o BatchMode=yes <host> \
         //          "mkdir -p ~/.ssh; ln -sf \"$SSH_AUTH_SOCK\" ~/.ssh/perch_auth_sock; exec sleep infinity"
         let tunnel_remote_cmd = format!(
             r#"mkdir -p ~/.ssh; ln -sf "$SSH_AUTH_SOCK" ~/.ssh/perch_auth_sock; exec sleep infinity"#
@@ -486,18 +698,32 @@ impl HubManager {
             "[hub] {}: starting SSH tunnel (agent-forwarded) :{}→{}:{}",
             host.id, local_port, ssh_host, remote_port
         );
+        // Wrapped in `TunnelGuard` from the moment it exists: every early
+        // `return None` below drops the guard, which kills the still-running
+        // ssh child automatically (see `TunnelGuard` doc comment) — no
+        // per-branch `tunnel_child.kill().await` needed or wanted.
         let mut tunnel_child = match tokio::process::Command::new("ssh")
             .args([
                 "-A",
                 "-L", &format!("{local_port}:127.0.0.1:{remote_port}"),
                 "-o", "ExitOnForwardFailure=yes",
+                // Bounds the initial TCP+handshake phase; the tunnel-ready
+                // poll below (step 4) additionally kills the child after ~5s
+                // regardless, so this is a defensive backstop against
+                // ProxyCommand wrappers that stall past normal TCP connect.
+                "-o", "ConnectTimeout=10",
                 "-o", "BatchMode=yes",
                 ssh_host,
                 &tunnel_remote_cmd,
             ])
+            // Defense in depth (belt-and-suspenders alongside `TunnelGuard`):
+            // if the whole perch-core process dies in a way that still runs
+            // Drop glue (panic unwind, normal exit), this alone would kill
+            // the child even without the guard.
+            .kill_on_drop(true)
             .spawn()
         {
-            Ok(child) => child,
+            Ok(child) => TunnelGuard::new(child),
             Err(e) => {
                 tracing::warn!("[hub] {}: tunnel spawn failed: {e}", host.id);
                 self.set_host_state(&host.id, &host.name, HostState::Error(format!("tunnel failed: {e}")));
@@ -510,7 +736,7 @@ impl HubManager {
             let mut tunnel_ready = false;
             for _ in 0..25 {
                 // Check for early exit first.
-                match tunnel_child.try_wait() {
+                match tunnel_child.get_mut().try_wait() {
                     Ok(Some(status)) => {
                         let err = format!("SSH tunnel exited early ({})", status);
                         tracing::warn!("[hub] {}: {err}", host.id);
@@ -528,7 +754,6 @@ impl HubManager {
                 tokio::select! {
                     _ = delay => {}
                     _ = shutdown_rx.changed() => {
-                        let _ = tunnel_child.kill().await;
                         return None;
                     }
                 }
@@ -536,7 +761,6 @@ impl HubManager {
             if !tunnel_ready {
                 let err = "SSH tunnel did not bind local port in time".to_string();
                 tracing::warn!("[hub] {}: {err}", host.id);
-                let _ = tunnel_child.kill().await;
                 self.set_host_state(&host.id, &host.name, HostState::Error(err));
                 return None;
             }
@@ -551,6 +775,27 @@ impl HubManager {
         //    $HOME is expanded by the REMOTE shell (ssh passes this as a single
         //    argv element; the remote sh -c receives it verbatim).
         if !health_ok {
+            // 5a. Cheap precheck: verify the auto-start command's prerequisites
+            //     before burning a 15s health-poll window on a remote that
+            //     can never come up (e.g. no perch checkout at all). This is
+            //     the fix for the "devpod with no perch checkout" incident:
+            //     without it, every retry cycle spent ~15-20s in "connecting"
+            //     for one brief "error" flash, making the UI look permanently
+            //     stuck instead of showing an actionable message.
+            let has_custom_cmd = host.remote_cmd.is_some();
+            let precheck = precheck_remote_prereqs(ssh_host, has_custom_cmd);
+            let precheck_result = tokio::select! {
+                r = precheck => r,
+                _ = shutdown_rx.changed() => {
+                    return None;
+                }
+            };
+            if let Err(msg) = precheck_result {
+                tracing::warn!("[hub] {}: {msg}", host.id);
+                self.set_host_state(&host.id, &host.name, HostState::Error(msg));
+                return None;
+            }
+
             let remote_cmd_template = host
                 .remote_cmd
                 .clone()
@@ -563,25 +808,23 @@ impl HubManager {
             );
 
             tracing::info!("[hub] {}: auto-starting remote perch via tmux (with agent socket)", host.id);
-            let start = tokio::process::Command::new("ssh")
-                .args([
-                    "-o", "BatchMode=yes",
-                    "-o", "ConnectTimeout=10",
-                    ssh_host,
-                    &format!("tmux new-session -A -d -s perch-core '{tmux_inner}'"),
-                ])
-                .output();
+            let tmux_cmd = format!("tmux new-session -A -d -s perch-core '{tmux_inner}'");
+            let start_args = [
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=10",
+                ssh_host.as_str(),
+                tmux_cmd.as_str(),
+            ];
+            let start = run_ssh_bounded(&start_args, 20, "auto-start");
             let start_result = tokio::select! {
                 r = start => r,
                 _ = shutdown_rx.changed() => {
-                    let _ = tunnel_child.kill().await;
                     return None;
                 }
             };
             if let Err(e) = start_result {
-                tracing::warn!("[hub] {}: tmux start failed: {e}", host.id);
-                self.set_host_state(&host.id, &host.name, HostState::Error(format!("auto-start failed: {e}")));
-                let _ = tunnel_child.kill().await;
+                tracing::warn!("[hub] {}: {e}", host.id);
+                self.set_host_state(&host.id, &host.name, HostState::Error(e));
                 return None;
             }
 
@@ -591,21 +834,30 @@ impl HubManager {
             let mut polls = 0u32;
             loop {
                 if *shutdown_rx.borrow() {
-                    let _ = tunnel_child.kill().await;
                     return None;
                 }
                 polls += 1;
                 if polls > 30 {
-                    tracing::warn!("[hub] {}: remote perch did not come up in time", host.id);
-                    self.set_host_state(&host.id, &host.name, HostState::Error("remote startup timeout".to_string()));
-                    let _ = tunnel_child.kill().await;
+                    // Prechecks passed but the remote still never came up —
+                    // capture best-effort tmux diagnostics (session alive? last
+                    // pane output?) and fold a one-line summary into the error
+                    // so the failure is actionable instead of a bare timeout.
+                    let diag = capture_start_diagnostics(ssh_host);
+                    let diag = tokio::select! {
+                        d = diag => d,
+                        _ = shutdown_rx.changed() => {
+                            return None;
+                        }
+                    };
+                    let err = format!("remote perch did not start in time ({diag})");
+                    tracing::warn!("[hub] {}: {err}", host.id);
+                    self.set_host_state(&host.id, &host.name, HostState::Error(err));
                     return None;
                 }
                 let delay = tokio::time::sleep(std::time::Duration::from_millis(500));
                 tokio::select! {
                     _ = delay => {}
                     _ = shutdown_rx.changed() => {
-                        let _ = tunnel_child.kill().await;
                         return None;
                     }
                 }
@@ -623,6 +875,14 @@ impl HubManager {
                 }
             }
         }
+
+        // Tunnel confirmed healthy — disarm the guard and hand the child to
+        // the watcher task below, which now owns its lifetime for as long as
+        // the connection stays up (killed via `stop_host_task`'s shutdown
+        // signal driving a future `setup_ssh_tunnel` call's early returns, or
+        // by the process exiting on its own and being observed by `.wait()`
+        // here).
+        let mut tunnel_child = tunnel_child.disarm();
 
         // Spawn a watcher that triggers state→error when the tunnel exits
         // unexpectedly while we are still connected.
@@ -725,6 +985,17 @@ impl HubManager {
                 }
                 let tagged = ServerMessage::SessionUpdated { session };
                 let _ = self.hub_events_tx.send(Arc::new(tagged));
+            }
+
+            // ----------------------------------------------------------------
+            // session.deleted → drop from remote caches + broadcast as-is
+            // (sessionId is unambiguous across hosts; no host_id to tag here,
+            // same as SessionCreated).
+            // ----------------------------------------------------------------
+            ServerMessage::SessionDeleted { ref session_id } => {
+                self.remote_sessions.lock().unwrap().remove(session_id);
+                self.remote_session_cache.lock().unwrap().remove(session_id);
+                let _ = self.hub_events_tx.send(Arc::new(msg));
             }
 
             // ----------------------------------------------------------------
@@ -844,6 +1115,73 @@ impl HubManager {
             }
 
             // ----------------------------------------------------------------
+            // fs.browse.result → single-shot unicast reply, rewriting hostId
+            // to the federated host's id (the remote reports "local" from its
+            // own point of view, same rationale as workspace.git above).
+            // ----------------------------------------------------------------
+            ServerMessage::FsBrowseResult { ref request_id, path, parent, home, entries, .. } => {
+                let rid = request_id.clone();
+                let tagged = ServerMessage::FsBrowseResult {
+                    request_id: rid.clone(),
+                    host_id: host_id.to_string(),
+                    path,
+                    parent,
+                    home,
+                    entries,
+                };
+                self.relay_unicast(&PendingKey::Browse(rid.clone()), Arc::new(tagged));
+                self.pending_unicast.lock().unwrap().remove(&PendingKey::Browse(rid));
+            }
+
+            // ----------------------------------------------------------------
+            // worktree.* → single-shot unicast replies, hostId rewritten to
+            // the federated host's id (same rationale as fs.browse.result).
+            // ----------------------------------------------------------------
+            ServerMessage::WorktreeListResult {
+                ref request_id,
+                repo_path,
+                default_root,
+                worktrees,
+                ..
+            } => {
+                let rid = request_id.clone();
+                self.relay_worktree_reply(
+                    rid,
+                    ServerMessage::WorktreeListResult {
+                        request_id: request_id.clone(),
+                        host_id: host_id.to_string(),
+                        repo_path,
+                        default_root,
+                        worktrees,
+                    },
+                );
+            }
+            ServerMessage::WorktreeDone { ref request_id, action, path, .. } => {
+                let rid = request_id.clone();
+                self.relay_worktree_reply(
+                    rid,
+                    ServerMessage::WorktreeDone {
+                        request_id: request_id.clone(),
+                        host_id: host_id.to_string(),
+                        action,
+                        path,
+                    },
+                );
+            }
+            ServerMessage::WorktreeError { ref request_id, message, dirty, .. } => {
+                let rid = request_id.clone();
+                self.relay_worktree_reply(
+                    rid,
+                    ServerMessage::WorktreeError {
+                        request_id: request_id.clone(),
+                        host_id: host_id.to_string(),
+                        message,
+                        dirty,
+                    },
+                );
+            }
+
+            // ----------------------------------------------------------------
             // Drop messages that should not propagate to browsers.
             // ----------------------------------------------------------------
             ServerMessage::SettingsCurrent { .. }
@@ -936,6 +1274,16 @@ impl HubManager {
         }
     }
 
+    /// Relay a single-shot `worktree.*` reply (already host-tagged) to the
+    /// connection that issued the request, then drop the pending slot. Every
+    /// `worktree.*` request gets exactly one reply — list result, done, or
+    /// error — so the slot is always consumed here.
+    fn relay_worktree_reply(&self, request_id: String, msg: ServerMessage) {
+        let key = PendingKey::Worktree(request_id);
+        self.relay_unicast(&key, Arc::new(msg));
+        self.pending_unicast.lock().unwrap().remove(&key);
+    }
+
     // -----------------------------------------------------------------------
     // Public API for server.rs
     // -----------------------------------------------------------------------
@@ -986,6 +1334,70 @@ impl HubManager {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Bounded ssh subprocess runner — now shared with the direct-host path.
+///
+/// This used to be defined here; it moved to `ssh.rs` verbatim when
+/// `mode: "direct"` hosts arrived, so both host modes bound their ssh children
+/// the same way instead of growing two subtly different implementations.
+use crate::ssh::run_ssh_bounded;
+
+
+/// Cheap remote precheck run before auto-starting perch over ssh+tmux. Fails
+/// fast (bounded, ~seconds) with an actionable message instead of letting the
+/// caller burn a full 15s health-poll window on a remote that can never come
+/// up — e.g. a devpod that was added as a host but never got a perch
+/// checkout, which used to time out silently and loop back to "connecting"
+/// forever.
+///
+/// For the default auto-start command we check the binary the default
+/// command actually runs (`~/perch/target/debug/perch-core`). For a custom
+/// `remote_cmd` we can't know its prerequisites, so we only verify `tmux`
+/// itself is present (auto-start always goes through `tmux new-session`).
+async fn precheck_remote_prereqs(ssh_host: &str, has_custom_cmd: bool) -> Result<(), String> {
+    let check_cmd = if has_custom_cmd {
+        "command -v tmux >/dev/null 2>&1"
+    } else {
+        "test -d ~/perch && test -x ~/perch/target/debug/perch-core"
+    };
+    let args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host, check_cmd];
+    let out = run_ssh_bounded(&args, 20, "precheck").await?;
+    if out.status.success() {
+        Ok(())
+    } else if has_custom_cmd {
+        Err("tmux not available on remote".to_string())
+    } else {
+        Err("perch not installed on remote (~/perch/target/debug/perch-core missing)".to_string())
+    }
+}
+
+/// Best-effort diagnostics gathered when auto-start prechecks passed but the
+/// remote still never answered the 15s health poll: is the tmux session
+/// even alive, and what did it last print (crash trace, port-in-use, missing
+/// dependency, …)? Folded into the timeout error as a one-line summary.
+/// Never fails the caller — any ssh error here is itself just folded into the
+/// returned string, since this is purely informational.
+async fn capture_start_diagnostics(ssh_host: &str) -> String {
+    let cmd = "tmux has-session -t perch-core 2>&1; echo ---; tmux capture-pane -pt perch-core -S -5 2>&1";
+    let args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host, cmd];
+    match run_ssh_bounded(&args, 15, "diagnostics").await {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let one_line: String = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            if one_line.is_empty() {
+                "no tmux output captured".to_string()
+            } else {
+                one_line.chars().take(200).collect()
+            }
+        }
+        Err(e) => format!("diagnostics unavailable: {e}"),
+    }
+}
 
 /// Build a `host.info` ServerMessage from a state snapshot.
 fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessage {

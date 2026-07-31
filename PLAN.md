@@ -368,6 +368,92 @@ and was e2e-verified before the next started.
   Rust-core/thin-TS architecture with zero protocol drift and no regressions in the pre-existing
   suite.** ✅ verified.
 
+### Phase 5.W — herdr Wave 2: git worktree management — ✅ done
+The largest remaining herdr gap (Section B of the gap inventory; explicitly deferred as "full
+worktree CRUD" in Phase 4's skip list, now landed).
+- **Rust:** new `crates/perch-core/src/worktree.rs` — ports herdr's `src/worktree.rs`
+  (`branch_to_path_slug`, `parse_worktree_list_porcelain`, new-vs-existing-branch `worktree add`
+  command shapes, dirty detection, the forced-remove leftover-checkout recovery) onto async,
+  timeout-bounded `tokio::process` git calls. Documented as the module-level exception to
+  `status.rs`'s "never shell out to git" policy (mutating porcelain — reimplementing the linked
+  worktree admin bookkeeping would be reimplementing git). Default checkout root
+  `~/.perch/worktrees/<repo-name>/<branch-slug>` (perch's analog of `~/.herdr/worktrees`),
+  overridable per create. 5 unit tests (porcelain parsing incl. bare/prunable/detached, slug
+  sanitization incl. traversal collapse, default path, git error classification).
+- **Protocol (both files, camelCase):** `worktree.list` / `worktree.create` / `worktree.remove`
+  client messages and `worktree.list.result` / `worktree.done` / `worktree.error` server messages,
+  plus the shared `WorktreeEntry` value type. Request-correlated by `requestId` exactly like
+  `fs.browse`; hub-routed for federated hosts via a new single-shot `PendingKey::Worktree`.
+- **Guard semantics:** removal of a dirty checkout is refused (`worktree.error { dirty: true }`)
+  and the client escalates into a force confirmation — herdr's `force_confirmation` two-step, kept
+  as attempt-then-escalate rather than a client-side pre-check so the guard always reflects the
+  checkout at the moment of removal. The branch is never deleted with the worktree.
+- **UI:** `components/WorktreeMenu.tsx`, mounted from the sidebar project header (branch-glyph
+  button, rendered only when `workspaceGit[key].branch` proves the cwd is a git checkout).
+  Portal popover lists every worktree (branch, path, `primary`/`dirty` badges), "Open" = create a
+  session with that worktree as cwd (perch's analog of herdr opening a workspace on the checkout),
+  "New worktree…" form (branch + new-branch checkbox + path prefilled from the server-reported
+  default root), "Remove" via the shared `ConfirmDialog`. Store cache `worktrees[${hostId}:${repoPath}]`.
+- **Keybind:** leader,`W` (capital — distinct from leader,`w`'s next-project jump, resolved by an
+  exact-key lookup before the case-insensitive fallback) opens the active project's worktree menu.
+- Also fixed a latent federation bug found while extending the same mechanism: forwarded
+  `fs.browse` kept its `hostId`, so the receiving remote tried to route it onward to an unknown
+  host instead of answering locally. Both `fs.browse` and `worktree.*` now forward host-stripped
+  JSON (`strip_host_id`), matching what the `session.create` arm already did by hand.
+- e2e: new `e2e/worktrees.spec.ts` (WT1 primary listed, WT2 create-on-new-branch lands on disk at
+  the default location, WT3 Open starts a session in the worktree, WT4 clean remove, WT5 dirty
+  guard then forced remove) against a throwaway temp-dir fixture repo. Verified green together
+  with `sidebar`/`wave1`/`workspace-git` (21/21), alongside clean `cargo clippy --workspace
+  --all-targets`, `cargo build -p perch-core`, `cargo build -p perch-desktop`, `npm run build`.
+
+### Phase 6 — Detached mode (`mode: "direct"` hosts) — ✅ done
+
+A second kind of remote host, alongside classic perch↔perch federation. A **direct** host needs
+only `claude`/`codex` + `tmux` — **no perch, no Rust toolchain, no tunnel, no agent forwarding**.
+perch drives the CLIs over `ssh` and runs every hosted turn *detached*, so a turn survives closing
+the laptop **and** quitting (or crashing) perch.
+
+- **Config**: `SshHost.mode` = `"perch"` (default, unchanged behaviour for every existing
+  `hosts.json`) | `"direct"`; mirrored in `protocol.rs` ↔ `packages/shared/src/protocol.ts`,
+  editable per host in Settings, badged `direct` in the sidebar's host switcher.
+- **`ssh.rs`** — the one bounded-`ssh` plumbing layer both host modes share: `run_ssh_bounded`
+  (lifted out of `hub.rs`), `run_remote`, stdin-fed `write_remote_file`, `shell_quote`, a
+  one-round-trip host prereq/version probe, and the tail primitives (`stat_remote_file`,
+  `TailCursor` = offset + inode + truncation check, `spawn_tail`).
+- **`detached.rs`** — the runner. Launch is one bounded ssh that writes a `perch.meta` header
+  line, then `bash -c 'set -m; nohup sh -c "<cli> < prompt >> run.jsonl" &'` (bash because zsh
+  refuses `set -m` and dash silently leaves the job in the parent's process group), reading the
+  real pgid back from `ps`. perch then follows `run.jsonl` with `tail -c +<offset> -F` over a
+  keepalive'd ssh and feeds the lines to **`agent.rs`'s factored `ClaudeStreamParser` /
+  `CodexStreamParser`** — the same parsers local turns use, which is what makes a detached turn
+  render identically. Completion is in-band (`{"type":"result"}` / `turn.completed`, plus a
+  synthetic `{"type":"perch.exit","code":N}` appended by the shell chain). Cancel is
+  `kill -TERM -<pgid>` then `-KILL`. Recovery on startup is tri-state (alive → re-tail; dead +
+  marker → finalize and scrape the provider session id; dead + no marker → crashed, with a
+  fallback scrape of claude's own `~/.claude/projects/<slug>/<sessionId>.jsonl`). A
+  per-run `active_tails` set is the single-tailer guard; `pending_cancels` covers
+  cancel-before-spawn; run dirs older than 7 days are swept on host connect.
+- **`hub.rs`** — `direct_connection_task`: probe → `Connected` with the static `models.rs`
+  catalogue filtered to the CLIs actually present; no tunnel, no auto-start, periodic re-probe.
+- **`db.rs`** — `sessions.host_id` (direct sessions live in the *local* DB tagged with their
+  host) + a `detached_runs` table (pid, pgid, start-time identity, cursor, provider session id,
+  status) as the durable half of recovery.
+- **`server.rs`** — direct-host routing for session create/prompt/cancel/delete/list,
+  `fs.browse` over ssh (real remote directory listing incl. `.git` detection — no typed-path
+  fallback needed), and CLI mode as a local PTY running
+  `ssh -tt <host> tmux new-session -A -s perch-cli-<id> '<cli resume>'`. Detached turns stream
+  through a `TurnSink` implemented over `AppState`, so they are **not** cancelled when the WS
+  connection that started them closes.
+- **Verified end-to-end against a devpod** (isolated `:7806` + `/tmp` db/hosts): claude turn
+  streams → second turn ("count 1→20") → `kill -9` of perch mid-turn → fresh perch recovers the
+  session with the **complete** 1..20 output and `--resume` continuity intact (turn 3 answers
+  "20") → cancel kills the whole process group with zero survivors → CLI mode attaches a live
+  `claude` TUI in remote tmux. Codex verified on the same host, including `codex exec resume`
+  thread continuity. e2e: new `detached.spec.ts` (mode select, direct badge, unreachable-host
+  error, plus a devpod-gated full-turn test enabled with `PERCH_E2E_DIRECT_SSH_HOST`).
+- **Known gap, by design**: headless `-p`/`exec` has no approval channel, so detached turns run
+  `bypassPermissions`. Real approvals need CLI mode (or, for codex, a future app-server backend).
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to

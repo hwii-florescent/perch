@@ -1,9 +1,10 @@
 import { create } from "zustand";
-import type { AgentAttach, AgentKind, ChatUsage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, HostInfoMessage } from "@perch/shared";
+import type { AgentAttach, AgentKind, ChatUsage, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
 import { socket } from "./ws";
 import { emitTerminalData } from "./terminalBus";
 import { defaultModel } from "./models";
 import { applyTheme } from "./themes";
+import { playBlockedTone, playDoneTone } from "./sound";
 
 export interface ToolCallEntry {
   name: string;
@@ -106,11 +107,27 @@ interface PerchState {
    * from `server.info` on connect; remote hosts are seeded from the
    * `claudeModels`/`codexModels` fields of their `host.info` message. */
   hostModels: Record<string, { claude: ModelEntry[]; codex: ModelEntry[] }>;
-  /** Which host the currently-active session belongs to.  "local" until a
-   * remote session is switched to or created.  Updated by switchSession and
-   * session.history (via the session's hostId). */
+  /** Which host the sidebar/tab bar are currently scoped to. "local" until a
+   * remote session is switched to or created, or the sidebar's host switcher
+   * picks another one. Updated by switchSession, session.history (via the
+   * session's hostId) and `setActiveHost`. Persisted in localStorage. */
   activeHostId: string;
-  /** Whether archived sessions are visible in the sidebar. */
+  /** Which project (a distinct `(hostId, cwd)` pair — the same grouping the
+   * sidebar has always used) the sidebar and tab bar are scoped to. This is
+   * an explicit *pin*: it follows the active session whenever one is opened,
+   * but the sidebar's project list can also set it on its own so the user can
+   * browse another project's sessions without leaving the current one.
+   * Persisted in localStorage; `null` means "no pin yet — fall back to the
+   * most recent project on the active host" (see `effectiveActiveProject`). */
+  activeProject: ActiveProject | null;
+  /** Switch the sidebar to another host. Clears the project pin so the new
+   * host resolves to its own most recent project. */
+  setActiveHost: (hostId: string) => void;
+  /** Pin the sidebar/tab bar to a project (also makes its host active). */
+  setActiveProject: (hostId: string, cwd: string) => void;
+  /** Whether archived sessions are visible in the sidebar. Client-only
+   * preference (toggled from Settings → Interface), persisted in
+   * localStorage — see `SHOW_ARCHIVED_STORAGE_KEY` below. */
   showArchived: boolean;
   setShowArchived: (show: boolean) => void;
   /** Cache of persisted dockview layout blobs, keyed by sessionId. Populated
@@ -126,6 +143,18 @@ interface PerchState {
    * populated from `workspace.git` server pushes. Keyed by
    * `${hostId}:${cwd}` — the same key `Sidebar.tsx`'s `ProjectGroup` uses. */
   workspaceGit: Record<string, { branch?: string; ahead: number; behind: number }>;
+  /** Wave 2: git worktrees per repo, keyed by `${hostId}:${repoPath}` — the
+   * same key shape `workspaceGit` uses. Populated by `worktree.list.result`
+   * (request-correlated like `fs.browse`); the sidebar's `WorktreeMenu`
+   * renders straight from this cache so a create/remove round-trip followed
+   * by a re-list refreshes every open menu for that repo. */
+  worktrees: Record<string, { worktrees: WorktreeEntry[]; defaultRoot: string }>;
+  /** Which project's worktree popover an external trigger (the leader,W
+   * keybind) wants opened, as `${hostId}:${cwd}` plus a monotonically
+   * increasing nonce so pressing the same binding twice re-opens it. The
+   * matching `WorktreeMenu` instance self-opens against its own button rect;
+   * cleared by that instance once consumed. */
+  worktreeMenuRequest: { projectKey: string; nonce: number } | null;
   /** "Session finished" toasts (Phase 6), derived client-side from
    * `session.updated` running→idle transitions on non-active sessions.
    * Rendered by `components/Toast.tsx`; dismissed on click or timeout. */
@@ -165,6 +194,49 @@ interface PerchState {
   createSessionOnHost: (hostId: string, cwd?: string) => void;
   /** Archive or unarchive a session. */
   archiveSession: (sessionId: string, archived: boolean) => void;
+  /** Permanently delete a session. Irreversible — unlike archiveSession there
+   * is no undo. Server-side cleanup (DB rows, in-flight turn, CLI-attached
+   * terminal) happens on receipt of `session.deleted`, which also drives the
+   * local sessions[]/sessionLayouts/cliTerminalIds cleanup and — if the
+   * deleted session was the active one — switching to the most recent
+   * remaining session (or a blank/empty state if none remain). */
+  deleteSession: (sessionId: string) => void;
+  /** Rename a session (Wave 1 item 2). Sets a persistent user title override
+   * that wins over the auto-derived first-message title once non-empty. */
+  renameSession: (sessionId: string, title: string) => void;
+  /** Request a directory listing for the new-session cwd picker (Wave 1 item
+   * 1). Resolves with the `fs.browse.result` reply matching this call's
+   * generated requestId. `hostId` omitted/undefined means "local"; `path`
+   * omitted means "start at $HOME". */
+  browseDirectory: (hostId: string | undefined, path?: string) => Promise<FsBrowseResultMessage>;
+  /** Wave 2 worktrees — list every git worktree of the repo containing
+   * `repoPath` on `hostId`. Also caches the result under
+   * `worktrees["${hostId}:${repoPath}"]`. */
+  listWorktrees: (hostId: string, repoPath: string) => Promise<WorktreeReply>;
+  /** Create a linked worktree. `newBranch` is a hint — the server falls back
+   * to checking out an existing branch when one already exists (herdr's
+   * `run_worktree_add_command` behavior). Resolves with `worktree.done` or
+   * `worktree.error`. */
+  createWorktree: (
+    hostId: string,
+    repoPath: string,
+    branch: string,
+    newBranch: boolean,
+    path?: string,
+  ) => Promise<WorktreeReply>;
+  /** Remove a worktree. Without `force`, a dirty checkout comes back as
+   * `worktree.error { dirty: true }` — the caller escalates that into a
+   * force confirmation rather than reporting a hard failure. */
+  removeWorktree: (
+    hostId: string,
+    repoPath: string,
+    path: string,
+    force: boolean,
+  ) => Promise<WorktreeReply>;
+  /** Ask the `WorktreeMenu` for `${hostId}:${cwd}` to open itself (leader,W). */
+  requestWorktreeMenu: (projectKey: string) => void;
+  /** Clear a consumed `worktreeMenuRequest`. */
+  clearWorktreeMenuRequest: () => void;
   /** Request the persisted dockview layout blob for a session. Reply lands
    * in `sessionLayouts[sessionId]` via the `session.layout` server message. */
   fetchSessionLayout: (sessionId: string) => void;
@@ -187,9 +259,79 @@ interface PerchState {
   attachAgentCli: (sessionId: string, agent: AgentKind) => Promise<string>;
   sendTerminalInput: (terminalId: string, data: string) => void;
   resizeTerminal: (terminalId: string, cols: number, rows: number) => void;
+  /** Force-terminate a terminal's backing PTY/process and drop it from local
+   * state (terminals + any cliTerminalIds entry pointing at it). Used to kill
+   * a CLI-attached terminal on unmount (leaving CLI mode, switching session,
+   * or the component tearing down before attach even resolves) so a stale
+   * still-alive `claude --resume` process never lingers to be silently
+   * reattached to a fresh, blank xterm instance later — see
+   * views/AgentCliTerminal.tsx. Also used by plain terminal panes on unmount
+   * (views/Terminal.tsx) so closing a terminal tab doesn't leak a shell
+   * process. Safe to call on an already-dead or unknown terminal id (no-op
+   * server-side). */
+  killTerminal: (terminalId: string) => void;
 }
 
 const pendingTerminals: PendingTerminal[] = [];
+
+/**
+ * Host id of a user-initiated `session.create` whose cwd the server still has
+ * to resolve ("~" or "use the default"), or `null` when nothing is pending.
+ * The `status.update` that `session.create` always replies with carries the
+ * resolved path, and the `"status.update"` handler consumes this flag to pin
+ * `activeProject` on it. Only local creates can be resolved this way — the
+ * hub does not relay remote `status.update`s (see `hub.rs`), so a remote
+ * project is picked up later from the `session.updated` that lands when the
+ * session gets its first message.
+ */
+let expectProjectFromStatus: string | null = null;
+
+/** Resolvers for in-flight `fs.browse` requests, keyed by requestId. See
+ * `browseDirectory` and the `"fs.browse.result"` case in
+ * `handleServerMessage`. Single-shot: each entry is deleted as soon as its
+ * matching reply arrives (mirrors the hub's `PendingKey::Browse` semantics
+ * on the server side). */
+const pendingBrowses = new Map<string, (msg: FsBrowseResultMessage) => void>();
+
+/** Any of the three replies a `worktree.*` request can produce. */
+export type WorktreeReply =
+  | WorktreeListResultMessage
+  | WorktreeDoneMessage
+  | WorktreeErrorMessage;
+
+/** Resolvers for in-flight `worktree.*` requests, keyed by requestId — the
+ * exact same single-shot request/response discipline as `pendingBrowses`
+ * above (and as the server's `PendingKey::Worktree` hub slot). Every request
+ * gets exactly one reply: `worktree.list.result`, `worktree.done`, or
+ * `worktree.error`. */
+const pendingWorktrees = new Map<string, (msg: WorktreeReply) => void>();
+
+function resolveWorktreeRequest(requestId: string, msg: WorktreeReply): void {
+  const resolve = pendingWorktrees.get(requestId);
+  if (resolve) {
+    pendingWorktrees.delete(requestId);
+    resolve(msg);
+  }
+}
+
+/** Mint a requestId, register the resolver, and send. `hostId: "local"` is
+ * dropped from the wire message (absent == local, same convention as
+ * `browseDirectory`) so a local request never hits the hub-routing branch. */
+function sendWorktreeRequest(
+  msg: (WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage) & { hostId: string },
+): Promise<WorktreeReply> {
+  return new Promise<WorktreeReply>((resolve) => {
+    const requestId = newId();
+    pendingWorktrees.set(requestId, resolve);
+    const { hostId, ...rest } = msg;
+    socket.send({
+      ...rest,
+      requestId,
+      ...(hostId && hostId !== "local" ? { hostId } : {}),
+    } as WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage);
+  });
+}
+
 
 function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -197,22 +339,192 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Sessions belonging to the same (hostId,cwd) project as the currently
- * active session, sorted oldest-first — the same grouping/ordering `TabBar`
- * uses. Falls back to a single-element list containing just the active
- * session when its cwd is unknown (e.g. a brand-new session with no
- * persisted DB row yet, per Fix 3's lazy-insert). Exported so `keybinds.ts`
- * (leader,n/p/1-9) can reuse the exact same project scoping without
- * duplicating the grouping logic. */
-export function activeProjectSessions(
-  state: Pick<PerchState, "sessions" | "sessionId" | "activeHostId" | "status">,
-): SessionSummary[] {
-  const current = state.sessions.find((s) => s.id === state.sessionId);
-  const hostId = current?.hostId ?? state.activeHostId;
-  const cwd = current?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined) ?? null;
-  if (!cwd) return current ? [current] : [];
+/** "Show archived sessions" is a client-only preference (no server round
+ * trip) — same localStorage-backed pattern as `paneLabels.ts`'s pane-label
+ * toggle. Unlike paneLabels there's no need for a separate pub/sub module:
+ * `showArchived` already lives in this zustand store and every reader goes
+ * through `usePerchStore`, so a plain localStorage mirror on read/write is
+ * enough to survive a reload. */
+const SHOW_ARCHIVED_STORAGE_KEY = "perch.showArchived.enabled";
+
+function readShowArchivedStored(): boolean {
+  try {
+    return localStorage.getItem(SHOW_ARCHIVED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeShowArchivedStored(value: boolean): void {
+  try {
+    localStorage.setItem(SHOW_ARCHIVED_STORAGE_KEY, value ? "1" : "0");
+  } catch {
+    // ignore — worst case the preference doesn't survive a reload
+  }
+}
+
+/** The sidebar/tab-bar "active project" pin — a `(hostId, cwd)` pair. */
+export interface ActiveProject {
+  hostId: string;
+  cwd: string;
+}
+
+/** localStorage keys backing `activeHostId` / `activeProject`. Same
+ * client-only-preference pattern as `SHOW_ARCHIVED_STORAGE_KEY` above: the
+ * navigation scope is pure view state, so it never round-trips the protocol. */
+const ACTIVE_HOST_STORAGE_KEY = "perch.activeHostId";
+const ACTIVE_PROJECT_STORAGE_KEY = "perch.activeProject";
+
+function readActiveHostStored(): string {
+  try {
+    return localStorage.getItem(ACTIVE_HOST_STORAGE_KEY) || "local";
+  } catch {
+    return "local";
+  }
+}
+
+/**
+ * True until the nav scope has been established for this profile. Only a
+ * profile that has never picked a host/project gets its host *and* project
+ * seeded from the most recent session (see the `"session.list"` handler).
+ * Once anything has set the scope — a persisted value, a host switch, a
+ * project click, opening a session — later `session.list` pushes must never
+ * move the sidebar off the host the user is looking at. That matters
+ * concretely with federation: the hub re-broadcasts `session.list` whenever a
+ * remote host's list changes, and without this latch the newest session
+ * (usually a local one) would yank the sidebar back to "local" moments after
+ * the user switched to a remote host.
+ */
+let navSeedPending = (() => {
+  try {
+    return (
+      localStorage.getItem(ACTIVE_HOST_STORAGE_KEY) == null &&
+      localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) == null
+    );
+  } catch {
+    return false;
+  }
+})();
+
+function writeActiveHostStored(hostId: string): void {
+  navSeedPending = false;
+  try {
+    localStorage.setItem(ACTIVE_HOST_STORAGE_KEY, hostId);
+  } catch {
+    // ignore — worst case the scope doesn't survive a reload
+  }
+}
+
+function readActiveProjectStored(): ActiveProject | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      const { hostId, cwd } = parsed as Partial<ActiveProject>;
+      if (typeof hostId === "string" && typeof cwd === "string") return { hostId, cwd };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveProjectStored(project: ActiveProject | null): void {
+  try {
+    if (project) localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, JSON.stringify(project));
+    else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** A project = every session sharing one `(hostId, cwd)`. The sidebar has
+ * always grouped this way; the nav redesign just promotes the grouping to a
+ * first-class, selectable navigation level. */
+export interface ProjectGroup {
+  /** `${hostId}:${cwd}` — also the `workspaceGit` / `tabOrder` cache key. */
+  key: string;
+  hostId: string;
+  cwd: string;
+  /** Sessions in the project, newest-first. */
+  sessions: SessionSummary[];
+  /** Newest session's createdAt — used to order projects newest-first. */
+  newestAt: number;
+}
+
+/** The slice of store state every project-navigation helper below reads. */
+export type ProjectNavState = Pick<
+  PerchState,
+  "sessions" | "sessionId" | "activeHostId" | "activeProject" | "showArchived"
+>;
+
+/**
+ * Projects belonging to `hostId`, newest-first. Archived sessions are
+ * excluded (so a project whose sessions were all archived drops out of the
+ * nav entirely) unless `showArchived` is on — with the usual exception for
+ * the currently-active session, which must never be yanked out from under an
+ * open chat.
+ */
+export function projectsForHost(state: ProjectNavState, hostId: string): ProjectGroup[] {
+  const map = new Map<string, ProjectGroup>();
+  for (const s of state.sessions) {
+    if ((s.hostId ?? "local") !== hostId) continue;
+    if (s.archived && !state.showArchived && s.id !== state.sessionId) continue;
+    const cwd = s.cwd ?? "(unknown)";
+    const key = `${hostId}:${cwd}`;
+    let group = map.get(key);
+    if (!group) {
+      group = { key, hostId, cwd, sessions: [], newestAt: 0 };
+      map.set(key, group);
+    }
+    group.sessions.push(s);
+    if (s.createdAt > group.newestAt) group.newestAt = s.createdAt;
+  }
+  for (const group of map.values()) group.sessions.sort((a, b) => b.createdAt - a.createdAt);
+  return [...map.values()].sort((a, b) => b.newestAt - a.newestAt);
+}
+
+/**
+ * Resolve the project the sidebar and tab bar are scoped to.
+ *
+ * Normally this is just `activeProject`, but two cases need a fallback:
+ *  - the pin points at a project with no listed sessions. That happens
+ *    legitimately right after "+ New session" in a fresh directory (Fix 3
+ *    defers the DB row until the first message, so the project has no
+ *    sessions yet) — detected by the active session having no row — in which
+ *    case the pin is kept so the new project doesn't blink out of the nav;
+ *  - otherwise the project genuinely disappeared (its last session was
+ *    deleted or archived), so fall back to the host's most recent project.
+ * `null` means the active host has no projects at all.
+ */
+export function effectiveActiveProject(state: ProjectNavState): ActiveProject | null {
+  const hostId = state.activeHostId;
+  const projects = projectsForHost(state, hostId);
+  const pinned = state.activeProject;
+  if (pinned && pinned.hostId === hostId) {
+    if (projects.some((p) => p.cwd === pinned.cwd)) return pinned;
+    const activeIsUnpersisted =
+      state.sessionId != null && !state.sessions.some((s) => s.id === state.sessionId);
+    if (activeIsUnpersisted) return pinned;
+  }
+  const first = projects[0];
+  return first ? { hostId, cwd: first.cwd } : null;
+}
+
+/** Sessions of the effective active project, sorted oldest-first — the
+ * ordering `TabBar` renders (before any stored drag order) and the one
+ * `keybinds.ts` (leader,n/p/1-9) cycles through, so both always agree.
+ * Archived sessions are omitted unless shown or currently active. */
+export function activeProjectSessions(state: ProjectNavState): SessionSummary[] {
+  const project = effectiveActiveProject(state);
+  if (!project) {
+    const current = state.sessions.find((s) => s.id === state.sessionId);
+    return current ? [current] : [];
+  }
   return state.sessions
-    .filter((s) => (s.hostId ?? "local") === hostId && s.cwd === cwd)
+    .filter((s) => (s.hostId ?? "local") === project.hostId && s.cwd === project.cwd)
+    .filter((s) => !s.archived || state.showArchived || s.id === state.sessionId)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
@@ -236,11 +548,14 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   hosts: [],
   hostStates: {},
   hostModels: { local: { claude: [], codex: [] } },
-  activeHostId: "local",
-  showArchived: false,
+  activeHostId: readActiveHostStored(),
+  activeProject: readActiveProjectStored(),
+  showArchived: readShowArchivedStored(),
   sessionLayouts: {},
   sidebarCollapsed: false,
   workspaceGit: {},
+  worktrees: {},
+  worktreeMenuRequest: null,
   toasts: [],
 
   dismissToast: (id) => {
@@ -315,8 +630,37 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const hostModelEntry = get().hostModels[newHostId];
     const available = hostModelEntry?.[newAgent] ?? get().availableModels[newAgent];
     const newModel = s?.lastModel ?? defaultModel(newAgent, available);
-    set({ messages: [], streamingMessageId: null, agent: newAgent, model: newModel, cliError: null, activeHostId: newHostId });
+    // Opening a session from *anywhere* (sidebar row, tab, Navigator, mobile
+    // switcher, toast) re-scopes the nav onto that session's host + project.
+    const newProject = s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
+    writeActiveHostStored(newHostId);
+    writeActiveProjectStored(newProject);
+    set({
+      messages: [],
+      streamingMessageId: null,
+      agent: newAgent,
+      model: newModel,
+      cliError: null,
+      activeHostId: newHostId,
+      activeProject: newProject,
+    });
     socket.switchSession(sessionId);
+  },
+
+  setActiveHost: (hostId) => {
+    // Always persist, even when the host is unchanged: writing closes the
+    // one-shot `navSeedPending` latch, so an explicit "stay on this host"
+    // click is as binding as a switch.
+    writeActiveHostStored(hostId);
+    if (get().activeHostId === hostId) return;
+    writeActiveProjectStored(null);
+    set({ activeHostId: hostId, activeProject: null });
+  },
+
+  setActiveProject: (hostId, cwd) => {
+    writeActiveHostStored(hostId);
+    writeActiveProjectStored({ hostId, cwd });
+    set({ activeHostId: hostId, activeProject: { hostId, cwd } });
   },
 
   setSettingsOpen: (open) => {
@@ -357,7 +701,23 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     }
     // Clear local UI state so the view is blank while waiting for
     // session.created + session.history.
-    set({ messages: [], streamingMessageId: null, activeHostId: hostId });
+    //
+    // Re-scope the nav onto the requested project. An absolute cwd can be
+    // pinned right away; "~" (the "No project" quick-pick) and an omitted cwd
+    // only resolve server-side, so arm `expectProjectFromStatus` instead and
+    // let the `status.update` that always follows `session.create` supply the
+    // resolved path. The flag is deliberately NOT armed by every
+    // `session.created` — the transport mints a blank session on every
+    // connect (see ws.ts), and that housekeeping create must not drag the
+    // sidebar off whatever project the user was last looking at.
+    writeActiveHostStored(hostId);
+    if (cwd && cwd.startsWith("/")) {
+      writeActiveProjectStored({ hostId, cwd });
+      set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });
+    } else {
+      expectProjectFromStatus = hostId;
+      set({ messages: [], streamingMessageId: null, activeHostId: hostId });
+    }
     if (hostId === "local") {
       // Clear stored session id so a mid-flight reconnect doesn't resume the
       // old session before session.created arrives (same as socket.newSession()).
@@ -382,10 +742,69 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     socket.send({ type: "session.archive", sessionId, archived });
   },
 
+  deleteSession: (sessionId) => {
+    socket.send({ type: "session.delete", sessionId });
+  },
+
+  renameSession: (sessionId, title) => {
+    socket.send({ type: "session.rename", sessionId, title });
+  },
+
+  browseDirectory: (hostId, path) => {
+    return new Promise<FsBrowseResultMessage>((resolve) => {
+      const requestId = newId();
+      pendingBrowses.set(requestId, resolve);
+      const msg: { type: "fs.browse"; requestId: string; hostId?: string; path?: string } = {
+        type: "fs.browse",
+        requestId,
+      };
+      if (hostId && hostId !== "local") msg.hostId = hostId;
+      if (path) msg.path = path;
+      socket.send(msg);
+    });
+  },
+
+  listWorktrees: (hostId, repoPath) => {
+    return sendWorktreeRequest({ type: "worktree.list", requestId: "", hostId, repoPath });
+  },
+
+  createWorktree: (hostId, repoPath, branch, newBranch, path) => {
+    return sendWorktreeRequest({
+      type: "worktree.create",
+      requestId: "",
+      hostId,
+      repoPath,
+      branch,
+      newBranch,
+      ...(path ? { path } : {}),
+    });
+  },
+
+  removeWorktree: (hostId, repoPath, path, force) => {
+    return sendWorktreeRequest({
+      type: "worktree.remove",
+      requestId: "",
+      hostId,
+      repoPath,
+      path,
+      force,
+    });
+  },
+
+  requestWorktreeMenu: (projectKey) => {
+    set((state) => ({
+      worktreeMenuRequest: {
+        projectKey,
+        nonce: (state.worktreeMenuRequest?.nonce ?? 0) + 1,
+      },
+    }));
+  },
+
+  clearWorktreeMenuRequest: () => set({ worktreeMenuRequest: null }),
+
   fetchSessionLayout: (sessionId) => {
     socket.send({ type: "session.layout.get", sessionId });
   },
-
   saveSessionLayout: (sessionId, layout) => {
     socket.send({ type: "session.layout.set", sessionId, layout });
   },
@@ -405,6 +824,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   setShowArchived: (show) => {
+    writeShowArchivedStored(show);
     set({ showArchived: show });
   },
 
@@ -464,6 +884,21 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       };
     });
   },
+
+  killTerminal: (terminalId) => {
+    socket.send({ type: "terminal.kill", terminalId });
+    set((state) => {
+      const { [terminalId]: _dead, ...terminals } = state.terminals;
+      let cliTerminalIds = state.cliTerminalIds;
+      for (const [sid, tid] of Object.entries(state.cliTerminalIds)) {
+        if (tid === terminalId) {
+          if (cliTerminalIds === state.cliTerminalIds) cliTerminalIds = { ...state.cliTerminalIds };
+          delete cliTerminalIds[sid];
+        }
+      }
+      return { terminals, cliTerminalIds };
+    });
+  },
 }));
 
 /** Immutably patch the currently-streaming assistant message, if any. */
@@ -484,7 +919,32 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "session.list": {
-      usePerchStore.setState({ sessions: msg.sessions });
+      usePerchStore.setState((state) => {
+        // First list seen by a profile that has never picked a scope: default
+        // the nav to the most recent session's host + project. Afterwards the
+        // latch is closed and only explicit actions move the scope.
+        if (!navSeedPending || msg.sessions.length === 0) {
+          return { sessions: msg.sessions };
+        }
+        const newest = [...msg.sessions].sort((a, b) => b.createdAt - a.createdAt)[0];
+        if (!newest?.cwd) return { sessions: msg.sessions };
+        const hostId = newest.hostId ?? "local";
+        // Never seed onto a host this client can't render: a session may
+        // outlive the host entry that owned it (federation e2e deletes its
+        // test host while its sessions stay in the remote's DB), and the
+        // `hosts.list` reconciliation below has already run by the time a
+        // session list arrives.
+        if (hostId !== "local" && !state.hosts.some((h) => h.id === hostId)) {
+          return { sessions: msg.sessions };
+        }
+        writeActiveHostStored(hostId); // also closes the latch
+        writeActiveProjectStored({ hostId, cwd: newest.cwd });
+        return {
+          sessions: msg.sessions,
+          activeHostId: hostId,
+          activeProject: { hostId, cwd: newest.cwd },
+        };
+      });
       break;
     }
     case "session.updated": {
@@ -494,23 +954,100 @@ function handleServerMessage(msg: ServerMessage): void {
           ? state.sessions.map((s) => (s.id === msg.session.id ? msg.session : s))
           : [msg.session, ...state.sessions];
 
-        // Phase 6: a turn finished (running→idle) on a session that isn't
-        // the one currently being viewed — surface a dismissible toast
-        // rather than relying on the user to notice the sidebar dot.
-        let toasts = state.toasts;
-        if (
-          prev &&
+        // Phase 6 / Wave 1 items 3-4: a turn finished (running→idle) on a
+        // session that isn't the one currently being viewed, or the session
+        // just became blocked on an approval prompt — surface a dismissible
+        // toast (gated on toastDelivery) and/or play a notification tone
+        // (gated on soundEnabled) rather than relying on the user to notice
+        // the sidebar dot.
+        const becameDone =
+          !!prev &&
           prev.status === "running" &&
           msg.session.status === "idle" &&
-          msg.session.id !== state.sessionId
-        ) {
-          toasts = [
-            ...toasts,
-            { id: newId(), sessionId: msg.session.id, title: msg.session.title },
-          ];
+          msg.session.id !== state.sessionId;
+        const becameBlocked =
+          !!prev && !prev.blocked && !!msg.session.blocked && msg.session.id !== state.sessionId;
+
+        if (state.settings?.soundEnabled) {
+          if (becameBlocked) playBlockedTone();
+          else if (becameDone) playDoneTone();
         }
-        return { sessions, toasts };
+
+        let toasts = state.toasts;
+        const toastDelivery = state.settings?.toastDelivery ?? "app";
+        if ((becameDone || becameBlocked) && toastDelivery !== "off") {
+          if (toastDelivery === "system" && typeof Notification !== "undefined" && Notification.permission === "granted") {
+            try {
+              new Notification(becameBlocked ? "Session needs attention" : "Session finished", {
+                body: msg.session.title || "(untitled session)",
+              });
+            } catch {
+              // Fall through to the in-app toast as a best-effort fallback.
+              toasts = [...toasts, { id: newId(), sessionId: msg.session.id, title: msg.session.title }];
+            }
+          } else {
+            toasts = [
+              ...toasts,
+              { id: newId(), sessionId: msg.session.id, title: msg.session.title },
+            ];
+          }
+        }
+        // The moment a brand-new session gets its DB row (Fix 3's lazy insert
+        // fires on the first message) is the first time its cwd is known to
+        // the client for a *remote* session — the hub never relays
+        // `status.update`, so this is the only chance to pin the nav onto the
+        // project it actually landed in. Local sessions were already pinned
+        // from `status.update`, and re-pinning to the same value is a no-op.
+        let activeProject = state.activeProject;
+        let activeHostId = state.activeHostId;
+        if (!prev && msg.session.id === state.sessionId && msg.session.cwd) {
+          activeHostId = msg.session.hostId ?? "local";
+          activeProject = { hostId: activeHostId, cwd: msg.session.cwd };
+          writeActiveHostStored(activeHostId);
+          writeActiveProjectStored(activeProject);
+        }
+
+        return { sessions, toasts, activeProject, activeHostId };
       });
+      break;
+    }
+    case "session.deleted": {
+      const state = usePerchStore.getState();
+      const wasActive = state.sessionId === msg.sessionId;
+      const { [msg.sessionId]: _removedLayout, ...restLayouts } = state.sessionLayouts;
+      const { [msg.sessionId]: _removedCli, ...restCli } = state.cliTerminalIds;
+      const remainingSessions = state.sessions.filter((s) => s.id !== msg.sessionId);
+      usePerchStore.setState({
+        sessions: remainingSessions,
+        sessionLayouts: restLayouts,
+        cliTerminalIds: restCli,
+      });
+      if (wasActive) {
+        // Prefer the most recent remaining session on the same host; fall
+        // back to the most recent session on any host; fall back to a
+        // blank/empty state (no active session) if nothing remains at all.
+        const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
+        const sameHost = remainingSessions
+          .filter((s) => (s.hostId ?? "local") === state.activeHostId)
+          .sort(byRecency);
+        const anyHost = remainingSessions.slice().sort(byRecency);
+        const next = sameHost[0] ?? anyHost[0];
+        if (next) {
+          usePerchStore.getState().switchSession(next.id);
+        } else {
+          try {
+            localStorage.removeItem("perch.sessionId");
+          } catch {
+            // ignore
+          }
+          usePerchStore.setState({
+            sessionId: null,
+            messages: [],
+            streamingMessageId: null,
+            cliError: null,
+          });
+        }
+      }
       break;
     }
     case "server.info": {
@@ -574,11 +1111,20 @@ function handleServerMessage(msg: ServerMessage): void {
         const m = lastAssistant.model ?? defaultModel(a, available);
         usePerchStore.setState({ agent: a, model: m });
       }
-      // Update activeHostId from the session's known hostId if available.
+      // Update activeHostId/activeProject from the session's known row if
+      // available — this is the resume path (page reload, WS reconnect), and
+      // resuming a session counts as "opening" it for nav-scoping purposes.
       // session.history carries sessionId; look it up in sessions[].
       const sessionEntry = usePerchStore.getState().sessions.find((s) => s.id === msg.sessionId);
-      if (sessionEntry?.hostId) {
-        usePerchStore.setState({ activeHostId: sessionEntry.hostId });
+      if (sessionEntry?.hostId || sessionEntry?.cwd) {
+        const hostId = sessionEntry.hostId ?? "local";
+        writeActiveHostStored(hostId);
+        if (sessionEntry.cwd) {
+          writeActiveProjectStored({ hostId, cwd: sessionEntry.cwd });
+          usePerchStore.setState({ activeHostId: hostId, activeProject: { hostId, cwd: sessionEntry.cwd } });
+        } else {
+          usePerchStore.setState({ activeHostId: hostId });
+        }
       }
       break;
     }
@@ -591,6 +1137,16 @@ function handleServerMessage(msg: ServerMessage): void {
           costUsd: msg.costUsd,
         },
       });
+      // Resolve a pending user-initiated create (see `expectProjectFromStatus`).
+      if (expectProjectFromStatus != null) {
+        const hostId = expectProjectFromStatus;
+        expectProjectFromStatus = null;
+        if (hostId === "local" && msg.cwd) {
+          writeActiveHostStored(hostId);
+          writeActiveProjectStored({ hostId, cwd: msg.cwd });
+          usePerchStore.setState({ activeHostId: hostId, activeProject: { hostId, cwd: msg.cwd } });
+        }
+      }
       break;
     }
     case "chat.chunk": {
@@ -709,12 +1265,19 @@ function handleServerMessage(msg: ServerMessage): void {
       applyTheme(msg.settings.theme);
       break;
     }
-    case "hosts.list": {
-      usePerchStore.setState({ hosts: msg.hosts });
-      break;
-    }
+    case "hosts.list":
     case "hosts.updated": {
-      usePerchStore.setState({ hosts: msg.hosts });
+      // Reconcile the persisted nav scope: a host that was removed (or that
+      // never existed on this machine) must not leave the sidebar pointing at
+      // a host it can no longer render.
+      usePerchStore.setState((state) => {
+        const stale =
+          state.activeHostId !== "local" && !msg.hosts.some((h) => h.id === state.activeHostId);
+        if (!stale) return { hosts: msg.hosts };
+        writeActiveHostStored("local");
+        writeActiveProjectStored(null);
+        return { hosts: msg.hosts, activeHostId: "local", activeProject: null };
+      });
       break;
     }
     case "host.info": {
@@ -754,6 +1317,34 @@ function handleServerMessage(msg: ServerMessage): void {
       }));
       break;
     }
+    case "fs.browse.result": {
+      const resolve = pendingBrowses.get(msg.requestId);
+      if (resolve) {
+        pendingBrowses.delete(msg.requestId);
+        resolve(msg);
+      }
+      break;
+    }
+    // Wave 2 worktrees: all three reply shapes resolve the same single-shot
+    // promise registered by listWorktrees/createWorktree/removeWorktree.
+    // `worktree.list.result` additionally refreshes the per-repo cache so an
+    // already-open menu re-renders without holding the result itself.
+    case "worktree.list.result": {
+      const key = `${msg.hostId}:${msg.repoPath}`;
+      usePerchStore.setState((state) => ({
+        worktrees: {
+          ...state.worktrees,
+          [key]: { worktrees: msg.worktrees, defaultRoot: msg.defaultRoot },
+        },
+      }));
+      resolveWorktreeRequest(msg.requestId, msg);
+      break;
+    }
+    case "worktree.done":
+    case "worktree.error": {
+      resolveWorktreeRequest(msg.requestId, msg);
+      break;
+    }
   }
 }
 
@@ -763,8 +1354,8 @@ socket.onConnectionChange((connected) => {
   // session.create/subscribe handshake runs on reconnect (see ws.ts).
   usePerchStore.setState(connected ? { connected } : { connected, sessionId: null });
 });
-// Apply perch's own look immediately so there's no flash of unstyled (or
-// browser-default) content before the server's settings.current message
-// (holding the actual persisted theme, if not "perch") arrives.
-applyTheme("perch");
+// Apply herdr's default look (catppuccin) immediately so there's no flash of
+// unstyled (or browser-default) content before the server's settings.current
+// message (holding the actual persisted theme, if not "catppuccin") arrives.
+applyTheme("catppuccin");
 socket.connect();

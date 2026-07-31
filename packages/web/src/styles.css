@@ -1,22 +1,28 @@
 :root {
   color-scheme: dark;
-  /* --- herdr-parity semantic tokens (16), perch's current look as defaults --- */
-  --accent: #58e6a8;
-  --panel-bg: #0b0d10;
-  --surface-0: #14171c;
-  --surface-1: #1b1f26;
-  --surface-dim: #101317;
-  --overlay-0: #262b33;
-  --overlay-1: #3a4150;
-  --text: #e6e6e6;
-  --subtext-0: #8a93a1;
-  --mauve: #b58ee6;
-  --green: #58e6a8;
-  --yellow: #e6c458;
-  --red: #e65858;
-  --blue: #5898e6;
-  --teal: #58c8e6;
-  --peach: #e69858;
+  /* --- herdr-parity semantic tokens (16) ------------------------------------
+   * Default look is now herdr's own default theme, Catppuccin Mocha — see
+   * `reference/herdr/src/app/state.rs::Palette::catppuccin()` (the values
+   * below are that palette, RGB -> hex, identical to `THEMES.catppuccin` in
+   * `themes.ts`). "perch" (the old hardcoded look) is kept as a selectable
+   * theme in Settings, just no longer the default — see `themes.ts`,
+   * `store.ts`, and the Rust `default_theme()` in protocol.rs/settings.rs. */
+  --accent: #89b4fa;
+  --panel-bg: #181825;
+  --surface-0: #313244;
+  --surface-1: #45475a;
+  --surface-dim: #1e1e2e;
+  --overlay-0: #6c7086;
+  --overlay-1: #7f849c;
+  --text: #cdd6f4;
+  --subtext-0: #a6adc8;
+  --mauve: #cba6f7;
+  --green: #a6e3a1;
+  --yellow: #f9e2af;
+  --red: #f38ba8;
+  --blue: #89b4fa;
+  --teal: #94e2d5;
+  --peach: #fab387;
   /* --- deprecated aliases: kept so existing component CSS keeps working --- */
   --bg: var(--panel-bg);
   --surface: var(--surface-0);
@@ -24,8 +30,20 @@
   --border: var(--overlay-0);
   --muted: var(--subtext-0);
   --danger: var(--red);
+  /* Flat/minimal corner radius for panel-like chrome (sidebar, tabs, status
+   * bar, overlays, popovers, buttons) — herdr's ratatui panes render with
+   * `ratatui::symbols::border::PLAIN` (square corners); a small radius here
+   * is the closest sane web equivalent without looking broken. Chat message
+   * bubbles and inline code/pre blocks intentionally keep their own (larger)
+   * radius since they're chat content, not TUI chrome. */
+  --radius: 3px;
+  /* herdr is a terminal app — the whole UI reads as a TUI, so the base font
+   * is a monospace stack rather than the system sans-serif perch used
+   * before. Falls through to the platform's default monospace if none of
+   * the named faces are installed. */
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
 }
 
 * {
@@ -42,6 +60,8 @@ body,
 body {
   background: var(--panel-bg);
   color: var(--text);
+  /* Terminal-dense line spacing instead of prose-comfortable 1.5+. */
+  line-height: 1.3;
   /* Avoids the classic mobile double-tap zoom + rubber-band scroll feel. */
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
@@ -69,7 +89,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.6rem;
   font-size: 0.9rem;
   line-height: 1;
@@ -87,19 +107,24 @@ body {
 .tab-bar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.15rem;
   flex-shrink: 0;
-  padding: 0.35rem 0.5rem;
+  padding: 0.3rem 0.5rem;
   border-bottom: 1px solid var(--overlay-0);
-  background: var(--surface-0);
+  /* herdr's tab bar (`ui/tabs.rs::render_tab_bar`) fills the whole strip with
+   * panel_bg first, then draws each tab's own bg on top — mirror that here
+   * instead of the surface-1 backdrop the old perch look used. */
+  background: var(--panel-bg);
   overflow-x: auto;
 }
 
 .tab-bar__tab {
-  background: var(--surface-1);
-  color: var(--subtext-0);
+  /* herdr: inactive named tab = surface0 bg / overlay1 fg
+   * (`ui/tabs.rs::render_tab_bar`). */
+  background: var(--surface-0);
+  color: var(--overlay-1);
   border: 1px solid var(--overlay-0);
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 0.25rem 0.75rem;
   font-size: 0.8rem;
   line-height: 1.2;
@@ -125,11 +150,39 @@ body {
   color: var(--panel-bg);
 }
 
+/* Wave 2 item 10: drag-to-reorder visual states. Dragged tab dims slightly;
+ * the tab currently under the pointer gets an accent-colored insertion edge
+ * so the drop target is unambiguous without a separate ghost/preview element. */
+.tab-bar__tab--dragging {
+  opacity: 0.5;
+}
+
+.tab-bar__tab--drag-over {
+  border-color: var(--accent);
+  box-shadow: -2px 0 0 var(--accent);
+}
+
+.tab-bar__rename-input {
+  /* Inline rename input (Wave 1 item 2), sized/positioned to slot into the
+   * tab strip in place of the tab button being renamed. */
+  background: var(--surface-0);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-family: inherit;
+  width: 10rem;
+  flex-shrink: 0;
+  outline: none;
+}
+
 .tab-bar__new {
   background: var(--surface-1);
   color: var(--subtext-0);
   border: 1px solid var(--overlay-0);
-  border-radius: 999px;
+  border-radius: var(--radius);
   width: 1.6rem;
   height: 1.6rem;
   flex-shrink: 0;
@@ -201,7 +254,7 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 0.15rem 0.4rem;
-  border-radius: 0.3rem;
+  border-radius: var(--radius);
   flex-shrink: 0;
 }
 
@@ -256,7 +309,7 @@ body {
   background: var(--surface-1);
   color: var(--accent);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   padding: 0.4rem 0.6rem;
   font-size: 0.82rem;
   font-weight: 600;
@@ -306,7 +359,13 @@ body {
 }
 
 .session-item--active {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  /* herdr: the selected sidebar row gets a full surface0 background
+   * (`ui/sidebar.rs::render_workspace_list` / `render_sidebar_collapsed`,
+   * `is_selected` -> `Style::default().bg(p.surface0)`) — surface-1 is
+   * reserved for hover per the `Palette` doc comment ("surface1: slightly
+   * lighter surface for hover/active states"). The left accent bar is kept
+   * as an extra affordance on top of that. */
+  background: var(--surface-0);
   border-left-color: var(--accent);
 }
 
@@ -338,28 +397,95 @@ body {
   flex-shrink: 0;
 }
 
-/* --- Sidebar project grouping (C1) --------------------------------------- */
+/* --- Sidebar project navigation (herdr "spaces" list) -------------------- */
 
 .sidebar__project {
-  margin-bottom: 0.1rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Sessions of the active project are nested one level in, so the project
+ * rows above/below them stay readable as the top navigation level. */
+.sidebar__project .session-item__wrapper {
+  padding-left: 0.85rem;
+}
+
+.sidebar__project .session-item {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
 }
 
 .sidebar__project-header {
   display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0 0.35rem;
+}
+
+/* The clickable body of a project row: [aggregate dot] [name / subline] [n] */
+.sidebar__project-select {
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.65rem 0.2rem;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.3rem;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.sidebar__project-select:hover {
+  background: var(--surface-1);
+}
+
+.sidebar__project--active > .sidebar__project-header > .sidebar__project-select {
+  background: var(--surface-0);
+  border-left-color: var(--accent);
+}
+
+.sidebar__project-dot {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.sidebar__project-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .sidebar__project-name {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
   min-width: 0;
+}
+
+.sidebar__project-subline {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar__project-sub {
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar__project-count {
@@ -367,9 +493,15 @@ body {
   color: var(--subtext-0);
   background: var(--surface-1);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   padding: 0.05rem 0.35rem;
   flex-shrink: 0;
+}
+
+.sidebar__empty {
+  margin: 0.6rem 0.65rem;
+  font-size: 0.72rem;
+  color: var(--subtext-0);
 }
 
 /* --- Sidebar project git status (Phase 6) -------------------------------- */
@@ -378,9 +510,9 @@ body {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   color: var(--subtext-0);
-  flex-shrink: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -388,7 +520,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 6rem;
+  max-width: 8rem;
 }
 
 .sidebar__project-ahead,
@@ -409,32 +541,13 @@ body {
   border-top: 1px solid var(--overlay-0);
 }
 
-.sidebar__toggle-archived {
-  background: none;
-  border: none;
-  color: var(--subtext-0);
-  font-size: 0.72rem;
-  padding: 0.2rem 0.4rem;
-  border-radius: 0.35rem;
-  cursor: pointer;
-  font-family: inherit;
-  line-height: 1;
-  margin-right: auto;
-  transition: color 0.12s ease, background 0.12s ease;
-}
-
-.sidebar__toggle-archived:hover {
-  color: var(--text);
-  background: var(--surface-1);
-}
-
 .sidebar__gear {
   background: none;
   border: none;
   color: var(--subtext-0);
   font-size: 1.1rem;
   padding: 0.25rem;
-  border-radius: 0.35rem;
+  border-radius: var(--radius);
   cursor: pointer;
   line-height: 1;
   transition: color 0.12s ease, background 0.12s ease;
@@ -445,53 +558,106 @@ body {
   background: var(--surface-1);
 }
 
-/* --- Local section -------------------------------------------------------- */
+/* --- Host switcher chip (top-left) --------------------------------------- */
 
-.sidebar__local-section {
+.sidebar__host-switcher {
   display: flex;
-  flex-direction: column;
-  /* Grow to fill available space when there are no remote host sections. */
-  flex: 1;
-  min-height: 0;
+  align-items: flex-start;
+  gap: 0.3rem;
+  width: 100%;
+  flex-shrink: 0;
+  background: none;
+  border: none;
   border-bottom: 1px solid var(--overlay-0);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
-.sidebar__local-section .sidebar__list {
+.sidebar__host-switcher:hover {
+  background: var(--surface-1);
+}
+
+.sidebar__host-switcher .sidebar__env {
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.sidebar__host-switcher-caret {
+  flex-shrink: 0;
+  color: var(--subtext-0);
+  font-size: 0.7rem;
+  padding: 0.6rem 0.5rem 0 0;
 }
 
 .sidebar__local-actions {
-  padding: 0 0.5rem 0.35rem;
+  padding: 0.5rem 0.5rem 0.35rem;
   flex-shrink: 0;
 }
 
-/* --- Remote host sections ------------------------------------------------- */
+.sidebar__local-actions .sidebar__new-btn {
+  margin: 0;
+  width: 100%;
+}
 
-.sidebar__host-section {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--overlay-0);
+/* --- Host switcher popover ------------------------------------------------ */
+
+.host-switcher-popover {
+  /* herdr overlay chrome — same as `.new-session-popover`. */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  min-width: 200px;
+  max-width: 320px;
   display: flex;
   flex-direction: column;
 }
 
-.sidebar__host-section--disabled {
-  opacity: 0.5;
+.host-switcher-popover__list {
+  overflow-y: auto;
+  min-height: 0;
 }
 
-.sidebar__host-header {
+.host-switcher-popover__row {
+  display: flex;
+  flex-direction: column;
+}
+
+.host-switcher-popover__row-top {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.65rem 0.35rem;
+}
+
+.host-switcher-popover__row--active {
   background: var(--surface-0);
 }
 
-.sidebar__host-name {
-  font-size: 0.8rem;
-  font-weight: 600;
+.host-switcher-popover__item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  background: none;
+  border: none;
   color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.host-switcher-popover__item:hover {
+  background: var(--surface-1);
+}
+
+.host-switcher-popover__name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -499,33 +665,72 @@ body {
   white-space: nowrap;
 }
 
-.sidebar__host-new-btn {
+.host-switcher-popover__state {
   flex-shrink: 0;
-  background: none;
-  color: var(--accent);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.35rem;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  font-family: inherit;
+  font-size: 0.66rem;
+  color: var(--subtext-0);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* "direct" mode marker in the host switcher — a host with no perch on it,
+   whose hosted turns run detached over SSH. Visually distinct from the
+   connection-state text next to it because it describes the *kind* of host,
+   not its current state. */
+.host-switcher-popover__badge {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid var(--surface-2);
+  color: var(--mauve, var(--subtext-0));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Per-host mode select in the Settings hosts list. */
+.settings-modal__host-mode {
+  flex-shrink: 0;
+  min-width: 5.5rem;
+}
+
+.host-switcher-popover__enabled {
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem 0 0;
   cursor: pointer;
-  line-height: 1.2;
-  transition: border-color 0.12s ease, opacity 0.12s ease;
 }
 
-.sidebar__host-new-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+/* Actionable error text under a host row, e.g. "perch not installed on
+ * remote…" — the HostStateDot title carries the full text too, but this
+ * makes the failure visible without hovering. */
+.host-switcher-popover__error {
+  padding: 0 0.6rem 0.4rem 1.55rem;
+  font-size: 0.68rem;
+  color: var(--red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sidebar__host-new-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.host-switcher-popover__divider {
+  height: 1px;
+  background: var(--overlay-0);
 }
 
-.sidebar__host-sessions {
-  overflow-y: auto;
-  max-height: 40vh;
+.host-switcher-popover__manage {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+}
+
+.host-switcher-popover__manage:hover {
+  background: var(--surface-1);
 }
 
 /* --- Host connection state dots ------------------------------------------ */
@@ -643,6 +848,69 @@ body {
   --dv-tabs-and-actions-container-height: 2.1rem;
 }
 
+/* herdr draws every pane with a 1px border: accent when focused, overlay0
+ * otherwise (`reference/herdr/src/ui/panes.rs::render_pane_borders`). dockview
+ * groups are perch's equivalent of herdr's panes, so mirror that rule on the
+ * group chrome itself rather than leaving groups borderless. */
+.dockview-theme-perch .dv-groupview {
+  border: 1px solid var(--overlay-0);
+}
+
+.dockview-theme-perch .dv-groupview.dv-active-group {
+  border-color: var(--accent);
+}
+
+/* Wave 2 item 12: transparent wrapper around `DockviewDefaultTab` so
+ * `PaneTab` (DockviewShell.tsx) can render the "active agent" badge as a
+ * real, testable DOM node alongside it. `.dv-default-tab`'s own layout rules
+ * in dockview's CSS are descendant selectors (`.dv-tab .dv-default-tab`),
+ * not direct-child ones, so this wrapper needs to replicate the same
+ * height/width/flex box `.dv-default-tab` itself expects from its parent —
+ * without this, the tab would collapse to its content's natural (0) height. */
+.pane-tab {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.pane-tab__agent-badge {
+  flex-shrink: 0;
+  margin-right: 0.4rem;
+  color: var(--subtext-0);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+/* The permanent "chat" panel can never actually be closed (see
+ * `canClosePanel` in dockviewController.ts), so hide its tab's close (X)
+ * button entirely — this also frees up the trailing space in the tab for
+ * the item-12 agent badge above to sit flush after the title instead of
+ * competing with the close button for room. */
+.pane-tab[data-testid="pane-tab-chat"] .dv-default-tab-action {
+  display: none;
+}
+
+.dockview-group-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.dockview-group-action:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
 /* --- Chat ---------------------------------------------------------------- */
 
 .chat {
@@ -650,6 +918,32 @@ body {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* `.chat`'s real parent at runtime is dockview-react's `.dv-react-part`
+   * portal wrapper, which is `display: block` (not flex/grid) and sizes
+   * itself via an *inline* `height: 100%` (see
+   * dockview-react/dist/esm/dockview/reactContentPart.js) rather than any
+   * flex layout. `flex: 1; min-height: 0` only constrains an element when
+   * its parent is a flex/grid container — under a block parent they're
+   * no-ops, so `.chat` fell back to block default `height: auto` and grew
+   * to fit all of its content (every message ever seeded/streamed) instead
+   * of being clipped to the dockview panel's actual allotted height. That
+   * silently defeated `.chat__list`'s own `overflow-y: auto` (nothing ever
+   * exceeded `.chat`'s content-sized height, so `.chat__list` never had
+   * internal overflow to scroll) and let long transcripts spill out past
+   * the visible panel. Mirror `.dv-react-part`'s own trick: an explicit
+   * `height: 100%` lets `.chat` inherit the parent's definite (percentage
+   * or pixel) height regardless of the parent's display type, so the
+   * inner `flex: 1; min-height: 0` chain (`.chat__list-container` →
+   * `.chat__list`) has something real to be bounded by. */
+  height: 100%;
+}
+
+.chat__list-container {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat__list {
@@ -662,27 +956,122 @@ body {
   gap: 0.5rem;
 }
 
-.message {
-  max-width: 88%;
-  padding: 0.55rem 0.75rem;
-  border-radius: 0.75rem;
-  word-break: break-word;
-  font-size: 0.95rem;
-  line-height: 1.4;
-}
-
-.message--user {
-  align-self: flex-end;
+/* --- Scroll-to-bottom pill -------------------------------------------------
+ * Perch used to force-scroll to the bottom on every new message, yanking
+ * the view out from under a user who scrolled up to read earlier messages
+ * while a turn was still streaming. Now auto-stick only applies while
+ * already at the bottom; otherwise this pill offers an explicit way back
+ * (jean's FloatingButtons "Bottom" button). The pulsing dot only shows
+ * while a message is actively streaming. */
+.scroll-bottom-pill {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   background: var(--accent);
   color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.scroll-bottom-pill:hover {
+  filter: brightness(1.08);
+}
+
+.scroll-bottom-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  animation: scroll-pill-pulse 1s ease-in-out infinite;
+}
+
+@keyframes scroll-pill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.6); }
+}
+
+.message {
+  max-width: 85%;
+  word-break: break-word;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  position: relative;
+}
+
+/* --- Asymmetric bubbles (jean MessageItem pattern) ------------------------
+ * User messages stay compact bordered bubbles, right-aligned. Assistant
+ * messages are full-width plain text — no bubble, no border, no background
+ * — reading like a terminal/log transcript rather than mirroring the user
+ * bubble, which fits perch's flat TUI identity better than two-speech-bubble
+ * chat-app styling. */
+.message--user {
+  align-self: flex-end;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
   white-space: pre-wrap;
-  border-radius: 1rem 1rem 0.25rem 1rem;
 }
 
 .message--assistant {
-  align-self: flex-start;
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0;
+  padding-bottom: 1.15rem; /* room for the hover "copy" action below-right */
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+}
+
+.message__actions {
+  position: absolute;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.message:hover .message__actions,
+.message__actions:focus-within {
+  opacity: 1;
+}
+
+.message--user .message__actions {
+  top: 0.25rem;
+  right: 0.35rem;
+}
+
+.message--assistant .message__actions {
+  bottom: 0;
+  left: 0;
+}
+
+.message__action-btn {
   background: var(--surface-1);
+  color: var(--subtext-0);
   border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.message__action-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .message__error {
@@ -732,7 +1121,7 @@ body {
 }
 
 .message__markdown code {
-  background: var(--surface-1);
+  background: var(--surface-dim);
   border: 1px solid var(--overlay-0);
   border-radius: 0.25rem;
   padding: 0.1em 0.35em;
@@ -740,12 +1129,10 @@ body {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-.message--assistant .message__markdown code {
-  background: var(--panel-bg);
-}
-
+/* Fenced code blocks (jean CodeBlock treatment, adapted to perch tokens). */
 .message__markdown pre {
-  background: var(--panel-bg);
+  position: relative;
+  background: var(--surface-dim);
   border: 1px solid var(--overlay-0);
   border-radius: 0.4rem;
   padding: 0.6rem 0.75rem;
@@ -758,6 +1145,35 @@ body {
   border: none;
   padding: 0;
   font-size: 0.85em;
+}
+
+/* Per-code-block copy button, injected into each rendered <pre> after
+ * DOMPurify.sanitize() (see Chat.tsx's injectCodeCopyButtons). Top-right,
+ * hover-to-reveal. */
+.codeblock-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  background: var(--surface-1);
+  color: var(--subtext-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.message__markdown pre:hover .codeblock-copy,
+.codeblock-copy:focus {
+  opacity: 1;
+}
+
+.codeblock-copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .message__markdown a {
@@ -778,7 +1194,12 @@ body {
   margin: 0.75em 0;
 }
 
-/* --- Worked-for details (C2) --------------------------------------------- */
+/* --- Worked-for summary + tool-call timeline (C2, C3) ---------------------
+ * jean's MessageItem builds a chronological "timeline" of thinking blocks
+ * and tool calls, each its own collapsible row sharing one row primitive
+ * (glyph + name + one-line arg summary + chevron). Perch keeps its own
+ * "Worked for Xs" collapsible summary line wrapping that timeline instead of
+ * inlining blocks into the prose flow. */
 
 .message__worked-for {
   margin-bottom: 0.4rem;
@@ -811,52 +1232,216 @@ body {
   transform: rotate(90deg);
 }
 
-.message__worked-for .thinking__body {
-  padding: 0.35rem 0.55rem 0.35rem 1rem;
+.tool-timeline {
   border-top: 1px solid var(--overlay-0);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.82rem;
+  padding: 0.35rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
-.message__worked-for .tool-call {
-  margin: 0;
-  border-top: 1px solid var(--overlay-0);
-  padding: 0.2rem 0.55rem 0.2rem 1rem;
+/* Shared row primitive (jean's TOOL_CALL_ROW_CLASS), reused by the thinking
+ * row and every tool-call row. */
+.tool-row {
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  background: var(--surface-dim);
+  overflow: hidden;
 }
 
-.thinking,
-.tool-call {
-  margin-bottom: 0.35rem;
-  font-size: 0.85rem;
+.tool-row__summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.tool-row__summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-row__glyph {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  color: var(--overlay-1);
+}
+
+.tool-row--thinking .tool-row__glyph {
+  color: var(--mauve);
+}
+
+.tool-row[open] .tool-row__glyph--tool {
+  color: var(--green);
+}
+
+.tool-row__name {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tool-row__arg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--subtext-0);
 }
 
-.thinking summary,
-.tool-call summary {
-  cursor: pointer;
-  user-select: none;
+.tool-row__chevron {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tool-row__chevron::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.tool-row[open] > .tool-row__summary .tool-row__chevron::before {
+  transform: rotate(90deg);
+}
+
+.tool-row__body {
+  border-top: 1px solid var(--overlay-0);
+  padding: 0.35rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tool-row__detail + .tool-row__detail {
+  border-top: 1px dashed var(--overlay-0);
+  padding-top: 0.35rem;
 }
 
 .thinking__body {
   white-space: pre-wrap;
-  padding: 0.35rem 0 0 0.75rem;
-  border-left: 2px solid var(--overlay-0);
-  margin-top: 0.25rem;
+  word-break: break-word;
+  font-size: 0.82rem;
+  color: var(--subtext-0);
 }
 
 .tool-call__block {
-  margin: 0.35rem 0 0 0.75rem;
+  margin: 0;
   padding: 0.4rem 0.5rem;
   background: var(--panel-bg);
   border: 1px solid var(--overlay-0);
   border-radius: 0.4rem;
   overflow-x: auto;
   font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-call__block--bash {
+  color: var(--green);
 }
 
 .tool-call__block--result {
   color: var(--text);
+}
+
+/* --- Inline diffs for Edit/Write-style tool calls --------------------------
+ * Colored unified diff instead of raw JSON — see Chat.tsx's
+ * getEditDiffInfo/DiffView. Computed with the `diff` npm package
+ * (diffLines), mirroring jean's own EditedFilesDisplay.tsx approach rather
+ * than hand-rolling an LCS diff. */
+.diff-view {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--overlay-0);
+  border-radius: 0.4rem;
+  background: var(--panel-bg);
+  font-size: 0.8rem;
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 0.4rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line__gutter {
+  flex-shrink: 0;
+  width: 1.2em;
+  text-align: center;
+  user-select: none;
+  color: var(--overlay-1);
+}
+
+.diff-line__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-line--add {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.diff-line--add .diff-line__gutter {
+  color: var(--green);
+}
+
+.diff-line--remove {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+
+.diff-line--remove .diff-line__gutter {
+  color: var(--red);
+}
+
+/* --- Per-file edit badges ---------------------------------------------------
+ * "path +N -M" badges below an assistant message summarizing every file
+ * touched by Edit/Write-style tool calls in that turn; clicking one scrolls
+ * to and expands the matching diff. */
+.message__edit-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.edit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-dim);
+  color: var(--subtext-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.edit-badge:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.edit-badge__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22rem;
+}
+
+.edit-badge__add {
+  color: var(--green);
+}
+
+.edit-badge__del {
+  color: var(--red);
 }
 
 /* --- Chat input row (C3) ------------------------------------------------- */
@@ -878,7 +1463,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.55rem 0.7rem;
   font-size: 1rem;
   font-family: inherit;
@@ -888,22 +1473,18 @@ body {
   outline: 1px solid var(--accent);
 }
 
-/* Bottom row: ModeSwitch + ModelChip + send/stop button */
+/* Bottom row: ModelChip + send/stop button (ModeSwitch moved to Settings —
+   chat mode is now global, not a per-chat footer control) */
 .chat__input-controls {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-/* ModeSwitch in this row should not push itself to the right */
-.chat__input-controls .mode-switch {
-  margin-left: 0;
-}
-
 .chat__send,
 .chat__cancel {
   border: none;
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.35rem 0.9rem;
   font-weight: 600;
   font-size: 0.9rem;
@@ -927,22 +1508,6 @@ body {
   color: var(--panel-bg);
 }
 
-/* --- CLI mode row (C3) — slim mode-switch bar above the terminal ---------- */
-
-.chat__mode-row {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0.3rem 0.6rem;
-  border-bottom: 1px solid var(--overlay-0);
-  background: var(--surface-0);
-}
-
-.chat__mode-row .mode-switch {
-  margin-left: 0;
-}
-
 /* --- Model chip (C3) ----------------------------------------------------- */
 
 .model-chip {
@@ -955,7 +1520,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 0.25rem 0.65rem;
   font-size: 0.78rem;
   font-family: inherit;
@@ -971,11 +1536,15 @@ body {
 .model-chip__popover {
   /* position/bottom/right are injected as inline style (position:fixed) by
      ModelChip via getBoundingClientRect so the popover escapes any
-     overflow:hidden ancestor in the input row. */
+     overflow:hidden ancestor in the input row.
+     Overlay chrome (accent border + panel_bg fill) matches herdr's
+     `render_modal_shell`/`render_panel_shell(accent, panel_bg)`, used for
+     every popup/menu/dialog in `reference/herdr/src/ui/{menus,navigator,
+     settings,keybind_help,dialogs,onboarding,release_notes}.rs`. */
   min-width: 220px;
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.6rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   z-index: 9999;
   overflow: hidden;
@@ -993,7 +1562,7 @@ body {
   background: none;
   color: var(--subtext-0);
   border: 1px solid transparent;
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.5rem;
   font-size: 0.8rem;
   font-family: inherit;
@@ -1057,8 +1626,16 @@ body {
 }
 
 /* --- Mode switch ----------------------------------------------------------
-   Styled like a light/dark switch, deliberately distinct from the app's own
-   (always-dark) theme rather than themed off --bg/--surface/--text. */
+   Hosted/CLI toggle. Previously hardcoded to a light-UI look (white thumb on
+   a pale track) on the theory that it should read as "deliberately distinct"
+   from perch's own always-dark palette. Now that the default theme and 18
+   other selectable themes include light palettes (catppuccin-latte,
+   one-light, gruvbox-light, ...), those hardcoded hex values no longer read
+   as "distinct" so much as "broken" against a light --panel-bg. Rebuilt on
+   semantic tokens instead: it keeps its own visual identity as a control
+   (pill track + sliding thumb, not themed to match panel/surface chrome
+   directly) while every color still comes from the active theme, so it never
+   clashes on light themes and still updates when the theme changes. */
 
 .mode-switch {
   display: flex;
@@ -1076,7 +1653,7 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #9aa1ad;
+  color: var(--overlay-1);
   transition: color 0.15s ease;
 }
 
@@ -1090,14 +1667,14 @@ body {
   width: 2.4rem;
   height: 1.3rem;
   border-radius: 999px;
-  background: #e2e5ea;
-  border: 1px solid #c7cbd4;
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
   transition: background 0.15s ease;
   flex-shrink: 0;
 }
 
 .mode-switch[aria-checked="true"] .mode-switch__track {
-  background: #22252b;
+  background: var(--panel-bg);
   border-color: var(--accent);
 }
 
@@ -1108,7 +1685,7 @@ body {
   width: 1.1rem;
   height: 1.1rem;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   transition: transform 0.15s ease, background 0.15s ease;
 }
@@ -1145,7 +1722,7 @@ body {
   background: var(--surface-1);
   border: 1px solid var(--overlay-0);
   padding: 0.35rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   font-size: 0.85rem;
   color: var(--subtext-0);
 }
@@ -1158,13 +1735,68 @@ body {
   background: color-mix(in srgb, var(--red) 20%, var(--panel-bg));
   border: 1px solid color-mix(in srgb, var(--red) 45%, var(--panel-bg));
   padding: 0.35rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   font-size: 0.85rem;
   color: var(--red);
   max-width: 90%;
   text-align: center;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- Terminal search (Wave 1 item 5) -------------------------------------- */
+
+.terminal-search {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.4rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.terminal-search__input {
+  background: var(--surface-0);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.45rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  width: 11rem;
+  outline: none;
+}
+
+.terminal-search__input:focus {
+  border-color: var(--accent);
+}
+
+.terminal-search__btn {
+  background: var(--surface-1);
+  color: var(--subtext-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  width: 1.4rem;
+  height: 1.4rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.terminal-search__btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.terminal-search__btn--close {
+  font-size: 0.95rem;
 }
 
 /* --- Status bar ------------------------------------------------------------ */
@@ -1206,6 +1838,26 @@ body {
   text-overflow: ellipsis;
 }
 
+/* herdr-style keybind hint: accent+bold "key" next to a dim description,
+ * see `reference/herdr/src/ui/navigator.rs::render_footer`. */
+.status-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.status-hint__key {
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.3rem;
+}
+
 /* --- Settings modal (Stage D) -------------------------------------------- */
 
 .settings-modal__backdrop {
@@ -1219,9 +1871,11 @@ body {
 }
 
 .settings-modal__panel {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.75rem;
+  /* herdr overlay chrome — see `.model-chip__popover` comment above
+   * (settings.rs calls `render_panel_shell(..., accent, panel_bg)`). */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   width: min(640px, calc(100vw - 2rem));
   max-height: calc(100dvh - 4rem);
@@ -1252,7 +1906,7 @@ body {
   color: var(--subtext-0);
   font-size: 1rem;
   padding: 0.2rem 0.35rem;
-  border-radius: 0.35rem;
+  border-radius: var(--radius);
   cursor: pointer;
   line-height: 1;
   transition: color 0.12s ease, background 0.12s ease;
@@ -1312,6 +1966,51 @@ body {
   color: var(--subtext-0);
 }
 
+/* Notifications section (Wave 1 items 3 & 4) */
+
+.settings-modal__checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  margin-bottom: 0.6rem;
+}
+
+.settings-modal__field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.settings-modal__field-label {
+  color: var(--subtext-0);
+}
+
+/* Chat Mode section reuses the chat pane's ModeSwitch pill; strip its
+   flex-auto-margin so it sits right after the field label like the toast
+   delivery <select> does, instead of being pushed to the row's far edge. */
+.settings-modal__field-row .mode-switch {
+  margin-left: 0;
+}
+
+.settings-modal__select {
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
+.settings-modal__select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Theme list */
 
 .settings-modal__theme-list {
@@ -1330,7 +2029,7 @@ body {
   padding: 0.3rem 0.65rem;
   background: var(--surface-1);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.45rem;
+  border-radius: var(--radius);
   color: var(--text);
   font-size: 0.8rem;
   cursor: pointer;
@@ -1369,7 +2068,7 @@ body {
   padding: 0.35rem 0.5rem;
   background: var(--surface-1);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.45rem;
+  border-radius: var(--radius);
   font-size: 0.82rem;
 }
 
@@ -1419,7 +2118,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.45rem;
+  border-radius: var(--radius);
   padding: 0.35rem 0.55rem;
   font-size: 0.82rem;
   font-family: inherit;
@@ -1444,7 +2143,7 @@ body {
 .settings-modal__btn {
   flex-shrink: 0;
   border: none;
-  border-radius: 0.45rem;
+  border-radius: var(--radius);
   padding: 0.35rem 0.7rem;
   font-size: 0.82rem;
   font-weight: 600;
@@ -1468,7 +2167,7 @@ body {
   margin-left: auto;
 }
 
-/* --- Session item wrapper + hover menu (Fix 4) --------------------------- */
+/* --- Session item wrapper + hover action icons -------------------------- */
 
 .session-item__wrapper {
   position: relative;
@@ -1481,7 +2180,9 @@ body {
   min-width: 0;
 }
 
-.session-item__menu-btn {
+/* Hover archive icon — single-click archive/unarchive toggle. Hidden until
+ * the row is hovered/focused, same reveal pattern as .session-item__delete-btn. */
+.session-item__archive-btn {
   display: none;
   align-items: center;
   justify-content: center;
@@ -1490,20 +2191,49 @@ body {
   background: none;
   border: none;
   color: var(--subtext-0);
-  font-size: 0.95rem;
+  font-size: 0.8rem;
   cursor: pointer;
   padding: 0;
   border-left: 1px solid transparent;
   transition: color 0.1s ease, background 0.1s ease;
 }
 
-.session-item__wrapper:hover .session-item__menu-btn,
-.session-item__wrapper:focus-within .session-item__menu-btn {
+.session-item__wrapper:hover .session-item__archive-btn,
+.session-item__wrapper:focus-within .session-item__archive-btn {
   display: flex;
 }
 
-.session-item__menu-btn:hover {
+.session-item__archive-btn:hover {
   color: var(--text);
+  background: var(--surface-1);
+}
+
+/* Hover trash icon — one-click, immediate delete (no confirmation). Hidden
+ * until the row is hovered/focused, same reveal pattern as
+ * .session-item__archive-btn. */
+.session-item__delete-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.6rem;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+  border-left: 1px solid transparent;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.session-item__wrapper:hover .session-item__delete-btn,
+.session-item__wrapper:focus-within .session-item__delete-btn {
+  display: flex;
+}
+
+.session-item__delete-btn:hover {
+  color: var(--red);
   background: var(--surface-1);
 }
 
@@ -1512,45 +2242,34 @@ body {
   opacity: 0.45;
 }
 
-/* --- Session menu portal popover (Fix 4) --------------------------------- */
-
-.session-menu__popover {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
-  min-width: 120px;
-}
-
-.session-menu__item {
-  display: block;
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 0.82rem;
-  text-align: left;
-  padding: 0.45rem 0.75rem;
-  cursor: pointer;
-  transition: background 0.1s ease;
-}
-
-.session-menu__item:hover {
-  background: var(--surface-1);
-}
-
 /* --- New-session picker popover (Fix 2) ---------------------------------- */
 
 .new-session-popover {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.55rem;
+  /* herdr overlay chrome — see `.model-chip__popover` comment above. */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   min-width: 200px;
-  max-width: 280px;
+  max-width: 320px;
+  /* `max-height` is set inline (Sidebar.tsx), clamped to the viewport below
+   * the anchor. This flex column + the `min-height: 0` flex children below
+   * (`__projects`, `.dir-browser` → `.dir-browser__list`) let the popover's
+   * inner lists scroll independently while the breadcrumb/filter/footer
+   * (Wave 1 F1 regression: `dir-browser-use` must stay reachable) never get
+   * pushed off-screen. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Known-project quick-pick rows: capped to ~5 visible rows and scrollable so
+ * a long history of distinct cwds can't push the DirectoryBrowser (and its
+ * "Use this folder" button) below the fold. */
+.new-session-popover__projects {
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 190px;
 }
 
 .new-session-popover__item {
@@ -1574,6 +2293,7 @@ body {
 }
 
 .new-session-popover__item--none {
+  flex-shrink: 0;
   color: var(--subtext-0);
   font-weight: 400;
 }
@@ -1589,6 +2309,7 @@ body {
 }
 
 .new-session-popover__divider {
+  flex-shrink: 0;
   height: 1px;
   background: var(--overlay-0);
   margin: 0.15rem 0;
@@ -1607,7 +2328,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.5rem;
   font-size: 0.78rem;
   font-family: inherit;
@@ -1622,7 +2343,7 @@ body {
   background: var(--accent);
   color: var(--panel-bg);
   border: none;
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.55rem;
   font-size: 0.78rem;
   font-weight: 600;
@@ -1633,6 +2354,278 @@ body {
 .new-session-popover__create-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* --- DirectoryBrowser (Wave 1 item 1) ------------------------------------ */
+
+.dir-browser {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Fills whatever space is left in the `.new-session-popover` flex column
+   * (below the quick-pick list / "No project" row), so only `__list` below
+   * scrolls internally while this wrapper's own header/breadcrumb/filter/
+   * footer rows stay put. `min-height: 0` is required for the child
+   * `flex: 1` list to be allowed to shrink below its content size. */
+  flex: 1;
+  min-height: 0;
+}
+
+.dir-browser__header {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.2rem 0.5rem;
+}
+
+.dir-browser__mode-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  text-decoration: underline;
+}
+
+.dir-browser__breadcrumb {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  overflow: hidden;
+}
+
+.dir-browser__crumb {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  cursor: pointer;
+}
+
+.dir-browser__crumb:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.dir-browser__crumb:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dir-browser__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--subtext-0);
+  flex: 1;
+  min-width: 0;
+}
+
+.dir-browser__crumb-segment {
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 0;
+  cursor: pointer;
+}
+
+.dir-browser__crumb-segment:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.dir-browser__crumb-segment:disabled {
+  color: var(--text);
+  cursor: default;
+}
+
+.dir-browser__filter {
+  flex-shrink: 0;
+  margin: 0.2rem 0.5rem;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+
+.dir-browser__filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dir-browser__list {
+  /* Grows to fill the remaining space handed to `.dir-browser` by the
+   * popover's flex column, capped so it never dominates when there's
+   * plenty of room; scrolls internally either way. */
+  flex: 1;
+  min-height: 60px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 0.1rem 0;
+}
+
+.dir-browser__empty {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.76rem;
+  color: var(--subtext-0);
+}
+
+.dir-browser__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  padding: 0.32rem 0.75rem;
+  cursor: pointer;
+}
+
+.dir-browser__entry:hover {
+  background: var(--surface-1);
+}
+
+.dir-browser__entry-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dir-browser__entry-badge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0 0.3rem;
+  margin-left: 0.4rem;
+}
+
+.dir-browser__footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.4rem 0.5rem;
+  border-top: 1px solid var(--overlay-0);
+}
+
+.dir-browser__use-btn {
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.32rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.dir-browser__use-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dir-browser__type {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.dir-browser__type-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+
+.dir-browser__type-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* --- ConfirmDialog (Wave 1 item 6) --------------------------------------- */
+
+.confirm-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-dialog {
+  /* herdr overlay chrome — see `.model-chip__popover` comment above. */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  width: min(360px, calc(100vw - 2rem));
+  padding: 1rem;
+}
+
+.confirm-dialog__message {
+  margin: 0 0 1rem;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.confirm-dialog__btn {
+  background: none;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0.35rem 0.85rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.confirm-dialog__btn:hover {
+  border-color: var(--accent);
+}
+
+.confirm-dialog__btn--accept {
+  background: var(--accent);
+  color: var(--panel-bg);
+  border-color: var(--accent);
+}
+
+.confirm-dialog__btn--accept:hover {
+  filter: brightness(1.1);
 }
 
 /* --- Sidebar collapse (Phase 4: Keybindings + Navigator, leader,b) ------- */
@@ -1648,9 +2641,7 @@ body {
 .sidebar--collapsed .sidebar__env,
 .sidebar--collapsed .sidebar__local-actions,
 .sidebar--collapsed .sidebar__list,
-.sidebar--collapsed .sidebar__host-sessions,
-.sidebar--collapsed .sidebar__host-name,
-.sidebar--collapsed .sidebar__toggle-archived {
+.sidebar--collapsed .sidebar__host-switcher-caret {
   display: none;
 }
 
@@ -1666,7 +2657,7 @@ body {
   color: var(--subtext-0);
   font-size: 0.9rem;
   padding: 0.25rem;
-  border-radius: 0.35rem;
+  border-radius: var(--radius);
   cursor: pointer;
   line-height: 1;
   transition: color 0.12s ease, background 0.12s ease;
@@ -1691,9 +2682,11 @@ body {
 }
 
 .navigator {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.75rem;
+  /* herdr overlay chrome — see `.model-chip__popover` comment above
+   * (navigator.rs itself calls `render_panel_shell(..., accent, panel_bg)`). */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   width: min(560px, calc(100vw - 2rem));
   max-height: min(480px, calc(100dvh - 16vh - 2rem));
@@ -1729,7 +2722,7 @@ body {
   background: var(--surface-1);
   color: var(--subtext-0);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   padding: 0.15rem 0.55rem;
   font-size: 0.72rem;
   font-family: inherit;
@@ -1812,9 +2805,11 @@ body {
 }
 
 .keybind-help {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.75rem;
+  /* herdr overlay chrome — see `.model-chip__popover` comment above
+   * (keybind_help.rs calls `render_modal_shell`, accent border/panel_bg fill). */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   width: min(560px, calc(100vw - 2rem));
   max-height: calc(100dvh - 4rem);
@@ -1845,7 +2840,7 @@ body {
   color: var(--subtext-0);
   font-size: 1rem;
   padding: 0.2rem 0.35rem;
-  border-radius: 0.35rem;
+  border-radius: var(--radius);
   cursor: pointer;
   line-height: 1;
   transition: color 0.12s ease, background 0.12s ease;
@@ -1914,7 +2909,7 @@ body {
   flex-shrink: 0;
   background: var(--surface-1);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.35rem;
+  border-radius: var(--radius);
   padding: 0.1rem 0.45rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
@@ -1928,12 +2923,108 @@ body {
   color: var(--text);
 }
 
+/* --- Onboarding (Wave 2 item 11: first-run modal) ------------------------ */
+
+.onboarding__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.onboarding {
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  width: min(480px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 4rem);
+  overflow-y: auto;
+  padding: 1.25rem 1.4rem 1.4rem;
+}
+
+.onboarding__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.onboarding__body {
+  margin: 0 0 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--subtext-0);
+}
+
+.onboarding__tips {
+  list-style: none;
+  margin: 0 0 1.1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.onboarding__tips li {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.onboarding__kbd {
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.onboarding__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.onboarding__link:hover {
+  color: var(--text);
+}
+
+.onboarding__dismiss {
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.onboarding__dismiss:hover {
+  opacity: 0.85;
+}
+
 /* --- Pane context menu (Phase 5: pane splitting/zoom/context-menu) ------- */
 
 .pane-context-menu {
-  background: var(--surface-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.55rem;
+  /* herdr overlay chrome — see `.model-chip__popover` comment above
+   * (menus.rs calls `render_panel_shell(..., accent, panel_bg)` for every
+   * context menu). */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   padding: 0.3rem 0;
@@ -1986,7 +3077,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.5rem;
   font-size: 0.8rem;
   font-family: inherit;
@@ -2001,7 +3092,7 @@ body {
   background: var(--accent);
   color: var(--panel-bg);
   border: none;
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.55rem;
   font-size: 0.78rem;
   font-weight: 600;
@@ -2044,7 +3135,7 @@ body {
   background: var(--surface-1);
   color: var(--text);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
   font-family: inherit;
@@ -2129,7 +3220,7 @@ body {
   background: var(--accent);
   color: var(--panel-bg);
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   padding: 0.45rem 0.6rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -2212,7 +3303,7 @@ body {
   width: 100%;
   background: none;
   border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   color: var(--text);
   font-family: inherit;
   font-size: 0.82rem;
@@ -2257,7 +3348,7 @@ body {
   gap: 0.5rem;
   background: var(--surface-0);
   border: 1px solid var(--overlay-0);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   padding: 0.55rem 0.8rem;
   color: var(--text);
@@ -2297,3 +3388,242 @@ body {
   }
 }
 
+
+/* --- WorktreeMenu (Wave 2: git worktrees, ported from herdr) -------------- */
+
+/* Branch-glyph button in the sidebar project header. Sits between the git
+   branch/ahead-behind decoration and the session count; only rendered for
+   projects whose cwd is a git checkout (see `ProjectWorktrees`). */
+.worktree-menu__btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.worktree-menu__btn:hover {
+  color: var(--accent);
+  background: var(--surface-1);
+}
+
+/* herdr overlay chrome — accent border + panel-bg fill, same as
+   `.model-chip__popover` / `.new-session-popover`. */
+.worktree-menu__popover {
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  min-width: 280px;
+  max-width: 420px;
+}
+
+.worktree-menu__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.65rem 0.3rem;
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.worktree-menu__title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--subtext-0);
+}
+
+.worktree-menu__repo {
+  font-size: 0.72rem;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-menu__list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0.15rem 0;
+}
+
+.worktree-menu__empty {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.76rem;
+  color: var(--subtext-0);
+}
+
+.worktree-menu__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.worktree-menu__entry:hover {
+  background: var(--surface-1);
+}
+
+.worktree-menu__entry-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.worktree-menu__entry-branch {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-menu__entry-path {
+  font-size: 0.68rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-menu__badge {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0 0.28rem;
+}
+
+.worktree-menu__badge--dirty {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.worktree-menu__entry-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.worktree-menu__action {
+  background: none;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  cursor: pointer;
+  transition: border-color 0.1s ease, color 0.1s ease;
+}
+
+.worktree-menu__action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.worktree-menu__action--danger:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.worktree-menu__error {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.72rem;
+  color: var(--red);
+  border-top: 1px solid var(--overlay-0);
+  white-space: pre-wrap;
+}
+
+.worktree-menu__divider {
+  height: 1px;
+  background: var(--overlay-0);
+}
+
+.worktree-menu__new-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.worktree-menu__new-btn:hover {
+  background: var(--surface-1);
+}
+
+.worktree-menu__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.65rem;
+}
+
+.worktree-menu__input {
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+
+.worktree-menu__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.worktree-menu__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--subtext-0);
+  cursor: pointer;
+}
+
+.worktree-menu__form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.worktree-menu__submit {
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.worktree-menu__submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

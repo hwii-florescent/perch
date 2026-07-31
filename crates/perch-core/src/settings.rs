@@ -14,7 +14,7 @@
 //!     "codex":  []
 //!   },
 //!   "defaultCwd": "/home/user/projects",
-//!   "theme": "perch"
+//!   "theme": "catppuccin"
 //! }
 //! ```
 
@@ -42,10 +42,24 @@ pub struct Settings {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the web client's `THEMES` table).
-    /// Defaults to `"perch"` so existing settings files (predating this
-    /// field) and a fresh install both see perch's own look.
+    /// Defaults to `"catppuccin"` — herdr's own default theme — so a fresh
+    /// install (and any settings file predating this field) matches herdr's
+    /// look out of the box. `"perch"` remains a selectable theme.
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Play a short WebAudio-generated tone on session done/blocked
+    /// transitions. Defaults to `false` (opt-in).
+    #[serde(default)]
+    pub sound_enabled: bool,
+    /// Toast delivery mode: `"off"` | `"app"` | `"system"`. Defaults to `"app"`.
+    #[serde(default = "default_toast_delivery")]
+    pub toast_delivery: String,
+    /// Global chat rendering mode: `"hosted"` | `"cli"`. Used to be per-chat
+    /// client state (a footer toggle in the chat pane); now a single global
+    /// setting so every open chat pane renders the same way, controlled from
+    /// Settings. Defaults to `"hosted"`.
+    #[serde(default = "default_chat_mode")]
+    pub chat_mode: String,
 }
 
 impl Default for Settings {
@@ -54,12 +68,23 @@ impl Default for Settings {
             custom_models: CustomModelsData::default(),
             default_cwd: None,
             theme: default_theme(),
+            sound_enabled: false,
+            toast_delivery: default_toast_delivery(),
+            chat_mode: default_chat_mode(),
         }
     }
 }
 
 fn default_theme() -> String {
-    "perch".to_string()
+    "catppuccin".to_string()
+}
+
+fn default_toast_delivery() -> String {
+    "app".to_string()
+}
+
+fn default_chat_mode() -> String {
+    "hosted".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +116,9 @@ pub struct SettingsPatch {
     )]
     pub default_cwd: Option<Option<String>>,
     pub theme: Option<String>,
+    pub sound_enabled: Option<bool>,
+    pub toast_delivery: Option<String>,
+    pub chat_mode: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -167,6 +195,15 @@ impl SettingsStore {
         }
         if let Some(theme) = patch.theme {
             guard.theme = theme;
+        }
+        if let Some(sound_enabled) = patch.sound_enabled {
+            guard.sound_enabled = sound_enabled;
+        }
+        if let Some(toast_delivery) = patch.toast_delivery {
+            guard.toast_delivery = toast_delivery;
+        }
+        if let Some(chat_mode) = patch.chat_mode {
+            guard.chat_mode = chat_mode;
         }
         let snapshot = guard.clone();
         drop(guard);

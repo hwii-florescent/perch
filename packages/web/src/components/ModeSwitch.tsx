@@ -1,15 +1,18 @@
 export function ModeSwitch({
   mode,
   onChange,
+  testId = "mode-switch",
 }: {
   mode: "hosted" | "cli";
   onChange: (mode: "hosted" | "cli") => void;
+  testId?: string;
 }) {
   const isCli = mode === "cli";
   return (
     <button
       type="button"
       className="mode-switch"
+      data-testid={testId}
       role="switch"
       aria-checked={isCli}
       aria-label="Toggle Hosted / CLI mode"

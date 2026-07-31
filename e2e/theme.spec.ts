@@ -1,10 +1,10 @@
 /**
  * theme.spec.ts — Phase 1 (herdr-parity) e2e tests for the theme system.
  *
- * T1 "default theme is perch on first load":
+ * T1 "default theme is catppuccin on first load":
  *   Fresh session, no theme override in ~/.perch/settings.json — assert
  *   `getComputedStyle(document.documentElement).getPropertyValue("--accent")`
- *   matches perch's default accent (#58e6a8).
+ *   matches herdr's default theme's accent (catppuccin, #89b4fa).
  *
  * T2 "switching theme in Settings persists across reload":
  *   Open Settings, click the "dracula" theme option, assert the ✓ marker and
@@ -15,9 +15,12 @@
  *   For catppuccin, dracula, one-light: select the theme, assert `--accent`
  *   matches that theme's value, and assert no new console errors appeared.
  *
- * Resets `theme` back to "perch" in ~/.perch/settings.json at start and end
- * so this spec — and any spec that runs after it — sees perch's default
- * look, matching settings.spec.ts's cleanup convention for other fields.
+ * Resets `theme` back to "catppuccin" (the app's default — see
+ * `default_theme()` in crates/perch-core/src/{protocol,settings}.rs and
+ * `applyTheme("catppuccin")` in store.ts) in ~/.perch/settings.json at start
+ * and end so this spec — and any spec that runs after it — sees the app's
+ * default look, matching settings.spec.ts's cleanup convention for other
+ * fields.
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -45,14 +48,15 @@ const ACCENT = {
 // Filesystem helpers
 // ---------------------------------------------------------------------------
 
-/** Force `theme` back to "perch" in ~/.perch/settings.json, leaving every
- * other field untouched. Safe to call even if the file doesn't exist yet. */
+/** Force `theme` back to "catppuccin" (the app's default) in
+ * ~/.perch/settings.json, leaving every other field untouched. Safe to call
+ * even if the file doesn't exist yet. */
 function resetTheme(): void {
   try {
     if (!fs.existsSync(SETTINGS_FILE)) return;
     const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
     const data = JSON.parse(raw) as Record<string, unknown>;
-    data.theme = "perch";
+    data.theme = "catppuccin";
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
   } catch {
     // Malformed file — leave it alone rather than destroy real settings.
@@ -107,15 +111,15 @@ test.describe("Phase 1: theme system", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T1 — default theme is "perch" on first load
+  // T1 — default theme is "catppuccin" on first load
   // ---------------------------------------------------------------------------
-  test("T1. default theme is perch on first load", async ({ page }) => {
+  test("T1. default theme is catppuccin on first load", async ({ page }) => {
     await freshSession(page);
 
     const accent = await getAccent(page);
-    expect(accent.toLowerCase()).toBe(ACCENT.perch);
+    expect(accent.toLowerCase()).toBe(ACCENT.catppuccin);
 
-    await page.screenshot({ path: "artifacts/T1-default-theme-perch.png" });
+    await page.screenshot({ path: "artifacts/T1-default-theme-catppuccin.png" });
   });
 
   // ---------------------------------------------------------------------------
@@ -157,12 +161,12 @@ test.describe("Phase 1: theme system", () => {
 
     await page.screenshot({ path: "artifacts/T2-theme-persisted-after-reload.png" });
 
-    // Restore to perch for subsequent tests/specs.
-    const perchOption = modal.locator('[data-testid="theme-option-perch"]');
-    await perchOption.click();
+    // Restore to catppuccin (the app's default) for subsequent tests/specs.
+    const catppuccinOption = modal.locator('[data-testid="theme-option-catppuccin"]');
+    await catppuccinOption.click();
     await expect
       .poll(async () => (await getAccent(page)).toLowerCase(), { timeout: 5000 })
-      .toBe(ACCENT.perch);
+      .toBe(ACCENT.catppuccin);
     await closeSettingsEsc(page);
   });
 
@@ -196,12 +200,13 @@ test.describe("Phase 1: theme system", () => {
     expect(consoleErrors, `console errors while spot-checking themes: ${consoleErrors.join("; ")}`)
       .toHaveLength(0);
 
-    // Restore to perch so this spec leaves no visible side effect.
-    const perchOption = modal.locator('[data-testid="theme-option-perch"]');
-    await perchOption.click();
+    // Restore to catppuccin (the app's default) so this spec leaves no
+    // visible side effect.
+    const catppuccinOption = modal.locator('[data-testid="theme-option-catppuccin"]');
+    await catppuccinOption.click();
     await expect
       .poll(async () => (await getAccent(page)).toLowerCase(), { timeout: 5000 })
-      .toBe(ACCENT.perch);
+      .toBe(ACCENT.catppuccin);
     await closeSettingsEsc(page);
   });
 });

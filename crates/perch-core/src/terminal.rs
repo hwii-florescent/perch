@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use uuid::Uuid;
 
 pub type TerminalDataListener = Arc<dyn Fn(String, String) + Send + Sync>;
@@ -20,6 +20,15 @@ pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
 struct TerminalHandle {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
+    /// A killer split off the spawned `Child` via `clone_killer()` *before*
+    /// the `Child` itself is moved into the waiter thread's blocking
+    /// `.wait()` call (see `create()`). This is exactly what `ChildKiller`
+    /// exists for: sending a terminate signal from a thread other than the
+    /// one blocked in `.wait()`. Used by `kill()` to force-terminate a single
+    /// terminal by id (e.g. `terminal.kill`, or a CLI-attached PTY torn down
+    /// on session delete / CLI-mode unmount) without tearing down every
+    /// other terminal on this connection.
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
 
 pub struct TerminalManager {
@@ -76,6 +85,12 @@ impl TerminalManager {
 
         let mut child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // only the master + child are needed after spawn
+        // Split off a killer before `child` is moved into the waiter thread
+        // below — `Child::wait()` blocks that thread, so any later `kill()`
+        // call (from a ws message handler on a different thread) must go
+        // through this independently-clonable handle instead of `child`
+        // itself.
+        let killer = child.clone_killer();
 
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
@@ -85,6 +100,7 @@ impl TerminalManager {
             TerminalHandle {
                 writer,
                 master: pair.master,
+                killer: Mutex::new(killer),
             },
         );
 
@@ -139,5 +155,20 @@ impl TerminalManager {
         // the shell to see EOF/HUP and exit; the waiter thread then fires
         // on_exit. We don't force-kill so in-flight output can still drain.
         self.terminals.lock().unwrap().clear();
+    }
+
+    /// Force-terminate a single terminal by id and drop its writer/master fds
+    /// (closing the pty, same cleanup `dispose_all` does for every terminal).
+    /// Unlike `dispose_all`'s "let it exit naturally via EOF/HUP" approach,
+    /// this actively signals the child — needed for CLI-attached processes
+    /// (e.g. `claude --resume`) that don't reliably exit just from losing
+    /// stdin. The waiter thread spawned in `create()` is still blocked on
+    /// this child's `.wait()`, so killing it here still yields a normal
+    /// `on_exit` callback once the process dies. No-op if `terminal_id` is
+    /// unknown (already exited/removed).
+    pub fn kill(&self, terminal_id: &str) {
+        if let Some(handle) = self.terminals.lock().unwrap().remove(terminal_id) {
+            let _ = handle.killer.lock().unwrap().kill();
+        }
     }
 }

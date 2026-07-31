@@ -1,6 +1,8 @@
 pub mod agent;
 pub mod boot;
+pub mod clipboard_image;
 pub mod db;
+pub mod detached;
 pub mod hosts;
 pub mod hub;
 pub mod models;
@@ -8,5 +10,7 @@ pub mod protocol;
 pub mod registry;
 pub mod server;
 pub mod settings;
+pub mod ssh;
 pub mod status;
 pub mod terminal;
+pub mod worktree;

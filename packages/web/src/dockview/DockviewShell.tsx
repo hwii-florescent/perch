@@ -5,6 +5,7 @@ import {
   themeAbyss,
   type DockviewApi,
   type DockviewReadyEvent,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview-react";
@@ -14,6 +15,7 @@ import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
 import { createDockviewController, getDockviewController, registerDockviewController } from "./dockviewController";
 import { PaneContextMenu } from "../components/PaneContextMenu";
+import { usePaneLabelsEnabled } from "../paneLabels";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
  * state (not React state) because `PaneTab` is a stable module-level
@@ -28,17 +30,38 @@ let openPaneContextMenu: ((panelId: string, title: string, x: number, y: number)
 
 /** Custom tab renderer applied to every dockview panel (chat + terminals),
  * layering a right-click context menu on top of the stock `DockviewDefaultTab`
- * look (drag handle, active styling, built-in close button, etc.). */
+ * look (drag handle, active styling, built-in close button, etc.). Also
+ * renders the Wave 2 item 12 "active agent" badge on the "chat" panel's tab
+ * (e.g. "Chat · claude") when the pane-labels setting is enabled — dockview's
+ * own `Tab` wrapper element (which owns click/drag/context-menu handling)
+ * wraps whatever this component renders as a plain child, and `.dv-default-
+ * tab`'s CSS is a *descendant* selector (`.dv-tab .dv-default-tab`, not a
+ * direct-child one), so nesting `DockviewDefaultTab` one level deeper inside
+ * our own wrapper div is visually and behaviorally transparent. */
 function PaneTab(props: IDockviewPanelHeaderProps) {
+  const paneLabelsEnabled = usePaneLabelsEnabled();
+  const agent = usePerchStore((s) => s.agent);
+  const showAgentBadge = props.api.id === "chat" && paneLabelsEnabled;
   return (
-    <DockviewDefaultTab
-      {...props}
+    <div
+      className="pane-tab"
       data-testid={`pane-tab-${props.api.id}`}
       onContextMenu={(e: React.MouseEvent) => {
         e.preventDefault();
         openPaneContextMenu?.(props.api.id, props.api.title ?? "", e.clientX, e.clientY);
       }}
-    />
+    >
+      <DockviewDefaultTab {...props} />
+      {showAgentBadge && (
+        // NOT "pane-tab-agent-badge": e2e's `nonChatTab()`/`[data-testid^="pane-tab-"]`
+        // locators (pane-splitting.spec.ts, wave2.spec.ts) match on that
+        // prefix to find the *real* terminal tab, and would otherwise also
+        // match this badge, causing a Playwright strict-mode violation.
+        <span className="pane-tab__agent-badge" data-testid="chat-tab-agent-badge">
+          · {agent}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -62,6 +85,30 @@ const components = {
   chat: ChatPanel,
   terminal: TerminalPanel,
 };
+
+/** Group-header "+" action (Bug 3): dockview applies `rightHeaderActionsComponent`
+ * to every group uniformly, so this self-filters to only render for a group
+ * that actually holds a terminal panel (never the "chat" group — there's only
+ * ever one chat panel and it must never gain a sibling tab this way). Clicking
+ * it adds a new terminal as a TAB within this same group (`direction: "within"`)
+ * rather than a new split panel, so repeated use of "Open terminal" -> "+"
+ * grows one group's tab bar instead of stacking panels across the layout. */
+function TerminalGroupHeaderActions({ panels }: IDockviewHeaderActionsProps) {
+  const terminalPanel = panels.find((p) => p.id !== "chat");
+  if (!terminalPanel) return null;
+  return (
+    <button
+      type="button"
+      className="dockview-group-action dockview-group-action--add-terminal"
+      data-testid="terminal-add-tab"
+      title="Add terminal"
+      aria-label="Add terminal"
+      onClick={() => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id)}
+    >
+      +
+    </button>
+  );
+}
 
 const LAYOUT_SAVE_DEBOUNCE_MS = 500;
 
@@ -240,6 +287,7 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
         theme={themeAbyss}
         components={components}
         defaultTabComponent={PaneTab}
+        rightHeaderActionsComponent={TerminalGroupHeaderActions}
         onReady={handleReady}
       />
       {contextMenu &&

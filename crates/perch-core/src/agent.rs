@@ -62,6 +62,304 @@ pub trait AgentRunner: Send + Sync {
     fn cancel(&self);
 }
 
+// ---------------------------------------------------------------------------
+// Shared stream-json line parsers
+// ---------------------------------------------------------------------------
+//
+// Both the *local* runners below and the *detached* (remote, over-ssh) runner
+// in `detached.rs` consume byte-for-byte identical NDJSON: the same
+// `claude -p --output-format stream-json` shapes and the same
+// `codex exec --json` shapes. The parsers therefore live here as standalone,
+// reusable state machines rather than as private methods on the runners —
+// that shared parse layer is precisely what makes a detached remote turn
+// render the same as a local one.
+//
+// Each parser owns only *stream* state (in-flight tool-use blocks, ids seen)
+// and exposes the provider-side continuity id it scraped, so the caller can
+// mirror it into its own state (`RunnerState`, or a DB row for detached runs).
+
+/// Incremental parser for `claude --output-format stream-json
+/// --include-partial-messages` NDJSON.
+pub struct ClaudeStreamParser {
+    tool_name_by_id: HashMap<String, String>,
+    pending_tool_uses: HashMap<i64, PendingToolUse>,
+    /// Claude's own session id, scraped from `system/init` or `result`.
+    /// Recovery uses this to keep a turn that finished while perch was gone
+    /// attached to its conversation.
+    pub session_id: Option<String>,
+    /// Set once a `{"type":"result"}` line has been seen — the in-band
+    /// terminal marker.
+    pub saw_terminal: bool,
+}
+
+impl Default for ClaudeStreamParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClaudeStreamParser {
+    pub fn new() -> Self {
+        Self {
+            tool_name_by_id: HashMap::new(),
+            pending_tool_uses: HashMap::new(),
+            session_id: None,
+            saw_terminal: false,
+        }
+    }
+
+    pub fn handle_line(&mut self, line: &str, tx: &UnboundedSender<AgentEvent>) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let evt: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => return, // ignore malformed / partial lines
+        };
+
+        match evt.get("type").and_then(Value::as_str) {
+            Some("system") => {
+                if evt.get("subtype").and_then(Value::as_str) == Some("init") {
+                    if let Some(id) = evt.get("session_id").and_then(Value::as_str) {
+                        self.session_id = Some(id.to_string());
+                    }
+                }
+            }
+            Some("stream_event") => {
+                if let Some(event) = evt.get("event") {
+                    self.handle_stream_event(event, tx);
+                }
+            }
+            Some("user") => {
+                if let Some(content) = evt
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(Value::as_array)
+                {
+                    for block in content {
+                        if block.get("type").and_then(Value::as_str) == Some("tool_result") {
+                            let name = block
+                                .get("tool_use_id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| self.tool_name_by_id.get(id))
+                                .cloned()
+                                .unwrap_or_else(|| "unknown".to_string());
+                            let result = block.get("content").cloned().unwrap_or(Value::Null);
+                            let _ = tx.send(AgentEvent::ToolResult { name, result });
+                        }
+                    }
+                }
+            }
+            Some("result") => {
+                self.saw_terminal = true;
+                if let Some(id) = evt.get("session_id").and_then(Value::as_str) {
+                    self.session_id = Some(id.to_string());
+                }
+                let usage = evt.get("usage").map(|raw| {
+                    let input_tokens = raw.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+                    let cache_read = raw
+                        .get("cache_read_input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let cache_creation = raw
+                        .get("cache_creation_input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    ChatUsage {
+                        input_tokens,
+                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
+                        cost_usd: evt.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
+                        context_tokens: input_tokens + cache_read + cache_creation,
+                    }
+                });
+                if evt.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                    let message = evt
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .unwrap_or("claude reported an error")
+                        .to_string();
+                    let _ = tx.send(AgentEvent::Error(message));
+                }
+                let _ = tx.send(AgentEvent::Done(usage));
+            }
+            _ => {} // assistant snapshots, hook events, etc. — nothing new to report
+        }
+    }
+
+    fn handle_stream_event(&mut self, event: &Value, tx: &UnboundedSender<AgentEvent>) {
+        let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
+        match event.get("type").and_then(Value::as_str) {
+            Some("content_block_start") => {
+                if let Some(block) = event.get("content_block") {
+                    if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                        self.pending_tool_uses.insert(
+                            index,
+                            PendingToolUse {
+                                id: block.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+                                name: block
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("unknown")
+                                    .to_string(),
+                                json: String::new(),
+                            },
+                        );
+                    }
+                }
+            }
+            Some("content_block_delta") => {
+                if let Some(delta) = event.get("delta") {
+                    match delta.get("type").and_then(Value::as_str) {
+                        Some("text_delta") => {
+                            let text = delta.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                            let _ = tx.send(AgentEvent::Chunk(text));
+                        }
+                        Some("thinking_delta") => {
+                            let thinking = delta
+                                .get("thinking")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            let _ = tx.send(AgentEvent::Thinking(thinking));
+                        }
+                        Some("input_json_delta") => {
+                            if let Some(pending) = self.pending_tool_uses.get_mut(&index) {
+                                pending
+                                    .json
+                                    .push_str(delta.get("partial_json").and_then(Value::as_str).unwrap_or(""));
+                            }
+                        }
+                        _ => {} // signature_delta etc. — not surfaced
+                    }
+                }
+            }
+            Some("content_block_stop") => {
+                if let Some(pending) = self.pending_tool_uses.remove(&index) {
+                    self.tool_name_by_id.insert(pending.id, pending.name.clone());
+                    let input = if pending.json.is_empty() {
+                        Value::Object(Default::default())
+                    } else {
+                        serde_json::from_str(&pending.json).unwrap_or(Value::String(pending.json))
+                    };
+                    let _ = tx.send(AgentEvent::ToolUse {
+                        name: pending.name,
+                        input,
+                    });
+                }
+            }
+            _ => {} // message_start/delta/stop — usage is read off the final "result" event instead
+        }
+    }
+}
+
+/// Incremental parser for `codex exec --json` NDJSON. See the `CodexRunner`
+/// doc comment below for the event shapes.
+#[derive(Default)]
+pub struct CodexStreamParser {
+    /// Codex's own `thread_id`, scraped from `thread.started`.
+    pub thread_id: Option<String>,
+    /// Set once a terminal event (`turn.completed`/`turn.failed`/`error`) has
+    /// been seen.
+    pub saw_terminal: bool,
+}
+
+impl CodexStreamParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn handle_line(&mut self, line: &str, tx: &UnboundedSender<AgentEvent>) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let evt: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => return, // ignore malformed / partial lines
+        };
+
+        match evt.get("type").and_then(Value::as_str) {
+            Some("item.completed") => {
+                let Some(item) = evt.get("item") else { return };
+                match item.get("type").and_then(Value::as_str) {
+                    Some("agent_message") => {
+                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                        let _ = tx.send(AgentEvent::Chunk(text));
+                    }
+                    Some("reasoning") => {
+                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                        let _ = tx.send(AgentEvent::Thinking(text));
+                    }
+                    Some(kind) => {
+                        // Best-effort: surface command/tool executions as a
+                        // paired tool_use/tool_result (codex reports these
+                        // as already-completed, so there's no separate
+                        // "started" event to key off of).
+                        let name = item
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .unwrap_or(kind)
+                            .to_string();
+                        let _ = tx.send(AgentEvent::ToolUse {
+                            name: name.clone(),
+                            input: item.clone(),
+                        });
+                        let result = item
+                            .get("aggregated_output")
+                            .or_else(|| item.get("output"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let _ = tx.send(AgentEvent::ToolResult { name, result });
+                    }
+                    None => {}
+                }
+            }
+            Some("turn.completed") => {
+                self.saw_terminal = true;
+                let usage = evt.get("usage").map(|raw| {
+                    let input_tokens = raw.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+                    ChatUsage {
+                        input_tokens,
+                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
+                        // codex reports no cost; ChatUsage has no optional cost field.
+                        cost_usd: 0.0,
+                        context_tokens: input_tokens,
+                    }
+                });
+                let _ = tx.send(AgentEvent::Done(usage));
+            }
+            Some("turn.failed") => {
+                self.saw_terminal = true;
+                let message = evt
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("codex turn failed")
+                    .to_string();
+                let _ = tx.send(AgentEvent::Error(message));
+                let _ = tx.send(AgentEvent::Done(None));
+            }
+            Some("error") => {
+                self.saw_terminal = true;
+                let message = evt
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("codex reported an error")
+                    .to_string();
+                let _ = tx.send(AgentEvent::Error(message));
+                let _ = tx.send(AgentEvent::Done(None));
+            }
+            Some("thread.started") => {
+                if let Some(id) = evt.get("thread_id").and_then(Value::as_str) {
+                    self.thread_id = Some(id.to_string());
+                }
+            }
+            _ => {} // turn.started, item.started/updated — nothing new to report
+        }
+    }
+}
+
 pub struct ClaudeRunnerOptions {
     pub cwd: String,
     /// Path/name of the claude binary. Defaults to "claude" (resolved via PATH).
@@ -144,159 +442,6 @@ impl ClaudeRunner {
         self.state.lock().unwrap().model.clone()
     }
 
-    fn handle_line(
-        line: &str,
-        tx: &UnboundedSender<AgentEvent>,
-        state: &Mutex<RunnerState>,
-        tool_name_by_id: &mut HashMap<String, String>,
-        pending_tool_uses: &mut HashMap<i64, PendingToolUse>,
-    ) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let evt: Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => return, // ignore malformed / partial lines
-        };
-
-        match evt.get("type").and_then(Value::as_str) {
-            Some("system") => {
-                if evt.get("subtype").and_then(Value::as_str) == Some("init") {
-                    if let Some(id) = evt.get("session_id").and_then(Value::as_str) {
-                        state.lock().unwrap().claude_session_id = Some(id.to_string());
-                    }
-                }
-            }
-            Some("stream_event") => {
-                if let Some(event) = evt.get("event") {
-                    Self::handle_stream_event(event, tx, tool_name_by_id, pending_tool_uses);
-                }
-            }
-            Some("user") => {
-                if let Some(content) = evt
-                    .get("message")
-                    .and_then(|m| m.get("content"))
-                    .and_then(Value::as_array)
-                {
-                    for block in content {
-                        if block.get("type").and_then(Value::as_str) == Some("tool_result") {
-                            let name = block
-                                .get("tool_use_id")
-                                .and_then(Value::as_str)
-                                .and_then(|id| tool_name_by_id.get(id))
-                                .cloned()
-                                .unwrap_or_else(|| "unknown".to_string());
-                            let result = block.get("content").cloned().unwrap_or(Value::Null);
-                            let _ = tx.send(AgentEvent::ToolResult { name, result });
-                        }
-                    }
-                }
-            }
-            Some("result") => {
-                if let Some(id) = evt.get("session_id").and_then(Value::as_str) {
-                    state.lock().unwrap().claude_session_id = Some(id.to_string());
-                }
-                let usage = evt.get("usage").map(|raw| {
-                    let input_tokens = raw.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
-                    let cache_read = raw
-                        .get("cache_read_input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
-                    let cache_creation = raw
-                        .get("cache_creation_input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
-                    ChatUsage {
-                        input_tokens,
-                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
-                        cost_usd: evt.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
-                        context_tokens: input_tokens + cache_read + cache_creation,
-                    }
-                });
-                if evt.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
-                    let message = evt
-                        .get("result")
-                        .and_then(Value::as_str)
-                        .unwrap_or("claude reported an error")
-                        .to_string();
-                    let _ = tx.send(AgentEvent::Error(message));
-                }
-                let _ = tx.send(AgentEvent::Done(usage));
-            }
-            _ => {} // assistant snapshots, hook events, etc. — nothing new to report
-        }
-    }
-
-    fn handle_stream_event(
-        event: &Value,
-        tx: &UnboundedSender<AgentEvent>,
-        tool_name_by_id: &mut HashMap<String, String>,
-        pending_tool_uses: &mut HashMap<i64, PendingToolUse>,
-    ) {
-        let index = event.get("index").and_then(Value::as_i64).unwrap_or(-1);
-        match event.get("type").and_then(Value::as_str) {
-            Some("content_block_start") => {
-                if let Some(block) = event.get("content_block") {
-                    if block.get("type").and_then(Value::as_str) == Some("tool_use") {
-                        pending_tool_uses.insert(
-                            index,
-                            PendingToolUse {
-                                id: block.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
-                                name: block
-                                    .get("name")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("unknown")
-                                    .to_string(),
-                                json: String::new(),
-                            },
-                        );
-                    }
-                }
-            }
-            Some("content_block_delta") => {
-                if let Some(delta) = event.get("delta") {
-                    match delta.get("type").and_then(Value::as_str) {
-                        Some("text_delta") => {
-                            let text = delta.get("text").and_then(Value::as_str).unwrap_or("").to_string();
-                            let _ = tx.send(AgentEvent::Chunk(text));
-                        }
-                        Some("thinking_delta") => {
-                            let thinking = delta
-                                .get("thinking")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_string();
-                            let _ = tx.send(AgentEvent::Thinking(thinking));
-                        }
-                        Some("input_json_delta") => {
-                            if let Some(pending) = pending_tool_uses.get_mut(&index) {
-                                pending
-                                    .json
-                                    .push_str(delta.get("partial_json").and_then(Value::as_str).unwrap_or(""));
-                            }
-                        }
-                        _ => {} // signature_delta etc. — not surfaced
-                    }
-                }
-            }
-            Some("content_block_stop") => {
-                if let Some(pending) = pending_tool_uses.remove(&index) {
-                    tool_name_by_id.insert(pending.id, pending.name.clone());
-                    let input = if pending.json.is_empty() {
-                        Value::Object(Default::default())
-                    } else {
-                        serde_json::from_str(&pending.json).unwrap_or(Value::String(pending.json))
-                    };
-                    let _ = tx.send(AgentEvent::ToolUse {
-                        name: pending.name,
-                        input,
-                    });
-                }
-            }
-            _ => {} // message_start/delta/stop — usage is read off the final "result" event instead
-        }
-    }
 }
 
 /// Whether a `run_once` attempt used `--resume <id>` or `--session-id <id>`
@@ -409,8 +554,7 @@ impl ClaudeRunner {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
 
-        let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
-        let mut pending_tool_uses: HashMap<i64, PendingToolUse> = HashMap::new();
+        let mut parser = ClaudeStreamParser::new();
 
         let mut stdout_lines = BufReader::new(stdout).lines();
         let stderr_task = tokio::spawn(async move {
@@ -434,7 +578,17 @@ impl ClaudeRunner {
                         resume_not_found = true;
                         break;
                     }
-                    Self::handle_line(&line, tx, state, &mut tool_name_by_id, &mut pending_tool_uses);
+                    parser.handle_line(&line, tx);
+                    // Mirror whatever provider session id the parser scraped
+                    // into the runner's own state, so `--resume` continuity
+                    // and DB persistence keep working exactly as before the
+                    // parser was factored out.
+                    if let Some(id) = &parser.session_id {
+                        let mut s = state.lock().unwrap();
+                        if s.claude_session_id.as_deref() != Some(id.as_str()) {
+                            s.claude_session_id = Some(id.clone());
+                        }
+                    }
                 }
                 Ok(None) => break,
                 Err(_) => break,
@@ -618,92 +772,6 @@ impl CodexRunner {
         self.model.clone()
     }
 
-    fn handle_line(line: &str, tx: &UnboundedSender<AgentEvent>, state: &Mutex<CodexState>) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let evt: Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => return, // ignore malformed / partial lines
-        };
-
-        match evt.get("type").and_then(Value::as_str) {
-            Some("item.completed") => {
-                let Some(item) = evt.get("item") else { return };
-                match item.get("type").and_then(Value::as_str) {
-                    Some("agent_message") => {
-                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
-                        let _ = tx.send(AgentEvent::Chunk(text));
-                    }
-                    Some("reasoning") => {
-                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
-                        let _ = tx.send(AgentEvent::Thinking(text));
-                    }
-                    Some(kind) => {
-                        // Best-effort: surface command/tool executions as a
-                        // paired tool_use/tool_result (codex reports these
-                        // as already-completed, so there's no separate
-                        // "started" event to key off of).
-                        let name = item
-                            .get("command")
-                            .and_then(Value::as_str)
-                            .unwrap_or(kind)
-                            .to_string();
-                        let _ = tx.send(AgentEvent::ToolUse {
-                            name: name.clone(),
-                            input: item.clone(),
-                        });
-                        let result = item
-                            .get("aggregated_output")
-                            .or_else(|| item.get("output"))
-                            .cloned()
-                            .unwrap_or(Value::Null);
-                        let _ = tx.send(AgentEvent::ToolResult { name, result });
-                    }
-                    None => {}
-                }
-            }
-            Some("turn.completed") => {
-                let usage = evt.get("usage").map(|raw| {
-                    let input_tokens = raw.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
-                    ChatUsage {
-                        input_tokens,
-                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
-                        // codex reports no cost; ChatUsage has no optional cost field.
-                        cost_usd: 0.0,
-                        context_tokens: input_tokens,
-                    }
-                });
-                let _ = tx.send(AgentEvent::Done(usage));
-            }
-            Some("turn.failed") => {
-                let message = evt
-                    .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("codex turn failed")
-                    .to_string();
-                let _ = tx.send(AgentEvent::Error(message));
-                let _ = tx.send(AgentEvent::Done(None));
-            }
-            Some("error") => {
-                let message = evt
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("codex reported an error")
-                    .to_string();
-                let _ = tx.send(AgentEvent::Error(message));
-                let _ = tx.send(AgentEvent::Done(None));
-            }
-            Some("thread.started") => {
-                if let Some(id) = evt.get("thread_id").and_then(Value::as_str) {
-                    state.lock().unwrap().thread_id = Some(id.to_string());
-                }
-            }
-            _ => {} // turn.started, item.started/updated — nothing new to report
-        }
-    }
 }
 
 impl AgentRunner for CodexRunner {
@@ -742,6 +810,7 @@ impl AgentRunner for CodexRunner {
             let stderr = child.stderr.take().expect("piped stderr");
 
             let mut stdout_lines = BufReader::new(stdout).lines();
+            let mut parser = CodexStreamParser::new();
             let stderr_task = tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = BufReader::new(stderr).lines();
@@ -754,7 +823,15 @@ impl AgentRunner for CodexRunner {
 
             loop {
                 match stdout_lines.next_line().await {
-                    Ok(Some(line)) => Self::handle_line(&line, &tx, &state),
+                    Ok(Some(line)) => {
+                        parser.handle_line(&line, &tx);
+                        if let Some(id) = &parser.thread_id {
+                            let mut s = state.lock().unwrap();
+                            if s.thread_id.as_deref() != Some(id.as_str()) {
+                                s.thread_id = Some(id.clone());
+                            }
+                        }
+                    }
                     Ok(None) => break,
                     Err(_) => break,
                 }
