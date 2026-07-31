@@ -596,8 +596,8 @@ function ArchivedSessionsSection({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/** The archived-sessions subpage itself: every archived session across every
- * host, with per-row Restore / Delete. */
+/** The archived-sessions subpage itself: archived sessions grouped by host
+ * (local first, then federated hosts), with per-row Restore / Delete. */
 function ArchivedSessionsPanel() {
   const sessions = usePerchStore((s) => s.sessions);
   const hosts = usePerchStore((s) => s.hosts);
@@ -606,11 +606,21 @@ function ArchivedSessionsPanel() {
 
   const rows = archivedSessions(sessions);
 
-  const hostLabel = (hostId: string | undefined): string | null => {
-    const id = hostId ?? "local";
-    if (id === "local") return null;
-    return hosts.find((h) => h.id === id)?.name ?? id;
-  };
+  const hostLabel = (hostId: string): string =>
+    hostId === "local" ? "Local" : (hosts.find((h) => h.id === hostId)?.name ?? hostId);
+
+  // Group by host, matching the sidebar's mental model. "local" always sorts
+  // first; the rest keep first-appearance order (rows arrive newest-first).
+  const groups = new Map<string, typeof rows>();
+  for (const s of rows) {
+    const id = s.hostId ?? "local";
+    const group = groups.get(id);
+    if (group) group.push(s);
+    else groups.set(id, [s]);
+  }
+  const groupIds = [...groups.keys()].sort((a, b) =>
+    a === "local" ? -1 : b === "local" ? 1 : 0,
+  );
 
   return (
     <section className="settings-modal__section" data-testid="settings-archived-panel">
@@ -619,59 +629,60 @@ function ArchivedSessionsPanel() {
           No archived sessions.
         </p>
       ) : (
-        <ul className="settings-modal__archived-list">
-          {rows.map((s) => {
-            const host = hostLabel(s.hostId);
-            return (
-              <li
-                key={s.id}
-                className="settings-modal__archived-row"
-                data-testid={`archived-row-${s.id}`}
-                data-session-id={s.id}
-              >
-                <div className="settings-modal__archived-body">
-                  <span className="settings-modal__archived-title">
-                    {s.title || "(untitled session)"}
-                  </span>
-                  <span className="settings-modal__archived-meta">
-                    {host && (
-                      <span className="settings-modal__archived-host" title={host}>
-                        {host}
+        groupIds.map((hostId) => (
+          <div
+            key={hostId}
+            className="settings-modal__archived-group"
+            data-testid={`archived-host-group-${hostId}`}
+          >
+            <h4 className="settings-modal__archived-group-title">{hostLabel(hostId)}</h4>
+            <ul className="settings-modal__archived-list">
+              {groups.get(hostId)!.map((s) => (
+                <li
+                  key={s.id}
+                  className="settings-modal__archived-row"
+                  data-testid={`archived-row-${s.id}`}
+                  data-session-id={s.id}
+                >
+                  <div className="settings-modal__archived-body">
+                    <span className="settings-modal__archived-title">
+                      {s.title || "(untitled session)"}
+                    </span>
+                    <span className="settings-modal__archived-meta">
+                      <span className="settings-modal__archived-project" title={s.cwd}>
+                        {projectName(s.cwd)}
                       </span>
-                    )}
-                    <span className="settings-modal__archived-project" title={s.cwd}>
-                      {projectName(s.cwd)}
+                      <span className="settings-modal__archived-date">
+                        {new Date(s.createdAt).toLocaleDateString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
                     </span>
-                    <span className="settings-modal__archived-date">
-                      {new Date(s.createdAt).toLocaleDateString(undefined, {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="settings-modal__btn settings-modal__btn--primary"
-                  data-testid={`archived-restore-${s.id}`}
-                  onClick={() => archiveSession(s.id, false)}
-                >
-                  Restore
-                </button>
-                {/* No confirmation, matching the sidebar's one-click delete. */}
-                <button
-                  type="button"
-                  className="settings-modal__btn settings-modal__btn--danger"
-                  data-testid={`archived-delete-${s.id}`}
-                  onClick={() => deleteSession(s.id)}
-                >
-                  Delete
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-modal__btn settings-modal__btn--primary"
+                    data-testid={`archived-restore-${s.id}`}
+                    onClick={() => archiveSession(s.id, false)}
+                  >
+                    Restore
+                  </button>
+                  {/* No confirmation, matching the sidebar's one-click delete. */}
+                  <button
+                    type="button"
+                    className="settings-modal__btn settings-modal__btn--danger"
+                    data-testid={`archived-delete-${s.id}`}
+                    onClick={() => deleteSession(s.id)}
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
     </section>
   );

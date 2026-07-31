@@ -2129,6 +2129,27 @@ body {
   flex: 1;
 }
 
+.settings-modal__archived-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.settings-modal__archived-group + .settings-modal__archived-group {
+  margin-top: 0.9rem;
+}
+
+/* Host header above each group — same visual register as the sidebar's host
+ * chip: small caps-ish label, accent colored. */
+.settings-modal__archived-group-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
 .settings-modal__archived-list {
   list-style: none;
   margin: 0;
@@ -2172,11 +2193,6 @@ body {
   font-size: 0.74rem;
   color: var(--subtext-0);
   min-width: 0;
-}
-
-.settings-modal__archived-host {
-  color: var(--accent);
-  flex-shrink: 0;
 }
 
 .settings-modal__archived-project {
