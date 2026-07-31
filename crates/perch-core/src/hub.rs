@@ -1090,6 +1090,8 @@ impl HubManager {
             ServerMessage::ChatChunk { ref session_id, .. }
             | ServerMessage::ChatThinking { ref session_id, .. }
             | ServerMessage::ChatToolUse { ref session_id, .. }
+            | ServerMessage::ChatPlan { ref session_id, .. }
+            | ServerMessage::CommandsList { ref session_id, .. }
             | ServerMessage::ChatToolResult { ref session_id, .. } => {
                 let key = PendingKey::Session(session_id.clone());
                 self.relay_unicast(&key, Arc::new(msg));

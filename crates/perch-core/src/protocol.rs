@@ -270,6 +270,18 @@ pub struct ChatUsage {
     pub context_tokens: u64,
 }
 
+/// One invocable command/skill offered by an agent CLI in a given cwd, as
+/// scraped by `commands.rs` and served in `commands.list`. `name` is bare (no
+/// `/` or `$` sigil) — the client prepends whichever sigil the active agent
+/// uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandEntry {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// Which backend a `chat.send` should be routed to. Mirrors the TS union
 /// `"claude" | "codex"`; defaults to `Claude` when the field is omitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,10 +359,36 @@ pub enum ClientMessage {
         #[serde(default)]
         agent: AgentKind,
         model: Option<String>,
+        /// Run this turn in *plan mode*: claude gets
+        /// `--permission-mode plan` instead of `bypassPermissions`, codex gets
+        /// `--sandbox read-only`. Absent ⇒ `false` (the pre-existing
+        /// behaviour), so older clients are unaffected.
+        #[serde(default)]
+        plan_mode: bool,
+        /// Reasoning-effort level for this turn. `None` (or `"default"`) omits
+        /// the flag entirely and lets the CLI use its own default. claude:
+        /// `--effort <level>`; codex: `-c model_reasoning_effort="<level>"`.
+        #[serde(default)]
+        effort: Option<String>,
+        /// Absolute, server-side paths of files staged via `POST {base}upload`
+        /// to attach to this turn. Images are passed to codex with `-i`; every
+        /// other file (and every file for claude) is named in a trailing
+        /// `[Attached files: …]` note appended to the turn text, which the CLI
+        /// then reads itself.
+        #[serde(default)]
+        attachments: Option<Vec<String>>,
     },
 
     #[serde(rename = "chat.cancel", rename_all = "camelCase")]
     ChatCancel { session_id: String },
+
+    /// Ask the server which slash commands / skills the agent CLIs know about
+    /// in this session's cwd, for composer autocomplete. The server probes the
+    /// CLIs (cached per host+cwd for a few minutes) and answers with
+    /// `commands.list`. Both probes are offline and cost zero tokens — see
+    /// `commands.rs`.
+    #[serde(rename = "commands.list", rename_all = "camelCase")]
+    CommandsList { session_id: String },
 
     #[serde(rename = "terminal.create", rename_all = "camelCase")]
     TerminalCreate {
@@ -545,6 +583,28 @@ pub enum ServerMessage {
         session_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<ChatUsage>,
+    },
+
+    /// A plan produced by a plan-mode claude turn. claude 2.1.x has no
+    /// `ExitPlanMode` tool; the plan arrives as an ordinary `Write` tool_use
+    /// whose `input.file_path` lands under `.claude/plans/`, and `agent.rs`
+    /// lifts its `input.content` into this message (see
+    /// `ClaudeStreamParser::plan_content_of`). Codex plan mode (`--sandbox
+    /// read-only`) produces no such artifact, so this is claude-only.
+    #[serde(rename = "chat.plan", rename_all = "camelCase")]
+    ChatPlan {
+        session_id: String,
+        content: String,
+    },
+
+    /// Reply to `commands.list` — the slash commands / skills each CLI knows
+    /// about in this session's cwd. Either list may be empty (probe failed,
+    /// CLI not installed, …); the client just shows fewer suggestions.
+    #[serde(rename = "commands.list", rename_all = "camelCase")]
+    CommandsList {
+        session_id: String,
+        claude: Vec<CommandEntry>,
+        codex: Vec<CommandEntry>,
     },
 
     #[serde(rename = "terminal.created", rename_all = "camelCase")]

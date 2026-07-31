@@ -134,9 +134,9 @@ test.describe("Workspace tabs (Phase 3)", () => {
     // the current project's cwd preselected as the first quick-pick option)
     // — clicking it exercises createSessionOnHost with A's hostId/cwd, so B
     // lands in the SAME project.
+    // The tab-bar "+" creates straight into the active project — no popover,
+    // same destination the "project-option-0" quick-pick used to select.
     await page.locator('[data-testid="tab-new"]').click();
-    await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible({ timeout: 5000 });
-    await page.locator('[data-testid="project-option-0"]').click();
     await sendAndWait(page, "Reply with exactly: B");
     sessionBId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
     expect(sessionBId).toBeTruthy();

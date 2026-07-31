@@ -32,3 +32,15 @@ export function getWsUrl(): string {
 export function getClipboardImageUploadUrl(ext: string): string {
   return `${window.location.origin}${getBasePath()}clipboard-image?ext=${encodeURIComponent(ext)}`;
 }
+
+/** The `{base}upload` HTTP endpoint (see server.rs's `attachment_upload`) —
+ * one composer attachment per request, raw file bytes as the body, answering
+ * `{"path": "/abs/path", "name": "sanitized.ext"}`. Staging is always local
+ * for the same reason clipboard-image is: the browser has no HTTP route to a
+ * federated remote's filesystem. Direct-mode hosts still work — the server
+ * copies the staged file into the remote run directory before launching the
+ * CLI (see detached.rs). */
+export function getAttachmentUploadUrl(sessionId: string, name: string): string {
+  const query = `sessionId=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(name)}`;
+  return `${window.location.origin}${getBasePath()}upload?${query}`;
+}

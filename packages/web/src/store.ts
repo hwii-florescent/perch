@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentAttach, AgentKind, ChatUsage, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
+import type { AgentAttach, AgentKind, ChatUsage, CommandEntry, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
 import { socket } from "./ws";
 import { emitTerminalData } from "./terminalBus";
 import { defaultModel } from "./models";
@@ -31,7 +31,30 @@ export interface ChatMessage {
   turnStartedAt?: number;
   /** Wall-clock seconds the turn took, set on chat.done. */
   elapsedSec?: number;
+  /** Discriminates the entry's rendering. Absent (the default, and what every
+   * pre-existing constructor produces) means an ordinary chat turn;
+   * `"plan"` is a plan-mode artifact delivered by `chat.plan`, rendered as a
+   * distinct card with an "Approve & run" action instead of a bubble. Kept in
+   * the same list rather than a parallel one so plans stay interleaved in
+   * transcript order. */
+  kind?: "plan";
+  /** Plan cards only: the user already pressed "Approve & run", so the button
+   * is spent (a plan can only be handed off once). */
+  planApproved?: boolean;
 }
+
+/** Per-agent effort levels offered by the composer's Effort chip. `"default"`
+ * is a client-side sentinel meaning "send no `effort` field at all and let the
+ * CLI use its own default" — it is never put on the wire. Mirrors what the
+ * runners in `agent.rs`/`detached.rs` accept. */
+export const EFFORT_OPTIONS: Record<AgentKind, string[]> = {
+  claude: ["default", "low", "medium", "high", "xhigh", "max", "none"],
+  codex: ["default", "none", "low", "medium", "high", "xhigh"],
+};
+
+/** Text sent when the user approves a plan card — a plain chat turn (with
+ * plan mode off) telling the agent to execute what it just planned. */
+export const PLAN_APPROVAL_TEXT = "Approved. Proceed with the plan now.";
 
 export interface TerminalMeta {
   id: string;
@@ -157,7 +180,29 @@ interface PerchState {
   /** Dismiss a toast by id (click or auto-dismiss timeout). */
   dismissToast: (id: string) => void;
 
-  sendChat: (text: string) => void;
+  /** Slash-command / skill lists per session, from `commands.list` replies.
+   * Keyed by sessionId because the server probes the session's *cwd* (a
+   * project can define its own commands). Absent = never fetched. */
+  sessionCommands: Record<string, { claude: CommandEntry[]; codex: CommandEntry[] }>;
+  /** Request the command lists for a session, at most once per session per
+   * page load (the server caches per host+cwd for minutes anyway, and the
+   * composer would otherwise re-ask on every "/" keystroke). Safe to call
+   * unconditionally — it self-dedupes. */
+  fetchCommands: (sessionId: string) => void;
+  /** Reasoning-effort selection per session (Effort chip). Values come from
+   * `EFFORT_OPTIONS`; `"default"`/absent means "send no effort field".
+   * Client-side only — nothing about effort is persisted server-side. */
+  effortBySession: Record<string, string>;
+  setEffort: (sessionId: string, effort: string) => void;
+  /** Mark a plan card's "Approve & run" button as spent. */
+  approvePlan: (messageId: string) => void;
+
+  /** Send a chat turn. `options.planMode` runs it in plan mode (claude:
+   * `--permission-mode plan`; codex: `--sandbox read-only`), and
+   * `options.attachments` carries server-side paths from `POST {base}upload`.
+   * The per-session effort selection is read from the store, so callers never
+   * pass it. */
+  sendChat: (text: string, options?: { planMode?: boolean; attachments?: string[] }) => void;
   cancelChat: () => void;
   setAgent: (agent: AgentKind) => void;
   setModel: (model: string) => void;
@@ -303,6 +348,12 @@ export type WorktreeReply =
  * gets exactly one reply: `worktree.list.result`, `worktree.done`, or
  * `worktree.error`. */
 const pendingWorktrees = new Map<string, (msg: WorktreeReply) => void>();
+
+/** Sessions whose `commands.list` has already been requested this page load.
+ * The composer calls `fetchCommands` on every "/" it sees, so the dedupe has
+ * to live outside React; the server caches per host+cwd on its side too, but
+ * there is no reason to make it answer the same question repeatedly. */
+const requestedCommands = new Set<string>();
 
 function resolveWorktreeRequest(requestId: string, msg: WorktreeReply): void {
   const resolve = pendingWorktrees.get(requestId);
@@ -537,13 +588,33 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   worktrees: {},
   worktreeMenuRequest: null,
   toasts: [],
+  sessionCommands: {},
+  effortBySession: {},
 
   dismissToast: (id) => {
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
   },
 
-  sendChat: (text) => {
-    const { sessionId, agent, model } = get();
+  fetchCommands: (sessionId) => {
+    if (!sessionId || requestedCommands.has(sessionId)) return;
+    requestedCommands.add(sessionId);
+    socket.send({ type: "commands.list", sessionId });
+  },
+
+  setEffort: (sessionId, effort) => {
+    set((state) => ({ effortBySession: { ...state.effortBySession, [sessionId]: effort } }));
+  },
+
+  approvePlan: (messageId) => {
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, planApproved: true } : m,
+      ),
+    }));
+  },
+
+  sendChat: (text, options) => {
+    const { sessionId, agent, model, effortBySession } = get();
     if (!sessionId || !text.trim()) return;
     const userMessage: ChatMessage = {
       id: newId(),
@@ -567,7 +638,19 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       messages: [...state.messages, userMessage, assistantMessage],
       streamingMessageId: assistantMessage.id,
     }));
-    socket.send({ type: "chat.send", sessionId, text, agent, model });
+    // "default" is a client-side sentinel — omit the field entirely so the
+    // CLI keeps its own default (see EFFORT_OPTIONS).
+    const effort = effortBySession[sessionId];
+    socket.send({
+      type: "chat.send",
+      sessionId,
+      text,
+      agent,
+      model,
+      ...(options?.planMode ? { planMode: true } : {}),
+      ...(effort && effort !== "default" ? { effort } : {}),
+      ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
+    });
   },
 
   cancelChat: () => {
@@ -671,11 +754,19 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // Fix 3: If the active session on this host has no messages (empty) and
     // no different cwd is requested, just focus the composer — don't create
     // another blank session.
+    //
+    // CLI mode is deliberately exempt: the PTY conversation is never recorded
+    // as hosted messages, so `messages.length === 0` is true for *every* CLI
+    // session — including one whose `claude`/`codex` process has already
+    // exited (e.g. the user typed `/exit`). Reusing it would turn "New
+    // session" into a silent no-op on a dead pane. In CLI mode emptiness
+    // proves nothing, so always create.
     const state = get();
+    const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
     const currentSession = state.sessions.find((s) => s.id === state.sessionId);
     const currentHostId = currentSession?.hostId ?? "local";
     const isCurrentHostMatch = currentHostId === hostId || (hostId === "local" && currentHostId === "local");
-    if (isCurrentHostMatch && state.messages.length === 0 && !cwd) {
+    if (isCurrentHostMatch && !cliMode && state.messages.length === 0 && !cwd) {
       // Already on an empty session for this host — just focus the composer.
       return;
     }
@@ -1195,6 +1286,40 @@ function handleServerMessage(msg: ServerMessage): void {
           : undefined,
       }));
       usePerchStore.setState({ streamingMessageId: null });
+      break;
+    }
+    case "chat.plan": {
+      // The plan lands mid-turn, before the assistant's closing summary, so
+      // insert the card *ahead* of the still-streaming message rather than
+      // appending after it — that keeps the transcript in the order things
+      // actually happened and leaves the streaming bubble last.
+      usePerchStore.setState((state) => {
+        const card: ChatMessage = {
+          id: newId(),
+          role: "assistant",
+          kind: "plan",
+          text: msg.content,
+          thinking: "",
+          tools: [],
+          streaming: false,
+        };
+        const idx = state.streamingMessageId
+          ? state.messages.findIndex((m) => m.id === state.streamingMessageId)
+          : -1;
+        if (idx === -1) return { messages: [...state.messages, card] };
+        return {
+          messages: [...state.messages.slice(0, idx), card, ...state.messages.slice(idx)],
+        };
+      });
+      break;
+    }
+    case "commands.list": {
+      usePerchStore.setState((state) => ({
+        sessionCommands: {
+          ...state.sessionCommands,
+          [msg.sessionId]: { claude: msg.claude, codex: msg.codex },
+        },
+      }));
       break;
     }
     case "error": {

@@ -76,7 +76,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use uuid::Uuid;
 
-use crate::agent::{AgentEvent, ClaudeStreamParser, CodexStreamParser};
+use crate::agent::{self, AgentEvent, ClaudeStreamParser, CodexStreamParser};
 use crate::db::{DetachedRunRow, HistoryDb};
 use crate::protocol::{AgentKind, ChatUsage, FsEntry, ServerMessage};
 use crate::ssh;
@@ -136,6 +136,15 @@ pub struct TurnRequest {
     pub claude_session_id: Option<String>,
     /// Codex's own thread id, when known (`codex exec resume <id>`).
     pub codex_thread_id: Option<String>,
+    /// Run this turn in plan mode (claude `--permission-mode plan` / codex
+    /// `--sandbox read-only`).
+    pub plan_mode: bool,
+    /// Reasoning effort for this turn; `None` omits the flag.
+    pub effort: Option<String>,
+    /// **Local** absolute paths of files the user attached. They are copied
+    /// into this run's remote directory before launch and the CLI is given
+    /// the *remote* paths — a local path would be meaningless on the host.
+    pub attachments: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -260,13 +269,42 @@ impl DetachedManager {
             }
         }
 
+        // Attachments live inside this run's directory, so they are named
+        // deterministically *before* anything is uploaded — the prompt note
+        // has to quote the remote paths, and the note is part of the prompt
+        // file that gets written first.
+        let remote_attachments: Vec<String> = req
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(i, local)| format!("{run_dir}/attachments/{i}-{}", sanitize_attachment_name(local)))
+            .collect();
+        // claude reads every attachment itself off the text note; codex takes
+        // images through `-i` and only needs the note for the rest.
+        let (image_paths, note_paths): (Vec<String>, Vec<String>) = match req.agent {
+            AgentKind::Claude => (Vec::new(), remote_attachments.clone()),
+            AgentKind::Codex => remote_attachments
+                .iter()
+                .cloned()
+                .partition(|p| agent::is_image_path(p)),
+        };
+        let prompt = agent::append_attachment_note(&req.prompt, &note_paths);
+
         let cli_cmd = match req.agent {
             AgentKind::Claude => claude_command(
                 req.model.as_deref(),
                 claude_id.as_deref().unwrap_or_default(),
                 req.claude_session_id.is_some(),
+                req.plan_mode,
+                req.effort.as_deref(),
             ),
-            AgentKind::Codex => codex_command(req.model.as_deref(), req.codex_thread_id.as_deref()),
+            AgentKind::Codex => codex_command(
+                req.model.as_deref(),
+                req.codex_thread_id.as_deref(),
+                req.plan_mode,
+                req.effort.as_deref(),
+                &image_paths,
+            ),
         };
 
         let meta = serde_json::json!({
@@ -331,9 +369,26 @@ impl DetachedManager {
         // The prompt goes over ssh *stdin*, never the command line: it is
         // arbitrary user text and shell-quoting megabytes of it into an argv
         // is both a correctness and an injection hazard.
-        if let Err(e) = ssh::write_remote_file(&req.ssh_host, &prompt_path, &req.prompt, 60).await {
+        if let Err(e) = ssh::write_remote_file(&req.ssh_host, &prompt_path, &prompt, 60).await {
             let _ = self.db.finish_detached_run(&run_id, "failed", None);
             return Err(e);
+        }
+
+        // Attachments follow the prompt, same run directory. A failed upload
+        // aborts the turn rather than launching a CLI that would be told to
+        // read a file that isn't there.
+        for (local, remote) in req.attachments.iter().zip(remote_attachments.iter()) {
+            let bytes = match std::fs::read(local) {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = self.db.finish_detached_run(&run_id, "failed", None);
+                    return Err(format!("could not read attachment {local}: {e}"));
+                }
+            };
+            if let Err(e) = ssh::write_remote_bytes(&req.ssh_host, remote, &bytes, 120).await {
+                let _ = self.db.finish_detached_run(&run_id, "failed", None);
+                return Err(e);
+            }
         }
 
         let launched = match self
@@ -751,7 +806,9 @@ impl DetachedManager {
             AgentEvent::Thinking(text) => acc.thinking.push_str(text),
             AgentEvent::Done(usage) => acc.usage = usage.clone(),
             AgentEvent::Error(message) => acc.error = Some(message.clone()),
-            AgentEvent::ToolUse { .. } | AgentEvent::ToolResult { .. } => {}
+            AgentEvent::Plan { .. }
+            | AgentEvent::ToolUse { .. }
+            | AgentEvent::ToolResult { .. } => {}
         }
         let Some(sink) = self.sink() else { return };
         match event {
@@ -790,6 +847,13 @@ impl DetachedManager {
                 },
             ),
             AgentEvent::Done(_) => {}
+            AgentEvent::Plan { content } => sink.emit(
+                &sid,
+                ServerMessage::ChatPlan {
+                    session_id: sid.clone(),
+                    content,
+                },
+            ),
             AgentEvent::Error(message) => {
                 sink.emit(&sid, ServerMessage::Error { message });
             }
@@ -1188,17 +1252,53 @@ fn chrono_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Reduce a local attachment path to a safe remote *file name*.
+///
+/// The name comes from a browser upload, so it is fully attacker-controlled:
+/// anything outside `[A-Za-z0-9._-]` is folded to `_`, which incidentally
+/// removes `/` and `..` and so pins the file inside the run directory. The
+/// index prefix the caller adds keeps two same-named attachments distinct.
+fn sanitize_attachment_name(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches('.').to_string();
+    if cleaned.is_empty() {
+        "attachment".to_string()
+    } else {
+        cleaned
+    }
+}
+
 /// The remote `claude` invocation for one detached turn — the same flag set
 /// `ClaudeRunner::run_once` uses locally, with the prompt on stdin instead of
 /// argv (a turn's prompt can be megabytes; argv can't).
-fn claude_command(model: Option<&str>, session_id: &str, resume: bool) -> String {
+pub(crate) fn claude_command(
+    model: Option<&str>,
+    session_id: &str,
+    resume: bool,
+    plan_mode: bool,
+    effort: Option<&str>,
+) -> String {
     let q = ssh::shell_quote;
-    let mut s = String::from(
-        "claude -p --output-format stream-json --verbose --include-partial-messages \
-         --permission-mode bypassPermissions",
-    );
-    if let Some(m) = model {
-        s.push_str(&format!(" --model {}", q(m)));
+    let mut s = String::new();
+    // `effort: "none"` is an env knob, not a flag (see `claude_effort_env`);
+    // as a `VAR=v cmd` prefix it applies to just this child.
+    if let Some((k, v)) = agent::claude_effort_env(effort) {
+        s.push_str(&format!("{k}={v} "));
+    }
+    s.push_str("claude -p");
+    for flag in agent::claude_turn_flags("bypassPermissions", plan_mode, model, effort) {
+        s.push(' ');
+        s.push_str(&q(&flag));
     }
     if resume {
         s.push_str(&format!(" --resume {}", q(session_id)));
@@ -1211,17 +1311,33 @@ fn claude_command(model: Option<&str>, session_id: &str, resume: bool) -> String
 /// The remote `codex` invocation. `codex exec resume <id>` gives the thread
 /// continuity the local `CodexRunner` never needed (it starts a fresh process
 /// per turn); the trailing `-` makes codex read the prompt from stdin.
-fn codex_command(model: Option<&str>, thread_id: Option<&str>) -> String {
+///
+/// `-` must come **after** every `-i <path>`: `-i/--image` is variadic, so a
+/// `-` placed before it would be eaten as an image filename. (`--` cannot be
+/// used here — the stdin form needs `-` as a real positional.)
+pub(crate) fn codex_command(
+    model: Option<&str>,
+    thread_id: Option<&str>,
+    plan_mode: bool,
+    effort: Option<&str>,
+    image_paths: &[String],
+) -> String {
     let q = ssh::shell_quote;
     let model = model.unwrap_or("gpt-5.4-mini");
-    match thread_id {
-        Some(id) => format!(
-            "codex exec resume {} --json --skip-git-repo-check -m {} -",
-            q(id),
-            q(model)
-        ),
-        None => format!("codex exec --json --skip-git-repo-check -m {} -", q(model)),
+    let flags = agent::codex_exec_flags(model, plan_mode, effort, image_paths);
+    // `codex exec resume <id> …` — the subcommand+id sit right after `exec`.
+    let mut parts: Vec<String> = vec!["codex".to_string()];
+    for (i, flag) in flags.iter().enumerate() {
+        parts.push(q(flag));
+        if i == 0 {
+            if let Some(id) = thread_id {
+                parts.push("resume".to_string());
+                parts.push(q(id));
+            }
+        }
     }
+    parts.push("-".to_string());
+    parts.join(" ")
 }
 
 /// Find a detached job on the remote by **run id** rather than by pid, and
@@ -1312,6 +1428,67 @@ async fn scrape_claude_transcript(ssh_host: &str, claude_session_id: &str) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Remote command construction
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detached_claude_command_defaults_are_unchanged() {
+        assert_eq!(
+            claude_command(Some("claude-haiku-4-5"), "sid-1", false, false, None),
+            "claude -p '--output-format' 'stream-json' '--verbose' '--include-partial-messages' \
+             '--permission-mode' 'bypassPermissions' '--model' 'claude-haiku-4-5' --session-id 'sid-1'"
+        );
+    }
+
+    #[test]
+    fn detached_claude_command_carries_plan_mode_and_effort() {
+        let cmd = claude_command(None, "sid-2", true, true, Some("xhigh"));
+        assert!(cmd.starts_with("claude -p "), "{cmd}");
+        assert!(cmd.contains("'--permission-mode' 'plan'"), "{cmd}");
+        assert!(!cmd.contains("bypassPermissions"), "{cmd}");
+        assert!(cmd.contains("'--effort' 'xhigh'"), "{cmd}");
+        assert!(cmd.contains("--resume 'sid-2'"), "{cmd}");
+    }
+
+    #[test]
+    fn detached_claude_command_prefixes_the_thinking_env_for_effort_none() {
+        let cmd = claude_command(None, "sid-3", false, false, Some("none"));
+        assert!(cmd.starts_with("MAX_THINKING_TOKENS=0 claude -p "), "{cmd}");
+        assert!(cmd.contains("'--effort' 'none'"), "{cmd}");
+    }
+
+    #[test]
+    fn detached_codex_command_defaults_are_unchanged() {
+        assert_eq!(
+            codex_command(Some("gpt-5.4-mini"), None, false, None, &[]),
+            "codex 'exec' '--json' '--skip-git-repo-check' '-m' 'gpt-5.4-mini' -"
+        );
+        assert_eq!(
+            codex_command(Some("gpt-5.4-mini"), Some("th-1"), false, None, &[]),
+            "codex 'exec' resume 'th-1' '--json' '--skip-git-repo-check' '-m' 'gpt-5.4-mini' -"
+        );
+    }
+
+    #[test]
+    fn detached_codex_command_puts_the_stdin_dash_after_every_image() {
+        let images = vec!["/run/a.png".to_string()];
+        let cmd = codex_command(Some("gpt-5.4-mini"), None, true, Some("low"), &images);
+        assert_eq!(
+            cmd,
+            "codex 'exec' '--json' '--skip-git-repo-check' '-m' 'gpt-5.4-mini' \
+             '-c' 'model_reasoning_effort=\"low\"' '--sandbox' 'read-only' '-i' '/run/a.png' -"
+        );
+        assert!(cmd.ends_with("'/run/a.png' -"), "{cmd}");
+    }
+
+    #[test]
+    fn attachment_names_cannot_escape_the_run_directory() {
+        assert_eq!(sanitize_attachment_name("/tmp/x/../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_attachment_name("my shot.png"), "my_shot.png");
+        assert_eq!(sanitize_attachment_name("..."), "attachment");
+    }
 
     // -----------------------------------------------------------------------
     // Recording sink + fixtures for the replay tests
@@ -1571,13 +1748,13 @@ mod tests {
 
     #[test]
     fn claude_command_uses_resume_after_the_first_turn() {
-        let first = claude_command(Some("claude-haiku-4-5"), "abc", false);
+        let first = claude_command(Some("claude-haiku-4-5"), "abc", false, false, None);
         assert!(first.contains("--session-id 'abc'"));
         assert!(!first.contains("--resume"));
-        assert!(first.contains("--model 'claude-haiku-4-5'"));
+        assert!(first.contains("'--model' 'claude-haiku-4-5'"));
         // bypassPermissions is mandatory: `-p` has no approval channel.
-        assert!(first.contains("--permission-mode bypassPermissions"));
-        let later = claude_command(Some("claude-haiku-4-5"), "abc", true);
+        assert!(first.contains("'--permission-mode' 'bypassPermissions'"));
+        let later = claude_command(Some("claude-haiku-4-5"), "abc", true, false, None);
         assert!(later.contains("--resume 'abc'"));
         assert!(!later.contains("--session-id"));
     }
@@ -1585,11 +1762,11 @@ mod tests {
     #[test]
     fn codex_command_resumes_a_known_thread() {
         assert_eq!(
-            codex_command(Some("gpt-5.4-mini"), None),
-            "codex exec --json --skip-git-repo-check -m 'gpt-5.4-mini' -"
+            codex_command(Some("gpt-5.4-mini"), None, false, None, &[]),
+            "codex 'exec' '--json' '--skip-git-repo-check' '-m' 'gpt-5.4-mini' -"
         );
-        let resumed = codex_command(Some("gpt-5.4-mini"), Some("t-1"));
-        assert!(resumed.starts_with("codex exec resume 't-1' --json"));
+        let resumed = codex_command(Some("gpt-5.4-mini"), Some("t-1"), false, None, &[]);
+        assert!(resumed.starts_with("codex 'exec' resume 't-1' '--json'"));
         assert!(resumed.ends_with(" -"));
     }
 

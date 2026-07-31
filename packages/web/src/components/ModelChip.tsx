@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
+import { computeAnchoredPopoverStyle } from "./popoverPosition";
 import type { AgentKind } from "@perch/shared";
 
 /** Format helper: get agent display label */
@@ -11,40 +12,7 @@ function agentLabel(agentId: AgentKind): string {
 
 /** Compute fixed popover style from the pill's bounding rect. */
 function computePopoverStyle(pill: HTMLButtonElement): React.CSSProperties {
-  const rect = pill.getBoundingClientRect();
-  const GAP = 6;
-  const MIN_W = 220;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  // Right-align with the pill's right edge.
-  const right = Math.max(0, vw - rect.right);
-
-  // Space above the pill (preferred) vs below (fallback).
-  const spaceAbove = rect.top - GAP - 8;
-  const spaceBelow = vh - rect.bottom - GAP - 8;
-
-  if (spaceAbove >= 100) {
-    // Show above: popover bottom = viewport bottom minus space below pill.
-    return {
-      position: "fixed",
-      bottom: vh - rect.top + GAP,
-      right,
-      minWidth: MIN_W,
-      maxHeight: Math.min(spaceAbove, vh * 0.75),
-      overflowY: "auto",
-    };
-  } else {
-    // Flip below.
-    return {
-      position: "fixed",
-      top: rect.bottom + GAP,
-      right,
-      minWidth: MIN_W,
-      maxHeight: Math.min(spaceBelow, vh * 0.75),
-      overflowY: "auto",
-    };
-  }
+  return computeAnchoredPopoverStyle(pill, { minWidth: 220, align: "right" });
 }
 
 /**

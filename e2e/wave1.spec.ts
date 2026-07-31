@@ -2,7 +2,7 @@
  * wave1.spec.ts — e2e coverage for Wave 1 (herdr functionality gaps):
  *   F1 — directory browser for the new-session cwd picker (Browse default,
  *        filter, up/breadcrumb navigation, Type-path fallback, and the
- *        tab-bar "+" opening the same popover)
+ *        tab-bar "+" creating straight into the active project)
  *   F2 — session rename via double-click on a TabBar tab
  *   F3/F4 — Notifications settings section: soundEnabled toggle and
  *        toastDelivery selector (off/app/system), persisted across reload
@@ -181,18 +181,36 @@ test.describe("Wave 1 functionality gaps", () => {
     await page.screenshot({ path: "artifacts/wave1-f1-dir-browser.png" });
   });
 
-  test("F1b. tab-bar + opens the same directory-browser popover", async ({ page }) => {
+  test("F1b. tab-bar + creates a session in the active project (no popover)", async ({ page }) => {
     await freshPage(page);
 
+    // Pin an active project by creating a session in a known folder through
+    // the sidebar's picker (which keeps the directory browser).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-tabplus-"));
+    await openLocalPicker(page);
+    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
+    await page.locator('[data-testid="project-path-input"]').fill(dir);
+    await page.locator('[data-testid="dir-browser-use"]').click();
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
+      .toBeTruthy();
+    const firstId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+
+    // The tab-bar "+" is the zero-click fast path: it must create straight
+    // into the active project, never open the directory browser.
     const tabNew = page.locator('[data-testid="tab-new"]');
     await expect(tabNew).toBeVisible({ timeout: 10000 });
     await tabNew.click();
+    await expect(page.locator('[data-testid="dir-browser"]')).not.toBeVisible({ timeout: 2000 });
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
+      .not.toBe(firstId);
 
-    await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible({ timeout: 5000 });
+    // ...and the nav stays scoped to that same project.
+    const pinned = await page.evaluate(() => localStorage.getItem("perch.activeProject"));
+    expect(pinned).toContain(dir);
 
-    // Escape dismisses the popover without creating a session.
-    await page.keyboard.press("Escape");
-    await expect(page.locator('[data-testid="dir-browser"]')).not.toBeVisible({ timeout: 3000 });
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   // -------------------------------------------------------------------------

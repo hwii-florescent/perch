@@ -32,7 +32,10 @@ struct TerminalHandle {
 }
 
 pub struct TerminalManager {
-    terminals: Mutex<HashMap<String, TerminalHandle>>,
+    /// `Arc` because each terminal's waiter thread holds a handle: when the
+    /// child exits it removes its own entry (see `create`), so a dead terminal
+    /// never lingers in the map.
+    terminals: Arc<Mutex<HashMap<String, TerminalHandle>>>,
     on_data: TerminalDataListener,
     on_exit: TerminalExitListener,
 }
@@ -40,7 +43,7 @@ pub struct TerminalManager {
 impl TerminalManager {
     pub fn new(on_data: TerminalDataListener, on_exit: TerminalExitListener) -> Self {
         Self {
-            terminals: Mutex::new(HashMap::new()),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
             on_data,
             on_exit,
         }
@@ -122,11 +125,18 @@ impl TerminalManager {
         // Waiter thread: pty exit -> terminal.exit.
         let on_exit = self.on_exit.clone();
         let exit_id = id.clone();
+        let terminals = self.terminals.clone();
         std::thread::spawn(move || {
             let code = match child.wait() {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
+            // Drop the handle first: the child is gone, so keeping its writer
+            // + master fds around only leaks them and makes `input()` write
+            // into a pty nobody reads (a dead CLI-mode pane silently
+            // swallowing keystrokes). Removing here also means `kill()` and
+            // `dispose_all()` never touch an already-exited terminal.
+            terminals.lock().unwrap().remove(&exit_id);
             on_exit(exit_id, code);
         });
 

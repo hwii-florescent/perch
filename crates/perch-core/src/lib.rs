@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod boot;
 pub mod clipboard_image;
+pub mod commands;
 pub mod db;
 pub mod detached;
 pub mod hosts;
@@ -13,4 +14,5 @@ pub mod settings;
 pub mod ssh;
 pub mod status;
 pub mod terminal;
+pub mod uploads;
 pub mod worktree;

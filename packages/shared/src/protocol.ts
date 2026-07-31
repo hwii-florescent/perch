@@ -30,6 +30,15 @@ export interface ChatUsage {
   contextTokens: number;
 }
 
+/** One invocable command/skill offered by an agent CLI in a given cwd, as
+ * scraped by `commands.rs` and served in `commands.list`. `name` is bare (no
+ * `/` or `$` sigil) — the client prepends whichever sigil the active agent
+ * uses. Mirrors `CommandEntry` in `crates/perch-core/src/protocol.rs`. */
+export interface CommandEntry {
+  name: string;
+  description?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Stage D: Settings & SSH hosts value types
 // ---------------------------------------------------------------------------
@@ -239,6 +248,32 @@ export interface ChatSendMessage {
   text: string;
   agent?: AgentKind;
   model?: string;
+  /** Run this turn in *plan mode*: claude gets `--permission-mode plan`
+   * instead of `bypassPermissions`, codex gets `--sandbox read-only`. Absent
+   * ⇒ `false` (the pre-existing behaviour), so older clients are unaffected. */
+  planMode?: boolean;
+  /** Reasoning-effort level for this turn. Absent (or `"default"`) omits the
+   * flag entirely and lets the CLI use its own default. claude:
+   * `--effort <level>`; codex: `-c model_reasoning_effort="<level>"`.
+   * Legal values — claude: `low|medium|high|xhigh|max|none`;
+   * codex: `none|low|medium|high|xhigh`. */
+  effort?: string;
+  /** Absolute, server-side paths of files staged via `POST {base}upload` to
+   * attach to this turn. Images are passed to codex with `-i`; every other
+   * file (and every file for claude) is named in a trailing
+   * `[Attached files: …]` note appended to the turn text, which the CLI then
+   * reads itself. */
+  attachments?: string[];
+}
+
+/** Ask the server which slash commands / skills the agent CLIs know about in
+ * this session's cwd, for composer autocomplete. The server probes the CLIs
+ * (cached per host+cwd for a few minutes) and answers with the server-side
+ * `commands.list` (`CommandsListResponseMessage`). Note: "commands.list"
+ * appears in both directions — the union context disambiguates. */
+export interface CommandsListMessage {
+  type: "commands.list";
+  sessionId: string;
 }
 
 export interface ChatCancelMessage {
@@ -404,6 +439,7 @@ export type ClientMessage =
   | SessionListMessage
   | ChatSendMessage
   | ChatCancelMessage
+  | CommandsListMessage
   | TerminalCreateMessage
   | TerminalInputMessage
   | TerminalResizeMessage
@@ -482,6 +518,29 @@ export interface ChatDoneMessage {
   type: "chat.done";
   sessionId: string;
   usage?: ChatUsage;
+}
+
+/** A plan produced by a plan-mode claude turn. claude 2.1.x has no
+ * `ExitPlanMode` tool; the plan arrives as an ordinary `Write` tool_use whose
+ * `input.file_path` lands under `.claude/plans/`, and `agent.rs` lifts its
+ * `input.content` into this message. Codex plan mode (`--sandbox read-only`)
+ * produces no such artifact, so this is claude-only. */
+export interface ChatPlanMessage {
+  type: "chat.plan";
+  sessionId: string;
+  content: string;
+}
+
+/** Reply to the client `commands.list` — the slash commands / skills each CLI
+ * knows about in this session's cwd. Either list may be empty (probe failed,
+ * CLI not installed, …); the client just shows fewer suggestions. Note:
+ * "commands.list" appears in both directions; here it is the server response
+ * form. */
+export interface CommandsListResponseMessage {
+  type: "commands.list";
+  sessionId: string;
+  claude: CommandEntry[];
+  codex: CommandEntry[];
 }
 
 export interface TerminalCreatedMessage {
@@ -657,6 +716,8 @@ export type ServerMessage =
   | ChatToolUseMessage
   | ChatToolResultMessage
   | ChatDoneMessage
+  | ChatPlanMessage
+  | CommandsListResponseMessage
   | TerminalCreatedMessage
   | TerminalDataMessage
   | TerminalExitMessage

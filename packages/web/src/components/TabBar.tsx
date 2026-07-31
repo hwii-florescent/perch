@@ -26,14 +26,13 @@ function tabLabel(session: SessionSummary): string {
  * sidebar); double-clicking a tab renames it (Wave 1 item 2, inline input).
  * Dragging a tab reorders it within the strip (Wave 2 item 10) — purely
  * presentational, persisted client-side *per project* via `tabOrder.ts` (no
- * protocol field for tab order exists or is added). The trailing "+" opens
- * the same `NewSessionPopover` (directory browser + quick-pick) used by the
- * sidebar's "+" button (Wave 1 item 1), anchored to the button, with the
- * current project's cwd preselected as the first quick-pick option so the
- * one-click "new session in this project" fast path still exists — it's
- * just one popover-click away instead of zero. Picking a *different* folder
- * creates the session there, which makes that folder the active project (so
- * it appears in the sidebar nav and this strip re-points at it).
+ * protocol field for tab order exists or is added). The trailing "+" is the
+ * zero-click "new session in *this* project" fast path: it creates a session
+ * in the active project's cwd on the active host immediately, no popover. The
+ * dir-browser flow (`NewSessionPopover`) is only used as a fallback when there
+ * is no active project at all (blank state — nothing to infer a cwd from);
+ * the sidebar's "+ New session" button keeps the popover unconditionally, so
+ * picking a *different* folder is still one click away there.
  */
 export function TabBar() {
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -80,6 +79,18 @@ export function TabBar() {
   }
 
   function handleNewClick(e: React.MouseEvent<HTMLButtonElement>) {
+    // Fast path: an active project means we already know exactly where the
+    // session belongs — create it straight away. `cwd` is always absolute
+    // here (it comes from an existing session's cwd), so `createSessionOnHost`
+    // pins the nav on it synchronously and never hits the "reuse the empty
+    // active session" shortcut (that shortcut only applies to cwd-less
+    // creates).
+    if (cwd) {
+      createSessionOnHost(hostId, cwd);
+      return;
+    }
+    // Blank state (no project on this host yet): nothing to infer a cwd from,
+    // so fall back to the directory browser, same as the sidebar's button.
     setPopoverAnchor(e.currentTarget.getBoundingClientRect());
   }
 

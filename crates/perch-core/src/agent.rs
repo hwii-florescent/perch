@@ -21,7 +21,7 @@
 //!   - `{type:"user", message:{content:[{type:"tool_result", tool_use_id, content, is_error}]}}`
 //!   - `{type:"result", subtype, is_error, result, session_id, total_cost_usd, usage:{...}}`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -42,8 +42,158 @@ pub enum AgentEvent {
     Thinking(String),
     ToolUse { name: String, input: Value },
     ToolResult { name: String, result: Value },
+    /// A plan-mode plan (claude only — see [`ClaudeStreamParser::plan_content_of`]).
+    Plan { content: String },
     Done(Option<ChatUsage>),
     Error(String),
+}
+
+// ---------------------------------------------------------------------------
+// Per-turn knobs shared by every runner (local and detached)
+// ---------------------------------------------------------------------------
+
+/// Reasoning-effort level a client asked for, normalized. `"default"`, `""`
+/// and `None` all mean "omit the flag entirely and let the CLI decide".
+pub fn normalized_effort(effort: Option<&str>) -> Option<String> {
+    let e = effort?.trim();
+    if e.is_empty() || e.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    Some(e.to_ascii_lowercase())
+}
+
+/// Extensions codex can take as a real image attachment (`-i <path>`).
+/// Everything else is named in the text note instead, which is the only route
+/// claude has for *any* attachment.
+pub fn is_image_path(path: &str) -> bool {
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+    )
+}
+
+/// Append the `[Attached files: …]` note the CLIs act on. This is the whole
+/// attachment mechanism for claude (it `Read`s the paths itself, images
+/// included) and the non-image half of it for codex.
+pub fn append_attachment_note(text: &str, paths: &[String]) -> String {
+    if paths.is_empty() {
+        return text.to_string();
+    }
+    format!("{text}\n\n[Attached files: {}]", paths.join(", "))
+}
+
+/// The flag set every claude turn perch launches shares — local
+/// ([`ClaudeRunner::run_once`]) and detached
+/// ([`crate::detached::claude_command`]) alike — *excluding* the `-p` prompt
+/// and the `--resume`/`--session-id` continuity pair.
+///
+/// `plan_mode` overrides `base_permission_mode` with `plan` rather than
+/// sitting alongside it: they are the same CLI flag.
+pub fn claude_turn_flags(
+    base_permission_mode: &str,
+    plan_mode: bool,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
+        "--permission-mode".to_string(),
+        if plan_mode {
+            "plan".to_string()
+        } else {
+            base_permission_mode.to_string()
+        },
+    ];
+    if let Some(m) = model {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = normalized_effort(effort) {
+        args.push("--effort".to_string());
+        args.push(e);
+    }
+    args
+}
+
+/// `effort: "none"` is not one of `--effort`'s levels (the flag warns and
+/// ignores it); what actually disables thinking on every model is
+/// `MAX_THINKING_TOKENS=0` in the child's environment. Returns the env pair
+/// to set, if any.
+pub fn claude_effort_env(effort: Option<&str>) -> Option<(&'static str, &'static str)> {
+    match normalized_effort(effort).as_deref() {
+        Some("none") => Some(("MAX_THINKING_TOKENS", "0")),
+        _ => None,
+    }
+}
+
+/// The codex `exec` argv perch runs for one turn, *excluding* the binary
+/// name and the trailing prompt (local passes `-- <text>`; detached passes a
+/// bare `-` positional and pipes the prompt on stdin).
+///
+/// Argv order matters: `-i/--image` is variadic, so every image path must be
+/// followed by another flag or an explicit separator before the positional
+/// prompt — otherwise codex swallows the prompt as one more image filename.
+pub fn codex_exec_flags(
+    model: &str,
+    plan_mode: bool,
+    effort: Option<&str>,
+    image_paths: &[String],
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "exec".to_string(),
+        "--json".to_string(),
+        "--skip-git-repo-check".to_string(),
+        "-m".to_string(),
+        model.to_string(),
+    ];
+    if let Some(e) = normalized_effort(effort) {
+        args.push("-c".to_string());
+        args.push(format!("model_reasoning_effort=\"{e}\""));
+    }
+    if plan_mode {
+        args.push("--sandbox".to_string());
+        args.push("read-only".to_string());
+    }
+    for p in image_paths {
+        args.push("-i".to_string());
+        args.push(p.clone());
+    }
+    args
+}
+
+/// Replace base64 `image` blocks inside a claude `tool_result` payload with a
+/// short text placeholder.
+///
+/// **Why this exists:** when claude `Read`s an image (which is exactly what an
+/// image attachment makes it do) the tool_result content carries the file back
+/// as an inline base64 `image` block — hundreds of kilobytes for a small PNG.
+/// That value used to be forwarded verbatim into `AgentEvent::ToolResult`,
+/// i.e. straight onto the WebSocket and into the SQLite transcript. Stripping
+/// it here — at the single point every runner's tool_result flows through —
+/// keeps the wire and the DB small while leaving the model's own view of the
+/// image completely untouched (this is perch's copy of the event, not
+/// claude's).
+pub fn strip_image_blocks(value: Value) -> Value {
+    fn is_image(block: &Value) -> bool {
+        block.get("type").and_then(Value::as_str) == Some("image")
+    }
+    fn placeholder() -> Value {
+        serde_json::json!({ "type": "text", "text": "[image]" })
+    }
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|b| if is_image(&b) { placeholder() } else { b })
+                .collect(),
+        ),
+        other if is_image(&other) => placeholder(),
+        other => other,
+    }
 }
 
 /// A pluggable chat backend for a single perch session. One instance is
@@ -83,6 +233,11 @@ pub trait AgentRunner: Send + Sync {
 pub struct ClaudeStreamParser {
     tool_name_by_id: HashMap<String, String>,
     pending_tool_uses: HashMap<i64, PendingToolUse>,
+    /// tool_use ids that were recognized as plan writes and reported as
+    /// [`AgentEvent::Plan`] instead of a `Write` tool card. Their eventual
+    /// `tool_result` is suppressed too, so the transcript shows one plan card
+    /// rather than a plan card plus an orphaned "Write succeeded".
+    plan_tool_use_ids: HashSet<String>,
     /// Claude's own session id, scraped from `system/init` or `result`.
     /// Recovery uses this to keep a turn that finished while perch was gone
     /// attached to its conversation.
@@ -103,8 +258,34 @@ impl ClaudeStreamParser {
         Self {
             tool_name_by_id: HashMap::new(),
             pending_tool_uses: HashMap::new(),
+            plan_tool_use_ids: HashSet::new(),
             session_id: None,
             saw_terminal: false,
+        }
+    }
+
+    /// If this completed tool_use is really a **plan-mode plan**, return its
+    /// markdown body.
+    ///
+    /// claude 2.1.220 has no `ExitPlanMode` tool: under
+    /// `--permission-mode plan` the model writes the plan out as an ordinary
+    /// `Write` whose `file_path` lands in the CLI's own plans directory. The
+    /// match is on the `/.claude/plans/` **substring** deliberately — on a
+    /// direct-mode host the path is absolute *on the remote*, so anchoring it
+    /// to the local `$HOME` would silently never fire there.
+    pub fn plan_content_of(name: &str, input: &Value) -> Option<String> {
+        if name != "Write" {
+            return None;
+        }
+        let path = input.get("file_path").and_then(Value::as_str)?;
+        if !path.contains("/.claude/plans/") {
+            return None;
+        }
+        let content = input.get("content").and_then(Value::as_str)?;
+        if content.trim().is_empty() {
+            None
+        } else {
+            Some(content.to_string())
         }
     }
 
@@ -139,14 +320,21 @@ impl ClaudeStreamParser {
                 {
                     for block in content {
                         if block.get("type").and_then(Value::as_str) == Some("tool_result") {
-                            let name = block
-                                .get("tool_use_id")
-                                .and_then(Value::as_str)
+                            let id = block.get("tool_use_id").and_then(Value::as_str);
+                            // A plan write was reported as AgentEvent::Plan;
+                            // don't also emit its "file written" result.
+                            if id.is_some_and(|id| self.plan_tool_use_ids.contains(id)) {
+                                continue;
+                            }
+                            let name = id
                                 .and_then(|id| self.tool_name_by_id.get(id))
                                 .cloned()
                                 .unwrap_or_else(|| "unknown".to_string());
                             let result = block.get("content").cloned().unwrap_or(Value::Null);
-                            let _ = tx.send(AgentEvent::ToolResult { name, result });
+                            let _ = tx.send(AgentEvent::ToolResult {
+                                name,
+                                result: strip_image_blocks(result),
+                            });
                         }
                     }
                 }
@@ -236,12 +424,17 @@ impl ClaudeStreamParser {
             }
             Some("content_block_stop") => {
                 if let Some(pending) = self.pending_tool_uses.remove(&index) {
-                    self.tool_name_by_id.insert(pending.id, pending.name.clone());
+                    self.tool_name_by_id.insert(pending.id.clone(), pending.name.clone());
                     let input = if pending.json.is_empty() {
                         Value::Object(Default::default())
                     } else {
                         serde_json::from_str(&pending.json).unwrap_or(Value::String(pending.json))
                     };
+                    if let Some(content) = Self::plan_content_of(&pending.name, &input) {
+                        self.plan_tool_use_ids.insert(pending.id);
+                        let _ = tx.send(AgentEvent::Plan { content });
+                        return;
+                    }
                     let _ = tx.send(AgentEvent::ToolUse {
                         name: pending.name,
                         input,
@@ -377,6 +570,13 @@ struct RunnerState {
     /// per-turn (via `set_model`) without disturbing multi-turn `--resume`
     /// continuity, which lives on this same `ClaudeRunner` instance.
     model: Option<String>,
+    /// Run the next turn under `--permission-mode plan`. Per-turn for the
+    /// same reason `model` is: permission modes can be changed freely between
+    /// turns of one `--resume`d claude session (validated on 2.1.220).
+    plan_mode: bool,
+    /// `--effort <level>` for the next turn, already normalized (see
+    /// [`normalized_effort`]); `None` omits the flag.
+    effort: Option<String>,
     cancelled: bool,
     child_pid: Option<u32>,
 }
@@ -405,6 +605,8 @@ impl ClaudeRunner {
             state: Arc::new(Mutex::new(RunnerState {
                 claude_session_id: None,
                 model: None,
+                plan_mode: false,
+                effort: None,
                 cancelled: false,
                 child_pid: None,
             })),
@@ -415,6 +617,15 @@ impl ClaudeRunner {
     /// back to claude's own default.
     pub fn set_model(&self, model: Option<String>) {
         self.state.lock().unwrap().model = model;
+    }
+
+    /// Set plan mode + reasoning effort for the *next* turn. Both are reset
+    /// on every `chat.send`, so a turn never inherits the previous turn's
+    /// knobs.
+    pub fn set_turn_options(&self, plan_mode: bool, effort: Option<&str>) {
+        let mut s = self.state.lock().unwrap();
+        s.plan_mode = plan_mode;
+        s.effort = normalized_effort(effort);
     }
 
     /// Prime this runner to `--resume` an existing claude session (e.g. one
@@ -464,6 +675,13 @@ enum TurnOutcome {
     ResumeNotFound,
 }
 
+/// The per-turn knobs snapshotted out of `RunnerState` at the top of `send`,
+/// so the retry-as-new-session path uses exactly the same ones.
+struct TurnKnobs {
+    plan_mode: bool,
+    effort: Option<String>,
+}
+
 impl ClaudeRunner {
     /// True if `line` is claude's immediate failure response to a
     /// `--resume <id>` for an id it doesn't recognize, e.g.:
@@ -504,26 +722,20 @@ impl ClaudeRunner {
         claude_bin: &str,
         permission_mode: &str,
         model: &Option<String>,
+        turn: &TurnKnobs,
         text: &str,
         state: &Arc<Mutex<RunnerState>>,
         tx: &UnboundedSender<AgentEvent>,
         mode: RunMode,
         session_id: &str,
     ) -> TurnOutcome {
-        let mut args: Vec<String> = vec![
-            "-p".to_string(),
-            text.to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--include-partial-messages".to_string(),
-            "--permission-mode".to_string(),
-            permission_mode.to_string(),
-        ];
-        if let Some(model) = model {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
+        let mut args: Vec<String> = vec!["-p".to_string(), text.to_string()];
+        args.extend(claude_turn_flags(
+            permission_mode,
+            turn.plan_mode,
+            model.as_deref(),
+            turn.effort.as_deref(),
+        ));
         match mode {
             RunMode::Resume => {
                 args.push("--resume".to_string());
@@ -541,6 +753,9 @@ impl ClaudeRunner {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some((k, v)) = claude_effort_env(turn.effort.as_deref()) {
+            cmd.env(k, v);
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -638,6 +853,13 @@ impl AgentRunner for ClaudeRunner {
             }
 
             let model = state.lock().unwrap().model.clone();
+            let turn = {
+                let s = state.lock().unwrap();
+                TurnKnobs {
+                    plan_mode: s.plan_mode,
+                    effort: s.effort.clone(),
+                }
+            };
             let resume_id = state.lock().unwrap().claude_session_id.clone();
             let (mode, session_id) = match resume_id {
                 Some(id) => (RunMode::Resume, id),
@@ -653,6 +875,7 @@ impl AgentRunner for ClaudeRunner {
                 &claude_bin,
                 &permission_mode,
                 &model,
+                &turn,
                 &text,
                 &state,
                 &tx,
@@ -676,6 +899,7 @@ impl AgentRunner for ClaudeRunner {
                     &claude_bin,
                     &permission_mode,
                     &model,
+                    &turn,
                     &text,
                     &state,
                     &tx,
@@ -727,6 +951,15 @@ pub struct CodexRunnerOptions {
     pub codex_bin: Option<String>,
     /// Model alias, e.g. "gpt-5.4-mini". Defaults to "gpt-5.4-mini".
     pub model: Option<String>,
+    /// Plan mode for this turn → `--sandbox read-only`. Codex has no plan
+    /// *artifact* (nothing like claude's plan file), so this is purely a
+    /// safety mode: the turn can read and reason but not write.
+    pub plan_mode: bool,
+    /// Reasoning effort → `-c model_reasoning_effort="<level>"`.
+    pub effort: Option<String>,
+    /// Image attachments, passed with a repeated `-i`. Non-image attachments
+    /// are appended to the prompt text by the caller instead.
+    pub image_paths: Vec<String>,
 }
 
 struct CodexState {
@@ -742,6 +975,9 @@ pub struct CodexRunner {
     cwd: String,
     codex_bin: String,
     model: String,
+    plan_mode: bool,
+    effort: Option<String>,
+    image_paths: Vec<String>,
     state: Arc<Mutex<CodexState>>,
 }
 
@@ -751,6 +987,9 @@ impl CodexRunner {
             cwd: options.cwd,
             codex_bin: options.codex_bin.unwrap_or_else(|| "codex".to_string()),
             model: options.model.unwrap_or_else(|| "gpt-5.4-mini".to_string()),
+            plan_mode: options.plan_mode,
+            effort: options.effort,
+            image_paths: options.image_paths,
             state: Arc::new(Mutex::new(CodexState {
                 cancelled: false,
                 child_pid: None,
@@ -779,6 +1018,9 @@ impl AgentRunner for CodexRunner {
         let cwd = self.cwd.clone();
         let codex_bin = self.codex_bin.clone();
         let model = self.model.clone();
+        let plan_mode = self.plan_mode;
+        let effort = self.effort.clone();
+        let image_paths = self.image_paths.clone();
         let state = self.state.clone();
 
         async move {
@@ -788,8 +1030,17 @@ impl AgentRunner for CodexRunner {
                 s.child_pid = None;
             }
 
+            // `--` before the prompt is load-bearing whenever `-i` is present:
+            // `-i/--image` is variadic, so without the separator codex would
+            // read the prompt as one more image filename. It is harmless (and
+            // kept unconditional) otherwise, and additionally protects a
+            // prompt that happens to start with `-`.
+            let mut args = codex_exec_flags(&model, plan_mode, effort.as_deref(), &image_paths);
+            args.push("--".to_string());
+            args.push(text);
+
             let mut cmd = Command::new(&codex_bin);
-            cmd.args(["exec", "--json", "--skip-git-repo-check", "-m", &model, &text])
+            cmd.args(&args)
                 .current_dir(&cwd)
                 // Must be closed: codex otherwise prints "Reading additional
                 // input from stdin..." and hangs waiting for EOF.
@@ -886,3 +1137,248 @@ extern "C" {
 unsafe fn raw_kill(pid: i32, sig: i32) {
     kill(pid, sig);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AgentEvent>) -> Vec<AgentEvent> {
+        let mut out = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            out.push(e);
+        }
+        out
+    }
+
+    // -- F2: plan detection ------------------------------------------------
+
+    #[test]
+    fn plan_write_is_detected_by_the_plans_path_substring() {
+        let input = serde_json::json!({
+            "file_path": "/home/user/.claude/plans/2026-07-31-hello.md",
+            "content": "## Plan\n1. touch hello.txt",
+        });
+        assert_eq!(
+            ClaudeStreamParser::plan_content_of("Write", &input).as_deref(),
+            Some("## Plan\n1. touch hello.txt"),
+        );
+        // Remote-side absolute paths must match too — the check is on the
+        // substring, never on the local $HOME.
+        let remote = serde_json::json!({
+            "file_path": "/mnt/devpod/home/other/.claude/plans/p.md",
+            "content": "remote plan",
+        });
+        assert!(ClaudeStreamParser::plan_content_of("Write", &remote).is_some());
+    }
+
+    #[test]
+    fn ordinary_writes_and_other_tools_are_not_plans() {
+        let ordinary = serde_json::json!({ "file_path": "/repo/hello.txt", "content": "hi" });
+        assert!(ClaudeStreamParser::plan_content_of("Write", &ordinary).is_none());
+        let plan_path = serde_json::json!({
+            "file_path": "/home/u/.claude/plans/p.md",
+            "content": "x",
+        });
+        assert!(ClaudeStreamParser::plan_content_of("Edit", &plan_path).is_none());
+        let empty = serde_json::json!({
+            "file_path": "/home/u/.claude/plans/p.md",
+            "content": "   ",
+        });
+        assert!(ClaudeStreamParser::plan_content_of("Write", &empty).is_none());
+    }
+
+    #[test]
+    fn plan_write_streams_as_plan_and_suppresses_its_tool_result() {
+        let (tx, mut rx) = unbounded_channel();
+        let mut p = ClaudeStreamParser::new();
+        let json = serde_json::json!({
+            "file_path": "/home/u/.claude/plans/p.md",
+            "content": "the plan"
+        })
+        .to_string();
+        p.handle_line(
+            &serde_json::json!({"type":"stream_event","event":{"type":"content_block_start","index":0,
+                "content_block":{"type":"tool_use","id":"tu_1","name":"Write"}}})
+            .to_string(),
+            &tx,
+        );
+        p.handle_line(
+            &serde_json::json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":json}}})
+            .to_string(),
+            &tx,
+        );
+        p.handle_line(
+            &serde_json::json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})
+                .to_string(),
+            &tx,
+        );
+        p.handle_line(
+            &serde_json::json!({"type":"user","message":{"content":[
+                {"type":"tool_result","tool_use_id":"tu_1","content":"File created"}]}})
+            .to_string(),
+            &tx,
+        );
+        let events = drain(&mut rx);
+        assert_eq!(events.len(), 1, "expected only the plan event: {events:?}");
+        match &events[0] {
+            AgentEvent::Plan { content } => assert_eq!(content, "the plan"),
+            other => panic!("expected Plan, got {other:?}"),
+        }
+    }
+
+    // -- F3: image-block stripping ----------------------------------------
+
+    #[test]
+    fn strip_image_blocks_replaces_base64_images_with_a_placeholder() {
+        let result = serde_json::json!([
+            {"type": "text", "text": "Read 1 image"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                          "data": "iVBORw0KGgoAAAANS..."}},
+        ]);
+        let stripped = strip_image_blocks(result);
+        assert_eq!(
+            stripped,
+            serde_json::json!([
+                {"type": "text", "text": "Read 1 image"},
+                {"type": "text", "text": "[image]"},
+            ])
+        );
+        // A bare image object (not in an array) is handled too.
+        assert_eq!(
+            strip_image_blocks(serde_json::json!({"type":"image","source":{"data":"AAAA"}})),
+            serde_json::json!({"type":"text","text":"[image]"})
+        );
+        // Everything else passes through untouched.
+        let plain = serde_json::json!("ok");
+        assert_eq!(strip_image_blocks(plain.clone()), plain);
+    }
+
+    #[test]
+    fn tool_result_events_are_stripped_before_they_reach_the_wire() {
+        let (tx, mut rx) = unbounded_channel();
+        let mut p = ClaudeStreamParser::new();
+        let big = "A".repeat(5000);
+        p.handle_line(
+            &serde_json::json!({"type":"user","message":{"content":[
+                {"type":"tool_result","tool_use_id":"tu_x","content":[
+                    {"type":"image","source":{"type":"base64","data": big}}]}]}})
+            .to_string(),
+            &tx,
+        );
+        let events = drain(&mut rx);
+        match &events[0] {
+            AgentEvent::ToolResult { result, .. } => {
+                let s = result.to_string();
+                assert!(s.contains("[image]"), "{s}");
+                assert!(s.len() < 200, "payload should be tiny, got {} bytes", s.len());
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    // -- F4 / F2: argv construction ---------------------------------------
+
+    #[test]
+    fn claude_argv_defaults_match_the_pre_existing_flag_set() {
+        assert_eq!(
+            claude_turn_flags("bypassPermissions", false, Some("claude-haiku-4-5"), None),
+            vec![
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-mode",
+                "bypassPermissions",
+                "--model",
+                "claude-haiku-4-5",
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_argv_swaps_the_permission_mode_in_plan_mode_and_appends_effort() {
+        let args = claude_turn_flags("bypassPermissions", true, None, Some("high"));
+        assert_eq!(
+            args,
+            vec![
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-mode",
+                "plan",
+                "--effort",
+                "high",
+            ]
+        );
+        assert!(!args.contains(&"bypassPermissions".to_string()));
+    }
+
+    #[test]
+    fn effort_default_is_omitted_and_none_also_sets_the_thinking_env() {
+        for omitted in [None, Some(""), Some("default"), Some("DEFAULT")] {
+            let args = claude_turn_flags("bypassPermissions", false, None, omitted);
+            assert!(!args.contains(&"--effort".to_string()), "{omitted:?}");
+            assert!(claude_effort_env(omitted).is_none(), "{omitted:?}");
+        }
+        assert_eq!(claude_effort_env(Some("none")), Some(("MAX_THINKING_TOKENS", "0")));
+        assert_eq!(claude_effort_env(Some("low")), None);
+    }
+
+    #[test]
+    fn codex_argv_orders_effort_sandbox_and_images_before_the_prompt_separator() {
+        let images = vec!["/tmp/a.png".to_string(), "/tmp/b.jpg".to_string()];
+        let args = codex_exec_flags("gpt-5.4-mini", true, Some("low"), &images);
+        assert_eq!(
+            args,
+            vec![
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "-m",
+                "gpt-5.4-mini",
+                "-c",
+                "model_reasoning_effort=\"low\"",
+                "--sandbox",
+                "read-only",
+                "-i",
+                "/tmp/a.png",
+                "-i",
+                "/tmp/b.jpg",
+            ]
+        );
+        // `-i` is variadic: the last flag must be an image path, so the caller
+        // has to insert a separator before the positional prompt.
+        assert_eq!(args.last().unwrap(), "/tmp/b.jpg");
+    }
+
+    #[test]
+    fn codex_argv_without_knobs_is_the_original_invocation() {
+        assert_eq!(
+            codex_exec_flags("gpt-5.4-mini", false, None, &[]),
+            vec!["exec", "--json", "--skip-git-repo-check", "-m", "gpt-5.4-mini"]
+        );
+    }
+
+    // -- F3: attachment routing -------------------------------------------
+
+    #[test]
+    fn image_paths_are_recognized_case_insensitively() {
+        assert!(is_image_path("/tmp/a.PNG"));
+        assert!(is_image_path("/tmp/a.jpeg"));
+        assert!(!is_image_path("/tmp/a.pdf"));
+        assert!(!is_image_path("/tmp/noext"));
+    }
+
+    #[test]
+    fn attachment_note_is_appended_only_when_there_are_attachments() {
+        assert_eq!(append_attachment_note("hi", &[]), "hi");
+        assert_eq!(
+            append_attachment_note("hi", &["/a/b.png".to_string(), "/c/d.pdf".to_string()]),
+            "hi\n\n[Attached files: /a/b.png, /c/d.pdf]"
+        );
+    }
+}
+

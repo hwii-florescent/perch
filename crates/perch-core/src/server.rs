@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::body::Bytes;
@@ -257,6 +257,7 @@ pub async fn run(
     let base_path = normalize_base_path(&options.base_path);
     let ws_path = format!("{base_path}ws");
     let clipboard_image_path = format!("{base_path}clipboard-image");
+    let upload_path = format!("{base_path}upload");
 
     // Bind the TCP listener first so we know the actual port (important when
     // port 0 is requested — the OS assigns a free port).
@@ -332,6 +333,7 @@ pub async fn run(
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
         .route(&clipboard_image_path, post(clipboard_image_upload))
+        .route(&upload_path, post(attachment_upload))
         .with_state(state);
 
     if options.web_dist_dir.is_dir() {
@@ -468,6 +470,48 @@ async fn clipboard_image_upload(
     }
 }
 
+/// `POST {base}upload?sessionId=…&name=…` — stage one composer attachment.
+///
+/// The body is the raw file bytes (the client sends the `File` object
+/// directly; there is no multipart parser in the dependency set and none is
+/// needed for one file per request). The reply is `{"path": "/abs/path"}`,
+/// and that path is what the client echoes back in `chat.send`'s
+/// `attachments`.
+///
+/// Staging is always **local**, exactly like `clipboard-image`: there is no
+/// HTTP route from the browser to a remote host. For a direct-mode session
+/// `detached.rs` copies the staged file into the turn's remote run directory
+/// and rewrites the path before launching the CLI.
+async fn attachment_upload(
+    Query(params): Query<HashMap<String, String>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    const MAX_BYTES: usize = 25 * 1024 * 1024;
+    if body.len() > MAX_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "file too large (max 25MB)").into_response();
+    }
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty upload").into_response();
+    }
+    let session_id = params
+        .get("sessionId")
+        .map(|s| s.as_str())
+        .unwrap_or("unknown");
+    let name = params.get("name").map(|s| s.as_str()).unwrap_or("attachment");
+    match crate::uploads::stage(session_id, name, &body) {
+        Ok(path) => axum::Json(serde_json::json!({
+            "path": path.to_string_lossy(),
+            "name": crate::uploads::sanitize_filename(name),
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to stage attachment: {e}"),
+        )
+            .into_response(),
+    }
+}
+
 struct SessionRuntime {
     cwd: String,
     /// `"local"`, or the id of the `mode: "direct"` host this session runs on.
@@ -507,6 +551,39 @@ fn agent_str(agent: AgentKind) -> &'static str {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
     }
+}
+
+/// Does the claude CLI actually have a conversation for `session_id`?
+///
+/// perch mints the claude session id *optimistically* — the id is recorded on
+/// the runtime (and in the DB) when CLI mode first attaches, but claude only
+/// writes the transcript once the conversation has a first message. A session
+/// whose CLI was opened and closed again (`/exit` before typing anything)
+/// therefore has a known id and **no** conversation, and `claude --resume
+/// <id>` on the next attach dies instantly with "No conversation found with
+/// session ID" — a dead pane the user cannot get out of. Passing
+/// `--session-id <id>` instead creates the conversation under the *same* id,
+/// so hosted and CLI mode still share one conversation either way.
+///
+/// The probe deliberately searches every `~/.claude/projects/*/` dir for
+/// `<session_id>.jsonl` rather than re-deriving claude's cwd→directory slug,
+/// so it cannot be broken by that (undocumented) naming scheme. `None` means
+/// "can't tell" (no `~/.claude/projects` at all) — callers keep the
+/// conservative `--resume` behaviour in that case.
+fn claude_conversation_exists(session_id: &str) -> Option<bool> {
+    let home = std::env::var("HOME").ok()?;
+    claude_conversation_exists_in(&Path::new(&home).join(".claude").join("projects"), session_id)
+}
+
+fn claude_conversation_exists_in(projects: &Path, session_id: &str) -> Option<bool> {
+    let file = format!("{session_id}.jsonl");
+    let entries = std::fs::read_dir(projects).ok()?;
+    for entry in entries.flatten() {
+        if entry.path().join(&file).exists() {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 /// Per-connection state shared across the read loop, the writer task, the
@@ -1112,6 +1189,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ref text,
             agent,
             ref model,
+            plan_mode,
+            ref effort,
+            ref attachments,
         } => {
             // Route remote sessions through the hub.
             if let Some(host_id) = state.app.hub.route_for_session(session_id) {
@@ -1128,6 +1208,8 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let session_id = session_id.clone();
             let text = text.clone();
             let model = model.clone();
+            let effort = effort.clone();
+            let attachments: Vec<String> = attachments.clone().unwrap_or_default();
 
             // Direct-mode host: launch the turn detached over ssh instead of
             // spawning a local child. Everything after this point (persisting
@@ -1165,13 +1247,30 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         cwd,
                         agent,
                         model,
+                        // The attachment note is appended remote-side: the
+                        // paths it has to name only exist once the run
+                        // directory is known (see `launch_and_tail`).
                         prompt: text,
                         claude_session_id: row.as_ref().and_then(|r| r.claude_session_id.clone()),
                         codex_thread_id: row.as_ref().and_then(|r| r.codex_thread_id.clone()),
+                        plan_mode,
+                        effort,
+                        attachments,
                     });
                     return;
                 }
             }
+
+            // Local turn: claude reads every attachment off the text note;
+            // codex takes images through `-i` and the rest off the note.
+            let (image_paths, note_paths): (Vec<String>, Vec<String>) = match agent {
+                AgentKind::Claude => (Vec::new(), attachments.clone()),
+                AgentKind::Codex => attachments
+                    .iter()
+                    .cloned()
+                    .partition(|p| crate::agent::is_image_path(p)),
+            };
+            let prompt = crate::agent::append_attachment_note(&text, &note_paths);
 
             let runner = {
                 let map = state.runtimes.lock().unwrap();
@@ -1188,12 +1287,18 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                             cwd: runtime.cwd.clone(),
                             codex_bin: None,
                             model: model.clone(),
+                            plan_mode,
+                            effort: effort.clone(),
+                            image_paths,
                         }));
                         *runtime.last_codex_runner.lock().unwrap() = Some(codex_runner.clone());
                         codex_runner
                     }
                     AgentKind::Claude => {
                         runtime.claude_runner.set_model(model.clone());
+                        runtime
+                            .claude_runner
+                            .set_turn_options(plan_mode, effort.as_deref());
                         runtime.claude_runner.clone()
                     }
                 };
@@ -1231,7 +1336,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let state = state.clone();
             tokio::spawn(async move {
                 let (tx, mut rx) = unbounded_channel::<AgentEvent>();
-                let send_fut = runner.send(text, tx);
+                let send_fut = runner.send(prompt, tx);
                 let forward = async {
                     while let Some(event) = rx.recv().await {
                         handle_agent_event(&state, &session_id, event);
@@ -1261,6 +1366,46 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // emit a trailing Done/Error, but remove here to be safe.
             state.app.running_sessions.lock().unwrap().remove(&session_id);
             notify_session_updated(&state.app, &session_id);
+        }
+        ClientMessage::CommandsList { ref session_id } => {
+            // Remote (perch-mode) sessions: the remote instance knows its own
+            // cwd and CLIs, so ask it and unicast the reply back.
+            if let Some(host_id) = state.app.hub.route_for_session(session_id) {
+                state.app.hub.register_unicast(
+                    PendingKey::Session(session_id.clone()),
+                    state.conn_id.clone(),
+                    state.out_tx.clone(),
+                );
+                state.app.hub.forward(&host_id, raw_text);
+                return;
+            }
+            let session_id = session_id.clone();
+            let Some((host_id, cwd)) = ({
+                let map = state.runtimes.lock().unwrap();
+                map.get(&session_id).map(|r| (r.host_id.clone(), r.cwd.clone()))
+            }) else {
+                let _ = state.out_tx.send(ServerMessage::CommandsList {
+                    session_id,
+                    claude: Vec::new(),
+                    codex: Vec::new(),
+                });
+                return;
+            };
+            // Direct-mode host: probe the same two commands over ssh.
+            let ssh_host = if host_id == "local" {
+                None
+            } else {
+                direct_host(state, &host_id).map(|h| h.ssh_host)
+            };
+            let out_tx = state.out_tx.clone();
+            tokio::spawn(async move {
+                let lists = crate::commands::list_for(&host_id, ssh_host.as_deref(), &cwd).await;
+                let _ = out_tx.send(ServerMessage::CommandsList {
+                    session_id,
+                    claude: lists.claude,
+                    codex: lists.codex,
+                });
+            });
         }
         ClientMessage::TerminalCreate {
             cols,
@@ -1401,8 +1546,18 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     };
                     let mut argv = vec!["claude".to_string()];
                     match claude_session_id {
-                        Some(id) => {
+                        // Known id *and* claude has (or might have) the
+                        // conversation on disk → resume it.
+                        Some(id) if claude_conversation_exists(&id) != Some(false) => {
                             argv.push("--resume".to_string());
+                            argv.push(id);
+                        }
+                        // Known id but claude never created the conversation
+                        // (CLI opened and closed without a single message).
+                        // `--resume` would fail instantly; create it under the
+                        // same id so hosted/CLI continuity is preserved.
+                        Some(id) => {
+                            argv.push("--session-id".to_string());
                             argv.push(id);
                         }
                         None => {
@@ -1413,6 +1568,16 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                                     runtime.claude_runner.resume_session(id.clone());
                                 }
                             }
+                            // The sessions row is normally inserted lazily
+                            // further down (once the pty actually spawned),
+                            // but `set_claude_session_id` is an UPDATE — on a
+                            // session whose first activity is this CLI attach
+                            // there is no row yet, so it would silently affect
+                            // 0 rows and the claude session id would never be
+                            // persisted (CLI-mode context lost on reconnect /
+                            // restart). Insert first, exactly like the
+                            // direct-mode branch above does.
+                            let _ = state.app.db.create_session(&attach.session_id, &runtime_cwd);
                             let _ = state.app.db.set_claude_session_id(&attach.session_id, &id);
                             argv.push("--session-id".to_string());
                             argv.push(id);
@@ -2133,6 +2298,14 @@ fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEven
                 result,
             },
         ),
+        AgentEvent::Plan { content } => emit(
+            state,
+            session_id,
+            ServerMessage::ChatPlan {
+                session_id: session_id.to_string(),
+                content,
+            },
+        ),
         AgentEvent::Done(usage) => {
             update_last_usage(state, session_id, usage.as_ref());
             persist_turn(state, session_id);
@@ -2472,5 +2645,25 @@ mod blocked_pattern_tests {
             append_tail(&mut tail, "chunk-❯-chunk ");
         }
         assert!(tail.len() <= 4096 + "chunk-❯-chunk ".len());
+    }
+
+    /// CLI-attach argv choice: `Some(true)`/`Some(false)` decide
+    /// `--resume` vs `--session-id`, and a missing projects dir must stay
+    /// "unknown" (`None`) so the conservative `--resume` path is kept.
+    #[test]
+    fn claude_conversation_probe_finds_transcripts_in_any_project_dir() {
+        let root = std::env::temp_dir().join(format!("perch-probe-{}", Uuid::new_v4()));
+        let projects = root.join("projects");
+        assert_eq!(claude_conversation_exists_in(&projects, "abc"), None);
+
+        std::fs::create_dir_all(projects.join("-tmp-one")).unwrap();
+        std::fs::create_dir_all(projects.join("-tmp-two")).unwrap();
+        assert_eq!(claude_conversation_exists_in(&projects, "abc"), Some(false));
+
+        std::fs::write(projects.join("-tmp-two").join("abc.jsonl"), b"{}").unwrap();
+        assert_eq!(claude_conversation_exists_in(&projects, "abc"), Some(true));
+        assert_eq!(claude_conversation_exists_in(&projects, "other"), Some(false));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

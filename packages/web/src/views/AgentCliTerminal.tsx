@@ -27,6 +27,11 @@ export function AgentCliTerminal({
   const terminalIdRef = useRef<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
+  // Bumped by "Restart CLI" — the attach effect below keys off it, so a bump
+  // tears down the dead xterm+PTY pair and builds a fresh one (see the effect
+  // comment for why a *fresh* xterm, not a reattach, is the only thing that
+  // renders correctly).
+  const [restartNonce, setRestartNonce] = useState(0);
   const search = useTerminalSearch(termInstance);
 
   const attachAgentCli = usePerchStore((s) => s.attachAgentCli);
@@ -103,11 +108,23 @@ export function AgentCliTerminal({
       term.dispose();
       if (currentId) killTerminal(currentId);
     };
-    // Deliberately run once per mount: sessionId/agent are fixed for the
-    // lifetime of this component instance (key prop in Chat.tsx ensures a
-    // remount when session or agent changes).
+    // Deliberately re-run only on mount and on an explicit "Restart CLI"
+    // (`restartNonce`): sessionId/agent are fixed for the lifetime of this
+    // component instance (key prop in Chat.tsx ensures a remount when session
+    // or agent changes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restartNonce]);
+
+  /** "Restart CLI" — respawn the agent CLI in place after its process exited.
+   * Without this the pane is a dead end: the xterm still shows whatever the
+   * CLI left on screen (usually a cleared screen after `/exit`), keystrokes go
+   * to a pty whose child is gone, and the only escape is switching the global
+   * chat mode or creating another session. */
+  function restartCli() {
+    terminalIdRef.current = null;
+    setTerminalId(null);
+    setRestartNonce((n) => n + 1);
+  }
 
 
   // Stream PTY output straight into xterm, bypassing React state.
@@ -138,8 +155,30 @@ export function AgentCliTerminal({
         <div className="terminal__cli-error">{cliError}</div>
       )}
       {exitCode !== null && (
-        <div className="terminal__exited" onClick={onExitCli} style={onExitCli ? { cursor: "pointer" } : undefined}>
-          process exited (code {exitCode})
+        <div className="terminal__exited terminal__exited--cli" data-testid="cli-exited">
+          <span className="terminal__exited-text">
+            {agent} exited (code {exitCode})
+          </span>
+          <span className="terminal__exited-actions">
+            <button
+              type="button"
+              className="terminal__exited-btn terminal__exited-btn--primary"
+              data-testid="cli-restart"
+              onClick={restartCli}
+            >
+              Restart CLI
+            </button>
+            {onExitCli && (
+              <button
+                type="button"
+                className="terminal__exited-btn"
+                data-testid="cli-back-to-hosted"
+                onClick={onExitCli}
+              >
+                Back to Hosted
+              </button>
+            )}
+          </span>
         </div>
       )}
     </div>

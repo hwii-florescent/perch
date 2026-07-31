@@ -354,6 +354,87 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Copy raw **bytes** to `path` on the remote, creating parent directories.
+///
+/// [`write_remote_file`]'s `cat > file` is fine for text but not for an
+/// attachment: a PNG contains NUL bytes and invalid UTF-8, and perch's payload
+/// type is `&str`. Base64 on the way out and `base64 -d` on the way in keeps
+/// the transport 7-bit-clean while still going over ssh **stdin**, so nothing
+/// binary is ever shell-quoted into an argv. (`-d` is GNU/coreutils; the
+/// `-D` fallback covers BSD/macOS remotes.)
+pub async fn write_remote_bytes(
+    ssh_host: &str,
+    path: &str,
+    data: &[u8],
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+    let command = format!(
+        "mkdir -p {} && {{ if base64 -d </dev/null >/dev/null 2>&1; then base64 -d; else base64 -D; fi; }} > {}",
+        shell_quote(dir),
+        shell_quote(path)
+    );
+    let encoded = base64_encode(data);
+    let mut owned = base_args(ssh_host);
+    owned.push(command);
+
+    let mut cmd = tokio::process::Command::new("ssh");
+    cmd.args(&owned)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("ssh failed (upload {path}): {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(encoded.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    }
+    let out = match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err(format!("ssh failed (upload {path}): {e}")),
+        Err(_) => return Err(format!("ssh timed out (upload {path})")),
+    };
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
+        Err(format!("failed uploading {path}: {err}"))
+    }
+}
+
+/// Standard base64 (RFC 4648, padded). Hand-rolled rather than pulling in a
+/// crate for the ~20 lines the one caller above needs.
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Prereq / version probe
 // ---------------------------------------------------------------------------
@@ -785,5 +866,16 @@ mod tests {
             ..Default::default()
         };
         assert!(no_cli.missing().unwrap().contains("claude or codex"));
+    }
+
+    #[test]
+    fn base64_encode_matches_rfc4648_including_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        // Binary (non-UTF8) input is exactly what an attachment upload is.
+        assert_eq!(base64_encode(&[0x89, 0x50, 0x4e, 0x47]), "iVBORw==");
     }
 }

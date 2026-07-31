@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { diffLines } from "diff";
-import { usePerchStore, type ChatMessage, type ToolCallEntry } from "../store";
+import { usePerchStore, PLAN_APPROVAL_TEXT, type ChatMessage, type ToolCallEntry } from "../store";
 import { AGENTS } from "../models";
 import { repairMarkdown } from "../markdownRepair";
 import { ModelChip } from "../components/ModelChip";
+import { EffortChip } from "../components/EffortChip";
+import { computeAnchoredPopoverStyle } from "../components/popoverPosition";
+import {
+  AGENT_SIGIL,
+  activeSigilToken,
+  applyCommand,
+  filterCommands,
+  type SigilToken,
+} from "../composerCommands";
+import { uploadAttachment, type StagedAttachment } from "../attachments";
 import { AgentCliTerminal } from "./AgentCliTerminal";
 import type { AgentKind } from "@perch/shared";
 
@@ -650,8 +661,9 @@ export function ChatView() {
               }}
             />
             <div className="chat__input-controls">
-              {/* ModelChip only visible in Hosted mode */}
+              {/* ModelChip/EffortChip only visible in Hosted mode */}
               <ModelChip />
+              <EffortChip />
               {streamingMessageId ? (
                 <button className="chat__cancel" onClick={cancelChat}>
                   Stop
