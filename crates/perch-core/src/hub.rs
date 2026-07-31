@@ -599,7 +599,11 @@ impl HubManager {
                                     "[hub] {host_id}: remote codex catalogue: {} entries \
                                      (default {})",
                                     remote.len(),
-                                    remote[0].id
+                                    remote
+                                        .iter()
+                                        .find(|m| m.is_default)
+                                        .unwrap_or(&remote[0])
+                                        .id
                                 );
                                 remote
                             }

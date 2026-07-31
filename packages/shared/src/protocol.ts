@@ -16,6 +16,11 @@
 export interface ModelEntry {
   id: string;
   label: string;
+  /** The model this machine's CLI is configured to use by default (e.g.
+   * codex's `model =` in config.toml). Lists stay in the catalogue's own
+   * best-first order — clients preselect the flagged entry rather than
+   * reordering; at most one entry per list carries it. Omitted when false. */
+  isDefault?: boolean;
 }
 
 export interface ChatUsage {

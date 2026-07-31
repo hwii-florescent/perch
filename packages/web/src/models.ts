@@ -12,8 +12,10 @@ export const AGENTS: { id: AgentKind; label: string }[] = [
   { id: "codex", label: "Codex" },
 ];
 
-/** First (default) model for an agent given the server-provided available list.
+/** Default model for an agent given the server-provided available list: the
+ * entry flagged `isDefault` by the owning host (its CLI's own configured
+ * default), else the first entry (lists arrive best-first).
  * Returns "" when the list is empty (server not yet connected). */
 export function defaultModel(agent: AgentKind, available: ModelEntry[]): string {
-  return available[0]?.id ?? "";
+  return available.find((m) => m.isDefault)?.id ?? available[0]?.id ?? "";
 }

@@ -38,6 +38,7 @@ pub struct ModelLists {
 /// 404 on the GenAI proxy; the aliases are the stable identifiers.
 const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
     ("claude-fable-5",    "Fable 5"),
+    ("claude-opus-5",     "Opus 5"),
     ("claude-opus-4-8",   "Opus 4.8"),
     ("claude-opus-4-7",   "Opus 4.7"),
     ("claude-opus-4-6",   "Opus 4.6"),
@@ -54,21 +55,22 @@ const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
 /// stable identifiers codex expects via `-m`/`--model`, so no alias
 /// translation is needed here (unlike Claude's dated-snapshot problem above).
 ///
-/// `gpt-5.4-mini` is kept first (i.e. the default — `defaultModel()` in
-/// `packages/web/src/models.ts` picks index 0) to preserve the historical
-/// default; the rest follow the catalogue's own best-first ordering. When the
-/// runtime catalogue *is* readable, index 0 is instead the slug configured as
-/// `model` in `~/.codex/config.toml`.
+/// Best-first, in the catalogue's own priority order. `gpt-5.4-mini` carries
+/// the `isDefault` flag (the historical perch default) — lists are never
+/// reordered around the default; clients preselect the flagged entry.
 const CODEX_CATALOGUE: &[(&str, &str)] = &[
-    ("gpt-5.4-mini",   "GPT-5.4 Mini"),
     ("gpt-5.6-sol",    "GPT-5.6 Sol"),
     ("gpt-5.6-luna",   "GPT-5.6 Luna"),
     ("gpt-5.6-terra",  "GPT-5.6 Terra"),
     ("gpt-5.5",        "GPT-5.5"),
     ("gpt-5.4",        "GPT-5.4"),
+    ("gpt-5.4-mini",   "GPT-5.4 Mini"),
     ("gpt-5.4-nano",   "GPT-5.4 Nano"),
     ("gpt-5.3-codex",  "GPT-5.3 Codex"),
 ];
+
+/// The flagged default within [`CODEX_CATALOGUE`].
+const CODEX_FALLBACK_DEFAULT: &str = "gpt-5.4-mini";
 
 // ---------------------------------------------------------------------------
 // Runtime codex catalogue (~/.codex)
@@ -134,9 +136,10 @@ fn catalog_visible(entry: &serde_json::Value) -> bool {
 /// slug, duplicates (by slug) are dropped, and the result is sorted by
 /// `priority` ascending (codex's own best-first ordering; missing = 0).
 ///
-/// If `default_slug` is present in the list it is moved to the front, because
-/// index 0 is perch's default (`defaultModel()` in the web client picks it) —
-/// so perch's default mirrors the codex CLI's configured default.
+/// If `default_slug` is present in the list, that entry gets `is_default:
+/// true` **in place** — the list always stays in the catalogue's own
+/// best-first order (user decision: never reorder around the default; the
+/// web client preselects the flagged entry, falling back to index 0).
 ///
 /// Pure: returns an empty vec on any malformed input, and the caller decides
 /// whether to fall back to [`CODEX_CATALOGUE`].
@@ -173,6 +176,7 @@ pub(crate) fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -
             ModelEntry {
                 id: slug.to_string(),
                 label: label.to_string(),
+                is_default: false,
             },
         ));
     }
@@ -181,10 +185,12 @@ pub(crate) fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -
     collected.sort_by_key(|(priority, _)| *priority);
     let mut list: Vec<ModelEntry> = collected.into_iter().map(|(_, m)| m).collect();
 
+    // The configured default keeps its catalogue position — clients preselect
+    // the flagged entry rather than perch reordering the list (user decision:
+    // the picker should always read best-first, exactly as codex orders it).
     if let Some(default_slug) = default_slug {
-        if let Some(pos) = list.iter().position(|m| m.id == default_slug) {
-            let entry = list.remove(pos);
-            list.insert(0, entry);
+        if let Some(entry) = list.iter_mut().find(|m| m.id == default_slug) {
+            entry.is_default = true;
         }
     }
 
@@ -223,7 +229,8 @@ pub(crate) const REMOTE_CATALOG_MARKER: &str = "__PERCH_CODEX_CATALOG__";
 ///
 /// The two sections then go through the same [`parse_codex_config`] /
 /// [`parse_codex_catalog`] pair used for the local install, including
-/// promoting the configured default slug to index 0. Returns an empty vec for
+/// flagging the configured default slug via `is_default` (in place — order is
+/// never changed). Returns an empty vec for
 /// anything malformed or missing; the caller (`hub.rs`) decides the fallback.
 pub(crate) fn parse_remote_codex_payload(payload: &str) -> Vec<ModelEntry> {
     #[derive(PartialEq, Clone, Copy)]
@@ -291,7 +298,11 @@ fn load_codex_models() -> Option<Vec<ModelEntry>> {
         "[perch] codex models from {}: {} entries (default {})",
         catalog_path.display(),
         models.len(),
-        models[0].id
+        models
+            .iter()
+            .find(|m| m.is_default)
+            .unwrap_or(&models[0])
+            .id
     );
     Some(models)
 }
@@ -356,6 +367,7 @@ fn append_custom_models(
             target.push(ModelEntry {
                 id: id.to_string(),
                 label: label.to_string(),
+                is_default: false,
             });
         }
     }
@@ -388,6 +400,7 @@ pub fn catalogue() -> ModelLists {
         .map(|(id, label)| ModelEntry {
             id: id.to_string(),
             label: label.to_string(),
+            is_default: false,
         })
         .collect();
 
@@ -403,6 +416,7 @@ pub fn catalogue() -> ModelLists {
                 .map(|(id, label)| ModelEntry {
                     id: id.to_string(),
                     label: label.to_string(),
+                    is_default: *id == CODEX_FALLBACK_DEFAULT,
                 })
                 .collect()
         }
@@ -442,18 +456,25 @@ mod tests {
     }
 
     #[test]
-    fn default_model_is_promoted_to_front() {
+    fn default_model_is_flagged_in_place() {
         let list = parse_codex_catalog(CATALOG, Some("gpt-5.6-luna"));
+        // Order is untouched — the default is flagged, not promoted.
         assert_eq!(
             ids(&list),
-            vec!["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.4", "gpt-5.3-codex"]
+            vec!["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.3-codex"]
         );
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.6-luna")
+        );
+        assert_eq!(list.iter().filter(|m| m.is_default).count(), 1);
     }
 
     #[test]
     fn unknown_default_model_leaves_order_untouched() {
         let list = parse_codex_catalog(CATALOG, Some("gpt-9-nope"));
         assert_eq!(ids(&list), ids(&parse_codex_catalog(CATALOG, None)));
+        assert!(list.iter().all(|m| !m.is_default));
     }
 
     #[test]
@@ -566,8 +587,8 @@ js_repl = false
         assert_eq!(
             ids(&list),
             vec![
-                "gpt-5.6-luna",
                 "gpt-5.6-sol",
+                "gpt-5.6-luna",
                 "gpt-5.6-terra",
                 "gpt-5.5",
                 "gpt-5.4",
@@ -575,6 +596,10 @@ js_repl = false
                 "gpt-5.4-nano",
                 "gpt-5.3-codex",
             ]
+        );
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.6-luna")
         );
     }
 
@@ -588,10 +613,14 @@ js_repl = false
              {REMOTE_CATALOG_MARKER}\n{CATALOG}\n"
         );
         let list = parse_remote_codex_payload(&payload);
-        // Config default promoted to index 0; the rest stay priority-sorted.
+        // Order stays priority-sorted; the config default is flagged in place.
         assert_eq!(
             ids(&list),
-            vec!["gpt-5.4", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.3-codex"]
+            vec!["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.3-codex"]
+        );
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.4")
         );
     }
 
@@ -602,7 +631,11 @@ js_repl = false
             "Welcome to Ubuntu\n* documentation: https://help.ubuntu.com\n\
              {REMOTE_CFG_MARKER}\nmodel = \"gpt-5.3-codex\"\n{REMOTE_CATALOG_MARKER}\n{CATALOG}"
         );
-        assert_eq!(parse_remote_codex_payload(&payload)[0].id, "gpt-5.3-codex");
+        let list = parse_remote_codex_payload(&payload);
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.3-codex")
+        );
     }
 
     #[test]
@@ -651,7 +684,8 @@ js_repl = false
         let payload =
             format!("{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.4\"\n{REMOTE_CATALOG_MARKER}\n{json}");
         let list = parse_remote_codex_payload(&payload);
-        assert_eq!(ids(&list), vec!["gpt-5.4", "gpt-5.6-sol"]);
-        assert_eq!(list[0].label, "GPT-5.4 __PERCH_CODEX_CATALOG__ edition");
+        assert_eq!(ids(&list), vec!["gpt-5.6-sol", "gpt-5.4"]);
+        assert_eq!(list[1].label, "GPT-5.4 __PERCH_CODEX_CATALOG__ edition");
+        assert!(list[1].is_default);
     }
 }

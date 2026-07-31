@@ -169,6 +169,13 @@ fn default_mode() -> String { "perch".to_string() }
 pub struct ModelEntry {
     pub id: String,
     pub label: String,
+    /// The model this machine's CLI is configured to use by default (e.g.
+    /// codex's `model =` in `~/.codex/config.toml`). Lists stay in the
+    /// catalogue's own best-first order; clients preselect the flagged entry
+    /// (falling back to index 0 when no entry is flagged). At most one entry
+    /// per list carries it. Omitted on the wire when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_default: bool,
 }
 
 /// Running/idle indicator for a session, broadcast to all connected clients
