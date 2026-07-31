@@ -134,9 +134,11 @@ function SshHostsSection() {
   const [newRemoteCmd, setNewRemoteCmd] = useState("");
   // "perch" = classic federation (remote runs its own perch); "direct" = the
   // remote has only claude/codex + tmux and perch drives them over SSH with
-  // every hosted turn detached. Defaults to "perch" so the add form keeps its
-  // pre-existing behaviour.
-  const [newMode, setNewMode] = useState<HostMode>("perch");
+  // every hosted turn detached. Defaults to "direct" — most SSH targets don't
+  // have perch installed, so direct is the normal case for a newly added
+  // host. (The Rust serde default for `mode` stays "perch", which only
+  // matters for hosts persisted before the field existed.)
+  const [newMode, setNewMode] = useState<HostMode>("direct");
 
   const handleAdd = () => {
     const name = newName.trim();
@@ -160,7 +162,7 @@ function SshHostsSection() {
     setNewPort("7788");
     setNewDirectUrl("");
     setNewRemoteCmd("");
-    setNewMode("perch");
+    setNewMode("direct");
   };
 
   return (
@@ -254,12 +256,12 @@ function SshHostsSection() {
         <select
           className="settings-modal__select"
           data-testid="host-mode-input"
-          title="perch = remote runs its own perch; direct = remote only needs claude/codex + tmux"
+          title="direct = remote only needs claude/codex + tmux; perch = remote runs its own perch"
           value={newMode}
           onChange={(e) => setNewMode(e.target.value as HostMode)}
         >
-          <option value="perch">perch</option>
           <option value="direct">direct</option>
+          <option value="perch">perch</option>
         </select>
         <button
           type="button"
