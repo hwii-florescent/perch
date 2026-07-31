@@ -508,12 +508,16 @@ impl HubManager {
     /// reduces to: probe → publish `host.info` → re-probe periodically so a
     /// devpod that goes away is reflected in the sidebar.
     ///
-    /// The model lists published for the host come from perch's own static
-    /// catalogue (`models.rs`), filtered to the CLIs the probe actually found.
-    /// That is deliberate and consistent with the rest of perch: the
-    /// catalogue is not version-gated or probed per host — but advertising
-    /// codex models on a box with no `codex` would be a lie the user pays for
-    /// only when their turn fails.
+    /// The claude list published for the host is perch's own static catalogue
+    /// (universal aliases — there is no per-machine claude model file), and
+    /// each list is dropped entirely when the probe finds no corresponding
+    /// CLI: advertising codex models on a box with no `codex` would be a lie
+    /// the user only pays for when their turn fails. The **codex** list is
+    /// genuinely the remote's own — `~/.codex/config.toml` + its catalogue
+    /// JSON are fetched over ssh on the same probe cycle (see
+    /// `ssh::fetch_remote_codex_catalog`), so a devpod serving different
+    /// models than the laptop shows exactly those. A remote with no readable
+    /// catalogue file degrades to perch's built-in codex list.
     ///
     /// Sessions on a direct host are *not* fetched from the remote (it has no
     /// DB); they live in the local DB tagged with this host id, so the normal
@@ -574,6 +578,34 @@ impl HubManager {
                     }
                     None => {
                         let catalogue = crate::models::catalogue();
+                        // The remote's own codex catalogue, one extra bounded
+                        // ssh exec on the probe cycle (cheap over the shared
+                        // control master) — so a catalogue change on the
+                        // devpod is picked up by the next re-probe with no
+                        // perch restart.
+                        let codex_models = if prereqs.codex_version.is_some() {
+                            let remote = crate::ssh::fetch_remote_codex_catalog(&ssh_host)
+                                .await
+                                .map(|payload| crate::models::parse_remote_codex_payload(&payload))
+                                .unwrap_or_default();
+                            if remote.is_empty() {
+                                tracing::info!(
+                                    "[hub] {host_id}: no readable codex model catalogue on the \
+                                     remote (~/.codex) — falling back to perch's built-in list"
+                                );
+                                catalogue.codex.clone()
+                            } else {
+                                tracing::info!(
+                                    "[hub] {host_id}: remote codex catalogue: {} entries \
+                                     (default {})",
+                                    remote.len(),
+                                    remote[0].id
+                                );
+                                remote
+                            }
+                        } else {
+                            Vec::new()
+                        };
                         let info = RemoteInfo {
                             hostname: if prereqs.hostname.is_empty() {
                                 ssh_host.clone()
@@ -587,11 +619,7 @@ impl HubManager {
                             } else {
                                 Vec::new()
                             },
-                            codex_models: if prereqs.codex_version.is_some() {
-                                catalogue.codex.clone()
-                            } else {
-                                Vec::new()
-                            },
+                            codex_models,
                         };
                         tracing::info!(
                             "[hub] {host_id}: direct host ready (claude={:?} codex={:?} tmux={:?})",

@@ -13,8 +13,11 @@
 //!   one developer's laptop. `CODEX_CATALOGUE` remains as the fallback for
 //!   machines with no readable catalog file.
 //!
-//! Neither list is ever probed per host: model lists are resolved once at
-//! startup for the local host only, and federated hosts report their own.
+//! The local lists are resolved once at startup. Remote hosts get their own:
+//! `mode: "perch"` hosts report theirs over the wire (`server.info`), and
+//! `mode: "direct"` hosts have their `~/.codex` config+catalogue fetched by
+//! `hub.rs` during the prereq probe and parsed here by
+//! [`parse_remote_codex_payload`] — same two parsers, different transport.
 //!
 //! Custom models can be appended via `~/.perch/settings.json` (see
 //! `append_custom_models`). Stage D will replace that ad-hoc reader with a
@@ -82,7 +85,10 @@ const CODEX_CATALOG_FILE: &str = "model-catalog.json";
 /// Pure so it can be unit-tested without touching `$HOME`. Any parse failure
 /// is treated as "neither key present" — a broken/unfamiliar codex config
 /// must never stop perch from booting.
-fn parse_codex_config(toml_text: &str) -> (Option<String>, Option<PathBuf>) {
+///
+/// `pub(crate)` because the same text also arrives over ssh from a direct-mode
+/// host (see [`parse_remote_codex_payload`]).
+pub(crate) fn parse_codex_config(toml_text: &str) -> (Option<String>, Option<PathBuf>) {
     let value: toml::Value = match toml_text.parse() {
         Ok(v) => v,
         Err(_) => return (None, None),
@@ -134,7 +140,10 @@ fn catalog_visible(entry: &serde_json::Value) -> bool {
 ///
 /// Pure: returns an empty vec on any malformed input, and the caller decides
 /// whether to fall back to [`CODEX_CATALOGUE`].
-fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -> Vec<ModelEntry> {
+///
+/// `pub(crate)` because a direct-mode host's catalogue arrives over ssh and is
+/// parsed with exactly this function (see [`parse_remote_codex_payload`]).
+pub(crate) fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -> Vec<ModelEntry> {
     let value: serde_json::Value = match serde_json::from_str(json_text) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
@@ -180,6 +189,81 @@ fn parse_codex_catalog(json_text: &str, default_slug: Option<&str>) -> Vec<Model
     }
 
     list
+}
+
+// ---------------------------------------------------------------------------
+// Remote codex catalogue (direct-mode hosts, fetched over ssh)
+// ---------------------------------------------------------------------------
+
+/// Marker line introducing the remote `~/.codex/config.toml` text.
+pub(crate) const REMOTE_CFG_MARKER: &str = "__PERCH_CODEX_CFG__";
+
+/// Marker line introducing the remote model-catalogue JSON text.
+pub(crate) const REMOTE_CATALOG_MARKER: &str = "__PERCH_CODEX_CATALOG__";
+
+/// Parse the delimited payload produced by
+/// `ssh::fetch_remote_codex_catalog` for a `mode: "direct"` host.
+///
+/// The remote has no perch to ask, so instead of a protocol message perch
+/// `cat`s the two files it would have read locally and ships them back in one
+/// stream, separated by marker lines:
+///
+/// ```text
+/// __PERCH_CODEX_CFG__
+/// <contents of ~/.codex/config.toml>
+/// __PERCH_CODEX_CATALOG__
+/// <contents of the model catalogue json>
+/// ```
+///
+/// Either section may be empty (missing/unreadable file on the remote), and
+/// anything before the first marker is discarded — an ssh login can prepend a
+/// MOTD, exactly as [`crate::ssh::probe_host`] guards against. A marker is
+/// only recognised as a **whole line**, so the same text appearing inside a
+/// JSON string cannot split the payload.
+///
+/// The two sections then go through the same [`parse_codex_config`] /
+/// [`parse_codex_catalog`] pair used for the local install, including
+/// promoting the configured default slug to index 0. Returns an empty vec for
+/// anything malformed or missing; the caller (`hub.rs`) decides the fallback.
+pub(crate) fn parse_remote_codex_payload(payload: &str) -> Vec<ModelEntry> {
+    #[derive(PartialEq, Clone, Copy)]
+    enum Section {
+        Preamble,
+        Config,
+        Catalog,
+    }
+
+    let mut section = Section::Preamble;
+    let mut config = String::new();
+    let mut catalog = String::new();
+    for line in payload.lines() {
+        let trimmed = line.trim();
+        if trimmed == REMOTE_CFG_MARKER {
+            section = Section::Config;
+            continue;
+        }
+        if trimmed == REMOTE_CATALOG_MARKER {
+            section = Section::Catalog;
+            continue;
+        }
+        match section {
+            Section::Preamble => {}
+            Section::Config => {
+                config.push_str(line);
+                config.push('\n');
+            }
+            Section::Catalog => {
+                catalog.push_str(line);
+                catalog.push('\n');
+            }
+        }
+    }
+
+    if catalog.trim().is_empty() {
+        return Vec::new();
+    }
+    let (default_slug, _) = parse_codex_config(&config);
+    parse_codex_catalog(&catalog, default_slug.as_deref())
 }
 
 /// Load the codex model list from the local codex installation.
@@ -492,5 +576,82 @@ js_repl = false
                 "gpt-5.3-codex",
             ]
         );
+    }
+
+    #[test]
+    fn remote_payload_parses_config_and_catalog() {
+        let payload = format!(
+            "{REMOTE_CFG_MARKER}\n\
+             model = \"gpt-5.4\"\n\
+             model_catalog_json = \"/home/user/.codex/model-catalog.json\"\n\
+             model_provider = \"corp-gateway\"\n\
+             {REMOTE_CATALOG_MARKER}\n{CATALOG}\n"
+        );
+        let list = parse_remote_codex_payload(&payload);
+        // Config default promoted to index 0; the rest stay priority-sorted.
+        assert_eq!(
+            ids(&list),
+            vec!["gpt-5.4", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.3-codex"]
+        );
+    }
+
+    #[test]
+    fn remote_payload_tolerates_an_ssh_preamble() {
+        // A chatty remote login (MOTD) prepends noise before the first marker.
+        let payload = format!(
+            "Welcome to Ubuntu\n* documentation: https://help.ubuntu.com\n\
+             {REMOTE_CFG_MARKER}\nmodel = \"gpt-5.3-codex\"\n{REMOTE_CATALOG_MARKER}\n{CATALOG}"
+        );
+        assert_eq!(parse_remote_codex_payload(&payload)[0].id, "gpt-5.3-codex");
+    }
+
+    #[test]
+    fn remote_payload_without_a_config_section_keeps_catalog_order() {
+        // Remote has a catalogue but no readable config.toml: nothing to
+        // promote, so codex's own priority ordering stands.
+        let payload = format!("{REMOTE_CFG_MARKER}\n{REMOTE_CATALOG_MARKER}\n{CATALOG}");
+        assert_eq!(
+            ids(&parse_remote_codex_payload(&payload)),
+            ids(&parse_codex_catalog(CATALOG, None))
+        );
+        // Same when the config marker is absent entirely.
+        let payload = format!("{REMOTE_CATALOG_MARKER}\n{CATALOG}");
+        assert_eq!(
+            ids(&parse_remote_codex_payload(&payload)),
+            vec!["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.3-codex"]
+        );
+    }
+
+    #[test]
+    fn remote_payload_without_a_usable_catalog_yields_nothing() {
+        // Stock codex install: config present, no catalogue file.
+        let payload =
+            format!("{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.4\"\n{REMOTE_CATALOG_MARKER}\n");
+        assert!(parse_remote_codex_payload(&payload).is_empty());
+        // Garbage where the catalogue should be, no markers at all, empty.
+        let payload = format!(
+            "{REMOTE_CFG_MARKER}\n{REMOTE_CATALOG_MARKER}\ncat: No such file or directory\n"
+        );
+        assert!(parse_remote_codex_payload(&payload).is_empty());
+        assert!(parse_remote_codex_payload("just some ssh noise").is_empty());
+        assert!(parse_remote_codex_payload("").is_empty());
+    }
+
+    #[test]
+    fn remote_payload_markers_must_be_whole_lines() {
+        // The marker text inside a JSON string must not split the payload:
+        // both models below still parse even though a display name contains
+        // the catalog marker verbatim.
+        let json = r#"{
+          "models": [
+            {"slug": "gpt-5.4", "display_name": "GPT-5.4 __PERCH_CODEX_CATALOG__ edition", "priority": -10},
+            {"slug": "gpt-5.6-sol", "display_name": "GPT-5.6 Sol", "priority": -30}
+          ]
+        }"#;
+        let payload =
+            format!("{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.4\"\n{REMOTE_CATALOG_MARKER}\n{json}");
+        let list = parse_remote_codex_payload(&payload);
+        assert_eq!(ids(&list), vec!["gpt-5.4", "gpt-5.6-sol"]);
+        assert_eq!(list[0].label, "GPT-5.4 __PERCH_CODEX_CATALOG__ edition");
     }
 }

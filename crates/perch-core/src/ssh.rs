@@ -400,8 +400,10 @@ impl HostPrereqs {
 
 /// One-round-trip prerequisite + identity probe for a direct-mode host.
 ///
-/// Deliberately does *not* probe model lists: per `models.rs`'s philosophy the
-/// catalogue is static and not version-gated or probed per host.
+/// Deliberately does *not* probe *claude* model lists: those are bare aliases
+/// with no machine-local file to read, so `models.rs`'s static list applies
+/// everywhere. The *codex* list is machine-specific and is fetched separately
+/// by [`fetch_remote_codex_catalog`], on the same probe cycle.
 pub async fn probe_host(ssh_host: &str) -> Result<HostPrereqs, String> {
     // Each field on its own line, in a fixed order, with an empty line for
     // anything absent — parsed positionally below so a chatty MOTD prepended
@@ -437,6 +439,48 @@ pub async fn probe_host(ssh_host: &str) -> Result<HostPrereqs, String> {
         codex_version: opt(4),
         tmux_version: opt(5),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Remote codex catalogue
+// ---------------------------------------------------------------------------
+
+/// Fetch a direct-mode host's codex model catalogue in one bounded ssh exec.
+///
+/// A `mode: "direct"` remote has no perch to ask over the wire, so perch reads
+/// the same two files it would read locally — `~/.codex/config.toml` (for the
+/// configured default slug) and the catalogue JSON it points at, defaulting to
+/// `~/.codex/model-catalog.json` — and ships both back in a single stream
+/// delimited by [`crate::models::REMOTE_CFG_MARKER`] /
+/// [`crate::models::REMOTE_CATALOG_MARKER`]. The two ends of that format must
+/// stay in sync: the snippet below is the writer,
+/// [`crate::models::parse_remote_codex_payload`] the reader.
+///
+/// The catalogue path is extracted remotely with `sed` rather than by shipping
+/// the config back and doing a second round trip for the file it names — one
+/// ssh exec per probe cycle is the budget (ControlMaster makes it ~0.5s, but
+/// it is still a round trip through the devpod's `ProxyCommand`).
+///
+/// Runs under plain `sh` (no login shell): `cat`/`sed` need no PATH setup.
+/// The trailing `exit 0` matters — a stock codex install has no catalogue file
+/// and the last `cat` would otherwise exit non-zero, making [`run_remote`]
+/// discard a payload whose config half is perfectly good.
+///
+/// Returns `None` on any ssh failure or timeout; never panics. The caller
+/// (`hub.rs`) falls back to perch's own catalogue.
+pub async fn fetch_remote_codex_catalog(ssh_host: &str) -> Option<String> {
+    let cfg_marker = crate::models::REMOTE_CFG_MARKER;
+    let catalog_marker = crate::models::REMOTE_CATALOG_MARKER;
+    let command = format!(
+        r#"cfg="$HOME/.codex/config.toml"; cat_path=$(sed -n 's/^model_catalog_json[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$cfg" 2>/dev/null | head -1); [ -n "$cat_path" ] || cat_path="$HOME/.codex/model-catalog.json"; echo {cfg_marker}; cat "$cfg" 2>/dev/null; echo {catalog_marker}; cat "$cat_path" 2>/dev/null; exit 0"#
+    );
+    match run_remote(ssh_host, &command, 15, "codex catalogue").await {
+        Ok(payload) => Some(payload),
+        Err(e) => {
+            tracing::debug!("[ssh] {ssh_host}: codex catalogue fetch failed: {e}");
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
