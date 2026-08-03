@@ -454,6 +454,61 @@ the laptop **and** quitting (or crashing) perch.
 - **Known gap, by design**: headless `-p`/`exec` has no approval channel, so detached turns run
   `bypassPermissions`. Real approvals need CLI mode (or, for codex, a future app-server backend).
 
+### Phase 7 — Hosted composer power features (UI) — ✅ done
+The composer half of `PLANS.md` item 1. The Rust server, the WS protocol, the store layer and the
+pure helpers had all landed in the previous pass (77 Rust unit tests green); only the React UI was
+never built, leaving `Chat.tsx` importing `activeSigilToken`/`applyCommand`/`filterCommands`/
+`uploadAttachment`/`PLAN_APPROVAL_TEXT` without using any of them. **This phase changed zero protocol
+code** — `protocol.rs` ↔ `protocol.ts` were not touched, and neither was any Rust file. Every field
+these features send already existed on both sides.
+- **Slash / skill autocomplete**: new `components/SlashPopover.tsx` (presentational) + the state
+  machine in `ChatView`. "Open" is *derived* per render from `activeSigilToken(text, caret, sigil)`
+  rather than stored, so the menu can't drift out of sync with the textarea; the one piece of real
+  state is `dismissedTokenStart` (Escape closes without touching the text). Sigil is per-agent
+  (`/` claude, `$` codex) and `CommandEntry.name` is bare, so the UI prepends it. Keyboard handling
+  sits *ahead* of the existing Enter-submits handler, so Enter accepts a suggestion instead of
+  sending the turn while the popover is open. Positioned with the pre-existing
+  `computeAnchoredPopoverStyle(..., { align: "left" })` and portal-rendered to escape dockview's
+  `overflow:hidden`. Caret restore after `applyCommand` waits a frame — React controls the textarea,
+  so `setSelectionRange` before the re-render would be clobbered.
+- **Plan mode**: new `components/PlanCard.tsx` + a `composer-plan-toggle`. The message list branches
+  on the existing `kind: "plan"` (the store already inserts plan cards *ahead* of the streaming
+  bubble, so transcript order reflects what actually happened). "Approve & run" always sends
+  `PLAN_APPROVAL_TEXT` with plan mode **off** regardless of the toggle's own state — otherwise the
+  agent replies with another plan instead of executing — and `planApproved` spends the button while
+  leaving the card as a record. The toggle is a standing mode, not one-shot. Plan cards are
+  claude-only (2.1.x has no `ExitPlanMode`; `agent.rs` treats a `Write` under `/.claude/plans/` as
+  the plan), so the toggle deliberately carries no agent-conditional logic and promises no card.
+- **Attachments**: new `components/AttachmentBar.tsx` — attach button, hidden multi-file input, and
+  drag-drop on `.chat__input`. Uploads go through the pre-existing `attachments.ts` helper (25 MB cap,
+  `POST {base}upload`), partial failures keep their successes (`allSettled`), and Send is disabled
+  while any upload is in flight. Chips are **name-only by design**: no `FileReader`, no
+  `createObjectURL`, so the raw bytes never enter the DOM — the client-side half of the guarantee
+  `strip_image_blocks` provides server-side. Only staged server paths reach `chat.send`. Staging is
+  always local even for direct-mode hosts (`detached.rs` pushes to the remote run dir over ssh), so
+  there is no host-conditional logic.
+- Extracted `renderMarkdown` into a new `packages/web/src/markdown.ts`: PlanCard needs it and is
+  itself imported by `Chat.tsx`, which would otherwise have made the two modules circular.
+- e2e: new `e2e/chat-power.spec.ts` (added to `testMatch`) — P1 slash popover + ArrowDown/Enter
+  accept; P2 plan round trip asserting on the **filesystem** (target file absent while the card
+  shows, created after approval — a real check that `--permission-mode plan` suppressed the write);
+  P3 attachment round trip asserting the reply names the colour **and** that the DOM contains no
+  `data:image` and no attribute/text node over 2000 chars; P4 codex low-effort regression guard.
+- Verified: P1/P2/P3 green against real claude turns; P4 skips cleanly because **codex is not
+  installed on this Mac** (see `PLANS.md`). Additional headless UI verification against an isolated
+  instance confirmed 40 real command rows in the popover, `/agents ` inserted with its trailing
+  space, the plan card's markdown + Approve button, the staged chip with working ✕, and
+  `data:image` absent from the DOM while staged. `cargo build` (both crates), `cargo clippy
+  --workspace --all-targets` (exactly the 5 pre-existing warnings, zero new), `cargo test -p
+  perch-core` (76/77 — the one failure is the documented `ssh::tests::mux_control_path…` test-order
+  flake, which passes in isolation), and `npm run build` all clean. **Full Playwright suite: 93 tests,
+  90 passed / 3 skipped / 0 failed** (5.4 min) — the skips are `cli-sync` A1 (unconditional,
+  long-documented: a server-side CLI attach failure can't be forced without mocking), `chat-power` P4
+  (codex not installed on this machine), and one content-dependent `chat-ui` skip that fires when a
+  real turn happens to produce no tool call.
+- **Milestone: the Hosted composer now offers slash/skill autocomplete, plan mode with an approval
+  card, and file attachments — against a backend that already supported all three.** ✅ verified.
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to
@@ -464,6 +519,29 @@ the laptop **and** quitting (or crashing) perch.
   for a tmux-attach, protocol surface unchanged.
 - Side panel (file tree, fuzzy search, diff by branch / last changes); full status bar
   (context + cost); open-source vs corp-internal split.
+
+### Phase 8 (planned) — optimization pass
+Nothing here is urgent — no felt slowness was reported; these are code-evidenced and preemptive,
+found during a Phase 7 audit and recorded so they don't have to be re-derived.
+- **`chat.chunk` is O(transcript²) per turn.** `store.ts`'s `updateStreamingMessage` does
+  `messages.map(...)` — a full array copy per token — and `MessageBubble` is unmemoized with
+  `renderMarkdown(...)` called inline in render, so *every* bubble re-runs `repairMarkdown` +
+  `marked.parse` + `DOMPurify.sanitize` over its whole text on *every* token. Fix: `memo` the bubble,
+  `useMemo` the markdown, rAF-coalesce chunks.
+- **`list_sessions()` is unindexed and over-called.** Four correlated subqueries per session row
+  against `messages`, and the only index in the schema is `detached_runs_status` — there is **no**
+  index on `messages(session_id, role, id)`. It is re-run per-connection per-event by the
+  `session_events_tx` forwarder *just to find one row*, plus every 5 s by the git poll task.
+- **Zero `spawn_blocking` in the crate** — every rusqlite call runs inline on a tokio worker behind
+  a `std::sync::Mutex<Connection>`.
+- **No `[profile.release]`** anywhere in the workspace — no LTO, default codegen-units.
+- **Ring buffer holds cloned `ServerMessage`s including every `chat.chunk`** (500/session);
+  `DetachedSink` additionally clones each chunk per connected client out of its `Arc`.
+- **Git poll shells out per distinct cwd every 5 s forever**, even with zero clients connected.
+- **Structure/test gaps**: `server.rs` 2669 lines, `store.ts` ~1600, `styles.css` ~3900; protocol
+  parity is hand-maintained with no test asserting it; `db.rs`, `registry.rs`, `hub.rs`,
+  `protocol.rs`, `settings.rs`, `hosts.rs`, `status.rs`, `terminal.rs` have zero unit tests.
+- Already optimized, leave alone: `terminalBus.ts` deliberately bypasses zustand for PTY bytes.
 
 ---
 

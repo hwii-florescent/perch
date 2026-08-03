@@ -4,7 +4,7 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "nav.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts", "wave1.spec.ts", "worktrees.spec.ts", "wave2.spec.ts", "chat-ui.spec.ts", "chat-mode.spec.ts", "detached.spec.ts"],
+  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "nav.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts", "wave1.spec.ts", "worktrees.spec.ts", "wave2.spec.ts", "chat-ui.spec.ts", "chat-mode.spec.ts", "detached.spec.ts", "chat-power.spec.ts"],
   outputDir: "artifacts",
   timeout: 120000,
   use: {

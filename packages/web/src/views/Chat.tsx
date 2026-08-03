@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 import { diffLines } from "diff";
-import { usePerchStore, PLAN_APPROVAL_TEXT, type ChatMessage, type ToolCallEntry } from "../store";
+import { usePerchStore, type ChatMessage, type ToolCallEntry } from "../store";
 import { AGENTS } from "../models";
-import { repairMarkdown } from "../markdownRepair";
+import { renderMarkdown } from "../markdown";
 import { ModelChip } from "../components/ModelChip";
 import { EffortChip } from "../components/EffortChip";
+import { SlashPopover } from "../components/SlashPopover";
+import { PlanCard } from "../components/PlanCard";
+import { AttachmentBar } from "../components/AttachmentBar";
 import { computeAnchoredPopoverStyle } from "../components/popoverPosition";
 import {
   AGENT_SIGIL,
   activeSigilToken,
   applyCommand,
   filterCommands,
-  type SigilToken,
 } from "../composerCommands";
 import { uploadAttachment, type StagedAttachment } from "../attachments";
 import { AgentCliTerminal } from "./AgentCliTerminal";
-import type { AgentKind } from "@perch/shared";
+import type { AgentKind, CommandEntry } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,17 +30,6 @@ function fmtElapsed(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
-}
-
-/** Render markdown text to sanitized HTML. Guard: only runs in browser.
- * While a message is still streaming, run it through `repairMarkdown` first
- * so a growing, incomplete string (open code fence, dangling `**`, etc.)
- * doesn't render visibly broken for a frame or two — see markdownRepair.ts. */
-function renderMarkdown(text: string, streaming: boolean): string {
-  if (typeof window === "undefined") return text;
-  const source = streaming ? repairMarkdown(text) : text;
-  const html = marked.parse(source, { async: false }) as string;
-  return DOMPurify.sanitize(html);
 }
 
 function truncate(s: string, n: number): string {
@@ -557,6 +546,8 @@ export function ChatView() {
   const agent = usePerchStore((s) => s.agent);
   const cliError = usePerchStore((s) => s.cliError);
   const updateSettings = usePerchStore((s) => s.updateSettings);
+  const sessionCommands = usePerchStore((s) => s.sessionCommands);
+  const fetchCommands = usePerchStore((s) => s.fetchCommands);
   // Global chat mode (Settings > Chat Mode) — no longer per-chat client
   // state. Every open chat pane reads this same value, so flipping the
   // setting flips already-open chats too (see AgentCliTerminal's kill-on-
@@ -565,9 +556,148 @@ export function ChatView() {
   const mode: "hosted" | "cli" = usePerchStore((s) => s.settings?.chatMode ?? "hosted");
 
   const [text, setText] = useState("");
+  // Plan mode is a composer-level toggle, not a one-shot: leaving it ON after
+  // sending matches how the CLI's `--permission-mode plan` behaves (it's a
+  // standing mode you turn off), so the next turn on this session stays in
+  // plan mode until the user flips it back. The one exception is the plan
+  // card's own "Approve & run" button, which always sends with plan mode off
+  // regardless of this flag — see PlanCard.tsx.
+  const [planMode, setPlanMode] = useState(false);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // -------------------------------------------------------------------------
+  // Composer attachments
+  //
+  // `staged` holds successfully-uploaded files (server-side paths only — see
+  // attachments.ts); `uploadError` is the last upload failure's message, one
+  // slot shared across concurrent uploads (a fresh error replaces the old
+  // one, successes don't clear it — the point is "something recently went
+  // wrong", not a per-file log). `uploading` gates Send: a file mid-upload
+  // has no path yet, so sending before it lands would silently drop it
+  // rather than attach it. Switching sessions clears staged files — they're
+  // tied to the session dir they were uploaded into (see uploads.rs).
+  // -------------------------------------------------------------------------
+  const [staged, setStaged] = useState<StagedAttachment[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+
+  useEffect(() => {
+    setStaged([]);
+    setUploadError(null);
+  }, [sessionId]);
+
+  async function handleFiles(files: FileList | File[]) {
+    if (!sessionId) return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setUploading(true);
+    const results = await Promise.allSettled(list.map((f) => uploadAttachment(sessionId, f)));
+    const successes: StagedAttachment[] = [];
+    let lastError: string | null = null;
+    for (const r of results) {
+      if (r.status === "fulfilled") successes.push(r.value);
+      else lastError = r.reason instanceof Error ? r.reason.message : String(r.reason);
+    }
+    if (successes.length > 0) setStaged((prev) => [...prev, ...successes]);
+    if (lastError) setUploadError(lastError);
+    setUploading(false);
+  }
+
+  function handleRemoveAttachment(id: string) {
+    setStaged((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  // -------------------------------------------------------------------------
+  // Slash-command / skill autocomplete (Hosted mode only)
+  //
+  // The "open" state is *derived*, not stored: on every render we recompute
+  // which sigil token (if any) the caret sits inside from `text`+`caret`,
+  // then filter that session's command list against its query. This keeps
+  // the popover always in sync with the textarea without a separate
+  // open/close flag that could drift out of sync with what's actually typed.
+  //
+  // The one bit of real state is `dismissedTokenStart`: Escape needs to close
+  // the popover *without* touching the text, and since "open" is derived from
+  // the token, closing it means remembering "the token starting at this
+  // index was dismissed" until the user moves to a different token (a new
+  // sigil, or this one gets edited into a different query). See
+  // `composerCommands.ts` for `activeSigilToken`/`filterCommands`.
+  // -------------------------------------------------------------------------
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashPopoverRef = useRef<HTMLDivElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [dismissedTokenStart, setDismissedTokenStart] = useState<number | null>(null);
+
+  const sigil = AGENT_SIGIL[agent];
+  const slashToken = activeSigilToken(text, caret, sigil);
+  const slashEntries: CommandEntry[] = slashToken
+    ? filterCommands(sessionId ? (sessionCommands[sessionId]?.[agent] ?? []) : [], slashToken.query)
+    : [];
+  const slashOpen =
+    slashToken !== null && slashEntries.length > 0 && slashToken.start !== dismissedTokenStart;
+
+  // Ask the server for this session's command list as soon as a sigil token
+  // opens. `fetchCommands` is internally deduped per session, so calling it
+  // on every keystroke that leaves a token active is cheap.
+  useEffect(() => {
+    if (slashToken && sessionId) fetchCommands(sessionId);
+  }, [slashToken !== null, sessionId, fetchCommands]);
+
+  // A fresh token (new sigil, or the same one edited into a different query)
+  // always starts back at the top of the list.
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [slashToken?.start, slashToken?.query]);
+
+  // Clear a dismissal once there is no active token at all. Escape is scoped
+  // to the token it was pressed in (keep typing that word and the popover
+  // stays out of the way), but deleting the sigil and typing a new one — even
+  // at the very same offset — has to bring the menu back, and the offset
+  // alone can't tell those two cases apart.
+  useEffect(() => {
+    if (!slashToken) setDismissedTokenStart(null);
+  }, [slashToken !== null]);
+
+  // Click outside the textarea and the popover itself dismisses it, same
+  // contract as EffortChip/ModelChip's click-outside handling.
+  useEffect(() => {
+    if (!slashOpen) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const inTextarea = textareaRef.current?.contains(target) ?? false;
+      const inPopover = slashPopoverRef.current?.contains(target) ?? false;
+      if (!inTextarea && !inPopover && slashToken) setDismissedTokenStart(slashToken.start);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [slashOpen, slashToken]);
+
+  const slashPopoverStyle =
+    slashOpen && textareaRef.current
+      ? computeAnchoredPopoverStyle(textareaRef.current, { align: "left" })
+      : undefined;
+
+  /** Replace the active sigil token with `entry.name` and land the caret
+   * after the trailing space `applyCommand` appends. The caret restore has
+   * to wait a frame: React hasn't re-rendered the (controlled) textarea with
+   * the new value yet, so `setSelectionRange` right now would apply to the
+   * stale DOM value and get clobbered by the re-render. */
+  function acceptSlashCommand(entry: CommandEntry) {
+    if (!slashToken) return;
+    const result = applyCommand(text, slashToken, sigil, entry.name);
+    setText(result.text);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(result.caret, result.caret);
+      setCaret(result.caret);
+    });
+  }
 
   // Scroll-behavior fix (item 4/6): only auto-stick to the bottom while
   // already at the bottom. Otherwise a user reading earlier messages would
@@ -603,9 +733,14 @@ export function ChatView() {
   };
 
   const submit = () => {
-    if (!text.trim() || streamingMessageId) return;
-    sendChat(text);
+    if (!text.trim() || streamingMessageId || uploading) return;
+    const options: { planMode?: boolean; attachments?: string[] } = {};
+    if (planMode) options.planMode = true;
+    if (staged.length > 0) options.attachments = staged.map((a) => a.path);
+    sendChat(text, Object.keys(options).length > 0 ? options : undefined);
     setText("");
+    setStaged([]);
+    setUploadError(null);
   };
 
   // Leaving CLI mode (globally, via Settings): clear any stale CLI error
@@ -630,9 +765,13 @@ export function ChatView() {
         <>
           <div className="chat__list-container">
             <div className="chat__list" ref={listRef} onScroll={handleScroll}>
-              {messages.map((m) => (
-                <MessageBubble key={m.id} message={m} onCopyToInput={setText} />
-              ))}
+              {messages.map((m) =>
+                m.kind === "plan" ? (
+                  <PlanCard key={m.id} message={m} />
+                ) : (
+                  <MessageBubble key={m.id} message={m} onCopyToInput={setText} />
+                ),
+              )}
             </div>
             {!isAtBottom && (
               <button
@@ -646,14 +785,65 @@ export function ChatView() {
               </button>
             )}
           </div>
-          <div className="chat__input">
+          <div
+            className={"chat__input" + (dragActive ? " chat__input--drag-active" : "")}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (sessionId) setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+              if (sessionId && e.dataTransfer.files.length > 0) void handleFiles(e.dataTransfer.files);
+            }}
+          >
+            <AttachmentBar
+              staged={staged}
+              onRemove={handleRemoveAttachment}
+              onFiles={(files) => void handleFiles(files)}
+              error={uploadError}
+              disabled={!sessionId}
+            />
             <textarea
+              ref={textareaRef}
               value={text}
               placeholder={sessionId ? "Message perch..." : "Connecting..."}
               disabled={!sessionId}
               rows={1}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                setCaret(e.target.selectionStart ?? e.target.value.length);
+              }}
+              onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+              onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
               onKeyDown={(e) => {
+                if (slashOpen) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setHighlightedIndex((i) => (i + 1) % slashEntries.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setHighlightedIndex((i) => (i - 1 + slashEntries.length) % slashEntries.length);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    const entry = slashEntries[Math.min(highlightedIndex, slashEntries.length - 1)];
+                    if (entry) acceptSlashCommand(entry);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    if (slashToken) setDismissedTokenStart(slashToken.start);
+                    return;
+                  }
+                  // Any other key falls through to normal typing — the popover
+                  // will just re-derive from the resulting text/caret.
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   submit();
@@ -661,9 +851,22 @@ export function ChatView() {
               }}
             />
             <div className="chat__input-controls">
-              {/* ModelChip/EffortChip only visible in Hosted mode */}
+              {/* ModelChip/EffortChip/plan toggle only visible in Hosted mode */}
               <ModelChip />
               <EffortChip />
+              <button
+                type="button"
+                className={"composer-plan-toggle" + (planMode ? " composer-plan-toggle--active" : "")}
+                data-testid="composer-plan-toggle"
+                onClick={() => setPlanMode((v) => !v)}
+                title={
+                  planMode
+                    ? "Plan mode on — the agent will plan before making changes"
+                    : "Plan mode off — turn on to have the agent plan before acting"
+                }
+              >
+                Plan
+              </button>
               {streamingMessageId ? (
                 <button className="chat__cancel" onClick={cancelChat}>
                   Stop
@@ -672,13 +875,27 @@ export function ChatView() {
                 <button
                   className="chat__send"
                   onClick={submit}
-                  disabled={!sessionId || !text.trim()}
+                  disabled={!sessionId || !text.trim() || uploading}
                 >
-                  Send
+                  {uploading ? "Uploading…" : "Send"}
                 </button>
               )}
             </div>
           </div>
+          {slashOpen &&
+            slashPopoverStyle &&
+            createPortal(
+              <SlashPopover
+                entries={slashEntries}
+                sigil={sigil}
+                highlightedIndex={Math.min(highlightedIndex, slashEntries.length - 1)}
+                style={slashPopoverStyle}
+                onSelect={acceptSlashCommand}
+                onHover={setHighlightedIndex}
+                popoverRef={slashPopoverRef}
+              />,
+              document.body,
+            )}
         </>
       )}
     </div>
