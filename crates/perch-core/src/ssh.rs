@@ -62,15 +62,25 @@ pub const REMOTE_PATH_PREFIX: &str = r#"export PATH="$HOME/.local/bin:$HOME/bin:
 // composes with the devpod `ProxyCommand` chain exactly as normal OpenSSH
 // multiplexing always has (the proxy only runs once, to establish the
 // master; the mux socket is a plain local IPC after that).
+/// Where the control socket lives for a given `$HOME`. Split out of
+/// [`control_dir`] as a *pure* function so the sun_path-length guard below can
+/// be tested without touching the process environment: `control_dir` memoises
+/// into a `OnceLock`, and other tests in this crate (`uploads`, `clipboard_image`)
+/// point `$HOME` at a uuid-named temp dir, so whichever test happened to win
+/// the race decided the cached value and the guard failed at random.
+fn control_dir_for_home(home: &str) -> PathBuf {
+    // `~/.ssh` (not `/tmp`): it already exists with `0700` permissions
+    // for every ssh user, so the control socket inherits a private
+    // directory without perch having to reason about a shared,
+    // world-writable `/tmp` on a multi-user box.
+    PathBuf::from(home).join(".ssh").join("perch-cm")
+}
+
 fn control_dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        // `~/.ssh` (not `/tmp`): it already exists with `0700` permissions
-        // for every ssh user, so the control socket inherits a private
-        // directory without perch having to reason about a shared,
-        // world-writable `/tmp` on a multi-user box.
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let dir = PathBuf::from(home).join(".ssh").join("perch-cm");
+        let dir = control_dir_for_home(&home);
         if let Err(e) = std::fs::create_dir_all(&dir) {
             tracing::warn!("[ssh] failed to create control dir {}: {e}", dir.display());
         }
@@ -795,16 +805,34 @@ mod tests {
         // failure this exists to avoid: a long-enough control dir silently
         // breaking multiplexing with an "unix_listener: too long for Unix
         // domain socket" error from ssh itself.
-        let opts = mux_opts();
-        let control_path = opts
-            .iter()
-            .find_map(|s| s.strip_prefix("ControlPath="))
-            .expect("ControlPath option present");
+        //
+        // Deliberately goes through `control_dir_for_home` with a fixed,
+        // realistic `$HOME` rather than through `mux_opts()`: `mux_opts` reads
+        // the `control_dir()` `OnceLock`, whose value is decided by whichever
+        // test initialised it first, and sibling tests here repoint `$HOME` at
+        // a uuid-named temp dir — which made this assertion fail at random
+        // depending on test order.
+        let control_path = control_dir_for_home("/Users/a-fairly-long-mac-username")
+            .join("%C")
+            .display()
+            .to_string();
         assert!(
             control_path.len() < 100,
             "control path {control_path} ({} bytes) is too close to the sun_path limit",
             control_path.len()
         );
+        assert!(control_path.ends_with("/perch-cm/%C"));
+    }
+
+    /// `mux_opts()` is what actually reaches ssh, so keep asserting on its
+    /// shape — just not on a length that depends on the ambient `$HOME`.
+    #[test]
+    fn mux_opts_control_path_points_at_the_perch_control_dir() {
+        let opts = mux_opts();
+        let control_path = opts
+            .iter()
+            .find_map(|s| s.strip_prefix("ControlPath="))
+            .expect("ControlPath option present");
         assert!(control_path.ends_with("/perch-cm/%C"));
     }
 

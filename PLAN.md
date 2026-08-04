@@ -565,6 +565,50 @@ measurably better *and* provably behaviour-preserving, or it doesn't ship. **Zer
 - **Milestone: the two quadratic hot paths are gone and the server no longer works when nobody is
   watching — with no protocol change and no behaviour change.** ✅ verified.
 
+### Phase 9 — open-item cleanup — ✅ done
+The `PLANS.md` backlog items, minus the Tauri bundle (explicitly deferred). **Zero protocol changes.**
+- **CLI-only sessions are now reachable in the nav.** Chat mode is global, and in CLI mode a session's
+  activity is a real PTY — nothing is ever written to `messages` — so `list_sessions()`'s
+  `WHERE EXISTS (... messages ...)` hid such sessions forever. The trap: `AgentCliTerminal` attaches
+  its PTY *on mount*, so marking "has a CLI terminal" would have un-hidden the blank throwaway
+  session perch mints on every connect — exactly the junk that filter exists to suppress. So the
+  marker is **first keystroke** (`cli_activity` column, set from the `terminal.input` handler via the
+  `terminal_agent_sessions` map that already existed for blocked-state bookkeeping), mirroring
+  Hosted's first-user-message rule. Deduped through an `AppState` set so the per-keystroke hot path
+  pays for the DB write + broadcast once per session; the flag is monotonic, so the set can't go
+  stale. The predicate is factored into `SESSION_VISIBILITY_FILTER` shared by `list_sessions` and
+  `get_session_row`, for the same anti-drift reason as `SESSION_LIST_ROW_SELECT`.
+- Verified over the WS protocol directly rather than the UI (chat mode is a *client-side* setting, so
+  the server behaves identically and the shared `settings.json` never had to be touched): after
+  `agentAttach` with no keystroke the session is absent from `session.list`; after the first
+  keystroke it is present, `cli_activity = 1`, and one `session.updated` is pushed so the sidebar
+  updates live. Migration confirmed against a copy of the real `~/.perch/history.sqlite`.
+- **Detached recovery live-update wart — root cause was broader than reported.** There is no
+  `chat.start` message on the wire at all: the streaming bubble is minted *client-side* in `sendChat`
+  by whichever page sent the turn. Any client that didn't initiate a turn therefore has
+  `streamingMessageId === null`, and `updateStreamingMessage`'s early return silently discarded the
+  entire turn. Recovery was just the most visible case (after a restart nobody holds a placeholder).
+  Fixed with `adoptStreamingMessage(sessionId)`: mint-and-adopt a placeholder when an event arrives
+  for the open session with nothing streaming. Adoption happens **before** the chunk is buffered —
+  Phase 8's rAF flush applies through `updateStreamingMessage`, so buffering first would have thrown
+  the text away.
+- **Fixed an adjacent cross-session bug found while reviewing that.** The hub forwarder relays
+  detached events to *every* connection with no session filter, and neither the chunk buffer nor
+  `chat.done` checked which session an event belonged to — so session B's text could be appended into
+  session A's bubble, and B's completion could end A's stream mid-turn. `adoptStreamingMessage`'s
+  `false` return (and a matching guard in `chat.done`) now makes callers ignore foreign events.
+  Pre-existing, not introduced by Phase 8. The server-side half is logged in `PLANS.md`.
+- **Fixed the order-dependent `ssh::tests::mux_control_path…` flake** (reproduced: failed on run 3 of
+  3, with a 121-byte path against a 100-byte limit). `control_dir()` memoises `$HOME` in a `OnceLock`
+  while sibling tests repoint `$HOME` at a uuid-named temp dir, so whichever test won the race decided
+  the cached value. Extracted a pure `control_dir_for_home()` and assert on that with a fixed
+  realistic `$HOME`; a separate test still covers `mux_opts()`'s shape. **6/6 clean full-suite runs.**
+- Verified: `cargo test -p perch-core` **82/82 green** (79 + 3 new), clippy at exactly the 5
+  pre-existing warnings, `npm run build` clean, **full Playwright 93 tests / 91 passed / 2 skipped /
+  0 failed**, `~/.perch/settings.json` byte-identical afterward.
+- **Milestone: CLI-mode sessions are navigable, and a turn you didn't start now renders live instead
+  of vanishing.** ✅ verified.
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to

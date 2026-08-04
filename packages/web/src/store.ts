@@ -624,16 +624,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       tools: [],
       streaming: false,
     };
-    const assistantMessage: ChatMessage = {
-      id: newId(),
-      role: "assistant",
-      text: "",
-      thinking: "",
-      tools: [],
-      streaming: true,
-      agent,
-      model,
-    };
+    const assistantMessage = makeAssistantMessage(agent, model);
     set((state) => ({
       messages: [...state.messages, userMessage, assistantMessage],
       streamingMessageId: assistantMessage.id,
@@ -969,6 +960,22 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 }));
 
+/** Build a fresh streaming-assistant placeholder. Shared by `sendChat` (the
+ * initiating client) and `adoptStreamingMessage` (any other client that
+ * observes a turn it didn't start) so the two can never drift apart. */
+function makeAssistantMessage(agent?: AgentKind, model?: string): ChatMessage {
+  return {
+    id: newId(),
+    role: "assistant",
+    text: "",
+    thinking: "",
+    tools: [],
+    streaming: true,
+    agent,
+    model,
+  };
+}
+
 /** Immutably patch the currently-streaming assistant message, if any. */
 function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void {
   const { streamingMessageId, messages } = usePerchStore.getState();
@@ -976,6 +983,41 @@ function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void
   usePerchStore.setState({
     messages: messages.map((m) => (m.id === streamingMessageId ? update(m) : m)),
   });
+}
+
+/**
+ * There is no `chat.start` message on the wire — the streaming assistant
+ * bubble is normally minted client-side by whichever page called `sendChat`.
+ * Any *other* client watching the same session (a second tab, or any client
+ * live during detached-turn recovery, which re-emits a whole turn's worth of
+ * `chat.*` events to every connection) never had a `streamingMessageId` to
+ * begin with, so `updateStreamingMessage`'s `if (!streamingMessageId) return`
+ * would silently drop the entire turn.
+ *
+ * Called at the top of every `chat.chunk`/`chat.thinking`/`chat.tool_use`/
+ * `chat.tool_result` handler: if this client is already tracking a streaming
+ * message, it's a no-op. Otherwise, only when the event belongs to the
+ * currently *open* session does it adopt by minting a placeholder and
+ * wiring up `streamingMessageId`.
+ *
+ * The `false` return is load-bearing and not merely an optimisation: the
+ * server's hub forwarder relays detached-turn events to *every* connection
+ * with no session filtering (the `DetachedSink` broadcast in server.rs), so a
+ * client with session A open really does receive session B's chunks. Callers
+ * MUST ignore the event entirely when this returns false — otherwise B's text
+ * is appended into A's bubble, since `updateStreamingMessage` patches whatever
+ * `streamingMessageId` currently points at without checking the session.
+ */
+function adoptStreamingMessage(sessionId: string): boolean {
+  const state = usePerchStore.getState();
+  if (state.sessionId !== sessionId) return false;
+  if (state.streamingMessageId) return true;
+  const assistantMessage = makeAssistantMessage(state.agent, state.model);
+  usePerchStore.setState({
+    messages: [...state.messages, assistantMessage],
+    streamingMessageId: assistantMessage.id,
+  });
+  return true;
 }
 
 /**
@@ -1287,11 +1329,19 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.chunk": {
+      // Adopt-or-create must happen here, before buffering — the buffer's
+      // flush applies via updateStreamingMessage, which itself no-ops when
+      // streamingMessageId is null, so buffering first would discard the
+      // chunk on any client that didn't initiate this turn. The guard also
+      // keeps another session's broadcast chunks out of this buffer, which
+      // would otherwise flush into the open session's bubble.
+      if (!adoptStreamingMessage(msg.sessionId)) break;
       chunkBuffer += msg.text;
       scheduleChunkFlush();
       break;
     }
     case "chat.thinking": {
+      if (!adoptStreamingMessage(msg.sessionId)) break;
       updateStreamingMessage((m) => ({
         ...m,
         thinking: m.thinking + msg.text,
@@ -1300,6 +1350,7 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.tool_use": {
+      if (!adoptStreamingMessage(msg.sessionId)) break;
       updateStreamingMessage((m) => ({
         ...m,
         tools: [...m.tools, { name: msg.name, input: msg.input, done: false }],
@@ -1308,6 +1359,7 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.tool_result": {
+      if (!adoptStreamingMessage(msg.sessionId)) break;
       updateStreamingMessage((m) => {
         const idx = [...m.tools].reverse().findIndex((t) => t.name === msg.name && !t.done);
         if (idx === -1) {
@@ -1321,6 +1373,10 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.done": {
+      // Same broadcast hazard as the streaming handlers above: an unfiltered
+      // detached `chat.done` for a *different* session would otherwise end
+      // this session's stream and clear its streamingMessageId mid-turn.
+      if (usePerchStore.getState().sessionId !== msg.sessionId) break;
       updateStreamingMessage((m) => ({
         ...m,
         streaming: false,

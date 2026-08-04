@@ -103,6 +103,17 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
              FROM sessions s
              ";
 
+/// Shared nav-visibility predicate for [`HistoryDb::list_sessions`] and
+/// [`HistoryDb::get_session_row`]: a session is visible once it has at least
+/// one message (Hosted mode) OR `cli_activity = 1` (CLI mode, set on first
+/// keystroke — see `cli_activity`'s migration comment). Factored out so the
+/// two call sites cannot drift apart on this filter, which would otherwise
+/// let a `session.updated` push disagree with `session.list` about whether a
+/// row exists. Callers combine this with their own `s.id = ?` etc.
+const SESSION_VISIBILITY_FILTER: &str = "(EXISTS (
+                 SELECT 1 FROM messages WHERE session_id = s.id
+             ) OR s.cli_activity = 1)";
+
 /// Row-mapping closure shared by `list_sessions` / `get_session_row` so the
 /// column->field mapping cannot drift between the two call sites.
 fn session_list_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionListRow> {
@@ -231,6 +242,22 @@ impl HistoryDb {
         if !existing_session_columns.contains("host_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN host_id TEXT", [])?;
         }
+        // CLI mode (`terminal.create` with `agentAttach`) never writes to
+        // `messages` — the agent's own PTY owns the transcript — so the
+        // `WHERE EXISTS (... messages ...)` visibility filter below would
+        // hide every CLI-mode session forever, including ones the user
+        // actually typed into. `cli_activity` is flipped to 1 on the FIRST
+        // keystroke into such a terminal (see `server.rs`'s `terminal.input`
+        // handler and `mark_cli_activity`), mirroring Hosted mode's
+        // first-user-message visibility rule without marking the blank
+        // throwaway session every CLI-mode connect mints (that session gets
+        // an `agentAttach` on mount but the user never types into it).
+        if !existing_session_columns.contains("cli_activity") {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN cli_activity INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
 
         // One row per *detached turn* launched on a direct host. This is the
         // durable half of detached mode: everything needed to re-attach to a
@@ -335,6 +362,20 @@ impl HistoryDb {
         self.conn.lock().unwrap().execute(
             "UPDATE sessions SET archived = ?2 WHERE id = ?1",
             params![id, archived as i32],
+        )?;
+        Ok(())
+    }
+
+    /// Flip a CLI-mode session's `cli_activity` flag on — see the
+    /// `cli_activity` migration comment and [`SESSION_VISIBILITY_FILTER`].
+    /// Callers (`server.rs`'s `terminal.input` handler) are expected to only
+    /// call this once per session per process lifetime (an in-memory set
+    /// dedupes the per-keystroke calls); the `UPDATE` itself is naturally
+    /// idempotent regardless.
+    pub fn mark_cli_activity(&self, session_id: &str) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET cli_activity = 1 WHERE id = ?1",
+            params![session_id],
         )?;
         Ok(())
     }
@@ -470,17 +511,17 @@ impl HistoryDb {
 
     /// Return all sessions ordered newest-first, with title (first user
     /// message snippet) and last-agent/model via correlated subqueries.
-    /// Sessions with zero messages are excluded (Fix 3: blank sessions are
-    /// not inserted into the DB until the first message arrives, but any
-    /// pre-existing zero-message rows from before this change are also hidden).
+    /// Sessions with zero messages AND no CLI activity are excluded (Fix 3:
+    /// blank sessions are not inserted into the DB until the first message
+    /// arrives, but any pre-existing zero-message/no-activity rows from
+    /// before this change are also hidden). CLI-mode sessions become visible
+    /// on first keystroke instead — see [`SESSION_VISIBILITY_FILTER`].
     /// Used to build `session.list` and `session.updated` wire messages.
     pub fn list_sessions(&self) -> anyhow::Result<Vec<SessionListRow>> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(
             "{SESSION_LIST_ROW_SELECT}
-             WHERE EXISTS (
-                 SELECT 1 FROM messages WHERE session_id = s.id
-             )
+             WHERE {SESSION_VISIBILITY_FILTER}
              ORDER BY s.created_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -499,19 +540,17 @@ impl HistoryDb {
     /// so a `session.updated` push can never disagree with the row the same
     /// session would have in `session.list`.
     ///
-    /// Deliberately keeps the same `WHERE EXISTS (... messages ...)` filter
-    /// as `list_sessions`: a session with zero messages yet is not returned,
-    /// matching prior behaviour (the old call site built the full list via
-    /// `list_sessions()` and then `.find()`d the id in it — a messageless
-    /// session was never in that list, so it never produced a `session.updated`
-    /// push either).
+    /// Deliberately keeps the same [`SESSION_VISIBILITY_FILTER`] as
+    /// `list_sessions`: a session with zero messages and no CLI activity yet
+    /// is not returned, matching prior behaviour (the old call site built the
+    /// full list via `list_sessions()` and then `.find()`d the id in it — an
+    /// invisible session was never in that list, so it never produced a
+    /// `session.updated` push either).
     pub fn get_session_row(&self, id: &str) -> anyhow::Result<Option<SessionListRow>> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(
             "{SESSION_LIST_ROW_SELECT}
-             WHERE s.id = ?1 AND EXISTS (
-                 SELECT 1 FROM messages WHERE session_id = s.id
-             )"
+             WHERE s.id = ?1 AND {SESSION_VISIBILITY_FILTER}"
         );
         let mut stmt = conn.prepare(&sql)?;
         let mut rows = stmt.query_map(params![id], session_list_row_from_row)?;
@@ -792,6 +831,93 @@ mod tests {
             sample.len(),
             get_elapsed / sample.len() as u32,
         );
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// CLI-mode sessions (no rows in `messages` ever, per `agent.rs`'s doc
+    /// comments on `terminal.create`/`agentAttach`) must stay invisible until
+    /// `mark_cli_activity` fires on first keystroke — otherwise every blank
+    /// throwaway session a CLI-mode connect mints would flood the sidebar.
+    #[test]
+    fn cli_only_session_hidden_until_marked_active() {
+        let path = temp_db_path("cli-hidden");
+        let db = HistoryDb::open(&path).unwrap();
+        db.create_session("cli-sess", "/tmp/cli-proj").unwrap();
+
+        // Zero messages, cli_activity = 0 (default): invisible to both.
+        assert!(
+            !db.list_sessions().unwrap().iter().any(|r| r.id == "cli-sess"),
+            "unmarked CLI session must not appear in list_sessions()"
+        );
+        assert!(
+            db.get_session_row("cli-sess").unwrap().is_none(),
+            "unmarked CLI session must not appear in get_session_row()"
+        );
+
+        // First keystroke: mark_cli_activity flips it visible everywhere.
+        db.mark_cli_activity("cli-sess").unwrap();
+
+        assert!(
+            db.list_sessions().unwrap().iter().any(|r| r.id == "cli-sess"),
+            "marked CLI session must appear in list_sessions()"
+        );
+        assert!(
+            db.get_session_row("cli-sess").unwrap().is_some(),
+            "marked CLI session must appear in get_session_row()"
+        );
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A session that already has messages (Hosted mode, or a CLI session
+    /// that was also used in Hosted mode) must stay visible regardless of
+    /// `cli_activity` — the flag only ever adds visibility, never removes it.
+    #[test]
+    fn session_with_messages_visible_regardless_of_cli_activity() {
+        let path = temp_db_path("messages-visible");
+        let db = HistoryDb::open(&path).unwrap();
+        let ids = seed(&db, 1, 2);
+        let id = &ids[0];
+
+        assert!(db.list_sessions().unwrap().iter().any(|r| &r.id == id));
+        assert!(db.get_session_row(id).unwrap().is_some());
+
+        // cli_activity stays 0 here (never marked) — messages alone suffice.
+        let row = db.get_session_row(id).unwrap().unwrap();
+        assert_eq!(&row.id, id);
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `get_session_row` and `list_sessions` must agree field-for-field on a
+    /// CLI-only (no-messages, `cli_activity = 1`) session too, not just the
+    /// message-backed sessions the large-seed test above covers — this is
+    /// the same invariant `SESSION_VISIBILITY_FILTER` exists to protect.
+    #[test]
+    fn get_session_row_matches_list_sessions_for_cli_only_session() {
+        let path = temp_db_path("cli-matches-list");
+        let db = HistoryDb::open(&path).unwrap();
+        let ids = seed(&db, 3, 2);
+        db.create_session("cli-only", "/tmp/cli-only-proj").unwrap();
+        db.mark_cli_activity("cli-only").unwrap();
+
+        let list = db.list_sessions().unwrap();
+        assert_eq!(list.len(), ids.len() + 1);
+        let expected = list.iter().find(|r| r.id == "cli-only").unwrap();
+
+        let row = db.get_session_row("cli-only").unwrap().unwrap();
+        assert_eq!(row.id, expected.id);
+        assert_eq!(row.cwd, expected.cwd);
+        assert_eq!(row.created_at, expected.created_at);
+        assert_eq!(row.title, expected.title);
+        assert_eq!(row.last_agent, expected.last_agent);
+        assert_eq!(row.last_model, expected.last_model);
+        assert_eq!(row.archived, expected.archived);
+        assert_eq!(row.host_id, expected.host_id);
 
         drop(db);
         let _ = std::fs::remove_file(&path);

@@ -166,6 +166,15 @@ struct AppState {
     /// an approval-prompt pattern (see `blocked_patterns`). Cleared on the
     /// next `terminal.input` to that terminal, or when the terminal exits.
     blocked_sessions: Arc<Mutex<HashSet<String>>>,
+    /// Local session ids already `mark_cli_activity`'d in the DB this process
+    /// lifetime — dedupes the DB write + `notify_session_updated` so a
+    /// CLI-attached terminal's `terminal.input` (fires on every keystroke)
+    /// only pays for either once per session, on the first keystroke. Never
+    /// needs eviction: a session id is stable for the DB's lifetime and this
+    /// set only ever mirrors "is `cli_activity` already 1", which is also
+    /// monotonic (`mark_cli_activity` never unsets it), so the set can never
+    /// go stale relative to the DB.
+    cli_active_sessions: Arc<Mutex<HashSet<String>>>,
     /// Last known git branch + ahead/behind for each local session cwd,
     /// populated by the background poll task spawned in `run()`. Keyed by
     /// cwd (local host only — "local" is implicit). Used both to detect
@@ -318,6 +327,7 @@ pub async fn run(
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
+        cli_active_sessions: Arc::new(Mutex::new(HashSet::new())),
         workspace_git: Arc::new(Mutex::new(HashMap::new())),
         session_events_tx,
         model_lists,
@@ -1738,6 +1748,20 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             if let Some(session_id) = state.terminal_agent_sessions.lock().unwrap().get(&terminal_id).cloned() {
                 let was_blocked = state.app.blocked_sessions.lock().unwrap().remove(&session_id);
                 if was_blocked {
+                    notify_session_updated(&state.app, &session_id);
+                }
+                // First keystroke into an agent-attached CLI terminal makes
+                // its session nav-visible (mirrors Hosted mode's
+                // first-user-message rule) — see the `cli_activity` column's
+                // migration comment in db.rs for why this can't be done on
+                // terminal *attach* instead. Deduped via `cli_active_sessions`
+                // so the per-keystroke hot path only pays for the DB write +
+                // broadcast once per session.
+                let newly_active = state.app.cli_active_sessions.lock().unwrap().insert(session_id.clone());
+                if newly_active {
+                    if let Err(err) = state.app.db.mark_cli_activity(&session_id) {
+                        tracing::warn!(%session_id, %err, "failed to mark_cli_activity");
+                    }
                     notify_session_updated(&state.app, &session_id);
                 }
             }
