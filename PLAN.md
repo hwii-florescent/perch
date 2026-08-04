@@ -609,6 +609,48 @@ The `PLANS.md` backlog items, minus the Tauri bundle (explicitly deferred). **Ze
 - **Milestone: CLI-mode sessions are navigable, and a turn you didn't start now renders live instead
   of vanishing.** ✅ verified.
 
+### Phase 10 — server-side event scoping + codex default — ✅ done
+Two fixes found by auditing the environment rather than the code. **Zero protocol changes.**
+- **`chat.*` is now scoped to the connections actually viewing a session.** A detached turn outlives
+  the connection that started it, so `DetachedSink::emit` broadcasts on `hub_events_tx` and the
+  per-connection forwarder relayed *every* event to *every* client. The web client had been patched
+  to defend itself in Phase 9, but that left the client compensating for data it should never have
+  received. New pure `should_forward_to_viewer(msg, conn_id, viewers)` consults the pre-existing
+  `AppState.session_viewers` map and drops the six session-scoped variants (`chat.chunk`/`thinking`/
+  `tool_use`/`tool_result`/`done`/`plan`) for connections not viewing that session.
+- **The filter is deliberately fail-open** (`_ => true`): wrongly dropping a message breaks the
+  sidebar / toasts / unseen dots, while wrongly forwarding one is merely the old behaviour. Every
+  other variant — `session.*`, `host.*`, `workspace.git`, terminal, settings, worktree — forwards
+  unconditionally, as does the bare `error` variant, which carries no session id to scope by.
+- Verified all three delivery paths before trusting it, because only one of them is affected:
+  local hosted chat goes `emit()` → `out_tx` **unicast**; perch-mode federated chat (all six
+  variants, `ChatPlan` included) goes through `relay_unicast` — *neither touches this broadcast*.
+  Only direct-mode detached turns do, and those sessions take the **local** `session.subscribe`
+  branch (hub.rs: "no `remote_sessions` routing entry is ever created for them"), so
+  `set_active_session` registers the viewer before any event arrives. A client switching in mid-turn
+  is covered by registering as a viewer *before* the ring-buffer replay decision.
+- **Codex's configured default model was being discarded.** `load_codex_models` parsed
+  `~/.codex/config.toml` (yielding `model = "gpt-5.6-luna"` on this Mac), then hit
+  `read_to_string(&catalog_path).ok()?` — an early return that threw the parsed default away when the
+  catalogue file was missing, leaving the hardcoded `gpt-5.4-mini`. So perch preselected a model the
+  user had not chosen. Now the static catalogue honours the configured slug: flagged in place if
+  present, appended at the end if not (**never reordered** — the list keeps catalogue best-first
+  order and only `isDefault` moves). No config or no `model` key → unchanged legacy behaviour.
+- `parse_remote_codex_payload` had the same bug and was fixed identically. It matters more there:
+  `hub.rs` substitutes the *local* machine's catalogue when the remote returns empty, so a direct
+  host's configured default was being silently replaced by the laptop's.
+- The missing-catalogue path now logs which default won; it was previously silent, which is why this
+  went unnoticed. Note codex 0.146.0 writes no `model-catalog.json` at all on this Mac (searched
+  `~/.codex`, `/Applications/Codex.app`, `~/.cache/codex-runtimes`), so the fallback is the permanent
+  path here, not an edge case.
+- Verified: `cargo test -p perch-core` **93/93** (82 + 11 codex + 6 filter), clippy at exactly the 5
+  pre-existing warnings, `cargo fmt --check` clean, **full Playwright 93 tests / 91 passed / 2
+  skipped / 0 failed**, and `federation.spec.ts` re-run in isolation **6/6** — E3 "remote hosted chat
+  turn relayed through hub" is the test that would have caught over-filtering. Codex default
+  confirmed over the wire: `gpt-5.6-luna` carries `isDefault`, list order intact.
+- **Milestone: a connection now receives only the sessions it is watching, and the codex picker
+  honours the user's own config.** ✅ verified.
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to

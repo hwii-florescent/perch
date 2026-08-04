@@ -72,6 +72,91 @@ const CODEX_CATALOGUE: &[(&str, &str)] = &[
 /// The flagged default within [`CODEX_CATALOGUE`].
 const CODEX_FALLBACK_DEFAULT: &str = "gpt-5.4-mini";
 
+/// Derive a human label from a bare model slug for entries appended to the
+/// static catalogue at runtime (a configured default that this snapshot of
+/// [`CODEX_CATALOGUE`] predates). Not meant to be exact — just readable.
+/// `gpt` is special-cased to the all-caps form used throughout the built-in
+/// list; everything else is title-cased word by word.
+fn label_from_slug(slug: &str) -> String {
+    let parts: Vec<&str> = slug.split('-').collect();
+    let mut out = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        let piece = if part.eq_ignore_ascii_case("gpt") {
+            "GPT".to_string()
+        } else {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        };
+        if i == 0 {
+            out.push_str(&piece);
+        } else if i == 1
+            && parts[0].eq_ignore_ascii_case("gpt")
+            && part.starts_with(|c: char| c.is_ascii_digit())
+        {
+            // Keep the version number glued to "GPT-" (e.g. "GPT-5.7"),
+            // matching the style of the hand-written CODEX_CATALOGUE labels.
+            out.push('-');
+            out.push_str(&piece);
+        } else {
+            out.push(' ');
+            out.push_str(&piece);
+        }
+    }
+    out
+}
+
+/// Build the static [`CODEX_CATALOGUE`] as [`ModelEntry`] values, honouring a
+/// configured default slug rather than always flagging
+/// [`CODEX_FALLBACK_DEFAULT`].
+///
+/// This is the shared fallback used whenever a codex model-catalogue file
+/// (local or remote) is missing/unreadable/unusable, so that a `config.toml`
+/// that *was* readable doesn't silently lose its configured default to the
+/// historical hardcoded one:
+///
+/// * `default_slug` is `None` (no readable config, or no `model` key) →
+///   behaviour is unchanged from before this fix: [`CODEX_FALLBACK_DEFAULT`]
+///   is flagged.
+/// * `default_slug` names an entry already in [`CODEX_CATALOGUE`] → that
+///   entry is flagged in place (list order untouched — never reorder).
+/// * `default_slug` names something absent from [`CODEX_CATALOGUE`] (e.g. a
+///   model newer than this snapshot) → it is appended at the *end* and
+///   flagged, preserving the built-in ordering for everything else.
+fn static_codex_catalogue(default_slug: Option<&str>) -> Vec<ModelEntry> {
+    let mut list: Vec<ModelEntry> = CODEX_CATALOGUE
+        .iter()
+        .map(|(id, label)| ModelEntry {
+            id: id.to_string(),
+            label: label.to_string(),
+            is_default: false,
+        })
+        .collect();
+
+    match default_slug {
+        None => {
+            if let Some(entry) = list.iter_mut().find(|m| m.id == CODEX_FALLBACK_DEFAULT) {
+                entry.is_default = true;
+            }
+        }
+        Some(slug) => {
+            if let Some(entry) = list.iter_mut().find(|m| m.id == slug) {
+                entry.is_default = true;
+            } else {
+                list.push(ModelEntry {
+                    id: slug.to_string(),
+                    label: label_from_slug(slug),
+                    is_default: true,
+                });
+            }
+        }
+    }
+
+    list
+}
+
 // ---------------------------------------------------------------------------
 // Runtime codex catalogue (~/.codex)
 // ---------------------------------------------------------------------------
@@ -266,21 +351,55 @@ pub(crate) fn parse_remote_codex_payload(payload: &str) -> Vec<ModelEntry> {
         }
     }
 
-    if catalog.trim().is_empty() {
-        return Vec::new();
-    }
     let (default_slug, _) = parse_codex_config(&config);
-    parse_codex_catalog(&catalog, default_slug.as_deref())
+
+    if !catalog.trim().is_empty() {
+        let models = parse_codex_catalog(&catalog, default_slug.as_deref());
+        if !models.is_empty() {
+            return models;
+        }
+    }
+
+    // No usable remote catalogue (missing file, empty section, or malformed
+    // JSON). If the remote's own config.toml at least gave us a default
+    // slug, fall back to the static catalogue honouring it — same fix as
+    // load_codex_models below. The caller (hub.rs) only substitutes the
+    // *local* machine's catalogue when this returns empty, so returning
+    // Vec::new() here would silently erase the remote's configured default
+    // in favour of whatever this machine happens to default to.
+    match default_slug {
+        Some(slug) => {
+            tracing::info!(
+                "[perch] remote codex catalogue unreadable but config.toml default is \
+                 {slug} — falling back to the built-in codex model list with that default"
+            );
+            static_codex_catalogue(Some(&slug))
+        }
+        None => Vec::new(),
+    }
 }
 
 /// Load the codex model list from the local codex installation.
 ///
 /// `~/.codex/config.toml` supplies the default model slug and (optionally) an
 /// override path for the catalogue; otherwise `~/.codex/model-catalog.json`
-/// is used. Returns `None` when anything is missing or unusable, in which
-/// case the caller falls back to the static [`CODEX_CATALOGUE`].
-fn load_codex_models() -> Option<Vec<ModelEntry>> {
-    let codex_dir = PathBuf::from(std::env::var("HOME").ok()?).join(".codex");
+/// is used. When the catalogue file is missing/unusable, falls back to the
+/// static [`CODEX_CATALOGUE`] — but still honours a default slug that
+/// `config.toml` itself yielded (see [`static_codex_catalogue`]), so a
+/// configured model never silently loses its `isDefault` flag to the
+/// historical [`CODEX_FALLBACK_DEFAULT`] just because the catalogue file
+/// happens to be absent (e.g. newer codex releases that don't write one).
+fn load_codex_models() -> Vec<ModelEntry> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => {
+            tracing::info!(
+                "[perch] $HOME is not set — falling back to the built-in codex model list"
+            );
+            return static_codex_catalogue(None);
+        }
+    };
+    let codex_dir = PathBuf::from(home).join(".codex");
 
     let (default_slug, catalog_override) = std::fs::read_to_string(codex_dir.join("config.toml"))
         .ok()
@@ -288,23 +407,36 @@ fn load_codex_models() -> Option<Vec<ModelEntry>> {
         .unwrap_or((None, None));
 
     let catalog_path = catalog_override.unwrap_or_else(|| codex_dir.join(CODEX_CATALOG_FILE));
-    let json_text = std::fs::read_to_string(&catalog_path).ok()?;
 
-    let models = parse_codex_catalog(&json_text, default_slug.as_deref());
-    if models.is_empty() {
-        return None;
+    if let Ok(json_text) = std::fs::read_to_string(&catalog_path) {
+        let models = parse_codex_catalog(&json_text, default_slug.as_deref());
+        if !models.is_empty() {
+            tracing::info!(
+                "[perch] codex models from {}: {} entries (default {})",
+                catalog_path.display(),
+                models.len(),
+                models
+                    .iter()
+                    .find(|m| m.is_default)
+                    .unwrap_or(&models[0])
+                    .id
+            );
+            return models;
+        }
     }
+
+    let fallback = static_codex_catalogue(default_slug.as_deref());
     tracing::info!(
-        "[perch] codex models from {}: {} entries (default {})",
+        "[perch] no readable codex model catalogue at {} — falling back to the built-in \
+         codex model list (default {})",
         catalog_path.display(),
-        models.len(),
-        models
+        fallback
             .iter()
             .find(|m| m.is_default)
-            .unwrap_or(&models[0])
+            .unwrap_or(&fallback[0])
             .id
     );
-    Some(models)
+    fallback
 }
 
 // ---------------------------------------------------------------------------
@@ -404,23 +536,7 @@ pub fn catalogue() -> ModelLists {
         })
         .collect();
 
-    let mut codex: Vec<ModelEntry> = match load_codex_models() {
-        Some(list) => list,
-        None => {
-            tracing::info!(
-                "[perch] no readable codex model catalogue (~/.codex) — \
-                 falling back to the built-in codex model list"
-            );
-            CODEX_CATALOGUE
-                .iter()
-                .map(|(id, label)| ModelEntry {
-                    id: id.to_string(),
-                    label: label.to_string(),
-                    is_default: *id == CODEX_FALLBACK_DEFAULT,
-                })
-                .collect()
-        }
-    };
+    let mut codex: Vec<ModelEntry> = load_codex_models();
 
     append_custom_models(&mut claude, &mut codex);
 
@@ -567,6 +683,89 @@ js_repl = false
         assert!(model.is_none() && path.is_none());
     }
 
+    // -----------------------------------------------------------------
+    // Static-catalogue fallback (regression tests for the lost-default bug)
+    // -----------------------------------------------------------------
+
+    fn static_catalogue_ids() -> Vec<&'static str> {
+        CODEX_CATALOGUE.iter().map(|(id, _)| *id).collect()
+    }
+
+    #[test]
+    fn static_catalogue_with_no_default_slug_keeps_legacy_fallback_default() {
+        // No config.toml at all (or none with a `model` key): behaviour must
+        // be exactly what it was before this fix.
+        let list = static_codex_catalogue(None);
+        assert_eq!(ids(&list), static_catalogue_ids());
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some(CODEX_FALLBACK_DEFAULT)
+        );
+        assert_eq!(list.iter().filter(|m| m.is_default).count(), 1);
+    }
+
+    #[test]
+    fn static_catalogue_honours_a_configured_default_already_in_the_list() {
+        // config.toml says gpt-5.6-luna, no catalogue file readable: the
+        // static list is used, but gpt-5.6-luna (not gpt-5.4-mini) must be
+        // the flagged default, with list order unchanged.
+        let list = static_codex_catalogue(Some("gpt-5.6-luna"));
+        assert_eq!(ids(&list), static_catalogue_ids());
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.6-luna")
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|m| m.id == CODEX_FALLBACK_DEFAULT && m.is_default),
+            "gpt-5.4-mini must not still be flagged once another default wins"
+        );
+        assert_eq!(list.iter().filter(|m| m.is_default).count(), 1);
+    }
+
+    #[test]
+    fn static_catalogue_appends_an_unknown_configured_default_at_the_end() {
+        // config.toml names a model this CODEX_CATALOGUE snapshot predates:
+        // it must be appended (never inserted/sorted to the front) and
+        // flagged, with every pre-existing entry still present in order.
+        let list = static_codex_catalogue(Some("gpt-9-nova"));
+        let mut expected = static_catalogue_ids();
+        expected.push("gpt-9-nova");
+        assert_eq!(ids(&list), expected);
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-9-nova")
+        );
+        assert_eq!(list.iter().filter(|m| m.is_default).count(), 1);
+        assert_eq!(list.last().unwrap().label, "GPT-9 Nova");
+    }
+
+    #[test]
+    fn label_from_slug_title_cases_and_specialcases_gpt() {
+        assert_eq!(label_from_slug("gpt-9-nova"), "GPT-9 Nova");
+        assert_eq!(label_from_slug("gpt-5.7-quasar"), "GPT-5.7 Quasar");
+        assert_eq!(label_from_slug("some-other-model"), "Some Other Model");
+        assert_eq!(label_from_slug("solo"), "Solo");
+    }
+
+    #[test]
+    fn remote_payload_prefers_readable_catalog_over_static_fallback() {
+        // A readable catalogue must win even though it's a completely
+        // different (smaller) list than CODEX_CATALOGUE — no regression from
+        // adding the static-fallback path.
+        let payload = format!(
+            "{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.6-luna\"\n{REMOTE_CATALOG_MARKER}\n{CATALOG}"
+        );
+        let list = parse_remote_codex_payload(&payload);
+        assert_eq!(
+            ids(&list),
+            vec!["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.3-codex"]
+        );
+        // None of the static-only entries (e.g. gpt-5.4-mini) leaked in.
+        assert!(!list.iter().any(|m| m.id == "gpt-5.4-mini"));
+    }
+
     #[test]
     fn real_shaped_catalog_matches_expected_runtime_order() {
         // Mirrors this machine's ~/.codex catalogue (8 models, all "list").
@@ -656,12 +855,34 @@ js_repl = false
     }
 
     #[test]
-    fn remote_payload_without_a_usable_catalog_yields_nothing() {
-        // Stock codex install: config present, no catalogue file.
+    fn remote_payload_without_a_usable_catalog_falls_back_to_static_with_configured_default() {
+        // Stock codex install: config present (with a default slug), no
+        // catalogue file — must NOT silently lose the configured default to
+        // CODEX_FALLBACK_DEFAULT (this was the bug: the old code returned
+        // Vec::new() here and the caller fell back to a different default).
         let payload =
-            format!("{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.4\"\n{REMOTE_CATALOG_MARKER}\n");
-        assert!(parse_remote_codex_payload(&payload).is_empty());
-        // Garbage where the catalogue should be, no markers at all, empty.
+            format!("{REMOTE_CFG_MARKER}\nmodel = \"gpt-5.6-luna\"\n{REMOTE_CATALOG_MARKER}\n");
+        let list = parse_remote_codex_payload(&payload);
+        assert_eq!(
+            ids(&list),
+            CODEX_CATALOGUE
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            list.iter().find(|m| m.is_default).map(|m| m.id.as_str()),
+            Some("gpt-5.6-luna")
+        );
+        assert!(!list
+            .iter()
+            .any(|m| m.id == CODEX_FALLBACK_DEFAULT && m.is_default));
+    }
+
+    #[test]
+    fn remote_payload_without_usable_catalog_or_config_yields_nothing() {
+        // No config default to preserve, so caller (hub.rs) falls back to
+        // its own local catalogue instead — behaviour is unchanged here.
         let payload = format!(
             "{REMOTE_CFG_MARKER}\n{REMOTE_CATALOG_MARKER}\ncat: No such file or directory\n"
         );

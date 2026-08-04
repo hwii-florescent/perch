@@ -921,10 +921,26 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let mut hub_rx = app.hub.subscribe_events();
     let hub_out_tx = state.out_tx.clone();
     let hub_app = app.clone();
+    let hub_conn_id = conn_id.clone();
     tokio::spawn(async move {
         loop {
             match hub_rx.recv().await {
                 Ok(msg) => {
+                    // Session-scoped chat events (chat.chunk/thinking/tool_use/
+                    // tool_result/done/plan) only go to connections currently
+                    // viewing that session — a detached turn broadcasts to
+                    // every connection (see `DetachedSink::emit`), so without
+                    // this a client watching session A would also receive
+                    // session B's live chat frames. Lock scope is just the
+                    // lookup; released before any send (see
+                    // `should_forward_to_viewer`'s doc comment).
+                    let forward = {
+                        let viewers = hub_app.session_viewers.lock().unwrap();
+                        should_forward_to_viewer(&msg, &hub_conn_id, &viewers)
+                    };
+                    if !forward {
+                        continue;
+                    }
                     // `session.list` from the hub is the *remote-only*
                     // snapshot (the hub has no DB handle — see
                     // `broadcast_merged_session_list`). Forwarding it verbatim
@@ -1110,6 +1126,49 @@ fn mark_unseen_if_unviewed(app: &AppState, session_id: &str) {
             .unwrap()
             .insert(session_id.to_string());
     }
+}
+
+/// Decide whether a hub-broadcast `ServerMessage` should be forwarded to one
+/// particular connection (`conn_id`). Only the per-session *streaming* chat
+/// events are session-scoped — everything else (sidebar/host/global state)
+/// must reach every connection regardless of what it's viewing, so this
+/// defaults to `true` (forward) for any variant not explicitly listed as
+/// session-scoped below. A detached (direct-mode) turn broadcasts on
+/// `hub_events_tx` to every connection (see `DetachedSink::emit`'s doc
+/// comment) because it has no single initiating connection to unicast to;
+/// this is the filter that keeps a client watching session A from also
+/// receiving session B's live chat frames.
+///
+/// `viewers` mirrors `AppState::session_viewers`: for each local session id,
+/// the set of connection ids currently viewing it. A session with no entry,
+/// or an entry with an empty set, has no viewers, so the event is dropped for
+/// every connection until someone subscribes — at which point the ring-buffer
+/// replay (`SessionRegistry::replay`, see `ClientMessage::SessionSubscribe`)
+/// catches the new viewer up on anything already recorded.
+fn should_forward_to_viewer(
+    msg: &ServerMessage,
+    conn_id: &str,
+    viewers: &HashMap<String, HashSet<String>>,
+) -> bool {
+    let session_id = match msg {
+        ServerMessage::ChatChunk { session_id, .. }
+        | ServerMessage::ChatThinking { session_id, .. }
+        | ServerMessage::ChatToolUse { session_id, .. }
+        | ServerMessage::ChatToolResult { session_id, .. }
+        | ServerMessage::ChatDone { session_id, .. }
+        | ServerMessage::ChatPlan { session_id, .. } => session_id,
+        // `error` (the bare `ServerMessage::Error` variant) carries no
+        // session id at all, so it can't be session-scoped-filtered — always
+        // forward it. Everything else (session.list/updated/created/deleted,
+        // host.info, workspace.git, server.info, terminal.*, settings,
+        // hosts.*, commands.list, session.history/layout, fs/worktree
+        // replies, …) is global or drives the sidebar, and must reach every
+        // connection: fail open by forwarding.
+        _ => return true,
+    };
+    viewers
+        .get(session_id)
+        .is_some_and(|set| set.contains(conn_id))
 }
 
 /// Insert `session_id` into the running set and fire the broadcast channel so
@@ -3005,5 +3064,125 @@ mod blocked_pattern_tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(test)]
+mod session_viewer_filter_tests {
+    use super::*;
+
+    fn viewers_of(session_id: &str, conn_ids: &[&str]) -> HashMap<String, HashSet<String>> {
+        let mut map = HashMap::new();
+        map.insert(
+            session_id.to_string(),
+            conn_ids.iter().map(|c| c.to_string()).collect(),
+        );
+        map
+    }
+
+    #[test]
+    fn chat_chunk_forwards_to_a_viewer_of_its_session() {
+        let msg = ServerMessage::ChatChunk {
+            session_id: "s1".to_string(),
+            text: "hi".to_string(),
+        };
+        let viewers = viewers_of("s1", &["conn-a", "conn-b"]);
+        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers));
+    }
+
+    #[test]
+    fn chat_chunk_drops_for_a_connection_not_viewing_that_session() {
+        let msg = ServerMessage::ChatChunk {
+            session_id: "s1".to_string(),
+            text: "hi".to_string(),
+        };
+        let viewers = viewers_of("s1", &["conn-a"]);
+        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers));
+    }
+
+    #[test]
+    fn chat_done_drops_when_session_has_no_viewers_entry_at_all() {
+        let msg = ServerMessage::ChatDone {
+            session_id: "s1".to_string(),
+            usage: None,
+        };
+        let viewers: HashMap<String, HashSet<String>> = HashMap::new();
+        assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers));
+    }
+
+    #[test]
+    fn chat_thinking_tool_use_tool_result_and_plan_are_all_session_scoped() {
+        let viewers = viewers_of("s1", &["conn-a"]);
+        let thinking = ServerMessage::ChatThinking {
+            session_id: "s1".to_string(),
+            text: "thinking".to_string(),
+        };
+        let tool_use = ServerMessage::ChatToolUse {
+            session_id: "s2".to_string(),
+            name: "Bash".to_string(),
+            input: serde_json::Value::Null,
+        };
+        let tool_result = ServerMessage::ChatToolResult {
+            session_id: "s2".to_string(),
+            name: "Bash".to_string(),
+            result: serde_json::Value::Null,
+        };
+        let plan = ServerMessage::ChatPlan {
+            session_id: "s2".to_string(),
+            content: "plan".to_string(),
+        };
+        assert!(should_forward_to_viewer(&thinking, "conn-a", &viewers));
+        assert!(!should_forward_to_viewer(&tool_use, "conn-a", &viewers));
+        assert!(!should_forward_to_viewer(&tool_result, "conn-a", &viewers));
+        assert!(!should_forward_to_viewer(&plan, "conn-a", &viewers));
+    }
+
+    #[test]
+    fn global_and_sidebar_messages_forward_regardless_of_viewer_state() {
+        let viewers: HashMap<String, HashSet<String>> = HashMap::new();
+        let session_updated = ServerMessage::SessionUpdated {
+            session: SessionSummary {
+                id: "s1".to_string(),
+                title: "t".to_string(),
+                cwd: "/tmp".to_string(),
+                created_at: 0,
+                last_agent: None,
+                last_model: None,
+                status: SessionStatus::Idle,
+                host_id: "local".to_string(),
+                archived: false,
+                unseen: false,
+                blocked: false,
+            },
+        };
+        let workspace_git = ServerMessage::WorkspaceGit {
+            host_id: "local".to_string(),
+            cwd: "/tmp".to_string(),
+            branch: None,
+            ahead: 0,
+            behind: 0,
+        };
+        let host_state = ServerMessage::HostInfo {
+            host_id: "h1".to_string(),
+            name: "host".to_string(),
+            state: "connected".to_string(),
+            error: None,
+            hostname: None,
+            platform: None,
+            is_ssh: None,
+            claude_models: None,
+            codex_models: None,
+        };
+        let bare_error = ServerMessage::Error {
+            message: "boom".to_string(),
+        };
+        assert!(should_forward_to_viewer(
+            &session_updated,
+            "conn-a",
+            &viewers
+        ));
+        assert!(should_forward_to_viewer(&workspace_git, "conn-a", &viewers));
+        assert!(should_forward_to_viewer(&host_state, "conn-a", &viewers));
+        assert!(should_forward_to_viewer(&bare_error, "conn-a", &viewers));
     }
 }
