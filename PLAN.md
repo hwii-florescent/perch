@@ -709,6 +709,51 @@ running. No web client build found at this path"). Two bugs, one bad verificatio
   clean, clippy still exactly 5 distinct warnings (both doc-list ones are in `agent.rs` /
   `server.rs`, untouched here).
 
+### Phase 11.2 — public-repo sanitization + codex catalogue sync — ✅ done
+Triggered by the repo going **public**. Two unrelated pieces of cleanup.
+
+**History scrub.** A sweep found employer-internal identifiers not just in history but in
+`HEAD`: internal hostnames (`PLAN.md`, `hosts.rs`), the internal npm registry (lockfile
+history), the corp username, internal tooling names, and the internal AI-gateway provider
+name. Three `git filter-repo --replace-text` passes rewrote all 23 commits, mapping everything
+to neutral placeholders (`*.internal.example.com`, `corp-*`, `dev-*`).
+- **Scope decision: prose and comments only, no refactor.** `herdr` (156 occurrences) and
+  `devpod` (60) are woven through source, CSS class names, protocol fields and specs —
+  renaming those is a refactor with regression risk, not a redaction, so they stayed. The
+  codex model slugs (`gpt-5.6-sol`/`-terra`/`-luna`) also stayed: they are **real public codex
+  models**, not internal names.
+- **One claim corrected mid-flight:** the internal AI-gateway provider name (now
+  `corp-gateway`) was first called functional and left in. It was not — `#[cfg(test)]` starts
+  at `models.rs:546` and all three occurrences were test fixtures, so it was scrubbable, and
+  was scrubbed. `gpt-5.6-terra` genuinely *is* functional (line 64, inside
+  `CODEX_CATALOGUE`), which is why the model slugs were handled separately.
+- **A force-push was not enough, and this is the reusable lesson.** After force-pushing the
+  rewritten history, `gh api repos/…/contents/crates/perch-core/src/hosts.rs?ref=<old-sha>`
+  still returned the real internal hostname — orphaned objects stay fetchable by SHA until
+  GitHub GCs them. The repo was therefore **deleted and recreated**; the same call now returns
+  422/404. Verified by fresh-cloning the published repo and scanning all 23 commits: zero hits
+  for every scrubbed term.
+- Backups (outside the repo, made before the destructive step):
+  `~/perch-backup-20260804/` — `perch-PRE-SCRUB-original.bundle` (the real names, if ever
+  needed), `perch-all-refs.bundle`, `perch-worktree.tar.gz`, `repo-metadata.json`.
+- **Consequence for future work:** placeholders in the docs are not real values, and internal
+  names must never be reintroduced. Recorded as the first bullet under "Constraints and
+  gotchas" in `CLAUDE.md`.
+
+**Codex catalogue sync.** `CODEX_CATALOGUE` had drifted from what codex actually serves:
+dropped `gpt-5.4-nano` and `gpt-5.3-codex`, and swapped luna/terra to match codex's own
+priority order (sol=1, terra=2, luna=3). Verified at runtime, not just by reading the
+constant — the server logs `6 codex model(s)` with `default gpt-5.6-luna`, confirming the
+`config.toml` default flows through `static_codex_catalogue()` instead of the hardcoded
+`CODEX_FALLBACK_DEFAULT`.
+- **Deliberately still hard-coded.** codex-cli 0.146.0 caches its server-fetched list at
+  `~/.codex/models_cache.json` in *exactly* the shape `parse_codex_catalog` already reads, so
+  wiring it up is a two-line change — **user decision not to**, so the picker cannot change
+  underneath them. Re-sync by hand when codex ships new models. Noted in the module doc and
+  `CLAUDE.md` so this isn't "helpfully" made dynamic later.
+- Labels keep perch's space-separated style (`GPT-5.6 Sol`) rather than codex's hyphenated
+  `display_name`, so runtime entries appended by `label_from_slug` match the built-ins.
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to
