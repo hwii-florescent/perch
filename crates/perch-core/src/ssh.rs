@@ -278,7 +278,9 @@ pub async fn run_remote(
         if err.is_empty() {
             Err(format!("remote command failed ({phase}, exit {code})"))
         } else {
-            Err(format!("remote command failed ({phase}, exit {code}): {err}"))
+            Err(format!(
+                "remote command failed ({phase}, exit {code}): {err}"
+            ))
         }
     }
 }
@@ -353,7 +355,11 @@ async fn write_remote_file_ex(
     if out.status.success() {
         Ok(())
     } else {
-        let err: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
+        let err: String = String::from_utf8_lossy(&out.stderr)
+            .trim()
+            .chars()
+            .take(300)
+            .collect();
         Err(format!("failed writing {path}: {err}"))
     }
 }
@@ -414,7 +420,11 @@ pub async fn write_remote_bytes(
     if out.status.success() {
         Ok(())
     } else {
-        let err: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
+        let err: String = String::from_utf8_lossy(&out.stderr)
+            .trim()
+            .chars()
+            .take(300)
+            .collect();
         Err(format!("failed uploading {path}: {err}"))
     }
 }
@@ -513,7 +523,11 @@ pub async fn probe_host(ssh_host: &str) -> Result<HostPrereqs, String> {
         .position(|l| l.trim() == "__PERCH_PROBE__")
         .map(|i| i + 1)
         .ok_or_else(|| "prereq probe produced no output".to_string())?;
-    let field = |i: usize| all.get(start + i).map(|s| s.trim().to_string()).unwrap_or_default();
+    let field = |i: usize| {
+        all.get(start + i)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
     let opt = |i: usize| {
         let v = field(i);
         if v.is_empty() {
@@ -604,8 +618,14 @@ pub async fn stat_remote_file(ssh_host: &str, path: &str) -> Result<Option<Remot
         return Ok(None);
     }
     let mut parts = line.split_whitespace();
-    let inode = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let size = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let inode = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let size = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
     Ok(Some(RemoteFileId { inode, size }))
 }
 

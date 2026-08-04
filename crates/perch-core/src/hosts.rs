@@ -135,8 +135,7 @@ impl HostsStore {
 
     /// Open using the canonical `~/.perch/hosts.json` path.
     pub fn load_default() -> Self {
-        let path = default_hosts_path()
-            .unwrap_or_else(|| PathBuf::from(".perch/hosts.json"));
+        let path = default_hosts_path().unwrap_or_else(|| PathBuf::from(".perch/hosts.json"));
         Self::load(path)
     }
 
@@ -161,7 +160,13 @@ impl HostsStore {
     /// decide whether a session is driven over ssh rather than through the
     /// hub's WS connection.
     pub fn get(&self, id: &str) -> Option<SshHost> {
-        self.inner.lock().unwrap().hosts.iter().find(|h| h.id == id).cloned()
+        self.inner
+            .lock()
+            .unwrap()
+            .hosts
+            .iter()
+            .find(|h| h.id == id)
+            .cloned()
     }
 
     /// Insert or update a host by id (upsert).
@@ -191,7 +196,9 @@ impl HostsStore {
     }
 
     fn write_to_disk_hosts(&self, hosts: &[SshHost]) -> anyhow::Result<()> {
-        let config = HostsConfig { hosts: hosts.to_vec() };
+        let config = HostsConfig {
+            hosts: hosts.to_vec(),
+        };
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }

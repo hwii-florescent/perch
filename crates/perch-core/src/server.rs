@@ -27,13 +27,18 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
-use crate::agent::{AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions};
+use crate::agent::{
+    AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions,
+};
 use crate::db::HistoryDb;
 use crate::detached::{DetachedManager, FinishedTurn, TurnRequest, TurnSink};
 use crate::hosts::HostsStore;
 use crate::hub::{HubManager, PendingKey};
 use crate::models::{self, ModelLists};
-use crate::protocol::{AgentKind, ChatUsage, ClientMessage, CustomModelsData, FsEntry, ServerMessage, SessionStatus, SessionSummary, SettingsData, SshHostEntry, WorktreeEntry};
+use crate::protocol::{
+    AgentKind, ChatUsage, ClientMessage, CustomModelsData, FsEntry, ServerMessage, SessionStatus,
+    SessionSummary, SettingsData, SshHostEntry, WorktreeEntry,
+};
 use crate::registry::SessionRegistry;
 use crate::settings::SettingsStore;
 use crate::status::{get_server_info, get_status, LastUsage};
@@ -233,7 +238,11 @@ impl TurnSink for DetachedSink {
 
     fn set_running(&self, session_id: &str, running: bool) {
         if running {
-            self.app.running_sessions.lock().unwrap().insert(session_id.to_string());
+            self.app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .insert(session_id.to_string());
         } else {
             self.app.running_sessions.lock().unwrap().remove(session_id);
             mark_unseen_if_unviewed(&self.app, session_id);
@@ -300,7 +309,10 @@ pub async fn run(
 
     // Load settings store.
     let settings = Arc::new(SettingsStore::load_default());
-    tracing::info!("[perch] settings loaded from {:?}", crate::settings::default_settings_path());
+    tracing::info!(
+        "[perch] settings loaded from {:?}",
+        crate::settings::default_settings_path()
+    );
 
     // Load hosts store (custom path or default).
     let hosts = Arc::new(if let Some(p) = options.hosts_path {
@@ -359,7 +371,8 @@ pub async fn run(
 
     if options.web_dist_dir.is_dir() {
         let index = options.web_dist_dir.join("index.html");
-        let serve_dir = ServeDir::new(&options.web_dist_dir).not_found_service(ServeFile::new(index));
+        let serve_dir =
+            ServeDir::new(&options.web_dist_dir).not_found_service(ServeFile::new(index));
         let nest_at = if base_path == "/" {
             "/".to_string()
         } else {
@@ -419,7 +432,11 @@ fn spawn_git_poll_task(state: AppState) {
                 _ = state.git_poll_notify.notified() => {}
             }
 
-            if state.connected_clients.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            if state
+                .connected_clients
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == 0
+            {
                 continue;
             }
             run_git_poll_pass(&state).await;
@@ -442,8 +459,14 @@ async fn run_git_poll_pass(state: &AppState) {
 
     for cwd in cwds {
         let branch = crate::status::get_branch(&cwd);
-        let branch = if branch.is_empty() { None } else { Some(branch) };
-        let (ahead, behind) = crate::status::get_ahead_behind(&cwd).await.unwrap_or((0, 0));
+        let branch = if branch.is_empty() {
+            None
+        } else {
+            Some(branch)
+        };
+        let (ahead, behind) = crate::status::get_ahead_behind(&cwd)
+            .await
+            .unwrap_or((0, 0));
         let fingerprint = (branch.clone(), ahead, behind);
 
         let changed = {
@@ -457,13 +480,16 @@ async fn run_git_poll_pass(state: &AppState) {
         };
 
         if changed {
-            let _ = state.hub.hub_events_tx.send(Arc::new(ServerMessage::WorkspaceGit {
-                host_id: "local".to_string(),
-                cwd: cwd.clone(),
-                branch,
-                ahead,
-                behind,
-            }));
+            let _ = state
+                .hub
+                .hub_events_tx
+                .send(Arc::new(ServerMessage::WorkspaceGit {
+                    host_id: "local".to_string(),
+                    cwd: cwd.clone(),
+                    branch,
+                    ahead,
+                    behind,
+                }));
         }
     }
 }
@@ -510,12 +536,22 @@ async fn clipboard_image_upload(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !content_type.starts_with("image/") {
-        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "expected an image/* content type").into_response();
+        return (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "expected an image/* content type",
+        )
+            .into_response();
     }
     let ext = params.get("ext").map(|s| s.as_str()).unwrap_or("");
     match crate::clipboard_image::stage(&body, ext) {
-        Ok(path) => axum::Json(serde_json::json!({ "path": path.to_string_lossy() })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to stage clipboard image: {e}")).into_response(),
+        Ok(path) => {
+            axum::Json(serde_json::json!({ "path": path.to_string_lossy() })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to stage clipboard image: {e}"),
+        )
+            .into_response(),
     }
 }
 
@@ -546,7 +582,10 @@ async fn attachment_upload(
         .get("sessionId")
         .map(|s| s.as_str())
         .unwrap_or("unknown");
-    let name = params.get("name").map(|s| s.as_str()).unwrap_or("attachment");
+    let name = params
+        .get("name")
+        .map(|s| s.as_str())
+        .unwrap_or("attachment");
     match crate::uploads::stage(session_id, name, &body) {
         Ok(path) => axum::Json(serde_json::json!({
             "path": path.to_string_lossy(),
@@ -621,7 +660,10 @@ fn agent_str(agent: AgentKind) -> &'static str {
 /// conservative `--resume` behaviour in that case.
 fn claude_conversation_exists(session_id: &str) -> Option<bool> {
     let home = std::env::var("HOME").ok()?;
-    claude_conversation_exists_in(&Path::new(&home).join(".claude").join("projects"), session_id)
+    claude_conversation_exists_in(
+        &Path::new(&home).join(".claude").join("projects"),
+        session_id,
+    )
 }
 
 fn claude_conversation_exists_in(projects: &Path, session_id: &str) -> Option<bool> {
@@ -675,7 +717,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // Counted for `spawn_git_poll_task`'s zero-client gate; notify it so a
     // fresh pass runs now instead of the client waiting up to 5s for the
     // next tick. The guard's `Drop` decrements on every exit path below.
-    app.connected_clients.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    app.connected_clients
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     app.git_poll_notify.notify_one();
     let _conn_count_guard = ConnCountGuard(app.connected_clients.clone());
 
@@ -698,7 +741,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     });
 
     let terminal_tx = out_tx.clone();
-    let terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     // Rolling ANSI-stripped output tail per CLI-attached terminal, used only
     // for blocked-state (approval-prompt) detection — see `blocked_patterns`.
     let terminal_tails: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -708,16 +752,29 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let on_data = Arc::new(move |terminal_id: String, data: String| {
         // Phase 6: blocked-state detection — only for terminals created via
         // `agentAttach` (real interactive CLI mode), never plain shells.
-        if let Some(session_id) = on_data_agent_sessions.lock().unwrap().get(&terminal_id).cloned() {
+        if let Some(session_id) = on_data_agent_sessions
+            .lock()
+            .unwrap()
+            .get(&terminal_id)
+            .cloned()
+        {
             let newly_blocked = {
                 let mut tails = on_data_tails.lock().unwrap();
                 let tail = tails.entry(terminal_id.clone()).or_default();
                 append_tail(tail, &data);
-                let already_blocked = on_data_app.blocked_sessions.lock().unwrap().contains(&session_id);
+                let already_blocked = on_data_app
+                    .blocked_sessions
+                    .lock()
+                    .unwrap()
+                    .contains(&session_id);
                 !already_blocked && blocked_patterns().iter().any(|re| re.is_match(tail))
             };
             if newly_blocked {
-                on_data_app.blocked_sessions.lock().unwrap().insert(session_id.clone());
+                on_data_app
+                    .blocked_sessions
+                    .lock()
+                    .unwrap()
+                    .insert(session_id.clone());
                 notify_session_updated(&on_data_app, &session_id);
             }
         }
@@ -732,7 +789,11 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         // PTY end clears any blocked flag for the session it was attached to
         // — there's no longer a live prompt to answer.
         if let Some(session_id) = on_exit_agent_sessions.lock().unwrap().remove(&terminal_id) {
-            let was_blocked = on_exit_app.blocked_sessions.lock().unwrap().remove(&session_id);
+            let was_blocked = on_exit_app
+                .blocked_sessions
+                .lock()
+                .unwrap()
+                .remove(&session_id);
             if was_blocked {
                 notify_session_updated(&on_exit_app, &session_id);
             }
@@ -768,7 +829,13 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // Bug fix (F3): previously hosts were only sent in response to hosts.list;
     // the sidebar would show no remote sections until Settings was opened.
     let _ = state.out_tx.send(ServerMessage::HostsList {
-        hosts: state.app.hosts.list().into_iter().map(host_to_wire).collect(),
+        hosts: state
+            .app
+            .hosts
+            .list()
+            .into_iter()
+            .map(host_to_wire)
+            .collect(),
     });
 
     // Send current settings (including the selected theme) immediately on
@@ -821,7 +888,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     // `list_sessions()` (shared SELECT body — see db.rs) so
                     // this can't ever disagree with what `session.list`
                     // would say about the same row.
-                    let Some(row) = event_db.get_session_row(&evt.session_id).unwrap_or(None) else {
+                    let Some(row) = event_db.get_session_row(&evt.session_id).unwrap_or(None)
+                    else {
                         continue;
                     };
                     let running = event_running.lock().unwrap();
@@ -831,7 +899,10 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     drop(running);
                     drop(unseen);
                     drop(blocked);
-                    if event_out_tx.send(ServerMessage::SessionUpdated { session: summary }).is_err() {
+                    if event_out_tx
+                        .send(ServerMessage::SessionUpdated { session: summary })
+                        .is_err()
+                    {
                         // out channel closed — connection gone, stop leaking.
                         break;
                     }
@@ -1008,7 +1079,10 @@ fn set_active_session(state: &Arc<ConnState>, session_id: &str) {
                 }
             }
         }
-        viewers.entry(session_id.to_string()).or_default().insert(state.conn_id.clone());
+        viewers
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(state.conn_id.clone());
     }
     let was_unseen = state.app.unseen_sessions.lock().unwrap().remove(session_id);
     if was_unseen {
@@ -1031,7 +1105,10 @@ fn mark_unseen_if_unviewed(app: &AppState, session_id: &str) {
         .map(|set| !set.is_empty())
         .unwrap_or(false);
     if !has_viewer {
-        app.unseen_sessions.lock().unwrap().insert(session_id.to_string());
+        app.unseen_sessions
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string());
     }
 }
 
@@ -1065,7 +1142,15 @@ fn insert_runtime(
     last_agent: Option<&str>,
     last_model: Option<&str>,
 ) {
-    insert_runtime_on_host(state, session_id, cwd, "local", claude_session_id, last_agent, last_model)
+    insert_runtime_on_host(
+        state,
+        session_id,
+        cwd,
+        "local",
+        claude_session_id,
+        last_agent,
+        last_model,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1125,8 +1210,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 // Forward a stripped message (no hostId) so the remote creates a
                 // local session rather than trying to route further.
                 let forward_json = match &cwd {
-                    Some(c) => format!(r#"{{"type":"session.create","cwd":{}}}"#,
-                        serde_json::to_string(c).unwrap_or_default()),
+                    Some(c) => format!(
+                        r#"{{"type":"session.create","cwd":{}}}"#,
+                        serde_json::to_string(c).unwrap_or_default()
+                    ),
                     None => r#"{"type":"session.create"}"#.to_string(),
                 };
                 state.app.hub.forward(target, &forward_json);
@@ -1164,7 +1251,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let _ = state.out_tx.send(ServerMessage::SessionCreated {
                 session_id: session_id.clone(),
             });
-            let _ = state.out_tx.send(status_message(get_status(&resolved_cwd, None)));
+            let _ = state
+                .out_tx
+                .send(status_message(get_status(&resolved_cwd, None)));
             // Do NOT broadcast session.updated yet — session has no messages,
             // so it won't appear in list_sessions(). It lives only in memory
             // until the first chat.send or terminal.create agentAttach.
@@ -1191,7 +1280,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         session_id: session_id.clone(),
                         messages,
                     });
-                    let _ = state.out_tx.send(status_message(get_status(&row.cwd, None)));
+                    let _ = state
+                        .out_tx
+                        .send(status_message(get_status(&row.cwd, None)));
                     notify_session_updated(&state.app, &session_id);
                 }
                 _ => {
@@ -1249,7 +1340,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // host then by createdAt desc within each host.
             let mut remote = state.app.hub.remote_sessions_snapshot();
             remote.sort_by(|a, b| {
-                a.host_id.cmp(&b.host_id).then(b.created_at.cmp(&a.created_at))
+                a.host_id
+                    .cmp(&b.host_id)
+                    .then(b.created_at.cmp(&a.created_at))
             });
             sessions.extend(remote);
             // Direct send — not recorded into the ring buffer.
@@ -1289,7 +1382,8 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // survives this connection going away.
             let session_host = {
                 let map = state.runtimes.lock().unwrap();
-                map.get(&session_id).map(|r| (r.host_id.clone(), r.cwd.clone()))
+                map.get(&session_id)
+                    .map(|r| (r.host_id.clone(), r.cwd.clone()))
             };
             if let Some((host_id, cwd)) = session_host {
                 if host_id != "local" {
@@ -1299,7 +1393,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         });
                         return;
                     };
-                    let _ = state.app.db.create_session_on_host(&session_id, &cwd, &host_id);
+                    let _ = state
+                        .app
+                        .db
+                        .create_session_on_host(&session_id, &cwd, &host_id);
                     let _ = state.app.db.add_message(
                         &session_id,
                         "user",
@@ -1309,7 +1406,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         None,
                     );
                     let row = state.app.db.get_session(&session_id).ok().flatten();
-                    state.app.running_sessions.lock().unwrap().insert(session_id.clone());
+                    state
+                        .app
+                        .running_sessions
+                        .lock()
+                        .unwrap()
+                        .insert(session_id.clone());
                     notify_session_updated(&state.app, &session_id);
                     state.app.detached.start_turn(TurnRequest {
                         session_id,
@@ -1385,7 +1487,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // Fix 3: lazily insert the sessions row on first user message.
             // If the row already exists (e.g. resumed session), INSERT OR IGNORE is a no-op.
             let cwd_for_insert = {
-                state.runtimes.lock().unwrap()
+                state
+                    .runtimes
+                    .lock()
+                    .unwrap()
                     .get(&session_id)
                     .map(|r| r.cwd.clone())
                     .unwrap_or_else(|| state.app.default_cwd.clone())
@@ -1401,7 +1506,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             );
 
             // Mark running before spawning so the status is visible immediately.
-            state.app.running_sessions.lock().unwrap().insert(session_id.clone());
+            state
+                .app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .insert(session_id.clone());
             notify_session_updated(&state.app, &session_id);
 
             let state = state.clone();
@@ -1435,7 +1545,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             state.app.detached.cancel(&session_id);
             // Remove from running immediately on cancel — the agent may still
             // emit a trailing Done/Error, but remove here to be safe.
-            state.app.running_sessions.lock().unwrap().remove(&session_id);
+            state
+                .app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .remove(&session_id);
             notify_session_updated(&state.app, &session_id);
         }
         ClientMessage::CommandsList { ref session_id } => {
@@ -1453,7 +1568,8 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let session_id = session_id.clone();
             let Some((host_id, cwd)) = ({
                 let map = state.runtimes.lock().unwrap();
-                map.get(&session_id).map(|r| (r.host_id.clone(), r.cwd.clone()))
+                map.get(&session_id)
+                    .map(|r| (r.host_id.clone(), r.cwd.clone()))
             }) else {
                 let _ = state.out_tx.send(ServerMessage::CommandsList {
                     session_id,
@@ -1505,7 +1621,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 let cwd = Some(cwd.unwrap_or_else(|| state.app.default_cwd.clone()));
                 match state.terminals.create(cols, rows, cwd, None) {
                     Ok(terminal_id) => {
-                        let _ = state.out_tx.send(ServerMessage::TerminalCreated { terminal_id });
+                        let _ = state
+                            .out_tx
+                            .send(ServerMessage::TerminalCreated { terminal_id });
                     }
                     Err(err) => {
                         let _ = state.out_tx.send(ServerMessage::Error {
@@ -1535,7 +1653,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // ssh propagates SIGWINCH from the local pty.
             let runtime_host = {
                 let map = state.runtimes.lock().unwrap();
-                map.get(&attach.session_id).map(|r| r.host_id.clone()).unwrap_or_default()
+                map.get(&attach.session_id)
+                    .map(|r| r.host_id.clone())
+                    .unwrap_or_default()
             };
             if runtime_host != "local" && !runtime_host.is_empty() {
                 let Some(host) = direct_host(state, &runtime_host) else {
@@ -1596,7 +1716,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                             .lock()
                             .unwrap()
                             .insert(terminal_id.clone(), attach.session_id.clone());
-                        let _ = state.out_tx.send(ServerMessage::TerminalCreated { terminal_id });
+                        let _ = state
+                            .out_tx
+                            .send(ServerMessage::TerminalCreated { terminal_id });
                     }
                     Err(err) => {
                         let _ = state.out_tx.send(ServerMessage::Error {
@@ -1648,7 +1770,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                             // persisted (CLI-mode context lost on reconnect /
                             // restart). Insert first, exactly like the
                             // direct-mode branch above does.
-                            let _ = state.app.db.create_session(&attach.session_id, &runtime_cwd);
+                            let _ = state
+                                .app
+                                .db
+                                .create_session(&attach.session_id, &runtime_cwd);
                             let _ = state.app.db.set_claude_session_id(&attach.session_id, &id);
                             argv.push("--session-id".to_string());
                             argv.push(id);
@@ -1682,7 +1807,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                             let codex_model = {
                                 let map = state.runtimes.lock().unwrap();
                                 map.get(&attach.session_id).and_then(|r| {
-                                    r.last_codex_runner.lock().unwrap().as_ref().map(|r| r.model())
+                                    r.last_codex_runner
+                                        .lock()
+                                        .unwrap()
+                                        .as_ref()
+                                        .map(|r| r.model())
                                 })
                             };
                             let codex_model = codex_model.or_else(|| {
@@ -1713,12 +1842,18 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 }
             };
 
-            match state.terminals.create(cols, rows, Some(runtime_cwd.clone()), Some(argv)) {
+            match state
+                .terminals
+                .create(cols, rows, Some(runtime_cwd.clone()), Some(argv))
+            {
                 Ok(terminal_id) => {
                     // Fix 3: lazily insert the sessions row on first terminal activity
                     // (same as on first chat.send). INSERT OR IGNORE is a no-op if the
                     // row already exists.
-                    let _ = state.app.db.create_session(&attach.session_id, &runtime_cwd);
+                    let _ = state
+                        .app
+                        .db
+                        .create_session(&attach.session_id, &runtime_cwd);
                     // Phase 6: remember this is a CLI-attached (agentAttach)
                     // terminal so the on_data/on_exit closures and
                     // TerminalInput below can do blocked-state bookkeeping.
@@ -1727,7 +1862,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         .lock()
                         .unwrap()
                         .insert(terminal_id.clone(), attach.session_id.clone());
-                    let _ = state.out_tx.send(ServerMessage::TerminalCreated { terminal_id });
+                    let _ = state
+                        .out_tx
+                        .send(ServerMessage::TerminalCreated { terminal_id });
                 }
                 Err(err) => {
                     let _ = state.out_tx.send(ServerMessage::Error {
@@ -1745,8 +1882,19 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // Phase 6: user input to a CLI-attached terminal is treated as an
             // answer to whatever prompt it was showing — clear blocked state
             // (if set) so the dot flips back before the next poll/output.
-            if let Some(session_id) = state.terminal_agent_sessions.lock().unwrap().get(&terminal_id).cloned() {
-                let was_blocked = state.app.blocked_sessions.lock().unwrap().remove(&session_id);
+            if let Some(session_id) = state
+                .terminal_agent_sessions
+                .lock()
+                .unwrap()
+                .get(&terminal_id)
+                .cloned()
+            {
+                let was_blocked = state
+                    .app
+                    .blocked_sessions
+                    .lock()
+                    .unwrap()
+                    .remove(&session_id);
                 if was_blocked {
                     notify_session_updated(&state.app, &session_id);
                 }
@@ -1757,7 +1905,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 // terminal *attach* instead. Deduped via `cli_active_sessions`
                 // so the per-keystroke hot path only pays for the DB write +
                 // broadcast once per session.
-                let newly_active = state.app.cli_active_sessions.lock().unwrap().insert(session_id.clone());
+                let newly_active = state
+                    .app
+                    .cli_active_sessions
+                    .lock()
+                    .unwrap()
+                    .insert(session_id.clone());
                 if newly_active {
                     if let Err(err) = state.app.db.mark_cli_activity(&session_id) {
                         tracing::warn!(%session_id, %err, "failed to mark_cli_activity");
@@ -1767,7 +1920,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             }
             state.terminals.input(&terminal_id, &data);
         }
-        ClientMessage::TerminalResize { terminal_id, cols, rows } => {
+        ClientMessage::TerminalResize {
+            terminal_id,
+            cols,
+            rows,
+        } => {
             // Route remote terminals through the hub.
             if let Some(host_id) = state.app.hub.route_for_terminal(&terminal_id) {
                 state.app.hub.forward(&host_id, raw_text);
@@ -1787,8 +1944,18 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // actually dies) does this too, but doing it here as well means a
             // fast follow-up session.delete doesn't race a still-in-flight
             // kill.
-            if let Some(session_id) = state.terminal_agent_sessions.lock().unwrap().remove(&terminal_id) {
-                let was_blocked = state.app.blocked_sessions.lock().unwrap().remove(&session_id);
+            if let Some(session_id) = state
+                .terminal_agent_sessions
+                .lock()
+                .unwrap()
+                .remove(&terminal_id)
+            {
+                let was_blocked = state
+                    .app
+                    .blocked_sessions
+                    .lock()
+                    .unwrap()
+                    .remove(&session_id);
                 if was_blocked {
                     notify_session_updated(&state.app, &session_id);
                 }
@@ -1799,7 +1966,6 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         // -----------------------------------------------------------------------
         // Settings & hosts (Stage D)
         // -----------------------------------------------------------------------
-
         ClientMessage::SettingsGet {} => {
             let s = state.app.settings.get();
             let _ = state.out_tx.send(ServerMessage::SettingsCurrent {
@@ -1844,7 +2010,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     let wire: Vec<SshHostEntry> = all.into_iter().map(host_to_wire).collect();
                     // Broadcast hosts.updated to ALL connections via hub channel.
                     let _ = state.app.hub.hub_events_tx.send(std::sync::Arc::new(
-                        ServerMessage::HostsUpdated { hosts: wire }
+                        ServerMessage::HostsUpdated { hosts: wire },
                     ));
                 }
                 Err(e) => {
@@ -1862,7 +2028,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     let wire: Vec<SshHostEntry> = all.into_iter().map(host_to_wire).collect();
                     // Broadcast hosts.updated to ALL connections via hub channel.
                     let _ = state.app.hub.hub_events_tx.send(std::sync::Arc::new(
-                        ServerMessage::HostsUpdated { hosts: wire }
+                        ServerMessage::HostsUpdated { hosts: wire },
                     ));
                 }
                 Err(e) => {
@@ -1874,7 +2040,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         }
 
         // Fix 4: Archive / unarchive a session.
-        ClientMessage::SessionArchive { session_id, archived } => {
+        ClientMessage::SessionArchive {
+            session_id,
+            archived,
+        } => {
             // Route remote sessions through the hub.
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 state.app.hub.forward(&host_id, raw_text);
@@ -1938,17 +2107,41 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     .collect()
             };
             for terminal_id in attached_terminal_ids {
-                state.terminal_agent_sessions.lock().unwrap().remove(&terminal_id);
+                state
+                    .terminal_agent_sessions
+                    .lock()
+                    .unwrap()
+                    .remove(&terminal_id);
                 state.terminals.kill(&terminal_id);
             }
 
             // Drop every other piece of in-memory bookkeeping keyed by this
             // session id.
             state.app.registry.remove(&session_id);
-            state.app.running_sessions.lock().unwrap().remove(&session_id);
-            state.app.unseen_sessions.lock().unwrap().remove(&session_id);
-            state.app.blocked_sessions.lock().unwrap().remove(&session_id);
-            state.app.session_viewers.lock().unwrap().remove(&session_id);
+            state
+                .app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .remove(&session_id);
+            state
+                .app
+                .unseen_sessions
+                .lock()
+                .unwrap()
+                .remove(&session_id);
+            state
+                .app
+                .blocked_sessions
+                .lock()
+                .unwrap()
+                .remove(&session_id);
+            state
+                .app
+                .session_viewers
+                .lock()
+                .unwrap()
+                .remove(&session_id);
             if state.active_session_id.lock().unwrap().as_deref() == Some(session_id.as_str()) {
                 *state.active_session_id.lock().unwrap() = None;
             }
@@ -1958,9 +2151,14 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     // Fan out to every connection (this one included) via the
                     // same broadcast channel hosts.upsert/delete use, since
                     // the row a normal session.updated event looks up is gone.
-                    let _ = state.app.hub.hub_events_tx.send(Arc::new(ServerMessage::SessionDeleted {
-                        session_id: session_id.clone(),
-                    }));
+                    let _ =
+                        state
+                            .app
+                            .hub
+                            .hub_events_tx
+                            .send(Arc::new(ServerMessage::SessionDeleted {
+                                session_id: session_id.clone(),
+                            }));
                 }
                 Err(e) => {
                     let _ = state.out_tx.send(ServerMessage::Error {
@@ -1992,7 +2190,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 .get_session_layout(&session_id)
                 .unwrap_or(None)
                 .and_then(|raw| serde_json::from_str(&raw).ok());
-            let _ = state.out_tx.send(ServerMessage::SessionLayout { session_id, layout });
+            let _ = state
+                .out_tx
+                .send(ServerMessage::SessionLayout { session_id, layout });
         }
 
         ClientMessage::SessionLayoutSet { session_id, layout } => {
@@ -2006,7 +2206,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // chat message (Fix 3 defers the `sessions` row insert until then)
             // — materialize the row here too so the UPDATE below isn't a
             // silent no-op. INSERT OR IGNORE, same as chat.send's lazy insert.
-            if let Some(cwd) = state.runtimes.lock().unwrap().get(&session_id).map(|r| r.cwd.clone()) {
+            if let Some(cwd) = state
+                .runtimes
+                .lock()
+                .unwrap()
+                .get(&session_id)
+                .map(|r| r.cwd.clone())
+            {
                 let _ = state.app.db.create_session(&session_id, &cwd);
             }
             let layout_str = serde_json::to_string(&layout).unwrap_or_default();
@@ -2037,7 +2243,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         }
 
         // Item 1: directory browser for new-session cwd picker.
-        ClientMessage::FsBrowse { request_id, host_id, path } => {
+        ClientMessage::FsBrowse {
+            request_id,
+            host_id,
+            path,
+        } => {
             let target = host_id.as_deref().unwrap_or("local");
             if target != "local" && !target.is_empty() {
                 // Direct-mode host: no perch to forward to — list over ssh.
@@ -2047,7 +2257,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     let out_tx = state.out_tx.clone();
                     let target = target.to_string();
                     tokio::spawn(async move {
-                        match crate::detached::browse_remote(&host.ssh_host, path.as_deref(), 30).await {
+                        match crate::detached::browse_remote(&host.ssh_host, path.as_deref(), 30)
+                            .await
+                        {
                             Ok((resolved, parent, home, entries)) => {
                                 let _ = out_tx.send(ServerMessage::FsBrowseResult {
                                     request_id,
@@ -2143,7 +2355,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         //   3. reply with exactly one message — `worktree.list.result` /
         //      `worktree.done` / `worktree.error` — always echoing requestId.
         // -------------------------------------------------------------------
-        ClientMessage::WorktreeList { request_id, host_id, repo_path } => {
+        ClientMessage::WorktreeList {
+            request_id,
+            host_id,
+            repo_path,
+        } => {
             if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
                 return;
             }
@@ -2263,7 +2479,11 @@ fn direct_host(state: &Arc<ConnState>, host_id: &str) -> Option<crate::hosts::Ss
 /// round trip on the message loop for every new session, and the cwd is
 /// already chosen from the remote directory browser (`fs.browse` over ssh).
 /// A bad path fails on the first turn with the remote shell's own message.
-fn create_direct_session(state: &Arc<ConnState>, host: &crate::hosts::SshHost, cwd: Option<String>) {
+fn create_direct_session(
+    state: &Arc<ConnState>,
+    host: &crate::hosts::SshHost,
+    cwd: Option<String>,
+) {
     let Some(cwd) = cwd.filter(|c| !c.trim().is_empty()) else {
         let _ = state.out_tx.send(ServerMessage::Error {
             message: format!("pick a directory on {} to start a session there", host.name),
@@ -2410,16 +2630,30 @@ fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEven
                     .map(|r| (r.cwd.clone(), r.last_usage.clone()))
                     .unwrap_or_default()
             };
-            emit(state, session_id, status_message(get_status(&cwd, Some(&last_usage))));
+            emit(
+                state,
+                session_id,
+                status_message(get_status(&cwd, Some(&last_usage))),
+            );
             // Turn complete — mark idle, mark unseen if no one is watching
             // (herdr's `done` state), and broadcast to all connections.
-            state.app.running_sessions.lock().unwrap().remove(session_id);
+            state
+                .app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .remove(session_id);
             mark_unseen_if_unviewed(&state.app, session_id);
             notify_session_updated(&state.app, session_id);
         }
         AgentEvent::Error(message) => {
             // Error also ends the turn — ensure running status can't get stuck.
-            state.app.running_sessions.lock().unwrap().remove(session_id);
+            state
+                .app
+                .running_sessions
+                .lock()
+                .unwrap()
+                .remove(session_id);
             mark_unseen_if_unviewed(&state.app, session_id);
             notify_session_updated(&state.app, session_id);
             emit(state, session_id, ServerMessage::Error { message });
@@ -2454,7 +2688,8 @@ fn append_pending_thinking(state: &Arc<ConnState>, session_id: &str, text: &str)
 fn persist_turn(state: &Arc<ConnState>, session_id: &str) {
     let turn = {
         let map = state.runtimes.lock().unwrap();
-        map.get(session_id).and_then(|r| r.pending_turn.lock().unwrap().take())
+        map.get(session_id)
+            .and_then(|r| r.pending_turn.lock().unwrap().take())
     };
     let Some(turn) = turn else { return };
     if turn.text.is_empty() && turn.thinking.is_empty() {
@@ -2490,7 +2725,8 @@ fn persist_turn(state: &Arc<ConnState>, session_id: &str) {
 fn persist_claude_session_id(state: &Arc<ConnState>, session_id: &str) {
     let claude_session_id = {
         let map = state.runtimes.lock().unwrap();
-        map.get(session_id).and_then(|r| r.claude_runner.claude_session_id())
+        map.get(session_id)
+            .and_then(|r| r.claude_runner.claude_session_id())
     };
     if let Some(id) = claude_session_id {
         let _ = state.app.db.set_claude_session_id(session_id, &id);
@@ -2504,8 +2740,13 @@ fn persist_claude_session_id(state: &Arc<ConnState>, session_id: &str) {
 fn persist_codex_thread_id(state: &Arc<ConnState>, session_id: &str) {
     let thread_id = {
         let map = state.runtimes.lock().unwrap();
-        map.get(session_id)
-            .and_then(|r| r.last_codex_runner.lock().unwrap().as_ref().and_then(|r| r.thread_id()))
+        map.get(session_id).and_then(|r| {
+            r.last_codex_runner
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|r| r.thread_id())
+        })
     };
     if let Some(id) = thread_id {
         let _ = state.app.db.set_codex_thread_id(session_id, &id);
@@ -2570,7 +2811,11 @@ fn wire_to_host(h: SshHostEntry) -> crate::hosts::SshHost {
         // An unrecognised value from a client degrades to `"perch"` rather
         // than being stored verbatim, so a typo can't leave a host in a mode
         // nothing handles (see `hosts::HostMode`).
-        mode: if h.mode == "direct" { h.mode } else { "perch".to_string() },
+        mode: if h.mode == "direct" {
+            h.mode
+        } else {
+            "perch".to_string()
+        },
         direct_url: h.direct_url,
         remote_cmd: h.remote_cmd,
     }
@@ -2612,7 +2857,9 @@ fn append_tail(tail: &mut String, data: &str) {
     const MAX_TAIL: usize = 4096;
     if tail.len() > MAX_TAIL {
         let cutoff = tail.len() - MAX_TAIL;
-        let start = (cutoff..=tail.len()).find(|&i| tail.is_char_boundary(i)).unwrap_or(0);
+        let start = (cutoff..=tail.len())
+            .find(|&i| tail.is_char_boundary(i))
+            .unwrap_or(0);
         tail.drain(..start);
     }
 }
@@ -2643,8 +2890,10 @@ fn blocked_patterns() -> &'static [Regex] {
                 .expect("static blocked-pattern regex must compile"),
             Regex::new(r"(?is)(?:do you want to|would you like to)\b.{0,200}(?:\byes\b|❯)")
                 .expect("static blocked-pattern regex must compile"),
-            Regex::new(r"(?i)allow command\?|action required|press enter to confirm or esc to cancel")
-                .expect("static blocked-pattern regex must compile"),
+            Regex::new(
+                r"(?i)allow command\?|action required|press enter to confirm or esc to cancel",
+            )
+            .expect("static blocked-pattern regex must compile"),
         ]
     })
 }
@@ -2676,7 +2925,10 @@ mod blocked_pattern_tests {
             \x1b[90m  2. No, and tell Claude what to do differently\x1b[0m\r\n\
             \x1b[2m(esc to cancel)\x1b[0m\r\n";
         let tail = strip_ansi(raw);
-        assert!(!tail.contains('\x1b'), "ANSI codes must be stripped: {tail:?}");
+        assert!(
+            !tail.contains('\x1b'),
+            "ANSI codes must be stripped: {tail:?}"
+        );
         assert!(matches_any(&tail), "expected a match on: {tail:?}");
     }
 
@@ -2747,7 +2999,10 @@ mod blocked_pattern_tests {
 
         std::fs::write(projects.join("-tmp-two").join("abc.jsonl"), b"{}").unwrap();
         assert_eq!(claude_conversation_exists_in(&projects, "abc"), Some(true));
-        assert_eq!(claude_conversation_exists_in(&projects, "other"), Some(false));
+        assert_eq!(
+            claude_conversation_exists_in(&projects, "other"),
+            Some(false)
+        );
 
         std::fs::remove_dir_all(&root).ok();
     }

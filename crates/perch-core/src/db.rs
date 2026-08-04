@@ -224,7 +224,10 @@ impl HistoryDb {
             conn.execute("ALTER TABLE sessions ADD COLUMN last_model TEXT", [])?;
         }
         if !existing_session_columns.contains("archived") {
-            conn.execute("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", [])?;
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
         }
         if !existing_session_columns.contains("pane_layout") {
             conn.execute("ALTER TABLE sessions ADD COLUMN pane_layout TEXT", [])?;
@@ -336,7 +339,6 @@ impl HistoryDb {
             Ok(None)
         }
     }
-
 
     pub fn session_exists(&self, id: &str) -> anyhow::Result<bool> {
         Ok(self.get_session(id)?.is_some())
@@ -457,7 +459,15 @@ impl HistoryDb {
         self.conn.lock().unwrap().execute(
             "INSERT INTO messages (session_id, role, content, agent, model, thinking, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![session_id, role, content, agent, model, thinking, now_millis()],
+            params![
+                session_id,
+                role,
+                content,
+                agent,
+                model,
+                thinking,
+                now_millis()
+            ],
         )?;
         Ok(())
     }
@@ -617,7 +627,12 @@ impl HistoryDb {
     /// in-memory one; this copy exists so a *reaper* can tell how much of a
     /// log was ingested, and to make the truncation check on re-attach
     /// meaningful. See `detached.rs` for why recovery still re-reads from 0.
-    pub fn update_detached_cursor(&self, run_id: &str, offset: u64, inode: u64) -> anyhow::Result<()> {
+    pub fn update_detached_cursor(
+        &self,
+        run_id: &str,
+        offset: u64,
+        inode: u64,
+    ) -> anyhow::Result<()> {
         self.conn.lock().unwrap().execute(
             "UPDATE detached_runs SET cursor_offset = ?2, cursor_inode = ?3 WHERE run_id = ?1",
             params![run_id, offset as i64, inode as i64],
@@ -679,7 +694,10 @@ impl HistoryDb {
 
     /// The most recent still-running run for a session, if any — used by
     /// `chat.cancel` to find the process group to signal.
-    pub fn running_detached_run_for_session(&self, session_id: &str) -> anyhow::Result<Option<DetachedRunRow>> {
+    pub fn running_detached_run_for_session(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Option<DetachedRunRow>> {
         Ok(self
             .unfinished_detached_runs()?
             .into_iter()
@@ -739,7 +757,10 @@ mod tests {
     use std::time::Instant;
 
     fn temp_db_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("perch-db-test-{name}-{}.sqlite", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!(
+            "perch-db-test-{name}-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ))
     }
 
     /// Seeds `n_sessions` sessions with `n_messages_per_session` messages
@@ -799,7 +820,11 @@ mod tests {
         let list = db.list_sessions().unwrap();
         let list_elapsed = t0.elapsed();
 
-        assert_eq!(list.len(), ids.len(), "empty session must be filtered out of list_sessions()");
+        assert_eq!(
+            list.len(),
+            ids.len(),
+            "empty session must be filtered out of list_sessions()"
+        );
         assert!(!list.iter().any(|r| r.id == "empty-session"));
 
         let sample: Vec<&String> = ids.iter().step_by(7).collect();
@@ -848,7 +873,10 @@ mod tests {
 
         // Zero messages, cli_activity = 0 (default): invisible to both.
         assert!(
-            !db.list_sessions().unwrap().iter().any(|r| r.id == "cli-sess"),
+            !db.list_sessions()
+                .unwrap()
+                .iter()
+                .any(|r| r.id == "cli-sess"),
             "unmarked CLI session must not appear in list_sessions()"
         );
         assert!(
@@ -860,7 +888,10 @@ mod tests {
         db.mark_cli_activity("cli-sess").unwrap();
 
         assert!(
-            db.list_sessions().unwrap().iter().any(|r| r.id == "cli-sess"),
+            db.list_sessions()
+                .unwrap()
+                .iter()
+                .any(|r| r.id == "cli-sess"),
             "marked CLI session must appear in list_sessions()"
         );
         assert!(

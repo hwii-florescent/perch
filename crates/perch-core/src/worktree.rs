@@ -667,6 +667,8 @@ prunable stale
         assert!(!is_dirty_remove_error(
             "fatal: '/w/x' is a missing but already registered worktree"
         ));
-        assert!(is_not_working_tree_error("fatal: '/w/x' is not a working tree"));
+        assert!(is_not_working_tree_error(
+            "fatal: '/w/x' is not a working tree"
+        ));
     }
 }

@@ -110,10 +110,7 @@ pub struct SettingsPatch {
     /// Deserialized with a custom helper because serde's double-Option
     /// needs special treatment: by default `"defaultCwd": null` and the
     /// field being absent both deserialize as `None`.
-    #[serde(
-        default,
-        deserialize_with = "deserialize_option_option_string"
-    )]
+    #[serde(default, deserialize_with = "deserialize_option_option_string")]
     pub default_cwd: Option<Option<String>>,
     pub theme: Option<String>,
     pub sound_enabled: Option<bool>,
@@ -161,8 +158,7 @@ impl SettingsStore {
 
     /// Open using the canonical `~/.perch/settings.json` path.
     pub fn load_default() -> Self {
-        let path = default_settings_path()
-            .unwrap_or_else(|| PathBuf::from(".perch/settings.json"));
+        let path = default_settings_path().unwrap_or_else(|| PathBuf::from(".perch/settings.json"));
         Self::load(path)
     }
 
@@ -189,8 +185,8 @@ impl SettingsStore {
             guard.custom_models = cm;
         }
         match patch.default_cwd {
-            None => {}                         // absent → unchanged
-            Some(None) => guard.default_cwd = None,  // null → clear
+            None => {}                              // absent → unchanged
+            Some(None) => guard.default_cwd = None, // null → clear
             Some(Some(v)) => guard.default_cwd = Some(v),
         }
         if let Some(theme) = patch.theme {

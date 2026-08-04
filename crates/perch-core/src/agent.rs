@@ -40,10 +40,18 @@ use crate::protocol::ChatUsage;
 pub enum AgentEvent {
     Chunk(String),
     Thinking(String),
-    ToolUse { name: String, input: Value },
-    ToolResult { name: String, result: Value },
+    ToolUse {
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        name: String,
+        result: Value,
+    },
     /// A plan-mode plan (claude only — see [`ClaudeStreamParser::plan_content_of`]).
-    Plan { content: String },
+    Plan {
+        content: String,
+    },
     Done(Option<ChatUsage>),
     Error(String),
 }
@@ -356,12 +364,22 @@ impl ClaudeStreamParser {
                         .unwrap_or(0);
                     ChatUsage {
                         input_tokens,
-                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
-                        cost_usd: evt.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
+                        output_tokens: raw
+                            .get("output_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
+                        cost_usd: evt
+                            .get("total_cost_usd")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0),
                         context_tokens: input_tokens + cache_read + cache_creation,
                     }
                 });
-                if evt.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                if evt
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     let message = evt
                         .get("result")
                         .and_then(Value::as_str)
@@ -384,7 +402,11 @@ impl ClaudeStreamParser {
                         self.pending_tool_uses.insert(
                             index,
                             PendingToolUse {
-                                id: block.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+                                id: block
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string(),
                                 name: block
                                     .get("name")
                                     .and_then(Value::as_str)
@@ -400,7 +422,11 @@ impl ClaudeStreamParser {
                 if let Some(delta) = event.get("delta") {
                     match delta.get("type").and_then(Value::as_str) {
                         Some("text_delta") => {
-                            let text = delta.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                            let text = delta
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
                             let _ = tx.send(AgentEvent::Chunk(text));
                         }
                         Some("thinking_delta") => {
@@ -413,9 +439,12 @@ impl ClaudeStreamParser {
                         }
                         Some("input_json_delta") => {
                             if let Some(pending) = self.pending_tool_uses.get_mut(&index) {
-                                pending
-                                    .json
-                                    .push_str(delta.get("partial_json").and_then(Value::as_str).unwrap_or(""));
+                                pending.json.push_str(
+                                    delta
+                                        .get("partial_json")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or(""),
+                                );
                             }
                         }
                         _ => {} // signature_delta etc. — not surfaced
@@ -424,7 +453,8 @@ impl ClaudeStreamParser {
             }
             Some("content_block_stop") => {
                 if let Some(pending) = self.pending_tool_uses.remove(&index) {
-                    self.tool_name_by_id.insert(pending.id.clone(), pending.name.clone());
+                    self.tool_name_by_id
+                        .insert(pending.id.clone(), pending.name.clone());
                     let input = if pending.json.is_empty() {
                         Value::Object(Default::default())
                     } else {
@@ -477,11 +507,19 @@ impl CodexStreamParser {
                 let Some(item) = evt.get("item") else { return };
                 match item.get("type").and_then(Value::as_str) {
                     Some("agent_message") => {
-                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                        let text = item
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
                         let _ = tx.send(AgentEvent::Chunk(text));
                     }
                     Some("reasoning") => {
-                        let text = item.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                        let text = item
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
                         let _ = tx.send(AgentEvent::Thinking(text));
                     }
                     Some(kind) => {
@@ -514,7 +552,10 @@ impl CodexStreamParser {
                     let input_tokens = raw.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
                     ChatUsage {
                         input_tokens,
-                        output_tokens: raw.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
+                        output_tokens: raw
+                            .get("output_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
                         // codex reports no cost; ChatUsage has no optional cost field.
                         cost_usd: 0.0,
                         context_tokens: input_tokens,
@@ -652,7 +693,6 @@ impl ClaudeRunner {
     pub fn model(&self) -> Option<String> {
         self.state.lock().unwrap().model.clone()
     }
-
 }
 
 /// Whether a `run_once` attempt used `--resume <id>` or `--session-id <id>`
@@ -825,7 +865,10 @@ impl ClaudeRunner {
                 let message = if tail.is_empty() {
                     format!("claude exited with code {}", status.code().unwrap_or(-1))
                 } else {
-                    format!("claude exited with code {}: {tail}", status.code().unwrap_or(-1))
+                    format!(
+                        "claude exited with code {}: {tail}",
+                        status.code().unwrap_or(-1)
+                    )
                 };
                 let _ = tx.send(AgentEvent::Error(message));
             }
@@ -1010,7 +1053,6 @@ impl CodexRunner {
     pub fn model(&self) -> String {
         self.model.clone()
     }
-
 }
 
 impl AgentRunner for CodexRunner {
@@ -1099,7 +1141,10 @@ impl AgentRunner for CodexRunner {
                     let message = if tail.is_empty() {
                         format!("codex exited with code {}", status.code().unwrap_or(-1))
                     } else {
-                        format!("codex exited with code {}: {tail}", status.code().unwrap_or(-1))
+                        format!(
+                            "codex exited with code {}: {tail}",
+                            status.code().unwrap_or(-1)
+                        )
                     };
                     let _ = tx.send(AgentEvent::Error(message));
                 }
@@ -1272,7 +1317,11 @@ mod tests {
             AgentEvent::ToolResult { result, .. } => {
                 let s = result.to_string();
                 assert!(s.contains("[image]"), "{s}");
-                assert!(s.len() < 200, "payload should be tiny, got {} bytes", s.len());
+                assert!(
+                    s.len() < 200,
+                    "payload should be tiny, got {} bytes",
+                    s.len()
+                );
             }
             other => panic!("expected ToolResult, got {other:?}"),
         }
@@ -1323,7 +1372,10 @@ mod tests {
             assert!(!args.contains(&"--effort".to_string()), "{omitted:?}");
             assert!(claude_effort_env(omitted).is_none(), "{omitted:?}");
         }
-        assert_eq!(claude_effort_env(Some("none")), Some(("MAX_THINKING_TOKENS", "0")));
+        assert_eq!(
+            claude_effort_env(Some("none")),
+            Some(("MAX_THINKING_TOKENS", "0"))
+        );
         assert_eq!(claude_effort_env(Some("low")), None);
     }
 
@@ -1358,7 +1410,13 @@ mod tests {
     fn codex_argv_without_knobs_is_the_original_invocation() {
         assert_eq!(
             codex_exec_flags("gpt-5.4-mini", false, None, &[]),
-            vec!["exec", "--json", "--skip-git-repo-check", "-m", "gpt-5.4-mini"]
+            vec![
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "-m",
+                "gpt-5.4-mini"
+            ]
         );
     }
 
@@ -1381,4 +1439,3 @@ mod tests {
         );
     }
 }
-

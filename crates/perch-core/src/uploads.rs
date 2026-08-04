@@ -167,10 +167,7 @@ mod tests {
 
     #[test]
     fn stage_writes_into_a_per_session_directory_without_clobbering() {
-        let tmp = std::env::temp_dir().join(format!(
-            "perch-upload-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp = std::env::temp_dir().join(format!("perch-upload-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&tmp).unwrap();
         // Safety: test-only; no concurrent HOME mutation in this suite.
         unsafe {

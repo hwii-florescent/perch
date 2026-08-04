@@ -79,7 +79,11 @@ impl TerminalManager {
                 CommandBuilder::new(&shell)
             }
         };
-        if let Some(cwd) = cwd.or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string())) {
+        if let Some(cwd) = cwd.or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        }) {
             cmd.cwd(cwd);
         }
         for (key, value) in std::env::vars() {
@@ -88,11 +92,11 @@ impl TerminalManager {
 
         let mut child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // only the master + child are needed after spawn
-        // Split off a killer before `child` is moved into the waiter thread
-        // below — `Child::wait()` blocks that thread, so any later `kill()`
-        // call (from a ws message handler on a different thread) must go
-        // through this independently-clonable handle instead of `child`
-        // itself.
+                          // Split off a killer before `child` is moved into the waiter thread
+                          // below — `Child::wait()` blocks that thread, so any later `kill()`
+                          // call (from a ws message handler on a different thread) must go
+                          // through this independently-clonable handle instead of `child`
+                          // itself.
         let killer = child.clone_killer();
 
         let reader = pair.master.try_clone_reader()?;
@@ -116,7 +120,10 @@ impl TerminalManager {
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => on_data(reader_id.clone(), String::from_utf8_lossy(&buf[..n]).into_owned()),
+                    Ok(n) => on_data(
+                        reader_id.clone(),
+                        String::from_utf8_lossy(&buf[..n]).into_owned(),
+                    ),
                     Err(_) => break,
                 }
             }

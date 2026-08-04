@@ -37,14 +37,14 @@ pub struct ModelLists {
 /// Only bare aliases — dated snapshot ids (e.g. `claude-haiku-4-5-20251001`)
 /// 404 on the GenAI proxy; the aliases are the stable identifiers.
 const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
-    ("claude-fable-5",    "Fable 5"),
-    ("claude-opus-5",     "Opus 5"),
-    ("claude-opus-4-8",   "Opus 4.8"),
-    ("claude-opus-4-7",   "Opus 4.7"),
-    ("claude-opus-4-6",   "Opus 4.6"),
-    ("claude-sonnet-5",   "Sonnet 5"),
+    ("claude-fable-5", "Fable 5"),
+    ("claude-opus-5", "Opus 5"),
+    ("claude-opus-4-8", "Opus 4.8"),
+    ("claude-opus-4-7", "Opus 4.7"),
+    ("claude-opus-4-6", "Opus 4.6"),
+    ("claude-sonnet-5", "Sonnet 5"),
     ("claude-sonnet-4-6", "Sonnet 4.6"),
-    ("claude-haiku-4-5",  "Haiku 4.5"),
+    ("claude-haiku-4-5", "Haiku 4.5"),
 ];
 
 /// Fallback Codex models, used only when the local codex installation has no
@@ -59,14 +59,14 @@ const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
 /// the `isDefault` flag (the historical perch default) — lists are never
 /// reordered around the default; clients preselect the flagged entry.
 const CODEX_CATALOGUE: &[(&str, &str)] = &[
-    ("gpt-5.6-sol",    "GPT-5.6 Sol"),
-    ("gpt-5.6-luna",   "GPT-5.6 Luna"),
-    ("gpt-5.6-terra",  "GPT-5.6 Terra"),
-    ("gpt-5.5",        "GPT-5.5"),
-    ("gpt-5.4",        "GPT-5.4"),
-    ("gpt-5.4-mini",   "GPT-5.4 Mini"),
-    ("gpt-5.4-nano",   "GPT-5.4 Nano"),
-    ("gpt-5.3-codex",  "GPT-5.3 Codex"),
+    ("gpt-5.6-sol", "GPT-5.6 Sol"),
+    ("gpt-5.6-luna", "GPT-5.6 Luna"),
+    ("gpt-5.6-terra", "GPT-5.6 Terra"),
+    ("gpt-5.5", "GPT-5.5"),
+    ("gpt-5.4", "GPT-5.4"),
+    ("gpt-5.4-mini", "GPT-5.4 Mini"),
+    ("gpt-5.4-nano", "GPT-5.4 Nano"),
+    ("gpt-5.3-codex", "GPT-5.3 Codex"),
 ];
 
 /// The flagged default within [`CODEX_CATALOGUE`].
@@ -327,10 +327,7 @@ fn load_codex_models() -> Option<Vec<ModelEntry>> {
 /// Duplicates (by id) are dropped to keep the list clean.
 ///
 /// Stage D replaces this ad-hoc reader with a formal `settings.rs` module.
-fn append_custom_models(
-    claude_list: &mut Vec<ModelEntry>,
-    codex_list: &mut Vec<ModelEntry>,
-) {
+fn append_custom_models(claude_list: &mut Vec<ModelEntry>, codex_list: &mut Vec<ModelEntry>) {
     let settings_path = match dirs_path() {
         Some(p) => p,
         None => return,
@@ -346,7 +343,9 @@ fn append_custom_models(
             return;
         }
     };
-    let Some(custom) = val.get("customModels") else { return };
+    let Some(custom) = val.get("customModels") else {
+        return;
+    };
 
     for (agent_key, target) in [("claude", &mut *claude_list), ("codex", &mut *codex_list)] {
         let Some(arr) = custom.get(agent_key).and_then(|v| v.as_array()) else {
@@ -356,10 +355,7 @@ fn append_custom_models(
             let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            let label = entry
-                .get("label")
-                .and_then(|v| v.as_str())
-                .unwrap_or(id);
+            let label = entry.get("label").and_then(|v| v.as_str()).unwrap_or(id);
             // Dedupe by id.
             if target.iter().any(|m| m.id == id) {
                 continue;
@@ -376,7 +372,11 @@ fn append_custom_models(
 /// Resolve `~/.perch/settings.json` without the `dirs` crate.
 fn dirs_path() -> Option<std::path::PathBuf> {
     let home = std::env::var("HOME").ok()?;
-    Some(std::path::PathBuf::from(home).join(".perch").join("settings.json"))
+    Some(
+        std::path::PathBuf::from(home)
+            .join(".perch")
+            .join("settings.json"),
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -149,9 +149,15 @@ impl Default for SshHostEntry {
     }
 }
 
-fn default_remote_port() -> u16 { 7788 }
-fn default_enabled() -> bool { true }
-fn default_mode() -> String { "perch".to_string() }
+fn default_remote_port() -> u16 {
+    7788
+}
+fn default_enabled() -> bool {
+    true
+}
+fn default_mode() -> String {
+    "perch".to_string()
+}
 
 // ---------------------------------------------------------------------------
 // Shared value types
@@ -592,10 +598,7 @@ pub enum ServerMessage {
     /// `ClaudeStreamParser::plan_content_of`). Codex plan mode (`--sandbox
     /// read-only`) produces no such artifact, so this is claude-only.
     #[serde(rename = "chat.plan", rename_all = "camelCase")]
-    ChatPlan {
-        session_id: String,
-        content: String,
-    },
+    ChatPlan { session_id: String, content: String },
 
     /// Reply to `commands.list` — the slash commands / skills each CLI knows
     /// about in this session's cwd. Either list may be empty (probe failed,

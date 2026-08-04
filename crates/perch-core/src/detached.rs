@@ -277,7 +277,12 @@ impl DetachedManager {
             .attachments
             .iter()
             .enumerate()
-            .map(|(i, local)| format!("{run_dir}/attachments/{i}-{}", sanitize_attachment_name(local)))
+            .map(|(i, local)| {
+                format!(
+                    "{run_dir}/attachments/{i}-{}",
+                    sanitize_attachment_name(local)
+                )
+            })
             .collect();
         // claude reads every attachment itself off the text note; codex takes
         // images through `-i` and only needs the note for the rest.
@@ -1485,7 +1490,10 @@ mod tests {
 
     #[test]
     fn attachment_names_cannot_escape_the_run_directory() {
-        assert_eq!(sanitize_attachment_name("/tmp/x/../../etc/passwd"), "passwd");
+        assert_eq!(
+            sanitize_attachment_name("/tmp/x/../../etc/passwd"),
+            "passwd"
+        );
         assert_eq!(sanitize_attachment_name("my shot.png"), "my_shot.png");
         assert_eq!(sanitize_attachment_name("..."), "attachment");
     }

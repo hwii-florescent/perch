@@ -61,11 +61,7 @@ fn main() {
     // Block (on the tokio runtime) until the core signals it is ready, with a
     // 10-second timeout.  If the core fails to start we exit non-zero.
     let bound_addr = match runtime.block_on(async {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            ready_rx,
-        )
-        .await
+        tokio::time::timeout(std::time::Duration::from_secs(10), ready_rx).await
     }) {
         Ok(Ok(addr)) => addr,
         Ok(Err(_)) => {
@@ -86,9 +82,8 @@ fn main() {
     // automated verification never steals user focus or flashes a window.
     let test_mode = std::env::var("PERCH_DESKTOP_TEST").as_deref() == Ok("1");
 
-    let url: tauri::WebviewUrl = tauri::WebviewUrl::External(
-        url_str.parse().expect("invalid server URL"),
-    );
+    let url: tauri::WebviewUrl =
+        tauri::WebviewUrl::External(url_str.parse().expect("invalid server URL"));
 
     tauri::Builder::default()
         .setup(move |app| {

@@ -163,7 +163,14 @@ async fn run_remote(ssh_host: &str, cwd: &str, bin: &str, args: &[&str], phase: 
 }
 
 async fn probe_claude_remote(ssh_host: &str, cwd: &str) -> String {
-    run_remote(ssh_host, cwd, "claude", &CLAUDE_PROBE_ARGS, "commands claude").await
+    run_remote(
+        ssh_host,
+        cwd,
+        "claude",
+        &CLAUDE_PROBE_ARGS,
+        "commands claude",
+    )
+    .await
 }
 
 async fn probe_codex_remote(ssh_host: &str, cwd: &str) -> String {

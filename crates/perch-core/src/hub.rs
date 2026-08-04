@@ -205,7 +205,9 @@ impl HubManager {
         let names = self.host_names.lock().unwrap();
         states
             .iter()
-            .map(|(id, state)| build_host_info(id, names.get(id).map(|s| s.as_str()).unwrap_or(""), state))
+            .map(|(id, state)| {
+                build_host_info(id, names.get(id).map(|s| s.as_str()).unwrap_or(""), state)
+            })
             .collect()
     }
 
@@ -235,7 +237,13 @@ impl HubManager {
 
         for id in &current_ids {
             if !new_all_ids.contains(id.as_str()) {
-                let name = self.host_names.lock().unwrap().get(id).cloned().unwrap_or_default();
+                let name = self
+                    .host_names
+                    .lock()
+                    .unwrap()
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_default();
                 self.stop_host_task(id);
                 self.host_states.lock().unwrap().remove(id);
                 self.host_names.lock().unwrap().remove(id);
@@ -276,7 +284,10 @@ impl HubManager {
 
         // Handle enabled hosts: start task if new or changed.
         for (id, host) in &new_enabled {
-            self.host_names.lock().unwrap().insert(id.clone(), host.name.clone());
+            self.host_names
+                .lock()
+                .unwrap()
+                .insert(id.clone(), host.name.clone());
             let current_state = {
                 let states = self.host_states.lock().unwrap();
                 states.get(id).cloned()
@@ -323,7 +334,10 @@ impl HubManager {
 
     /// Update the state for a host and broadcast a `host.info` event.
     fn set_host_state(&self, host_id: &str, name: &str, state: HostState) {
-        self.host_states.lock().unwrap().insert(host_id.to_string(), state.clone());
+        self.host_states
+            .lock()
+            .unwrap()
+            .insert(host_id.to_string(), state.clone());
         let msg = Arc::new(build_host_info(host_id, name, &state));
         let _ = self.hub_events_tx.send(msg);
     }
@@ -331,8 +345,14 @@ impl HubManager {
     /// Spawn a background task that manages the WS connection to `host`.
     fn spawn_connection_task(self: &Arc<Self>, host: SshHost) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        self.shutdown_flags.lock().unwrap().insert(host.id.clone(), shutdown_tx);
-        self.running_hosts.lock().unwrap().insert(host.id.clone(), host.clone());
+        self.shutdown_flags
+            .lock()
+            .unwrap()
+            .insert(host.id.clone(), shutdown_tx);
+        self.running_hosts
+            .lock()
+            .unwrap()
+            .insert(host.id.clone(), host.clone());
 
         let hub = self.clone();
         tokio::spawn(async move {
@@ -391,7 +411,10 @@ impl HubManager {
             } else {
                 // SSH tunnel path: health-check → tunnel (agent-fwd + symlink)
                 //   → auto-start (if needed) → health-poll via local port → connect.
-                match self.setup_ssh_tunnel(&host, own_port, &mut shutdown_rx).await {
+                match self
+                    .setup_ssh_tunnel(&host, own_port, &mut shutdown_rx)
+                    .await
+                {
                     Some(url) => url,
                     None => {
                         // setup_ssh_tunnel already set state or shutdown was requested.
@@ -399,7 +422,8 @@ impl HubManager {
                             return;
                         }
                         // Back off and retry.
-                        let sleep = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
+                        let sleep =
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
                         tokio::select! {
                             _ = sleep => {}
                             _ = shutdown_rx.changed() => { return; }
@@ -444,7 +468,10 @@ impl HubManager {
                 host_id: host_id.clone(),
                 ws_tx: ws_tx.clone(),
             });
-            self.connections.lock().unwrap().insert(host_id.clone(), conn);
+            self.connections
+                .lock()
+                .unwrap()
+                .insert(host_id.clone(), conn);
 
             // Sink task: forward queued messages to remote.
             let sink_task = tokio::spawn(async move {
@@ -697,8 +724,15 @@ impl HubManager {
         let remote_port = host.remote_port;
 
         if ssh_host.is_empty() {
-            tracing::warn!("[hub] {}: no sshHost and no directUrl — cannot connect", host.id);
-            self.set_host_state(&host.id, &host.name, HostState::Error("no sshHost configured".to_string()));
+            tracing::warn!(
+                "[hub] {}: no sshHost and no directUrl — cannot connect",
+                host.id
+            );
+            self.set_host_state(
+                &host.id,
+                &host.name,
+                HostState::Error("no sshHost configured".to_string()),
+            );
             return None;
         }
 
@@ -707,8 +741,10 @@ impl HubManager {
         let health_ok = {
             let curl_cmd = format!("curl -s --max-time 3 http://localhost:{remote_port}/");
             let args = [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=5",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
                 ssh_host.as_str(),
                 curl_cmd.as_str(),
             ];
@@ -726,7 +762,11 @@ impl HubManager {
                 Ok(l) => l,
                 Err(e) => {
                     tracing::warn!("[hub] {}: failed to bind free port: {e}", host.id);
-                    self.set_host_state(&host.id, &host.name, HostState::Error(format!("bind failed: {e}")));
+                    self.set_host_state(
+                        &host.id,
+                        &host.name,
+                        HostState::Error(format!("bind failed: {e}")),
+                    );
                     return None;
                 }
             };
@@ -765,7 +805,10 @@ impl HubManager {
         );
         tracing::info!(
             "[hub] {}: starting SSH tunnel (agent-forwarded) :{}→{}:{}",
-            host.id, local_port, ssh_host, remote_port
+            host.id,
+            local_port,
+            ssh_host,
+            remote_port
         );
         // Wrapped in `TunnelGuard` from the moment it exists: every early
         // `return None` below drops the guard, which kills the still-running
@@ -774,14 +817,18 @@ impl HubManager {
         let mut tunnel_child = match tokio::process::Command::new("ssh")
             .args([
                 "-A",
-                "-L", &format!("{local_port}:127.0.0.1:{remote_port}"),
-                "-o", "ExitOnForwardFailure=yes",
+                "-L",
+                &format!("{local_port}:127.0.0.1:{remote_port}"),
+                "-o",
+                "ExitOnForwardFailure=yes",
                 // Bounds the initial TCP+handshake phase; the tunnel-ready
                 // poll below (step 4) additionally kills the child after ~5s
                 // regardless, so this is a defensive backstop against
                 // ProxyCommand wrappers that stall past normal TCP connect.
-                "-o", "ConnectTimeout=10",
-                "-o", "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
                 ssh_host,
                 &tunnel_remote_cmd,
             ])
@@ -795,7 +842,11 @@ impl HubManager {
             Ok(child) => TunnelGuard::new(child),
             Err(e) => {
                 tracing::warn!("[hub] {}: tunnel spawn failed: {e}", host.id);
-                self.set_host_state(&host.id, &host.name, HostState::Error(format!("tunnel failed: {e}")));
+                self.set_host_state(
+                    &host.id,
+                    &host.name,
+                    HostState::Error(format!("tunnel failed: {e}")),
+                );
                 return None;
             }
         };
@@ -833,7 +884,10 @@ impl HubManager {
                 self.set_host_state(&host.id, &host.name, HostState::Error(err));
                 return None;
             }
-            tracing::info!("[hub] {}: SSH tunnel ready on :{local_port} (symlink refreshed)", host.id);
+            tracing::info!(
+                "[hub] {}: SSH tunnel ready on :{local_port} (symlink refreshed)",
+                host.id
+            );
         }
 
         // 5. Auto-start if remote perch was not already running.
@@ -865,22 +919,25 @@ impl HubManager {
                 return None;
             }
 
-            let remote_cmd_template = host
-                .remote_cmd
-                .clone()
-                .unwrap_or_else(|| "cd ~/perch && ./target/debug/perch-core --port {port}".to_string());
+            let remote_cmd_template = host.remote_cmd.clone().unwrap_or_else(|| {
+                "cd ~/perch && ./target/debug/perch-core --port {port}".to_string()
+            });
             let remote_cmd = remote_cmd_template.replace("{port}", &remote_port.to_string());
 
             // Prefix with stable-socket export so tmux child inherits a live agent.
-            let tmux_inner = format!(
-                r#"export SSH_AUTH_SOCK=$HOME/.ssh/perch_auth_sock; {remote_cmd}"#
-            );
+            let tmux_inner =
+                format!(r#"export SSH_AUTH_SOCK=$HOME/.ssh/perch_auth_sock; {remote_cmd}"#);
 
-            tracing::info!("[hub] {}: auto-starting remote perch via tmux (with agent socket)", host.id);
+            tracing::info!(
+                "[hub] {}: auto-starting remote perch via tmux (with agent socket)",
+                host.id
+            );
             let tmux_cmd = format!("tmux new-session -A -d -s perch-core '{tmux_inner}'");
             let start_args = [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
                 ssh_host.as_str(),
                 tmux_cmd.as_str(),
             ];
@@ -899,7 +956,10 @@ impl HubManager {
 
             // 6. Poll up to 15 s for the remote to become healthy — via the
             //    LOCAL tunnel port (no extra ssh round-trips needed).
-            tracing::info!("[hub] {}: waiting for remote perch to come up on tunnel :{local_port}", host.id);
+            tracing::info!(
+                "[hub] {}: waiting for remote perch to come up on tunnel :{local_port}",
+                host.id
+            );
             let mut polls = 0u32;
             loop {
                 if *shutdown_rx.borrow() {
@@ -934,7 +994,8 @@ impl HubManager {
                 let health = tokio::process::Command::new("curl")
                     .args([
                         "-s",
-                        "--max-time", "2",
+                        "--max-time",
+                        "2",
                         &format!("http://127.0.0.1:{local_port}/"),
                     ])
                     .output()
@@ -968,8 +1029,15 @@ impl HubManager {
             };
             if is_connected {
                 tracing::warn!("[hub] {hid}: SSH tunnel exited unexpectedly");
-                hub.host_states.lock().unwrap().insert(hid.clone(), HostState::Error("SSH tunnel exited".to_string()));
-                let msg = Arc::new(build_host_info(&hid, &hname, &HostState::Error("SSH tunnel exited".to_string())));
+                hub.host_states.lock().unwrap().insert(
+                    hid.clone(),
+                    HostState::Error("SSH tunnel exited".to_string()),
+                );
+                let msg = Arc::new(build_host_info(
+                    &hid,
+                    &hname,
+                    &HostState::Error("SSH tunnel exited".to_string()),
+                ));
                 let _ = hub_tx.send(msg);
             }
         });
@@ -991,7 +1059,13 @@ impl HubManager {
             // ----------------------------------------------------------------
             // server.info → cache metadata, transition to Connected
             // ----------------------------------------------------------------
-            ServerMessage::ServerInfo { hostname, is_ssh, platform, claude_models, codex_models } => {
+            ServerMessage::ServerInfo {
+                hostname,
+                is_ssh,
+                platform,
+                claude_models,
+                codex_models,
+            } => {
                 let info = RemoteInfo {
                     hostname: hostname.clone(),
                     platform: platform.clone(),
@@ -1037,7 +1111,10 @@ impl HubManager {
                 // AND broadcast to all connections so the initiating browser
                 // (which forwarded session.create without a registered unicast)
                 // also receives session.created.
-                self.relay_unicast(&PendingKey::Session(session_id.clone()), Arc::new(msg.clone()));
+                self.relay_unicast(
+                    &PendingKey::Session(session_id.clone()),
+                    Arc::new(msg.clone()),
+                );
                 let _ = self.hub_events_tx.send(Arc::new(msg));
             }
 
@@ -1100,7 +1177,10 @@ impl HubManager {
                 let sid = session_id.clone();
                 self.relay_unicast(&PendingKey::Session(sid.clone()), Arc::new(msg));
                 // Clear the pending unicast so the sender doesn't leak.
-                self.pending_unicast.lock().unwrap().remove(&PendingKey::Session(sid));
+                self.pending_unicast
+                    .lock()
+                    .unwrap()
+                    .remove(&PendingKey::Session(sid));
             }
 
             // ----------------------------------------------------------------
@@ -1145,7 +1225,10 @@ impl HubManager {
                     self.swap_session_to_terminal_key(&tid)
                 };
                 // Register the remote terminal → host mapping.
-                self.remote_terminals.lock().unwrap().insert(tid.clone(), host_id.to_string());
+                self.remote_terminals
+                    .lock()
+                    .unwrap()
+                    .insert(tid.clone(), host_id.to_string());
 
                 // Relay the terminal.created message.
                 if let Some(conn_id_tx) = session_id_for_terminal {
@@ -1158,15 +1241,22 @@ impl HubManager {
             // ----------------------------------------------------------------
             // terminal.data / terminal.exit → relay via Terminal unicast
             // ----------------------------------------------------------------
-            ServerMessage::TerminalData { ref terminal_id, .. } => {
+            ServerMessage::TerminalData {
+                ref terminal_id, ..
+            } => {
                 let key = PendingKey::Terminal(terminal_id.clone());
                 self.relay_unicast(&key, Arc::new(msg));
             }
-            ServerMessage::TerminalExit { ref terminal_id, .. } => {
+            ServerMessage::TerminalExit {
+                ref terminal_id, ..
+            } => {
                 let tid = terminal_id.clone();
                 self.relay_unicast(&PendingKey::Terminal(tid.clone()), Arc::new(msg));
                 // Clear the terminal unicast to avoid leaks.
-                self.pending_unicast.lock().unwrap().remove(&PendingKey::Terminal(tid));
+                self.pending_unicast
+                    .lock()
+                    .unwrap()
+                    .remove(&PendingKey::Terminal(tid));
             }
 
             // ----------------------------------------------------------------
@@ -1174,7 +1264,13 @@ impl HubManager {
             // then fan out to all connections (host-wide state, like
             // session.updated — NOT a per-connection unicast reply).
             // ----------------------------------------------------------------
-            ServerMessage::WorkspaceGit { cwd, branch, ahead, behind, .. } => {
+            ServerMessage::WorkspaceGit {
+                cwd,
+                branch,
+                ahead,
+                behind,
+                ..
+            } => {
                 let tagged = ServerMessage::WorkspaceGit {
                     host_id: host_id.to_string(),
                     cwd,
@@ -1190,7 +1286,14 @@ impl HubManager {
             // to the federated host's id (the remote reports "local" from its
             // own point of view, same rationale as workspace.git above).
             // ----------------------------------------------------------------
-            ServerMessage::FsBrowseResult { ref request_id, path, parent, home, entries, .. } => {
+            ServerMessage::FsBrowseResult {
+                ref request_id,
+                path,
+                parent,
+                home,
+                entries,
+                ..
+            } => {
                 let rid = request_id.clone();
                 let tagged = ServerMessage::FsBrowseResult {
                     request_id: rid.clone(),
@@ -1201,7 +1304,10 @@ impl HubManager {
                     entries,
                 };
                 self.relay_unicast(&PendingKey::Browse(rid.clone()), Arc::new(tagged));
-                self.pending_unicast.lock().unwrap().remove(&PendingKey::Browse(rid));
+                self.pending_unicast
+                    .lock()
+                    .unwrap()
+                    .remove(&PendingKey::Browse(rid));
             }
 
             // ----------------------------------------------------------------
@@ -1227,7 +1333,12 @@ impl HubManager {
                     },
                 );
             }
-            ServerMessage::WorktreeDone { ref request_id, action, path, .. } => {
+            ServerMessage::WorktreeDone {
+                ref request_id,
+                action,
+                path,
+                ..
+            } => {
                 let rid = request_id.clone();
                 self.relay_worktree_reply(
                     rid,
@@ -1239,7 +1350,12 @@ impl HubManager {
                     },
                 );
             }
-            ServerMessage::WorktreeError { ref request_id, message, dirty, .. } => {
+            ServerMessage::WorktreeError {
+                ref request_id,
+                message,
+                dirty,
+                ..
+            } => {
                 let rid = request_id.clone();
                 self.relay_worktree_reply(
                     rid,
@@ -1279,7 +1395,9 @@ impl HubManager {
         // Sort: by host_id then by createdAt descending.
         let mut sessions = sessions;
         sessions.sort_by(|a, b| {
-            a.host_id.cmp(&b.host_id).then(b.created_at.cmp(&a.created_at))
+            a.host_id
+                .cmp(&b.host_id)
+                .then(b.created_at.cmp(&a.created_at))
         });
         let _ = self
             .hub_events_tx
@@ -1288,7 +1406,10 @@ impl HubManager {
 
     /// Find a Session unicast key that was registered by `register_terminal_create`
     /// and atomically move it to a Terminal key.  Returns the sender for the found entry.
-    fn swap_session_to_terminal_key(&self, terminal_id: &str) -> Option<UnboundedSender<ServerMessage>> {
+    fn swap_session_to_terminal_key(
+        &self,
+        terminal_id: &str,
+    ) -> Option<UnboundedSender<ServerMessage>> {
         let mut map = self.pending_unicast.lock().unwrap();
         // We look for a key stored as PendingKey::Session("__terminal_create__:<anything>")
         // Actually the convention (set in server.rs) is that for terminal.create the
@@ -1306,27 +1427,37 @@ impl HubManager {
         // a "pending terminal create" slot (meaning: swap to Terminal(terminal_id)
         // when terminal.created arrives).  We find ANY Terminal key that doesn't
         // yet have a real terminal_id registered in remote_terminals.
-        let pending_tc_key = map.keys().find(|k| {
-            if let PendingKey::Terminal(ref id) = k {
-                // A real terminal id won't collide with a session_id because
-                // terminal ids generated by remotes are UUIDs, as are session ids —
-                // but we registered this slot BEFORE the remote assigned the terminal_id,
-                // so the stored key contains the session_id.
-                // Heuristic: if it's NOT in remote_terminals, it's a pending-create slot.
-                !self.remote_terminals.lock().unwrap().contains_key(id.as_str())
-            } else {
-                false
-            }
-        }).cloned();
+        let pending_tc_key = map
+            .keys()
+            .find(|k| {
+                if let PendingKey::Terminal(ref id) = k {
+                    // A real terminal id won't collide with a session_id because
+                    // terminal ids generated by remotes are UUIDs, as are session ids —
+                    // but we registered this slot BEFORE the remote assigned the terminal_id,
+                    // so the stored key contains the session_id.
+                    // Heuristic: if it's NOT in remote_terminals, it's a pending-create slot.
+                    !self
+                        .remote_terminals
+                        .lock()
+                        .unwrap()
+                        .contains_key(id.as_str())
+                } else {
+                    false
+                }
+            })
+            .cloned();
 
         if let Some(old_key) = pending_tc_key {
             let entry = map.remove(&old_key)?;
             let tx = entry.tx;
             // Insert under the real terminal_id.
-            map.insert(PendingKey::Terminal(terminal_id.to_string()), PendingUnicast {
-                conn_id: entry.conn_id,
-                tx: tx.clone(),
-            });
+            map.insert(
+                PendingKey::Terminal(terminal_id.to_string()),
+                PendingUnicast {
+                    conn_id: entry.conn_id,
+                    tx: tx.clone(),
+                },
+            );
             Some(tx)
         } else {
             None
@@ -1361,12 +1492,20 @@ impl HubManager {
 
     /// Return the host_id for a session known to the hub, or `None` if local.
     pub fn route_for_session(&self, session_id: &str) -> Option<String> {
-        self.remote_sessions.lock().unwrap().get(session_id).cloned()
+        self.remote_sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
     }
 
     /// Return the host_id for a terminal known to the hub, or `None` if local.
     pub fn route_for_terminal(&self, terminal_id: &str) -> Option<String> {
-        self.remote_terminals.lock().unwrap().get(terminal_id).cloned()
+        self.remote_terminals
+            .lock()
+            .unwrap()
+            .get(terminal_id)
+            .cloned()
     }
 
     /// Send raw JSON to a connected remote host.
@@ -1381,8 +1520,16 @@ impl HubManager {
 
     /// Register a unicast receiver for the given key.  `conn_id` is the
     /// browser connection that should receive the replies.
-    pub fn register_unicast(&self, key: PendingKey, conn_id: String, tx: UnboundedSender<ServerMessage>) {
-        self.pending_unicast.lock().unwrap().insert(key, PendingUnicast { conn_id, tx });
+    pub fn register_unicast(
+        &self,
+        key: PendingKey,
+        conn_id: String,
+        tx: UnboundedSender<ServerMessage>,
+    ) {
+        self.pending_unicast
+            .lock()
+            .unwrap()
+            .insert(key, PendingUnicast { conn_id, tx });
     }
 
     /// Remove the unicast registration for `key`.
@@ -1393,12 +1540,20 @@ impl HubManager {
     /// Remove all unicast registrations for the given connection id (called on
     /// socket close to prevent leaking senders to dead connections).
     pub fn unregister_all_for_connection(&self, conn_id: &str) {
-        self.pending_unicast.lock().unwrap().retain(|_, u| u.conn_id != conn_id);
+        self.pending_unicast
+            .lock()
+            .unwrap()
+            .retain(|_, u| u.conn_id != conn_id);
     }
 
     /// Return all remote session summaries (tagged with host_id).
     pub fn remote_sessions_snapshot(&self) -> Vec<SessionSummary> {
-        self.remote_session_cache.lock().unwrap().values().cloned().collect()
+        self.remote_session_cache
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
     }
 }
 
@@ -1412,7 +1567,6 @@ impl HubManager {
 /// `mode: "direct"` hosts arrived, so both host modes bound their ssh children
 /// the same way instead of growing two subtly different implementations.
 use crate::ssh::run_ssh_bounded;
-
 
 /// Cheap remote precheck run before auto-starting perch over ssh+tmux. Fails
 /// fast (bounded, ~seconds) with an actionable message instead of letting the
@@ -1431,7 +1585,14 @@ async fn precheck_remote_prereqs(ssh_host: &str, has_custom_cmd: bool) -> Result
     } else {
         "test -d ~/perch && test -x ~/perch/target/debug/perch-core"
     };
-    let args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host, check_cmd];
+    let args = [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        ssh_host,
+        check_cmd,
+    ];
     let out = run_ssh_bounded(&args, 20, "precheck").await?;
     if out.status.success() {
         Ok(())
@@ -1450,7 +1611,14 @@ async fn precheck_remote_prereqs(ssh_host: &str, has_custom_cmd: bool) -> Result
 /// returned string, since this is purely informational.
 async fn capture_start_diagnostics(ssh_host: &str) -> String {
     let cmd = "tmux has-session -t perch-core 2>&1; echo ---; tmux capture-pane -pt perch-core -S -5 2>&1";
-    let args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host, cmd];
+    let args = [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        ssh_host,
+        cmd,
+    ];
     match run_ssh_bounded(&args, 15, "diagnostics").await {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
