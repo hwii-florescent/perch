@@ -11,6 +11,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "../../packages/web/dist": "web-dist"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -10,9 +10,19 @@ marked done; `PLAN.md` is the record.
 
 ## Open items
 
-- **Tauri `Perch.app` bundle** — unblocked now that boot adopts the login-shell
-  PATH; build the bundle and verify a Finder launch end-to-end (codex auth
-  included).
+- **Ship perch to other machines** (the bundle itself is DONE — Phase 11, see
+  `PLAN.md`; `/Applications/perch.app` is installed and verified). What remains is
+  purely distribution, and none of it is code — full detail in
+  `docs/DISTRIBUTION.md`:
+  - ~~the repo is **private**~~ — **resolved**, `hwii-florescent/perch` is public. But there
+    is still **no release**, so the cask's `url` points at an artifact that does not exist;
+  - the app is **ad-hoc signed, not notarized**, so Gatekeeper blocks it on any
+    other Mac. Note Homebrew removes casks failing the Gatekeeper check from the
+    official repo on **2026-09-01**, and `--no-quarantine` is being removed from
+    `brew`, so a personal tap would need users to run `xattr -dr
+    com.apple.quarantine` by hand. Notarizing needs an Apple Developer account;
+  - the build is **arm64-only** (deliberate — see the decision note in the doc).
+  A filled-in cask template is ready at `packaging/homebrew/perch.rb`.
 - **jean-parity backlog** (earlier menu, untouched): @-file mentions, AI commit
   messages / PR descriptions, MCP support, GitHub #-issue mentions, worktree
   auto-cleanup.

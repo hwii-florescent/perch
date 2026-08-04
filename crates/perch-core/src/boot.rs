@@ -3,7 +3,7 @@
 //! db-open / registry / server-run plumbing across two crates.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -208,30 +208,57 @@ pub fn adopt_login_shell_path() {}
 ///
 /// Priority order:
 /// 1. `PERCH_WEB_DIST` environment variable (if set and non-empty).
-/// 2. Exe-relative `../../../packages/web/dist` canonicalized (works when the
-///    binary lives in `target/debug/` or `target/release/`).
-/// 3. Fallback: `packages/web/dist` relative to the working directory.
+/// 2. Exe-relative `../Resources/web-dist` — the packaged `.app` layout, where
+///    the exe is `perch.app/Contents/MacOS/perch-desktop` and the web build is
+///    copied in as a bundle resource (see `bundle.resources` in
+///    `tauri.conf.json`). This MUST be checked, because the desktop window
+///    points at the in-process axum server over `http://127.0.0.1:<port>/`
+///    rather than the `tauri://` asset protocol, so Tauri's *embedded* copy of
+///    `frontendDist` is never consulted — axum serves this directory from disk.
+/// 3. Exe-relative `../../packages/web/dist` — the dev tree, where the binary
+///    lives in `target/debug/` or `target/release/`. (This was `../../../` and
+///    therefore dead: from `<repo>/target/release` it resolved to
+///    `<parent-of-repo>/packages/web/dist`. The dev tree only ever worked via
+///    the CWD fallback below, which meant running the binary from anywhere
+///    other than the repo root also served the placeholder.)
+/// 4. Fallback: `packages/web/dist` relative to the working directory.
+///
+/// A missing directory is not fatal: `server.rs` falls back to a placeholder
+/// page that only exposes the WS endpoint. That page returns HTTP 200, so
+/// status code alone does NOT prove the UI is being served — assert on the
+/// body (or on `index.html`) when verifying a bundle.
 pub fn resolve_web_dist_dir() -> PathBuf {
-    // 1. Env override.
+    // 1. Env override. Taken verbatim and unchecked, so an explicit override
+    //    that is wrong surfaces as the placeholder rather than being silently
+    //    replaced by a guess.
     if let Ok(v) = std::env::var("PERCH_WEB_DIST") {
         if !v.is_empty() {
             return PathBuf::from(v);
         }
     }
 
-    // 2. Exe-relative candidate.
+    // 2 & 3. Exe-relative candidates, first existing one wins.
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-    if let Some(dir) = exe_dir {
-        let candidate = dir.join("../../../packages/web/dist");
-        if let Ok(canonical) = candidate.canonicalize() {
-            return canonical;
-        }
+    if let Some(found) = exe_dir.as_deref().and_then(web_dist_from_exe_dir) {
+        return found;
     }
 
-    // 3. CWD-relative fallback.
+    // 4. CWD-relative fallback.
     PathBuf::from("packages/web/dist")
+}
+
+/// Exe-relative half of [`resolve_web_dist_dir`], split out so it can be tested
+/// against synthetic layouts without spawning a process at a chosen path.
+///
+/// Order is load-bearing: the packaged `.app` layout is checked first so a
+/// bundle can never accidentally resolve to a developer's source tree.
+fn web_dist_from_exe_dir(exe_dir: &Path) -> Option<PathBuf> {
+    ["../Resources/web-dist", "../../packages/web/dist"]
+        .iter()
+        .filter_map(|rel| exe_dir.join(rel).canonicalize().ok())
+        .find(|p| p.is_dir())
 }
 
 /// Core boot sequence shared by the headless binary and the Tauri shell.
@@ -289,7 +316,52 @@ pub async fn boot(
 
 #[cfg(test)]
 mod tests {
-    use super::merge_login_path;
+    use super::{merge_login_path, web_dist_from_exe_dir};
+
+    /// The packaged `.app` layout must resolve. This is the case that shipped
+    /// broken: `Contents/Resources/web-dist` did not exist in the bundle, so
+    /// every launch fell through to the placeholder page.
+    #[test]
+    fn app_bundle_layout_resolves_the_resources_web_dist() {
+        let tmp = std::env::temp_dir().join(format!("perch-boot-bundle-{}", std::process::id()));
+        let macos = tmp.join("perch.app/Contents/MacOS");
+        let web = tmp.join("perch.app/Contents/Resources/web-dist");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::create_dir_all(&web).unwrap();
+
+        let found = web_dist_from_exe_dir(&macos).expect("bundle web-dist should resolve");
+        assert_eq!(found, web.canonicalize().unwrap());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// The dev tree must keep working: `target/{debug,release}/perch-desktop`
+    /// resolves up two levels to the repo's `packages/web/dist`. Guards the
+    /// off-by-one that made this candidate dead.
+    #[test]
+    fn dev_tree_layout_still_resolves_packages_web_dist() {
+        let tmp = std::env::temp_dir().join(format!("perch-boot-dev-{}", std::process::id()));
+        let exe_dir = tmp.join("target/release");
+        let web = tmp.join("packages/web/dist");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&web).unwrap();
+
+        let found = web_dist_from_exe_dir(&exe_dir).expect("dev web-dist should resolve");
+        assert_eq!(found, web.canonicalize().unwrap());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn no_candidate_directory_means_no_match() {
+        let tmp = std::env::temp_dir().join(format!("perch-boot-none-{}", std::process::id()));
+        let exe_dir = tmp.join("some/where");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+
+        assert!(web_dist_from_exe_dir(&exe_dir).is_none());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 
     #[test]
     fn login_entries_come_first_and_current_only_entries_are_appended() {

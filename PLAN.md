@@ -651,6 +651,64 @@ Two fixes found by auditing the environment rather than the code. **Zero protoco
 - **Milestone: a connection now receives only the sessions it is watching, and the codex picker
   honours the user's own config.** ✅ verified.
 
+### Phase 11 — `perch.app` bundle — ✅ done
+The last deferred `PLANS.md` item. **No source changes at all** — this phase is a build,
+a verification, and two documents.
+- `cargo tauri build` (tauri-cli 2.11.4, installed for this) produces
+  `target/release/bundle/macos/perch.app` (~14 MB) and `perch_0.0.1_aarch64.dmg` (~5.3 MB).
+  `npm run build` must run first — `frontendDist` points at `packages/web/dist`, so the app
+  bundles a *snapshot* of the UI and the PWA self-update path does not apply to it.
+- **The Finder-launch risk is the whole reason this was blocked, and it is now proven fixed.**
+  A GUI launch inherits launchd's minimal `PATH`, not the shell's, which historically left
+  `claude`/`codex` unreachable. Tested with `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin`:
+  `boot.rs`'s `adopt_login_shell_path()` recovers both `~/.local/bin` (claude) and
+  `/opt/homebrew/bin` (codex), the server binds an ephemeral port and answers HTTP 200, zero
+  ERROR lines. Verified from the build tree *and* from the installed `/Applications/perch.app`.
+- `/Applications/perch.app` was already present and is byte-identical to this build
+  (`shasum` matched on the binary), carrying only `com.apple.provenance` — no
+  `com.apple.quarantine`, so it launches locally without intervention.
+- **Distribution is deliberately not done**, and the reasons are recorded in
+  `docs/DISTRIBUTION.md` rather than rediscovered later: the repo is private (a cask needs a
+  public URL), the app is ad-hoc signed rather than notarized (Homebrew drops
+  Gatekeeper-failing casks from the official repo on 2026-09-01, and `--no-quarantine` is
+  being removed from `brew`), and the build is arm64-only. A filled-in cask template sits at
+  `packaging/homebrew/perch.rb`.
+- **Universal build skipped on purpose.** It is the least important of the three blockers, and
+  `brew install rust` ships only `aarch64-apple-darwin` (a test `--target x86_64-apple-darwin`
+  compile fails with `can't find crate for std`), so it would mean adding rustup — keg-only
+  because it conflicts with `rust`, and usable only by shadowing brew's toolchain on `PATH`,
+  which `boot.rs` would then propagate to every subprocess. The cask declares
+  `depends_on arch: :arm64` so an Intel user gets a clean refusal instead of a crash.
+- **Milestone: perch is a double-clickable Mac app that finds the user's CLIs from a cold GUI
+  launch.** ✅ verified.
+
+### Phase 11.1 — the bundle had no UI in it — ✅ fixed
+Phase 11 shipped a bundle that booted and then showed the *placeholder* page ("Server is
+running. No web client build found at this path"). Two bugs, one bad verification.
+- **Root cause.** The desktop window uses `WebviewUrl::External` against the in-process axum
+  server, so Tauri's embedded `frontendDist` is never consulted — axum serves the UI **from
+  disk**. Nothing copied `packages/web/dist` into the `.app`, so `Contents/Resources/` held
+  only `icon.icns`. Fix: `bundle.resources` in `tauri.conf.json` maps it to
+  `Contents/Resources/web-dist`, and `resolve_web_dist_dir()` checks `../Resources/web-dist`
+  first (before the dev-tree candidate, so a bundle can never resolve into a source checkout).
+- **Second, pre-existing bug found while fixing the first.** The dev-tree candidate was
+  `../../../packages/web/dist`, which from `<repo>/target/release` resolves to
+  *`<parent-of-repo>`* — it had never matched. The dev tree only ever worked through the
+  CWD-relative fallback, meaning `cargo run` from anywhere but the repo root served the
+  placeholder too. Corrected to `../../`.
+- **Why Phase 11 missed it: the verification was checking the wrong thing.** It asserted
+  HTTP 200, and the placeholder page *is* an HTTP 200. Status code cannot distinguish the two.
+  Re-verified properly: response body contains the app shell and zero occurrences of "No web
+  client build found", `/assets/index-*.js` returns the full ~1.09 MB bundle, process launched
+  from `/` under `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin` so neither the CWD fallback nor a
+  rich PATH could mask the failure. Zero ERROR lines; `~/.local/bin` and `/opt/homebrew/bin`
+  both present in the adopted PATH.
+- `web_dist_from_exe_dir()` split out as a pure function with three unit tests (bundle layout,
+  dev layout, no-match) so the path arithmetic is pinned instead of trusted.
+- `/Applications/perch.app` replaced with the fixed build. Gate: 96 tests pass, `cargo fmt`
+  clean, clippy still exactly 5 distinct warnings (both doc-list ones are in `agent.rs` /
+  `server.rs`, untouched here).
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to
