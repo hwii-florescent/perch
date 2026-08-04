@@ -50,23 +50,34 @@ const CLAUDE_CATALOGUE: &[(&str, &str)] = &[
 /// Fallback Codex models, used only when the local codex installation has no
 /// readable model catalogue (see `load_codex_models`).
 ///
-/// This snapshot was taken from a machine whose `codex` CLI is backed by
-/// corp's `corp-gateway` provider; the slugs (e.g. `gpt-5.6-terra`) are already the
-/// stable identifiers codex expects via `-m`/`--model`, so no alias
-/// translation is needed here (unlike Claude's dated-snapshot problem above).
+/// The slugs (e.g. `gpt-5.6-terra`) are already the stable identifiers codex
+/// expects via `-m`/`--model`, so no alias translation is needed here (unlike
+/// Claude's dated-snapshot problem above).
+///
+/// **This list is maintained by hand — update it when codex ships new models.**
+/// That is a deliberate choice over reading the live list: recent codex-cli
+/// (0.146.0) caches its server-fetched catalogue at `~/.codex/models_cache.json`
+/// in exactly the shape [`parse_codex_catalog`] already parses, so teaching
+/// `load_codex_models` that filename would make this dynamic. It is not wired
+/// up on purpose; a hand-checked list cannot surprise the picker.
+///
+/// Last synced 2026-08-04 against `~/.codex/models_cache.json` (codex-cli
+/// 0.146.0): dropped `gpt-5.4-nano` and `gpt-5.3-codex` (no longer offered),
+/// and swapped luna/terra to match codex's own priority order (sol=1, terra=2,
+/// luna=3). Labels keep perch's space-separated style rather than codex's
+/// hyphenated `display_name` ("GPT-5.6-Sol"), so that entries appended at
+/// runtime by [`label_from_slug`] look the same as these.
 ///
 /// Best-first, in the catalogue's own priority order. `gpt-5.4-mini` carries
 /// the `isDefault` flag (the historical perch default) — lists are never
 /// reordered around the default; clients preselect the flagged entry.
 const CODEX_CATALOGUE: &[(&str, &str)] = &[
     ("gpt-5.6-sol", "GPT-5.6 Sol"),
-    ("gpt-5.6-luna", "GPT-5.6 Luna"),
     ("gpt-5.6-terra", "GPT-5.6 Terra"),
+    ("gpt-5.6-luna", "GPT-5.6 Luna"),
     ("gpt-5.5", "GPT-5.5"),
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 Mini"),
-    ("gpt-5.4-nano", "GPT-5.4 Nano"),
-    ("gpt-5.3-codex", "GPT-5.3 Codex"),
 ];
 
 /// The flagged default within [`CODEX_CATALOGUE`].
