@@ -509,6 +509,62 @@ these features send already existed on both sides.
 - **Milestone: the Hosted composer now offers slash/skill autocomplete, plan mode with an approval
   card, and file attachments — against a backend that already supported all three.** ✅ verified.
 
+### Phase 8 — optimization pass — ✅ done
+The preemptive items audited during Phase 7. No felt slowness had been reported, so the bar was:
+measurably better *and* provably behaviour-preserving, or it doesn't ship. **Zero protocol changes**
+— five files touched in total.
+- **Streaming render** (`views/Chat.tsx`, `store.ts`): a single `chat.chunk` used to copy the whole
+  `messages` array, re-render *every* bubble, and re-run `repairMarkdown` + `marked.parse` +
+  `DOMPurify.sanitize` over each bubble's full text — O(transcript²) per turn. `MessageBubble` is now
+  `memo`ised (default shallow comparator is correct because the store replaces `ChatMessage` objects
+  immutably; `onCopyToInput` is a raw `useState` setter, so already stable), the markdown is behind a
+  `useMemo` keyed on `[message.text, isStreaming]`, and `chat.chunk` text is coalesced into one store
+  write per animation frame. **Measured: 65 → 4 `renderMarkdown` calls for one turn in an 18-message
+  transcript (16×).**
+- The rAF buffer's **load-bearing invariant**: anything that reads or replaces `messages` must flush
+  it *synchronously* first, because `updateStreamingMessage` no-ops once `streamingMessageId` is
+  cleared — a late flush drops text rather than misapplying it. `handleServerMessage` therefore
+  flushes up front for every message type except `chat.chunk` itself, and `switchSession`,
+  `createSessionOnHost`, `switchAwayFromActiveSession` and the disconnect handler each flush before
+  resetting state. Backgrounded tabs stop firing rAF, which is safe *only* because of that rule:
+  `chat.done` flushes on arrival.
+- **Database access** (`db.rs`, `server.rs`): added the missing
+  `messages(session_id, role, id)` index — the schema previously had exactly one index, on
+  `detached_runs`, while `list_sessions()` ran a `WHERE EXISTS` plus three correlated subqueries all
+  of that shape. **Measured on 200 sessions × 200 messages (40k rows): `list_sessions()` 354 ms → 0.60
+  ms; `EXPLAIN QUERY PLAN` moves from `SCAN messages` ×3 to `SEARCH … USING INDEX`.** Verified the
+  migration applies to *existing* databases (`migrate()` runs on every `open()`), not just fresh ones.
+- Added `HistoryDb::get_session_row(id)` — the `session_events_tx` forwarder was running the entire
+  `list_sessions()` query once per event *per connected client* only to `.find()` one row. The shared
+  `SELECT` body and row-mapping function are factored into `SESSION_LIST_ROW_SELECT` /
+  `session_list_row_from_row` so a `session.updated` push can never disagree with the same row in
+  `session.list`. It deliberately keeps the `WHERE EXISTS` message filter: the old `.find()` over the
+  filtered list already skipped messageless sessions, so dropping it would be an observable change.
+- The git poll no longer shells out `git` per cwd every 5 s with **zero clients connected**. Gated on
+  a `connected_clients: AtomicUsize` (decremented by an RAII `ConnCountGuard`, so no exit path can
+  forget it), with a `Notify` that runs a prompt pass on connect — preserving the pre-existing
+  "cache warm by first connect" property that `handle_socket` depends on.
+- **Release profile**: added `[profile.release]` with `lto = "thin"` + `codegen-units = 1`.
+  **Measured A/B on an identical source tree: 10,176,752 → 8,304,000 bytes (−1.79 MB, −18.4%)**, at
+  roughly +60% build time.
+- **`panic = "abort"` was planned and deliberately rejected.** There is no `catch_unwind` in the
+  crate, so the planned check passed — but that check was aimed at the wrong risk. perch runs ~22
+  long-lived `tokio::spawn` tasks (per connection, per terminal, per hub host) and unwraps mutex
+  guards throughout; unwinding is what keeps a panic in one connection's task from taking down every
+  other session and every in-flight agent turn. Availability of a long-lived server beats a marginal
+  size win. Reasoning is recorded in a comment above the profile block.
+- Verified: `cargo build` (both crates), `cargo clippy --workspace --all-targets` (exactly the 5
+  pre-existing warnings, zero new), `cargo test -p perch-core` **78/78 green** (77 baseline + one new
+  correctness test asserting `get_session_row` agrees field-for-field with `list_sessions`; timings
+  are printed, never asserted, so the test can't go flaky on a loaded machine), `npm run build` clean.
+  **Full Playwright suite: 93 tests, 91 passed / 2 skipped / 0 failed** (5.3 min) — one better than
+  the Phase 7 baseline of 90/3, since a content-dependent `chat-ui` skip didn't fire. Plus a headless
+  streaming smoke confirming a completed reply is exact and does not change after several idle frames
+  (the direct test that the rAF buffer strands nothing). `~/.perch/settings.json` verified byte-
+  identical after the suite.
+- **Milestone: the two quadratic hot paths are gone and the server no longer works when nobody is
+  watching — with no protocol change and no behaviour change.** ✅ verified.
+
 ### Later phases (post v0.1)
 - **ACP transport migration**: replace the headless `claude -p --output-format stream-json` /
   `codex exec --json` runners with real Agent Client Protocol (JSON-RPC over stdio to
@@ -520,27 +576,21 @@ these features send already existed on both sides.
 - Side panel (file tree, fuzzy search, diff by branch / last changes); full status bar
   (context + cost); open-source vs corp-internal split.
 
-### Phase 8 (planned) — optimization pass
-Nothing here is urgent — no felt slowness was reported; these are code-evidenced and preemptive,
-found during a Phase 7 audit and recorded so they don't have to be re-derived.
-- **`chat.chunk` is O(transcript²) per turn.** `store.ts`'s `updateStreamingMessage` does
-  `messages.map(...)` — a full array copy per token — and `MessageBubble` is unmemoized with
-  `renderMarkdown(...)` called inline in render, so *every* bubble re-runs `repairMarkdown` +
-  `marked.parse` + `DOMPurify.sanitize` over its whole text on *every* token. Fix: `memo` the bubble,
-  `useMemo` the markdown, rAF-coalesce chunks.
-- **`list_sessions()` is unindexed and over-called.** Four correlated subqueries per session row
-  against `messages`, and the only index in the schema is `detached_runs_status` — there is **no**
-  index on `messages(session_id, role, id)`. It is re-run per-connection per-event by the
-  `session_events_tx` forwarder *just to find one row*, plus every 5 s by the git poll task.
-- **Zero `spawn_blocking` in the crate** — every rusqlite call runs inline on a tokio worker behind
-  a `std::sync::Mutex<Connection>`.
-- **No `[profile.release]`** anywhere in the workspace — no LTO, default codegen-units.
+### Deferred out of Phase 8 — considered and not done
+Each of these was examined during Phase 8 and left alone on purpose; the reasoning is here so it
+isn't re-derived.
+- **`spawn_blocking` for rusqlite** — every DB call still runs inline on a tokio worker behind a
+  `std::sync::Mutex<Connection>`. Wrapping them would make the whole `HistoryDb` API async and ripple
+  through every call site, adding real deadlock surface, for a local SQLite file that — now that it
+  is indexed — answers in microseconds. Revisit only if a measurement shows actual runtime stalls.
 - **Ring buffer holds cloned `ServerMessage`s including every `chat.chunk`** (500/session);
-  `DetachedSink` additionally clones each chunk per connected client out of its `Arc`.
-- **Git poll shells out per distinct cwd every 5 s forever**, even with zero clients connected.
-- **Structure/test gaps**: `server.rs` 2669 lines, `store.ts` ~1600, `styles.css` ~3900; protocol
-  parity is hand-maintained with no test asserting it; `db.rs`, `registry.rs`, `hub.rs`,
-  `protocol.rs`, `settings.rs`, `hosts.rs`, `status.rs`, `terminal.rs` have zero unit tests.
+  `DetachedSink` additionally clones each chunk per connected client out of its `Arc`. Dropping
+  chunks would shrink it a lot, but replaying them is how a reconnecting client rebuilds a mid-turn
+  partial message — that's a design decision about reconnect semantics, not an optimization.
+- **Structure/test gaps**: `server.rs` ~2700 lines, `store.ts` ~1500, `styles.css` ~4000; protocol
+  parity is hand-maintained with no test asserting it; `registry.rs`, `hub.rs`, `protocol.rs`,
+  `settings.rs`, `hosts.rs`, `status.rs`, `terminal.rs` have zero unit tests (`db.rs` gained one in
+  Phase 8). Maintainability rather than speed — worth its own phase.
 - Already optimized, leave alone: `terminalBus.ts` deliberately bypasses zustand for PTY bytes.
 
 ---

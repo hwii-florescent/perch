@@ -698,6 +698,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const newProject = s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
     writeActiveHostStored(newHostId);
     writeActiveProjectStored(newProject);
+    flushChunkBuffer();
     set({
       messages: [],
       streamingMessageId: null,
@@ -782,6 +783,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // connect (see ws.ts), and that housekeeping create must not drag the
     // sidebar off whatever project the user was last looking at.
     writeActiveHostStored(hostId);
+    flushChunkBuffer();
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });
       set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });
@@ -977,6 +979,46 @@ function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void
 }
 
 /**
+ * `chat.chunk` arrives token-by-token and, unbuffered, drove one full
+ * `messages` array copy (+ full-transcript re-render) per token. Coalesce a
+ * burst of chunks into a single store write per animation frame instead.
+ *
+ * Correctness-critical: any code path that can read or replace `messages`
+ * must flush this buffer synchronously first, or trailing tokens can be
+ * silently dropped (the buffer applies via `updateStreamingMessage`, which
+ * itself no-ops once `streamingMessageId` is cleared/changed — so a flush
+ * that arrives "too late" loses text rather than misapplying it). Every
+ * `handleServerMessage` case other than "chat.chunk" flushes up front, and
+ * every store action that resets `messages`/`streamingMessageId` flushes
+ * before doing so.
+ */
+let chunkBuffer = "";
+let chunkRaf: number | null = null;
+
+function flushChunkBuffer(): void {
+  if (chunkRaf != null) {
+    cancelAnimationFrame(chunkRaf);
+    chunkRaf = null;
+  }
+  if (!chunkBuffer) return;
+  const text = chunkBuffer;
+  chunkBuffer = "";
+  updateStreamingMessage((m) => ({
+    ...m,
+    text: m.text + text,
+    turnStartedAt: m.turnStartedAt ?? Date.now(),
+  }));
+}
+
+function scheduleChunkFlush(): void {
+  if (chunkRaf != null) return;
+  chunkRaf = requestAnimationFrame(() => {
+    chunkRaf = null;
+    flushChunkBuffer();
+  });
+}
+
+/**
  * The active session just went away — it was deleted, or archived (archiving
  * hides a session everywhere, so an open archived chat must be closed exactly
  * the way a deleted one is). Switch to the most recent remaining session on
@@ -1000,6 +1042,7 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
   } catch {
     // ignore
   }
+  flushChunkBuffer();
   usePerchStore.setState({
     sessionId: null,
     messages: [],
@@ -1009,6 +1052,10 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
 }
 
 function handleServerMessage(msg: ServerMessage): void {
+  // Flush any rAF-buffered chat.chunk text before processing anything else,
+  // so e.g. chat.done/error see the fully up-to-date message text instead of
+  // racing a still-pending animation frame (see flushChunkBuffer above).
+  if (msg.type !== "chat.chunk") flushChunkBuffer();
   switch (msg.type) {
     case "session.created": {
       usePerchStore.setState({ sessionId: msg.sessionId });
@@ -1240,11 +1287,8 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.chunk": {
-      updateStreamingMessage((m) => ({
-        ...m,
-        text: m.text + msg.text,
-        turnStartedAt: m.turnStartedAt ?? Date.now(),
-      }));
+      chunkBuffer += msg.text;
+      scheduleChunkFlush();
       break;
     }
     case "chat.thinking": {
@@ -1476,6 +1520,7 @@ socket.onMessage(handleServerMessage);
 socket.onConnectionChange((connected) => {
   // Dropping the transport also invalidates the session; a fresh
   // session.create/subscribe handshake runs on reconnect (see ws.ts).
+  if (!connected) flushChunkBuffer();
   usePerchStore.setState(connected ? { connected } : { connected, sessionId: null });
 });
 // Apply herdr's default look (catppuccin) immediately so there's no flash of

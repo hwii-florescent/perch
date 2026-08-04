@@ -8,3 +8,13 @@ default-members = ["crates/perch-core"]
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
+
+# Release builds are shipped artifacts (the devpod server and the Tauri bundle),
+# so trade build time for a smaller, faster binary. Deliberately NOT setting
+# `panic = "abort"`: perch runs ~22 long-lived `tokio::spawn` tasks (per
+# connection, per terminal, per hub host) and unwraps mutex guards throughout, so
+# unwinding is what keeps a panic in one connection's task from taking down every
+# other session and every in-flight agent turn with it.
+[profile.release]
+lto = "thin"
+codegen-units = 1

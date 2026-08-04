@@ -190,6 +190,15 @@ struct AppState {
     /// outlives the WS connection that started it, and must not be cancelled
     /// when that connection closes.
     detached: Arc<DetachedManager>,
+    /// Number of currently-open WS connections, incremented/decremented in
+    /// `handle_socket`. Lets `spawn_git_poll_task` skip its per-tick work
+    /// (a `list_sessions()` call plus one `git` subprocess per distinct cwd)
+    /// when nobody is around to see the result.
+    connected_clients: Arc<std::sync::atomic::AtomicUsize>,
+    /// Woken by `handle_socket` on every new connection so the git-poll task
+    /// runs a prompt pass instead of waiting up to 5s for cold/stale data —
+    /// see `spawn_git_poll_task`.
+    git_poll_notify: Arc<tokio::sync::Notify>,
 }
 
 /// `AppState`'s implementation of the detached-turn callback interface.
@@ -316,6 +325,8 @@ pub async fn run(
         hosts,
         hub,
         detached,
+        connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        git_poll_notify: Arc::new(tokio::sync::Notify::new()),
     };
 
     // The detached manager needs `AppState` to report turn progress, and
@@ -369,54 +380,82 @@ pub async fn run(
 /// Background task (Phase 6): every 5s, recompute the git branch +
 /// ahead/behind status for every distinct cwd among local sessions, and
 /// broadcast `workspace.git` to all connections whenever a cwd's value
-/// changes. Runs an initial pass immediately (before the first sleep) so the
+/// changes. Runs an initial pass immediately (before the first wait) so the
 /// `workspace_git` cache is warm by the time the first client connects,
 /// letting `handle_socket` push a snapshot without waiting up to 5s.
+///
+/// Ticks after the initial pass skip the `list_sessions()` + per-cwd `git`
+/// subprocess work entirely when `connected_clients` is zero — nobody is
+/// connected to see a `workspace.git` broadcast, and no `handle_socket` will
+/// read `workspace_git` until a client shows up. `handle_socket` notifies
+/// `git_poll_notify` on every new connection so a pass runs promptly right
+/// then, rather than the new client waiting up to 5s for the next tick.
 ///
 /// Uses `tokio::process::Command` (async) for the one `git rev-list`
 /// subprocess per cwd per tick (see `status::get_ahead_behind`) so this never
 /// blocks the async runtime.
 fn spawn_git_poll_task(state: AppState) {
     tokio::spawn(async move {
+        // Unconditional first pass: no client can possibly be connected yet
+        // (this task is spawned before the router starts accepting
+        // connections), so gating on `connected_clients` here would leave
+        // the cache cold. This is what keeps the "warm by first connect"
+        // property regardless of the zero-client gating below.
+        run_git_poll_pass(&state).await;
+
         loop {
-            let cwds: HashSet<String> = state
-                .db
-                .list_sessions()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|row| row.cwd)
-                .collect();
-
-            for cwd in cwds {
-                let branch = crate::status::get_branch(&cwd);
-                let branch = if branch.is_empty() { None } else { Some(branch) };
-                let (ahead, behind) = crate::status::get_ahead_behind(&cwd).await.unwrap_or((0, 0));
-                let fingerprint = (branch.clone(), ahead, behind);
-
-                let changed = {
-                    let mut cache = state.workspace_git.lock().unwrap();
-                    if cache.get(&cwd) == Some(&fingerprint) {
-                        false
-                    } else {
-                        cache.insert(cwd.clone(), fingerprint.clone());
-                        true
-                    }
-                };
-
-                if changed {
-                    let _ = state.hub.hub_events_tx.send(Arc::new(ServerMessage::WorkspaceGit {
-                        host_id: "local".to_string(),
-                        cwd: cwd.clone(),
-                        branch,
-                        ahead,
-                        behind,
-                    }));
-                }
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                _ = state.git_poll_notify.notified() => {}
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            if state.connected_clients.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                continue;
+            }
+            run_git_poll_pass(&state).await;
         }
     });
+}
+
+/// One pass of the git-poll task's work: recompute branch/ahead/behind for
+/// every distinct cwd among local sessions and broadcast `workspace.git` for
+/// whichever cwds changed. Factored out of [`spawn_git_poll_task`] so it can
+/// be called both for the unconditional startup pass and for gated ticks.
+async fn run_git_poll_pass(state: &AppState) {
+    let cwds: HashSet<String> = state
+        .db
+        .list_sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| row.cwd)
+        .collect();
+
+    for cwd in cwds {
+        let branch = crate::status::get_branch(&cwd);
+        let branch = if branch.is_empty() { None } else { Some(branch) };
+        let (ahead, behind) = crate::status::get_ahead_behind(&cwd).await.unwrap_or((0, 0));
+        let fingerprint = (branch.clone(), ahead, behind);
+
+        let changed = {
+            let mut cache = state.workspace_git.lock().unwrap();
+            if cache.get(&cwd) == Some(&fingerprint) {
+                false
+            } else {
+                cache.insert(cwd.clone(), fingerprint.clone());
+                true
+            }
+        };
+
+        if changed {
+            let _ = state.hub.hub_events_tx.send(Arc::new(ServerMessage::WorkspaceGit {
+                host_id: "local".to_string(),
+                cwd: cwd.clone(),
+                branch,
+                ahead,
+                behind,
+            }));
+        }
+    }
 }
 
 fn placeholder_response(base_path: &str, url: &str) -> axum::response::Response {
@@ -610,7 +649,26 @@ struct ConnState {
     terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
 
+/// RAII guard that decrements `AppState::connected_clients` on drop, so the
+/// count stays correct no matter which path `handle_socket` exits through
+/// (normal close, error, or a future early return/panic) — the decrement
+/// can't be forgotten because it isn't spelled out at each exit point.
+struct ConnCountGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for ConnCountGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 async fn handle_socket(socket: WebSocket, app: AppState) {
+    // Counted for `spawn_git_poll_task`'s zero-client gate; notify it so a
+    // fresh pass runs now instead of the client waiting up to 5s for the
+    // next tick. The guard's `Drop` decrements on every exit path below.
+    app.connected_clients.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    app.git_poll_notify.notify_one();
+    let _conn_count_guard = ConnCountGuard(app.connected_clients.clone());
+
     let (mut sender, mut receiver) = socket.split();
     let (out_tx, mut out_rx) = unbounded_channel::<ServerMessage>();
 
@@ -749,8 +807,11 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 Ok(evt) => {
                     // Look up the current DB row for this session, build a
                     // summary with the live running snapshot, and push it.
-                    let rows = event_db.list_sessions().unwrap_or_default();
-                    let Some(row) = rows.into_iter().find(|r| r.id == evt.session_id) else {
+                    // `get_session_row` is the single-row counterpart of
+                    // `list_sessions()` (shared SELECT body — see db.rs) so
+                    // this can't ever disagree with what `session.list`
+                    // would say about the same row.
+                    let Some(row) = event_db.get_session_row(&evt.session_id).unwrap_or(None) else {
                         continue;
                     };
                     let running = event_running.lock().unwrap();

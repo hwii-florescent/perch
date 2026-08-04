@@ -71,6 +71,57 @@ pub struct SessionListRow {
     pub host_id: String,
 }
 
+/// Shared `SELECT` body for [`HistoryDb::list_sessions`] and
+/// [`HistoryDb::get_session_row`] — column list and column *order* must stay
+/// identical between the two so [`session_list_row_from_row`] can map both
+/// result sets the same way, and so a `session.updated` push (built from
+/// `get_session_row`) can never disagree with the equivalent row in
+/// `session.list` (built from `list_sessions`). Callers append their own
+/// `WHERE`/`ORDER BY` clause.
+const SESSION_LIST_ROW_SELECT: &str = "SELECT
+                s.id,
+                s.cwd,
+                s.created_at,
+                COALESCE(
+                    NULLIF(s.title_override, ''),
+                    (SELECT SUBSTR(content, 1, 40)
+                     FROM messages
+                     WHERE session_id = s.id AND role = 'user'
+                     ORDER BY id ASC LIMIT 1),
+                    ''
+                ) AS title,
+                (SELECT agent
+                 FROM messages
+                 WHERE session_id = s.id AND role = 'assistant'
+                 ORDER BY id DESC LIMIT 1) AS last_agent,
+                (SELECT model
+                 FROM messages
+                 WHERE session_id = s.id AND role = 'assistant'
+                 ORDER BY id DESC LIMIT 1) AS last_model,
+                s.archived,
+                s.host_id
+             FROM sessions s
+             ";
+
+/// Row-mapping closure shared by `list_sessions` / `get_session_row` so the
+/// column->field mapping cannot drift between the two call sites.
+fn session_list_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionListRow> {
+    Ok(SessionListRow {
+        id: row.get(0)?,
+        cwd: row.get(1)?,
+        created_at: row.get(2)?,
+        title: row.get(3)?,
+        last_agent: row.get(4)?,
+        last_model: row.get(5)?,
+        archived: row.get::<_, i32>(6).unwrap_or(0) != 0,
+        host_id: row
+            .get::<_, Option<String>>(7)
+            .unwrap_or(None)
+            .filter(|h| !h.is_empty())
+            .unwrap_or_else(|| "local".to_string()),
+    })
+}
+
 pub struct HistoryDb {
     conn: Mutex<Connection>,
 }
@@ -116,7 +167,9 @@ impl HistoryDb {
                 model TEXT,
                 thinking TEXT,
                 created_at INTEGER NOT NULL
-            );",
+            );
+            CREATE INDEX IF NOT EXISTS messages_session_role
+                ON messages(session_id, role, id);",
         )?;
 
         let mut existing_columns = std::collections::HashSet::new();
@@ -423,55 +476,49 @@ impl HistoryDb {
     /// Used to build `session.list` and `session.updated` wire messages.
     pub fn list_sessions(&self) -> anyhow::Result<Vec<SessionListRow>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT
-                s.id,
-                s.cwd,
-                s.created_at,
-                COALESCE(
-                    NULLIF(s.title_override, ''),
-                    (SELECT SUBSTR(content, 1, 40)
-                     FROM messages
-                     WHERE session_id = s.id AND role = 'user'
-                     ORDER BY id ASC LIMIT 1),
-                    ''
-                ) AS title,
-                (SELECT agent
-                 FROM messages
-                 WHERE session_id = s.id AND role = 'assistant'
-                 ORDER BY id DESC LIMIT 1) AS last_agent,
-                (SELECT model
-                 FROM messages
-                 WHERE session_id = s.id AND role = 'assistant'
-                 ORDER BY id DESC LIMIT 1) AS last_model,
-                s.archived,
-                s.host_id
-             FROM sessions s
+        let sql = format!(
+            "{SESSION_LIST_ROW_SELECT}
              WHERE EXISTS (
                  SELECT 1 FROM messages WHERE session_id = s.id
              )
-             ORDER BY s.created_at DESC",
-        )?;
+             ORDER BY s.created_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok(SessionListRow {
-                    id: row.get(0)?,
-                    cwd: row.get(1)?,
-                    created_at: row.get(2)?,
-                    title: row.get(3)?,
-                    last_agent: row.get(4)?,
-                    last_model: row.get(5)?,
-                    archived: row.get::<_, i32>(6).unwrap_or(0) != 0,
-                    host_id: row
-                        .get::<_, Option<String>>(7)
-                        .unwrap_or(None)
-                        .filter(|h| !h.is_empty())
-                        .unwrap_or_else(|| "local".to_string()),
-                })
-            })?
+            .query_map([], session_list_row_from_row)?
             .filter_map(Result::ok)
             .collect();
         Ok(rows)
+    }
+
+    /// Single-row counterpart to [`Self::list_sessions`], used by the
+    /// `session_events_tx` forwarder in `server.rs` to fetch the one row that
+    /// changed instead of re-running the full multi-subquery list query per
+    /// event per connected client. Column semantics are shared with
+    /// `list_sessions` via [`SESSION_LIST_ROW_SELECT`] / [`session_list_row_from_row`]
+    /// so a `session.updated` push can never disagree with the row the same
+    /// session would have in `session.list`.
+    ///
+    /// Deliberately keeps the same `WHERE EXISTS (... messages ...)` filter
+    /// as `list_sessions`: a session with zero messages yet is not returned,
+    /// matching prior behaviour (the old call site built the full list via
+    /// `list_sessions()` and then `.find()`d the id in it — a messageless
+    /// session was never in that list, so it never produced a `session.updated`
+    /// push either).
+    pub fn get_session_row(&self, id: &str) -> anyhow::Result<Option<SessionListRow>> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "{SESSION_LIST_ROW_SELECT}
+             WHERE s.id = ?1 AND EXISTS (
+                 SELECT 1 FROM messages WHERE session_id = s.id
+             )"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query_map(params![id], session_list_row_from_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -645,4 +692,108 @@ fn now_millis() -> i64 {
 fn default_db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     Path::new(&home).join(".perch").join("history.sqlite")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn temp_db_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("perch-db-test-{name}-{}.sqlite", uuid::Uuid::new_v4()))
+    }
+
+    /// Seeds `n_sessions` sessions with `n_messages_per_session` messages
+    /// each in one transaction — bypasses `add_message`'s one-autocommit-per-
+    /// row cost, since this is a measurement harness for `list_sessions()` /
+    /// `get_session_row()`, not a test of the insert path itself. Returns the
+    /// seeded session ids in insertion order.
+    fn seed(db: &HistoryDb, n_sessions: usize, n_messages_per_session: usize) -> Vec<String> {
+        let mut ids = Vec::with_capacity(n_sessions);
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch("BEGIN").unwrap();
+        for i in 0..n_sessions {
+            let id = format!("sess-{i:04}");
+            conn.execute(
+                "INSERT INTO sessions (id, cwd, created_at, host_id) VALUES (?1, ?2, ?3, 'local')",
+                params![id, format!("/tmp/proj-{}", i % 5), i as i64],
+            )
+            .unwrap();
+            for j in 0..n_messages_per_session {
+                let role = if j % 2 == 0 { "user" } else { "assistant" };
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, agent, model, thinking, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
+                    params![id, role, format!("message body {j} for {id}"), "claude", "claude-haiku-4-5", j as i64],
+                )
+                .unwrap();
+            }
+            ids.push(id);
+        }
+        conn.execute_batch("COMMIT").unwrap();
+        ids
+    }
+
+    /// Correctness (not timing) is what this test asserts on — see the
+    /// workstream note about timing-based assertions being flaky in CI.
+    /// Timing numbers are printed via `eprintln!` (visible with `--nocapture`)
+    /// for the write-up, not asserted on.
+    ///
+    /// Seeds ~200 sessions x 200 messages (40,000 rows) — roughly the shape
+    /// `messages_session_role` (db.rs migration) is meant to help with — then
+    /// checks that `get_session_row(id)` agrees field-for-field with the
+    /// matching row from `list_sessions()` for a sample of ids, and that the
+    /// `WHERE EXISTS` (has-at-least-one-message) filter behaves identically
+    /// for both: a session with zero messages appears in neither.
+    #[test]
+    fn get_session_row_matches_list_sessions_over_a_large_seed() {
+        let path = temp_db_path("bench");
+        let db = HistoryDb::open(&path).unwrap();
+        let ids = seed(&db, 200, 200);
+
+        // A session with no messages yet must be invisible to both queries —
+        // this is the `WHERE EXISTS` semantic `get_session_row` deliberately
+        // preserves from `list_sessions` (see its doc comment).
+        db.create_session("empty-session", "/tmp/empty").unwrap();
+
+        let t0 = Instant::now();
+        let list = db.list_sessions().unwrap();
+        let list_elapsed = t0.elapsed();
+
+        assert_eq!(list.len(), ids.len(), "empty session must be filtered out of list_sessions()");
+        assert!(!list.iter().any(|r| r.id == "empty-session"));
+
+        let sample: Vec<&String> = ids.iter().step_by(7).collect();
+        let t1 = Instant::now();
+        for id in &sample {
+            let row = db
+                .get_session_row(id)
+                .unwrap()
+                .unwrap_or_else(|| panic!("get_session_row returned None for seeded session {id}"));
+            let expected = list.iter().find(|r| &r.id == *id).unwrap();
+            assert_eq!(row.id, expected.id);
+            assert_eq!(row.cwd, expected.cwd);
+            assert_eq!(row.created_at, expected.created_at);
+            assert_eq!(row.title, expected.title);
+            assert_eq!(row.last_agent, expected.last_agent);
+            assert_eq!(row.last_model, expected.last_model);
+            assert_eq!(row.archived, expected.archived);
+            assert_eq!(row.host_id, expected.host_id);
+        }
+        let get_elapsed = t1.elapsed();
+
+        assert!(db.get_session_row("empty-session").unwrap().is_none());
+        assert!(db.get_session_row("does-not-exist").unwrap().is_none());
+
+        eprintln!(
+            "[bench] {} sessions x 200 messages: list_sessions() = {list_elapsed:?}; \
+             get_session_row() x{} = {get_elapsed:?} (avg {:?}/call)",
+            ids.len(),
+            sample.len(),
+            get_elapsed / sample.len() as u32,
+        );
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
 }

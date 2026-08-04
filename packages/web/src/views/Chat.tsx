@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { diffLines } from "diff";
 import { usePerchStore, type ChatMessage, type ToolCallEntry } from "../store";
@@ -398,7 +398,13 @@ function injectCodeCopyButtons(container: HTMLElement | null): void {
 // MessageBubble
 // ---------------------------------------------------------------------------
 
-function MessageBubble({ message, onCopyToInput }: { message: ChatMessage; onCopyToInput: (text: string) => void }) {
+const MessageBubble = memo(function MessageBubble({
+  message,
+  onCopyToInput,
+}: {
+  message: ChatMessage;
+  onCopyToInput: (text: string) => void;
+}) {
   const hasThinkingOrTools = message.thinking || message.tools.length > 0;
   const isStreaming = message.streaming;
   const markdownRef = useRef<HTMLDivElement>(null);
@@ -427,6 +433,11 @@ function MessageBubble({ message, onCopyToInput }: { message: ChatMessage; onCop
   }, [toolGroups, message.thinking]);
 
   const editBadges = useMemo(() => computeEditBadges(message.tools, toolIndexToRow), [message.tools, toolIndexToRow]);
+
+  const renderedMarkdown = useMemo(
+    () => renderMarkdown(message.text, isStreaming),
+    [message.text, isStreaming],
+  );
 
   useEffect(() => {
     injectCodeCopyButtons(markdownRef.current);
@@ -498,7 +509,7 @@ function MessageBubble({ message, onCopyToInput }: { message: ChatMessage; onCop
         <div
           ref={markdownRef}
           className="message__markdown"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text, isStreaming) }}
+          dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
         />
       ) : message.text ? (
         <div className="message__text">{message.text}</div>
@@ -527,7 +538,7 @@ function MessageBubble({ message, onCopyToInput }: { message: ChatMessage; onCop
       )}
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // ChatView
