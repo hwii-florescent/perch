@@ -1944,21 +1944,31 @@ body {
 
 /* --- Terminal -------------------------------------------------------------- */
 
+/* No padding and no background of our own: xterm paints its own background
+ * from the user's terminal profile, and a perch-coloured inset around it
+ * would frame the terminal in a colour their terminal never uses. Edge to
+ * edge is also what a terminal window looks like. */
 .terminal {
   position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
-  background: var(--panel-bg);
-  padding: 0.4rem;
+  padding: 0;
 }
 
 .terminal__surface {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  /* xterm measures this element to derive its grid, and `createPerchTerminal`
+   * re-fits on every container resize. Without `overflow: hidden` a repaint
+   * that momentarily overflows can grow the box, which grows the fit, which
+   * grows the box — a resize feedback loop that shows up as the terminal
+   * "creeping" while the window is being dragged. */
+  overflow: hidden;
 }
+
 
 .terminal__exited {
   position: absolute;
@@ -2030,6 +2040,113 @@ body {
   text-align: center;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- CLI start panel ------------------------------------------------------
+ * Shown by CLI mode in place of a terminal until the user picks where to
+ * work (see components/CliStartPanel.tsx). Scrolls as a whole because the
+ * embedded DirectoryBrowser can be taller than a short pane. */
+
+.cli-start {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: var(--panel-bg);
+}
+
+.cli-start__card {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cli-start__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cli-start__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--subtext-0);
+}
+
+.cli-start__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cli-start__section-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--overlay-1);
+}
+
+.cli-start__projects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* The three button shapes share a base; only the emphasis differs. */
+.cli-start__primary,
+.cli-start__secondary,
+.cli-start__project {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--overlay-0);
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cli-start__primary:hover,
+.cli-start__secondary:hover,
+.cli-start__project:hover {
+  background: var(--surface-1);
+}
+
+.cli-start__primary {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-bg));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+  font-weight: 600;
+}
+
+.cli-start__secondary {
+  background: transparent;
+  border-style: dashed;
+  color: var(--subtext-0);
+  font-size: 0.85rem;
+}
+
+/* Paths are long and the interesting end is the tail, so clip from the left
+ * rather than truncating away the directory that identifies the project. */
+.cli-start__cwd {
+  font-size: 0.75rem;
+  color: var(--subtext-0);
+  font-weight: 400;
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- Terminal search (Wave 1 item 5) -------------------------------------- */

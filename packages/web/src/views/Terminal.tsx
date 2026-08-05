@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
+import type { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { usePerchStore } from "../store";
 import { onTerminalData } from "../terminalBus";
-import { xtermThemeFromTokens } from "../themes";
+import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
@@ -12,7 +11,7 @@ import { attachClipboardImagePaste } from "../clipboardImagePaste";
 export function TerminalView({ active }: { active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const perchTermRef = useRef<PerchTerminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
@@ -20,7 +19,6 @@ export function TerminalView({ active }: { active: boolean }) {
 
   const createTerminal = usePerchStore((s) => s.createTerminal);
   const sendTerminalInput = usePerchStore((s) => s.sendTerminalInput);
-  const resizeTerminal = usePerchStore((s) => s.resizeTerminal);
   const killTerminal = usePerchStore((s) => s.killTerminal);
   const exitCode = usePerchStore((s) =>
     terminalId ? (s.terminals[terminalId]?.exitCode ?? null) : null,
@@ -34,19 +32,21 @@ export function TerminalView({ active }: { active: boolean }) {
   // ever terminated this PTY server-side.
   useEffect(() => {
     if (!containerRef.current) return;
-    const term = new Terminal({
-      convertEol: true,
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-      theme: xtermThemeFromTokens(),
-    });
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(containerRef.current);
-    fitAddon.fit();
+    // The terminal keeps itself fitted to its container (ResizeObserver
+    // inside `createPerchTerminal`); this callback only forwards the new grid
+    // to the PTY, and `terminalIdRef` is read lazily because the first fits
+    // happen before the create round-trip resolves.
+    const perchTerm = createPerchTerminal(
+      containerRef.current,
+      (cols, rows) => {
+        const id = terminalIdRef.current;
+        if (id) usePerchStore.getState().resizeTerminal(id, cols, rows);
+      },
+      usePerchStore.getState().terminalProfile,
+    );
+    const term = perchTerm.term;
     xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
+    perchTermRef.current = perchTerm;
     setTermInstance(term);
 
     let disposed = false;
@@ -77,7 +77,7 @@ export function TerminalView({ active }: { active: boolean }) {
       disposed = true;
       detachClipboardPaste();
       dataSub.dispose();
-      term.dispose();
+      perchTerm.dispose();
       if (currentId) killTerminal(currentId);
     };
     // Deliberately run once: creating a PTY per mount, not per prop change.
@@ -90,21 +90,15 @@ export function TerminalView({ active }: { active: boolean }) {
     return onTerminalData(terminalId, (data) => xtermRef.current?.write(data));
   }, [terminalId]);
 
-  // Re-fit whenever the pane becomes visible or the viewport changes (tab
-  // switch, phone rotation, gateway window resize).
+  // Container-size changes are handled by the ResizeObserver inside
+  // `createPerchTerminal`. This only covers the one transition it can miss:
+  // becoming the active tab again at exactly the size we were hidden at, so
+  // no resize event ever fires — but the emulator may still owe the PTY a
+  // sync (fits taken while the pane measured 0x0 are skipped by design).
   useEffect(() => {
-    const refit = () => {
-      if (!active) return;
-      const fitAddon = fitAddonRef.current;
-      const term = xtermRef.current;
-      if (!fitAddon || !term) return;
-      fitAddon.fit();
-      if (terminalId) resizeTerminal(terminalId, term.cols, term.rows);
-    };
-    refit();
-    window.addEventListener("resize", refit);
-    return () => window.removeEventListener("resize", refit);
-  }, [active, terminalId, resizeTerminal]);
+    if (!active) return;
+    perchTermRef.current?.fit();
+  }, [active, terminalId]);
 
   return (
     <div className="terminal">

@@ -58,8 +58,9 @@ pub struct SessionListRow {
     pub id: String,
     pub cwd: String,
     pub created_at: i64,
-    /// First user-message snippet (up to 40 chars) via a correlated subquery,
-    /// or empty string if the session has no user messages yet.
+    /// Display title: a user rename if set, else the first user-message
+    /// snippet (up to 40 chars) via a correlated subquery, else the CLI-mode
+    /// first-prompt title (`cli_title`), else empty.
     pub title: String,
     /// Agent name from the most recent assistant message, if any.
     pub last_agent: Option<String>,
@@ -69,6 +70,9 @@ pub struct SessionListRow {
     pub archived: bool,
     /// `"local"` or a direct-mode host id — see [`SessionRow::host_id`].
     pub host_id: String,
+    /// The `cli_activity` flag: has this session ever been typed into in CLI
+    /// mode. Surfaced on the wire as `SessionSummary::cli_started`.
+    pub cli_started: bool,
 }
 
 /// Shared `SELECT` body for [`HistoryDb::list_sessions`] and
@@ -88,6 +92,7 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
                      FROM messages
                      WHERE session_id = s.id AND role = 'user'
                      ORDER BY id ASC LIMIT 1),
+                    NULLIF(s.cli_title, ''),
                     ''
                 ) AS title,
                 (SELECT agent
@@ -99,7 +104,8 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
                  WHERE session_id = s.id AND role = 'assistant'
                  ORDER BY id DESC LIMIT 1) AS last_model,
                 s.archived,
-                s.host_id
+                s.host_id,
+                s.cli_activity
              FROM sessions s
              ";
 
@@ -130,6 +136,7 @@ fn session_list_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionLis
             .unwrap_or(None)
             .filter(|h| !h.is_empty())
             .unwrap_or_else(|| "local".to_string()),
+        cli_started: row.get::<_, i32>(8).unwrap_or(0) != 0,
     })
 }
 
@@ -261,6 +268,18 @@ impl HistoryDb {
                 [],
             )?;
         }
+        // The auto-title in `SESSION_LIST_ROW_SELECT` is "first row in
+        // `messages` with role='user'", which a CLI-mode session never has —
+        // so every CLI session stayed permanently titled "(new session)" in
+        // the nav no matter how much work happened in it. `cli_title` is the
+        // CLI-mode equivalent of that first user message: the first prompt
+        // the user submits into the agent's PTY, reconstructed from the
+        // keystroke stream (see `server.rs`'s `CliTitleBuffer`). Written
+        // once and never overwritten, so it behaves like the first-message
+        // title rather than drifting to whatever was typed most recently.
+        if !existing_session_columns.contains("cli_title") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN cli_title TEXT", [])?;
+        }
 
         // One row per *detached turn* launched on a direct host. This is the
         // durable half of detached mode: everything needed to re-attach to a
@@ -380,6 +399,25 @@ impl HistoryDb {
             params![session_id],
         )?;
         Ok(())
+    }
+
+    /// Record the CLI-mode auto-title (the session's first submitted prompt)
+    /// — see the `cli_title` migration comment.
+    ///
+    /// The `WHERE ... cli_title IS NULL OR cli_title = ''` clause is the
+    /// whole point: this is a *first* prompt, not a *latest* prompt, so once
+    /// a session has one it must never be rewritten. Enforcing that in SQL
+    /// rather than in the caller means a restart (which drops the in-memory
+    /// "already titled" set) can't retitle a session from its next prompt.
+    /// Returns whether a row was actually written, so the caller only pays
+    /// for a `session.updated` broadcast when something changed.
+    pub fn set_cli_title(&self, id: &str, title: &str) -> anyhow::Result<bool> {
+        let changed = self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET cli_title = ?2
+             WHERE id = ?1 AND (cli_title IS NULL OR cli_title = '')",
+            params![id, title],
+        )?;
+        Ok(changed > 0)
     }
 
     /// Set (or clear, with an empty string) a user-chosen title override for
@@ -898,6 +936,55 @@ mod tests {
             db.get_session_row("cli-sess").unwrap().is_some(),
             "marked CLI session must appear in get_session_row()"
         );
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// CLI-mode sessions get their nav title from `cli_title` (their first
+    /// submitted prompt, reconstructed in `cli_title.rs`), and that title must
+    /// behave like Hosted mode's first-user-message title: written once,
+    /// never rewritten by later prompts, and always outranked by a user
+    /// rename.
+    #[test]
+    fn cli_title_is_write_once_and_loses_to_a_rename() {
+        let path = temp_db_path("cli-title");
+        let db = HistoryDb::open(&path).unwrap();
+        db.create_session("cli-sess", "/tmp/cli-proj").unwrap();
+        db.mark_cli_activity("cli-sess").unwrap();
+
+        // No title yet -> the nav shows its "(new session)" placeholder.
+        assert_eq!(db.get_session_row("cli-sess").unwrap().unwrap().title, "");
+
+        // First submitted prompt becomes the title.
+        assert!(db.set_cli_title("cli-sess", "fix the login bug").unwrap());
+        assert_eq!(
+            db.get_session_row("cli-sess").unwrap().unwrap().title,
+            "fix the login bug"
+        );
+
+        // A later prompt must not retitle the session — this is the guard
+        // that makes a perch restart mid-session safe (the in-memory
+        // "already titled" state is gone, but the DB still refuses).
+        let rewrote = db.set_cli_title("cli-sess", "later prompt").unwrap();
+        assert!(!rewrote);
+        assert_eq!(
+            db.get_session_row("cli-sess").unwrap().unwrap().title,
+            "fix the login bug"
+        );
+
+        // An explicit rename still wins, and survives further prompts.
+        db.set_title_override("cli-sess", "Login work").unwrap();
+        assert!(!db.set_cli_title("cli-sess", "another prompt").unwrap());
+        assert_eq!(
+            db.get_session_row("cli-sess").unwrap().unwrap().title,
+            "Login work"
+        );
+
+        // list_sessions must agree with get_session_row about all of it.
+        let listed = db.list_sessions().unwrap();
+        let row = listed.iter().find(|r| r.id == "cli-sess").unwrap();
+        assert_eq!(row.title, "Login work");
 
         drop(db);
         let _ = std::fs::remove_file(&path);

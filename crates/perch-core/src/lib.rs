@@ -1,11 +1,13 @@
 pub mod agent;
 pub mod boot;
+pub mod cli_title;
 pub mod clipboard_image;
 pub mod commands;
 pub mod db;
 pub mod detached;
 pub mod hosts;
 pub mod hub;
+pub mod iterm_profile;
 pub mod models;
 pub mod protocol;
 pub mod registry;

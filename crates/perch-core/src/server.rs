@@ -9,6 +9,7 @@
 //! reader thread) can push `ServerMessage`s to the client via an mpsc
 //! channel — mirroring Node's single-threaded-but-interleaved event loop.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -30,10 +31,12 @@ use uuid::Uuid;
 use crate::agent::{
     AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions,
 };
+use crate::cli_title::CliTitleBuffer;
 use crate::db::HistoryDb;
 use crate::detached::{DetachedManager, FinishedTurn, TurnRequest, TurnSink};
 use crate::hosts::HostsStore;
 use crate::hub::{HubManager, PendingKey};
+use crate::iterm_profile::TerminalProfile;
 use crate::models::{self, ModelLists};
 use crate::protocol::{
     AgentKind, ChatUsage, ClientMessage, CustomModelsData, FsEntry, ServerMessage, SessionStatus,
@@ -180,6 +183,12 @@ struct AppState {
     /// monotonic (`mark_cli_activity` never unsets it), so the set can never
     /// go stale relative to the DB.
     cli_active_sessions: Arc<Mutex<HashSet<String>>>,
+    /// Pending first-prompt reconstruction for CLI-attached sessions — see
+    /// `cli_title.rs` and `maybe_capture_cli_title`, which documents what the
+    /// three states (vacant / `Some` / `None`) mean. Keyed by session id;
+    /// `None` is the settled state, so an established session's keystrokes
+    /// cost exactly one map lookup.
+    cli_title_buffers: Arc<Mutex<HashMap<String, Option<CliTitleBuffer>>>>,
     /// Last known git branch + ahead/behind for each local session cwd,
     /// populated by the background poll task spawned in `run()`. Keyed by
     /// cwd (local host only — "local" is implicit). Used both to detect
@@ -192,6 +201,10 @@ struct AppState {
     session_events_tx: tokio::sync::broadcast::Sender<SessionUpdatedEvent>,
     /// Model lists discovered at startup — sent to each client in `server.info`.
     model_lists: Arc<ModelLists>,
+    /// The user's terminal appearance, read once at startup so CLI panes can
+    /// match their real terminal instead of perch's UI theme. `None` when
+    /// unavailable — see `iterm_profile.rs`.
+    terminal_profile: Option<TerminalProfile>,
     /// Persistent settings store (custom models, default cwd, …).
     settings: Arc<SettingsStore>,
     /// SSH hosts configuration store.
@@ -307,6 +320,19 @@ pub async fn run(
         model_lists.codex.len(),
     );
 
+    // Read the user's terminal appearance once (best-effort, see
+    // `iterm_profile.rs`) so CLI panes render in their colours and font.
+    let terminal_profile = crate::iterm_profile::load();
+    match &terminal_profile {
+        Some(p) => tracing::info!(
+            "[perch] terminal profile: font {:?} {:?}, {} colour(s)",
+            p.font_family,
+            p.font_size,
+            p.theme.len(),
+        ),
+        None => tracing::info!("[perch] no terminal profile found; using xterm defaults"),
+    }
+
     // Load settings store.
     let settings = Arc::new(SettingsStore::load_default());
     tracing::info!(
@@ -340,9 +366,11 @@ pub async fn run(
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
         cli_active_sessions: Arc::new(Mutex::new(HashSet::new())),
+        cli_title_buffers: Arc::new(Mutex::new(HashMap::new())),
         workspace_git: Arc::new(Mutex::new(HashMap::new())),
         session_events_tx,
         model_lists,
+        terminal_profile,
         settings,
         hosts,
         hub,
@@ -822,6 +850,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         platform: server_info.platform.to_string(),
         claude_models: state.app.model_lists.claude.clone(),
         codex_models: state.app.model_lists.codex.clone(),
+        terminal_profile: state.app.terminal_profile.clone(),
     });
 
     // Send the current hosts list so the sidebar can render remote sections
@@ -1063,6 +1092,7 @@ fn build_session_summary(
         // with no perch of its own, and the sidebar must group it under that
         // host (see `db.rs`'s `sessions.host_id`).
         host_id: row.host_id,
+        cli_started: row.cli_started,
         archived: row.archived,
         unseen: unseen.contains(&row.id),
         blocked: blocked.contains(&row.id),
@@ -1178,6 +1208,70 @@ fn notify_session_updated(app: &AppState, session_id: &str) {
     let _ = app.session_events_tx.send(SessionUpdatedEvent {
         session_id: session_id.to_string(),
     });
+}
+
+/// Feed one CLI keystroke payload into this session's first-prompt
+/// reconstruction, and persist the result as the session title once the user
+/// submits a line. See `cli_title.rs` for what "reconstruction" means and
+/// `db.rs::set_cli_title` for the write-once rule.
+///
+/// The `Option<CliTitleBuffer>` slot encodes three states in one map lookup,
+/// which is what keeps this cheap on the per-keystroke hot path:
+///   - vacant: first keystroke this process lifetime; consult the DB once.
+///   - `Some`: actively buffering an untitled session.
+///   - `None`: settled (already titled, or we just titled it) — every later
+///     keystroke returns immediately.
+fn maybe_capture_cli_title(app: &AppState, session_id: &str, data: &str) {
+    let submitted = {
+        let mut buffers = app.cli_title_buffers.lock().unwrap();
+        let slot = match buffers.entry(session_id.to_string()) {
+            Entry::Occupied(occupied) => occupied.into_mut(),
+            Entry::Vacant(vacant) => {
+                // Seeding from the DB (not just from "have we seen this
+                // session yet") is what makes a perch restart mid-session
+                // safe: the buffer map is empty after a restart, and without
+                // this check the session's *next* prompt would look like its
+                // first. It also keeps us off sessions that already have a
+                // title from Hosted mode or a user rename.
+                let already_titled = match app.db.get_session_row(session_id) {
+                    Ok(Some(row)) => !row.title.trim().is_empty(),
+                    // No row (or a DB error): stay out of the way rather than
+                    // risk titling something we can't see.
+                    Ok(None) => true,
+                    Err(err) => {
+                        tracing::warn!(%session_id, %err, "cli title: session lookup failed");
+                        true
+                    }
+                };
+                vacant.insert(if already_titled {
+                    None
+                } else {
+                    Some(CliTitleBuffer::new())
+                })
+            }
+        };
+        match slot {
+            None => return,
+            Some(buffer) => buffer.feed(data),
+        }
+    };
+
+    let Some(title) = submitted else { return };
+    match app.db.set_cli_title(session_id, &title) {
+        Ok(wrote) => {
+            // Settle the slot either way: `Ok(false)` means another writer
+            // beat us to it, which is just as final as writing it ourselves.
+            app.cli_title_buffers
+                .lock()
+                .unwrap()
+                .insert(session_id.to_string(), None);
+            if wrote {
+                notify_session_updated(app, session_id);
+            }
+        }
+        // Leave the buffer in place so the next submitted line retries.
+        Err(err) => tracing::warn!(%session_id, %err, "failed to set cli_title"),
+    }
 }
 
 fn emit(state: &Arc<ConnState>, session_id: &str, message: ServerMessage) {
@@ -1976,6 +2070,17 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     }
                     notify_session_updated(&state.app, &session_id);
                 }
+
+                // Reconstruct this session's first submitted prompt from the
+                // keystrokes and use it as the nav title (CLI mode's stand-in
+                // for Hosted mode's first-user-message title — see
+                // `cli_title.rs` and `db.rs::set_cli_title`).
+                //
+                // Gated on the session having no title yet so an established
+                // session's keystrokes cost one map lookup and nothing else:
+                // `set_cli_title` refuses to overwrite, and we drop the buffer
+                // as soon as it succeeds.
+                maybe_capture_cli_title(&state.app, &session_id, &data);
             }
             state.terminals.input(&terminal_id, &data);
         }
@@ -3150,6 +3255,7 @@ mod session_viewer_filter_tests {
                 last_model: None,
                 status: SessionStatus::Idle,
                 host_id: "local".to_string(),
+                cli_started: false,
                 archived: false,
                 unseen: false,
                 blocked: false,

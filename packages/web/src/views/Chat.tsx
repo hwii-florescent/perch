@@ -18,6 +18,7 @@ import {
 } from "../composerCommands";
 import { uploadAttachment, type StagedAttachment } from "../attachments";
 import { AgentCliTerminal } from "./AgentCliTerminal";
+import { CliStartPanel } from "../components/CliStartPanel";
 import type { AgentKind, CommandEntry } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
@@ -566,6 +567,20 @@ export function ChatView() {
   // when this value changes out from under a mounted pane).
   const mode: "hosted" | "cli" = usePerchStore((s) => s.settings?.chatMode ?? "hosted");
 
+  // CLI mode only mounts a terminal once the user has actually chosen to work
+  // somewhere — either they created this session (`cliStartedSessions`), or
+  // it already has CLI history on the server (`cliStarted`) and is therefore
+  // safe to resume unattended. Everything else gets the start panel. Without
+  // this, the blank session the transport mints on every connect spawned an
+  // agent process in the server's default cwd the moment the app opened.
+  const cliStartedLocally = usePerchStore((s) =>
+    sessionId ? (s.cliStartedSessions[sessionId] ?? false) : false,
+  );
+  const cliStartedOnServer = usePerchStore((s) =>
+    sessionId ? (s.sessions.find((x) => x.id === sessionId)?.cliStarted ?? false) : false,
+  );
+  const cliReady = !!sessionId && (cliStartedLocally || cliStartedOnServer);
+
   const [text, setText] = useState("");
   // Plan mode is a composer-level toggle, not a one-shot: leaving it ON after
   // sending matches how the CLI's `--permission-mode plan` behaves (it's a
@@ -764,7 +779,7 @@ export function ChatView() {
 
   return (
     <div className="chat">
-      {mode === "cli" && sessionId ? (
+      {mode === "cli" && cliReady && sessionId ? (
         <AgentCliTerminal
           key={`${sessionId}-${agent}`}
           sessionId={sessionId}
@@ -772,6 +787,8 @@ export function ChatView() {
           cliError={cliError}
           onExitCli={() => updateSettings({ chatMode: "hosted" })}
         />
+      ) : mode === "cli" ? (
+        <CliStartPanel agent={agent} />
       ) : (
         <>
           <div className="chat__list-container">

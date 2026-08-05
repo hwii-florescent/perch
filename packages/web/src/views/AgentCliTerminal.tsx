@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
+import type { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { AgentKind } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { onTerminalData } from "../terminalBus";
-import { xtermThemeFromTokens } from "../themes";
+import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
@@ -23,7 +22,7 @@ export function AgentCliTerminal({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const perchTermRef = useRef<PerchTerminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
@@ -61,24 +60,29 @@ export function AgentCliTerminal({
   // unaffected: the server resumes the same claude session id either way.
   useEffect(() => {
     if (!containerRef.current) return;
-    const term = new Terminal({
-      convertEol: true,
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-      theme: xtermThemeFromTokens(),
-    });
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(containerRef.current);
-    fitAddon.fit();
+    const perchTerm = createPerchTerminal(
+      containerRef.current,
+      (cols, rows) => {
+        const id = terminalIdRef.current;
+        if (id) usePerchStore.getState().resizeTerminal(id, cols, rows);
+      },
+      // Read at construction time rather than subscribed: the profile is sent
+      // once per connection and never changes mid-session, and xterm takes
+      // its font/theme at construction anyway.
+      usePerchStore.getState().terminalProfile,
+    );
+    const term = perchTerm.term;
     xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
+    perchTermRef.current = perchTerm;
     setTermInstance(term);
 
     let disposed = false;
     let currentId: string | null = null;
-    attachAgentCli(sessionId, agent).then((id) => {
+    // Spawn the CLI already sized to this pane. Attaching at a hardcoded
+    // 80x24 and resizing afterwards made the agent draw its first frame at
+    // the wrong width and then reflow — visible as a garbled banner that only
+    // straightened out on the next full repaint.
+    attachAgentCli(sessionId, agent, term.cols, term.rows).then((id) => {
       if (disposed) {
         // Unmounted before the attach round-trip resolved — the PTY was
         // still spawned server-side, so kill it now rather than leaking an
@@ -105,7 +109,7 @@ export function AgentCliTerminal({
       disposed = true;
       detachClipboardPaste();
       dataSub.dispose();
-      term.dispose();
+      perchTerm.dispose();
       if (currentId) killTerminal(currentId);
     };
     // Deliberately re-run only on mount and on an explicit "Restart CLI"
@@ -133,18 +137,14 @@ export function AgentCliTerminal({
     return onTerminalData(terminalId, (data) => xtermRef.current?.write(data));
   }, [terminalId]);
 
-  // Re-fit on mount and viewport changes.
+  // Container-size changes are handled by the ResizeObserver inside
+  // `createPerchTerminal`; this only syncs the PTY once the terminal id
+  // finally exists, since fits that completed before then had no id to
+  // forward the new grid to.
   useEffect(() => {
-    const refit = () => {
-      const fitAddon = fitAddonRef.current;
-      const term = xtermRef.current;
-      if (!fitAddon || !term) return;
-      fitAddon.fit();
-      if (terminalId) resizeTerminal(terminalId, term.cols, term.rows);
-    };
-    refit();
-    window.addEventListener("resize", refit);
-    return () => window.removeEventListener("resize", refit);
+    if (!terminalId) return;
+    const term = xtermRef.current;
+    if (term) resizeTerminal(terminalId, term.cols, term.rows);
   }, [terminalId, resizeTerminal]);
 
   return (

@@ -1065,6 +1065,10 @@ impl HubManager {
                 platform,
                 claude_models,
                 codex_models,
+                // A remote's terminal profile is deliberately ignored: the
+                // xterm rendering its output runs in the *local* client, so
+                // the local machine's terminal appearance is the one to match.
+                terminal_profile: _,
             } => {
                 let info = RemoteInfo {
                     hostname: hostname.clone(),

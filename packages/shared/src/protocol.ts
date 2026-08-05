@@ -201,6 +201,13 @@ export interface SessionSummary {
    * soon as any client subscribes/switches to the session. Defaults to false
    * when absent. */
   unseen?: boolean;
+  /** Whether this session has ever been typed into in CLI mode (the server's
+   * `cli_activity` flag). CLI mode uses it to decide whether to respawn the
+   * agent PTY on its own: a session with prior CLI activity is resumed
+   * automatically, while one without it waits for the user to pick a project
+   * and press "New chat" rather than silently launching an agent. Defaults to
+   * false when absent. */
+  cliStarted?: boolean;
   /** Whether the session's agent is blocked on an approval prompt, detected
    * by scanning recent CLI-attached terminal output for known approval-
    * prompt patterns. Only meaningful for sessions with a live CLI-attached
@@ -603,6 +610,19 @@ export interface SessionDeletedMessage {
  * where it is connected and can display the correct environment badge.
  * Also carries the server-discovered model lists — clients must populate
  * their model dropdowns from these rather than any hardcoded catalogue. */
+/** The user's real terminal appearance, read from their iTerm2 default
+ * profile (see `iterm_profile.rs`). CLI-mode panes render with this so the
+ * agent CLIs look exactly as they do in the user's own terminal, instead of
+ * being restyled by perch's UI theme. Every field is optional: whatever is
+ * absent falls through to xterm.js's stock default — never to a perch token. */
+export interface TerminalProfile {
+  /** CSS font family, e.g. `MesloLGS NF`. */
+  fontFamily?: string;
+  fontSize?: number;
+  /** xterm `ITheme` keys (`background`, `red`, `brightBlue`, …) to `#rrggbb`. */
+  theme?: Record<string, string>;
+}
+
 export interface ServerInfoMessage {
   type: "server.info";
   hostname: string;
@@ -610,6 +630,8 @@ export interface ServerInfoMessage {
   platform: string;
   claudeModels: ModelEntry[];
   codexModels: ModelEntry[];
+  /** Absent when the server couldn't read one. */
+  terminalProfile?: TerminalProfile;
 }
 
 // Stage D — settings & hosts server messages

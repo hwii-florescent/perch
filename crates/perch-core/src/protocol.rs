@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::iterm_profile::TerminalProfile;
+
 // ---------------------------------------------------------------------------
 // Settings & hosts value types (Stage D)
 // ---------------------------------------------------------------------------
@@ -223,6 +225,14 @@ pub struct SessionSummary {
     /// `false` when absent (older remote perch instances).
     #[serde(default)]
     pub unseen: bool,
+    /// Whether this session has ever been typed into in CLI mode (the
+    /// `cli_activity` column). The web client uses it to decide whether CLI
+    /// mode may respawn the agent PTY unattended: a session with prior CLI
+    /// activity is resumed automatically, one without it waits for an
+    /// explicit "New chat". Defaulted for backward federation-compat with
+    /// older remotes.
+    #[serde(default)]
+    pub cli_started: bool,
     /// Whether the session's agent is blocked on an approval prompt, detected
     /// by scanning recent CLI-attached terminal output for known approval-
     /// prompt patterns (see `blocked_patterns` in `server.rs`). Only
@@ -556,6 +566,13 @@ pub enum ServerMessage {
         platform: String,
         claude_models: Vec<ModelEntry>,
         codex_models: Vec<ModelEntry>,
+        /// The user's real terminal appearance — their iTerm2 default
+        /// profile's font and full ANSI palette — so CLI-mode panes look like
+        /// their terminal instead of like perch's UI theme. Absent when it
+        /// couldn't be read; the client then uses xterm's stock defaults,
+        /// never perch's palette. See `iterm_profile.rs`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_profile: Option<TerminalProfile>,
     },
 
     #[serde(rename = "session.history", rename_all = "camelCase")]

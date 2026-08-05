@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentAttach, AgentKind, ChatUsage, CommandEntry, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
+import type { AgentAttach, AgentKind, ChatUsage, CommandEntry, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
 import { socket } from "./ws";
 import { emitTerminalData } from "./terminalBus";
 import { defaultModel } from "./models";
@@ -97,6 +97,13 @@ interface PerchState {
    * Evicted when the cached terminal's exitCode is non-null (dead PTY), so
    * the next attach spawns a fresh one. */
   cliTerminalIds: Record<string, string>;
+  /** Sessions this client has explicitly started a CLI in during this app run
+   * — either by creating them ("+ New session", the CLI start panel) or by
+   * pressing "Start" on one. CLI mode only mounts its terminal for a session
+   * that is in here *or* already carries `cliStarted` from the server, so a
+   * blank auto-minted session never silently spawns an agent process. Not
+   * persisted: the server's `cliStarted` is the durable half. */
+  cliStartedSessions: Record<string, boolean>;
   agent: AgentKind;
   model: string;
   /** Server-discovered model lists, keyed by agent. Populated from server.info
@@ -108,6 +115,12 @@ interface PerchState {
   sessions: SessionSummary[];
   /** Host info sent once per connection by the server after WS handshake. */
   serverInfo: { hostname: string; isSsh: boolean; platform: string } | null;
+  /** The user's real terminal appearance (font + ANSI palette from their
+   * iTerm2 profile), sent in `server.info`. Every PTY-backed pane renders
+   * with this so the agent CLIs look the way they do in the user's own
+   * terminal. `null` = server had nothing to report, so xterm's stock
+   * defaults apply — perch's UI theme is deliberately never substituted. */
+  terminalProfile: TerminalProfile | null;
   /** Set while a CLI PTY is being attached for a given session, cleared on
    * success or error. Used to route ServerMessage::Error to cliError instead
    * of the chat message list when the error arrives during attach. */
@@ -299,7 +312,20 @@ interface PerchState {
     rows: number,
     options?: { cwd?: string; agentAttach?: AgentAttach },
   ) => Promise<string>;
-  attachAgentCli: (sessionId: string, agent: AgentKind) => Promise<string>;
+  /** Mark a session as CLI-started, which is what actually mounts the
+   * terminal (see `cliStartedSessions`). Used by the CLI start panel's
+   * "Start" affordance for a session that already exists but has never had a
+   * CLI launched in it. */
+  startCli: (sessionId: string) => void;
+  /** Attach (or reattach) the real interactive agent CLI for a session.
+   * `cols`/`rows` should be the pane's *actual* measured grid so the CLI
+   * paints its first frame at the final width — see AgentCliTerminal. */
+  attachAgentCli: (
+    sessionId: string,
+    agent: AgentKind,
+    cols?: number,
+    rows?: number,
+  ) => Promise<string>;
   sendTerminalInput: (terminalId: string, data: string) => void;
   resizeTerminal: (terminalId: string, cols: number, rows: number) => void;
   /** Force-terminate a terminal's backing PTY/process and drop it from local
@@ -328,6 +354,25 @@ const pendingTerminals: PendingTerminal[] = [];
  * session gets its first message.
  */
 let expectProjectFromStatus: string | null = null;
+
+/**
+ * Set when a `session.create` was initiated *by the user* (sidebar/tab-bar
+ * "+", the CLI start panel) rather than by the transport's housekeeping
+ * create on connect (see ws.ts). Consumed by the `session.created` handler,
+ * which marks the new id in `cliStartedSessions`.
+ *
+ * This is what stops CLI mode from launching an agent nobody asked for: every
+ * fresh connect mints a blank session, and CLI mode used to spawn
+ * `claude --resume` into it immediately — in whatever the server's default
+ * cwd happened to be. Now only an explicitly-created session (which therefore
+ * has a project the user chose) auto-starts its PTY.
+ *
+ * A plain module-level flag is enough for the same reason
+ * `expectProjectFromStatus` is: `session.create` is answered by exactly one
+ * `session.created`, and the UI has no way to issue two creates before the
+ * first reply lands.
+ */
+let expectCliStart = false;
 
 /** Resolvers for in-flight `fs.browse` requests, keyed by requestId. See
  * `browseDirectory` and the `"fs.browse.result"` case in
@@ -568,11 +613,13 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   streamingMessageId: null,
   terminals: {},
   cliTerminalIds: {},
+  cliStartedSessions: {},
   agent: "claude",
   model: "",
   availableModels: { claude: [], codex: [] },
   sessions: [],
   serverInfo: null,
+  terminalProfile: null,
   attachingCliForSession: null,
   cliError: null,
   settingsOpen: false,
@@ -775,6 +822,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // sidebar off whatever project the user was last looking at.
     writeActiveHostStored(hostId);
     flushChunkBuffer();
+    // The user asked for this session, so CLI mode is allowed to launch into
+    // it as soon as its id comes back — unlike the blank session the
+    // transport mints on every connect. See `expectCliStart`.
+    expectCliStart = true;
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });
       set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });
@@ -900,7 +951,13 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     });
   },
 
-  attachAgentCli: (sessionId, agent) => {
+  startCli: (sessionId) => {
+    set((state) => ({
+      cliStartedSessions: { ...state.cliStartedSessions, [sessionId]: true },
+    }));
+  },
+
+  attachAgentCli: (sessionId, agent, cols = 80, rows = 24) => {
     const existing = get().cliTerminalIds[sessionId];
     // Evict stale cache entry if the cached terminal has already exited, so we
     // fall through and spawn a fresh PTY instead of reattaching the dead one.
@@ -919,7 +976,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     }
     set({ attachingCliForSession: sessionId, cliError: null });
     return get()
-      .createTerminal(80, 24, { agentAttach: { sessionId, agent } })
+      .createTerminal(cols, rows, { agentAttach: { sessionId, agent } })
       .then((id) => {
         set((state) => ({
           cliTerminalIds: { ...state.cliTerminalIds, [sessionId]: id },
@@ -1100,6 +1157,14 @@ function handleServerMessage(msg: ServerMessage): void {
   if (msg.type !== "chat.chunk") flushChunkBuffer();
   switch (msg.type) {
     case "session.created": {
+      // A user-initiated create is an explicit "start working here", so CLI
+      // mode may spawn its PTY straight away (see `expectCliStart`).
+      if (expectCliStart) {
+        expectCliStart = false;
+        usePerchStore.setState((state) => ({
+          cliStartedSessions: { ...state.cliStartedSessions, [msg.sessionId]: true },
+        }));
+      }
       usePerchStore.setState({ sessionId: msg.sessionId });
       // Refresh the session list so the sidebar shows the new entry.
       usePerchStore.getState().listSessions();
@@ -1260,6 +1325,9 @@ function handleServerMessage(msg: ServerMessage): void {
           availableModels,
           hostModels: newHostModels,
           model: reconciledModel,
+          // Absent when the server couldn't read one; `null` then means
+          // "use xterm's own defaults" (see xtermSetup.ts).
+          terminalProfile: msg.terminalProfile ?? null,
         };
       });
       break;

@@ -78,8 +78,8 @@ export const PERCH_DEFAULT: Palette = {
  */
 /** Catppuccin Mocha — herdr's own default theme (see module doc above),
  * and perch's default too. Kept as a standalone typed constant (rather than
- * read back out of `THEMES.catppuccin`) so `applyTheme`/`xtermThemeFromTokens`
- * below have a `Palette`-typed fallback: `Record<string, Palette>` indexing
+ * read back out of `THEMES.catppuccin`) so `applyTheme`
+ * below has a `Palette`-typed fallback: `Record<string, Palette>` indexing
  * (including `THEMES.catppuccin`) is always `Palette | undefined` under
  * `noUncheckedIndexedAccess`, which a `??` fallback can't itself resolve. */
 export const CATPPUCCIN_DEFAULT: Palette = {
@@ -232,16 +232,4 @@ export function applyTheme(name: string): void {
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
     root.setProperty(TOKEN_CSS_VARS[key], palette[key]);
   }
-}
-
-/** Read the current `--panel-bg`/`--text` tokens (as applied by `applyTheme`)
- * for xterm's `theme` constructor option. xterm has no CSS-variable support
- * of its own, so PTY-backed terminals (`TerminalView`, `AgentCliTerminal`)
- * read the live token values once at construction time instead of
- * hardcoding a default theme's colors. */
-export function xtermThemeFromTokens(): { background: string; foreground: string } {
-  const style = getComputedStyle(document.documentElement);
-  const background = style.getPropertyValue("--panel-bg").trim() || CATPPUCCIN_DEFAULT.panelBg;
-  const foreground = style.getPropertyValue("--text").trim() || CATPPUCCIN_DEFAULT.text;
-  return { background, foreground };
 }
