@@ -71,6 +71,16 @@ export interface SettingsData {
    * setting controlled from Settings, applying to every open chat pane.
    * Defaults to `"hosted"`. */
   chatMode: "hosted" | "cli";
+  /** Lines of scrollback each terminal pane retains. Defaults to 10000 — the
+   * value that used to be hardcoded in `xtermSetup.ts`, so an existing
+   * settings file behaves exactly as before. Clamped client-side: xterm.js
+   * allocates eagerly, so a pathological value is a browser OOM. */
+  terminalScrollback: number;
+  /** Spawn plain terminal panes as a **login** shell (`-l`) rather than a bare
+   * interactive one. Off by default: it changes which rc files run, which can
+   * visibly change the user's prompt and PATH. Does not affect agent-attach
+   * (CLI-mode) panes, which spawn the CLI directly. */
+  terminalLoginShell: boolean;
 }
 
 /**
@@ -89,6 +99,8 @@ export interface SettingsPatch {
   soundEnabled?: boolean;
   toastDelivery?: "off" | "app" | "system";
   chatMode?: "hosted" | "cli";
+  terminalScrollback?: number;
+  terminalLoginShell?: boolean;
 }
 
 export type HostMode = "perch" | "direct";
@@ -621,6 +633,18 @@ export interface TerminalProfile {
   fontSize?: number;
   /** xterm `ITheme` keys (`background`, `red`, `brightBlue`, …) to `#rrggbb`. */
   theme?: Record<string, string>;
+  /** Appearance-specific palettes, when the source terminal defines them
+   * (iTerm2's `… (Light)`/`… (Dark)` key variants, Ghostty's light/dark theme
+   * pair). Absent when the terminal has a single palette — the common case,
+   * which is why `theme` stays the unconditional fallback. Clients pick by
+   * `prefers-color-scheme` and fall back to `theme`. */
+  themeLight?: Record<string, string>;
+  themeDark?: Record<string, string>;
+  /** Cursor shape, in xterm.js's own vocabulary. Absent → xterm's default
+   * (`block`); perch never picks a shape of its own, same rule as the palette. */
+  cursorStyle?: "block" | "underline" | "bar";
+  /** Whether the cursor blinks. Absent → xterm's default (`false`). */
+  cursorBlink?: boolean;
 }
 
 export interface ServerInfoMessage {

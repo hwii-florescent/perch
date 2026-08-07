@@ -498,6 +498,30 @@ body {
   flex-shrink: 0;
 }
 
+/* Bulk "archive all sessions in this project" trigger — sits in the project
+   header alongside the worktree-menu branch button, styled the same way
+   (icon-only, no border, dims until hovered) so the header reads as one
+   family of affordances rather than a mismatched extra control. */
+.sidebar__project-close-all {
+  flex-shrink: 0;
+  align-self: center;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.sidebar__project-close-all:hover {
+  color: var(--accent);
+  background: var(--surface-1);
+}
+
 .sidebar__empty {
   margin: 0.6rem 0.65rem;
   font-size: 0.72rem;
@@ -2094,6 +2118,42 @@ body {
   color: var(--overlay-1);
 }
 
+/* Provider (claude/codex) toggle — Bug 1 fix. Same look as
+ * `.model-chip__agents`/`.model-chip__agent-btn` (Hosted mode's agent tabs)
+ * so the two agent pickers feel like one control, even though this one picks
+ * which CLI binary to launch rather than model/effort chrome. */
+.cli-start__agents {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem;
+}
+
+.cli-start__agent-btn {
+  flex: 1;
+  background: none;
+  color: var(--subtext-0);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.cli-start__agent-btn:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.cli-start__agent-btn--active {
+  background: var(--surface-1);
+  color: var(--accent);
+  border-color: var(--overlay-0);
+}
+
 .cli-start__projects {
   display: flex;
   flex-direction: column;
@@ -2147,6 +2207,105 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* --- AgentPicker (Bug 2/3 fix) — the claude/codex segmented control used by
+   session-*create* flows (sidebar "+ New session" popover, NoSessionPanel).
+   Same look as `.cli-start__agents`/`.cli-start__agent-btn` (CLI mode's own
+   provider toggle) so every agent picker in the app reads as one family. --- */
+
+.agent-picker {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem;
+}
+
+.agent-picker__btn {
+  flex: 1;
+  background: none;
+  color: var(--subtext-0);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.agent-picker__btn:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.agent-picker__btn--active {
+  background: var(--surface-1);
+  color: var(--accent);
+  border-color: var(--overlay-0);
+}
+
+/* Inside the new-session popover the picker sits above the project list, so
+ * it needs its own bottom margin/padding instead of relying on a parent gap
+ * (`.new-session-popover` has none — see its rule above). */
+.new-session-popover__agent {
+  margin: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+/* --- No-session empty state (Bug 2 fix) — mirrors .cli-start's card layout
+ * so the two "nothing to show yet" states in the chat pane read as one
+ * family. --- */
+
+.no-session {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: var(--panel-bg);
+}
+
+.no-session__card {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.no-session__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.no-session__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--subtext-0);
+}
+
+.no-session__primary {
+  font: inherit;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--panel-bg));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.no-session__primary:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel-bg));
 }
 
 /* --- Terminal search (Wave 1 item 5) -------------------------------------- */

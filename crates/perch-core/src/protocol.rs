@@ -56,10 +56,27 @@ pub struct SettingsData {
     /// so every open chat pane renders the same way. Defaults to `"hosted"`.
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
+    /// Lines of scrollback each terminal pane retains. Defaults to 10000 —
+    /// the value that used to be hardcoded in `xtermSetup.ts`, so an existing
+    /// settings file behaves exactly as before. Clamped client-side, because
+    /// xterm.js allocates eagerly and a pathological value is a browser OOM,
+    /// not a server problem.
+    #[serde(default = "default_terminal_scrollback")]
+    pub terminal_scrollback: u32,
+    /// Spawn plain terminal panes as a **login** shell (`-l`) rather than a
+    /// bare interactive one. Off by default: it changes which rc files run,
+    /// which can visibly change the user's prompt and PATH. Does not affect
+    /// agent-attach (CLI-mode) panes, which spawn the CLI directly.
+    #[serde(default)]
+    pub terminal_login_shell: bool,
 }
 
 fn default_theme() -> String {
     "catppuccin".to_string()
+}
+
+fn default_terminal_scrollback() -> u32 {
+    10_000
 }
 
 fn default_toast_delivery() -> String {
@@ -91,6 +108,10 @@ pub struct SettingsPatch {
     /// Absent = unchanged; present = set. No "clear" case needed — a chat
     /// mode is never nullable, unlike `default_cwd`.
     pub chat_mode: Option<String>,
+    /// Absent = unchanged; present = set. No "clear" case needed.
+    pub terminal_scrollback: Option<u32>,
+    /// Absent = unchanged; present = set. No "clear" case needed.
+    pub terminal_login_shell: Option<bool>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

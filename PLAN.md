@@ -100,9 +100,20 @@ alternatives, and the reasoning behind each decision — lives in
 | 12 | CLI mode: emulator semantics, gated terminal start, auto session titles from the first prompt. |
 | 12.1 | CLI mode: fixed the pty UTF-8 byte path (the real corruption), adopted the user's terminal profile, font scaling instead of reflow. |
 | 12.2 | Rendering verified in **WebKit** (the engine the desktop app actually uses) after a Chromium-only pass gave a false pass; added `e2e/cli-rendering.spec.ts`; single-resize fit; PLAN.md condensed into this table. **Confirmed fixed by the user in the installed app.** |
+| 13 | herdr CLI-mode parity Wave 3: agent-attach singleton + multi-viewer fan-out (fixed duplicate `--resume` spawns), PTY-activity status detection, OSC 52, clickable links, directional swap + resize mode, protocol-parity test, CLI provider picker, no-session empty state, pane-menu discoverability. |
+| 14 | tmux-backed local CLI persistence (agents survive perch restarts) + a real web unit-test layer (Vitest, 113 cases) and `docs/TESTING.md`. |
+| 15 | herdr parity Wave 2: cursor style/blink + light/dark palettes from the real terminal, a Ghostty config reader, configurable scrollback, login-shell panes, system-notification click-to-focus, bulk archive-project. |
 
 **Current milestone:** ✅ perch is a double-clickable Mac app whose CLI mode renders the agent
-TUIs the way the user's own terminal does — user-confirmed in `/Applications/perch.app`.
+TUIs the way the user's own terminal does — user-confirmed in `/Applications/perch.app` — and
+whose CLI-mode agents **survive a perch restart** (tmux-backed, Phase 14), closing the last
+structural gap with herdr's detach/reattach. Phase 15 spent the remaining small parity items,
+so CLI-mode parity is **~86%** of herdr's user-facing surface (from ~61% → ~71% → ~77%).
+What is left is deliberate, not backlog: kitty graphics (no viable xterm.js implementation),
+a plugin marketplace, and Windows ConPTY — none of which perch has a use for. Tests:
+**151 Rust + 1 parity + 134 web** (all under a second) plus **91 e2e**.
+See Phases 13-15 in [`docs/PHASE-HISTORY.md`](docs/PHASE-HISTORY.md); testing strategy in
+[`docs/TESTING.md`](docs/TESTING.md).
 
 
 ## How to run

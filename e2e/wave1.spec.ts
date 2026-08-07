@@ -75,20 +75,60 @@ async function createAndFinishSession(page: Page, label: string): Promise<string
   return id as string;
 }
 
-/** Reset the sound/toast notification settings to their defaults so this
- * spec never leaks state into sibling specs (toasts.spec.ts assumes the
- * default "app" toast delivery). Belt-and-suspenders alongside resetting
- * through the UI at the end of the F3/F4 test itself. */
-function resetNotificationSettings(): void {
+/** The notification settings as they were before this spec touched anything.
+ *
+ * `~/.perch/settings.json` is GLOBAL — every instance shares it, there is no
+ * `--settings-path` — so it holds the *developer's own* preferences, not test
+ * fixtures. This spec must therefore put back exactly what it found.
+ *
+ * The previous version of this helper instead hard-wrote `toastDelivery:"app"`
+ * / `soundEnabled:false` into the file in `beforeAll` and `afterAll`. That was
+ * wrong twice over:
+ *  - the running perch server has already loaded settings into memory and does
+ *    not re-read the file, so writing behind its back changed nothing the UI
+ *    would show — the assertion then compared the value it had just written to
+ *    disk against the different value the server still had in memory, and the
+ *    test failed on any machine whose owner had picked something non-default;
+ *  - `afterAll` then made that clobber permanent, silently replacing the
+ *    developer's real preference with the factory default.
+ * Read here, and restore through the UI (which goes through the server, so
+ * memory and file stay in sync). */
+interface NotificationSettings {
+  soundEnabled: boolean;
+  toastDelivery: string;
+}
+
+function readNotificationSettings(): NotificationSettings | null {
   try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    data.soundEnabled = false;
-    data.toastDelivery = "app";
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+    if (!fs.existsSync(SETTINGS_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
+    return {
+      soundEnabled: data.soundEnabled === true,
+      toastDelivery: typeof data.toastDelivery === "string" ? data.toastDelivery : "app",
+    };
   } catch {
     // Malformed/missing file — leave it alone rather than destroying real settings.
+    return null;
+  }
+}
+
+/** Last-resort restore for the case where the UI path could not run (the test
+ * crashed, the browser died). The server is being torn down at `afterAll`
+ * time, so writing the file directly is safe *here* specifically — there is no
+ * longer a live in-memory copy to disagree with it. */
+function restoreNotificationSettingsOnDisk(original: NotificationSettings | null): void {
+  if (!original) return;
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
+    if (data.soundEnabled === original.soundEnabled && data.toastDelivery === original.toastDelivery) {
+      return; // already correct — the UI restore worked
+    }
+    data.soundEnabled = original.soundEnabled;
+    data.toastDelivery = original.toastDelivery;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+  } catch {
+    // ignore
   }
 }
 
@@ -100,9 +140,12 @@ test.describe("Wave 1 functionality gaps", () => {
   test.describe.configure({ mode: "serial" });
 
   let claudeAvailable = false;
+  /** Captured before any test runs; restored by F3/F4 through the UI and by
+   * `afterAll` on disk as a backstop. */
+  let originalNotifications: NotificationSettings | null = null;
 
   test.beforeAll(async () => {
-    resetNotificationSettings();
+    originalNotifications = readNotificationSettings();
     const { execSync } = await import("child_process");
     try {
       execSync("which claude || [ -x ~/.local/bin/claude ]", {
@@ -116,7 +159,7 @@ test.describe("Wave 1 functionality gaps", () => {
   });
 
   test.afterAll(() => {
-    resetNotificationSettings();
+    restoreNotificationSettingsOnDisk(originalNotifications);
   });
 
   // -------------------------------------------------------------------------
@@ -254,30 +297,57 @@ test.describe("Wave 1 functionality gaps", () => {
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
 
     const soundToggle = page.locator('[data-testid="settings-sound-enabled"]');
-    await expect(soundToggle).not.toBeChecked();
-    await soundToggle.check();
-    await expect(soundToggle).toBeChecked();
-
     const toastSelect = page.locator('[data-testid="settings-toast-delivery"]');
-    await expect(toastSelect).toHaveValue("app");
-    await toastSelect.selectOption("system");
-    await expect(toastSelect).toHaveValue("system");
 
-    // Close and reopen — settings persist server-side (settings.json).
-    await page.keyboard.press("Escape");
-    await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
-    await page.reload({ waitUntil: "networkidle" });
-    await page.locator('[data-testid="settings-gear"]').click();
-    await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
-    await expect(page.locator('[data-testid="settings-sound-enabled"]')).toBeChecked();
-    await expect(page.locator('[data-testid="settings-toast-delivery"]')).toHaveValue("system");
+    // Originals come from the file captured in `beforeAll`, NOT from reading
+    // the DOM here: the <select> renders with its own default before the
+    // server's `settings.current` lands over the WS, so an immediate
+    // `inputValue()` can capture "app" on a machine whose real setting is
+    // "system" — and then faithfully "restore" the wrong value at the end.
+    const originalSound = originalNotifications?.soundEnabled ?? false;
+    const originalToast = originalNotifications?.toastDelivery ?? "app";
+    const flippedToast = originalToast === "app" ? "system" : "app";
 
-    await page.screenshot({ path: "artifacts/wave1-f3f4-settings.png" });
+    // Wait for the real values to arrive before touching anything, so the
+    // flips below act on hydrated state rather than the pre-hydration default.
+    await expect(toastSelect).toHaveValue(originalToast, { timeout: 8000 });
+    await expect(soundToggle).toBeChecked({ checked: originalSound });
 
-    // Reset to defaults so this doesn't affect toasts.spec.ts / other specs.
-    await page.locator('[data-testid="settings-sound-enabled"]').uncheck();
-    await page.locator('[data-testid="settings-toast-delivery"]').selectOption("app");
-    await page.keyboard.press("Escape");
+    try {
+      await soundToggle.setChecked(!originalSound);
+      await expect(soundToggle).toBeChecked({ checked: !originalSound });
+
+      await toastSelect.selectOption(flippedToast);
+      await expect(toastSelect).toHaveValue(flippedToast);
+
+      // Close and reopen — settings persist server-side (settings.json).
+      await page.keyboard.press("Escape");
+      await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator('[data-testid="settings-gear"]').click();
+      await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+      await expect(page.locator('[data-testid="settings-sound-enabled"]')).toBeChecked({
+        checked: !originalSound,
+      });
+      await expect(page.locator('[data-testid="settings-toast-delivery"]')).toHaveValue(flippedToast);
+
+      await page.screenshot({ path: "artifacts/wave1-f3f4-settings.png" });
+    } finally {
+      // Restore what was actually there, on the failure path too — CLAUDE.md
+      // requires it, and without it one failed run leaves the developer's real
+      // settings flipped. Best-effort: a restore that itself fails must not
+      // mask the original assertion failure.
+      try {
+        await page.reload({ waitUntil: "networkidle" });
+        await page.locator('[data-testid="settings-gear"]').click();
+        await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+        await page.locator('[data-testid="settings-sound-enabled"]').setChecked(originalSound);
+        await page.locator('[data-testid="settings-toast-delivery"]').selectOption(originalToast);
+        await page.keyboard.press("Escape");
+      } catch {
+        // swallow — see above
+      }
+    }
   });
 
   // -------------------------------------------------------------------------

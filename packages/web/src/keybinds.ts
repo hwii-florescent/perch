@@ -69,8 +69,18 @@ export const KEYBINDS: KeybindEntry[] = [
   { keys: "Ctrl+Space, h/j/k/l", description: "Focus the pane to the left/below/above/right", group: "panes" },
   { keys: "Ctrl+Space, o", description: "Cycle focus to the next pane", group: "panes" },
   { keys: "Ctrl+Space, }", description: "Swap the focused pane with the next one", group: "panes" },
+  {
+    keys: "Ctrl+Space, H/J/K/L",
+    description: "Swap the focused pane with its neighbour left/below/above/right",
+    group: "panes",
+  },
   { keys: "Ctrl+Space, +", description: "Grow the focused pane", group: "panes" },
   { keys: "Ctrl+Space, -", description: "Shrink the focused pane", group: "panes" },
+  {
+    keys: "Ctrl+Space, r, then h/j/k/l…",
+    description: "Resize mode: repeated h/j/k/l resizes the focused pane (Esc or timeout exits)",
+    group: "panes",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -199,10 +209,39 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   "}": () => getDockviewController()?.swapActivePaneWithNext(),
   "+": () => getDockviewController()?.growActivePane(),
   "-": () => getDockviewController()?.shrinkActivePane(),
+  // Directional pane SWAP (capital H/J/K/L, i.e. shift+h/j/k/l) — deliberately
+  // separate bindings from lowercase h/j/k/l's directional FOCUS above,
+  // resolved by the same exact-key-first lookup in `handleKeyDown` that
+  // already keeps leader,W distinct from leader,w. No collision: object keys
+  // are case-sensitive, and `e.key` for Shift+H is "H", not "h".
+  H: () => getDockviewController()?.swapPaneDirection("left"),
+  J: () => getDockviewController()?.swapPaneDirection("down"),
+  K: () => getDockviewController()?.swapPaneDirection("up"),
+  L: () => getDockviewController()?.swapPaneDirection("right"),
 };
 for (let i = 1; i <= 9; i++) {
   CHORD_ACTIONS[String(i)] = () => jumpToNthProjectSession(i);
 }
+
+// ---------------------------------------------------------------------------
+// Resize mode (leader,r) — herdr lets repeated h/j/k/l resize the focused
+// pane without re-pressing the leader for each press. `r` is deliberately
+// NOT a CHORD_ACTIONS entry: entering resize mode has to arm a *second*,
+// independent timer alongside the leader's own (see `useLeaderKey` below),
+// which the flat CHORD_ACTIONS table (single no-args-beyond-handlers call)
+// has no way to express, so it's special-cased in `handleKeyDown` instead.
+// h/j/k/l while armed call the same grow/shrink helpers leader,+/- already
+// use (not a new directional-resize primitive) — direction is just a mnemonic
+// (left/up shrink, right/down grow), since a single split only ever has one
+// resizable axis at a time regardless of which of the four keys is pressed.
+// ---------------------------------------------------------------------------
+
+const RESIZE_KEYS: Record<string, (c: NonNullable<ReturnType<typeof getDockviewController>>) => void> = {
+  h: (c) => c.shrinkActivePane(),
+  j: (c) => c.shrinkActivePane(),
+  k: (c) => c.growActivePane(),
+  l: (c) => c.growActivePane(),
+};
 
 // ---------------------------------------------------------------------------
 // useLeaderKey — the single global keydown listener
@@ -220,6 +259,17 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     const armedRef = { current: false };
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    // Resize mode's own arm/disarm/timer, mirroring the leader's pattern
+    // above exactly (same `LEADER_TIMEOUT_MS`, same arm-resets-the-timer
+    // shape) rather than inventing a second timing mechanism.
+    const resizeArmedRef = { current: false };
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    // Captured at *arm* time, not at effect-mount time: nothing else writes
+    // `document.title` today, but if anything ever does (an unread count, the
+    // active session name), a mount-time capture would restore a stale title
+    // on disarm and silently clobber it.
+    let baseTitle = document.title;
+
     function disarm() {
       armedRef.current = false;
       if (timer != null) {
@@ -234,15 +284,83 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       timer = setTimeout(disarm, LEADER_TIMEOUT_MS);
     }
 
+    // Resize mode has no dedicated chip/overlay in this codebase — the
+    // leader chord itself has no visual affordance either (arming it is
+    // silent; only the follow-up letter's *effect* is visible), so this
+    // mirrors that by staying out of the DOM entirely. The one concession is
+    // the document title, the cheapest possible "you are in a mode" signal
+    // that needs no new CSS/markup (this file may only touch keybinds.ts,
+    // dockviewController.ts, and KeybindHelp.tsx).
+    function disarmResize() {
+      if (!resizeArmedRef.current) return;
+      resizeArmedRef.current = false;
+      if (resizeTimer != null) {
+        clearTimeout(resizeTimer);
+        resizeTimer = null;
+      }
+      document.title = baseTitle;
+    }
+
+    function armResize() {
+      // Capture the title only on a fresh arm. Re-arms (every h/j/k/l press
+      // refreshes the timeout) must not re-capture, or the prefixed title
+      // would become the new base and compound on each keystroke.
+      if (!resizeArmedRef.current) {
+        baseTitle = document.title.replace(/^\[resize\] /, "");
+      }
+      resizeArmedRef.current = true;
+      document.title = `[resize] ${baseTitle}`;
+      if (resizeTimer != null) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(disarmResize, LEADER_TIMEOUT_MS);
+    }
+
     function handleKeyDown(e: KeyboardEvent) {
+      // Resize mode: while armed, h/j/k/l resize (and re-arm the timeout so
+      // a steady stream of presses keeps working); Escape or any other
+      // non-modifier key exits; typing into an editable element always
+      // exits without touching the keystroke (same invariant as the leader
+      // chord — never intercept real typing).
+      if (resizeArmedRef.current) {
+        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+        if (isEditableTarget(e.target)) {
+          disarmResize();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          disarmResize();
+          return;
+        }
+        const controller = getDockviewController();
+        const action = RESIZE_KEYS[e.key.toLowerCase()];
+        if (action && controller) {
+          e.preventDefault();
+          action(controller);
+          armResize();
+        } else {
+          disarmResize();
+        }
+        return;
+      }
+
       // A chord is in progress — the next non-modifier keydown resolves it
       // (or is silently dropped if it doesn't match any bound letter).
       if (armedRef.current) {
         if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
         disarm();
+        // leader,r enters resize mode instead of going through the generic
+        // CHORD_ACTIONS dispatch below (see the "Resize mode" comment above
+        // CHORD_ACTIONS for why it can't just be a table entry).
+        if (e.key === "r") {
+          e.preventDefault();
+          armResize();
+          return;
+        }
         // Exact-key lookup first so shifted bindings (leader,W → worktree
-        // menu) stay distinct from their lowercase counterparts (leader,w →
-        // next project); everything else still resolves case-insensitively.
+        // menu, leader,H/J/K/L → directional swap) stay distinct from their
+        // lowercase counterparts (leader,w → next project, leader,h/j/k/l →
+        // directional focus); everything else still resolves
+        // case-insensitively.
         const action = CHORD_ACTIONS[e.key] ?? CHORD_ACTIONS[e.key.toLowerCase()];
         if (action) {
           e.preventDefault();
@@ -281,6 +399,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       disarm();
+      disarmResize();
     };
   }, []);
 }

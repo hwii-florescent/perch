@@ -89,6 +89,28 @@ interface PerchState {
   connected: boolean;
   sessionId: string | null;
   status: StatusInfo | null;
+  /** Hosted-mode chat transcripts, keyed by sessionId — the source of truth
+   * for every session's messages, not just the globally active one. Split
+   * panes (`dockview/DockviewShell.tsx`'s `SessionChatPanel`) read a
+   * specific session's bucket via `ChatView`'s `sessionId` prop, so two (or
+   * more) sessions can stream concurrently without clobbering each other.
+   * Populated lazily — a session gains an entry only once it has actually
+   * been loaded (via `switchSession`, `sendChat`, or `ensureSessionLive`),
+   * so a session nobody has opened this page load costs nothing here.
+   * Cleaned up on `session.deleted` via `omitKey`, same as every other
+   * per-session map. */
+  messagesBySession: Record<string, ChatMessage[]>;
+  /** Per-session counterpart to `messagesBySession` — which message id (if
+   * any) in that session's bucket is still streaming. */
+  streamingMessageIdBySession: Record<string, string | null>;
+  /** Mirror of `messagesBySession[sessionId]` for the globally *active*
+   * session only — kept in sync by every action/handler that touches the
+   * active session's bucket. Exists so call sites that only ever cared about
+   * "the current conversation" (e.g. `PlanCard.tsx`'s `streamingMessageId`
+   * read, and every pre-existing `ChatView` caller) keep working unchanged;
+   * `ChatView` itself now reads a specific session's bucket directly (see
+   * `sessionId` prop) rather than this mirror, so a split pane bound to a
+   * non-active session is not limited to it. */
   messages: ChatMessage[];
   streamingMessageId: string | null;
   terminals: Record<string, TerminalMeta>;
@@ -104,6 +126,30 @@ interface PerchState {
    * blank auto-minted session never silently spawns an agent process. Not
    * persisted: the server's `cliStarted` is the durable half. */
   cliStartedSessions: Record<string, boolean>;
+  /** Per-session CLI provider choice (Bug 1 fix): which agent binary
+   * (`claude`/`codex`) CLI mode launches for a given session, recorded when
+   * the user picks one in `CliStartPanel`. This is *provider* selection only
+   * — which CLI to spawn — not model/effort chrome; CLAUDE.md's "zero model
+   * chrome in CLI mode" product decision stands, and providers/model pickers
+   * still never render in CLI mode. Keyed by sessionId, same shape as
+   * `cliStartedSessions`/`cliTerminalIds`/`effortBySession`. A session with no
+   * entry here falls back to the global `agent` field, which is exactly what
+   * every pre-existing session (and the pre-fix code path) already did. Not
+   * persisted server-side — client-only, like `effortBySession`. */
+  cliAgentBySession: Record<string, AgentKind>;
+  /** Per-session Hosted-mode provider choice, keyed by sessionId — the Hosted
+   * counterpart to `cliAgentBySession`. A brand-new session created with an
+   * explicit agent choice (the sidebar's "+ New session" popover or
+   * `NoSessionPanel`, both via `createSessionOnHost`'s `agentChoice` param)
+   * records it here immediately, and `switchSession` prefers it over the
+   * hardcoded "claude" fallback whenever the session has no server-confirmed
+   * `lastAgent` yet (i.e. no turn has been sent) — see `resolveSessionAgent`.
+   * Once a turn lands, the server-derived `lastAgent`/`session.history` takes
+   * over, same as before. `setAgent` also stamps the current session's entry
+   * here so a manual switch survives a switch-away/switch-back within this
+   * page load. Not persisted server-side — client-only, like
+   * `cliAgentBySession`; cleaned up on `session.deleted` so ids can't leak. */
+  hostedAgentBySession: Record<string, AgentKind>;
   agent: AgentKind;
   model: string;
   /** Server-discovered model lists, keyed by agent. Populated from server.info
@@ -156,6 +202,16 @@ interface PerchState {
    * Persisted in localStorage; `null` means "no pin yet — fall back to the
    * most recent project on the active host" (see `effectiveActiveProject`). */
   activeProject: ActiveProject | null;
+  /** The user's last agent choice made in a session-*create* picker (the
+   * sidebar's "+ New session" popover, `NoSessionPanel`) — persisted in
+   * localStorage so a reload/new tab defaults to whichever provider was
+   * picked last, same durability convention as `activeHostId`/`activeProject`.
+   * This is distinct from `agent` (the *current session's* live provider) and
+   * from `cliAgentBySession` (CLI mode's per-session record) — it is only the
+   * default a fresh picker opens with. */
+  lastAgentChoice: AgentKind;
+  /** Persist a new default agent choice (localStorage) and update the store. */
+  setLastAgentChoice: (agent: AgentKind) => void;
   /** Switch the sidebar to another host. Clears the project pin so the new
    * host resolves to its own most recent project. */
   setActiveHost: (hostId: string) => void;
@@ -215,8 +271,25 @@ interface PerchState {
    * `options.attachments` carries server-side paths from `POST {base}upload`.
    * The per-session effort selection is read from the store, so callers never
    * pass it. */
-  sendChat: (text: string, options?: { planMode?: boolean; attachments?: string[] }) => void;
-  cancelChat: () => void;
+  sendChat: (
+    text: string,
+    options?: { planMode?: boolean; attachments?: string[] },
+    sessionId?: string,
+  ) => void;
+  cancelChat: (sessionId?: string) => void;
+  /** Load a session's history into `messagesBySession` without disturbing
+   * whichever session is actually active/foreground — used by a split pane
+   * (`Chat.tsx`) bound to a session this connection has never resumed
+   * before. No-ops once the session is already known (it's the active
+   * session, or was previously loaded this page load): `session.resume` is
+   * the *only* wire message that hands back a session's full history, and
+   * this connection's runtime map only gains an entry for a session via
+   * create/resume/subscribe — but that registration, once made, persists
+   * for the life of the connection regardless of which session later
+   * becomes "active", so this dance only ever has to run once per session
+   * per connection. See the `session.created`/`session.history` handlers
+   * for how the reply is kept from clobbering the real foreground session. */
+  ensureSessionLive: (sessionId: string) => void;
   setAgent: (agent: AgentKind) => void;
   setModel: (model: string) => void;
   /** Ask the server for a fresh session list push. */
@@ -243,8 +316,17 @@ interface PerchState {
    * session.create message; "local" omits the field (backward-compatible).
    * If `cwd` is provided it is sent to the server for validation. If the
    * active session on that host is already empty (no messages) and no
-   * different cwd is requested, just focuses the composer instead. */
-  createSessionOnHost: (hostId: string, cwd?: string) => void;
+   * different cwd is requested, just focuses the composer instead — see
+   * `shouldReuseCurrentSession`.
+   * `agentChoice`, when passed, is the provider `CliStartPanel`/the sidebar's
+   * "+ New session" popover/`NoSessionPanel` picked for this not-yet-created
+   * session — see `cliAgentBySession`/`hostedAgentBySession`; it's threaded
+   * through to the `session.created` handler since the new session's id isn't
+   * known until that reply arrives, and applied to whichever of the two maps
+   * matches the current global chat mode (plus, in Hosted mode, the live
+   * `agent`/`model` fields so the pane header and the next `chat.send`
+   * reflect it immediately). */
+  createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: AgentKind) => void;
   /** Archive or unarchive a session. Archiving hides it everywhere in the
    * nav (sidebar, tab bar, navigator) immediately; the only place archived
    * sessions are listed is Settings → Archived sessions, which is also where
@@ -315,8 +397,9 @@ interface PerchState {
   /** Mark a session as CLI-started, which is what actually mounts the
    * terminal (see `cliStartedSessions`). Used by the CLI start panel's
    * "Start" affordance for a session that already exists but has never had a
-   * CLI launched in it. */
-  startCli: (sessionId: string) => void;
+   * CLI launched in it. `agent`, when passed, also records the CLI provider
+   * choice for this session in `cliAgentBySession` (see there). */
+  startCli: (sessionId: string, agent?: AgentKind) => void;
   /** Attach (or reattach) the real interactive agent CLI for a session.
    * `cols`/`rows` should be the pane's *actual* measured grid so the CLI
    * paints its first frame at the final width — see AgentCliTerminal. */
@@ -374,6 +457,19 @@ let expectProjectFromStatus: string | null = null;
  */
 let expectCliStart = false;
 
+/**
+ * The provider (`claude`/`codex`) picked in a create-flow picker
+ * (`CliStartPanel`, the sidebar's "+ New session" popover, `NoSessionPanel`)
+ * for a not-yet-created session, so it can be recorded in
+ * `cliAgentBySession`/`hostedAgentBySession` once `session.created` reveals
+ * the new session's id (the panel's agent choice has to survive that round
+ * trip). Armed right before a `createSessionOnHost` call that carried an
+ * explicit `agentChoice`, consumed (and cleared) alongside `expectCliStart`
+ * in the `session.created` handler — same one-shot request/reply discipline
+ * as `expectProjectFromStatus`.
+ */
+let pendingAgentForNewSession: AgentKind | null = null;
+
 /** Resolvers for in-flight `fs.browse` requests, keyed by requestId. See
  * `browseDirectory` and the `"fs.browse.result"` case in
  * `handleServerMessage`. Single-shot: each entry is deleted as soon as its
@@ -393,6 +489,30 @@ export type WorktreeReply =
  * gets exactly one reply: `worktree.list.result`, `worktree.done`, or
  * `worktree.error`. */
 const pendingWorktrees = new Map<string, (msg: WorktreeReply) => void>();
+
+/**
+ * Sessions currently being loaded in the background — a split pane bound to
+ * a session this connection has never resumed before (see
+ * `ensureSessionLive`) — mapped to the session id that was actually
+ * active/foreground when the background load was kicked off (or `null` if
+ * none). A `session.resume` for the background id is indistinguishable on
+ * the wire from a real user switch (same `session.created` +
+ * `session.history` reply shape), so the `"session.created"`/
+ * `"session.history"` handlers consult this map by the reply's `sessionId`
+ * to keep `sessionId`/`activeHostId`/`activeProject`/`agent`/`model`
+ * untouched for a background load, and to send exactly one restoring
+ * `session.resume` for the captured foreground id afterward — otherwise the
+ * background load would silently steal this connection's server-side
+ * "active session" (used for direct-mode broadcast filtering and the unseen
+ * dot) out from under whatever the user is actually looking at.
+ *
+ * Doubles as an in-flight guard: `ensureSessionLive` no-ops while a session
+ * already has an entry here, and `switchSession` deletes the entry for
+ * whatever it's switching to before sending its own resume — promoting an
+ * in-flight background load to an ordinary switch reply instead of racing a
+ * second resume against it. See both call sites for the full reasoning.
+ */
+const pendingBackgroundLoads = new Map<string, string | null>();
 
 /** Sessions whose `commands.list` has already been requested this page load.
  * The composer calls `fetchCommands` on every "/" it sees, so the dedupe has
@@ -509,6 +629,29 @@ function writeActiveProjectStored(project: ActiveProject | null): void {
   }
 }
 
+/** localStorage key backing `lastAgentChoice` — same convention as
+ * `ACTIVE_HOST_STORAGE_KEY`/`ACTIVE_PROJECT_STORAGE_KEY` above. */
+const LAST_AGENT_CHOICE_STORAGE_KEY = "perch.lastAgentChoice";
+
+/** Only "claude"/"codex" are ever written; anything else (a stale/foreign
+ * value, or localStorage unavailable) falls back to "claude". */
+export function readLastAgentChoiceStored(): AgentKind {
+  try {
+    const raw = localStorage.getItem(LAST_AGENT_CHOICE_STORAGE_KEY);
+    return raw === "claude" || raw === "codex" ? raw : "claude";
+  } catch {
+    return "claude";
+  }
+}
+
+function writeLastAgentChoiceStored(agent: AgentKind): void {
+  try {
+    localStorage.setItem(LAST_AGENT_CHOICE_STORAGE_KEY, agent);
+  } catch {
+    // ignore — worst case the choice doesn't survive a reload
+  }
+}
+
 /** A project = every session sharing one `(hostId, cwd)`. The sidebar has
  * always grouped this way; the nav redesign just promotes the grouping to a
  * first-class, selectable navigation level. */
@@ -605,15 +748,97 @@ export function archivedSessions(sessions: SessionSummary[]): SessionSummary[] {
   return sessions.filter((s) => s.archived).sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Ids of the non-archived sessions belonging to one project (host + cwd),
+ * using the exact same membership rule as `projectsForHost` (absent hostId
+ * treated as "local", already-archived sessions excluded). Backs the
+ * sidebar's "archive all sessions in this project" bulk action — kept as a
+ * pure function so the bulk action's selection can be unit-tested without
+ * mounting `Sidebar.tsx`. */
+export function sessionIdsForProject(
+  sessions: SessionSummary[],
+  hostId: string,
+  cwd: string
+): string[] {
+  return sessions
+    .filter((s) => (s.hostId ?? "local") === hostId && !s.archived && (s.cwd ?? "(unknown)") === cwd)
+    .map((s) => s.id);
+}
+
+/**
+ * Which provider a session should resolve to when it becomes active, absent
+ * any live turn already in flight. The server-confirmed `lastAgent` (present
+ * once at least one turn has been sent, carried on the session summary) wins
+ * whenever it exists — it reflects the actual conversation history. Before
+ * that, `hostedAgentBySession` carries the client's create-time choice (Bug
+ * 2/3 fix: without this, switching away from and back to a freshly-created,
+ * still-empty session would silently reset the picker to "claude", since
+ * `lastAgent` doesn't exist yet). `"claude"` is the final fallback, matching
+ * every pre-existing session and pre-fix code path.
+ */
+export function resolveSessionAgent(
+  session: Pick<SessionSummary, "lastAgent"> | undefined,
+  hostedAgentBySession: Record<string, AgentKind>,
+  sessionId: string | null,
+): AgentKind {
+  const lastAgent = session?.lastAgent as AgentKind | undefined;
+  if (lastAgent) return lastAgent;
+  if (sessionId && hostedAgentBySession[sessionId]) return hostedAgentBySession[sessionId];
+  return "claude";
+}
+
+/** Drop one key from a `Record`, immutably. Shared by every per-session map
+ * (`sessionLayouts`, `cliTerminalIds`, `cliAgentBySession`,
+ * `hostedAgentBySession`) that has to evict its entry for a deleted session —
+ * kept as one pure helper so the four cleanups can't drift out of sync. */
+export function omitKey<T>(map: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _omitted, ...rest } = map;
+  return rest;
+}
+
+/**
+ * Bug 1: whether `createSessionOnHost` should skip creating a new session and
+ * just focus the composer on the current one instead. The guard exists so
+ * "+ New session" doesn't mint a second blank session when the user is
+ * already sitting on an empty one for this host — but that reuse is only
+ * possible when there IS a current session to reuse. With `sessionId: null`
+ * (no session open at all — e.g. every session was just deleted, or a fresh
+ * profile that hasn't created one yet) there is nothing to focus, so the old
+ * `currentHostId = currentSession?.hostId ?? "local"` fallback made this
+ * guard fire anyway (an absent session "matched" a `hostId` of `"local"`) and
+ * silently no-op the button. Requiring an actual `currentSession` fixes that.
+ *
+ * CLI mode stays exempt regardless: the PTY conversation is never recorded as
+ * hosted messages, so `messages.length === 0` is true for *every* CLI
+ * session, including a dead one — reusing it would turn "New session" into a
+ * silent no-op on an exited pane.
+ */
+export function shouldReuseCurrentSession(
+  state: Pick<ProjectNavState, "sessions" | "sessionId">,
+  hostId: string,
+  cwd: string | undefined,
+  cliMode: boolean,
+  messagesEmpty: boolean,
+): boolean {
+  const currentSession = state.sessions.find((s) => s.id === state.sessionId);
+  if (!currentSession) return false;
+  const currentHostId = currentSession.hostId ?? "local";
+  const isCurrentHostMatch = currentHostId === hostId || (hostId === "local" && currentHostId === "local");
+  return isCurrentHostMatch && !cliMode && messagesEmpty && !cwd;
+}
+
 export const usePerchStore = create<PerchState>((set, get) => ({
   connected: false,
   sessionId: null,
   status: null,
+  messagesBySession: {},
+  streamingMessageIdBySession: {},
   messages: [],
   streamingMessageId: null,
   terminals: {},
   cliTerminalIds: {},
   cliStartedSessions: {},
+  cliAgentBySession: {},
+  hostedAgentBySession: {},
   agent: "claude",
   model: "",
   availableModels: { claude: [], codex: [] },
@@ -629,6 +854,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   hostModels: { local: { claude: [], codex: [] } },
   activeHostId: readActiveHostStored(),
   activeProject: readActiveProjectStored(),
+  lastAgentChoice: readLastAgentChoiceStored(),
+  setLastAgentChoice: (agent) => {
+    writeLastAgentChoiceStored(agent);
+    set({ lastAgentChoice: agent });
+  },
   sessionLayouts: {},
   sidebarCollapsed: false,
   workspaceGit: {},
@@ -653,16 +883,28 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   approvePlan: (messageId) => {
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === messageId ? { ...m, planApproved: true } : m,
-      ),
-    }));
+    // The card can live in any session's bucket, not just the active one
+    // (a plan card in a background split pane) — search all of them rather
+    // than assuming `messages` (the active-session mirror) has it.
+    set((state) => {
+      for (const [sid, msgs] of Object.entries(state.messagesBySession)) {
+        const idx = msgs.findIndex((m) => m.id === messageId);
+        if (idx === -1) continue;
+        const updated = msgs.map((m) => (m.id === messageId ? { ...m, planApproved: true } : m));
+        return {
+          messagesBySession: { ...state.messagesBySession, [sid]: updated },
+          ...(state.sessionId === sid ? { messages: updated } : {}),
+        };
+      }
+      return {};
+    });
   },
 
-  sendChat: (text, options) => {
-    const { sessionId, agent, model, effortBySession } = get();
+  sendChat: (text, options, sessionIdParam) => {
+    const state = get();
+    const sessionId = sessionIdParam ?? state.sessionId;
     if (!sessionId || !text.trim()) return;
+    const { agent, model, effortBySession } = state;
     const userMessage: ChatMessage = {
       id: newId(),
       role: "user",
@@ -672,10 +914,8 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       streaming: false,
     };
     const assistantMessage = makeAssistantMessage(agent, model);
-    set((state) => ({
-      messages: [...state.messages, userMessage, assistantMessage],
-      streamingMessageId: assistantMessage.id,
-    }));
+    setSessionMessages(sessionId, [...sessionMessages(sessionId), userMessage, assistantMessage]);
+    setSessionStreamingId(sessionId, assistantMessage.id);
     // "default" is a client-side sentinel — omit the field entirely so the
     // CLI keeps its own default (see EFFORT_OPTIONS).
     const effort = effortBySession[sessionId];
@@ -691,10 +931,19 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     });
   },
 
-  cancelChat: () => {
-    const { sessionId } = get();
+  cancelChat: (sessionIdParam) => {
+    const sessionId = sessionIdParam ?? get().sessionId;
     if (!sessionId) return;
     socket.send({ type: "chat.cancel", sessionId });
+  },
+
+  ensureSessionLive: (sessionId) => {
+    const state = get();
+    if (sessionId === state.sessionId) return;
+    if (sessionId in state.messagesBySession) return;
+    if (pendingBackgroundLoads.has(sessionId)) return; // already loading
+    pendingBackgroundLoads.set(sessionId, state.sessionId);
+    socket.send({ type: "session.resume", sessionId });
   },
 
   setAgent: (agent) => {
@@ -702,7 +951,17 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // Prefer the active host's model list; fall back to server.info-derived list.
     const hostModelEntry = state.hostModels[state.activeHostId];
     const available = (hostModelEntry ? hostModelEntry[agent] : undefined) ?? state.availableModels[agent];
-    set({ agent, model: defaultModel(agent, available) });
+    set((s) => ({
+      agent,
+      model: defaultModel(agent, available),
+      // A manual switch mid-session is remembered too, so switching away and
+      // back (before any further turn changes `lastAgent` server-side) keeps
+      // showing this provider rather than falling back to "claude" — see
+      // `resolveSessionAgent`.
+      hostedAgentBySession: s.sessionId
+        ? { ...s.hostedAgentBySession, [s.sessionId]: agent }
+        : s.hostedAgentBySession,
+    }));
   },
 
   setModel: (model) => {
@@ -724,7 +983,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // Look up last agent/model from the sessions list and update the dropdowns
     // so they reflect the session being switched to, not the one left behind.
     const s = get().sessions.find((s) => s.id === sessionId);
-    const newAgent: AgentKind = (s?.lastAgent as AgentKind | undefined) ?? "claude";
+    const newAgent: AgentKind = resolveSessionAgent(s, get().hostedAgentBySession, sessionId);
     const newHostId = s?.hostId ?? "local";
     // Use the active host's model list for reconciliation; fall back to
     // local availableModels when the host has no model info yet.
@@ -737,15 +996,25 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     writeActiveHostStored(newHostId);
     writeActiveProjectStored(newProject);
     flushChunkBuffer();
-    set({
-      messages: [],
-      streamingMessageId: null,
+    // If a background load for this session is already in flight (a split
+    // pane mounted it before this switch), promote it to an ordinary switch
+    // instead of racing a second resume against it — see
+    // `pendingBackgroundLoads`'s doc comment.
+    pendingBackgroundLoads.delete(sessionId);
+    set((state) => ({
+      // Show whatever this session's bucket already holds (cached from an
+      // earlier load this page session) instead of flashing blank — the
+      // fresh session.history reply that's about to arrive will reconcile
+      // it, and the merge in that handler preserves any live streaming text
+      // already accumulated here rather than dropping it.
+      messages: state.messagesBySession[sessionId] ?? [],
+      streamingMessageId: state.streamingMessageIdBySession[sessionId] ?? null,
       agent: newAgent,
       model: newModel,
       cliError: null,
       activeHostId: newHostId,
       activeProject: newProject,
-    });
+    }));
     socket.switchSession(sessionId);
   },
 
@@ -789,7 +1058,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     socket.send({ type: "hosts.delete", id });
   },
 
-  createSessionOnHost: (hostId, cwd) => {
+  createSessionOnHost: (hostId, cwd, agentChoice) => {
     // Fix 3: If the active session on this host has no messages (empty) and
     // no different cwd is requested, just focus the composer — don't create
     // another blank session.
@@ -800,12 +1069,13 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // exited (e.g. the user typed `/exit`). Reusing it would turn "New
     // session" into a silent no-op on a dead pane. In CLI mode emptiness
     // proves nothing, so always create.
+    //
+    // Bug 1: the guard requires an actual `currentSession` to exist — see
+    // `shouldReuseCurrentSession`. With `sessionId: null` (no session open at
+    // all) there is nothing to focus, so it must not fire.
     const state = get();
     const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
-    const currentSession = state.sessions.find((s) => s.id === state.sessionId);
-    const currentHostId = currentSession?.hostId ?? "local";
-    const isCurrentHostMatch = currentHostId === hostId || (hostId === "local" && currentHostId === "local");
-    if (isCurrentHostMatch && !cliMode && state.messages.length === 0 && !cwd) {
+    if (shouldReuseCurrentSession(state, hostId, cwd, cliMode, state.messages.length === 0)) {
       // Already on an empty session for this host — just focus the composer.
       return;
     }
@@ -826,6 +1096,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // it as soon as its id comes back — unlike the blank session the
     // transport mints on every connect. See `expectCliStart`.
     expectCliStart = true;
+    // Carry the provider choice (if any) through the same round trip — see
+    // `pendingAgentForNewSession`. Always (re)armed, including to `null`, so
+    // a stale choice from an earlier call can never leak onto an unrelated
+    // create.
+    pendingAgentForNewSession = agentChoice ?? null;
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });
       set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });
@@ -951,9 +1226,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     });
   },
 
-  startCli: (sessionId) => {
+  startCli: (sessionId, agent) => {
     set((state) => ({
       cliStartedSessions: { ...state.cliStartedSessions, [sessionId]: true },
+      cliAgentBySession: agent
+        ? { ...state.cliAgentBySession, [sessionId]: agent }
+        : state.cliAgentBySession,
     }));
   },
 
@@ -1033,13 +1311,42 @@ function makeAssistantMessage(agent?: AgentKind, model?: string): ChatMessage {
   };
 }
 
-/** Immutably patch the currently-streaming assistant message, if any. */
-function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void {
-  const { streamingMessageId, messages } = usePerchStore.getState();
-  if (!streamingMessageId) return;
-  usePerchStore.setState({
-    messages: messages.map((m) => (m.id === streamingMessageId ? update(m) : m)),
-  });
+/** Read one session's message bucket (empty array if it has none yet). */
+function sessionMessages(sessionId: string): ChatMessage[] {
+  return usePerchStore.getState().messagesBySession[sessionId] ?? [];
+}
+
+/** Replace one session's message bucket, keeping the `messages` mirror field
+ * in sync whenever that session happens to be the globally active one — see
+ * `PerchState.messages`'s doc comment for why the mirror exists. */
+function setSessionMessages(sessionId: string, messages: ChatMessage[]): void {
+  usePerchStore.setState((state) => ({
+    messagesBySession: { ...state.messagesBySession, [sessionId]: messages },
+    ...(state.sessionId === sessionId ? { messages } : {}),
+  }));
+}
+
+/** Read one session's streaming-message id (`null` if it has none). */
+function sessionStreamingId(sessionId: string): string | null {
+  return usePerchStore.getState().streamingMessageIdBySession[sessionId] ?? null;
+}
+
+/** Set one session's streaming-message id, keeping the `streamingMessageId`
+ * mirror in sync for the active session — same convention as
+ * `setSessionMessages`. */
+function setSessionStreamingId(sessionId: string, streamingMessageId: string | null): void {
+  usePerchStore.setState((state) => ({
+    streamingMessageIdBySession: { ...state.streamingMessageIdBySession, [sessionId]: streamingMessageId },
+    ...(state.sessionId === sessionId ? { streamingMessageId } : {}),
+  }));
+}
+
+/** Immutably patch `sessionId`'s currently-streaming assistant message, if
+ * it has one. */
+function updateStreamingMessage(sessionId: string, update: (msg: ChatMessage) => ChatMessage): void {
+  const streamingId = sessionStreamingId(sessionId);
+  if (!streamingId) return;
+  setSessionMessages(sessionId, sessionMessages(sessionId).map((m) => (m.id === streamingId ? update(m) : m)));
 }
 
 /**
@@ -1048,73 +1355,91 @@ function updateStreamingMessage(update: (msg: ChatMessage) => ChatMessage): void
  * Any *other* client watching the same session (a second tab, or any client
  * live during detached-turn recovery, which re-emits a whole turn's worth of
  * `chat.*` events to every connection) never had a `streamingMessageId` to
- * begin with, so `updateStreamingMessage`'s `if (!streamingMessageId) return`
- * would silently drop the entire turn.
+ * begin with, so `updateStreamingMessage`'s `if (!streamingId) return` would
+ * silently drop the entire turn.
  *
  * Called at the top of every `chat.chunk`/`chat.thinking`/`chat.tool_use`/
  * `chat.tool_result` handler: if this client is already tracking a streaming
- * message, it's a no-op. Otherwise, only when the event belongs to the
- * currently *open* session does it adopt by minting a placeholder and
- * wiring up `streamingMessageId`.
+ * message for `sessionId`, it's a no-op. Otherwise, only when the session is
+ * *known* to this client — the active session, or any session whose bucket
+ * already exists in `messagesBySession` (loaded at least once this page
+ * load, e.g. by an open split pane) — does it adopt by minting a placeholder
+ * and wiring up that session's `streamingMessageIdBySession` entry.
  *
  * The `false` return is load-bearing and not merely an optimisation: the
  * server's hub forwarder relays detached-turn events to *every* connection
  * with no session filtering (the `DetachedSink` broadcast in server.rs), so a
  * client with session A open really does receive session B's chunks. Callers
- * MUST ignore the event entirely when this returns false — otherwise B's text
- * is appended into A's bubble, since `updateStreamingMessage` patches whatever
- * `streamingMessageId` currently points at without checking the session.
+ * MUST ignore the event entirely when this returns false — otherwise a
+ * session nobody has ever opened in this client would spring into existence
+ * in `messagesBySession`, unboundedly, from mere broadcast traffic.
  */
 function adoptStreamingMessage(sessionId: string): boolean {
   const state = usePerchStore.getState();
-  if (state.sessionId !== sessionId) return false;
-  if (state.streamingMessageId) return true;
-  const assistantMessage = makeAssistantMessage(state.agent, state.model);
-  usePerchStore.setState({
-    messages: [...state.messages, assistantMessage],
-    streamingMessageId: assistantMessage.id,
-  });
+  const known = sessionId === state.sessionId || sessionId in state.messagesBySession;
+  if (!known) return false;
+  if (sessionStreamingId(sessionId)) return true;
+  // Prefer this session's own recorded provider choice over the globally
+  // active agent/model — meaningful once a background pane's session
+  // differs from whatever the foreground currently has selected.
+  const agent = state.hostedAgentBySession[sessionId] ?? state.agent;
+  const assistantMessage = makeAssistantMessage(agent, state.model);
+  setSessionMessages(sessionId, [...sessionMessages(sessionId), assistantMessage]);
+  setSessionStreamingId(sessionId, assistantMessage.id);
   return true;
 }
 
 /**
  * `chat.chunk` arrives token-by-token and, unbuffered, drove one full
  * `messages` array copy (+ full-transcript re-render) per token. Coalesce a
- * burst of chunks into a single store write per animation frame instead.
+ * burst of chunks into a single store write per animation frame instead —
+ * one buffer + one scheduled frame *per session*, so two sessions streaming
+ * concurrently (two split panes) accumulate independently rather than
+ * interleaving into whichever session flushes first.
  *
- * Correctness-critical: any code path that can read or replace `messages`
- * must flush this buffer synchronously first, or trailing tokens can be
- * silently dropped (the buffer applies via `updateStreamingMessage`, which
- * itself no-ops once `streamingMessageId` is cleared/changed — so a flush
- * that arrives "too late" loses text rather than misapplying it). Every
- * `handleServerMessage` case other than "chat.chunk" flushes up front, and
- * every store action that resets `messages`/`streamingMessageId` flushes
- * before doing so.
+ * Correctness-critical: any code path that can read or replace a session's
+ * messages must flush that session's buffer (or call `flushChunkBuffer()`
+ * with no argument to flush every pending session) synchronously first, or
+ * trailing tokens can be silently dropped (the buffer applies via
+ * `updateStreamingMessage`, which itself no-ops once that session's
+ * streaming id is cleared/changed — so a flush that arrives "too late" loses
+ * text rather than misapplying it). Every `handleServerMessage` case other
+ * than "chat.chunk" flushes (all sessions) up front, and every store action
+ * that resets `messages`/`streamingMessageId` does the same.
  */
-let chunkBuffer = "";
-let chunkRaf: number | null = null;
+const chunkBuffers = new Map<string, string>();
+const chunkRafs = new Map<string, number>();
 
-function flushChunkBuffer(): void {
-  if (chunkRaf != null) {
-    cancelAnimationFrame(chunkRaf);
-    chunkRaf = null;
+/** Exported for `store.test.ts` only. */
+export function flushChunkBuffer(sessionId?: string): void {
+  const ids = sessionId != null ? [sessionId] : [...chunkBuffers.keys()];
+  for (const id of ids) {
+    const raf = chunkRafs.get(id);
+    if (raf != null) {
+      cancelAnimationFrame(raf);
+      chunkRafs.delete(id);
+    }
+    const text = chunkBuffers.get(id);
+    if (!text) {
+      chunkBuffers.delete(id);
+      continue;
+    }
+    chunkBuffers.delete(id);
+    updateStreamingMessage(id, (m) => ({
+      ...m,
+      text: m.text + text,
+      turnStartedAt: m.turnStartedAt ?? Date.now(),
+    }));
   }
-  if (!chunkBuffer) return;
-  const text = chunkBuffer;
-  chunkBuffer = "";
-  updateStreamingMessage((m) => ({
-    ...m,
-    text: m.text + text,
-    turnStartedAt: m.turnStartedAt ?? Date.now(),
-  }));
 }
 
-function scheduleChunkFlush(): void {
-  if (chunkRaf != null) return;
-  chunkRaf = requestAnimationFrame(() => {
-    chunkRaf = null;
-    flushChunkBuffer();
+function scheduleChunkFlush(sessionId: string): void {
+  if (chunkRafs.has(sessionId)) return;
+  const raf = requestAnimationFrame(() => {
+    chunkRafs.delete(sessionId);
+    flushChunkBuffer(sessionId);
   });
+  chunkRafs.set(sessionId, raf);
 }
 
 /**
@@ -1150,20 +1475,53 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
   });
 }
 
-function handleServerMessage(msg: ServerMessage): void {
+/** Exported for `store.test.ts` only — everything else drives this
+ * indirectly via `socket.onMessage`. */
+export function handleServerMessage(msg: ServerMessage): void {
   // Flush any rAF-buffered chat.chunk text before processing anything else,
   // so e.g. chat.done/error see the fully up-to-date message text instead of
   // racing a still-pending animation frame (see flushChunkBuffer above).
   if (msg.type !== "chat.chunk") flushChunkBuffer();
   switch (msg.type) {
     case "session.created": {
+      // A background-load resume (see `ensureSessionLive`) echoes back
+      // through this exact same message shape — indistinguishable from a
+      // real switch except by checking `pendingBackgroundLoads`. Its
+      // `session.history` reply (which always follows) does the real work
+      // and restores the true foreground session; this must NOT touch
+      // `sessionId`/`expectCliStart`/`listSessions` or it would yank the
+      // foreground pane onto the session a background pane just loaded.
+      if (pendingBackgroundLoads.has(msg.sessionId)) break;
       // A user-initiated create is an explicit "start working here", so CLI
       // mode may spawn its PTY straight away (see `expectCliStart`).
       if (expectCliStart) {
         expectCliStart = false;
-        usePerchStore.setState((state) => ({
-          cliStartedSessions: { ...state.cliStartedSessions, [msg.sessionId]: true },
-        }));
+        const agentChoice = pendingAgentForNewSession;
+        pendingAgentForNewSession = null;
+        usePerchStore.setState((state) => {
+          const next: Partial<PerchState> = {
+            cliStartedSessions: { ...state.cliStartedSessions, [msg.sessionId]: true },
+          };
+          if (agentChoice) {
+            // Record the choice in both per-session maps — whichever mode
+            // this session ends up viewed in (CLI or Hosted) finds it. Bug
+            // 2/3 fix: in Hosted mode, also drive the live `agent`/`model`
+            // fields immediately, since `sendChat` reads them straight off
+            // the store and Chat.tsx's pane header renders `agent` directly —
+            // without this the new session kept whatever provider the
+            // *previous* session happened to leave behind.
+            next.cliAgentBySession = { ...state.cliAgentBySession, [msg.sessionId]: agentChoice };
+            next.hostedAgentBySession = { ...state.hostedAgentBySession, [msg.sessionId]: agentChoice };
+            const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
+            if (!cliMode) {
+              const hostModelEntry = state.hostModels[state.activeHostId];
+              const available = (hostModelEntry ? hostModelEntry[agentChoice] : undefined) ?? state.availableModels[agentChoice];
+              next.agent = agentChoice;
+              next.model = defaultModel(agentChoice, available);
+            }
+          }
+          return next;
+        });
       }
       usePerchStore.setState({ sessionId: msg.sessionId });
       // Refresh the session list so the sidebar shows the new entry.
@@ -1230,9 +1588,25 @@ function handleServerMessage(msg: ServerMessage): void {
         if ((becameDone || becameBlocked) && toastDelivery !== "off") {
           if (toastDelivery === "system" && typeof Notification !== "undefined" && Notification.permission === "granted") {
             try {
-              new Notification(becameBlocked ? "Session needs attention" : "Session finished", {
-                body: msg.session.title || "(untitled session)",
-              });
+              const sessionIdForClick = msg.session.id;
+              const notification = new Notification(
+                becameBlocked ? "Session needs attention" : "Session finished",
+                {
+                  body: msg.session.title || "(untitled session)",
+                  // Same id -> the OS replaces the prior notification instead
+                  // of stacking a queue of them for a repeatedly-firing session.
+                  tag: sessionIdForClick,
+                },
+              );
+              // Reuse the exact same action the in-app Toast's onClick uses
+              // (see components/Toast.tsx) so the two click-to-switch paths
+              // cannot diverge; switchSession already re-scopes host/project
+              // for remote sessions the same way the toast path does.
+              notification.onclick = () => {
+                window.focus();
+                usePerchStore.getState().switchSession(sessionIdForClick);
+                notification.close();
+              };
             } catch {
               // Fall through to the in-app toast as a best-effort fallback.
               toasts = [...toasts, { id: newId(), sessionId: msg.session.id, title: msg.session.title }];
@@ -1278,14 +1652,17 @@ function handleServerMessage(msg: ServerMessage): void {
     case "session.deleted": {
       const state = usePerchStore.getState();
       const wasActive = state.sessionId === msg.sessionId;
-      const { [msg.sessionId]: _removedLayout, ...restLayouts } = state.sessionLayouts;
-      const { [msg.sessionId]: _removedCli, ...restCli } = state.cliTerminalIds;
       const remainingSessions = state.sessions.filter((s) => s.id !== msg.sessionId);
       usePerchStore.setState({
         sessions: remainingSessions,
-        sessionLayouts: restLayouts,
-        cliTerminalIds: restCli,
+        sessionLayouts: omitKey(state.sessionLayouts, msg.sessionId),
+        cliTerminalIds: omitKey(state.cliTerminalIds, msg.sessionId),
+        cliAgentBySession: omitKey(state.cliAgentBySession, msg.sessionId),
+        hostedAgentBySession: omitKey(state.hostedAgentBySession, msg.sessionId),
+        messagesBySession: omitKey(state.messagesBySession, msg.sessionId),
+        streamingMessageIdBySession: omitKey(state.streamingMessageIdBySession, msg.sessionId),
       });
+      pendingBackgroundLoads.delete(msg.sessionId);
       if (wasActive) {
         switchAwayFromActiveSession(
           remainingSessions.filter((s) => !s.archived),
@@ -1333,7 +1710,7 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "session.history": {
-      const messages: ChatMessage[] = msg.messages.map((h) => ({
+      const incoming: ChatMessage[] = msg.messages.map((h) => ({
         id: h.id,
         role: h.role,
         text: h.text,
@@ -1343,7 +1720,47 @@ function handleServerMessage(msg: ServerMessage): void {
         agent: h.agent,
         model: h.model,
       }));
-      usePerchStore.setState({ messages, streamingMessageId: null });
+
+      // The DB-persisted history this reply carries never includes a turn
+      // still in flight (it's only written on chat.done) — if this session
+      // already has a live streaming message accumulated locally (this
+      // client's own background pane keeping it warm, or a switch back into
+      // a session that started streaming while backgrounded), splice it back
+      // in after the persisted history rather than letting it get dropped.
+      const preState = usePerchStore.getState();
+      const existingStreamId = preState.streamingMessageIdBySession[msg.sessionId];
+      let messages = incoming;
+      let streamingMessageId: string | null = null;
+      if (existingStreamId) {
+        const streamingMsg = (preState.messagesBySession[msg.sessionId] ?? []).find(
+          (m) => m.id === existingStreamId,
+        );
+        if (streamingMsg) {
+          messages = [...incoming, streamingMsg];
+          streamingMessageId = existingStreamId;
+        }
+      }
+      setSessionMessages(msg.sessionId, messages);
+      setSessionStreamingId(msg.sessionId, streamingMessageId);
+
+      // A background load (see `ensureSessionLive`/`pendingBackgroundLoads`)
+      // must not touch anything foreground-only below — the bucket write
+      // above is the entire point of the fetch. Once done, restore whichever
+      // session was actually active/foreground when the load started, so
+      // this connection's server-side "active session" (viewer status) moves
+      // back off the session we just background-loaded — unless the real
+      // foreground has already changed since (e.g. the user switched there
+      // directly while this load was in flight), in which case that switch's
+      // own resume already re-established it and nothing further is needed.
+      if (pendingBackgroundLoads.has(msg.sessionId)) {
+        const restoreId = pendingBackgroundLoads.get(msg.sessionId) ?? null;
+        pendingBackgroundLoads.delete(msg.sessionId);
+        if (restoreId && restoreId !== msg.sessionId && usePerchStore.getState().sessionId === restoreId) {
+          socket.send({ type: "session.resume", sessionId: restoreId });
+        }
+        break;
+      }
+
       // Derive agent/model from the last assistant message in history — this
       // is the most reliable source since it arrives after switchSession's
       // optimistic update (which reads from sessions[] list metadata).
@@ -1399,18 +1816,18 @@ function handleServerMessage(msg: ServerMessage): void {
     case "chat.chunk": {
       // Adopt-or-create must happen here, before buffering — the buffer's
       // flush applies via updateStreamingMessage, which itself no-ops when
-      // streamingMessageId is null, so buffering first would discard the
-      // chunk on any client that didn't initiate this turn. The guard also
-      // keeps another session's broadcast chunks out of this buffer, which
-      // would otherwise flush into the open session's bubble.
+      // that session's streaming id is null, so buffering first would
+      // discard the chunk on any client that didn't initiate this turn. The
+      // guard also keeps an unknown session's broadcast chunks from spawning
+      // a bucket for a session nobody has opened in this client.
       if (!adoptStreamingMessage(msg.sessionId)) break;
-      chunkBuffer += msg.text;
-      scheduleChunkFlush();
+      chunkBuffers.set(msg.sessionId, (chunkBuffers.get(msg.sessionId) ?? "") + msg.text);
+      scheduleChunkFlush(msg.sessionId);
       break;
     }
     case "chat.thinking": {
       if (!adoptStreamingMessage(msg.sessionId)) break;
-      updateStreamingMessage((m) => ({
+      updateStreamingMessage(msg.sessionId, (m) => ({
         ...m,
         thinking: m.thinking + msg.text,
         turnStartedAt: m.turnStartedAt ?? Date.now(),
@@ -1419,7 +1836,7 @@ function handleServerMessage(msg: ServerMessage): void {
     }
     case "chat.tool_use": {
       if (!adoptStreamingMessage(msg.sessionId)) break;
-      updateStreamingMessage((m) => ({
+      updateStreamingMessage(msg.sessionId, (m) => ({
         ...m,
         tools: [...m.tools, { name: msg.name, input: msg.input, done: false }],
         turnStartedAt: m.turnStartedAt ?? Date.now(),
@@ -1428,7 +1845,7 @@ function handleServerMessage(msg: ServerMessage): void {
     }
     case "chat.tool_result": {
       if (!adoptStreamingMessage(msg.sessionId)) break;
-      updateStreamingMessage((m) => {
+      updateStreamingMessage(msg.sessionId, (m) => {
         const idx = [...m.tools].reverse().findIndex((t) => t.name === msg.name && !t.done);
         if (idx === -1) {
           return { ...m, tools: [...m.tools, { name: msg.name, result: msg.result, done: true }] };
@@ -1441,11 +1858,19 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "chat.done": {
-      // Same broadcast hazard as the streaming handlers above: an unfiltered
-      // detached `chat.done` for a *different* session would otherwise end
-      // this session's stream and clear its streamingMessageId mid-turn.
-      if (usePerchStore.getState().sessionId !== msg.sessionId) break;
-      updateStreamingMessage((m) => ({
+      // Unlike the old single-active-session model, a `chat.done` for a
+      // session this client knows about (active, or a background pane's
+      // session) is applied to exactly that session's bucket — it must NOT
+      // require `sessionId === state.sessionId`, or a background pane's turn
+      // would never be marked done. Deliberately does NOT call
+      // `adoptStreamingMessage` (which mints a placeholder): a done with no
+      // prior streaming id for a known session should stay a no-op, exactly
+      // like `updateStreamingMessage` already does — not spawn an empty
+      // "done" bubble. Still guards against an entirely unknown session
+      // reacting to broadcast traffic.
+      const knownDone = msg.sessionId === usePerchStore.getState().sessionId || msg.sessionId in usePerchStore.getState().messagesBySession;
+      if (!knownDone) break;
+      updateStreamingMessage(msg.sessionId, (m) => ({
         ...m,
         streaming: false,
         usage: msg.usage,
@@ -1453,7 +1878,7 @@ function handleServerMessage(msg: ServerMessage): void {
           ? Math.round((Date.now() - m.turnStartedAt) / 1000)
           : undefined,
       }));
-      usePerchStore.setState({ streamingMessageId: null });
+      setSessionStreamingId(msg.sessionId, null);
       break;
     }
     case "chat.plan": {
@@ -1461,24 +1886,24 @@ function handleServerMessage(msg: ServerMessage): void {
       // insert the card *ahead* of the still-streaming message rather than
       // appending after it — that keeps the transcript in the order things
       // actually happened and leaves the streaming bubble last.
-      usePerchStore.setState((state) => {
-        const card: ChatMessage = {
-          id: newId(),
-          role: "assistant",
-          kind: "plan",
-          text: msg.content,
-          thinking: "",
-          tools: [],
-          streaming: false,
-        };
-        const idx = state.streamingMessageId
-          ? state.messages.findIndex((m) => m.id === state.streamingMessageId)
-          : -1;
-        if (idx === -1) return { messages: [...state.messages, card] };
-        return {
-          messages: [...state.messages.slice(0, idx), card, ...state.messages.slice(idx)],
-        };
-      });
+      const known = msg.sessionId === usePerchStore.getState().sessionId || msg.sessionId in usePerchStore.getState().messagesBySession;
+      if (!known) break;
+      const card: ChatMessage = {
+        id: newId(),
+        role: "assistant",
+        kind: "plan",
+        text: msg.content,
+        thinking: "",
+        tools: [],
+        streaming: false,
+      };
+      const existing = sessionMessages(msg.sessionId);
+      const streamId = sessionStreamingId(msg.sessionId);
+      const idx = streamId ? existing.findIndex((m) => m.id === streamId) : -1;
+      setSessionMessages(
+        msg.sessionId,
+        idx === -1 ? [...existing, card] : [...existing.slice(0, idx), card, ...existing.slice(idx)],
+      );
       break;
     }
     case "commands.list": {
@@ -1491,30 +1916,32 @@ function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "error": {
-      const { streamingMessageId, attachingCliForSession } = usePerchStore.getState();
-      if (streamingMessageId) {
-        updateStreamingMessage((m) => ({ ...m, streaming: false, error: msg.message }));
-        usePerchStore.setState({ streamingMessageId: null });
+      // ErrorMessage carries no sessionId on the wire — it is inherently
+      // attributed to whatever this connection currently considers active,
+      // same as before this refactor.
+      const { sessionId: activeSessionId, attachingCliForSession } = usePerchStore.getState();
+      const streamingId = activeSessionId ? sessionStreamingId(activeSessionId) : null;
+      if (activeSessionId && streamingId) {
+        updateStreamingMessage(activeSessionId, (m) => ({ ...m, streaming: false, error: msg.message }));
+        setSessionStreamingId(activeSessionId, null);
       } else if (attachingCliForSession != null) {
         // Error arrived while a CLI PTY attach was in flight — surface it as
         // the cliError overlay (visible in CLI mode) instead of pushing it
         // into the chat message list which is hidden in CLI mode.
         usePerchStore.setState({ cliError: msg.message, attachingCliForSession: null });
-      } else {
-        usePerchStore.setState((state) => ({
-          messages: [
-            ...state.messages,
-            {
-              id: newId(),
-              role: "assistant",
-              text: "",
-              thinking: "",
-              tools: [],
-              streaming: false,
-              error: msg.message,
-            },
-          ],
-        }));
+      } else if (activeSessionId) {
+        setSessionMessages(activeSessionId, [
+          ...sessionMessages(activeSessionId),
+          {
+            id: newId(),
+            role: "assistant",
+            text: "",
+            thinking: "",
+            tools: [],
+            streaming: false,
+            error: msg.message,
+          },
+        ]);
       }
       break;
     }
@@ -1644,7 +2071,13 @@ socket.onMessage(handleServerMessage);
 socket.onConnectionChange((connected) => {
   // Dropping the transport also invalidates the session; a fresh
   // session.create/subscribe handshake runs on reconnect (see ws.ts).
-  if (!connected) flushChunkBuffer();
+  if (!connected) {
+    flushChunkBuffer();
+    // Any background load in flight will never get its reply now — clear
+    // the tracking so a reconnect's `ensureSessionLive` retries instead of
+    // finding a permanently-stuck "already loading" guard.
+    pendingBackgroundLoads.clear();
+  }
   usePerchStore.setState(connected ? { connected } : { connected, sessionId: null });
 });
 // Apply herdr's default look (catppuccin) immediately so there's no flash of

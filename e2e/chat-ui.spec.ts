@@ -90,9 +90,51 @@ async function seedSessionNoTurn(page: Page): Promise<void> {
  * Edit-tool diff, or "list is scrollable" — without needing a real agent
  * turn to happen to produce that exact shape. */
 async function injectMessages(page: Page, messages: unknown[]): Promise<void> {
+  // Injected fixtures race a real `session.history` for the freshly-seeded
+  // session: that reply legitimately replaces the bucket with the server's
+  // (empty) history and wipes the fixture. The product behaviour is correct —
+  // it is the fixture that is synthetic — so retry until the messages are
+  // actually in the store rather than assuming the first write survives.
+  // Settle first: wait until the session's bucket stops changing, so the
+  // history reply has already landed and cannot wipe the fixture afterwards.
+  // Retrying after the fact does not work — the write can land and then be
+  // overwritten a moment later, which reads as a pass and then fails at the
+  // assertion.
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as { usePerchStore: any; __injectSettle?: { n: number; c: number } };
+      const s = w.usePerchStore.getState();
+      const n = ((s.sessionId && s.messagesBySession?.[s.sessionId]) || s.messages || []).length;
+      const prev = w.__injectSettle;
+      // Same length observed on three consecutive polls => quiescent.
+      w.__injectSettle = prev && prev.n === n ? { n, c: prev.c + 1 } : { n, c: 0 };
+      return w.__injectSettle.c >= 3;
+    },
+    undefined,
+    { timeout: 10000, polling: 150 },
+  );
+  await page.evaluate(() => {
+    delete (window as unknown as { __injectSettle?: unknown }).__injectSettle;
+  });
+  await injectMessagesOnce(page, messages);
+}
+
+async function injectMessagesOnce(page: Page, messages: unknown[]): Promise<void> {
   await page.evaluate((msgs) => {
     const store = (window as unknown as { usePerchStore: { setState: (fn: (s: any) => any) => void } }).usePerchStore;
-    store.setState((s: any) => ({ messages: [...s.messages, ...msgs] }));
+    // Hosted conversations are stored per session in `messagesBySession`; the
+    // flat `messages` array is only a MIRROR of the active session's bucket.
+    // Writing `messages` alone therefore renders nothing — the views read the
+    // bucket. Write both so the injected fixture is the real source of truth
+    // and the mirror stays consistent with it.
+    store.setState((s: any) => {
+      const sid = s.sessionId;
+      const current = (sid && s.messagesBySession?.[sid]) || s.messages || [];
+      const next = [...current, ...msgs];
+      return sid
+        ? { messagesBySession: { ...s.messagesBySession, [sid]: next }, messages: next }
+        : { messages: next };
+    });
   }, messages);
 }
 

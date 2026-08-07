@@ -19,6 +19,7 @@ import {
 import { uploadAttachment, type StagedAttachment } from "../attachments";
 import { AgentCliTerminal } from "./AgentCliTerminal";
 import { CliStartPanel } from "../components/CliStartPanel";
+import { NoSessionPanel } from "../components/NoSessionPanel";
 import type { AgentKind, CommandEntry } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
@@ -549,13 +550,83 @@ const MessageBubble = memo(function MessageBubble({
  * for auto-stick and pill-visibility purposes. */
 const BOTTOM_THRESHOLD_PX = 48;
 
-export function ChatView() {
-  const messages = usePerchStore((s) => s.messages);
-  const streamingMessageId = usePerchStore((s) => s.streamingMessageId);
-  const sessionId = usePerchStore((s) => s.sessionId);
+/**
+ * Genuinely-unavailable fallback (see this file's header block, and
+ * `dockview/DockviewShell.tsx`'s `SessionChatPanel`) for a `ChatView`
+ * instance whose `sessionId` prop names a session that no longer exists —
+ * e.g. a persisted dockview layout referencing a session that was since
+ * deleted, or restored on a host/db that never had it. A pane bound to a
+ * session that DOES still exist renders the live chat below instead, even
+ * when it isn't the globally active session — `store.ts`'s
+ * `messagesBySession`/`streamingMessageIdBySession` are keyed per session
+ * (not scoped to one active conversation), and `sendChat`/`cancelChat` take
+ * an explicit `sessionId`, so a split pane genuinely streams that session's
+ * own turns rather than showing a "switch to see it" placeholder.
+ *
+ * CLI mode never needed this — `AgentCliTerminal` already takes an explicit
+ * `sessionId` and drives a PTY keyed by that id independent of which session
+ * is globally active (see the `mode === "cli"` branch below, unchanged).
+ */
+function InactiveSessionPane({ sessionId }: { sessionId: string }) {
+  return (
+    <div className="inactive-session-pane" data-testid={`session-pane-inactive-${sessionId}`}>
+      <div className="inactive-session-pane__note">This session is no longer available.</div>
+    </div>
+  );
+}
+
+/** Stable empty-array fallback for the `messages` selector below — a fresh
+ * `[]` literal returned from a zustand selector on every call (one that
+ * never actually changes) breaks `useSyncExternalStore`'s snapshot-equality
+ * check and produces an infinite re-render loop (React error #185), since
+ * the selector result never structurally settles. A session with no
+ * `messagesBySession` entry yet (not loaded) reuses this one reference. */
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
+/**
+ * `sessionId`: which session this pane renders. Omitted (the default, and
+ * what every pre-existing caller does) means "the globally active session" —
+ * that path is 100% unchanged from before this prop existed. Passing an
+ * explicit id is how `dockview/DockviewShell.tsx`'s `SessionChatPanel` binds
+ * a split pane to a specific, possibly-non-active session — see
+ * `InactiveSessionPane` above for what that renders when it isn't (yet, or
+ * ever) the active one.
+ */
+export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = {}) {
+  const activeSessionId = usePerchStore((s) => s.sessionId);
+  const sessionId = sessionIdProp ?? activeSessionId;
+  // True for every pre-existing caller (no `sessionId` prop at all).
+  const isActiveSession = sessionId === activeSessionId;
+  // Hosted mode's live state is now keyed per session — see
+  // `store.ts`'s `messagesBySession`/`streamingMessageIdBySession` — so a
+  // pane bound to a non-active session reads its OWN bucket here, not the
+  // active-session mirror.
+  const messages = usePerchStore((s) =>
+    sessionId ? (s.messagesBySession[sessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
+  );
+  const streamingMessageId = usePerchStore((s) =>
+    sessionId ? (s.streamingMessageIdBySession[sessionId] ?? null) : null,
+  );
+  // Whether this pane's session still exists at all (as opposed to merely
+  // being inactive) — the only remaining case that falls back to
+  // `InactiveSessionPane`. The active session is exempt: it can legitimately
+  // be brand-new and not yet in `sessions[]` (the DB row is deferred until
+  // the first message — see server.rs), so it must never be treated as
+  // "gone" just because it hasn't been listed yet.
+  const sessionExists = usePerchStore((s) => isActiveSession || s.sessions.some((x) => x.id === sessionId));
+  const ensureSessionLive = usePerchStore((s) => s.ensureSessionLive);
+  const connected = usePerchStore((s) => s.connected);
   const sendChat = usePerchStore((s) => s.sendChat);
   const cancelChat = usePerchStore((s) => s.cancelChat);
   const agent = usePerchStore((s) => s.agent);
+  const cliAgentBySession = usePerchStore((s) => s.cliAgentBySession);
+  // CLI mode's provider choice (Bug 1) — per-session, falling back to the
+  // global `agent` (Hosted mode's field) for a session with no recorded
+  // choice, which is exactly how every pre-existing session already behaved.
+  // This is *provider* selection only (which CLI binary launches), not
+  // model/effort chrome — CLAUDE.md's "zero model chrome in CLI mode" stands;
+  // see CliStartPanel.tsx's header comment for the full rationale.
+  const cliAgent: AgentKind = sessionId ? (cliAgentBySession[sessionId] ?? agent) : agent;
   const cliError = usePerchStore((s) => s.cliError);
   const updateSettings = usePerchStore((s) => s.updateSettings);
   const sessionCommands = usePerchStore((s) => s.sessionCommands);
@@ -580,6 +651,18 @@ export function ChatView() {
     sessionId ? (s.sessions.find((x) => x.id === sessionId)?.cliStarted ?? false) : false,
   );
   const cliReady = !!sessionId && (cliStartedLocally || cliStartedOnServer);
+
+  // A split pane bound to a session this connection has never resumed
+  // before (the common "split with an existing session" case) has no
+  // messagesBySession entry yet — load it in the background, without
+  // disturbing the actual active/foreground session. No-ops once loaded
+  // (or for the active session, which loads through the normal switch
+  // path) — see `ensureSessionLive`'s doc comment in store.ts.
+  useEffect(() => {
+    if (mode === "hosted" && sessionId && !isActiveSession && sessionExists) {
+      ensureSessionLive(sessionId);
+    }
+  }, [mode, sessionId, isActiveSession, sessionExists, ensureSessionLive]);
 
   const [text, setText] = useState("");
   // Plan mode is a composer-level toggle, not a one-shot: leaving it ON after
@@ -759,11 +842,11 @@ export function ChatView() {
   };
 
   const submit = () => {
-    if (!text.trim() || streamingMessageId || uploading) return;
+    if (!sessionId || !text.trim() || streamingMessageId || uploading) return;
     const options: { planMode?: boolean; attachments?: string[] } = {};
     if (planMode) options.planMode = true;
     if (staged.length > 0) options.attachments = staged.map((a) => a.path);
-    sendChat(text, Object.keys(options).length > 0 ? options : undefined);
+    sendChat(text, Object.keys(options).length > 0 ? options : undefined, sessionId);
     setText("");
     setStaged([]);
     setUploadError(null);
@@ -779,16 +862,26 @@ export function ChatView() {
 
   return (
     <div className="chat">
-      {mode === "cli" && cliReady && sessionId ? (
+      {!sessionId ? (
+        // Bug 2: no active session (e.g. the last one was just deleted) —
+        // render a real empty state instead of a disabled composer claiming
+        // "Connecting..." even though the socket is fine. See NoSessionPanel.
+        <NoSessionPanel connected={connected} />
+      ) : mode === "cli" && cliReady ? (
         <AgentCliTerminal
-          key={`${sessionId}-${agent}`}
+          key={`${sessionId}-${cliAgent}`}
           sessionId={sessionId}
-          agent={agent}
+          agent={cliAgent}
           cliError={cliError}
           onExitCli={() => updateSettings({ chatMode: "hosted" })}
         />
       ) : mode === "cli" ? (
-        <CliStartPanel agent={agent} />
+        <CliStartPanel agent={cliAgent} />
+      ) : !sessionExists ? (
+        // The session this pane is bound to no longer exists — see
+        // `InactiveSessionPane`'s doc comment. A merely-inactive (but real)
+        // session renders the live chat below like any other.
+        <InactiveSessionPane sessionId={sessionId} />
       ) : (
         <>
           <div className="chat__list-container">
@@ -836,8 +929,7 @@ export function ChatView() {
             <textarea
               ref={textareaRef}
               value={text}
-              placeholder={sessionId ? "Message perch..." : "Connecting..."}
-              disabled={!sessionId}
+              placeholder="Message perch..."
               rows={1}
               onChange={(e) => {
                 setText(e.target.value);
@@ -896,7 +988,7 @@ export function ChatView() {
                 Plan
               </button>
               {streamingMessageId ? (
-                <button className="chat__cancel" onClick={cancelChat}>
+                <button className="chat__cancel" onClick={() => cancelChat(sessionId ?? undefined)}>
                   Stop
                 </button>
               ) : (

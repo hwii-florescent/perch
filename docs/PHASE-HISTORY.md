@@ -881,3 +881,240 @@ exactly one cell — so Chromium-only was never evidence about the app.
   profile — both landed in a later build than the one that was installed at the time. The
   lesson stands regardless: verify in the engine the user runs, and rebuild + reinstall the
   bundle before asking whether a fix worked.
+
+---
+
+### Phase 13 — herdr CLI-mode parity, Wave 3 — ✅ done
+A four-domain gap analysis against the public `herdrdev/herdr` tree (docs treated as the
+definition of "user-facing function", then confirmed against source), followed by parallel
+implementation. Starting point **40/66 in-scope rows present (~61%)**; end state **~47/66 (~71%)**.
+
+**Scoping call, recorded so it isn't re-derived.** Literal parity with all of herdr is not a
+meaningful target: it is a native multiplexer with a vendored ghostty VT engine, kitty graphics, a
+plugin marketplace and a Windows ConPTY path. perch is not a terminal — it is a transport plus a
+real emulator at the far end (xterm.js), so it has *one* VT layer where herdr has two. That is why
+perch's terminal bugs are byte-path bugs, not emulation bugs. The measured target is herdr's
+user-facing CLI/terminal functionality. Structurally unreachable for perch, and deliberately not
+pursued: OS-global hotkeys, working with no browser, and unconditional clipboard/audio (both need a
+prior user gesture in a browser). The honest ceiling is ~95%.
+
+- **Duplicate agent spawn — a correctness bug, not a parity gap.** Two gap-analysis agents
+  independently found it. `TerminalManager` was owned by `ConnState`, with `on_data`/`on_exit`
+  captured at connection-open, so a second client attaching to one session spawned a second
+  independent `claude --resume <id>` against the same on-disk conversation. New
+  `AgentTerminalRegistry` in `terminal.rs`, owned by `AppState`, keyed by **session id**: a second
+  `attach()` returns `Reused` with the same terminal id and registers a viewer. Output fans out to
+  all viewers, any viewer may type (tmux-`attach` semantics — one conversation, so no principled
+  "owner"), and the PTY dies only when the last viewer detaches or the child exits. Resize is
+  last-write-wins, flagged as a known simplification vs tmux's smallest-common-size.
+  - The last viewer is deliberately **not** removed before killing: the waiter thread's `on_exit`
+    runs through still-registered callbacks, and that is what clears `blocked_sessions`. Removing
+    first strands that flag set forever.
+  - `detach()`'s last-viewer check and removal must happen under **one** lock acquisition. Split
+    across two, concurrent disconnects both observe `len == 2`, both take the non-last branch, and
+    both remove — leaving a live PTY with zero viewers that nothing ever kills. Fixed during review.
+  - **Direct-mode hosts never had this bug**: `tmux new-session -A` already dedupes remote attaches,
+    so that path stays on the per-connection manager. Only the local `agentAttach` branch was rewired.
+- **CLI-mode working/idle state.** `SessionStatus::Running` was only ever set from Hosted `ChatSend`
+  and detached-turn paths, so `running_sessions` never contained a CLI session; `statusDot.ts`
+  requires `status === "running"` for the working dot, and the done-toast needs a running→idle
+  transition. Both were therefore dead in CLI mode. PTY activity now drives the **existing**
+  `running_sessions` + `broadcast_session_updated` (no parallel status channel), so both light up
+  with zero web-side change; a CLI turn finishing unviewed goes `unseen` exactly like a Hosted turn.
+  `AGENT_QUIET_THRESHOLD = 700ms` (herdr's own idle-confirmation cap), one shared sweep task rather
+  than a timer per terminal, debounce extracted as the pure `is_quiet_enough_to_idle`.
+- **Protocol parity is finally enforced.** `crates/perch-core/tests/protocol_parity.rs` compares
+  message discriminants, wire-cased field names and optionality across `protocol.rs` ↔ `protocol.ts`
+  in both directions, plus 12 embedded value types, with count floors so a broken parser fails loudly
+  instead of passing vacuously. It is explicit about what it does *not* catch (field types, bare-string
+  enum variants, `serde_json::Value` contents, `flatten`). `ClientMessage` derives only `Deserialize`,
+  so there is no serde-driven path for it — both sides are text-parsed rather than giving the two
+  directions different trust levels. **Verified by injecting drift in both shapes** (TS-only field,
+  TS-only message type) and confirming a useful failure message, then reverting.
+- **Terminal features:** OSC 52 clipboard *write* forwarding (`osc52.ts` — write only; `?` reads are
+  refused as an exfiltration vector, and `atob`'s binary string is re-decoded through `TextDecoder`,
+  the same UTF-8 trap Phase 12.1 hit in the pty reader), and `@xterm/addon-web-links` for clickable
+  URLs. Both live in `createPerchTerminal`, the single construction point.
+- **Panes:** `leader,H/J/K/L` directional swap (reusing `adjacentGroupInDirection`, focus follows the
+  moved pane) and `leader,r` resize mode (repeated `h/j/k/l` without re-pressing leader).
+
+**Three user-reported bugs, fixed in the same pass:**
+- **CLI mode always launched Claude.** `Chat.tsx` read the *global* `s.agent`, but the only UI that
+  can change it renders in Hosted mode only ("zero model chrome in CLI mode"). The field was
+  reachable by code, not by the user. Fixed with a provider toggle in `CliStartPanel`, remembered
+  **per session** (`cliAgentBySession`, falling back to the global field for pre-existing sessions)
+  so a Codex session reattaches and restarts as Codex. **This does not revert the earlier decision:**
+  that was about *model/effort* chrome; choosing which CLI binary to launch is provider selection,
+  without which the mode cannot run Codex at all. No protocol change — `AgentAttach.agent` existed.
+- **Deleting the last session showed "Connecting…" forever.** The deletion path was correct —
+  `switchAwayFromActiveSession` already falls back to `sessionId: null`. The bug was one line:
+  `Chat.tsx`'s composer placeholder was `sessionId ? "Message perch..." : "Connecting..."`, so a
+  perfectly healthy socket rendered as a connection failure. New `NoSessionPanel` separates the three
+  real conditions (disconnected / connected-but-no-session / normal) and makes the middle one actionable.
+- **"Pane and tab navigation is gone" — nothing had regressed.** `git show e00286d --stat` proves the
+  "fix TUI bugs" commit never touched `DockviewShell.tsx`, `dockviewController.ts`,
+  `PaneContextMenu.tsx` or `TabBar.tsx`; every Phase 4.2–4.4 capability was present and wired, and
+  `pane-splitting.spec.ts`/`workspace-tabs.spec.ts` still match the implementation. The real defect was
+  **discoverability**: the only entry points were a right-click menu and the hidden `Ctrl+Space` chord,
+  and the one visible header button self-filtered to never render for the chat group — so a new
+  session's first and often only pane had no visible way to split. Fixed with an always-visible `⋯`
+  group-header button opening the same menu. Worth remembering as a category: *a working feature with
+  no affordance is indistinguishable from a missing one.*
+
+**Verification:** `cargo test -p perch-core` 121 passed + the parity test, `cargo clippy` still exactly
+the 5 pre-existing warnings, `cargo fmt --check` clean, `npm run build` clean. e2e was deliberately
+**not** run during parallel implementation (it runs real agent turns and is flaky under concurrent
+builds); recommended assertions are listed per-item in the agents' reports and still need adding.
+
+**Doc corrections made here:** CLAUDE.md claimed `cargo fmt --check` fails repo-wide (it is clean,
+exit 0) and that CLI-only sessions are invisible in the nav (closed in Phase 12 by
+`SESSION_VISIBILITY_FILTER` + `cli_title`). Both fixed.
+
+### Remaining gap list after Phase 13, and the path to ~90%
+- **Wave 2 (all small, no architectural risk):** sound notifications on done/blocked (needs a settings
+  flag + a user-gesture affordance), system-notification click-to-focus, bulk "close all sessions in
+  project", cursor style from `terminalProfile`, configurable scrollback, broader terminal-theme
+  adoption (`iterm_profile.rs` is iTerm2-on-macOS only, read once at boot; Ghostty's flat config is
+  the easiest next reader) and light/dark auto-switch, login-shell mode for terminal panes.
+- **`packages/web` has no test runner at all** — no vitest, no jest, zero test files, while
+  `osc52.ts`, `statusDot.ts`, `composerCommands.ts`, `attachments.ts`, `popoverPosition.ts` are all
+  pure and untested. The e2e suite is too slow and flaky to be their only safety net.
+- **The one structural gap: tmux-backed CLI-terminal persistence.** Local CLI PTYs still die with the
+  WS session, which is what keeps domain D near 50%. It is the only item that moves the overall number
+  to ~90%, it is already on the backlog, and it is the same trick direct mode uses natively. It rewrites
+  the spawn path Phase 13 just modified, so it must be its own phase — not folded into a parity pass.
+- **Deliberately not doing:** kitty graphics (no viable xterm.js implementation; herdr ships it
+  experimental and off by default; claude/codex are text-first), and PTY scrollback replay as a
+  standalone item (it belongs inside the tmux work).
+
+---
+
+### Phase 14 — tmux-backed local CLI persistence + a real web test layer — ✅ done
+The last structural gap with herdr's detach/reattach, plus the test story that was missing under
+`packages/web`. Parity moves ~71% → ~77%; the remaining gap is Wave 2's small items, not architecture.
+
+**tmux-backed CLI persistence.** New `crates/perch-core/src/agent_tmux.rs`, wired into exactly one
+seam — `AgentTerminalRegistry::attach` in `terminal.rs`. `server.rs` needed **zero** changes, which is
+the clearest evidence Phase 13's registry was cut at the right joint. The pty's child is now
+`tmux attach-session -t perch-cli-<sessionId>`; the real CLI runs inside the tmux session. Killing the
+pty — a viewer detaching, a dropped WS, or perch itself dying — loses only the attach client.
+Same naming scheme `detached::cli_attach_argv` already uses remotely, now applied locally.
+
+- **`tmux new-session -A -d` does not work here, contrary to the obvious idiom.** With no controlling
+  tty (which is what a bookkeeping `Command::output()` call has — the real pty is opened afterwards,
+  for the attach client only), `-A`'s reattach branch degrades to `attach-session -d` and fails with
+  `open terminal failed: not a terminal`. **Verified by hand at review time**, not taken on faith:
+  `-A -d` exits 0 on create and exits 1 on the second call. Remote/direct mode never hit this because
+  `ssh -tt` allocates a pty for the whole invocation. Local uses `has-session` → plain `new-session -d`
+  on the not-exists branch. Within one perch process this is race-free regardless: `attach()` holds
+  its `entries` mutex across the whole check-then-spawn.
+- **Kill vs detach is the load-bearing distinction.** `detach()` (viewer disconnect) kills only
+  `entry.killer` — now the attach client — so the agent lives; it is indistinguishable from a user
+  pressing tmux's detach key. `kill()` (Restart CLI, session delete) calls `kill_tmux_session()`
+  **first**, then the client. Get these backwards and "Restart CLI" orphans an agent forever while
+  silently reattaching to it next time.
+- **Two fallbacks, not one.** tmux *absent* is a pure argv passthrough (`resolve_agent_spawn` takes
+  `use_tmux` as an argument rather than probing ambiently, so the fallback is unit-testable).
+  tmux *present but broken* — server won't start, socket-dir permissions, version skew — was
+  originally propagated with `?`, which would have made a broken tmux cost the user CLI mode
+  entirely, a feature that worked before this phase existed. Fixed at review: it now logs and
+  degrades to the direct spawn. **Persistence is a bonus; it must never cost the base feature.**
+- Status bar is disabled (`set-option status off`) and `-x`/`-y` are passed at creation, so tmux
+  cannot steal a row and hand the agent a shorter grid than perch advertised — that would have
+  presented exactly like the rendering bugs Phases 12.1/12.2 spent two phases fixing. Resize needed
+  no change: `master.resize()` on the attach client's pty raises SIGWINCH into the tmux client like
+  any real terminal.
+- **Leak reaping deliberately not implemented.** An orphaned local tmux session (perch session deleted
+  while perch was down) sits on the user's own machine, is visible in `tmux ls`, and costs nothing
+  idle — unlike a shared devpod run-dir. A boot-time sweep cross-referencing `perch-cli-*` against the
+  sessions table is the follow-up if it ever bites.
+- **Proven, not asserted:** a real restart proof (isolated `--db-path`/`--hosts-path`, real `claude`)
+  showed pane pid 17508 surviving `kill -9` of perch, and the *same* pid with an identical screen after
+  restart. The unit test mirrors it in miniature — and at review the "session still exists" assertion
+  was strengthened to compare **pane pids before and after**, because the original would have passed
+  even if the session had been destroyed and recreated, which is precisely the regression that would
+  silently destroy a user's running agent. Tests skip cleanly where tmux is absent.
+
+**Web unit tests.** Vitest in `packages/web` (`npm test` at the root), **113 cases across 9 files**,
+~0.4s. Config kept in a separate `vitest.config.ts` so the react/PWA plugins aren't loaded to run unit
+tests; environment is `node` by default — which has the useful side effect of exercising the
+`try/catch` fallbacks around `localStorage`/`window` for real — with only `store.test.ts` opting into
+jsdom, because `store.ts` calls `applyTheme` and `socket.connect()` at module scope.
+Covered: `osc52`, `statusDot`, `composerCommands`, `attachments`, `popoverPosition`, `tabOrder`,
+`markdownRepair`, `models`, and the pure store selectors (including `effectiveActiveProject`'s
+documented pin-retention fallback). No real bugs found; when two of its own tests failed the author
+correctly concluded the *tests* were wrong rather than "fixing" working source.
+**The suite was mutation-tested at review:** reverting `parseOsc52` to the naive `atob`-binary-string
+implementation fails exactly the two UTF-8 round-trip tests and nothing else — the same bug class that
+hit the PTY reader in Phase 12.1, now caught in 0.4s instead of a Playwright run.
+`docs/TESTING.md` records which layer owns which kind of change.
+
+---
+
+### Phase 15 — herdr parity Wave 2: the small items — ✅ done
+The six remaining Wave 2 items, done as three file-partitioned lanes over shared plumbing.
+Parity moves ~77% → ~86%. Nothing structural was left; what remains is deliberately out of scope.
+
+**The backlog was wrong going in.** The Phase 13 gap list opened with "sound notifications on
+done/blocked" and "system-notification click-to-focus" as two separate items. Sound was already
+shipped in Wave 1 and wired at `store.ts`'s `session.updated` handler — only the click-to-focus half
+was missing. Wave 2 was six items, not eight. Re-derive a backlog against the code before working it;
+a stale list costs a whole lane.
+
+**Lanes were partitioned by file ownership, not by feature.** The recurring hazard in Waves 1 and 3
+was two agents editing one file concurrently (`xtermSetup.ts`, `store.ts`). Here the protocol and
+settings plumbing — `protocol.rs`/`protocol.ts`, `settings.rs`, the `server.rs` conversion helpers,
+and the new `TerminalProfile` fields — was written **first and by one owner**, so the three lanes only
+populated and consumed it and could not drift the parity invariant. `server.rs` stayed single-owner
+for the same reason. That is why this wave produced zero merge damage.
+
+- **The light/dark gate is the real find of this phase.** iTerm2 stores `… (Light)` / `… (Dark)`
+  colour variants and **keeps them fully populated even when "Use Separate Colors for Light and Dark
+  Mode" is off** — which is the state of the development machine: the option is `false` and both
+  complete variants sit in the plist. Shipping them unconditionally (as first written) would have let
+  the client repaint the pane on an OS appearance change into colours the user's terminal never
+  shows. That is exactly the "perch substitutes its own palette" failure `iterm_profile.rs` exists to
+  prevent, merely sourced from a stale plist key instead of a UI token. **Found by querying the real
+  plist, not by reading the diff** — the code matched its own doc comment's description of the gate
+  while not implementing it. Now gated; absent key means off. The `incomplete_variant` test had to be
+  updated too: with the gate in place it passed without ever reaching the completeness check it was
+  named for.
+- **Cursor style follows the same never-guess rule as the palette.** `Cursor Type` is absent from this
+  machine's profile, so `cursorStyle` ships as `undefined` and falls through to xterm's default rather
+  than being invented. The client-side change is subtler than it looks: `createPerchTerminal` used to
+  hardcode `cursorStyle: "block"`/`cursorBlink: true`, so the cursor blinked regardless of what the
+  user's terminal did. It now reads `Blinking Cursor` (false here) — a real, intended, user-visible
+  change in the direction of "look like iTerm2".
+- **Ghostty reader deliberately refuses to resolve named themes.** `theme = light:X,dark:Y` is parsed
+  and ignored: resolving it would mean vendoring Ghostty's theme files, and inventing colours is the
+  one thing these modules must never do. A config that only sets `theme` yields empty palettes and the
+  client falls back to xterm's stock defaults. `terminal_profile.rs` is the single entry point
+  (iTerm2 → Ghostty, first non-empty wins) so callers never learn which terminal produced the profile.
+- **Scrollback is clamped at both ends, for different reasons.** xterm.js allocates scrollback
+  eagerly, so an unbounded value is a browser OOM — hence the client clamp at terminal-creation time.
+  Separately the settings UI only *persists* an in-range value: as first written it wrote every
+  keystroke through, storing `5` on the way to `5000` and leaving the settings file holding a number
+  the app would never honour. The text box still shows what was typed; clamping mid-keystroke would
+  eat the user's input.
+- **Login-shell mode is off by default and scoped to plain panes.** `-l` runs the login rc files, so it
+  can visibly change the prompt and PATH — opt-in, and read per-create so the toggle applies to the
+  next pane without a restart. Agent-attach panes pass `false` explicitly: there is no shell in that
+  pty for `-l` to apply to, only the CLI (or its tmux client).
+- **Bulk project action is archive, never delete.** Archived sessions are restorable from Settings;
+  a one-click bulk delete of a project's history is not. Confirmation is an in-page `ConfirmDialog`
+  naming the exact count — never `window.confirm`, which blocks the page and the automation harness.
+  No new store logic was needed for "the active session was archived away": each archive emits its own
+  `session.updated`, and the existing per-message fallback (shared with `session.deleted`) already
+  lands on `NoSessionPanel`.
+- **Verified end-to-end against a live server**, not just unit tests: booted `perch-core` on an
+  isolated db/hosts path and read `server.info` + `settings.current` off the wire to confirm the real
+  machine's font, 22 palette keys, `cursorStyle: undefined`, `cursorBlink: false`, **absent**
+  `themeLight`/`themeDark`, and both new settings defaults.
+
+**Totals after this phase:** 151 Rust + 1 protocol-parity + 134 web unit tests, plus 91 e2e passing
+(2 documented skips). Zero new clippy warnings against the 5-warning baseline; `cargo fmt --check`
+clean.
+
+**What is left versus herdr, and why it stays left:** kitty graphics (no viable xterm.js
+implementation; herdr ships it experimental and off by default, and claude/codex are text-first),
+a plugin marketplace, and Windows ConPTY. None are backlog items — they are decisions.

@@ -28,12 +28,20 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePerchStore, projectsForHost, effectiveActiveProject, type ProjectGroup } from "./store";
+import {
+  usePerchStore,
+  projectsForHost,
+  effectiveActiveProject,
+  sessionIdsForProject,
+  type ProjectGroup,
+} from "./store";
 import { StatusDot } from "./components/StatusDot";
 import { DirectoryBrowser } from "./components/DirectoryBrowser";
 import { WorktreeMenu } from "./components/WorktreeMenu";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { AgentPicker } from "./components/AgentPicker";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
-import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
+import type { SessionSummary, SshHostEntry, HostConnectionState, AgentKind } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -438,6 +446,13 @@ function ProjectRow({
 }) {
   const dotState = aggregateDotState(group.sessions);
   const { glyph, color } = DOT_GLYPH[dotState];
+  // Bulk "archive all sessions in this project" — archive, not delete, is
+  // the default and only bulk action here (see the module doc comment):
+  // archived sessions stay restorable from Settings → Archived Sessions,
+  // unlike delete. Requires an explicit inline confirm (never `window.confirm`,
+  // which blocks the page) naming the exact count before anything happens.
+  const [confirmingCloseAll, setConfirmingCloseAll] = useState(false);
+  const sessionCount = group.sessions.length;
 
   return (
     <div className={"sidebar__project" + (isActiveProject ? " sidebar__project--active" : "")}>
@@ -467,9 +482,22 @@ function ProjectRow({
               <ProjectSubline projectKey={group.key} hostId={hostId} cwd={group.cwd} />
             </span>
           </span>
-          <span className="sidebar__project-count">{group.sessions.length}</span>
+          <span className="sidebar__project-count">{sessionCount}</span>
         </button>
         <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
+        <button
+          type="button"
+          className="sidebar__project-close-all"
+          data-testid="project-close-all"
+          title="Archive all sessions in this project"
+          aria-label="Archive all sessions in this project"
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmingCloseAll(true);
+          }}
+        >
+          📦
+        </button>
       </div>
       {isActiveProject &&
         group.sessions.map((s) => (
@@ -482,6 +510,23 @@ function ProjectRow({
             onDelete={onDelete}
           />
         ))}
+      {confirmingCloseAll && (
+        <ConfirmDialog
+          message={`Archive all ${sessionCount} session${sessionCount === 1 ? "" : "s"} in "${basename(group.cwd)}"? You can restore them later from Settings → Archived Sessions.`}
+          confirmLabel="Archive all"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            // sessionIdsForProject re-derives membership from group.sessions'
+            // own ids at click time rather than reusing the array reference,
+            // matching the pure selection logic unit-tested in store.test.ts.
+            for (const id of sessionIdsForProject(group.sessions, hostId, group.cwd)) {
+              onArchive(id, true);
+            }
+            setConfirmingCloseAll(false);
+          }}
+          onCancel={() => setConfirmingCloseAll(false)}
+        />
+      )}
     </div>
   );
 }
@@ -496,11 +541,18 @@ export interface NewSessionPopoverProps {
   projectCwds: string[];
   anchorRect: DOMRect;
   onClose: () => void;
-  onSelect: (cwd?: string) => void;
+  /** `agent` is the provider picked in this popover's `AgentPicker` at the
+   * moment of the click (Bug 2/3 fix) — TabBar's caller (a file this task
+   * doesn't touch) only reads `cwd` and simply drops the second argument,
+   * which TypeScript allows for a narrower callback. */
+  onSelect: (cwd: string | undefined, agent: AgentKind) => void;
 }
 
 export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
+  const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
+  const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
+  const [selectedAgent, setSelectedAgent] = useState<AgentKind>(lastAgentChoice);
 
   // Position: open below the anchor button, left-aligned. Clamped to the
   // viewport: the known-projects quick-pick list grows one row per distinct
@@ -538,6 +590,15 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
 
   return createPortal(
     <div className="new-session-popover" ref={popoverRef} style={style}>
+      <AgentPicker
+        value={selectedAgent}
+        onChange={(a) => {
+          setSelectedAgent(a);
+          setLastAgentChoice(a);
+        }}
+        testIdPrefix="new-session-popover-agent"
+        className="new-session-popover__agent"
+      />
       {projectCwds.length > 0 && (
         <div className="new-session-popover__projects">
           {projectCwds.map((cwd, i) => (
@@ -546,7 +607,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
               type="button"
               className="new-session-popover__item"
               data-testid={`project-option-${i}`}
-              onClick={() => { onSelect(cwd); onClose(); }}
+              onClick={() => { onSelect(cwd, selectedAgent); onClose(); }}
               title={cwd}
             >
               {basename(cwd)}
@@ -559,7 +620,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
         type="button"
         className="new-session-popover__item new-session-popover__item--none"
         data-testid="project-option-none"
-        onClick={() => { onSelect("~"); onClose(); }}
+        onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
         No project
         <span className="new-session-popover__item-cwd">~</span>
@@ -568,7 +629,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
       <DirectoryBrowser
         hostId={hostId}
         onUseFolder={(path) => {
-          onSelect(path);
+          onSelect(path, selectedAgent);
           onClose();
         }}
       />
@@ -771,7 +832,7 @@ export function Sidebar() {
           projectCwds={projectCwds}
           anchorRect={newAnchor}
           onClose={() => setNewAnchor(null)}
-          onSelect={(cwd) => createSessionOnHost(activeHostId, cwd)}
+          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent)}
         />
       )}
     </aside>

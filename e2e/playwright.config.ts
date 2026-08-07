@@ -4,7 +4,17 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "nav.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts", "wave1.spec.ts", "worktrees.spec.ts", "wave2.spec.ts", "chat-ui.spec.ts", "chat-mode.spec.ts", "detached.spec.ts", "chat-power.spec.ts"],
+  // ORDER MATTERS. `wave2.features.spec.ts` runs FIRST, before
+  // `federation.spec.ts`: its T4 test needs to reach `sessionId: null`, which
+  // is only possible when no non-archived session exists anywhere the hub can
+  // see. The federated remote (:7800) accumulates sessions across runs in its
+  // own db, and the hub keeps listing them without owning them — they can be
+  // neither archived nor deleted from here, and any one of them is something
+  // `switchAwayFromActiveSession` falls back to. Running before the federation
+  // spec adds that host is the only cheap way to guarantee the precondition.
+  // (T4 also removes any host left over from a previous run; federation.spec
+  // re-adds its own.)
+  testMatch: ["wave2.features.spec.ts", "sidebar.spec.ts", "cli-sync.spec.ts", "models.spec.ts", "restyle.spec.ts", "settings.spec.ts", "federation.spec.ts", "nav.spec.ts", "sessions.spec.ts", "theme.spec.ts", "status-glyphs.spec.ts", "workspace-tabs.spec.ts", "keybindings.spec.ts", "responsive.spec.ts", "pane-splitting.spec.ts", "workspace-git.spec.ts", "toasts.spec.ts", "wave1.spec.ts", "worktrees.spec.ts", "wave2.spec.ts", "chat-ui.spec.ts", "chat-mode.spec.ts", "detached.spec.ts", "chat-power.spec.ts"],
   outputDir: "artifacts",
   timeout: 120000,
   use: {

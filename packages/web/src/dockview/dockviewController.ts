@@ -12,7 +12,7 @@
  * missing controller as a no-op, not an error, since keybinds can fire before
  * the dockview instance exists (e.g. very early in a page's lifecycle).
  */
-import type { DockviewApi, DockviewGroupPanel, Position } from "dockview-react";
+import type { DockviewApi, DockviewGroupPanel, IDockviewPanel, Position } from "dockview-react";
 
 /** Directions accepted by `focusPaneDirection` — mirrors dockview-core's own
  * `GroupNavigationDirection` (dockview-react re-exports dockview-core's types
@@ -24,6 +24,72 @@ export type PaneDirection = "left" | "right" | "up" | "down";
 const RESIZE_STEP_PX = 60;
 const MIN_PANE_PX = 80;
 
+/** The one permanent panel's id — every shell always has exactly one of
+ * these, it can never be closed, and it's the fallback split target when no
+ * panel is active yet. */
+const PRIMARY_CHAT_PANEL_ID = "chat";
+
+/** dockview `component` key for a session-bound chat panel (`SessionChat-
+ * Panel` in DockviewShell.tsx) — as opposed to `"chat"` (the one permanent
+ * panel, bound to whatever session is globally active) or `"terminal"`. */
+const SESSION_CHAT_COMPONENT = "sessionChat";
+const TERMINAL_COMPONENT = "terminal";
+
+/** Coarse classification of a dockview panel used throughout this module —
+ * and unit-tested directly (see dockviewController.test.ts) because getting
+ * it wrong is exactly how a session chat panel would get counted/closed as a
+ * "terminal" (or vice versa). Reads `panel.view.contentComponent`, the
+ * `component` string a panel was created with — NOT `panel.id`. Panel ids
+ * are per-instance (a session chat panel's id encodes its session id; a
+ * terminal panel's id is a random uuid) and, before this fix, `"any panel
+ * whose id isn't the literal string 'chat'"` was used as a stand-in for
+ * "is a terminal" — true only as long as "chat" was the only other panel
+ * kind that could ever exist. Adding session-bound chat panels broke that
+ * assumption, so every "is this a terminal" check in this module now goes
+ * through here instead. */
+export type PanelKind = "chat" | "terminal" | "sessionChat" | "other";
+
+export function panelKind(panel: Pick<IDockviewPanel, "view">): PanelKind {
+  switch (panel.view.contentComponent) {
+    case "chat":
+      return "chat";
+    case TERMINAL_COMPONENT:
+      return "terminal";
+    case SESSION_CHAT_COMPONENT:
+      return "sessionChat";
+    default:
+      return "other";
+  }
+}
+
+/** Reads a `sessionChat` panel's bound session id back out of its `params`
+ * (set at `addPanel`/`addSessionChatPanel` time, and round-tripped verbatim
+ * through dockview's own `toJSON`/`fromJSON` layout persistence). Returns
+ * undefined for any panel that isn't a `sessionChat` panel, or one whose
+ * params are missing/malformed (e.g. hand-edited persisted JSON). */
+export function sessionChatPanelSessionId(panel: Pick<IDockviewPanel, "view" | "params">): string | undefined {
+  if (panelKind(panel) !== "sessionChat") return undefined;
+  const sessionId = (panel.params as { sessionId?: unknown } | undefined)?.sessionId;
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+}
+
+/** Stable panel id for a given session's chat pane — deterministic so
+ * `addSessionChatPanel` can find (and re-activate) an already-open pane for
+ * the same session instead of opening a duplicate. */
+function sessionChatPanelId(sessionId: string): string {
+  return `session-chat-${sessionId}`;
+}
+
+/** Maps `PaneDirection` (vim-style, matching `focusPaneDirection`) to
+ * dockview-core's `Position` (used by `moveTo`/`addPanel`) for
+ * `swapPaneDirection`. */
+const DIRECTION_TO_POSITION: Record<PaneDirection, Position> = {
+  left: "left",
+  right: "right",
+  up: "top",
+  down: "bottom",
+};
+
 export interface DockviewController {
   /** Add a new terminal panel split off the active panel (or "chat" if no
    * panel is active yet) in the given direction. Mirrors how the existing
@@ -32,16 +98,18 @@ export interface DockviewController {
   /** Close the active panel — unless it's the primary "chat" panel, which
    * must always remain (there is always exactly one Chat panel; "closing"
    * it would leave the session with no view). No-op if the active panel is
-   * "chat" or if there is no active panel. */
+   * "chat" or if there is no active panel. Closes terminal panels AND
+   * session-chat panels alike — "chat" is the only permanent one. */
   closeActiveTerminalPanel(): void;
-  /** Whether at least one terminal panel currently exists (any panel whose id
-   * isn't "chat" — this shell only ever has "chat" and "terminal" panels).
-   * Backs the toolbar "Open terminal" button's toggle affordance. */
+  /** Whether at least one terminal panel currently exists (classified by
+   * `panelKind`, i.e. `component === "terminal"` — NOT "any panel whose id
+   * isn't chat", which would also match session-chat panels). Backs the
+   * toolbar "Open terminal" button's toggle affordance. */
   hasTerminalOpen(): boolean;
-  /** Number of terminal panels currently open (any panel whose id isn't
-   * "chat"), regardless of how they're split across groups or grouped as
-   * tabs. Used to gate the close-confirmation dialog (Wave 1 item 6) — only
-   * shown when `toggleTerminalGroup()` is about to close more than one. */
+  /** Number of terminal panels currently open (`panelKind(p) === "terminal"`),
+   * regardless of how they're split across groups or grouped as tabs. Used to
+   * gate the close-confirmation dialog (Wave 1 item 6) — only shown when
+   * `toggleTerminalGroup()` is about to close more than one. */
   terminalPanelCount(): number;
   /** Toolbar "Open terminal" button behavior: if no terminal panel exists,
    * open one split below "chat" (same placement the button always used).
@@ -92,6 +160,15 @@ export interface DockviewController {
    * exchanges their screen positions. No-op with fewer than two groups.
    * Backs leader,}. */
   swapActivePaneWithNext(): void;
+  /** Swap the active group with its spatial neighbour in `direction` (the
+   * same neighbour `focusPaneDirection` would focus, via
+   * `adjacentGroupInDirection`) by moving the active group to sit exactly
+   * where that neighbour currently is — for a two-way split this exchanges
+   * their screen positions, matching herdr's `prefix+shift+h/j/k/l`. Focus
+   * follows the moved pane (repeated swaps keep acting on the same content).
+   * No-op if there is no active group or no neighbour in that direction.
+   * Backs leader,H/J/K/L. */
+  swapPaneDirection(direction: PaneDirection): void;
   /** Grow the active group by `RESIZE_STEP_PX`, along whichever axis is
    * actually split (compares the group's bounding box against the total
    * dockview size). No-op with only one group. Backs leader,+. */
@@ -100,7 +177,25 @@ export interface DockviewController {
    * along whichever axis is actually split. No-op with only one group.
    * Backs leader,-. */
   shrinkActivePane(): void;
+  /** Add (or, if one is already open, re-activate) a chat panel bound to
+   * `sessionId`, split off `referencePanelId` in `direction`. `direction`
+   * uses dockview's `Direction` vocabulary ("above"/"below"/"left"/"right"/
+   * "within" — "within" adds it as a tab in the reference panel's group
+   * rather than splitting). `title` is shown on the panel's tab. Backs both
+   * the click-to-split session picker and the drag-and-drop path (see
+   * `SessionSplitPopover.tsx` / `DockviewShell.tsx`'s drag handlers). */
+  addSessionChatPanel(sessionId: string, title: string, referencePanelId: string, direction: Direction): void;
+  /** Session ids that currently have an open (or grouped-as-tab) chat panel
+   * in this shell — used to grey out / relabel already-open sessions in the
+   * split-session picker rather than let it silently create a duplicate. */
+  openSessionChatIds(): string[];
 }
+
+/** Re-exported so callers (the split-session picker, DockviewShell's drag
+ * handlers) can name a split direction without importing dockview-core
+ * directly — mirrors how `Position` is already re-exported via the
+ * `dockview-react` import above. */
+export type Direction = "left" | "right" | "above" | "below" | "within";
 
 let controller: DockviewController | null = null;
 
@@ -122,49 +217,71 @@ function newPanelId(): string {
 export function createDockviewController(api: DockviewApi): DockviewController {
   return {
     addTerminalPanel(direction) {
-      const referencePanel = api.activePanel?.id ?? "chat";
+      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
       api.addPanel({
         id: newPanelId(),
-        component: "terminal",
+        component: TERMINAL_COMPONENT,
         title: "Terminal",
         position: { referencePanel, direction },
       });
     },
     closeActiveTerminalPanel() {
       const active = api.activePanel;
-      if (!active || active.id === "chat") return;
+      if (!active || active.id === PRIMARY_CHAT_PANEL_ID) return;
       api.removePanel(active);
     },
     hasTerminalOpen() {
-      return api.panels.some((p) => p.id !== "chat");
+      return api.panels.some((p) => panelKind(p) === "terminal");
     },
     terminalPanelCount() {
-      return api.panels.filter((p) => p.id !== "chat").length;
+      return api.panels.filter((p) => panelKind(p) === "terminal").length;
     },
     toggleTerminalGroup() {
-      const terminalPanels = api.panels.filter((p) => p.id !== "chat");
+      const terminalPanels = api.panels.filter((p) => panelKind(p) === "terminal");
       if (terminalPanels.length > 0) {
         // Close every terminal panel — across however many split groups they
-        // ended up in — collapsing back to just "chat" and resetting the
-        // toggle to "closed". Removing a group's last panel disposes the
-        // group itself, so this needs no separate group bookkeeping.
+        // ended up in — collapsing back to just "chat" (and any session-chat
+        // panels, which this toggle never touches) and resetting the toggle
+        // to "closed". Removing a group's last panel disposes the group
+        // itself, so this needs no separate group bookkeeping.
         for (const panel of terminalPanels) api.removePanel(panel);
         return;
       }
       api.addPanel({
         id: newPanelId(),
-        component: "terminal",
+        component: TERMINAL_COMPONENT,
         title: "Terminal",
-        position: { referencePanel: "chat", direction: "below" },
+        position: { referencePanel: PRIMARY_CHAT_PANEL_ID, direction: "below" },
       });
     },
     addTerminalTabInGroup(referencePanelId) {
       api.addPanel({
         id: newPanelId(),
-        component: "terminal",
+        component: TERMINAL_COMPONENT,
         title: "Terminal",
         position: { referencePanel: referencePanelId, direction: "within" },
       });
+    },
+    addSessionChatPanel(sessionId, title, referencePanelId, direction) {
+      const id = sessionChatPanelId(sessionId);
+      const existing = api.panels.find((p) => p.id === id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      const reference = api.panels.some((p) => p.id === referencePanelId)
+        ? referencePanelId
+        : (api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID);
+      api.addPanel({
+        id,
+        component: SESSION_CHAT_COMPONENT,
+        title,
+        params: { sessionId },
+        position: { referencePanel: reference, direction },
+      });
+    },
+    openSessionChatIds() {
+      return api.panels.map((p) => sessionChatPanelSessionId(p)).filter((id): id is string => id !== undefined);
     },
     toggleMaximizeActive() {
       if (api.hasMaximizedGroup()) {
@@ -183,7 +300,7 @@ export function createDockviewController(api: DockviewApi): DockviewController {
       panel?.api.setTitle(title);
     },
     canClosePanel(panelId) {
-      return panelId !== "chat";
+      return panelId !== PRIMARY_CHAT_PANEL_ID;
     },
     isPanelMaximized(panelId) {
       const panel = api.panels.find((p) => p.id === panelId);
@@ -224,6 +341,27 @@ export function createDockviewController(api: DockviewApi): DockviewController {
         }
       }
       active.api.moveTo({ group: next, position });
+    },
+    swapPaneDirection(direction) {
+      const active = api.activeGroup;
+      if (!active) return;
+      const adjacent = api.adjacentGroupInDirection(active, direction);
+      if (!adjacent || adjacent === active) return;
+      // `adjacentGroupInDirection` returns the narrower `IDockviewGroupPanel`
+      // view; `moveTo` needs the concrete `DockviewGroupPanel` from
+      // `api.groups` (same instance, just the wider type `swapActivePane-
+      // WithNext` above already works with).
+      const target = api.groups.find((g) => g.id === adjacent.id);
+      if (!target || target === active) return;
+      // Move the active group to sit where `target` is — `position` uses the
+      // *same* direction that located `target` (e.g. direction "left" found
+      // a neighbour to the left, and moving active to "left" of that
+      // neighbour puts active exactly there), which swaps the two groups'
+      // positions for the common two-way-split case.
+      active.api.moveTo({ group: target, position: DIRECTION_TO_POSITION[direction] });
+      // Focus follows the moved pane — repeated leader,H/J/K/L should keep
+      // acting on the same content, the way repeated tmux pane-swaps do.
+      active.api.setActive();
     },
     growActivePane() {
       resizeActivePane(api, RESIZE_STEP_PX);

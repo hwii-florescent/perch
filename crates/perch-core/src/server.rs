@@ -45,7 +45,9 @@ use crate::protocol::{
 use crate::registry::SessionRegistry;
 use crate::settings::SettingsStore;
 use crate::status::{get_server_info, get_status, LastUsage};
-use crate::terminal::TerminalManager;
+use crate::terminal::{
+    AgentTerminalRegistry, AttachOutcome, TerminalManager, AGENT_QUIET_THRESHOLD,
+};
 
 pub struct CliArgs {
     pub port: u16,
@@ -226,6 +228,12 @@ struct AppState {
     /// runs a prompt pass instead of waiting up to 5s for cold/stale data —
     /// see `spawn_git_poll_task`.
     git_poll_notify: Arc<tokio::sync::Notify>,
+    /// Local agent-attached (CLI-mode) terminals, one PTY per session id
+    /// shared across every viewing connection — see `AgentTerminalRegistry`'s
+    /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
+    /// outlive any single WS connection so a second tab/device can find and
+    /// share what the first one started, exactly like `running_sessions`.
+    agent_terminals: Arc<AgentTerminalRegistry>,
 }
 
 /// `AppState`'s implementation of the detached-turn callback interface.
@@ -322,7 +330,7 @@ pub async fn run(
 
     // Read the user's terminal appearance once (best-effort, see
     // `iterm_profile.rs`) so CLI panes render in their colours and font.
-    let terminal_profile = crate::iterm_profile::load();
+    let terminal_profile = crate::terminal_profile::load();
     match &terminal_profile {
         Some(p) => tracing::info!(
             "[perch] terminal profile: font {:?} {:?}, {} colour(s)",
@@ -357,11 +365,38 @@ pub async fn run(
 
     let detached = DetachedManager::new(db.clone());
 
+    // Task 2: agent-attached (CLI-mode) terminals report PTY activity here.
+    // Built with plain `Arc` clones (not the whole `AppState`, which doesn't
+    // exist yet) — same deferred-wire-up shape as `DetachedSink` below, just
+    // inline because the callback only needs two fields, not the full turn
+    // sink interface.
+    let running_sessions: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let agent_activity_running = running_sessions.clone();
+    let agent_activity_events_tx = session_events_tx.clone();
+    let agent_terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(
+        move |session_id: &str| {
+            // Only notify on the actual idle->running transition — PTY
+            // output fires this on every read, often many times a second
+            // under a repainting TUI, and re-broadcasting on every one of
+            // those would be pure waste once the session is already marked
+            // running.
+            let became_running = agent_activity_running
+                .lock()
+                .unwrap()
+                .insert(session_id.to_string());
+            if became_running {
+                let _ = agent_activity_events_tx.send(SessionUpdatedEvent {
+                    session_id: session_id.to_string(),
+                });
+            }
+        },
+    )));
+
     let state = AppState {
         registry,
         db,
         default_cwd: effective_cwd,
-        running_sessions: Arc::new(Mutex::new(HashSet::new())),
+        running_sessions,
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
@@ -377,6 +412,7 @@ pub async fn run(
         detached,
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
+        agent_terminals,
     };
 
     // The detached manager needs `AppState` to report turn progress, and
@@ -390,6 +426,7 @@ pub async fn run(
     state.detached.recover_all();
 
     spawn_git_poll_task(state.clone());
+    spawn_agent_idle_sweep_task(state.clone());
 
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
@@ -520,6 +557,40 @@ async fn run_git_poll_pass(state: &AppState) {
                 }));
         }
     }
+}
+
+/// Task 2: one shared sweep loop for every agent-attached (CLI-mode)
+/// terminal's working→idle transition, instead of a timer per terminal (a
+/// process with a dozen open CLI panes would otherwise leak a dozen sleeping
+/// tasks). Ticks at a fraction of `AGENT_QUIET_THRESHOLD` so the debounce
+/// still feels immediate while keeping the wakeup cheap (a `HashMap` scan of
+/// however many agent terminals are currently live — typically single
+/// digits). Exits only if the process exits; there is nothing to cancel it
+/// early because, like `spawn_git_poll_task`, its lifetime is the server's.
+fn spawn_agent_idle_sweep_task(state: AppState) {
+    tokio::spawn(async move {
+        let tick = AGENT_QUIET_THRESHOLD / 4;
+        loop {
+            tokio::time::sleep(tick).await;
+            let quiet_sessions = state
+                .agent_terminals
+                .sessions_quiet_since(AGENT_QUIET_THRESHOLD);
+            for session_id in quiet_sessions {
+                // `running_sessions` already covers Hosted-mode turns and
+                // detached turns; a CLI terminal that never went "running" in
+                // the first place (a plain shell, or one that's already been
+                // marked idle) is a no-op remove — cheap and side-effect-free.
+                let was_running = state.running_sessions.lock().unwrap().remove(&session_id);
+                if was_running {
+                    // Mirror `DetachedSink::set_running(false)` exactly: a CLI
+                    // turn finishing while nobody is viewing the session must
+                    // mark it unseen, the same as a Hosted turn completing.
+                    mark_unseen_if_unviewed(&state, &session_id);
+                    notify_session_updated(&state, &session_id);
+                }
+            }
+        }
+    });
 }
 
 fn placeholder_response(base_path: &str, url: &str) -> axum::response::Response {
@@ -727,6 +798,14 @@ struct ConnState {
     /// Shared (not owned) with those closures via the same `Arc`. Plain
     /// terminals (no `agentAttach`) never get an entry.
     terminal_agent_sessions: Arc<Mutex<HashMap<String, String>>>,
+    /// Same `on_data`/`on_exit` callbacks passed to `terminals` above, kept as
+    /// a second clone so a local `agentAttach` can register them as a viewer
+    /// on `AppState::agent_terminals` too (Task 1's shared-terminal path) —
+    /// they do the exact same blocked-state bookkeeping and `terminal.data`/
+    /// `terminal.exit` forwarding either way, so there's no second
+    /// implementation to keep in sync.
+    agent_on_data: crate::terminal::TerminalDataListener,
+    agent_on_exit: crate::terminal::TerminalExitListener,
 }
 
 /// RAII guard that decrements `AppState::connected_clients` on drop, so the
@@ -829,6 +908,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         let _ = terminal_tx.send(ServerMessage::TerminalExit { terminal_id, code });
     });
 
+    let agent_on_data = on_data.clone();
+    let agent_on_exit = on_exit.clone();
     let state = Arc::new(ConnState {
         app: app.clone(),
         conn_id: conn_id.clone(),
@@ -837,6 +918,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         terminals: TerminalManager::new(on_data, on_exit),
         active_session_id: Mutex::new(None),
         terminal_agent_sessions,
+        agent_on_data,
+        agent_on_exit,
     });
 
     // Send initial status.update and server.info once per connection.
@@ -1013,6 +1096,16 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // Connection closed: tear down terminals, in-flight turns, and hub unicast
     // registrations so no sender leaks to this dead connection.
     state.terminals.dispose_all();
+    // Task 1: detach this connection as a viewer from every shared agent
+    // terminal it holds — the terminal itself only dies once its *last*
+    // viewer detaches (or the child exits on its own); a second viewer
+    // elsewhere must not be torn down just because this tab/device closed.
+    {
+        let terminal_agent_sessions = state.terminal_agent_sessions.lock().unwrap().clone();
+        for session_id in terminal_agent_sessions.values() {
+            state.app.agent_terminals.detach(session_id, &state.conn_id);
+        }
+    }
     state.app.hub.unregister_all_for_connection(&conn_id);
     // Remove this connection from whichever session's viewer set it was in —
     // otherwise a stale conn_id would keep that session looking "viewed"
@@ -1772,7 +1865,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let agent_attach = agent_attach.clone();
             let Some(attach) = agent_attach else {
                 let cwd = Some(cwd.unwrap_or_else(|| state.app.default_cwd.clone()));
-                match state.terminals.create(cols, rows, cwd, None) {
+                // Read the flag per-create rather than caching it: settings
+                // are live-editable, and the next pane the user opens should
+                // honour what the toggle says now.
+                let login_shell = state.app.settings.get().terminal_login_shell;
+                match state.terminals.create(cols, rows, cwd, None, login_shell) {
                     Ok(terminal_id) => {
                         let _ = state
                             .out_tx
@@ -1857,7 +1954,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 );
                 // cwd is `None`: the *local* pty just runs ssh, and the remote
                 // cd happens inside the tmux command.
-                match state.terminals.create(cols, rows, None, Some(argv)) {
+                match state.terminals.create(cols, rows, None, Some(argv), false) {
                     Ok(terminal_id) => {
                         let _ = state.app.db.create_session_on_host(
                             &attach.session_id,
@@ -1995,11 +2092,25 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 }
             };
 
-            match state
-                .terminals
-                .create(cols, rows, Some(runtime_cwd.clone()), Some(argv))
-            {
-                Ok(terminal_id) => {
+            // Task 1: an agent-attached terminal is a per-session singleton,
+            // not a per-connection one — a second attach (another tab,
+            // another device) must share the one live `claude --resume` /
+            // `codex resume` process rather than spawning a second one
+            // against the same on-disk conversation (which corrupts it).
+            // `AgentTerminalRegistry::attach` lives on `AppState`, so it's the
+            // same registry no matter which connection asks.
+            match state.app.agent_terminals.attach(
+                &attach.session_id,
+                &state.conn_id,
+                cols,
+                rows,
+                Some(runtime_cwd.clone()),
+                argv,
+                state.agent_on_data.clone(),
+                state.agent_on_exit.clone(),
+            ) {
+                Ok(AttachOutcome::Created(terminal_id))
+                | Ok(AttachOutcome::Reused(terminal_id)) => {
                     // Fix 3: lazily insert the sessions row on first terminal activity
                     // (same as on first chat.send). INSERT OR IGNORE is a no-op if the
                     // row already exists.
@@ -2010,6 +2121,9 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     // Phase 6: remember this is a CLI-attached (agentAttach)
                     // terminal so the on_data/on_exit closures and
                     // TerminalInput below can do blocked-state bookkeeping.
+                    // Every viewer connection gets its own entry here (this
+                    // map is per-connection), whether it created the terminal
+                    // or reused it.
                     state
                         .terminal_agent_sessions
                         .lock()
@@ -2082,7 +2196,18 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 // as soon as it succeeds.
                 maybe_capture_cli_title(&state.app, &session_id, &data);
             }
-            state.terminals.input(&terminal_id, &data);
+            // Task 1: a shared local agent terminal lives in the app-wide
+            // registry, not this connection's own `TerminalManager` — route
+            // there instead. A plain shell or a direct-mode (ssh/tmux)
+            // terminal isn't registered there at all, so this correctly
+            // falls through to the per-connection manager for those. Any
+            // viewer may send input (shared-terminal semantics, like `tmux
+            // attach` — see `AgentTerminalRegistry::input`'s doc comment).
+            if let Some(session_id) = state.app.agent_terminals.session_for_terminal(&terminal_id) {
+                state.app.agent_terminals.input(&session_id, &data);
+            } else {
+                state.terminals.input(&terminal_id, &data);
+            }
         }
         ClientMessage::TerminalResize {
             terminal_id,
@@ -2094,7 +2219,11 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 state.app.hub.forward(&host_id, raw_text);
                 return;
             }
-            state.terminals.resize(&terminal_id, cols, rows);
+            if let Some(session_id) = state.app.agent_terminals.session_for_terminal(&terminal_id) {
+                state.app.agent_terminals.resize(&session_id, cols, rows);
+            } else {
+                state.terminals.resize(&terminal_id, cols, rows);
+            }
         }
 
         ClientMessage::TerminalKill { terminal_id } => {
@@ -2124,7 +2253,14 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     notify_session_updated(&state.app, &session_id);
                 }
             }
-            state.terminals.kill(&terminal_id);
+            // An explicit kill (e.g. "Restart CLI") means kill it for
+            // *everyone* sharing this terminal, not just detach the caller —
+            // see `AgentTerminalRegistry::kill`'s doc comment.
+            if let Some(session_id) = state.app.agent_terminals.session_for_terminal(&terminal_id) {
+                state.app.agent_terminals.kill(&session_id);
+            } else {
+                state.terminals.kill(&terminal_id);
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -2145,6 +2281,8 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 sound_enabled: patch.sound_enabled,
                 toast_delivery: patch.toast_delivery,
                 chat_mode: patch.chat_mode,
+                terminal_scrollback: patch.terminal_scrollback,
+                terminal_login_shell: patch.terminal_login_shell,
             };
             match state.app.settings.update(store_patch) {
                 Ok(updated) => {
@@ -2260,9 +2398,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             }
 
             // Kill any CLI-attached (agentAttach) terminal(s) for this
-            // session on this connection — a dangling `claude --resume`
-            // process would otherwise keep running (and fighting a future
-            // fresh attach) after the session it belongs to is gone.
+            // session — a dangling `claude --resume` process would otherwise
+            // keep running (and fighting a future fresh attach) after the
+            // session it belongs to is gone. Deleting a session must kill it
+            // for every viewer sharing it, not just this connection, so this
+            // goes through `agent_terminals.kill` (app-wide) rather than only
+            // clearing this connection's own bookkeeping.
             let attached_terminal_ids: Vec<String> = {
                 let map = state.terminal_agent_sessions.lock().unwrap();
                 map.iter()
@@ -2276,8 +2417,12 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     .lock()
                     .unwrap()
                     .remove(&terminal_id);
+                // Direct-mode (ssh/tmux) attach still lives only in this
+                // connection's `TerminalManager`; a local shared agent
+                // terminal lives in the app-wide registry.
                 state.terminals.kill(&terminal_id);
             }
+            state.app.agent_terminals.kill(&session_id);
 
             // Drop every other piece of in-memory bookkeeping keyed by this
             // session id.
@@ -2942,6 +3087,8 @@ fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         sound_enabled: s.sound_enabled,
         toast_delivery: s.toast_delivery.clone(),
         chat_mode: s.chat_mode.clone(),
+        terminal_scrollback: s.terminal_scrollback,
+        terminal_login_shell: s.terminal_login_shell,
     }
 }
 

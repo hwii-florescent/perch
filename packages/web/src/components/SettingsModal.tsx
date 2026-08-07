@@ -18,6 +18,9 @@ import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode } from "@p
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
+// Imported rather than re-declared so the bounds the UI enforces and the ones
+// `createPerchTerminal` actually clamps to cannot drift apart.
+import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 
 // ---------------------------------------------------------------------------
 // HostStateDot (reusable in the modal host rows)
@@ -553,6 +556,82 @@ function InterfaceSection() {
 }
 
 // ---------------------------------------------------------------------------
+// TerminalSection — Wave 2: scrollback length + login-shell toggle for plain
+// terminal panes.
+// ---------------------------------------------------------------------------
+
+function TerminalSection() {
+  const settings = usePerchStore((s) => s.settings);
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+
+  // Optimistic local mirrors, same pattern as NotificationsSection: flip the
+  // control instantly rather than waiting on the settings.update round-trip,
+  // then resync from the authoritative settings.current once it lands.
+  const [scrollback, setScrollback] = useState(String(settings?.terminalScrollback ?? 10000));
+  const [loginShell, setLoginShell] = useState(settings?.terminalLoginShell ?? false);
+
+  useEffect(() => {
+    if (!settings) return;
+    setScrollback(String(settings.terminalScrollback ?? 10000));
+    setLoginShell(settings.terminalLoginShell ?? false);
+  }, [settings?.terminalScrollback, settings?.terminalLoginShell]);
+
+  const handleScrollbackChange = (value: string) => {
+    // The text box always shows exactly what was typed — clamping mid-keystroke
+    // would fight the user (typing "5000" passes through "5", which would snap
+    // to MIN_SCROLLBACK and eat the rest of the input).
+    setScrollback(value);
+    // But only *persist* a value that is actually in range. Writing every
+    // intermediate keystroke through would store "5" on the way to "5000", and
+    // since the clamp lives at terminal-creation time the settings file would
+    // be left holding a number the app never honours.
+    const parsed = parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed >= MIN_SCROLLBACK && parsed <= MAX_SCROLLBACK) {
+      updateSettings({ terminalScrollback: parsed });
+    }
+  };
+
+  const handleLoginShellChange = (checked: boolean) => {
+    setLoginShell(checked);
+    updateSettings({ terminalLoginShell: checked });
+  };
+
+  return (
+    <section className="settings-modal__section">
+      <h3 className="settings-modal__section-title">Terminal</h3>
+      <div className="settings-modal__field-row">
+        <span className="settings-modal__field-label">Scrollback (lines)</span>
+        <input
+          type="number"
+          className="settings-modal__input settings-modal__input--port"
+          data-testid="settings-terminal-scrollback"
+          min={MIN_SCROLLBACK}
+          max={MAX_SCROLLBACK}
+          value={scrollback}
+          onChange={(e) => handleScrollbackChange(e.target.value)}
+        />
+      </div>
+      <p className="settings-modal__muted">
+        {MIN_SCROLLBACK}–{MAX_SCROLLBACK} lines; takes effect on newly-opened terminal panes.
+      </p>
+      <label className="settings-modal__checkbox-row">
+        <input
+          type="checkbox"
+          data-testid="settings-terminal-login-shell"
+          checked={loginShell}
+          onChange={(e) => handleLoginShellChange(e.target.checked)}
+        />
+        Spawn plain terminal panes as a login shell
+      </label>
+      <p className="settings-modal__muted">
+        Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created
+        terminals.
+      </p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Archived sessions — entry row + subpage
 // ---------------------------------------------------------------------------
 
@@ -774,6 +853,7 @@ export function SettingsModal() {
               <ChatModeSection />
               <NotificationsSection />
               <InterfaceSection />
+              <TerminalSection />
               <ArchivedSessionsSection onOpen={() => setView("archived")} />
               <SshHostsSection />
               <CustomModelsSection />

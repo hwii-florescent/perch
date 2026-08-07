@@ -60,6 +60,13 @@ pub struct Settings {
     /// Settings. Defaults to `"hosted"`.
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
+    /// Lines of scrollback each terminal pane retains. Defaults to the 10000
+    /// that used to be hardcoded client-side, so existing files are unchanged.
+    #[serde(default = "default_terminal_scrollback")]
+    pub terminal_scrollback: u32,
+    /// Spawn plain terminal panes as a login shell. Defaults to `false`.
+    #[serde(default)]
+    pub terminal_login_shell: bool,
 }
 
 impl Default for Settings {
@@ -71,12 +78,18 @@ impl Default for Settings {
             sound_enabled: false,
             toast_delivery: default_toast_delivery(),
             chat_mode: default_chat_mode(),
+            terminal_scrollback: default_terminal_scrollback(),
+            terminal_login_shell: false,
         }
     }
 }
 
 fn default_theme() -> String {
     "catppuccin".to_string()
+}
+
+fn default_terminal_scrollback() -> u32 {
+    10_000
 }
 
 fn default_toast_delivery() -> String {
@@ -116,6 +129,8 @@ pub struct SettingsPatch {
     pub sound_enabled: Option<bool>,
     pub toast_delivery: Option<String>,
     pub chat_mode: Option<String>,
+    pub terminal_scrollback: Option<u32>,
+    pub terminal_login_shell: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -200,6 +215,12 @@ impl SettingsStore {
         }
         if let Some(chat_mode) = patch.chat_mode {
             guard.chat_mode = chat_mode;
+        }
+        if let Some(scrollback) = patch.terminal_scrollback {
+            guard.terminal_scrollback = scrollback;
+        }
+        if let Some(login_shell) = patch.terminal_login_shell {
+            guard.terminal_login_shell = login_shell;
         }
         let snapshot = guard.clone();
         drop(guard);

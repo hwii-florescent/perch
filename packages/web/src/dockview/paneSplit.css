@@ -1,0 +1,130 @@
+/* paneSplit.css — styles for the "split with another session" feature
+ * (SessionSplitPopover.tsx, PaneGroupHeaderActions' new button in
+ * DockviewShell.tsx, and Chat.tsx's inactive-session degrade state).
+ * Imported once from DockviewShell.tsx, same component-level-CSS-import
+ * convention as that file's `dockview-react/dist/styles/dockview.css`. */
+
+.dockview-group-action--split-session {
+  font-size: 13px;
+}
+
+.session-split-popover {
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  font-size: 12.5px;
+  color: #ddd;
+  overflow: hidden;
+}
+
+.session-split-popover__header {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+
+.session-split-popover__empty {
+  padding: 8px;
+  color: #777;
+}
+
+.session-split-popover__list {
+  overflow-y: auto;
+}
+
+.session-split-popover__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+}
+
+.session-split-popover__item:hover {
+  background: #2a2d2e;
+}
+
+.session-split-popover__item-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.session-split-popover__item-cwd {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.session-split-popover__item-badge {
+  align-self: flex-end;
+  font-size: 10px;
+  color: #6ea8fe;
+  margin-top: -14px;
+}
+
+/* Chat.tsx's degrade state for a session-bound pane whose session isn't the
+ * globally active one (see views/Chat.tsx's `InactiveSessionPane`) — full
+ * height/width to fill the dockview panel, centered explanatory content. */
+.inactive-session-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: #999;
+}
+
+.inactive-session-pane__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #ddd;
+}
+
+.inactive-session-pane__cwd {
+  font-size: 12px;
+  color: #888;
+  word-break: break-all;
+}
+
+.inactive-session-pane__note {
+  font-size: 12px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.inactive-session-pane__switch {
+  margin-top: 4px;
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: 1px solid #3a3a3a;
+  background: #2a2d2e;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.inactive-session-pane__switch:hover {
+  background: #333;
+}

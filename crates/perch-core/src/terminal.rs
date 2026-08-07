@@ -95,6 +95,109 @@ fn apply_terminal_env(cmd: &mut CommandBuilder) {
     }
 }
 
+/// The pieces of a freshly-spawned pty that every caller needs, factored out
+/// of `TerminalManager::create` so [`AgentTerminalRegistry`] (which has a
+/// different fan-out story — many viewers, not one fixed callback pair) can
+/// spawn a process the exact same way instead of drifting out of sync with
+/// it (env, cwd fallback, `apply_terminal_env`, the killer-split-before-move
+/// dance).
+struct SpawnedPty {
+    id: String,
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    reader: Box<dyn Read + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+/// Argv for a plain (no explicit `command`) terminal pane's shell.
+///
+/// `login_shell` adds `-l`, which is a bigger behavioural change than it
+/// looks: it runs the user's *login* rc files (`.zprofile`/`.profile`) rather
+/// than only the interactive ones, so the prompt, PATH and anything else those
+/// files set can visibly differ from a non-login pane. That is exactly why the
+/// setting is opt-in and off by default — the pre-existing behaviour is the
+/// bare shell.
+///
+/// Split out as a pure function so the flag's effect is unit-testable without
+/// opening a pty. Note this applies only to plain panes: an agent-attach
+/// (CLI-mode) pane always arrives with an explicit `command` and is untouched.
+fn shell_argv(shell: &str, login_shell: bool) -> Vec<String> {
+    let mut argv = vec![shell.to_string()];
+    if login_shell {
+        argv.push("-l".to_string());
+    }
+    argv
+}
+
+fn spawn_pty(
+    cols: u16,
+    rows: u16,
+    cwd: Option<String>,
+    command: Option<Vec<String>>,
+    login_shell: bool,
+) -> anyhow::Result<SpawnedPty> {
+    let id = Uuid::new_v4().to_string();
+
+    let pty_system = native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+
+    let mut cmd = match command {
+        Some(argv) => {
+            let mut iter = argv.into_iter();
+            let program = iter.next().unwrap_or_else(|| "/bin/zsh".to_string());
+            let mut cmd = CommandBuilder::new(program);
+            cmd.args(iter);
+            cmd
+        }
+        None => {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            let mut argv = shell_argv(&shell, login_shell).into_iter();
+            let program = argv.next().unwrap_or_else(|| "/bin/zsh".to_string());
+            let mut cmd = CommandBuilder::new(program);
+            cmd.args(argv);
+            cmd
+        }
+    };
+    if let Some(cwd) = cwd.or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string())
+    }) {
+        cmd.cwd(cwd);
+    }
+    for (key, value) in std::env::vars() {
+        cmd.env(key, value);
+    }
+    apply_terminal_env(&mut cmd);
+
+    let child = pair.slave.spawn_command(cmd)?;
+    drop(pair.slave); // only the master + child are needed after spawn
+                      // Split off a killer before `child` is moved into the waiter thread
+                      // below — `Child::wait()` blocks that thread, so any later `kill()`
+                      // call (from a ws message handler on a different thread) must go
+                      // through this independently-clonable handle instead of `child`
+                      // itself.
+    let killer = child.clone_killer();
+
+    let reader = pair.master.try_clone_reader()?;
+    let writer = pair.master.take_writer()?;
+
+    Ok(SpawnedPty {
+        id,
+        master: pair.master,
+        writer,
+        reader,
+        killer,
+        child,
+    })
+}
+
 pub struct TerminalManager {
     /// `Arc` because each terminal's waiter thread holds a handle: when the
     /// child exits it removes its own entry (see `create`), so a dead terminal
@@ -119,59 +222,22 @@ impl TerminalManager {
         rows: u16,
         cwd: Option<String>,
         command: Option<Vec<String>>,
+        login_shell: bool,
     ) -> anyhow::Result<String> {
-        let id = Uuid::new_v4().to_string();
-
-        let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-
-        let mut cmd = match command {
-            Some(argv) => {
-                let mut iter = argv.into_iter();
-                let program = iter.next().unwrap_or_else(|| "/bin/zsh".to_string());
-                let mut cmd = CommandBuilder::new(program);
-                cmd.args(iter);
-                cmd
-            }
-            None => {
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-                CommandBuilder::new(&shell)
-            }
-        };
-        if let Some(cwd) = cwd.or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.display().to_string())
-        }) {
-            cmd.cwd(cwd);
-        }
-        for (key, value) in std::env::vars() {
-            cmd.env(key, value);
-        }
-        apply_terminal_env(&mut cmd);
-
-        let mut child = pair.slave.spawn_command(cmd)?;
-        drop(pair.slave); // only the master + child are needed after spawn
-                          // Split off a killer before `child` is moved into the waiter thread
-                          // below — `Child::wait()` blocks that thread, so any later `kill()`
-                          // call (from a ws message handler on a different thread) must go
-                          // through this independently-clonable handle instead of `child`
-                          // itself.
-        let killer = child.clone_killer();
-
-        let reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let SpawnedPty {
+            id,
+            master,
+            writer,
+            reader,
+            killer,
+            mut child,
+        } = spawn_pty(cols, rows, cwd, command, login_shell)?;
 
         self.terminals.lock().unwrap().insert(
             id.clone(),
             TerminalHandle {
                 writer,
-                master: pair.master,
+                master,
                 killer: Mutex::new(killer),
             },
         );
@@ -288,9 +354,452 @@ impl TerminalManager {
     }
 }
 
+/// Called whenever PTY output arrives on an agent-attached terminal, keyed by
+/// session id (not terminal id — every viewer of a shared terminal cares
+/// about the same session). Used to derive Task 2's working/idle state.
+pub type SessionActivityListener = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// One viewer's callbacks, registered against a shared [`AgentTerminalEntry`].
+/// Identical shape to `TerminalManager`'s single fixed `on_data`/`on_exit`
+/// pair — the difference is `AgentTerminalRegistry` keeps a *map* of these,
+/// one per attached connection, instead of exactly one.
+struct AgentViewer {
+    on_data: TerminalDataListener,
+    on_exit: TerminalExitListener,
+}
+
+struct AgentTerminalEntry {
+    terminal_id: String,
+    writer: Mutex<Box<dyn Write + Send>>,
+    // `Mutex`-wrapped (unlike `TerminalHandle::master`) because this entry is
+    // itself shared across threads via `Arc` (reader/waiter threads, plus
+    // whichever connection calls `resize`/`kill`) — `MasterPty` is `Send` but
+    // not `Sync`, so `Arc<AgentTerminalEntry>` needs every field to be `Sync`
+    // on its own, not just reachable through one shared outer lock.
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    /// Keyed by viewer id (the WS connection's `conn_id`). Any viewer may
+    /// write input (shared-terminal semantics, like `tmux attach` — there is
+    /// one underlying conversation, not one per viewer, so there is no
+    /// principled way to say only one of them "owns" keyboard input).
+    viewers: Mutex<HashMap<String, AgentViewer>>,
+    /// Last time PTY output was observed, for Task 2's quiet-period → idle
+    /// transition. Updated by the reader thread on every chunk.
+    last_activity: Mutex<std::time::Instant>,
+    /// `Some(name)` when this entry's pty child is a `tmux attach-session`
+    /// client rather than the CLI itself (see `agent_tmux.rs`) — the local
+    /// persistence trick that lets the real `claude`/`codex` process outlive
+    /// perch restarts and dropped connections. `None` on a machine without
+    /// tmux (the mandatory fallback), in which case the pty child *is* the
+    /// CLI, exactly as before this module existed, and `kill()` only ever
+    /// needs to signal the child directly.
+    tmux_session: Option<String>,
+}
+
+/// Registry of agent-attached (`agentAttach`) terminals, one PTY per **session
+/// id** rather than per WS connection.
+///
+/// This is what makes an agent-attached terminal a per-session singleton: a
+/// second `attach()` for a session that already has a live entry reuses the
+/// existing PTY and just registers another viewer, instead of spawning a
+/// second `claude --resume <id>` / `codex resume <id>` against the same
+/// on-disk conversation (see the `server.rs` doc comment on `TerminalCreate`
+/// for why running two of those at once corrupts the conversation).
+///
+/// Lives in `AppState` (one instance for the whole process), not `ConnState`
+/// — that's the entire point: it must outlive any single connection so a
+/// second tab/device can find and share what the first one started.
+pub struct AgentTerminalRegistry {
+    /// Keyed by session id. `Arc` so the reader/waiter threads spawned in
+    /// `attach()` can hold a handle independent of the registry's own lock.
+    entries: Arc<Mutex<HashMap<String, Arc<AgentTerminalEntry>>>>,
+    on_activity: SessionActivityListener,
+}
+
+/// Outcome of [`AgentTerminalRegistry::attach`] — whether it had to spawn a
+/// new process or found a live one to share. Both carry the terminal id the
+/// caller should reply with in `TerminalCreated`; the wire protocol does not
+/// need to (and does not) distinguish the two cases.
+pub enum AttachOutcome {
+    Created(String),
+    Reused(String),
+}
+
+impl AgentTerminalRegistry {
+    pub fn new(on_activity: SessionActivityListener) -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(HashMap::new())),
+            on_activity,
+        }
+    }
+
+    /// Attach `viewer_id` to `session_id`'s agent terminal, spawning it if
+    /// this is the first viewer. `cols`/`rows`/`cwd`/`command` are only used
+    /// when a process actually has to be spawned; a reuse ignores them (the
+    /// existing process keeps whatever size it already has — see
+    /// `resize()`'s doc comment for what happens when viewers disagree).
+    #[allow(clippy::too_many_arguments)]
+    pub fn attach(
+        &self,
+        session_id: &str,
+        viewer_id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<String>,
+        command: Vec<String>,
+        on_data: TerminalDataListener,
+        on_exit: TerminalExitListener,
+    ) -> anyhow::Result<AttachOutcome> {
+        let mut entries = self.entries.lock().unwrap();
+        if let Some(entry) = entries.get(session_id) {
+            entry
+                .viewers
+                .lock()
+                .unwrap()
+                .insert(viewer_id.to_string(), AgentViewer { on_data, on_exit });
+            return Ok(AttachOutcome::Reused(entry.terminal_id.clone()));
+        }
+
+        // Local tmux-backed persistence (see `agent_tmux.rs`): when tmux is
+        // present, the pty's child becomes a `tmux attach-session` client
+        // against a session that runs `command`, rather than `command`
+        // itself — so killing this pty (a viewer detaching, a dropped
+        // connection, or perch itself exiting) only loses the attach client;
+        // the real CLI keeps running in tmux and a later attach reattaches
+        // to it. `use_tmux` is resolved once here (cached probe) so the
+        // mandatory no-tmux fallback is a plain, argv-unchanged passthrough.
+        let use_tmux = crate::agent_tmux::tmux_available();
+        // tmux being *installed* is not the same as tmux *working*: the server
+        // can fail to start (socket-dir permissions, resource limits, a version
+        // skew). Persistence is a bonus feature — losing it must never cost the
+        // user CLI mode itself, which worked before this existed. So a failure
+        // here degrades to the exact pre-tmux behavior (spawn the CLI directly)
+        // instead of propagating and leaving the user with a dead pane.
+        let direct_argv = command.clone();
+        let (spawn_argv, tmux_session) = match crate::agent_tmux::resolve_agent_spawn(
+            use_tmux,
+            session_id,
+            cols,
+            rows,
+            cwd.as_deref(),
+            command,
+        ) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    session_id,
+                    error = %err,
+                    "tmux-backed CLI spawn failed; falling back to a direct \
+                     (non-persistent) spawn"
+                );
+                (direct_argv, None)
+            }
+        };
+
+        // The `false` below: an agent-attach pane spawns the CLI (or its tmux
+        // client) directly — there is no shell in this pty for `-l` to apply to.
+        let SpawnedPty {
+            id,
+            master,
+            writer,
+            reader,
+            killer,
+            mut child,
+        } = spawn_pty(cols, rows, cwd, Some(spawn_argv), false)?;
+
+        let mut viewers = HashMap::new();
+        viewers.insert(viewer_id.to_string(), AgentViewer { on_data, on_exit });
+        let entry = Arc::new(AgentTerminalEntry {
+            terminal_id: id.clone(),
+            writer: Mutex::new(writer),
+            master: Mutex::new(master),
+            killer: Mutex::new(killer),
+            viewers: Mutex::new(viewers),
+            last_activity: Mutex::new(std::time::Instant::now()),
+            tmux_session,
+        });
+        entries.insert(session_id.to_string(), entry.clone());
+        drop(entries);
+
+        // Reader thread: pump pty output to *every* registered viewer, not
+        // just the one that happened to create it — the fan-out this whole
+        // registry exists for. Same partial-UTF-8-carry handling as
+        // `TerminalManager::create`; see that function's comment for why.
+        let reader_id = id.clone();
+        let reader_entry = entry.clone();
+        let session_id_owned = session_id.to_string();
+        let on_activity = self.on_activity.clone();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 8192];
+            let mut carry: Vec<u8> = Vec::new();
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let bytes: &[u8] = if carry.is_empty() {
+                            &buf[..n]
+                        } else {
+                            carry.extend_from_slice(&buf[..n]);
+                            &carry[..]
+                        };
+                        let (text, tail) = split_utf8_tail(bytes);
+                        let tail = tail.to_vec();
+                        if !text.is_empty() {
+                            *reader_entry.last_activity.lock().unwrap() = std::time::Instant::now();
+                            on_activity(&session_id_owned);
+                            let viewers = reader_entry.viewers.lock().unwrap();
+                            for viewer in viewers.values() {
+                                (viewer.on_data)(reader_id.clone(), text.clone());
+                            }
+                        }
+                        carry = tail;
+                    }
+                    Err(_) => break,
+                }
+            }
+            if !carry.is_empty() {
+                let text = String::from_utf8_lossy(&carry).into_owned();
+                *reader_entry.last_activity.lock().unwrap() = std::time::Instant::now();
+                on_activity(&session_id_owned);
+                let viewers = reader_entry.viewers.lock().unwrap();
+                for viewer in viewers.values() {
+                    (viewer.on_data)(reader_id.clone(), text.clone());
+                }
+            }
+        });
+
+        // Waiter thread: pty exit -> fan out terminal.exit to every viewer
+        // still registered, then remove the entry. This is the *only* place
+        // an entry is ever removed from `entries` — `detach()` and `kill()`
+        // both only ever signal the child; removal always happens here, so
+        // there is a single writer for "is this session's terminal still
+        // alive" and no double-remove race between a disconnecting viewer
+        // and an explicit kill.
+        let exit_id = id.clone();
+        let entries_map = self.entries.clone();
+        let session_id_for_exit = session_id.to_string();
+        let exit_entry = entry.clone();
+        std::thread::spawn(move || {
+            let code = match child.wait() {
+                Ok(status) => status.exit_code() as i32,
+                Err(_) => -1,
+            };
+            entries_map.lock().unwrap().remove(&session_id_for_exit);
+            let viewers = exit_entry.viewers.lock().unwrap();
+            for viewer in viewers.values() {
+                (viewer.on_exit)(exit_id.clone(), code);
+            }
+        });
+
+        Ok(AttachOutcome::Created(id))
+    }
+
+    /// Remove `viewer_id` from `session_id`'s viewer set. If it was the last
+    /// viewer, kill the underlying process — the shared terminal dies only
+    /// when its last viewer disconnects (or the child exits on its own).
+    ///
+    /// The kill happens *before* removing the viewer from the map (see the
+    /// implementation) so the waiter thread's `on_exit` fan-out still reaches
+    /// this viewer's callback — that callback clears process-global state
+    /// (`blocked_sessions` in `server.rs`) that must be cleared by *someone*
+    /// regardless of which connection is disconnecting.
+    ///
+    /// For a tmux-backed entry (see `agent_tmux.rs`) this "kill" only ever
+    /// reaches the attach client (`entry.killer`), never the tmux session —
+    /// that composes automatically with zero special-casing here, because
+    /// the pty's child *is* the attach client, not the CLI. Losing it is
+    /// exactly equivalent to a tmux detach: the real process keeps running
+    /// for the next attach to find. Only `kill()` (explicit user action)
+    /// reaches further, into `kill_tmux_session`.
+    pub fn detach(&self, session_id: &str, viewer_id: &str) {
+        let entry = self.entries.lock().unwrap().get(session_id).cloned();
+        let Some(entry) = entry else { return };
+        // Decide *and* remove under a single lock acquisition. Splitting the
+        // "am I the last viewer?" check from the removal lets two viewers
+        // disconnecting concurrently both observe `len == 2`, both take the
+        // non-last branch, and both remove — leaving a live PTY with zero
+        // viewers that nothing will ever kill.
+        //
+        // The last viewer is deliberately NOT removed before killing: the
+        // waiter thread's `on_exit` runs through the still-registered
+        // callbacks, which is what clears process-global `blocked_sessions`
+        // state. Removing first would strand that flag set forever.
+        let is_last = {
+            let mut viewers = entry.viewers.lock().unwrap();
+            if !viewers.contains_key(viewer_id) {
+                return;
+            }
+            if viewers.len() <= 1 {
+                true
+            } else {
+                viewers.remove(viewer_id);
+                false
+            }
+        };
+        if is_last {
+            let _ = entry.killer.lock().unwrap().kill();
+        }
+    }
+
+    /// Write `data` into `session_id`'s terminal. Any registered viewer may
+    /// call this — a shared agent terminal has one keyboard, not one per
+    /// viewer, matching `tmux attach` semantics.
+    pub fn input(&self, session_id: &str, data: &str) {
+        if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
+            let _ = entry.writer.lock().unwrap().write_all(data.as_bytes());
+        }
+    }
+
+    /// Resize `session_id`'s terminal. Last write wins when viewers disagree
+    /// on size (e.g. two panes of different widths) — same rule a real
+    /// `tmux attach` uses in spirit (the terminal has one size, and whichever
+    /// client last reported a size determines it). Getting this "fair" across
+    /// viewers is a genuine tmux feature (smallest-common-size) that isn't
+    /// implemented here; flagged as a known simplification.
+    pub fn resize(&self, session_id: &str, cols: u16, rows: u16) {
+        if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
+            let _ = entry.master.lock().unwrap().resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
+        }
+    }
+
+    /// Force-terminate `session_id`'s terminal regardless of how many viewers
+    /// still hold it — used for explicit user actions (restart CLI,
+    /// session delete) where "kill it" must mean kill it for everyone, not
+    /// just detach the caller. No-op if there is no live entry.
+    ///
+    /// For a tmux-backed entry this is the one place that must reach past
+    /// the attach client to the tmux session itself (`kill_tmux_session`) —
+    /// killing only the attach client (what `detach()` does) would just
+    /// disconnect it and leave the real CLI running, which is correct for a
+    /// viewer disconnect but wrong here: an explicit kill must not leave an
+    /// orphan for the next attach to silently reattach to.
+    pub fn kill(&self, session_id: &str) {
+        if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
+            if let Some(name) = &entry.tmux_session {
+                crate::agent_tmux::kill_tmux_session(name);
+            }
+            let _ = entry.killer.lock().unwrap().kill();
+        }
+    }
+
+    /// The session id whose shared agent terminal is `terminal_id`, if any.
+    /// `server.rs` uses this to decide whether `TerminalInput`/`TerminalResize`/
+    /// `TerminalKill` (which only carry a `terminal_id`, not a session id) must
+    /// route into this registry rather than the per-connection
+    /// `TerminalManager` — a plain shell or a direct-mode (ssh/tmux) terminal
+    /// isn't in here at all, so this correctly returns `None` for those. A
+    /// linear scan is fine: the number of concurrently live agent terminals is
+    /// always tiny (one per actively-CLI-attached session).
+    pub fn session_for_terminal(&self, terminal_id: &str) -> Option<String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, entry)| entry.terminal_id == terminal_id)
+            .map(|(session_id, _)| session_id.clone())
+    }
+
+    /// The current terminal id for `session_id`'s live agent terminal, if
+    /// any. Used by tests; not needed by `server.rs`, which already gets the
+    /// terminal id back from `attach()`.
+    #[cfg(test)]
+    fn terminal_id_for(&self, session_id: &str) -> Option<String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|e| e.terminal_id.clone())
+    }
+
+    /// How many viewers `session_id`'s terminal currently has (0 if there is
+    /// no live entry). Used by tests to assert a disconnect didn't kill a
+    /// terminal another viewer still holds.
+    #[cfg(test)]
+    fn viewer_count(&self, session_id: &str) -> usize {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|e| e.viewers.lock().unwrap().len())
+            .unwrap_or(0)
+    }
+}
+
+/// How long an agent-attached terminal must go without PTY output before
+/// Task 2 considers it idle again.
+///
+/// herdr's own detector (`src/pane/agent_detection.rs` in the herdr clone)
+/// polls at 100ms and caps its idle-confirmation window at 700ms — i.e. about
+/// 700ms of visible quiet before it trusts that the agent really has stopped
+/// rather than just paused between tool calls or output chunks. perch has no
+/// polling loop to reuse that cadence from (activity here is push-driven, one
+/// call per PTY read), so the debounce is applied at sweep time instead: the
+/// same 700ms is used as the "how quiet is quiet" threshold, which keeps
+/// perch's dot exactly as twitchy as herdr's, without perch inventing its own
+/// number. Too short and a normal inter-token pause flaps the dot; too long
+/// and the "done" toast fires late enough to feel broken.
+pub const AGENT_QUIET_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// Pure decision function extracted so Task 2's debounce logic is testable
+/// without a real PTY: given how long ago output was last seen, has this
+/// terminal gone quiet long enough to be considered idle?
+pub fn is_quiet_enough_to_idle(
+    since_last_activity: std::time::Duration,
+    threshold: std::time::Duration,
+) -> bool {
+    since_last_activity >= threshold
+}
+
+impl AgentTerminalRegistry {
+    /// One sweep pass for Task 2: return the session ids whose agent terminal
+    /// has been quiet for at least `threshold`. Callers (a single shared
+    /// sweep task in `server.rs`, not one timer per terminal) cross-reference
+    /// this against `AppState::running_sessions` themselves — a session that
+    /// is already idle (or was never marked running, e.g. a plain shell) is
+    /// harmless to list here again, so this stays a cheap, side-effect-free
+    /// query rather than tracking its own "already reported" flag.
+    pub fn sessions_quiet_since(&self, threshold: std::time::Duration) -> Vec<String> {
+        let now = std::time::Instant::now();
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(session_id, entry)| {
+                let last = *entry.last_activity.lock().unwrap();
+                is_quiet_enough_to_idle(now.duration_since(last), threshold)
+                    .then(|| session_id.clone())
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::split_utf8_tail;
+    use super::{shell_argv, split_utf8_tail};
+
+    /// Off by default is the whole safety story for this setting: a login
+    /// shell runs different rc files, so the pre-existing behaviour has to be
+    /// what you get when the flag is untouched.
+    #[test]
+    fn a_plain_pane_spawns_a_bare_shell_unless_login_mode_is_on() {
+        assert_eq!(shell_argv("/bin/zsh", false), vec!["/bin/zsh"]);
+        assert_eq!(shell_argv("/bin/zsh", true), vec!["/bin/zsh", "-l"]);
+    }
+
+    /// `-l` is appended, never substituted for the shell itself — a bug here
+    /// would exec `-l` as the program.
+    #[test]
+    fn login_mode_keeps_the_shell_as_argv0() {
+        let argv = shell_argv("/opt/homebrew/bin/fish", true);
+        assert_eq!(argv[0], "/opt/homebrew/bin/fish");
+        assert_eq!(argv.len(), 2);
+    }
 
     /// The regression this exists for: a pty read that ends mid-glyph must
     /// carry the partial bytes forward, not turn them into U+FFFD. Box-drawing
@@ -344,5 +853,329 @@ mod tests {
         let (text, tail) = split_utf8_tail(&[0x41, 0xff, 0x42]);
         assert!(tail.is_empty());
         assert!(text.starts_with('A') && text.ends_with('B'));
+    }
+
+    use super::{
+        is_quiet_enough_to_idle, AgentTerminalRegistry, AttachOutcome, TerminalDataListener,
+        TerminalExitListener, AGENT_QUIET_THRESHOLD,
+    };
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// The pid of the process running in `name`'s (single) pane, if the
+    /// session is alive. Used to prove that a reattach found the *same*
+    /// running agent rather than a freshly recreated one.
+    fn tmux_pane_pid(name: &str) -> Option<String> {
+        let out = std::process::Command::new("tmux")
+            .args(["list-panes", "-t", name, "-F", "#{pane_pid}"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if pid.is_empty() {
+            None
+        } else {
+            Some(pid)
+        }
+    }
+
+    fn noop_listeners() -> (TerminalDataListener, TerminalExitListener) {
+        (
+            Arc::new(|_id: String, _data: String| {}),
+            Arc::new(|_id: String, _code: i32| {}),
+        )
+    }
+
+    /// Task 1's core correctness fix: a second `agentAttach` for a session
+    /// that already has a live terminal must reuse it, not spawn a second
+    /// process against the same on-disk conversation.
+    #[test]
+    fn a_second_attach_for_the_same_session_reuses_the_terminal() {
+        let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let (on_data, on_exit) = noop_listeners();
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 5".to_string(),
+        ];
+
+        let first = registry
+            .attach(
+                "session-shared",
+                "viewer-a",
+                80,
+                24,
+                None,
+                command.clone(),
+                on_data.clone(),
+                on_exit.clone(),
+            )
+            .expect("first attach spawns");
+        let first_id = match first {
+            AttachOutcome::Created(id) => id,
+            AttachOutcome::Reused(_) => panic!("first attach must create, not reuse"),
+        };
+
+        let second = registry
+            .attach(
+                "session-shared",
+                "viewer-b",
+                80,
+                24,
+                None,
+                command,
+                on_data,
+                on_exit,
+            )
+            .expect("second attach reuses");
+        match second {
+            AttachOutcome::Reused(id) => assert_eq!(id, first_id, "must be the same terminal"),
+            AttachOutcome::Created(_) => panic!("second attach spawned a NEW process — bug"),
+        }
+        assert_eq!(
+            registry.viewer_count("session-shared"),
+            2,
+            "both viewers should be registered against the one terminal"
+        );
+
+        registry.kill("session-shared");
+    }
+
+    /// A viewer disconnecting must not kill a terminal another viewer still
+    /// holds — only the last viewer leaving (or the child exiting) may do
+    /// that.
+    #[test]
+    fn a_disconnecting_viewer_does_not_kill_a_terminal_another_viewer_holds() {
+        let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let (on_data, on_exit) = noop_listeners();
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 5".to_string(),
+        ];
+
+        registry
+            .attach(
+                "session-two-viewers",
+                "viewer-a",
+                80,
+                24,
+                None,
+                command.clone(),
+                on_data.clone(),
+                on_exit.clone(),
+            )
+            .unwrap();
+        registry
+            .attach(
+                "session-two-viewers",
+                "viewer-b",
+                80,
+                24,
+                None,
+                command,
+                on_data,
+                on_exit,
+            )
+            .unwrap();
+
+        // The first viewer leaves — the second still holds the terminal.
+        registry.detach("session-two-viewers", "viewer-a");
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            registry.terminal_id_for("session-two-viewers").is_some(),
+            "terminal must survive while viewer-b still holds it"
+        );
+        assert_eq!(registry.viewer_count("session-two-viewers"), 1);
+
+        // The last viewer leaves — now it's really gone.
+        registry.detach("session-two-viewers", "viewer-b");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            registry.terminal_id_for("session-two-viewers").is_none(),
+            "terminal must die once its last viewer disconnects"
+        );
+        // Belt-and-braces cleanup: if this machine has tmux, the last
+        // detach above only killed the attach client (see
+        // `AgentTerminalRegistry::detach`'s doc comment) — the `sleep 5`
+        // inside tmux self-terminates shortly on its own, but an explicit
+        // kill here means the test never depends on that timing.
+        crate::agent_tmux::kill_tmux_session(&crate::agent_tmux::tmux_session_name(
+            "session-two-viewers",
+        ));
+    }
+
+    /// The tmux-persistence feature's core promise, exercised through the
+    /// *real* `AgentTerminalRegistry::attach`/`detach`/`kill` path (not just
+    /// `agent_tmux.rs`'s direct tmux-command tests): a spawned tmux-backed
+    /// terminal's underlying process survives its last viewer detaching —
+    /// only an explicit `kill()` may take it down. Gated on tmux being
+    /// installed; skips cleanly (not a failure) otherwise, per the phase
+    /// brief.
+    #[test]
+    fn a_tmux_backed_terminal_survives_its_last_viewer_detaching() {
+        if !crate::agent_tmux::tmux_available() {
+            eprintln!("skipping: tmux not installed");
+            return;
+        }
+        let session_id = "session-tmux-persistence";
+        let tmux_name = crate::agent_tmux::tmux_session_name(session_id);
+        crate::agent_tmux::kill_tmux_session(&tmux_name); // in case a previous failed run left it
+
+        let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let (on_data, on_exit) = noop_listeners();
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 30".to_string(),
+        ];
+
+        registry
+            .attach(
+                session_id,
+                "viewer-only",
+                80,
+                24,
+                None,
+                command,
+                on_data,
+                on_exit,
+            )
+            .expect("attach spawns a tmux-backed terminal");
+
+        // The real CLI (the `sleep 30`) is running inside tmux, not as this
+        // pty's direct child — confirm the tmux session actually exists
+        // before asserting anything about it surviving.
+        assert!(
+            crate::agent_tmux::tmux_session_exists(&tmux_name),
+            "attach() must have created the tmux session"
+        );
+
+        // The only viewer disconnects — this must kill the attach client,
+        // not the tmux session underneath it.
+        registry.detach(session_id, "viewer-only");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            registry.terminal_id_for(session_id).is_none(),
+            "the registry entry (attach client) must be gone"
+        );
+        assert!(
+            crate::agent_tmux::tmux_session_exists(&tmux_name),
+            "the tmux session — the real agent process — must survive a viewer detach"
+        );
+
+        // A fresh attach for the same session must reattach to the SAME
+        // tmux session (this is the perch-restart recovery path in
+        // miniature: a brand-new registry, exactly what exists right after
+        // a restart, finding a tmux session that already exists).
+        //
+        // Record the pane's pid first. Asserting only that *a* session with
+        // this name exists afterwards would pass even if it had been torn
+        // down and recreated — which is precisely the regression that would
+        // silently destroy the user's running agent. The pid is what proves
+        // continuity.
+        let pane_pid_before = tmux_pane_pid(&tmux_name);
+        assert!(
+            pane_pid_before.is_some(),
+            "expected a live pane pid before the simulated restart"
+        );
+        let recovering_registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let (on_data2, on_exit2) = noop_listeners();
+        recovering_registry
+            .attach(
+                session_id,
+                "viewer-after-restart",
+                80,
+                24,
+                None,
+                vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo should-not-run-again".to_string(),
+                ],
+                on_data2,
+                on_exit2,
+            )
+            .expect("reattach after 'restart' finds the live tmux session");
+        assert!(
+            crate::agent_tmux::tmux_session_exists(&tmux_name),
+            "reattach must still find the same tmux session, not a fresh one"
+        );
+        assert_eq!(
+            tmux_pane_pid(&tmux_name),
+            pane_pid_before,
+            "reattach must find the SAME running process — a changed pane pid \
+             means the agent was killed and relaunched, losing the user's session"
+        );
+
+        // Explicit kill (Restart CLI / session delete semantics): THIS must
+        // take the tmux session down, unlike the plain detach above.
+        recovering_registry.kill(session_id);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !crate::agent_tmux::tmux_session_exists(&tmux_name),
+            "an explicit kill must remove the tmux session, not just detach"
+        );
+    }
+
+    /// Pure debounce logic (Task 2): under the threshold stays "working",
+    /// at/over it flips to "idle".
+    #[test]
+    fn quiet_period_debounce_flips_at_the_threshold() {
+        assert!(!is_quiet_enough_to_idle(
+            Duration::from_millis(100),
+            AGENT_QUIET_THRESHOLD
+        ));
+        assert!(!is_quiet_enough_to_idle(
+            Duration::from_millis(699),
+            AGENT_QUIET_THRESHOLD
+        ));
+        assert!(is_quiet_enough_to_idle(
+            AGENT_QUIET_THRESHOLD,
+            AGENT_QUIET_THRESHOLD
+        ));
+        assert!(is_quiet_enough_to_idle(
+            Duration::from_secs(5),
+            AGENT_QUIET_THRESHOLD
+        ));
+    }
+
+    /// End-to-end (real PTY, no fake clock): a freshly spawned agent terminal
+    /// that produces no further output is reported as quiet almost
+    /// immediately relative to a short threshold — the plumbing from
+    /// `last_activity` through `sessions_quiet_since` actually works, not
+    /// just the pure comparison above.
+    #[test]
+    fn a_silent_terminal_is_reported_quiet_after_the_threshold() {
+        let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let (on_data, on_exit) = noop_listeners();
+        registry
+            .attach(
+                "session-quiet",
+                "viewer-a",
+                80,
+                24,
+                None,
+                vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "sleep 5".to_string(),
+                ],
+                on_data,
+                on_exit,
+            )
+            .unwrap();
+
+        let short_threshold = Duration::from_millis(20);
+        std::thread::sleep(Duration::from_millis(60));
+        let quiet = registry.sessions_quiet_since(short_threshold);
+        assert!(
+            quiet.contains(&"session-quiet".to_string()),
+            "a silent terminal should show up as quiet: {quiet:?}"
+        );
+
+        registry.kill("session-quiet");
     }
 }

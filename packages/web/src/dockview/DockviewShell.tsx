@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
+  positionToDirection,
   themeAbyss,
   type DockviewApi,
   type DockviewReadyEvent,
@@ -10,11 +11,20 @@ import {
   type IDockviewPanelProps,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
+import "./paneSplit.css";
 import { ChatView } from "../views/Chat";
 import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
-import { createDockviewController, getDockviewController, registerDockviewController } from "./dockviewController";
+import {
+  createDockviewController,
+  getDockviewController,
+  panelKind,
+  registerDockviewController,
+  sessionChatPanelSessionId,
+} from "./dockviewController";
 import { PaneContextMenu } from "../components/PaneContextMenu";
+import { SessionSplitPopover } from "./SessionSplitPopover";
+import { isSessionDrag, readSessionDragId } from "./sessionDrag";
 import { usePaneLabelsEnabled } from "../paneLabels";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
@@ -27,6 +37,12 @@ import { usePaneLabelsEnabled } from "../paneLabels";
  * register/get pattern already used to bridge `keybinds.ts` into this
  * module-level-singleton shell. */
 let openPaneContextMenu: ((panelId: string, title: string, x: number, y: number) => void) | null = null;
+
+/** Same bridge pattern as `openPaneContextMenu` above, for the "split with
+ * another session" picker (`SessionSplitPopover.tsx`) opened from
+ * `PaneGroupHeaderActions`'s new button — that component is also rendered by
+ * dockview outside `DockviewShell`'s own tree. */
+let openSessionSplitPopover: ((referencePanelId: string, x: number, y: number) => void) | null = null;
 
 /** Custom tab renderer applied to every dockview panel (chat + terminals),
  * layering a right-click context menu on top of the stock `DockviewDefaultTab`
@@ -69,6 +85,31 @@ function ChatPanel() {
   return <ChatView />;
 }
 
+/** Renders a split-pane chat bound to a specific session (added via
+ * `DockviewController.addSessionChatPanel` — the "Split with session" picker
+ * or drag-and-drop, both below). `params.sessionId` is set at `addPanel`
+ * time and round-trips through dockview's own layout persistence
+ * (`toJSON`/`fromJSON`), so a restored layout reconstructs this with the
+ * same binding automatically — no bespoke persistence code needed here.
+ * The wrapper div carries the `session-pane-<id>` testid the task asked for;
+ * `display: contents` keeps it out of the box tree entirely so it doesn't
+ * disturb `ChatView`'s `.chat` height/flex model (see that file's own CSS
+ * comment on its `.dv-react-part` parent contract). */
+function SessionChatPanel(props: IDockviewPanelProps) {
+  const sessionId = typeof props.params?.sessionId === "string" ? (props.params.sessionId as string) : undefined;
+  if (!sessionId) {
+    // Malformed/legacy params (shouldn't happen via addSessionChatPanel, but
+    // a hand-edited or future-incompatible persisted layout could produce
+    // one) — degrade instead of crashing.
+    return <div className="inactive-session-pane">Session pane is missing its session id.</div>;
+  }
+  return (
+    <div data-testid={`session-pane-${sessionId}`} style={{ display: "contents" }}>
+      <ChatView sessionId={sessionId} />
+    </div>
+  );
+}
+
 function TerminalPanel(props: IDockviewPanelProps) {
   const [active, setActive] = useState(props.api.isVisible);
 
@@ -84,6 +125,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
 const components = {
   chat: ChatPanel,
   terminal: TerminalPanel,
+  sessionChat: SessionChatPanel,
 };
 
 /** Group-header "+" action (Bug 3): dockview applies `rightHeaderActionsComponent`
@@ -92,21 +134,69 @@ const components = {
  * ever one chat panel and it must never gain a sibling tab this way). Clicking
  * it adds a new terminal as a TAB within this same group (`direction: "within"`)
  * rather than a new split panel, so repeated use of "Open terminal" -> "+"
- * grows one group's tab bar instead of stacking panels across the layout. */
-function TerminalGroupHeaderActions({ panels }: IDockviewHeaderActionsProps) {
-  const terminalPanel = panels.find((p) => p.id !== "chat");
-  if (!terminalPanel) return null;
+ * grows one group's tab bar instead of stacking panels across the layout.
+ *
+ * The sibling "⋯" button next to it (`data-testid="pane-group-menu"`) is the
+ * *discoverability* fix for split/zoom/rename/close: before this, the only
+ * way to reach `PaneContextMenu` was a right-click on a tab, or memorizing
+ * the `Ctrl+Space` leader chord — the chat group (a brand-new session's
+ * *only* pane) had no visible affordance suggesting panes can be split at
+ * all. This button renders in every group, including chat's, and opens the
+ * exact same context menu the right-click already does, anchored under the
+ * button instead of at a cursor position. */
+function PaneGroupHeaderActions({ panels, activePanel }: IDockviewHeaderActionsProps) {
+  // Classified by `component`, not "any panel whose id isn't chat" — a
+  // session-chat panel's id is `session-chat-<sessionId>` (definitely not
+  // "chat"), so the old id-based check would have wrongly treated a
+  // session-chat group as a terminal group and rendered this "+" button
+  // there too (which would then add a TERMINAL tab into someone's session
+  // chat group). See dockviewController.ts's `panelKind`.
+  const terminalPanel = panels.find((p) => panelKind(p) === "terminal");
   return (
-    <button
-      type="button"
-      className="dockview-group-action dockview-group-action--add-terminal"
-      data-testid="terminal-add-tab"
-      title="Add terminal"
-      aria-label="Add terminal"
-      onClick={() => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id)}
-    >
-      +
-    </button>
+    <>
+      {terminalPanel && (
+        <button
+          type="button"
+          className="dockview-group-action dockview-group-action--add-terminal"
+          data-testid="terminal-add-tab"
+          title="Add terminal"
+          aria-label="Add terminal"
+          onClick={() => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id)}
+        >
+          +
+        </button>
+      )}
+      {activePanel && (
+        <button
+          type="button"
+          className="dockview-group-action dockview-group-action--split-session"
+          data-testid="pane-split-session"
+          title="Split with another session"
+          aria-label="Split with another session"
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            openSessionSplitPopover?.(activePanel.id, rect.right, rect.bottom);
+          }}
+        >
+          ⛶
+        </button>
+      )}
+      {activePanel && (
+        <button
+          type="button"
+          className="dockview-group-action dockview-group-action--pane-menu"
+          data-testid="pane-group-menu"
+          title="Split / zoom / rename / close pane"
+          aria-label="Split / zoom / rename / close pane"
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            openPaneContextMenu?.(activePanel.id, activePanel.title ?? "", rect.right, rect.bottom);
+          }}
+        >
+          ⋯
+        </button>
+      )}
+    </>
   );
 }
 
@@ -133,6 +223,7 @@ function applyDefaultLayout(api: DockviewApi) {
 export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => void }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const sessionId = usePerchStore((s) => s.sessionId);
+  const sessions = usePerchStore((s) => s.sessions);
   const sessionLayouts = usePerchStore((s) => s.sessionLayouts);
   const fetchSessionLayout = usePerchStore((s) => s.fetchSessionLayout);
   const saveSessionLayout = usePerchStore((s) => s.saveSessionLayout);
@@ -145,14 +236,23 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
     null,
   );
 
+  // "Split with another session" picker state — which group's header button
+  // opened it (`referencePanelId`, so the pick/drag target lands there) and
+  // where to anchor it. Same module-level-bridge pattern as `contextMenu`
+  // above, since `PaneGroupHeaderActions` also renders outside this tree.
+  const [sessionSplit, setSessionSplit] = useState<{ referencePanelId: string; x: number; y: number } | null>(null);
+
   // Unregister the dockview controller (Phase 4 keybindings) on unmount so
   // a stale controller pointing at a disposed api never lingers. Also wires
-  // (and tears down) the Phase 5 pane-context-menu bridge.
+  // (and tears down) the Phase 5 pane-context-menu bridge and the
+  // session-split-popover bridge.
   useEffect(() => {
     openPaneContextMenu = (panelId, title, x, y) => setContextMenu({ panelId, title, x, y });
+    openSessionSplitPopover = (referencePanelId, x, y) => setSessionSplit({ referencePanelId, x, y });
     return () => {
       registerDockviewController(null);
       openPaneContextMenu = null;
+      openSessionSplitPopover = null;
     };
   }, []);
 
@@ -204,6 +304,32 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
         pendingSaveRef.current = { sessionId: activeId, snapshot: event.api.toJSON() };
         if (saveTimerRef.current != null) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(flushPendingSave, LAYOUT_SAVE_DEBOUNCE_MS);
+      });
+
+      // Drag-and-drop a session (from `SessionSplitPopover.tsx`'s picker
+      // list) onto any edge/centre of any group, splitting/tabbing it in as
+      // that session's own chat panel — dockview's OWN native drop-target
+      // overlay (the same highlight a terminal-tab drag already shows) does
+      // all the hover/zone-detection work; we only opt our custom drag
+      // payload into it (`onUnhandledDragOver`, which by default rejects any
+      // drag that isn't dockview's own internal panel-move data) and read the
+      // payload back out once dockview reports it as "unhandled" (`onDidDrop`
+      // fires only for drags dockview itself didn't know how to process —
+      // exactly external drags like this one). See `sessionDrag.ts`'s header
+      // comment for the full mechanism.
+      event.api.onUnhandledDragOver((e) => {
+        if (e.nativeEvent instanceof DragEvent && isSessionDrag(e.nativeEvent.dataTransfer)) {
+          e.accept();
+        }
+      });
+      event.api.onDidDrop((e) => {
+        if (!(e.nativeEvent instanceof DragEvent)) return;
+        const draggedSessionId = readSessionDragId(e.nativeEvent.dataTransfer);
+        if (!draggedSessionId) return; // not our drag — nothing to do
+        const referencePanelId = e.panel?.id ?? e.group?.activePanel?.id ?? "chat";
+        const direction = positionToDirection(e.position);
+        const title = usePerchStore.getState().sessions.find((s) => s.id === draggedSessionId)?.title ?? "Session";
+        getDockviewController()?.addSessionChatPanel(draggedSessionId, title, referencePanelId, direction);
       });
     },
     [onReady, flushPendingSave],
@@ -287,7 +413,7 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
         theme={themeAbyss}
         components={components}
         defaultTabComponent={PaneTab}
-        rightHeaderActionsComponent={TerminalGroupHeaderActions}
+        rightHeaderActionsComponent={PaneGroupHeaderActions}
         onReady={handleReady}
       />
       {contextMenu &&
@@ -305,6 +431,40 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
             />
           );
         })()}
+      {sessionSplit &&
+        (() => {
+          const controller = getDockviewController();
+          const api = apiRef.current;
+          if (!controller || !api) return null;
+          // Exclude whichever session the triggering group is already
+          // showing — splitting a pane with the very session it's already
+          // bound to would just be a same-session duplicate.
+          const excludeId = referencePanelSessionId(api, sessionSplit.referencePanelId, sessionId);
+          const candidates = sessions.filter((s) => !s.archived && s.id !== excludeId);
+          return (
+            <SessionSplitPopover
+              sessions={candidates}
+              openSessionIds={controller.openSessionChatIds()}
+              x={sessionSplit.x}
+              y={sessionSplit.y}
+              onPick={(pickedSessionId, title) =>
+                controller.addSessionChatPanel(pickedSessionId, title, sessionSplit.referencePanelId, "right")
+              }
+              onClose={() => setSessionSplit(null)}
+            />
+          );
+        })()}
     </>
   );
+}
+
+/** Which session (if any) `referencePanelId` is currently showing — "chat"
+ * (the one permanent panel) shows `activeSessionId`; a `sessionChat` panel
+ * shows whatever session id is in its own params. Used only to keep the
+ * split-session picker from offering "split this pane with the session it's
+ * already showing". */
+function referencePanelSessionId(api: DockviewApi, referencePanelId: string, activeSessionId: string | null): string | undefined {
+  if (referencePanelId === "chat") return activeSessionId ?? undefined;
+  const panel = api.panels.find((p) => p.id === referencePanelId);
+  return panel ? sessionChatPanelSessionId(panel) : undefined;
 }
