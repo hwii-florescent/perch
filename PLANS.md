@@ -29,6 +29,27 @@ marked done; `PLAN.md` is the record.
     com.apple.quarantine` by hand. Notarizing needs an Apple Developer account;
   - the build is **arm64-only** (deliberate — see the decision note in the doc).
   A filled-in cask template is ready at `packaging/homebrew/perch.rb`.
+- **Universal command/skill palette** (supersedes `BUGS.md` Bug 2 — do this
+  *before* the jean-parity backlog below). Today the composer sigil is
+  per-agent (`AGENT_SIGIL = {claude:'/', codex:'$'}` in
+  `packages/web/src/composerCommands.ts`) and only the *selected* model's list
+  shows: `sigil` is derived each render from `AGENT_SIGIL[store.agent]`
+  (`Chat.tsx:744`) and the candidate list is sliced to that same agent
+  (`sessionCommands[sessionId]?.[agent]`). This is correct today but doesn't
+  generalize to future open-weight models / added MCPs / plugins / skills.
+  **Goal:** any sigil triggers one unified, deduped palette regardless of the
+  selected model. **Approach sketch:** on app start, aggregate
+  commands/skills/plugins/MCPs from every agent config dir (`~/.claude`,
+  `~/.codex`, `~/.agents`, plus their plugin/MCP/skill subdirs) into one pool,
+  **dedup first** (by name/source), and serve it through the existing
+  `commands.list` path — which already returns *both* agents' lists per session
+  (`crates/perch-core/src/commands.rs::list_for` → `store.ts` stores
+  `{claude, codex}`), a natural foundation. The composer then derives the
+  popover from the unified pool instead of `AGENT_SIGIL[agent]`. **Must
+  preserve the no-mis-send guarantee**: a picked command has to route to the
+  runner it belongs to (claude path-list vs codex `-i`/`--` separator in
+  `agent.rs`). Relaxes the "sigil derived per-agent, never stored" invariant
+  documented at `Chat.tsx:722–736` — update that comment when it lands.
 - **jean-parity backlog** (earlier menu, untouched): @-file mentions, AI commit
   messages / PR descriptions, MCP support, GitHub #-issue mentions, worktree
   auto-cleanup.

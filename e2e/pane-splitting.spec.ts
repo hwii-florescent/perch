@@ -19,6 +19,14 @@
  *        gate, same pattern as workspace-tabs.spec.ts's W2/W3) since Fix 3
  *        defers a session's DB row — and hence any `session.layout.set`
  *        actually landing — until its first message.
+ *   P4 — the pane header's `⋯` button (`pane-group-menu`, rendered in
+ *        dockview's right-header-actions slot, distinct from P2's right-click
+ *        tab menu) opens the same `PaneContextMenu` on a *plain* click. This
+ *        is the regression guard for the stacking bug where the Hosted
+ *        `.chat__list` won the hit-test over the header button, so the click
+ *        landed on the chat content and the menu never opened (only a
+ *        synthetic `dispatchEvent` reached it). The fix gives dockview's
+ *        `.dv-tabs-and-actions-container` its own stacking context.
  *
  * All tests are headless (no --headed/--ui).
  */
@@ -253,5 +261,39 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await expect(chat).toBeVisible();
 
     await page.screenshot({ path: "artifacts/p3-restored-on-a.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // P4 — the header `⋯` button opens the pane menu on a PLAIN click (no
+  // dispatchEvent). Regression guard for the `.chat__list` hit-test
+  // interception fixed by the `.dv-tabs-and-actions-container` stacking rule.
+  // -------------------------------------------------------------------------
+  test("P4. header ⋯ button opens the pane menu on a plain click", async ({ page }) => {
+    await freshPage(page);
+
+    const chatTab = page.locator('[data-testid="pane-tab-chat"]');
+    await expect(chatTab).toBeVisible({ timeout: 10000 });
+
+    // A plain locator click must reach the button — before the fix this timed
+    // out with `.chat__list ... intercepts pointer events` and only a
+    // synthetic dispatchEvent could open the menu.
+    const headerMenuBtn = page.locator('[data-testid="pane-group-menu"]').first();
+    await expect(headerMenuBtn).toBeVisible({ timeout: 10000 });
+    await headerMenuBtn.click();
+
+    const menu = page.locator('[data-testid="pane-context-menu"]');
+    await expect(menu).toBeVisible({ timeout: 5000 });
+    // Split Right / Split Down / Zoom / Rename / Close.
+    await expect(page.locator(".pane-context-menu__item")).toHaveCount(5);
+
+    await page.screenshot({ path: "artifacts/p4-header-menu.png" });
+
+    // And the wiring works end-to-end: Split Right adds a terminal pane.
+    await page.locator('[data-testid="pane-menu-split-right"]').click();
+    await expect(menu).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await expect(nonChatTab(page)).toBeVisible({ timeout: 5000 });
+
+    await page.screenshot({ path: "artifacts/p4-split-from-header-menu.png" });
   });
 });

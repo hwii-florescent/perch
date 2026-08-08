@@ -884,6 +884,23 @@ body {
   border-color: var(--accent);
 }
 
+/* The pane header's action buttons (the `⋯` pane menu and the split-session
+ * button) live in dockview's `.dv-tabs-and-actions-container`, laid out as a
+ * normal-flow flex sibling above `.dv-content-container`. Perch sets no
+ * `z-index`/`isolation` on that header, while the Hosted chat column inside the
+ * content (`.chat` height:100% → `.chat__list-container` position:relative →
+ * `.chat__list`) shares the same stacking context — so the browser routed a
+ * plain click on `[data-testid="pane-group-menu"]` to `.chat__list` instead of
+ * the button (reachable only via `dispatchEvent`). Give the header its own
+ * stacking context above the content so the buttons are hit-testable.
+ * `position:relative` with no offsets moves nothing — it only fixes hit/paint
+ * order — and `isolation:isolate` on `.chat` guarantees the chat subtree can
+ * never paint into the header's stacking context. */
+.dockview-theme-perch .dv-tabs-and-actions-container {
+  position: relative;
+  z-index: 1;
+}
+
 /* Wave 2 item 12: transparent wrapper around `DockviewDefaultTab` so
  * `PaneTab` (DockviewShell.tsx) can render the "active agent" badge as a
  * real, testable DOM node alongside it. `.dv-default-tab`'s own layout rules
@@ -960,6 +977,10 @@ body {
    * inner `flex: 1; min-height: 0` chain (`.chat__list-container` →
    * `.chat__list`) has something real to be bounded by. */
   height: 100%;
+  /* Keep the chat subtree in its own stacking context so it can never win the
+   * hit-test over the pane header's action buttons — see the
+   * `.dv-tabs-and-actions-container` rule above. */
+  isolation: isolate;
 }
 
 .chat__list-container {
@@ -4079,6 +4100,19 @@ body {
 .worktree-menu__btn:hover {
   color: var(--accent);
   background: var(--surface-1);
+}
+
+/* Non-git project: the glyph is present (so users see where worktrees would
+ * live) but dimmed and inert — see `ProjectWorktrees` in Sidebar.tsx. */
+.worktree-menu__btn--disabled {
+  color: var(--overlay-0);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.worktree-menu__btn--disabled:hover {
+  color: var(--overlay-0);
+  background: none;
 }
 
 /* herdr overlay chrome — accent border + panel-bg fill, same as

@@ -403,7 +403,22 @@ function ProjectSubline({ projectKey, hostId, cwd }: { projectKey: string; hostI
  * without first switching projects. */
 function ProjectWorktrees({ projectKey, hostId, cwd }: { projectKey: string; hostId: string; cwd: string }) {
   const git = usePerchStore((s) => s.workspaceGit[projectKey]);
-  if (!git || !git.branch) return null;
+  // Non-git projects have no worktrees (backend `worktree.rs list` errors on a
+  // non-git cwd, matching herdr's `not_git_worktree` guard). Rather than hide
+  // the affordance entirely — which left users guessing why the branch glyph
+  // was missing — render a disabled, non-interactive glyph whose tooltip says
+  // why. No menu is wired, so it can never fire a doomed `worktree.list`.
+  if (!git || !git.branch)
+    return (
+      <span
+        className="worktree-menu__btn worktree-menu__btn--disabled"
+        data-testid={`worktree-menu-disabled-${hostId}-${cwd}`}
+        title="Not a git repository — worktrees unavailable"
+        aria-disabled="true"
+      >
+        ⑂
+      </span>
+    );
   return <WorktreeMenu hostId={hostId} cwd={cwd} projectKey={projectKey} />;
 }
 
