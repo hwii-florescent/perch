@@ -7,9 +7,12 @@
 //! target too) come from `git.rs`/`mod.rs` via the normal privacy rules —
 //! see git.rs's module doc. `settle_review_packet_from_db` stays
 //! pub(super): mod.rs's still-resident review_delivery_tests module calls
-//! it directly.
+//! it directly. `resolve_review_target`, `review_snapshot_revision`, and
+//! `prompt_payload_digest` live in session.rs (already pub(super) there,
+//! Phase 3's session.rs commit) and are imported by name below.
 
 use super::*;
+use session::{prompt_payload_digest, resolve_review_target, review_snapshot_revision};
 
 fn review_error_response(request_id: String, error: review::ReviewError) -> ServerMessage {
     request_error(
