@@ -13,6 +13,9 @@ import type { AgentKind } from "@perch/shared";
 import type { ActiveProject } from "./index";
 import { newId } from "./index";
 
+/** localStorage keys backing `activeHostId` / `activeProject`. These are
+ * client-only preferences: the navigation scope is pure view state, so it
+ * never round-trips the protocol. */
 const ACTIVE_HOST_STORAGE_KEY = "perch.activeHostId";
 const ACTIVE_PROJECT_STORAGE_KEY = "perch.activeProject";
 export const ACTIVE_PROJECT_ID_STORAGE_KEY = "perch.activeProjectId";
