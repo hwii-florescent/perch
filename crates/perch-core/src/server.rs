@@ -2043,6 +2043,26 @@ fn request_error(
     }
 }
 
+/// Send a `ServerMessage::Error` and ignore a closed channel, exactly like
+/// the 101 call sites this replaces. Behavior must stay byte-identical to
+/// each site's original `request_error(...)` call: same `code`, `message`,
+/// `retryable`, and `request_id` optionality — do not normalize divergent
+/// error codes or retryable flags.
+fn fail(
+    out_tx: &UnboundedSender<ServerMessage>,
+    request_id: impl Into<Option<String>>,
+    code: &str,
+    message: impl Into<String>,
+    retryable: bool,
+) {
+    let _ = out_tx.send(request_error(
+        request_id,
+        Some(code.to_string()),
+        message,
+        retryable,
+    ));
+}
+
 fn wire_session_mode(mode: AgentMode) -> WireSessionMode {
     match mode {
         AgentMode::Hosted => WireSessionMode::Hosted,
@@ -3340,12 +3360,7 @@ fn send_git_action_error(
     request_id: String,
     message: impl Into<String>,
 ) {
-    let _ = out_tx.send(request_error(
-        Some(request_id),
-        Some("git_action_failed".to_string()),
-        message,
-        false,
-    ));
+    fail(out_tx, request_id, "git_action_failed", message, false);
 }
 
 fn spawn_git_path_action(
@@ -3710,12 +3725,13 @@ fn spawn_review_list(state: &Arc<ConnState>, request_id: String, workspace_id: S
                 });
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_list_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_list_failed",
                     error.to_string(),
                     true,
-                ));
+                );
             }
         }
     });
@@ -3758,12 +3774,13 @@ fn spawn_review_create(
             }
         };
         if source.revision != base_revision {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_stale_source".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_stale_source",
                 "the source changed since this line was shown; refresh the diff before commenting",
                 true,
-            ));
+            );
             return;
         }
         let draft = ReviewCommentDraft {
@@ -3786,12 +3803,13 @@ fn spawn_review_create(
             }
         };
         if let Err(error) = app.db.insert_review_comment(&comment) {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_create_failed".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_create_failed",
                 error.to_string(),
                 true,
-            ));
+            );
             return;
         }
         let _ = out_tx.send(ServerMessage::ReviewCommentResult {
@@ -3816,30 +3834,33 @@ fn spawn_review_update(
         let Some(comment) = (match app.db.get_review_comment(&workspace_id, &comment_id) {
             Ok(comment) => comment,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_get_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_get_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         }) else {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_not_found".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_not_found",
                 "review comment was not found",
                 false,
-            ));
+            );
             return;
         };
         if comment.version != expected_version {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_conflict".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_conflict",
                 "review comment changed; refresh before editing",
                 true,
-            ));
+            );
             return;
         }
         let next = match review::edit_comment(&comment, body, wall_clock_millis()) {
@@ -3861,28 +3882,31 @@ fn spawn_review_update(
                 });
             }
             Ok(ReviewUpdateResult::Conflict(_)) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_conflict".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_conflict",
                     "review comment changed; refresh before editing",
                     true,
-                ));
+                );
             }
             Ok(ReviewUpdateResult::NotFound) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_not_found".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_not_found",
                     "review comment was not found",
                     false,
-                ));
+                );
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_update_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_update_failed",
                     error.to_string(),
                     true,
-                ));
+                );
             }
         }
     });
@@ -3902,30 +3926,33 @@ fn spawn_review_resolve(
         let Some(comment) = (match app.db.get_review_comment(&workspace_id, &comment_id) {
             Ok(comment) => comment,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_get_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_get_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         }) else {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_not_found".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_not_found",
                 "review comment was not found",
                 false,
-            ));
+            );
             return;
         };
         if comment.version != expected_version {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_conflict".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_conflict",
                 "review comment changed; refresh before updating",
                 true,
-            ));
+            );
             return;
         }
         let next = review::set_comment_resolved(&comment, resolved, wall_clock_millis());
@@ -3941,28 +3968,31 @@ fn spawn_review_resolve(
                 });
             }
             Ok(ReviewUpdateResult::Conflict(_)) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_conflict".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_conflict",
                     "review comment changed; refresh before updating",
                     true,
-                ));
+                );
             }
             Ok(ReviewUpdateResult::NotFound) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_not_found".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_not_found",
                     "review comment was not found",
                     false,
-                ));
+                );
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_update_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_update_failed",
                     error.to_string(),
                     true,
-                ));
+                );
             }
         }
     });
@@ -3991,28 +4021,31 @@ fn spawn_review_delete(
                 });
             }
             Ok(ReviewDeleteResult::Conflict(_)) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_conflict".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_conflict",
                     "review comment changed; refresh before deleting",
                     true,
-                ));
+                );
             }
             Ok(ReviewDeleteResult::NotFound) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_not_found".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_not_found",
                     "review comment was not found",
                     false,
-                ));
+                );
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_delete_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_delete_failed",
                     error.to_string(),
                     true,
-                ));
+                );
             }
         }
     });
@@ -4050,24 +4083,20 @@ fn spawn_review_batch_preview(
         ) {
             Ok(target) => target,
             Err(message) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_target_invalid".to_string()),
-                    message,
-                    false,
-                ));
+                fail(&out_tx, request_id, "review_target_invalid", message, false);
                 return;
             }
         };
         let comments = match app.db.list_review_comments(&workspace_id, 4096) {
             Ok(comments) => comments,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_list_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_list_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         };
@@ -4128,30 +4157,27 @@ fn spawn_review_batch_preview(
                         ) {
                             Ok(crate::db::ReviewUpdateResult::Updated(_)) => candidate,
                             Ok(crate::db::ReviewUpdateResult::Conflict(_)) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_conflict".to_string()),
-                                    "review comment changed while preparing the packet; refresh and try again",
-                                    true,
-                                ));
+                                fail(&out_tx, request_id, "review_conflict", "review comment changed while preparing the packet; refresh and try again", true);
                                 return;
                             }
                             Ok(crate::db::ReviewUpdateResult::NotFound) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_not_found".to_string()),
+                                fail(
+                                    &out_tx,
+                                    request_id,
+                                    "review_not_found",
                                     "review comment was removed while preparing the packet",
                                     false,
-                                ));
+                                );
                                 return;
                             }
                             Err(error) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_reanchor_failed".to_string()),
+                                fail(
+                                    &out_tx,
+                                    request_id,
+                                    "review_reanchor_failed",
                                     error.to_string(),
                                     true,
-                                ));
+                                );
                                 return;
                             }
                         }
@@ -4170,39 +4196,31 @@ fn spawn_review_batch_preview(
                         ) {
                             Ok(ReviewUpdateResult::Updated(_)) => {}
                             Ok(ReviewUpdateResult::Conflict(_)) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_conflict".to_string()),
-                                    "review comment changed while recording its stale anchor; refresh and try again",
-                                    true,
-                                ));
+                                fail(&out_tx, request_id, "review_conflict", "review comment changed while recording its stale anchor; refresh and try again", true);
                                 return;
                             }
                             Ok(ReviewUpdateResult::NotFound) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_not_found".to_string()),
+                                fail(
+                                    &out_tx,
+                                    request_id,
+                                    "review_not_found",
                                     "review comment was removed while recording its stale anchor",
                                     false,
-                                ));
+                                );
                                 return;
                             }
                             Err(error) => {
-                                let _ = out_tx.send(request_error(
-                                    Some(request_id),
-                                    Some("review_reanchor_failed".to_string()),
+                                fail(
+                                    &out_tx,
+                                    request_id,
+                                    "review_reanchor_failed",
                                     error.to_string(),
                                     true,
-                                ));
+                                );
                                 return;
                             }
                         }
-                        let _ = out_tx.send(request_error(
-                            Some(request_id),
-                            Some("review_stale_anchor".to_string()),
-                            "a review anchor no longer identifies the same source; refresh the diff and move the comment deliberately",
-                            true,
-                        ));
+                        fail(&out_tx, request_id, "review_stale_anchor", "a review anchor no longer identifies the same source; refresh the diff and move the comment deliberately", true);
                         return;
                     }
                 }
@@ -4244,12 +4262,13 @@ fn spawn_review_batch_preview(
             }
         };
         if let Err(error) = app.db.insert_review_packet(&packet, wall_clock_millis()) {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_packet_failed".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_packet_failed",
                 error.to_string(),
                 true,
-            ));
+            );
             return;
         }
         let _ = out_tx.send(ServerMessage::ReviewBatchPreviewResult { request_id, packet });
@@ -4356,32 +4375,35 @@ fn spawn_review_batch_send(
         let Some(row) = (match app.db.get_review_packet(&packet_id) {
             Ok(row) => row,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_packet_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_packet_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         }) else {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_packet_not_found".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_packet_not_found",
                 "review packet was not found",
                 false,
-            ));
+            );
             return;
         };
         if row.packet.workspace_id != workspace_id
             || row.packet.send_operation_id != send_operation_id
         {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_packet_mismatch".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_packet_mismatch",
                 "review packet does not belong to this workspace or operation",
                 false,
-            ));
+            );
             return;
         }
 
@@ -4404,45 +4426,49 @@ fn spawn_review_batch_send(
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        let _ = out_tx.send(request_error(
-                            Some(request_id),
-                            Some("review_delivery_persistence_failed".to_string()),
+                        fail(
+                            &out_tx,
+                            request_id,
+                            "review_delivery_persistence_failed",
                             error,
                             false,
-                        ));
+                        );
                         return;
                     }
                 }
             }
             Ok(Some(_)) | Ok(None) => {}
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_delivery_persistence_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_delivery_persistence_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         }
         let row = match app.db.get_review_packet(&packet_id) {
             Ok(Some(row)) => row,
             Ok(None) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_packet_not_found".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_packet_not_found",
                     "review packet was not found",
                     false,
-                ));
+                );
                 return;
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_packet_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_packet_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         };
@@ -4494,12 +4520,13 @@ fn spawn_review_batch_send(
                     let _ = out_tx.send(review_delivery_result(request_id, row));
                 }
                 Err(error) => {
-                    let _ = out_tx.send(request_error(
-                        Some(request_id),
-                        Some("review_delivery_persistence_failed".to_string()),
+                    fail(
+                        &out_tx,
+                        request_id,
+                        "review_delivery_persistence_failed",
                         error,
                         false,
-                    ));
+                    );
                 }
             }
             return;
@@ -4513,33 +4540,30 @@ fn spawn_review_batch_send(
         ) {
             Ok(target) => target,
             Err(message) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_target_invalid".to_string()),
-                    message,
-                    false,
-                ));
+                fail(&out_tx, request_id, "review_target_invalid", message, false);
                 return;
             }
         };
         let Some(session) = (match app.db.get_session(&session_id) {
             Ok(session) => session,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_target_invalid".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_target_invalid",
                     error.to_string(),
                     false,
-                ));
+                );
                 return;
             }
         }) else {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_target_invalid".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_target_invalid",
                 "target session was not found",
                 false,
-            ));
+            );
             return;
         };
         let payload_digest = prompt_payload_digest(
@@ -4565,12 +4589,13 @@ fn spawn_review_batch_send(
         ) {
             Ok(result) => result,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_prompt_rejected".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_prompt_rejected",
                     error.to_string(),
                     false,
-                ));
+                );
                 return;
             }
         };
@@ -4586,12 +4611,13 @@ fn spawn_review_batch_send(
                     let _ = out_tx.send(review_delivery_result(request_id, row));
                 }
                 Err(error) => {
-                    let _ = out_tx.send(request_error(
-                        Some(request_id),
-                        Some("review_delivery_persistence_failed".to_string()),
+                    fail(
+                        &out_tx,
+                        request_id,
+                        "review_delivery_persistence_failed",
                         error,
                         false,
-                    ));
+                    );
                 }
             }
             return;
@@ -4609,21 +4635,23 @@ fn spawn_review_batch_send(
         ) {
             Ok(result) => result,
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_packet_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_packet_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
         }) else {
-            let _ = out_tx.send(request_error(
-                Some(request_id),
-                Some("review_packet_not_found".to_string()),
+            fail(
+                &out_tx,
+                request_id,
+                "review_packet_not_found",
                 "review packet was not found",
                 false,
-            ));
+            );
             return;
         };
         if !won {
@@ -4701,12 +4729,13 @@ fn spawn_review_batch_send(
                 let _ = out_tx.send(review_delivery_result(request_id, row));
             }
             Err(error) => {
-                let _ = out_tx.send(request_error(
-                    Some(request_id),
-                    Some("review_delivery_persistence_failed".to_string()),
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_delivery_persistence_failed",
                     error,
                     false,
-                ));
+                );
             }
         }
     });
@@ -5700,12 +5729,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // out of navigation via SESSION_VISIBILITY_FILTER, but their mode
             // overrides and a second viewer must survive reconnect/restart.
             if let Err(error) = state.app.db.create_session(&session_id, &resolved_cwd) {
-                let _ = state.out_tx.send(request_error(
+                fail(
+                    &state.out_tx,
                     None,
-                    Some("session_create_failed".to_string()),
+                    "session_create_failed",
                     format!("could not persist session: {error}"),
                     true,
-                ));
+                );
                 return;
             }
             state.app.registry.create(&session_id, &resolved_cwd);
@@ -5778,12 +5808,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // the response back to this exact connection.
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 if !state.app.hub.is_connected(&host_id) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {host_id} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -5798,12 +5829,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 match mode_workspace_for_session(state, &session_id, workspace_id.as_deref()) {
                     Ok(workspace_id) => workspace_id,
                     Err(error) => {
-                        let _ = state.out_tx.send(request_error(
-                            Some(request_id),
-                            Some("unknown_session".to_string()),
-                            error,
-                            false,
-                        ));
+                        fail(&state.out_tx, request_id, "unknown_session", error, false);
                         return;
                     }
                 };
@@ -5820,12 +5846,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("mode_read_failed".to_string()),
-                        error,
-                        true,
-                    ));
+                    fail(&state.out_tx, request_id, "mode_read_failed", error, true);
                 }
             }
         }
@@ -5840,12 +5861,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 if !state.app.hub.is_connected(&host_id) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {host_id} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -5860,12 +5882,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 match mode_workspace_for_session(state, &session_id, workspace_id.as_deref()) {
                     Ok(workspace_id) => workspace_id,
                     Err(error) => {
-                        let _ = state.out_tx.send(request_error(
-                            Some(request_id),
-                            Some("unknown_session".to_string()),
-                            error,
-                            false,
-                        ));
+                        fail(&state.out_tx, request_id, "unknown_session", error, false);
                         return;
                     }
                 };
@@ -5881,12 +5898,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 ),
                 SessionModeScope::Workspace => {
                     let Some(workspace_id) = workspace_id.as_deref() else {
-                        let _ = state.out_tx.send(request_error(
-                            Some(request_id),
-                            Some("workspace_required".to_string()),
+                        fail(
+                            &state.out_tx,
+                            request_id,
+                            "workspace_required",
                             "the session has no server-owned workspace override",
                             false,
-                        ));
+                        );
                         return;
                     };
                     state.app.agent_persistence.set_workspace_override(
@@ -5914,12 +5932,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let mutation_revision = match mutation_revision {
                 Ok(revision) => revision,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("mode_write_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "mode_write_failed",
                         error.to_string(),
                         true,
-                    ));
+                    );
                     return;
                 }
             };
@@ -5947,12 +5966,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ) {
                 Ok(result) => result,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("mode_read_failed".to_string()),
-                        error,
-                        true,
-                    ));
+                    fail(&state.out_tx, request_id, "mode_read_failed", error, true);
                     return;
                 }
             };
@@ -5972,23 +5986,25 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             host_id,
         } => {
             if request_id.trim().is_empty() {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("invalid_request_id".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "invalid_request_id",
                     "agent.manifest.list requires a non-empty requestId",
                     false,
-                ));
+                );
                 return;
             }
             let target = host_id.as_deref().unwrap_or("local").trim();
             if !target.is_empty() && target != "local" {
                 if !state.app.hub.is_connected(target) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {target} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -6024,12 +6040,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 if !state.app.hub.is_connected(&host_id) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {host_id} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -6048,12 +6065,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ) {
                 Ok(key) => key,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_lifecycle_not_found".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_lifecycle_not_found",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
@@ -6065,12 +6083,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_lifecycle_read_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_lifecycle_read_failed",
                         error.to_string(),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -6083,12 +6102,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 if !state.app.hub.is_connected(&host_id) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {host_id} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -6107,35 +6127,38 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ) {
                 Ok(key) => key,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_lifecycle_not_found".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_lifecycle_not_found",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
             let client = match connection_client_identity(state) {
                 Ok(client) => client,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("connection_identity_invalid".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "connection_identity_invalid",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
             let _views_guard = state.agent_views.lock().unwrap();
             if !_views_guard.contains_key(&key) {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("agent_view_required".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "agent_view_required",
                     "Open this agent before taking control".to_string(),
                     false,
-                ));
+                );
                 return;
             }
             match state
@@ -6172,9 +6195,10 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_control_acquire_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_control_acquire_failed",
                         if matches!(
                             error,
                             crate::agent_runtime::RuntimeAdapterError::Ownership(
@@ -6187,7 +6211,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                             error.to_string()
                         },
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -6201,12 +6225,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
                 if !state.app.hub.is_connected(&host_id) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("host_unavailable".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "host_unavailable",
                         format!("host {host_id} is not connected"),
                         true,
-                    ));
+                    );
                     return;
                 }
                 state.app.hub.register_unicast(
@@ -6225,24 +6250,26 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ) {
                 Ok(key) => key,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_lifecycle_not_found".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_lifecycle_not_found",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
             let client = match connection_client_identity(state) {
                 Ok(client) => client,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("connection_identity_invalid".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "connection_identity_invalid",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
@@ -6276,12 +6303,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_control_release_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_control_release_failed",
                         error.to_string(),
                         false,
-                    ));
+                    );
                 }
             }
         }
@@ -6362,7 +6390,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         && state.app.agent_runtime.runtime_alive(&snapshot.key)
                 })
             {
-                let _ = state.out_tx.send(request_error(None, Some("agent_cli_active".to_string()), "This agent is still running in CLI. Use its terminal, or stop the CLI before starting a Chat turn.".to_string(), false));
+                fail(&state.out_tx, None, "agent_cli_active", "This agent is still running in CLI. Use its terminal, or stop the CLI before starting a Chat turn.".to_string(), false);
                 return;
             }
             // Local chat turn. Resolve the runtime before reserving anything:
@@ -6380,12 +6408,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 map.get(&session_id)
                     .map(|runtime| (runtime.host_id.clone(), runtime.cwd.clone()))
             }) else {
-                let _ = state.out_tx.send(request_error(
+                fail(
+                    &state.out_tx,
                     None,
-                    Some("unknown_session".to_string()),
+                    "unknown_session",
                     format!("unknown session {session_id}"),
                     false,
-                ));
+                );
                 return;
             };
 
@@ -6396,12 +6425,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // survives this connection going away.
             if host_id != "local" {
                 let Some(host) = direct_host(state, &host_id) else {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("host_unavailable".to_string()),
+                        "host_unavailable",
                         format!("host {host_id} is no longer configured"),
                         false,
-                    ));
+                    );
                     return;
                 };
                 if let Err(error) = state
@@ -6409,21 +6439,23 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     .db
                     .create_session_on_host(&session_id, &cwd, &host_id)
                 {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("prompt_reservation_failed".to_string()),
+                        "prompt_reservation_failed",
                         error.to_string(),
                         true,
-                    ));
+                    );
                     return;
                 }
                 let Some(row) = state.app.db.get_session(&session_id).ok().flatten() else {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("unknown_session".to_string()),
+                        "unknown_session",
                         format!("unknown session {session_id}"),
                         false,
-                    ));
+                    );
                     return;
                 };
                 let payload_digest = prompt_payload_digest(
@@ -6450,12 +6482,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 ) {
                     Ok(claim) => claim,
                     Err(error) => {
-                        let _ = state.out_tx.send(request_error(
+                        fail(
+                            &state.out_tx,
                             None,
-                            Some("prompt_operation_rejected".to_string()),
+                            "prompt_operation_rejected",
                             error,
                             false,
-                        ));
+                        );
                         return;
                     }
                 };
@@ -6510,21 +6543,23 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             let prompt = crate::agent::append_attachment_note(&text, &note_paths);
 
             if let Err(error) = state.app.db.create_session(&session_id, &cwd) {
-                let _ = state.out_tx.send(request_error(
+                fail(
+                    &state.out_tx,
                     None,
-                    Some("prompt_reservation_failed".to_string()),
+                    "prompt_reservation_failed",
                     error.to_string(),
                     true,
-                ));
+                );
                 return;
             }
             let Some(row) = state.app.db.get_session(&session_id).ok().flatten() else {
-                let _ = state.out_tx.send(request_error(
+                fail(
+                    &state.out_tx,
                     None,
-                    Some("unknown_session".to_string()),
+                    "unknown_session",
                     format!("unknown session {session_id}"),
                     false,
-                ));
+                );
                 return;
             };
             let payload_digest = prompt_payload_digest(
@@ -6551,12 +6586,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             ) {
                 Ok(claim) => claim,
                 Err(error) => {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("prompt_operation_rejected".to_string()),
+                        "prompt_operation_rejected",
                         error,
                         false,
-                    ));
+                    );
                     return;
                 }
             };
@@ -6762,21 +6798,23 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // Persistent shell forwarding needs a multicast subscription on the
             // hub. Until then, reject remote ownership instead of opening locally.
             if state.app.hub.route_for_session(&session_id).is_some() {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("terminal_remote_unsupported".into()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "terminal_remote_unsupported",
                     "Persistent shells on this remote host are not available yet",
                     false,
-                ));
+                );
                 return;
             }
             if view_id.is_empty() || view_id.len() > 128 || view_id.contains(':') {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("terminal_invalid_view".into()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "terminal_invalid_view",
                     "Invalid terminal view",
                     false,
-                ));
+                );
                 return;
             }
             let state = state.clone();
@@ -6806,12 +6844,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     },
                 );
                 if let Err(error) = result {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("terminal_open_failed".into()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "terminal_open_failed",
                         error.to_string(),
                         false,
-                    ));
+                    );
                 }
                 if state.out_tx.is_closed() {
                     state
@@ -6896,12 +6935,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     cols,
                     rows,
                 ) {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("agent_terminal_open_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "agent_terminal_open_failed",
                         error.to_string(),
                         true,
-                    ));
+                    );
                 }
             });
         }
@@ -7078,13 +7118,14 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         && state.app.agent_runtime.runtime_alive(&snapshot.key)
                 })
             {
-                let _ = state.out_tx.send(request_error(
+                fail(
+                    &state.out_tx,
                     None,
-                    Some("agent_runtime_already_open".to_string()),
+                    "agent_runtime_already_open",
                     "This session has a persistent CLI; reload this client to attach to it"
                         .to_string(),
                     false,
-                ));
+                );
                 return;
             }
             let argv = match attach.agent {
@@ -7303,12 +7344,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                         maybe_capture_cli_title(&state.app, &key.session_id, &data);
                     }
                 } else {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("agent_control_required".to_string()),
+                        "agent_control_required",
                         "Take control of this agent before typing".to_string(),
                         false,
-                    ));
+                    );
                 }
                 return;
             }
@@ -7609,12 +7651,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                 .collect::<Vec<_>>();
             for key in &agent_keys {
                 if let Err(error) = state.app.agent_runtime.remove(key) {
-                    let _ = state.out_tx.send(request_error(
+                    fail(
+                        &state.out_tx,
                         None,
-                        Some("agent_stop_failed".to_string()),
+                        "agent_stop_failed",
                         error.to_string(),
                         true,
-                    ));
+                    );
                     return;
                 }
             }
@@ -8414,12 +8457,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("project_list_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "project_list_failed",
                         format!("project.list failed: {err}"),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -8437,12 +8481,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             }
             let canonical = crate::db::canonical_path_for_host("local", &path);
             if !Path::new(&canonical).is_dir() {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("invalid_path".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "invalid_path",
                     format!("project path is not an existing directory: {canonical}"),
                     false,
-                ));
+                );
                 return;
             }
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
@@ -8488,12 +8533,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     let _ = state.out_tx.send(snapshot);
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("project_create_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "project_create_failed",
                         format!("project.create failed: {err}"),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -8505,22 +8551,24 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let name = name.trim().to_string();
             if name.is_empty() {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("invalid_name".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "invalid_name",
                     "project name cannot be empty",
                     false,
-                ));
+                );
                 return;
             }
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(project) = local_project(&state.app, &project_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("project_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "project_not_found",
                     "project is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.rename_project(&project.id, &name) {
@@ -8537,12 +8585,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     );
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("project_rename_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "project_rename_failed",
                         format!("project.rename failed: {err}"),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -8554,12 +8603,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(project) = local_project(&state.app, &project_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("project_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "project_not_found",
                     "project is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.set_project_archived(&project.id, archived) {
@@ -8577,12 +8627,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     send_workspace_snapshot_locked(state, request_id, None);
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("project_archive_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "project_archive_failed",
                         format!("project.archive failed: {err}"),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -8593,12 +8644,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(project) = local_project(&state.app, &project_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("project_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "project_not_found",
                     "project is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.focus_project(&project.id) {
@@ -8621,12 +8673,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     send_workspace_snapshot_locked(state, request_id, None);
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("project_focus_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "project_focus_failed",
                         format!("project.focus failed: {err}"),
                         false,
-                    ));
+                    );
                 }
             }
         }
@@ -8650,12 +8703,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(workspace) = local_workspace(&state.app, &workspace_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("workspace_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "workspace_not_found",
                     "workspace is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.focus_workspace(&workspace.id) {
@@ -8673,12 +8727,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     });
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("workspace_focus_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "workspace_focus_failed",
                         format!("workspace.focus failed: {err}"),
                         false,
-                    ));
+                    );
                 }
             }
         }
@@ -8690,22 +8745,24 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let name = name.trim().to_string();
             if name.is_empty() {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("invalid_name".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "invalid_name",
                     "workspace name cannot be empty",
                     false,
-                ));
+                );
                 return;
             }
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(workspace) = local_workspace(&state.app, &workspace_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("workspace_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "workspace_not_found",
                     "workspace is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.rename_workspace(&workspace.id, &name) {
@@ -8722,12 +8779,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     );
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("workspace_rename_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "workspace_rename_failed",
                         format!("workspace.rename failed: {err}"),
                         true,
-                    ));
+                    );
                 }
             }
         }
@@ -8738,12 +8796,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
         } => {
             let _foundation_guard = state.app.foundation_lock.lock().unwrap();
             let Some(workspace) = local_workspace(&state.app, &workspace_id) else {
-                let _ = state.out_tx.send(request_error(
-                    Some(request_id),
-                    Some("workspace_not_found".to_string()),
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "workspace_not_found",
                     "workspace is not present on the local host",
                     false,
-                ));
+                );
                 return;
             };
             match state.app.db.restore_workspace(&workspace.id) {
@@ -8760,12 +8819,13 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
                     );
                 }
                 Err(err) => {
-                    let _ = state.out_tx.send(request_error(
-                        Some(request_id),
-                        Some("workspace_restore_failed".to_string()),
+                    fail(
+                        &state.out_tx,
+                        request_id,
+                        "workspace_restore_failed",
                         format!("workspace.restore failed: {err}"),
                         false,
-                    ));
+                    );
                 }
             }
         }
