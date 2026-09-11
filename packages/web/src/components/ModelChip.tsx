@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
-import { computeAnchoredPopoverStyle } from "./popoverPosition";
+import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./popoverPosition";
 import type { AgentKind } from "@perch/shared";
 
 /** Format helper: get agent display label */
@@ -42,24 +42,7 @@ export function ModelChip() {
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Click-outside and Escape to close
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      const inPill = pillRef.current?.contains(target) ?? false;
-      const inPopover = popoverRef.current?.contains(target) ?? false;
-      if (!inPill && !inPopover) setOpen(false);
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
+  useDismissOnOutsideClick(open, setOpen, pillRef, popoverRef);
 
   function handlePillClick() {
     if (open) {

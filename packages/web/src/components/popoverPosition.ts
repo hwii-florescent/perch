@@ -8,6 +8,8 @@
  * module is the one copy of that arithmetic.
  */
 
+import { useEffect, type RefObject } from "react";
+
 const GAP = 6;
 const EDGE = 8;
 
@@ -62,4 +64,35 @@ export function computeAnchoredPopoverStyle(
     maxHeight: Math.min(spaceBelow, vh * 0.75),
     overflowY: "auto",
   };
+}
+
+/**
+ * Close an anchored popover on an outside click or Escape. Byte-identical
+ * effect body shared by EffortChip and ModelChip (mousedown outside both the
+ * pill and the popover closes it; Escape always closes it).
+ */
+export function useDismissOnOutsideClick(
+  open: boolean,
+  setOpen: (open: boolean) => void,
+  pillRef: RefObject<HTMLElement | null>,
+  popoverRef: RefObject<HTMLElement | null>,
+): void {
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const inPill = pillRef.current?.contains(target) ?? false;
+      const inPopover = popoverRef.current?.contains(target) ?? false;
+      if (!inPill && !inPopover) setOpen(false);
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
 }

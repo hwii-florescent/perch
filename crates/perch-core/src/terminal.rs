@@ -194,6 +194,42 @@ fn split_utf8_tail(bytes: &[u8]) -> (String, &[u8]) {
     }
 }
 
+/// Pump `reader`'s pty output through `split_utf8_tail`, carrying an
+/// incomplete trailing multi-byte sequence across 8 KiB reads so it is
+/// decoded together with the bytes that complete it on the next read (see
+/// `split_utf8_tail` and the reader-thread comment on `TerminalManager::create`
+/// for why this matters). `on_chunk` is called once per non-empty decoded
+/// chunk while the pty is alive, and once more with a lossy-decoded flush of
+/// anything left over when it closes — a trailing partial sequence there
+/// means the process died mid-character, so lossy is the right call.
+fn read_pty_into_chunks(mut reader: impl Read, mut on_chunk: impl FnMut(String)) {
+    let mut buf = [0u8; 8192];
+    let mut carry: Vec<u8> = Vec::new();
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let bytes: &[u8] = if carry.is_empty() {
+                    &buf[..n]
+                } else {
+                    carry.extend_from_slice(&buf[..n]);
+                    &carry[..]
+                };
+                let (text, tail) = split_utf8_tail(bytes);
+                let tail = tail.to_vec();
+                if !text.is_empty() {
+                    on_chunk(text);
+                }
+                carry = tail;
+            }
+            Err(_) => break,
+        }
+    }
+    if !carry.is_empty() {
+        on_chunk(String::from_utf8_lossy(&carry).into_owned());
+    }
+}
+
 /// Describe the pty to the child the way a real terminal emulator would.
 ///
 /// These are set *after* the parent environment is copied in, deliberately
@@ -402,35 +438,7 @@ impl TerminalManager {
         let on_data = self.on_data.clone();
         let reader_id = id.clone();
         std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 8192];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let bytes: &[u8] = if carry.is_empty() {
-                            &buf[..n]
-                        } else {
-                            carry.extend_from_slice(&buf[..n]);
-                            &carry[..]
-                        };
-                        let (text, tail) = split_utf8_tail(bytes);
-                        let tail = tail.to_vec();
-                        if !text.is_empty() {
-                            on_data(reader_id.clone(), text);
-                        }
-                        carry = tail;
-                    }
-                    Err(_) => break,
-                }
-            }
-            // Flush whatever is left. A trailing partial sequence here means
-            // the process died mid-character, so lossy is the right call —
-            // there is nothing left to complete it with.
-            if !carry.is_empty() {
-                on_data(reader_id, String::from_utf8_lossy(&carry).into_owned());
-            }
+            read_pty_into_chunks(reader, |text| on_data(reader_id.clone(), text));
         });
 
         // Waiter thread: pty exit -> terminal.exit.
@@ -758,43 +766,14 @@ impl AgentTerminalRegistry {
         let session_id_owned = session_id.to_string();
         let on_activity = self.on_activity.clone();
         std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 8192];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let bytes: &[u8] = if carry.is_empty() {
-                            &buf[..n]
-                        } else {
-                            carry.extend_from_slice(&buf[..n]);
-                            &carry[..]
-                        };
-                        let (text, tail) = split_utf8_tail(bytes);
-                        let tail = tail.to_vec();
-                        if !text.is_empty() {
-                            *reader_entry.last_activity.lock().unwrap() = std::time::Instant::now();
-                            on_activity(&session_id_owned);
-                            let viewers = reader_entry.viewers.lock().unwrap();
-                            for viewer in viewers.values() {
-                                (viewer.on_data)(reader_id.clone(), text.clone());
-                            }
-                        }
-                        carry = tail;
-                    }
-                    Err(_) => break,
-                }
-            }
-            if !carry.is_empty() {
-                let text = String::from_utf8_lossy(&carry).into_owned();
+            read_pty_into_chunks(reader, |text| {
                 *reader_entry.last_activity.lock().unwrap() = std::time::Instant::now();
                 on_activity(&session_id_owned);
                 let viewers = reader_entry.viewers.lock().unwrap();
                 for viewer in viewers.values() {
                     (viewer.on_data)(reader_id.clone(), text.clone());
                 }
-            }
+            });
         });
 
         // Waiter thread: pty exit -> fan out terminal.exit to every viewer

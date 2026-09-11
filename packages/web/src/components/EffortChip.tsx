@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore, EFFORT_OPTIONS } from "../store";
-import { computeAnchoredPopoverStyle } from "./popoverPosition";
+import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./popoverPosition";
 
 /**
  * EffortChip — compact pill selecting the reasoning-effort level applied to
@@ -32,24 +32,7 @@ export function EffortChip() {
   const options = EFFORT_OPTIONS[agent];
 
   // Click-outside and Escape to close (same contract as ModelChip).
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      const inPill = pillRef.current?.contains(target) ?? false;
-      const inPopover = popoverRef.current?.contains(target) ?? false;
-      if (!inPill && !inPopover) setOpen(false);
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
+  useDismissOnOutsideClick(open, setOpen, pillRef, popoverRef);
 
   function handlePillClick() {
     if (open) {

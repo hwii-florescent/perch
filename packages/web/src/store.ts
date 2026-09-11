@@ -819,6 +819,29 @@ function beginAgentRuntimeRequest(
   registerAgentRuntimeRequest(requestId);
 }
 
+/**
+ * Shared prelude for `acquireAgentControl`/`releaseAgentControl`: if a
+ * control request for `key` is already in flight, return its request id so
+ * the caller can reuse it; otherwise set `agentControlBySession[sessionId]`
+ * to "loading" and return `null` so the caller proceeds to send its message.
+ */
+function beginAgentControlOptimisticUpdate(key: string, sessionId: string, agentId: string): string | null {
+  const existing = latestAgentRuntimeRequestByKey.get(key);
+  if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+  usePerchStore.setState((currentState) => ({
+    agentControlBySession: {
+      ...currentState.agentControlBySession,
+      [sessionId]: {
+        ...(currentState.agentControlBySession[sessionId] ?? { agentId }),
+        agentId,
+        state: "loading",
+        error: undefined,
+      },
+    },
+  }));
+  return null;
+}
+
 function sessionModeStateFor(state: Pick<PerchState, "sessionModes" | "settings">, sessionId: string | null): SessionMode {
   if (sessionId) {
     const mode = state.sessionModes[sessionId];
@@ -1517,20 +1540,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.acquire)) return null;
     const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
     const key = `control:${sessionId}:${agentId}:${channel}`;
-    const existing = latestAgentRuntimeRequestByKey.get(key);
-    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const inFlight = beginAgentControlOptimisticUpdate(key, sessionId, agentId);
+    if (inFlight) return inFlight;
     const requestId = newId();
-    set((currentState) => ({
-      agentControlBySession: {
-        ...currentState.agentControlBySession,
-        [sessionId]: {
-          ...(currentState.agentControlBySession[sessionId] ?? { agentId }),
-          agentId,
-          state: "loading",
-          error: undefined,
-        },
-      },
-    }));
     beginAgentRuntimeRequest(requestId, {
       kind: "control",
       key,
@@ -1556,20 +1568,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.release)) return null;
     const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
     const key = `control:${sessionId}:${agentId}:${channel}`;
-    const existing = latestAgentRuntimeRequestByKey.get(key);
-    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const inFlight = beginAgentControlOptimisticUpdate(key, sessionId, agentId);
+    if (inFlight) return inFlight;
     const requestId = newId();
-    set((currentState) => ({
-      agentControlBySession: {
-        ...currentState.agentControlBySession,
-        [sessionId]: {
-          ...(currentState.agentControlBySession[sessionId] ?? { agentId }),
-          agentId,
-          state: "loading",
-          error: undefined,
-        },
-      },
-    }));
     beginAgentRuntimeRequest(requestId, {
       kind: "control",
       key,
