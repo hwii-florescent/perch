@@ -1207,6 +1207,10 @@ pub struct GitStatus {
 }
 
 impl GitStatus {
+    pub fn observed_revision(&self) -> &str {
+        &self.observed_fingerprint
+    }
+
     pub fn dirty(&self) -> bool {
         !self.entries.is_empty()
     }
@@ -1219,6 +1223,14 @@ impl GitStatus {
         self.entries
             .iter()
             .filter(|entry| entry.staged)
+            .map(|entry| entry.path.clone())
+            .collect()
+    }
+
+    pub fn unstaged_paths(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.unstaged || entry.is_untracked())
             .map(|entry| entry.path.clone())
             .collect()
     }
@@ -1247,6 +1259,10 @@ impl StatusEntry {
 
     pub fn is_conflicted(&self) -> bool {
         self.index == FileState::Conflicted || self.worktree == FileState::Conflicted
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.index == FileState::Deleted || self.worktree == FileState::Deleted
     }
 
     pub fn is_renamed(&self) -> bool {
@@ -1443,6 +1459,10 @@ impl ActionConfirmation {
             message_digest,
             confirmed: true,
         }
+    }
+
+    pub fn is_confirmed(&self) -> bool {
+        self.confirmed
     }
 
     pub fn workspace_id(&self) -> &str {

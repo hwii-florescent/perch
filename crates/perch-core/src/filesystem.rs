@@ -602,6 +602,13 @@ impl FileService {
         })
     }
 
+    /// Return the current content version for a regular file.  This is useful
+    /// to an adapter that wants to refresh a conflict without opening content.
+    pub fn current_version<P: AsRef<Path>>(&self, path: P) -> Result<String, FsError> {
+        let read = self.read_file(path)?;
+        Ok(read.version)
+    }
+
     /// Compute the same SHA-256 version used by reads and writes without
     /// exposing the hashing implementation to protocol adapters.
     pub fn version_for_bytes(bytes: &[u8]) -> String {
