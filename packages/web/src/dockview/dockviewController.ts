@@ -34,6 +34,8 @@ const PRIMARY_CHAT_PANEL_ID = "chat";
  * panel, bound to whatever session is globally active) or `"terminal"`. */
 const SESSION_CHAT_COMPONENT = "sessionChat";
 const TERMINAL_COMPONENT = "terminal";
+const FILES_COMPONENT = "files";
+const GIT_REVIEW_COMPONENT = "gitReview";
 
 /** Coarse classification of a dockview panel used throughout this module —
  * and unit-tested directly (see dockviewController.test.ts) because getting
@@ -47,7 +49,7 @@ const TERMINAL_COMPONENT = "terminal";
  * kind that could ever exist. Adding session-bound chat panels broke that
  * assumption, so every "is this a terminal" check in this module now goes
  * through here instead. */
-export type PanelKind = "chat" | "terminal" | "sessionChat" | "other";
+export type PanelKind = "chat" | "terminal" | "sessionChat" | "files" | "gitReview" | "other";
 
 export function panelKind(panel: Pick<IDockviewPanel, "view">): PanelKind {
   switch (panel.view.contentComponent) {
@@ -57,6 +59,10 @@ export function panelKind(panel: Pick<IDockviewPanel, "view">): PanelKind {
       return "terminal";
     case SESSION_CHAT_COMPONENT:
       return "sessionChat";
+    case FILES_COMPONENT:
+      return "files";
+    case GIT_REVIEW_COMPONENT:
+      return "gitReview";
     default:
       return "other";
   }
@@ -185,6 +191,13 @@ export interface DockviewController {
    * the click-to-split session picker and the drag-and-drop path (see
    * `SessionSplitPopover.tsx` / `DockviewShell.tsx`'s drag handlers). */
   addSessionChatPanel(sessionId: string, title: string, referencePanelId: string, direction: Direction): void;
+  /** Open the workspace-scoped file surface as a real dockview panel. A
+   * deterministic id keeps one editor surface per workspace and lets the
+   * persisted dockview layout restore its workspace binding. */
+  openFiles(workspaceId: string, title?: string): void;
+  /** Open the workspace-scoped Git/status/diff/review surface in the saved
+   * dockview layout. A deterministic id prevents duplicate review panes. */
+  openGitReview(workspaceId: string, title?: string): void;
   /** Session ids that currently have an open (or grouped-as-tab) chat panel
    * in this shell — used to grey out / relabel already-open sessions in the
    * split-session picker rather than let it silently create a duplicate. */
@@ -278,6 +291,40 @@ export function createDockviewController(api: DockviewApi): DockviewController {
         title,
         params: { sessionId },
         position: { referencePanel: reference, direction },
+      });
+    },
+    openFiles(workspaceId, title) {
+      if (!workspaceId) return;
+      const id = `files-${workspaceId}`;
+      const existing = api.panels.find((panel) => panel.id === id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
+      api.addPanel({
+        id,
+        component: FILES_COMPONENT,
+        title: title || "Files",
+        params: { workspaceId },
+        position: { referencePanel, direction: "right" },
+      });
+    },
+    openGitReview(workspaceId, title) {
+      if (!workspaceId) return;
+      const id = `git-review-${workspaceId}`;
+      const existing = api.panels.find((panel) => panel.id === id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
+      api.addPanel({
+        id,
+        component: GIT_REVIEW_COMPONENT,
+        title: title || "Git & review",
+        params: { workspaceId },
+        position: { referencePanel, direction: "right" },
       });
     },
     openSessionChatIds() {

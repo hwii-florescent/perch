@@ -11,6 +11,7 @@
  */
 import { usePerchStore } from "../store";
 import { StatusDot } from "./StatusDot";
+import { WorkspaceOverview } from "./WorkspaceOverview";
 import type { SessionSummary } from "@perch/shared";
 
 function basename(cwd: string): string {
@@ -59,10 +60,16 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
+  const workspaceCapabilities = usePerchStore((s) => s.workspaceCapabilities);
+  const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
 
   if (!open) return null;
 
   const groups = groupAllSessionsByProject(sessions);
+  const workspaceNavigationEnabled = (activeHostId === "local"
+    ? workspaceCapabilities
+    : workspaceCapabilitiesByHost[activeHostId] ?? []
+  ).includes("workspace.snapshot");
 
   function handleSwitch(id: string) {
     switchSession(id);
@@ -106,35 +113,41 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
           </button>
         </div>
 
-        <div className="mobile-switcher__list">
-          {groups.map((group) => (
-            <div className="mobile-switcher__project" key={group.key}>
-              <div className="mobile-switcher__project-header" title={group.cwd}>
-                {basename(group.cwd)}
-                {group.hostId !== "local" && (
-                  <span className="mobile-switcher__project-host">{group.hostId}</span>
-                )}
+        {workspaceNavigationEnabled ? (
+          <div className="mobile-switcher__list mobile-switcher__list--workspace">
+            <WorkspaceOverview compact onNavigate={onClose} />
+          </div>
+        ) : (
+          <div className="mobile-switcher__list">
+            {groups.map((group) => (
+              <div className="mobile-switcher__project" key={group.key}>
+                <div className="mobile-switcher__project-header" title={group.cwd}>
+                  {basename(group.cwd)}
+                  {group.hostId !== "local" && (
+                    <span className="mobile-switcher__project-host">{group.hostId}</span>
+                  )}
+                </div>
+                {group.sessions.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    className={
+                      "mobile-switcher__session" +
+                      (s.id === sessionId ? " mobile-switcher__session--active" : "")
+                    }
+                    data-testid={`mobile-switcher-session-${s.id}`}
+                    onClick={() => handleSwitch(s.id)}
+                  >
+                    <StatusDot session={s} />
+                    <span className="mobile-switcher__session-title">
+                      {s.title || "(new session)"}
+                    </span>
+                  </button>
+                ))}
               </div>
-              {group.sessions.map((s) => (
-                <button
-                  type="button"
-                  key={s.id}
-                  className={
-                    "mobile-switcher__session" +
-                    (s.id === sessionId ? " mobile-switcher__session--active" : "")
-                  }
-                  data-testid={`mobile-switcher-session-${s.id}`}
-                  onClick={() => handleSwitch(s.id)}
-                >
-                  <StatusDot session={s} />
-                  <span className="mobile-switcher__session-title">
-                    {s.title || "(new session)"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <div className="mobile-switcher__footer">
           <button

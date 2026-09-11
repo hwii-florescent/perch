@@ -2,10 +2,12 @@ export function ModeSwitch({
   mode,
   onChange,
   testId = "mode-switch",
+  disabled = false,
 }: {
   mode: "hosted" | "cli";
   onChange: (mode: "hosted" | "cli") => void;
   testId?: string;
+  disabled?: boolean;
 }) {
   const isCli = mode === "cli";
   return (
@@ -16,6 +18,7 @@ export function ModeSwitch({
       role="switch"
       aria-checked={isCli}
       aria-label="Toggle Hosted / CLI mode"
+      disabled={disabled}
       onClick={() => onChange(isCli ? "hosted" : "cli")}
     >
       <span className="mode-switch__label mode-switch__label--hosted">Hosted</span>

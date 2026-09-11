@@ -10,8 +10,19 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
+use crate::filesystem::{DirectoryEntry, FileMetadata, PreviewKind};
 use crate::iterm_profile::TerminalProfile;
+use crate::review::{ReviewComment, ReviewPacket};
+use crate::source_control::{
+    BranchRef, DiffFile, DiffTarget, DiscardMode, GitActionReceipt, GitStatus,
+};
+
+/// Version of the additive project/workspace wire contract.  Existing
+/// clients can continue using the legacy message families; clients that
+/// understand the new families gate them on `server.info.capabilities`.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // Settings & hosts value types (Stage D)
@@ -85,6 +96,10 @@ fn default_toast_delivery() -> String {
 
 fn default_chat_mode() -> String {
     "hosted".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Patch applied via `settings.update`. Fields absent from JSON → no change.
@@ -246,7 +261,8 @@ pub struct SessionSummary {
     /// `false` when absent (older remote perch instances).
     #[serde(default)]
     pub unseen: bool,
-    /// Whether this session has ever been typed into in CLI mode (the
+    /// Whether this session has explicitly started a persistent CLI or has
+    /// been typed into through the legacy CLI transport (the
     /// `cli_activity` column). The web client uses it to decide whether CLI
     /// mode may respawn the agent PTY unattended: a session with prior CLI
     /// activity is resumed automatically, one without it waits for an
@@ -262,6 +278,55 @@ pub struct SessionSummary {
     /// remotes.
     #[serde(default)]
     pub blocked: bool,
+    /// Stable project metadata association, populated after the database
+    /// migration. Optional so old remote peers and pre-migration rows remain
+    /// readable during rolling upgrades.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Stable workspace metadata association, populated after the database
+    /// migration. Optional for federation compatibility with older peers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Last explicitly selected CLI provider, including configured providers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_provider_id: Option<String>,
+}
+
+/// Durable editor draft returned by the workspace buffer endpoints. Both the
+/// draft and its original bounded baseline are server-owned so a reconnect
+/// can offer compare/merge after an external change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBuffer {
+    pub workspace_id: String,
+    pub path: String,
+    pub content: String,
+    pub base_content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_version: Option<String>,
+    pub revision: u64,
+    pub dirty: bool,
+    pub conflict: bool,
+    pub updated_at: i64,
+}
+
+/// Metadata-only listing form for durable editor tabs. Clients fetch the full
+/// bounded content through `fs.buffer.get` when they need to render a tab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBufferSummary {
+    pub workspace_id: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_version: Option<String>,
+    pub revision: u64,
+    pub dirty: bool,
+    pub conflict: bool,
+    pub updated_at: i64,
 }
 
 fn default_local_host_id() -> String {
@@ -280,6 +345,64 @@ pub struct FsEntry {
     pub is_git_repo: bool,
 }
 
+/// Durable project identity. A project is scoped by `host_id` and its
+/// canonical `path`; the id is generated once and survives server restarts.
+/// `settings` is intentionally opaque in this first slice so later feature
+/// work can add project-scoped preferences without another migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSummary {
+    pub id: String,
+    pub host_id: String,
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    pub favorite: bool,
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Value>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Lifecycle state accepted on the wire. Keeping this as an enum prevents a
+/// malformed DB value from silently becoming a client-only state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceState {
+    Active,
+    Sleeping,
+    Archived,
+}
+
+/// Durable workspace identity. The initial implementation creates one
+/// workspace for each imported project path. Later worktree/editor slices can
+/// add more rows without changing the project identity contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSummary {
+    pub id: String,
+    pub project_id: String,
+    pub host_id: String,
+    pub path: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    pub dirty: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_workspace_id: Option<String>,
+    pub state: WorkspaceState,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// One git worktree of a repo, as reported by `worktree.list.result`.
 /// Mirrors `worktree::WorktreeInfo` (see that module for the git plumbing).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,6 +419,23 @@ pub struct WorktreeEntry {
     pub is_primary: bool,
     /// Has uncommitted or untracked files (drives the remove guard).
     pub is_dirty: bool,
+}
+
+/// A request-scoped, persisted approval receipt for a destructive Git action.
+/// The opaque id is bound by the server to the workspace, operation, canonical
+/// paths, current content fingerprint, and expiry; clients must not synthesize
+/// or reinterpret it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPreviewReceipt {
+    pub preview_id: String,
+    pub operation: String,
+    pub workspace_id: String,
+    pub paths: Vec<String>,
+    pub status: GitStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub expires_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,6 +472,92 @@ impl Default for AgentKind {
     fn default() -> Self {
         AgentKind::Claude
     }
+}
+
+/// Structured Chat/UI versus interactive CLI view.  This wire enum is kept
+/// separate from the runtime's internal `agent_fleet::AgentMode` so protocol
+/// clients do not need to depend on lifecycle implementation details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionMode {
+    Hosted,
+    Cli,
+}
+
+/// Scope reported by `session.mode`; `default` means no session/workspace
+/// override exists and the device default (or Hosted fallback) won.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionModeScope {
+    Session,
+    Workspace,
+    Device,
+    Default,
+}
+
+/// Stable identity fields exposed by the lifecycle endpoint.  The runtime
+/// keeps the provider continuation opaque; clients only use it to label the
+/// same agent and never synthesize one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLifecycleKey {
+    pub workspace_id: String,
+    pub session_id: String,
+    pub agent_id: String,
+}
+
+/// A bounded provider descriptor and executable availability result.  The
+/// `reason` field explains an unavailable executable without exposing a shell
+/// command or environment value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentManifestSummary {
+    pub id: String,
+    pub display_name: String,
+    pub supported_modes: Vec<SessionMode>,
+    pub resumability: String,
+    pub capabilities: Vec<String>,
+    pub status_detection: String,
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Connection-authenticated ownership token returned by the control endpoint.
+/// The server never accepts a client-supplied identity in its place.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentControlLease {
+    pub client_id: String,
+    pub device_id: String,
+    pub generation: u64,
+    pub acquired_at_ms: u64,
+    pub last_activity_ms: u64,
+}
+
+/// Lifecycle status returned for one workspace/session/provider key.  Owner
+/// identities are optional because read-only observers need not hold either
+/// control channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLifecycleStatus {
+    pub key: AgentLifecycleKey,
+    pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_session_id: Option<String>,
+    pub resumable: bool,
+    pub state: crate::agent_fleet::AgentState,
+    pub reason: String,
+    pub last_transition_ms: u64,
+    pub last_activity_ms: u64,
+    pub revision: u64,
+    pub transition_sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_owner: Option<AgentControlLease>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resize_owner: Option<AgentControlLease>,
 }
 
 /// Requests that `terminal.create` spawn the given session's *interactive*
@@ -389,10 +615,45 @@ pub enum ClientMessage {
     #[serde(rename = "session.resume", rename_all = "camelCase")]
     SessionResume { session_id: String },
 
+    /// Read the effective mode after applying session/workspace/device
+    /// precedence.  `device_id` is an opaque client-stable identifier; the
+    /// server validates it as a key but authenticates control identities from
+    /// the connection itself.
+    #[serde(rename = "session.mode.get", rename_all = "camelCase")]
+    SessionModeGet {
+        request_id: String,
+        session_id: String,
+        device_id: String,
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+
+    /// Set or clear a mode override.  `scope: "device"` changes the supplied
+    /// device default; session/workspace scopes require the corresponding id.
+    /// Omitting `mode` (or setting `clear_override`) clears the selected
+    /// session/workspace override and reveals lower-precedence policy.
+    #[serde(rename = "session.mode.set", rename_all = "camelCase")]
+    SessionModeSet {
+        request_id: String,
+        session_id: String,
+        device_id: String,
+        scope: SessionModeScope,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        #[serde(default)]
+        mode: Option<SessionMode>,
+        #[serde(default)]
+        clear_override: bool,
+    },
+
     #[serde(rename = "chat.send", rename_all = "camelCase")]
     ChatSend {
         session_id: String,
         text: String,
+        /// Stable client supplied id used to make prompt insertion and
+        /// runner dispatch idempotent across reconnects.
+        #[serde(default)]
+        operation_id: Option<String>,
         #[serde(default)]
         agent: AgentKind,
         model: Option<String>,
@@ -427,6 +688,50 @@ pub enum ClientMessage {
     #[serde(rename = "commands.list", rename_all = "camelCase")]
     CommandsList { session_id: String },
 
+    /// Persistent shell pane operations. Closing a view only releases its subscription.
+    #[serde(rename = "terminal.open", rename_all = "camelCase")]
+    TerminalOpen {
+        request_id: String,
+        session_id: String,
+        pane_id: String,
+        view_id: String,
+        cols: u16,
+        rows: u16,
+    },
+    #[serde(rename = "terminal.list", rename_all = "camelCase")]
+    TerminalList {
+        request_id: String,
+        session_id: String,
+    },
+    #[serde(rename = "terminal.release", rename_all = "camelCase")]
+    TerminalRelease {
+        terminal_id: String,
+        view_id: String,
+    },
+    #[serde(rename = "terminal.close", rename_all = "camelCase")]
+    TerminalClose {
+        request_id: String,
+        session_id: String,
+        terminal_id: String,
+    },
+
+    /// Observe the host-owned provider process. A view release never stops it.
+    #[serde(rename = "agent.terminal.open", rename_all = "camelCase")]
+    AgentTerminalOpen {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        view_id: String,
+        cols: u16,
+        rows: u16,
+    },
+    #[serde(rename = "agent.terminal.release", rename_all = "camelCase")]
+    AgentTerminalRelease {
+        session_id: String,
+        provider_id: String,
+        view_id: String,
+    },
+
     #[serde(rename = "terminal.create", rename_all = "camelCase")]
     TerminalCreate {
         cols: u16,
@@ -437,13 +742,71 @@ pub enum ClientMessage {
     },
 
     #[serde(rename = "terminal.input", rename_all = "camelCase")]
-    TerminalInput { terminal_id: String, data: String },
+    TerminalInput {
+        terminal_id: String,
+        data: String,
+        /// Optional generation-bound lease.  Omitted is retained for legacy
+        /// unowned terminals; once a shared agent has an owner, omission is
+        /// rejected rather than bypassing the lease.
+        #[serde(default)]
+        generation: Option<u64>,
+    },
 
     #[serde(rename = "terminal.resize", rename_all = "camelCase")]
     TerminalResize {
         terminal_id: String,
         cols: u16,
         rows: u16,
+        /// Optional generation-bound resize lease; see `TerminalInput`.
+        #[serde(default)]
+        generation: Option<u64>,
+    },
+
+    /// Return the configured provider manifests and executable availability.
+    #[serde(rename = "agent.manifest.list", rename_all = "camelCase")]
+    AgentManifestList {
+        /// Required for request/reply correlation. `host_id` is omitted for
+        /// the local provider registry and selects a configured remote host
+        /// when present.
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+    },
+
+    /// Read one provider lifecycle snapshot.  When `agent_id` is omitted the
+    /// server resolves the session's last provider or returns a typed error.
+    #[serde(rename = "agent.lifecycle.get", rename_all = "camelCase")]
+    AgentLifecycleGet {
+        request_id: String,
+        session_id: String,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        #[serde(default)]
+        agent_id: Option<String>,
+    },
+
+    /// Acquire input or resize authority for a shared local agent terminal.
+    /// Client/device identity is derived from the authenticated WS connection.
+    #[serde(rename = "agent.control.acquire", rename_all = "camelCase")]
+    AgentControlAcquire {
+        request_id: String,
+        session_id: String,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        agent_id: String,
+        channel: crate::agent_fleet::ControlChannel,
+    },
+
+    /// Release the exact generation returned by `agent.control.acquire`.
+    #[serde(rename = "agent.control.release", rename_all = "camelCase")]
+    AgentControlRelease {
+        request_id: String,
+        session_id: String,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        agent_id: String,
+        channel: crate::agent_fleet::ControlChannel,
+        generation: u64,
     },
 
     /// Force-terminate a single terminal's backing PTY/process. Used when a
@@ -509,6 +872,297 @@ pub enum ClientMessage {
         path: Option<String>,
     },
 
+    /// List one lazy level of an already-authorized durable workspace. The
+    /// path is always workspace-relative; the server resolves the root from
+    /// `workspaceId` and never accepts a caller-supplied filesystem root.
+    #[serde(rename = "fs.tree", rename_all = "camelCase")]
+    FsTree {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        path: Option<String>,
+    },
+
+    /// Read one bounded UTF-8 text file from a durable workspace.
+    #[serde(rename = "fs.read", rename_all = "camelCase")]
+    FsRead {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+    },
+
+    /// Return a bounded, classified preview. Binary/image results contain
+    /// metadata only; HTML results carry an explicit sandbox requirement.
+    #[serde(rename = "fs.preview", rename_all = "camelCase")]
+    FsPreview {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+    },
+
+    /// Atomically save bounded text with optimistic version checking. An
+    /// omitted version means create-only and never permits clobbering a file.
+    #[serde(rename = "fs.write", rename_all = "camelCase")]
+    FsWrite {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        content: String,
+        #[serde(default)]
+        expected_version: Option<String>,
+        /// Revision of the durable draft being saved. The server checks this
+        /// before writing and reconciles the same revision after publication.
+        #[serde(default)]
+        expected_buffer_revision: Option<u64>,
+    },
+
+    /// List the bounded set of durable editor buffers for a workspace.
+    #[serde(rename = "fs.buffer.list", rename_all = "camelCase")]
+    FsBufferList {
+        request_id: String,
+        workspace_id: String,
+    },
+
+    /// Fetch one durable editor buffer, creating a clean baseline row when
+    /// this is the first open of the path.
+    #[serde(rename = "fs.buffer.get", rename_all = "camelCase")]
+    FsBufferGet {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+    },
+
+    /// Persist a bounded draft with optimistic revision checking. When
+    /// supplied, `baseContent` is the original bounded text used for merge
+    /// and compare after external changes.
+    #[serde(rename = "fs.buffer.set", rename_all = "camelCase")]
+    FsBufferSet {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        content: String,
+        #[serde(default)]
+        base_content: Option<String>,
+        #[serde(default)]
+        expected_buffer_revision: Option<u64>,
+    },
+
+    /// Close a durable editor buffer. Dirty/conflicted drafts require an
+    /// explicit discard flag and the current buffer revision.
+    #[serde(rename = "fs.buffer.close", rename_all = "camelCase")]
+    FsBufferClose {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        #[serde(default)]
+        expected_buffer_revision: Option<u64>,
+        #[serde(default)]
+        discard: bool,
+    },
+
+    /// Request the complete Git status for an already-authorized workspace.
+    /// `hostId` is present for federated routing; the owning host resolves the
+    /// workspace root and never accepts a caller-supplied filesystem path.
+    #[serde(rename = "git.status", rename_all = "camelCase")]
+    GitStatus {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        include_ignored: bool,
+    },
+
+    /// List local and remote refs that are valid bases for `git.diff` and
+    /// review anchoring. Ref names are returned by the owning workspace.
+    #[serde(rename = "git.refs", rename_all = "camelCase")]
+    GitRefs {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+    },
+
+    /// Compare one workspace against a selected Git base. Compare targets are
+    /// tagged objects (`{"kind":"compare","base":"main"}`) so a branch
+    /// name can never be confused with a mode keyword.
+    #[serde(rename = "git.diff", rename_all = "camelCase")]
+    GitDiff {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        target: DiffTarget,
+        #[serde(default = "default_true")]
+        include_untracked: bool,
+        #[serde(default)]
+        ignore_whitespace: bool,
+        #[serde(default)]
+        context_lines: Option<u32>,
+        #[serde(default)]
+        path: Option<String>,
+    },
+
+    /// Stage exact authorized paths or one validated patch. Exactly one of
+    /// `paths` and `patch` must be supplied.
+    #[serde(rename = "git.stage", rename_all = "camelCase")]
+    GitStage {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        paths: Option<Vec<String>>,
+        #[serde(default)]
+        patch: Option<String>,
+    },
+
+    #[serde(rename = "git.unstage", rename_all = "camelCase")]
+    GitUnstage {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        paths: Option<Vec<String>>,
+        #[serde(default)]
+        patch: Option<String>,
+    },
+
+    /// Capture a durable, path-bound confirmation receipt before discard.
+    #[serde(rename = "git.discard.preview", rename_all = "camelCase")]
+    GitDiscardPreview {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        mode: DiscardMode,
+        paths: Vec<String>,
+    },
+
+    /// Execute a previously previewed discard. The server looks up and
+    /// invalidates the receipt atomically after rechecking its fingerprint.
+    #[serde(rename = "git.discard", rename_all = "camelCase")]
+    GitDiscard {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        preview_id: String,
+    },
+
+    #[serde(rename = "git.commit.preview", rename_all = "camelCase")]
+    GitCommitPreview {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        message: String,
+    },
+
+    #[serde(rename = "git.commit", rename_all = "camelCase")]
+    GitCommit {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        preview_id: String,
+        message: String,
+    },
+
+    /// Durable inline review comment lifecycle. The server reads the
+    /// authorized file/diff at `baseRevision` and derives the stored anchor.
+    #[serde(rename = "review.list", rename_all = "camelCase")]
+    ReviewList {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+    },
+
+    #[serde(rename = "review.create", rename_all = "camelCase")]
+    ReviewCreate {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        id: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        agent_id: Option<String>,
+        path: String,
+        /// Diff/file base selector used to derive the anchor source. The
+        /// server re-reads this target and rejects a stale `baseRevision`.
+        base: DiffTarget,
+        base_revision: String,
+        side: crate::review::ReviewSide,
+        range: crate::review::LineRange,
+        body: String,
+    },
+
+    #[serde(rename = "review.update", rename_all = "camelCase")]
+    ReviewUpdate {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        comment_id: String,
+        body: String,
+        expected_version: u64,
+    },
+
+    #[serde(rename = "review.resolve", rename_all = "camelCase")]
+    ReviewResolve {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        comment_id: String,
+        resolved: bool,
+        expected_version: u64,
+    },
+
+    #[serde(rename = "review.delete", rename_all = "camelCase")]
+    ReviewDelete {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        comment_id: String,
+        expected_version: u64,
+    },
+
+    #[serde(rename = "review.batch.preview", rename_all = "camelCase")]
+    ReviewBatchPreview {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        send_operation_id: String,
+        #[serde(default)]
+        target_session_id: Option<String>,
+        #[serde(default)]
+        target_agent_id: Option<String>,
+        /// Revision of the source snapshot shown to the user. Older clients
+        /// may omit it; the server then rejects the preview unless it can
+        /// derive an exact revision from the selected comments.
+        #[serde(default)]
+        current_revision: String,
+        #[serde(default)]
+        instruction: String,
+    },
+
+    #[serde(rename = "review.batch.send", rename_all = "camelCase")]
+    ReviewBatchSend {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        packet_id: String,
+        send_operation_id: String,
+    },
+
     /// List every git worktree of the repo containing `repoPath` (Wave 2 —
     /// ported from herdr, see `worktree.rs`). Request-correlated exactly like
     /// `fs.browse`: `requestId` comes back on `worktree.list.result`, and the
@@ -554,6 +1208,81 @@ pub enum ClientMessage {
         #[serde(default)]
         force: bool,
     },
+
+    /// List durable projects on one host.  The request id is echoed by the
+    /// response so concurrent sidebar refreshes cannot race each other.
+    #[serde(rename = "project.list", rename_all = "camelCase")]
+    ProjectList {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        include_archived: bool,
+    },
+
+    /// Create (or idempotently look up) a project for a canonical local path.
+    #[serde(rename = "project.create", rename_all = "camelCase")]
+    ProjectCreate {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        path: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
+
+    #[serde(rename = "project.rename", rename_all = "camelCase")]
+    ProjectRename {
+        request_id: String,
+        project_id: String,
+        name: String,
+    },
+
+    #[serde(rename = "project.archive", rename_all = "camelCase")]
+    ProjectArchive {
+        request_id: String,
+        project_id: String,
+        archived: bool,
+    },
+
+    #[serde(rename = "project.focus", rename_all = "camelCase")]
+    ProjectFocus {
+        request_id: String,
+        project_id: String,
+    },
+
+    /// Return a coherent projects/workspaces/active selection snapshot.  A
+    /// boot epoch plus revision lets a reconnecting client discard stale
+    /// frames from a previous process lifetime.
+    #[serde(rename = "workspace.snapshot", rename_all = "camelCase")]
+    WorkspaceSnapshot {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        project_id: Option<String>,
+    },
+
+    #[serde(rename = "workspace.focus", rename_all = "camelCase")]
+    WorkspaceFocus {
+        request_id: String,
+        workspace_id: String,
+    },
+
+    #[serde(rename = "workspace.rename", rename_all = "camelCase")]
+    WorkspaceRename {
+        request_id: String,
+        workspace_id: String,
+        name: String,
+    },
+
+    /// Restore a sleeping workspace's metadata state. This first slice does
+    /// not advertise sleep itself and never starts an agent as a side effect.
+    #[serde(rename = "workspace.restore", rename_all = "camelCase")]
+    WorkspaceRestore {
+        request_id: String,
+        workspace_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +1300,36 @@ pub enum ServerMessage {
 
     #[serde(rename = "session.updated", rename_all = "camelCase")]
     SessionUpdated { session: SessionSummary },
+
+    /// Effective session mode after session/workspace/device precedence.
+    #[serde(rename = "session.mode", rename_all = "camelCase")]
+    SessionMode {
+        request_id: String,
+        session_id: String,
+        device_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_id: Option<String>,
+        mode: SessionMode,
+        scope: SessionModeScope,
+        revision: u64,
+    },
+
+    /// Broadcast when a mode policy changes. It carries no effective mode:
+    /// each connected client must refetch for its own device and precedence
+    /// chain instead of applying another client's result.
+    #[serde(rename = "session.mode.invalidated", rename_all = "camelCase")]
+    SessionModeInvalidated {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_id: Option<String>,
+        /// Set only for a device-default mutation; `None` means all devices.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_id: Option<String>,
+        /// Monotonic persisted policy revision at the time of the mutation.
+        revision: u64,
+    },
 
     /// Broadcast to every connection (mirrors `hosts.updated`'s fan-out via
     /// `hub_events_tx`) when a session is permanently deleted, since the row
@@ -594,6 +1353,16 @@ pub enum ServerMessage {
         /// never perch's palette. See `iterm_profile.rs`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         terminal_profile: Option<TerminalProfile>,
+        /// Additive protocol version and capability discovery. New clients
+        /// must gate project/workspace calls on these fields.
+        #[serde(default)]
+        protocol_version: u32,
+        #[serde(default)]
+        capabilities: Vec<String>,
+        #[serde(default)]
+        snapshot_epoch: String,
+        #[serde(default)]
+        snapshot_revision: u64,
     },
 
     #[serde(rename = "session.history", rename_all = "camelCase")]
@@ -648,6 +1417,69 @@ pub enum ServerMessage {
         codex: Vec<CommandEntry>,
     },
 
+    /// Provider manifests plus best-effort executable availability.  The
+    /// response is additive and safe for older federation peers to ignore.
+    #[serde(rename = "agent.manifest.list", rename_all = "camelCase")]
+    AgentManifestList {
+        request_id: String,
+        /// The authenticated origin host. Hub responses always stamp this
+        /// field; local responses use `"local"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_id: Option<String>,
+        manifests: Vec<AgentManifestSummary>,
+    },
+
+    #[serde(rename = "agent.lifecycle", rename_all = "camelCase")]
+    AgentLifecycle {
+        request_id: String,
+        status: AgentLifecycleStatus,
+    },
+
+    #[serde(rename = "agent.lifecycle.changed", rename_all = "camelCase")]
+    AgentLifecycleChanged {
+        host_id: String,
+        status: AgentLifecycleStatus,
+    },
+
+    #[serde(rename = "agent.control", rename_all = "camelCase")]
+    AgentControl {
+        request_id: String,
+        session_id: String,
+        agent_id: String,
+        channel: crate::agent_fleet::ControlChannel,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        lease: Option<AgentControlLease>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<AgentLifecycleStatus>,
+    },
+
+    #[serde(rename = "agent.terminal.opened", rename_all = "camelCase")]
+    AgentTerminalOpened {
+        request_id: String,
+        terminal_id: String,
+        status: AgentLifecycleStatus,
+        replay: String,
+    },
+
+    #[serde(rename = "terminal.opened", rename_all = "camelCase")]
+    TerminalOpened {
+        request_id: String,
+        terminal: crate::workspace_terminals::WorkspaceTerminal,
+        replay: String,
+    },
+    #[serde(rename = "terminal.list.result", rename_all = "camelCase")]
+    TerminalListResult {
+        request_id: String,
+        session_id: String,
+        terminals: Vec<crate::workspace_terminals::WorkspaceTerminal>,
+    },
+    #[serde(rename = "terminal.closed", rename_all = "camelCase")]
+    TerminalClosed {
+        request_id: String,
+        session_id: String,
+        terminal_id: String,
+    },
+
     #[serde(rename = "terminal.created", rename_all = "camelCase")]
     TerminalCreated { terminal_id: String },
 
@@ -667,8 +1499,16 @@ pub enum ServerMessage {
         cost_usd: Option<f64>,
     },
 
-    #[serde(rename = "error")]
-    Error { message: String },
+    #[serde(rename = "error", rename_all = "camelCase")]
+    Error {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none", alias = "request_id")]
+        request_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        retryable: bool,
+    },
 
     #[serde(rename = "settings.current", rename_all = "camelCase")]
     SettingsCurrent { settings: SettingsData },
@@ -732,6 +1572,119 @@ pub enum ServerMessage {
         behind: u32,
     },
 
+    /// Request-correlated Git status for a durable workspace. The workspace
+    /// root is server-owned and is included only inside the status snapshot
+    /// for display/debugging; clients never supply it.
+    #[serde(rename = "git.status.result", rename_all = "camelCase")]
+    GitStatusResult {
+        request_id: String,
+        workspace_id: String,
+        status: GitStatus,
+    },
+
+    /// Branch refs available for selecting a diff/review base.
+    #[serde(rename = "git.refs.result", rename_all = "camelCase")]
+    GitRefsResult {
+        request_id: String,
+        workspace_id: String,
+        refs: Vec<BranchRef>,
+    },
+
+    /// Request-correlated bounded diff. Every path and line number comes from
+    /// the server-owned Git target selected by the request.
+    #[serde(rename = "git.diff.result", rename_all = "camelCase")]
+    GitDiffResult {
+        request_id: String,
+        workspace_id: String,
+        target: DiffTarget,
+        files: Vec<DiffFile>,
+        hunk_count: usize,
+        truncated: bool,
+        /// Content revisions for the exact path/side sources represented by
+        /// this diff. Keys are `<path>:old` / `<path>:new`; the scalar is an
+        /// aggregate snapshot revision for batch review operations.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_revision: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_revisions: Option<BTreeMap<String, String>>,
+    },
+
+    /// Result of a non-destructive stage/unstage action or a confirmed
+    /// destructive action.
+    #[serde(rename = "git.action.result", rename_all = "camelCase")]
+    GitActionResult {
+        request_id: String,
+        workspace_id: String,
+        receipt: GitActionReceipt,
+    },
+
+    /// Durable preview receipt. The opaque `previewId` is persisted and is
+    /// the only valid authorization for the corresponding destructive call.
+    #[serde(rename = "git.preview.result", rename_all = "camelCase")]
+    GitPreviewResult {
+        request_id: String,
+        preview: GitPreviewReceipt,
+    },
+
+    #[serde(rename = "review.list.result", rename_all = "camelCase")]
+    ReviewListResult {
+        request_id: String,
+        workspace_id: String,
+        comments: Vec<ReviewComment>,
+    },
+
+    #[serde(rename = "review.comment.result", rename_all = "camelCase")]
+    ReviewCommentResult {
+        request_id: String,
+        workspace_id: String,
+        comment: ReviewComment,
+    },
+
+    #[serde(rename = "review.delete.result", rename_all = "camelCase")]
+    ReviewDeleteResult {
+        request_id: String,
+        workspace_id: String,
+        comment_id: String,
+        deleted: bool,
+    },
+
+    #[serde(rename = "review.batch.preview.result", rename_all = "camelCase")]
+    ReviewBatchPreviewResult {
+        request_id: String,
+        packet: ReviewPacket,
+    },
+
+    /// Delivery is explicit: `queued`, `claimed`, `delivered`, or
+    /// `unconfirmed`. An unconfirmed operation retains its packet and must
+    /// never be silently retried because the provider may already have it.
+    #[serde(rename = "review.batch.send.result", rename_all = "camelCase")]
+    ReviewBatchSendResult {
+        request_id: String,
+        workspace_id: String,
+        packet_id: String,
+        send_operation_id: String,
+        delivery: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_session_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_agent_id: Option<String>,
+    },
+
+    /// Provider acceptance updates the visible outbox without another send.
+    #[serde(rename = "review.batch.delivery", rename_all = "camelCase")]
+    ReviewBatchDelivery {
+        workspace_id: String,
+        packet_id: String,
+        send_operation_id: String,
+        delivery: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_agent_id: Option<String>,
+    },
+
     /// Reply to `fs.browse`. `parent` is absent when `path` is already the
     /// filesystem root. `home` is always the resolved home directory for the
     /// target host, so the client can offer a "home" shortcut regardless of
@@ -745,6 +1698,130 @@ pub enum ServerMessage {
         parent: Option<String>,
         home: String,
         entries: Vec<FsEntry>,
+    },
+
+    /// Reply to `fs.tree` with one bounded directory level.
+    #[serde(rename = "fs.tree.result", rename_all = "camelCase")]
+    FsTreeResult {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        entries: Vec<DirectoryEntry>,
+        truncated: bool,
+    },
+
+    /// Reply to `fs.read` with bounded text and its exact content version.
+    #[serde(rename = "fs.read.result", rename_all = "camelCase")]
+    FsReadResult {
+        request_id: String,
+        workspace_id: String,
+        metadata: FileMetadata,
+        content: String,
+        version: String,
+    },
+
+    /// Reply to `fs.preview` with bounded safe-format content or metadata-only
+    /// information for binary/unsupported content.
+    #[serde(rename = "fs.preview.result", rename_all = "camelCase")]
+    FsPreviewResult {
+        request_id: String,
+        workspace_id: String,
+        metadata: FileMetadata,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
+        kind: PreviewKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        requires_sandbox: bool,
+        truncated: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+
+    /// Reply to `fs.write` after the durable atomic publication.
+    #[serde(rename = "fs.write.result", rename_all = "camelCase")]
+    FsWriteResult {
+        request_id: String,
+        workspace_id: String,
+        metadata: FileMetadata,
+        bytes_written: usize,
+        version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        buffer_revision: Option<u64>,
+    },
+
+    /// Bounded durable-buffer listing. The content itself is fetched only by
+    /// `fs.buffer.get` so reconnects do not eagerly load every open tab.
+    #[serde(rename = "fs.buffer.list.result", rename_all = "camelCase")]
+    FsBufferListResult {
+        request_id: String,
+        workspace_id: String,
+        buffers: Vec<FileBufferSummary>,
+        truncated: bool,
+    },
+
+    /// Full bounded durable draft returned by `fs.buffer.get` or `.set`.
+    #[serde(rename = "fs.buffer.result", rename_all = "camelCase")]
+    FsBufferResult {
+        request_id: String,
+        workspace_id: String,
+        buffer: FileBuffer,
+    },
+
+    /// A durable buffer row was removed after an explicit close/discard.
+    #[serde(rename = "fs.buffer.close.result", rename_all = "camelCase")]
+    FsBufferCloseResult {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        removed: bool,
+    },
+
+    /// Invalidation emitted after an external or server-owned filesystem
+    /// change. Dirty buffers remain durable and are fetched through
+    /// `fs.buffer.get` to expose their conflict/base content.
+    #[serde(rename = "fs.changed", rename_all = "camelCase")]
+    FsChanged {
+        workspace_id: String,
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
+        kind: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<FileMetadata>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        buffer_revision: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        conflict: bool,
+    },
+
+    /// Structured filesystem failure. Conflicts include both versions and
+    /// current metadata so the client can offer reload/compare/explicit
+    /// overwrite without opening an unbounded file.
+    #[serde(rename = "fs.error", rename_all = "camelCase")]
+    FsError {
+        request_id: String,
+        workspace_id: String,
+        code: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<FileMetadata>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        actual_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current: Option<FileMetadata>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_buffer_revision: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        actual_buffer_revision: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_buffer: Option<Box<FileBuffer>>,
     },
 
     /// Reply to `worktree.list`. `repoPath` echoes the request so the client
@@ -769,6 +1846,11 @@ pub enum ServerMessage {
         /// `"create"` | `"remove"`.
         action: String,
         path: String,
+        /// Durable workspace created for a linked checkout. Older peers may
+        /// omit this field; remove operations can still use the path-only
+        /// form.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<WorkspaceSummary>,
     },
 
     /// Failure reply to any `worktree.*` request. `dirty` is true only when
@@ -783,4 +1865,187 @@ pub enum ServerMessage {
         #[serde(default)]
         dirty: bool,
     },
+
+    #[serde(rename = "project.list", rename_all = "camelCase")]
+    ProjectList {
+        request_id: String,
+        host_id: String,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+        projects: Vec<ProjectSummary>,
+    },
+
+    #[serde(rename = "project.updated", rename_all = "camelCase")]
+    ProjectUpdated {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        project: ProjectSummary,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+    },
+
+    #[serde(rename = "project.deleted", rename_all = "camelCase")]
+    ProjectDeleted {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        project_id: String,
+        host_id: String,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+    },
+
+    #[serde(rename = "workspace.snapshot", rename_all = "camelCase")]
+    WorkspaceSnapshot {
+        request_id: String,
+        host_id: String,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+        projects: Vec<ProjectSummary>,
+        workspaces: Vec<WorkspaceSummary>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_project_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_workspace_id: Option<String>,
+    },
+
+    #[serde(rename = "workspace.updated", rename_all = "camelCase")]
+    WorkspaceUpdated {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        workspace: WorkspaceSummary,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+    },
+
+    #[serde(rename = "workspace.focus", rename_all = "camelCase")]
+    WorkspaceFocus {
+        request_id: String,
+        host_id: String,
+        snapshot_epoch: String,
+        snapshot_revision: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_project_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_workspace_id: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_request_id_uses_wire_camel_case() {
+        let value = serde_json::to_value(ServerMessage::Error {
+            message: "conflict".to_string(),
+            request_id: Some("req-1".to_string()),
+            code: Some("conflict".to_string()),
+            retryable: false,
+        })
+        .expect("error serializes");
+        assert_eq!(value.get("type").and_then(Value::as_str), Some("error"));
+        assert_eq!(
+            value.get("requestId").and_then(Value::as_str),
+            Some("req-1")
+        );
+        assert!(value.get("request_id").is_none());
+
+        let legacy: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type": "error",
+            "message": "legacy",
+            "request_id": "old-req"
+        }))
+        .expect("legacy snake_case error still deserializes");
+        match legacy {
+            ServerMessage::Error { request_id, .. } => {
+                assert_eq!(request_id.as_deref(), Some("old-req"));
+            }
+            other => panic!("expected error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn filesystem_wire_variants_use_camel_case_request_fields() {
+        let value = serde_json::to_value(ServerMessage::FsError {
+            request_id: "req-2".to_string(),
+            workspace_id: "ws-1".to_string(),
+            code: "conflict".to_string(),
+            message: "changed".to_string(),
+            path: Some("src/main.rs".to_string()),
+            metadata: None,
+            expected_version: Some("old".to_string()),
+            actual_version: Some("new".to_string()),
+            current: None,
+            expected_buffer_revision: None,
+            actual_buffer_revision: None,
+            current_buffer: None,
+        })
+        .expect("filesystem error serializes");
+        assert_eq!(value.get("type").and_then(Value::as_str), Some("fs.error"));
+        assert_eq!(
+            value.get("requestId").and_then(Value::as_str),
+            Some("req-2")
+        );
+        assert_eq!(
+            value.get("workspaceId").and_then(Value::as_str),
+            Some("ws-1")
+        );
+        assert_eq!(
+            value.get("expectedVersion").and_then(Value::as_str),
+            Some("old")
+        );
+        assert!(value.get("request_id").is_none());
+        assert!(value.get("workspace_id").is_none());
+    }
+
+    #[test]
+    fn durable_buffer_wire_uses_camel_case_and_preserves_base_content() {
+        let request: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "fs.buffer.set",
+            "requestId": "req-buffer",
+            "workspaceId": "ws-1",
+            "path": "src/main.rs",
+            "content": "draft",
+            "baseContent": "base",
+            "expectedBufferRevision": 7
+        }))
+        .expect("buffer request deserializes");
+        match request {
+            ClientMessage::FsBufferSet {
+                request_id,
+                workspace_id,
+                base_content,
+                expected_buffer_revision,
+                ..
+            } => {
+                assert_eq!(request_id, "req-buffer");
+                assert_eq!(workspace_id, "ws-1");
+                assert_eq!(base_content.as_deref(), Some("base"));
+                assert_eq!(expected_buffer_revision, Some(7));
+            }
+            other => panic!("expected fs.buffer.set, got {other:?}"),
+        }
+
+        let response = serde_json::to_value(ServerMessage::FsBufferResult {
+            request_id: "req-buffer".to_string(),
+            workspace_id: "ws-1".to_string(),
+            buffer: FileBuffer {
+                workspace_id: "ws-1".to_string(),
+                path: "src/main.rs".to_string(),
+                content: "draft".to_string(),
+                base_content: "base".to_string(),
+                base_version: Some("base-hash".to_string()),
+                external_version: Some("disk-hash".to_string()),
+                revision: 7,
+                dirty: true,
+                conflict: true,
+                updated_at: 123,
+            },
+        })
+        .expect("buffer response serializes");
+        assert_eq!(response["type"], "fs.buffer.result");
+        assert_eq!(response["buffer"]["baseContent"], "base");
+        assert_eq!(response["buffer"]["revision"], 7);
+        assert!(response["buffer"].get("base_content").is_none());
+    }
 }

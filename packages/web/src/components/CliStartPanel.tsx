@@ -28,7 +28,6 @@
  * globally.
  */
 import { useEffect, useState } from "react";
-import type { AgentKind } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { DirectoryBrowser } from "./DirectoryBrowser";
@@ -38,10 +37,14 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function CliStartPanel({ agent }: { agent: AgentKind }) {
+export function CliStartPanel({ agent }: { agent: string }) {
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
   const activeHostId = usePerchStore((s) => s.activeHostId);
+  const serverInfo = usePerchStore((s) => s.serverInfo);
+  const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
+  const manifestState = usePerchStore((s) => s.agentManifestsByHost[activeHostId]);
+  const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
   const startCli = usePerchStore((s) => s.startCli);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const [browsing, setBrowsing] = useState(false);
@@ -50,7 +53,16 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
   // fallback — see `cliAgentBySession`). Local state so the toggle is
   // instantly responsive; it's written back into the store only when the
   // user actually starts/creates a session (see the button handlers below).
-  const [selectedAgent, setSelectedAgent] = useState<AgentKind>(agent);
+  const [selectedAgent, setSelectedAgent] = useState(agent);
+
+  const capabilities = activeHostId === "local"
+    ? serverInfo?.capabilities ?? []
+    : workspaceCapabilitiesByHost[activeHostId] ?? [];
+  const manifestCapability = capabilities.includes("agent.manifest.list");
+
+  useEffect(() => {
+    if (manifestCapability) fetchAgentManifests(activeHostId);
+  }, [activeHostId, fetchAgentManifests, manifestCapability]);
 
   // The resolved default can change out from under this component (e.g. the
   // user switches to a different not-yet-started session); follow it rather
@@ -58,6 +70,28 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
   useEffect(() => {
     setSelectedAgent(agent);
   }, [agent]);
+
+  const manifestByAgent = new Map(
+    (manifestState?.manifests ?? []).map((manifest) => [manifest.id, manifest]),
+  );
+  const selectedManifest = manifestByAgent.get(selectedAgent);
+  const choices = manifestCapability
+    ? (manifestState?.manifests ?? [])
+      .filter((manifest) => manifest.supportedModes.includes("cli") && manifest.capabilities.includes("interactiveTerminal"))
+      .map((manifest) => ({ id: manifest.id, label: manifest.displayName, available: manifest.available, reason: manifest.reason }))
+    : AGENTS.map((candidate) => ({ ...candidate, available: true, reason: undefined }));
+  // Once a host advertises manifest discovery, wait for its authoritative
+  // answer before allowing a real CLI process to start. Legacy peers keep the
+  // historical provider choices because they cannot describe availability.
+  const selectedAvailable = !manifestCapability || (
+    manifestState?.state === "ready" && choices.some((choice) => choice.id === selectedAgent && choice.available)
+  );
+  const firstAvailableId = choices.find((choice) => choice.available)?.id;
+
+  useEffect(() => {
+    if (manifestState?.state !== "ready" || selectedAvailable || !firstAvailableId) return;
+    setSelectedAgent(firstAvailableId);
+  }, [firstAvailableId, manifestState?.state, selectedAvailable]);
 
   // Only a *listed* session can be resumed in place. The blank connect-time
   // session is deliberately invisible in `sessions` (db.rs hides sessions
@@ -75,19 +109,19 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
     ),
   );
 
-  const agentLabel = selectedAgent === "claude" ? "Claude" : "Codex";
+  const agentLabel = selectedManifest?.displayName ?? AGENTS.find((candidate) => candidate.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <div className="cli-start" data-testid="cli-start-panel">
       <div className="cli-start__card">
         <h2 className="cli-start__title">Start a {agentLabel} session</h2>
         <p className="cli-start__hint">
-          CLI mode runs the real {selectedAgent} command in a terminal. Choose the
+          CLI mode runs {agentLabel} in a terminal. Choose the
           provider and the project it should run in.
         </p>
 
         <div className="cli-start__agents" role="group" aria-label="CLI provider">
-          {AGENTS.map((a) => (
+          {choices.map((a) => (
             <button
               key={a.id}
               type="button"
@@ -95,6 +129,11 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
                 "cli-start__agent-btn" + (a.id === selectedAgent ? " cli-start__agent-btn--active" : "")
               }
               data-testid={`cli-start-agent-${a.id}`}
+              disabled={manifestCapability && (
+                manifestState?.state !== "ready" || !a.available
+              )}
+              title={a.reason}
+              aria-pressed={a.id === selectedAgent}
               onClick={() => setSelectedAgent(a.id)}
             >
               {a.label}
@@ -102,11 +141,36 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
           ))}
         </div>
 
+        {manifestCapability && manifestState?.state === "ready" && !firstAvailableId && (
+          <div className="cli-start__provider-status" role="status">
+            No CLI providers are available on this host. Install a provider or check its configuration, then retry.
+            <button type="button" onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
+          </div>
+        )}
+
+        {manifestState?.state === "loading" && (
+          <div className="cli-start__provider-status" role="status" data-testid="cli-manifest-loading">
+            Checking providers on {activeHostId === "local" ? "this host" : activeHostId}…
+          </div>
+        )}
+        {manifestState?.state === "error" && (
+          <div className="cli-start__provider-status cli-start__provider-status--error" role="alert">
+            {manifestState.error || "Provider discovery failed."}
+            <button type="button" onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
+          </div>
+        )}
+        {manifestState?.state === "ready" && selectedManifest && !selectedManifest.available && (
+          <div className="cli-start__provider-status cli-start__provider-status--error" role="alert" data-testid="cli-provider-unavailable">
+            {selectedManifest.displayName} is unavailable on this host. {selectedManifest.reason || "Choose an available provider."}
+          </div>
+        )}
+
         {current?.cwd && (
           <button
             type="button"
             className="cli-start__primary"
             data-testid="cli-start-here"
+            disabled={!selectedAvailable}
             onClick={() => startCli(current.id, selectedAgent)}
           >
             Start in {basename(current.cwd)}
@@ -125,6 +189,7 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
                   className="cli-start__project"
                   data-testid={`cli-start-project-${i}`}
                   title={cwd}
+                  disabled={!selectedAvailable}
                   onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent)}
                 >
                   {basename(cwd)}
@@ -140,7 +205,9 @@ export function CliStartPanel({ agent }: { agent: AgentKind }) {
             <div className="cli-start__section-label">Choose a folder</div>
             <DirectoryBrowser
               hostId={activeHostId}
-              onUseFolder={(path) => createSessionOnHost(activeHostId, path, selectedAgent)}
+              onUseFolder={(path) => {
+                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent);
+              }}
             />
           </div>
         ) : (

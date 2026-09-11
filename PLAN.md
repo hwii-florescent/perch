@@ -69,6 +69,61 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
 
 ## Phases & Milestones
 
+### ADE rework checkpoint — 2026-09-10 (in progress)
+
+Work now continues directly under the user's instruction to finish the current
+workers and create no more agents. The full contract remains `goals.md` and
+`SPEC.md`; no ADE phase or final acceptance gate is declared complete here.
+
+User clarification, 2026-09-11: ship Claude Code, Codex, OMP, Pi, OpenCode,
+and ordinary terminals as first-class choices. UI mode is a web view and
+control surface of the same CLI-owned session, not a Perch agent harness.
+The CLI retains its tools, instructions, authentication, approvals, and
+transcript. Retiring the separate Hosted/print-runner path in favor of this
+shared native session is required; refusing UI sends until the CLI is stopped
+is an interim defect, not an acceptable final mode-switch contract.
+Alpha/Beta are isolated automated-test programs only. Their checks do not
+establish real provider support or UI/CLI turn continuity.
+
+Configured-provider loading, environment enforcement inside tmux, durable
+provider selection before input, and generic CLI picker/reload are now
+implemented. The completed configuration checkpoint passed 247 core tests,
+two protocol tests, 216 web tests, build, and the isolated desktop/mobile
+provider suite in both Chromium and WebKit. Screenshot review also fixed the
+provider pane badge and terminal-response bytes leaking into session titles.
+The five built-in choices and native UI connection are the next active slice.
+
+Implemented and browser-verified mode policy discovery, stable blank-session
+identity, server-owned workspace associations, multi-view invalidation, and
+session/workspace/device precedence with safe gated CLI start. Fixed a real
+cold-start React render loop missed by builds and unit tests. Direct checks:
+235 core unit tests, two protocol parity tests, 206 web tests, shared/web build,
+and headless Chromium mode-policy plus responsive R1/R2/R2b interactions.
+Detailed evidence and remaining gates are in
+`docs/ADE-REWORK-VERIFICATION.md`. Plain shell persistence now passes real browser reload, phone view release,
+and isolated core-crash recovery in WebKit and Chromium, preserving the same
+PID and shell state. Workspace tests pass (238 core plus two protocol checks);
+213 web tests, the shared/web build, and all ten WebKit/Chromium terminal
+checks pass. Local agent terminals now also attach through the lifecycle adapter, retain
+host-owned replay across view release, and expose generation-bound input/resize
+control. Real Claude desktop/phone ownership and reconnect checks passed in
+both WebKit and Chromium. Latest checks: 240 core tests, two protocol checks,
+216 web tests, shared/web build, formatting, and Clippy with the same five
+existing warnings. See the 2026-09-11 checkpoint in the verification report for
+browser rerun status and explicit limits. Seamless CLI-backed UI
+prompt/transcript continuity, complete native-agent recovery,
+full worktree/remote pairing flows, mixed workspace recovery, lifecycle-driven
+hibernation, and populated resource budgets remain incomplete.
+
+V-08 local review delivery is now observed: the real browser added two exact
+inline anchors, edited/resolved/reopened a note, previewed one packet, selected
+the session, sent it to Claude, and received one provider turn despite an
+explicit same-operation retry. Durable delivery now pushes its confirmation
+to the pane and the send button recovers after each correlated request. The
+latest checks pass 208 web tests, 235 core unit tests, both protocol tests, and
+the real review browser flow; core Clippy retains only the five baseline
+warnings. Recovery and remote/mobile gates remain separate and open.
+
 All phases below are **done**. One line each; the full record — root causes, rejected
 alternatives, and the reasoning behind each decision — lives in
 [`docs/PHASE-HISTORY.md`](docs/PHASE-HISTORY.md). Read that before re-litigating anything here.

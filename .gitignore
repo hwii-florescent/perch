@@ -10,3 +10,6 @@ crates/perch-desktop/gen/
 reference/herdr/
 reference/jean/
 .claude/
+# Local UI captures can contain real session titles and account details.
+.impeccable/review/
+e2e/artifacts-provider-config/

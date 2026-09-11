@@ -1,7 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { diffLines } from "diff";
-import { usePerchStore, type ChatMessage, type ToolCallEntry } from "../store";
+import {
+  agentRuntimeCapabilitiesKnown,
+  resolveSessionModeForView,
+  usePerchStore,
+  type ChatMessage,
+  type ToolCallEntry,
+} from "../store";
 import { AGENTS } from "../models";
 import { renderMarkdown } from "../markdown";
 import { ModelChip } from "../components/ModelChip";
@@ -20,7 +26,8 @@ import { uploadAttachment, type StagedAttachment } from "../attachments";
 import { AgentCliTerminal } from "./AgentCliTerminal";
 import { CliStartPanel } from "../components/CliStartPanel";
 import { NoSessionPanel } from "../components/NoSessionPanel";
-import type { AgentKind, CommandEntry } from "@perch/shared";
+import { SessionModeControl, type SessionModeOverrideScope } from "../components/SessionModeControl";
+import type { AgentKind, CommandEntry, SessionMode } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -626,17 +633,80 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
   // This is *provider* selection only (which CLI binary launches), not
   // model/effort chrome — CLAUDE.md's "zero model chrome in CLI mode" stands;
   // see CliStartPanel.tsx's header comment for the full rationale.
-  const cliAgent: AgentKind = sessionId ? (cliAgentBySession[sessionId] ?? agent) : agent;
+  const persistedCliProvider = usePerchStore((state) => state.sessions.find((session) => session.id === sessionId)?.cliProviderId);
+  const cliAgent = sessionId ? (cliAgentBySession[sessionId] ?? persistedCliProvider ?? agent) : agent;
   const cliError = usePerchStore((s) => s.cliError);
   const updateSettings = usePerchStore((s) => s.updateSettings);
+  const sessionSummary = usePerchStore((s) =>
+    sessionId ? s.sessions.find((candidate) => candidate.id === sessionId) : undefined,
+  );
+  const activeHostId = usePerchStore((s) => s.activeHostId);
+  const legacyChatMode = usePerchStore((s) => s.settings?.chatMode ?? "hosted");
+  const owningHostId = sessionSummary?.hostId ?? activeHostId;
+  const runtimeCapabilitiesKnown = usePerchStore((s) =>
+    agentRuntimeCapabilitiesKnown(s, owningHostId),
+  );
+  // Return a scalar snapshot. A newly allocated [] while the handshake is
+  // pending makes useSyncExternalStore see a change on every read and can
+  // crash a cold page with React's maximum-update-depth error.
+  const runtimeModeAvailable = usePerchStore((s) => {
+    const capabilities = owningHostId === "local"
+      ? s.serverInfo?.capabilities
+      : s.workspaceCapabilitiesByHost[owningHostId];
+    return Boolean(capabilities?.includes("session.mode.get") && capabilities.includes("session.mode.set"));
+  });
+  const sessionModeState = usePerchStore((s) =>
+    sessionId ? s.sessionModes[sessionId] : undefined,
+  );
+  const workspaceId = sessionSummary?.workspaceId ?? sessionModeState?.workspaceId;
+  const fetchSessionMode = usePerchStore((s) => s.fetchSessionMode);
+  const setSessionMode = usePerchStore((s) => s.setSessionMode);
+  useEffect(() => {
+    if (runtimeModeAvailable && sessionId) fetchSessionMode(sessionId, workspaceId);
+  }, [fetchSessionMode, runtimeModeAvailable, sessionId, workspaceId]);
   const sessionCommands = usePerchStore((s) => s.sessionCommands);
   const fetchCommands = usePerchStore((s) => s.fetchCommands);
-  // Global chat mode (Settings > Chat Mode) — no longer per-chat client
-  // state. Every open chat pane reads this same value, so flipping the
-  // setting flips already-open chats too (see AgentCliTerminal's kill-on-
-  // unmount effect for how the CLI->Hosted->CLI PTY lifecycle stays correct
-  // when this value changes out from under a mounted pane).
-  const mode: "hosted" | "cli" = usePerchStore((s) => s.settings?.chatMode ?? "hosted");
+  // Newer peers own mode policy per session/workspace/device. Until the first
+  // correlated result arrives, keep the pane neutral even if the legacy global
+  // setting says CLI: mounting the terminal before the server answers could
+  // create a provider process for the wrong mode. Once a result exists, retain
+  // that server-established mode while later reads/writes are pending.
+  const modeResolution = resolveSessionModeForView(
+    runtimeCapabilitiesKnown,
+    runtimeModeAvailable,
+    sessionModeState,
+    legacyChatMode,
+  );
+  const mode: SessionMode = modeResolution.mode;
+  const modePending = modeResolution.pending;
+
+  function applyMode(next: SessionMode, scope: SessionModeOverrideScope = "session") {
+    if (!sessionId) return;
+    if (runtimeModeAvailable) {
+      setSessionMode(sessionId, scope, next, workspaceId);
+    } else {
+      // Legacy peers only understand the old persisted global setting.
+      updateSettings({ chatMode: next });
+    }
+  }
+
+  function clearMode(scope: SessionModeOverrideScope) {
+    if (!sessionId || !runtimeModeAvailable) return;
+    setSessionMode(sessionId, scope, undefined, workspaceId, true);
+  }
+
+  const modeControl = sessionId && runtimeModeAvailable ? (
+    <SessionModeControl
+      mode={mode}
+      scope={sessionModeState?.scope ?? "default"}
+      state={sessionModeState?.state ?? (modePending ? "loading" : "idle")}
+      error={sessionModeState?.error}
+      hasWorkspace={Boolean(workspaceId)}
+      canPersist={runtimeModeAvailable}
+      onChange={applyMode}
+      onClear={clearMode}
+    />
+  ) : null;
 
   // CLI mode only mounts a terminal once the user has actually chosen to work
   // somewhere — either they created this session (`cliStartedSessions`), or
@@ -862,18 +932,26 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
 
   return (
     <div className="chat">
+      {modeControl}
       {!sessionId ? (
         // Bug 2: no active session (e.g. the last one was just deleted) —
         // render a real empty state instead of a disabled composer claiming
         // "Connecting..." even though the socket is fine. See NoSessionPanel.
         <NoSessionPanel connected={connected} />
+      ) : modePending ? (
+        <div className="chat__mode-pending" data-testid="session-mode-pending" role="status">
+          <strong>{sessionModeState?.state === "error" ? "Session mode unavailable" : "Loading session mode"}</strong>
+          <span>
+            {sessionModeState?.error ?? "Waiting for the session's persisted mode before opening the workspace."}
+          </span>
+        </div>
       ) : mode === "cli" && cliReady ? (
         <AgentCliTerminal
           key={`${sessionId}-${cliAgent}`}
           sessionId={sessionId}
           agent={cliAgent}
           cliError={cliError}
-          onExitCli={() => updateSettings({ chatMode: "hosted" })}
+          onExitCli={() => applyMode("hosted", sessionModeState?.scope === "workspace" ? "workspace" : "session")}
         />
       ) : mode === "cli" ? (
         <CliStartPanel agent={cliAgent} />

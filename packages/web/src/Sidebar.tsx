@@ -40,6 +40,7 @@ import { DirectoryBrowser } from "./components/DirectoryBrowser";
 import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker } from "./components/AgentPicker";
+import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState, AgentKind } from "@perch/shared";
 
@@ -677,6 +678,8 @@ export function Sidebar() {
   const deleteSession = usePerchStore((s) => s.deleteSession);
   const sidebarCollapsed = usePerchStore((s) => s.sidebarCollapsed);
   const toggleSidebar = usePerchStore((s) => s.toggleSidebar);
+  const workspaceCapabilities = usePerchStore((s) => s.workspaceCapabilities);
+  const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
 
   const [hostAnchor, setHostAnchor] = useState<DOMRect | null>(null);
   const [newAnchor, setNewAnchor] = useState<DOMRect | null>(null);
@@ -697,6 +700,10 @@ export function Sidebar() {
   const navState = { sessions, sessionId, activeHostId, activeProject };
   const projects = projectsForHost(navState, activeHostId);
   const active = effectiveActiveProject(navState);
+  const workspaceNavigationEnabled = (activeHostId === "local"
+    ? workspaceCapabilities
+    : workspaceCapabilitiesByHost[activeHostId] ?? []
+  ).includes("workspace.snapshot");
 
   const projectCwds = [
     ...new Set(
@@ -786,25 +793,29 @@ export function Sidebar() {
           </button>
         </div>
 
-        <div className="sidebar__list" data-testid="project-list">
-          {projects.length === 0 ? (
-            <p className="sidebar__empty">No projects yet.</p>
-          ) : (
-            projects.map((group) => (
-              <ProjectRow
-                key={group.key}
-                group={group}
-                hostId={activeHostId}
-                isActiveProject={active != null && active.cwd === group.cwd}
-                sessionId={sessionId}
-                onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
-                onSwitch={switchSession}
-                onArchive={archiveSession}
-                onDelete={deleteSession}
-              />
-            ))
-          )}
-        </div>
+        {workspaceNavigationEnabled ? (
+          <WorkspaceOverview />
+        ) : (
+          <div className="sidebar__list" data-testid="project-list">
+            {projects.length === 0 ? (
+              <p className="sidebar__empty">No projects yet.</p>
+            ) : (
+              projects.map((group) => (
+                <ProjectRow
+                  key={group.key}
+                  group={group}
+                  hostId={activeHostId}
+                  isActiveProject={active != null && active.cwd === group.cwd}
+                  sessionId={sessionId}
+                  onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
+                  onSwitch={switchSession}
+                  onArchive={archiveSession}
+                  onDelete={deleteSession}
+                />
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <div className="sidebar__footer">

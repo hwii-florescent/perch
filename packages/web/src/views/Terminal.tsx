@@ -7,8 +7,19 @@ import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
+import { PersistentTerminal } from "./PersistentTerminal";
 
-export function TerminalView({ active }: { active: boolean }) {
+export function TerminalView({ active, paneId, sessionId: ownerSessionId, layoutPanelId, onPaneChange }: {
+  active: boolean; paneId?: string; sessionId?: string; layoutPanelId?: string; onPaneChange?: (paneId: string) => void;
+}) {
+  const sessionId = usePerchStore((state) => ownerSessionId ?? state.sessionId);
+  const ready = usePerchStore((state) => state.connected && state.serverInfo !== null);
+  const persistent = usePerchStore((state) => state.serverInfo?.capabilities?.includes("terminal.open") === true);
+  if (!ready || !sessionId) return <div className="terminal__notice" role="status">Connecting to terminal…</div>;
+  return persistent ? <PersistentTerminal key={sessionId} active={active} sessionId={sessionId} paneId={paneId} layoutPanelId={layoutPanelId} onPaneChange={onPaneChange} /> : <LegacyTerminalView active={active} />;
+}
+
+function LegacyTerminalView({ active }: { active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const perchTermRef = useRef<PerchTerminal | null>(null);

@@ -44,8 +44,10 @@ enum EscState {
     /// also what swallows bracketed-paste markers (`ESC [ 200 ~`), so pasted
     /// text lands in the buffer as plain characters.
     Csi,
-    /// Inside `ESC ] … BEL` (or ST). Consumed wholesale.
+    /// Inside OSC/DCS/APC/PM responses, ending in BEL or ST. Consumed wholesale.
     Osc,
+    /// ESC within a string response; consume the following ST backslash too.
+    OscEsc,
 }
 
 /// Per-terminal accumulator. One of these lives per CLI-attached session for
@@ -71,7 +73,7 @@ impl CliTitleBuffer {
                 EscState::Esc => {
                     self.esc = match ch {
                         '[' => EscState::Csi,
-                        ']' => EscState::Osc,
+                        ']' | 'P' | '_' | '^' => EscState::Osc,
                         // Any other byte completes a two-char sequence. Note
                         // this is what makes Alt/Shift+Enter (`ESC CR`)
                         // correctly *not* submit: the CR is consumed here.
@@ -84,11 +86,18 @@ impl CliTitleBuffer {
                     }
                 }
                 EscState::Osc => {
-                    // BEL, or the ST introducer (the ESC of `ESC \`) — either
-                    // way we're done with the string payload.
-                    if ch == '\u{7}' || ch == '\u{1b}' {
-                        self.esc = EscState::Ground;
-                    }
+                    self.esc = match ch {
+                        '\u{7}' | '\u{9c}' => EscState::Ground,
+                        '\u{1b}' => EscState::OscEsc,
+                        _ => EscState::Osc,
+                    };
+                }
+                EscState::OscEsc => {
+                    self.esc = match ch {
+                        '\\' | '\u{7}' | '\u{9c}' => EscState::Ground,
+                        '\u{1b}' => EscState::OscEsc,
+                        _ => EscState::Osc,
+                    };
                 }
                 EscState::Ground => match ch {
                     '\u{1b}' => self.esc = EscState::Esc,
@@ -229,6 +238,19 @@ mod tests {
         buf.feed("[C");
         buf.feed("cd");
         assert_eq!(buf.feed("\r"), Some("abcd".to_string()));
+    }
+
+    #[test]
+    fn terminal_string_responses_do_not_prefix_the_user_title() {
+        let mut buf = CliTitleBuffer::new();
+        for introducer in [']', 'P', '_', '^'] {
+            assert_eq!(
+                buf.feed(&format!("\u{1b}{introducer}10;rgb:aaaa/bbbb/cccc\u{1b}")),
+                None
+            );
+            assert_eq!(buf.feed("\\"), None);
+        }
+        assert_eq!(buf.feed("actual prompt\r"), Some("actual prompt".into()));
     }
 
     #[test]

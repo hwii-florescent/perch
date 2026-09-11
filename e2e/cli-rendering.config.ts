@@ -20,7 +20,7 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["cli-rendering.spec.ts"],
+  testMatch: ["cli-rendering.spec.ts", "workspace-terminals.spec.ts", "agent-terminal-ownership.spec.ts"],
   outputDir: "artifacts-cli-rendering",
   timeout: 180000,
   workers: 1,

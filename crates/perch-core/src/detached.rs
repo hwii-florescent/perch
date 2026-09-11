@@ -115,6 +115,14 @@ pub struct FinishedTurn {
     pub model: Option<String>,
     pub text: String,
     pub thinking: String,
+    /// The durable prompt operation associated with this run. `None` keeps
+    /// recovery compatible with detached rows created before prompt
+    /// idempotency was introduced.
+    pub operation_id: Option<String>,
+    /// Whether the provider produced a positive stream event. A remote
+    /// process can exist while its binary, credentials, or prompt launch is
+    /// failing, so process creation alone never means `delivered`.
+    pub accepted: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +132,9 @@ pub struct FinishedTurn {
 /// Everything needed to launch one detached turn.
 pub struct TurnRequest {
     pub session_id: String,
+    /// The durable prompt operation that owns this detached run. It is copied
+    /// into the run row so a later recovery can settle the outbox safely.
+    pub operation_id: Option<String>,
     pub host_id: String,
     pub ssh_host: String,
     pub cwd: String,
@@ -220,9 +231,18 @@ impl DetachedManager {
             let session_id = req.session_id.clone();
             let agent = req.agent;
             let model = req.model.clone();
+            let operation_id = req.operation_id.clone();
             if let Err(err) = this.clone().launch_and_tail(req).await {
                 if let Some(sink) = this.sink() {
-                    sink.emit(&session_id, ServerMessage::Error { message: err });
+                    sink.emit(
+                        &session_id,
+                        ServerMessage::Error {
+                            message: err,
+                            request_id: None,
+                            code: None,
+                            retryable: false,
+                        },
+                    );
                     sink.emit(
                         &session_id,
                         ServerMessage::ChatDone {
@@ -237,6 +257,8 @@ impl DetachedManager {
                             model,
                             text: String::new(),
                             thinking: String::new(),
+                            operation_id,
+                            accepted: false,
                         },
                     );
                     sink.set_running(&session_id, false);
@@ -351,6 +373,7 @@ impl DetachedManager {
         let mut row = DetachedRunRow {
             run_id: run_id.clone(),
             session_id: req.session_id.clone(),
+            operation_id: req.operation_id.clone(),
             host_id: req.host_id.clone(),
             ssh_host: req.ssh_host.clone(),
             agent: agent_str(req.agent).to_string(),
@@ -643,6 +666,9 @@ impl DetachedManager {
                                         "the turn never started on {} (perch stopped mid-launch); send it again",
                                         run.host_id
                                     ),
+                                    request_id: None,
+                                    code: None,
+                                    retryable: false,
                                 },
                             );
                             sink.emit(
@@ -815,6 +841,37 @@ impl DetachedManager {
             | AgentEvent::ToolUse { .. }
             | AgentEvent::ToolResult { .. } => {}
         }
+        let first_provider_event =
+            !acc.provider_accepted && acc.error.is_none() && event.is_provider_progress();
+        if first_provider_event {
+            acc.provider_accepted = true;
+            if let Some(operation_id) = run.operation_id.as_deref() {
+                if let Err(error) =
+                    self.db
+                        .settle_prompt_dispatch(operation_id, "delivered", chrono_millis())
+                {
+                    if let Some(sink) = self.sink() {
+                        sink.emit(
+                            &sid,
+                            ServerMessage::Error {
+                                message: format!(
+                                    "prompt operation {operation_id} could not be settled: {error}"
+                                ),
+                                request_id: None,
+                                code: Some("prompt_dispatch_persistence_failed".to_string()),
+                                retryable: false,
+                            },
+                        );
+                    } else {
+                        tracing::error!(
+                            operation_id,
+                            error = %error,
+                            "failed to persist detached prompt dispatch outcome"
+                        );
+                    }
+                }
+            }
+        }
         let Some(sink) = self.sink() else { return };
         match event {
             AgentEvent::Chunk(text) => {
@@ -860,7 +917,15 @@ impl DetachedManager {
                 },
             ),
             AgentEvent::Error(message) => {
-                sink.emit(&sid, ServerMessage::Error { message });
+                sink.emit(
+                    &sid,
+                    ServerMessage::Error {
+                        message,
+                        request_id: None,
+                        code: None,
+                        retryable: false,
+                    },
+                );
             }
         }
     }
@@ -990,6 +1055,9 @@ impl DetachedManager {
                     &run.session_id,
                     ServerMessage::Error {
                         message: format!("{detail}{hint}"),
+                        request_id: None,
+                        code: None,
+                        retryable: false,
                     },
                 );
             }
@@ -1007,6 +1075,8 @@ impl DetachedManager {
                     model: run.model.clone(),
                     text: acc.text.clone(),
                     thinking: acc.thinking.clone(),
+                    operation_id: run.operation_id.clone(),
+                    accepted: acc.provider_accepted && acc.error.is_none(),
                 },
             );
             sink.set_running(&run.session_id, false);
@@ -1193,6 +1263,10 @@ struct Accumulator {
     usage: Option<ChatUsage>,
     error: Option<String>,
     exit_code: Option<i32>,
+    /// Set only after the shared parser emits a non-error provider event.
+    /// `perch.meta` and the synthetic exit marker do not count: a launched
+    /// process can still fail before the provider accepts the prompt.
+    provider_accepted: bool,
 }
 
 /// Thin dispatcher over the two shared stream-json parsers in `agent.rs`.
@@ -1519,7 +1593,7 @@ mod tests {
                 ServerMessage::ChatThinking { .. } => "thinking".to_string(),
                 ServerMessage::ChatToolUse { name, .. } => format!("tool_use:{name}"),
                 ServerMessage::ChatDone { .. } => "done".to_string(),
-                ServerMessage::Error { message } => format!("error:{message}"),
+                ServerMessage::Error { message, .. } => format!("error:{message}"),
                 _ => "other".to_string(),
             };
             self.0.lock().unwrap().emitted.push(label);
@@ -1533,6 +1607,33 @@ mod tests {
                 turn.thinking,
                 agent_str(turn.agent).to_string(),
             ));
+        }
+    }
+
+    /// Minimal durable sink for operation outcome tests. The production sink
+    /// performs this settlement after persisting the turn; keeping the same
+    /// boundary here makes the replay regression exercise `FinishedTurn`'s
+    /// acceptance bit instead of merely inspecting parser state.
+    struct SettlementSink {
+        db: Arc<HistoryDb>,
+    }
+
+    impl TurnSink for SettlementSink {
+        fn emit(&self, _session_id: &str, _msg: ServerMessage) {}
+
+        fn set_running(&self, _session_id: &str, _running: bool) {}
+
+        fn persist_turn(&self, _session_id: &str, turn: FinishedTurn) {
+            if let Some(operation_id) = turn.operation_id {
+                let state = if turn.accepted {
+                    "delivered"
+                } else {
+                    "unconfirmed"
+                };
+                self.db
+                    .settle_prompt_dispatch(&operation_id, state, chrono_millis())
+                    .expect("settle replayed prompt operation");
+            }
         }
     }
 
@@ -1567,6 +1668,7 @@ mod tests {
             provider_session_id: None,
             status: "running".to_string(),
             created_at: 0,
+            operation_id: None,
         }
     }
 
@@ -1692,6 +1794,56 @@ mod tests {
         drop(rec);
         let row = mgr.db.get_session(&run.session_id).unwrap().unwrap();
         assert_eq!(row.codex_thread_id.as_deref(), Some("th-9"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A provider completion marker by itself is not evidence that the
+    /// provider accepted the prompt. This is the recovery shape produced by
+    /// an empty or failed launch: the parser sees terminal metadata, but no
+    /// provider progress event. The durable operation must remain
+    /// `unconfirmed` so a reconnect cannot report a false delivery.
+    #[tokio::test]
+    async fn completion_without_provider_progress_stays_unconfirmed() {
+        let path =
+            std::env::temp_dir().join(format!("perch-detached-test-{}.sqlite", Uuid::new_v4()));
+        let db = Arc::new(HistoryDb::open(&path).expect("open test db"));
+        let mgr = DetachedManager::new(db.clone());
+        mgr.attach_sink(Arc::new(SettlementSink { db: db.clone() }));
+        let mut run = test_run("claude");
+        run.operation_id = Some("op-empty-provider".to_string());
+        mgr.db.create_session(&run.session_id, &run.cwd).unwrap();
+        mgr.db
+            .reserve_prompt_operation(
+                "op-empty-provider",
+                &run.session_id,
+                None,
+                "digest-empty-provider",
+                "hello",
+                Some("claude"),
+                run.model.as_deref(),
+            )
+            .unwrap();
+        mgr.db.claim_prompt_operation("op-empty-provider").unwrap();
+        mgr.db.insert_detached_run(&run).unwrap();
+
+        let lines = vec![
+            r#"{"type":"perch.meta","runId":"r-empty"}"#.to_string(),
+            r#"{"type":"system","subtype":"init"}"#.to_string(),
+            r#"{"type":"result","subtype":"success","result":""}"#.to_string(),
+        ];
+        replay(&mgr, &run, AgentKind::Claude, &lines).await;
+
+        let operation = mgr
+            .db
+            .get_prompt_operation("op-empty-provider")
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation.state, "unconfirmed");
+        assert!(mgr
+            .db
+            .get_review_packet_for_operation("op-empty-provider")
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_file(path);
     }
 

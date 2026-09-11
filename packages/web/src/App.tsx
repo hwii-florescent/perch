@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DockviewApi } from "dockview-react";
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
@@ -16,6 +16,8 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useIsMobileWidth } from "./responsive";
 import { useLeaderKey } from "./keybinds";
 import { getDockviewController } from "./dockview/dockviewController";
+import { usePerchStore } from "./store";
+import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 
 export default function App() {
   const apiRef = useRef<DockviewApi | null>(null);
@@ -26,12 +28,17 @@ export default function App() {
   // store.ts's diff minimal) so it renders at most once per browser/profile.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasSeenOnboarding());
   // Phase 5 (narrow-width collapse): below MOBILE_WIDTH_BREAKPOINT, swap the
-  // desktop Sidebar+TabBar chrome for MobileHeader+MobileSwitcher. The
-  // dockview area and StatusBar stay mounted unchanged either way. Overlay
-  // open state lives here, same rationale as navigatorOpen/keybindHelpOpen
-  // above (keep store.ts's diff minimal).
+  // desktop Sidebar+TabBar/Dockview canvas for MobileHeader+MobileSwitcher
+  // and one mounted pane. StatusBar stays mounted either way. Overlay open
+  // state lives here, same rationale as navigatorOpen/keybindHelpOpen above.
   const isMobile = useIsMobileWidth();
   const [mobileSwitcherOpen, setMobileSwitcherOpen] = useState(false);
+  const [mobilePane, setMobilePane] = useState<MobilePaneKind>("chat");
+  const workspaceFilesWorkspaceId = usePerchStore((state) => state.workspaceFilesWorkspaceId);
+  const closeWorkspaceFiles = usePerchStore((state) => state.closeWorkspaceFiles);
+  const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
+  const closeWorkspaceGitReview = usePerchStore((state) => state.closeWorkspaceGitReview);
+  const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
   // Mirrors the live dockview terminal-open state so the toolbar button can
   // render pressed/unpressed — see the onDidLayoutChange subscription below.
   // The actual toggle decision itself is always made from live panel state
@@ -55,6 +62,10 @@ export default function App() {
   }, []);
 
   const toggleTerminal = useCallback(() => {
+    if (isMobile) {
+      setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
+      return;
+    }
     const controller = getDockviewController();
     if (!controller) return;
     if (controller.hasTerminalOpen()) {
@@ -65,7 +76,20 @@ export default function App() {
       }
     }
     controller.toggleTerminalGroup();
-  }, []);
+  }, [isMobile]);
+
+  // Workspace navigation originates in the shared switcher on mobile. The
+  // request ids remain in the store so desktop Dockview can consume them when
+  // the viewport grows again; the mobile canvas only selects the matching
+  // single pane while the narrow layout is active.
+  useEffect(() => {
+    if (!isMobile) return;
+    if (workspaceFilesWorkspaceId) {
+      setMobilePane("files");
+    } else if (workspaceGitReviewWorkspaceId) {
+      setMobilePane("gitReview");
+    }
+  }, [isMobile, workspaceFilesWorkspaceId, workspaceGitReviewWorkspaceId]);
 
   // Phase 4 (Keybindings + Navigator): single global keydown listener owning
   // the Ctrl+Space leader chord, Ctrl/Cmd+K, and plain '?'. Overlay open/close
@@ -89,7 +113,7 @@ export default function App() {
           className="toolbar__button"
           title="Open terminal"
           aria-label="Open terminal"
-          aria-pressed={terminalOpen}
+          aria-pressed={isMobile ? mobilePane === "terminal" : terminalOpen}
           onClick={toggleTerminal}
         >
           {"›_"}
@@ -105,7 +129,17 @@ export default function App() {
       <div className="app__body">
         {!isMobile && <Sidebar />}
         <main className="dock-area">
-          <DockviewShell onReady={handleReady} />
+          {isMobile ? (
+            <MobilePaneShell
+              activePane={mobilePane}
+              workspaceFilesWorkspaceId={workspaceFilesWorkspaceId}
+              workspaceGitReviewWorkspaceId={workspaceGitReviewWorkspaceId}
+              fallbackWorkspaceId={activeWorkspaceId}
+              onPaneChange={setMobilePane}
+              onCloseFiles={closeWorkspaceFiles}
+              onCloseGitReview={closeWorkspaceGitReview}
+            />
+          ) : <DockviewShell onReady={handleReady} />}
         </main>
       </div>
 

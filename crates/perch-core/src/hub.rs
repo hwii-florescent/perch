@@ -42,6 +42,10 @@ pub enum PendingKey {
     /// `worktree.done`, or `worktree.error`), keyed by the request's
     /// `requestId`. Same single-shot lifecycle as `Browse`.
     Worktree(String),
+    /// Waiting on a single request-correlated Git/review reply, keyed by the
+    /// request id. The remote response is relayed only to the originating
+    /// browser connection and consumed immediately.
+    Request(String),
 }
 
 /// A pending reply sender: the browser connection-id that opened the request
@@ -1068,7 +1072,7 @@ impl HubManager {
                 // A remote's terminal profile is deliberately ignored: the
                 // xterm rendering its output runs in the *local* client, so
                 // the local machine's terminal appearance is the one to match.
-                terminal_profile: _,
+                ..
             } => {
                 let info = RemoteInfo {
                     hostname: hostname.clone(),
@@ -1165,6 +1169,90 @@ impl HubManager {
                 self.relay_unicast(&key, Arc::new(msg));
             }
 
+            // Mode/lifecycle/control replies are request-correlated.  Keep
+            // them on the originating connection instead of broadcasting a
+            // device-specific lease or mode result to every browser.
+            ServerMessage::SessionMode { ref request_id, .. }
+            | ServerMessage::AgentLifecycle { ref request_id, .. }
+            | ServerMessage::AgentTerminalOpened { ref request_id, .. }
+            | ServerMessage::AgentControl { ref request_id, .. }
+            | ServerMessage::TerminalOpened { ref request_id, .. }
+            | ServerMessage::TerminalListResult { ref request_id, .. }
+            | ServerMessage::TerminalClosed { ref request_id, .. } => {
+                let key = PendingKey::Request(request_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+                self.pending_unicast.lock().unwrap().remove(&key);
+            }
+            ServerMessage::AgentManifestList {
+                request_id,
+                manifests,
+                ..
+            } => {
+                // The remote cannot choose the origin field. Stamp it from
+                // the authenticated hub connection before routing the one
+                // response back to the requesting browser.
+                let tagged = ServerMessage::AgentManifestList {
+                    request_id: request_id.clone(),
+                    host_id: Some(host_id.to_string()),
+                    manifests,
+                };
+                let key = PendingKey::Request(request_id);
+                self.relay_unicast(&key, Arc::new(tagged));
+                self.pending_unicast.lock().unwrap().remove(&key);
+            }
+
+            // A mode mutation is broadcast by its owning perch without an
+            // effective value: each browser must refetch with its own device
+            // identity. Stamp the authenticated remote host so a local client
+            // can keep policy caches host-scoped.
+            ServerMessage::SessionModeInvalidated {
+                session_id,
+                workspace_id,
+                device_id,
+                revision,
+                ..
+            } => {
+                let tagged = ServerMessage::SessionModeInvalidated {
+                    session_id,
+                    workspace_id,
+                    device_id,
+                    host_id: Some(host_id.to_string()),
+                    revision,
+                };
+                let _ = self.hub_events_tx.send(Arc::new(tagged));
+            }
+
+            ServerMessage::AgentLifecycleChanged { status, .. } => {
+                let _ = self
+                    .hub_events_tx
+                    .send(Arc::new(ServerMessage::AgentLifecycleChanged {
+                        host_id: host_id.to_string(),
+                        status,
+                    }));
+            }
+
+            ServerMessage::ReviewBatchDelivery {
+                workspace_id,
+                packet_id,
+                send_operation_id,
+                delivery,
+                target_session_id,
+                target_agent_id,
+                ..
+            } => {
+                let _ = self
+                    .hub_events_tx
+                    .send(Arc::new(ServerMessage::ReviewBatchDelivery {
+                        workspace_id,
+                        packet_id,
+                        send_operation_id,
+                        delivery,
+                        host_id: Some(host_id.to_string()),
+                        target_session_id,
+                        target_agent_id,
+                    }));
+            }
+
             // ----------------------------------------------------------------
             // chat.* → relay via Session unicast; chat.done also clears it
             // ----------------------------------------------------------------
@@ -1190,10 +1278,20 @@ impl HubManager {
             // ----------------------------------------------------------------
             // error → relay via whichever unicast makes sense (best-effort)
             // ----------------------------------------------------------------
-            ServerMessage::Error { ref message } => {
-                // Broadcast to hub channel so all connections see it.
-                tracing::warn!("[hub] {host_id}: remote error: {message}");
-                let _ = self.hub_events_tx.send(Arc::new(msg));
+            ServerMessage::Error {
+                ref message,
+                ref request_id,
+                ..
+            } => {
+                if let Some(request_id) = request_id {
+                    let key = PendingKey::Request(request_id.clone());
+                    self.relay_unicast(&key, Arc::new(msg));
+                    self.pending_unicast.lock().unwrap().remove(&key);
+                } else {
+                    // Broadcast uncorrelated errors to hub listeners.
+                    tracing::warn!("[hub] {host_id}: remote error: {message}");
+                    let _ = self.hub_events_tx.send(Arc::new(msg));
+                }
             }
 
             // ----------------------------------------------------------------
@@ -1285,6 +1383,24 @@ impl HubManager {
                 let _ = self.hub_events_tx.send(Arc::new(tagged));
             }
 
+            // Git/review request results are single-shot and preserve the
+            // remote payload. The request id is the only routing key needed;
+            // workspace ids remain owned by the remote host.
+            ServerMessage::GitStatusResult { ref request_id, .. }
+            | ServerMessage::GitRefsResult { ref request_id, .. }
+            | ServerMessage::GitDiffResult { ref request_id, .. }
+            | ServerMessage::GitActionResult { ref request_id, .. }
+            | ServerMessage::GitPreviewResult { ref request_id, .. }
+            | ServerMessage::ReviewListResult { ref request_id, .. }
+            | ServerMessage::ReviewCommentResult { ref request_id, .. }
+            | ServerMessage::ReviewDeleteResult { ref request_id, .. }
+            | ServerMessage::ReviewBatchPreviewResult { ref request_id, .. }
+            | ServerMessage::ReviewBatchSendResult { ref request_id, .. } => {
+                let key = PendingKey::Request(request_id.clone());
+                self.relay_unicast(&key, Arc::new(msg));
+                self.pending_unicast.lock().unwrap().remove(&key);
+            }
+
             // ----------------------------------------------------------------
             // fs.browse.result → single-shot unicast reply, rewriting hostId
             // to the federated host's id (the remote reports "local" from its
@@ -1351,6 +1467,7 @@ impl HubManager {
                         host_id: host_id.to_string(),
                         action,
                         path,
+                        workspace: None,
                     },
                 );
             }
@@ -1378,8 +1495,29 @@ impl HubManager {
             ServerMessage::SettingsCurrent { .. }
             | ServerMessage::HostsList { .. }
             | ServerMessage::HostsUpdated { .. }
-            | ServerMessage::HostInfo { .. } => {
+            | ServerMessage::HostInfo { .. }
+            | ServerMessage::ProjectList { .. }
+            | ServerMessage::ProjectUpdated { .. }
+            | ServerMessage::ProjectDeleted { .. }
+            | ServerMessage::WorkspaceSnapshot { .. }
+            | ServerMessage::WorkspaceUpdated { .. }
+            | ServerMessage::WorkspaceFocus { .. }
+            | ServerMessage::FsTreeResult { .. }
+            | ServerMessage::FsReadResult { .. }
+            | ServerMessage::FsPreviewResult { .. }
+            | ServerMessage::FsWriteResult { .. }
+            | ServerMessage::FsBufferListResult { .. }
+            | ServerMessage::FsBufferResult { .. }
+            | ServerMessage::FsBufferCloseResult { .. }
+            | ServerMessage::FsChanged { .. }
+            | ServerMessage::FsError { .. } => {
                 // Remote settings/hosts are not propagated to our clients.
+                // Project/workspace federation is not advertised by this
+                // first local-only slice, so do not expose remote metadata or
+                // accidentally merge it into the local namespace. The same
+                // applies to workspace-scoped fs replies: this slice accepts
+                // durable local workspace ids only and has no remote root
+                // authorization/relay path.
             }
         }
     }
@@ -1510,6 +1648,12 @@ impl HubManager {
             .unwrap()
             .get(terminal_id)
             .cloned()
+    }
+
+    /// Whether a request can be forwarded to a live perch peer. Direct hosts
+    /// intentionally return false because they have no protocol endpoint.
+    pub fn is_connected(&self, host_id: &str) -> bool {
+        self.connections.lock().unwrap().contains_key(host_id)
     }
 
     /// Send raw JSON to a connected remote host.

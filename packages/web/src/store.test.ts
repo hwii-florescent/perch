@@ -16,10 +16,11 @@ class FakeWebSocket {
   static OPEN = 1;
   static CLOSING = 2;
   static CLOSED = 3;
-  readyState = 0;
+  readyState = FakeWebSocket.OPEN;
   addEventListener(): void {}
   removeEventListener(): void {}
-  send(): void {}
+  static sent: string[] = [];
+  send(message: string): void { FakeWebSocket.sent.push(message); }
   close(): void {}
 }
 // Must be installed before `./store` is evaluated — its module-scope
@@ -44,6 +45,8 @@ const {
   sessionIdsForProject,
   shouldReuseCurrentSession,
   resolveSessionAgent,
+  agentRuntimeCapabilitiesKnown,
+  resolveSessionModeForView,
   omitKey,
   readLastAgentChoiceStored,
   usePerchStore,
@@ -386,6 +389,206 @@ describe("resolveSessionAgent", () => {
   });
 });
 
+describe("session mode capability handshake safety", () => {
+  it("treats a missing local server.info as unknown, while an empty list is a known legacy peer", () => {
+    const pendingHandshake = {
+      serverInfo: null,
+      workspaceCapabilitiesByHost: {},
+    };
+    expect(agentRuntimeCapabilitiesKnown(pendingHandshake, "local")).toBe(false);
+    expect(resolveSessionModeForView(false, false, undefined, "cli")).toEqual({
+      mode: "hosted",
+      pending: true,
+    });
+
+    const legacyPeer = {
+      serverInfo: {
+        hostname: "legacy",
+        isSsh: false,
+        platform: "test",
+        capabilities: [],
+      },
+      workspaceCapabilitiesByHost: {},
+    };
+    expect(agentRuntimeCapabilitiesKnown(legacyPeer, "local")).toBe(true);
+    expect(resolveSessionModeForView(true, false, undefined, "cli")).toEqual({
+      mode: "cli",
+      pending: false,
+    });
+  });
+
+  it("keeps a server-confirmed CLI mode mounted safely during an invalidation refetch", () => {
+    const modeState = {
+      mode: "cli" as const,
+      scope: "session" as const,
+      revision: 12,
+      deviceId: "device",
+      authoritative: true,
+      state: "loading" as const,
+    };
+    expect(resolveSessionModeForView(true, true, modeState, "hosted")).toEqual({
+      mode: "cli",
+      pending: false,
+    });
+  });
+
+  it("marks a mode reply authoritative so a later read cannot fall back to the global setting", () => {
+    FakeWebSocket.sent = [];
+    usePerchStore.setState({
+      connected: true,
+      sessionId: "mode-session",
+      activeHostId: "local",
+      deviceId: "mode-device",
+      sessions: [session({ id: "mode-session", hostId: "local" })],
+      serverInfo: {
+        hostname: "modern",
+        isSsh: false,
+        platform: "test",
+        protocolVersion: 1,
+        capabilities: ["session.mode.get", "session.mode.set"],
+      },
+      sessionModes: {},
+      settings: {
+        customModels: { claude: [], codex: [] },
+        defaultCwd: null,
+        theme: "catppuccin",
+        soundEnabled: false,
+        toastDelivery: "off",
+        chatMode: "cli",
+        terminalScrollback: 10000,
+        terminalLoginShell: false,
+      },
+    });
+
+    const requestId = usePerchStore.getState().fetchSessionMode("mode-session");
+    expect(requestId).toBeTruthy();
+    handleServerMessage({
+      type: "session.mode",
+      requestId: requestId!,
+      sessionId: "mode-session",
+      deviceId: "mode-device",
+      mode: "hosted",
+      scope: "session",
+      revision: 12,
+    });
+
+    expect(usePerchStore.getState().sessionModes["mode-session"]).toMatchObject({
+      mode: "hosted",
+      authoritative: true,
+      state: "ready",
+    });
+
+    usePerchStore.getState().fetchSessionMode("mode-session");
+    expect(usePerchStore.getState().sessionModes["mode-session"]).toMatchObject({
+      mode: "hosted",
+      authoritative: true,
+      state: "loading",
+    });
+  });
+});
+
+describe("mode policy invalidation across observed sessions", () => {
+  function prepare(ids: string[], workspaces: string[], hosts = ids.map(() => "local")) {
+    FakeWebSocket.sent = [];
+    usePerchStore.setState({
+      connected: true,
+      sessionId: ids[0],
+      activeHostId: "local",
+      activeWorkspaceId: workspaces[0],
+      deviceId: "invalidation-device",
+      sessions: ids.map((id, i) => session({ id, workspaceId: workspaces[i], hostId: hosts[i] })),
+      serverInfo: {
+        hostname: "modern", isSsh: false, platform: "test",
+        capabilities: ["session.mode.get", "session.mode.set"],
+      },
+      sessionModes: Object.fromEntries(ids.map((id) => [id, {
+        mode: "hosted", scope: "default", revision: 1,
+        deviceId: "invalidation-device", authoritative: true, state: "ready",
+      }])),
+    });
+  }
+
+  function reads(): Array<{ requestId: string; sessionId: string }> {
+    return FakeWebSocket.sent.map((frame) => JSON.parse(frame))
+      .filter((frame) => frame.type === "session.mode.get");
+  }
+
+  function reply(request: { requestId: string; sessionId: string }, revision: number) {
+    handleServerMessage({
+      type: "session.mode", requestId: request.requestId, sessionId: request.sessionId,
+      deviceId: "invalidation-device",
+      mode: "cli", scope: "workspace", revision,
+    });
+  }
+
+  it("uses the session's server association instead of another browsed host or workspace", () => {
+    prepare(["association-mode"], ["unused"]);
+    usePerchStore.setState({
+      activeHostId: "remote",
+      activeWorkspaceId: "unrelated-navigation",
+      sessions: [session({ id: "association-mode", hostId: undefined, workspaceId: undefined })],
+    });
+    usePerchStore.getState().fetchSessionMode("association-mode");
+    expect(reads()).toHaveLength(1);
+    expect(reads()[0]).not.toHaveProperty("workspaceId");
+    handleServerMessage({
+      type: "session.mode", requestId: reads()[0].requestId, sessionId: "association-mode", deviceId: "invalidation-device",
+      workspaceId: "server-workspace", mode: "hosted", scope: "default", revision: 2,
+    });
+    usePerchStore.getState().setSessionMode("association-mode", "workspace", "cli");
+    const write = FakeWebSocket.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.type === "session.mode.set");
+    expect(write).toMatchObject({ sessionId: "association-mode", workspaceId: "server-workspace", scope: "workspace" });
+    reply(write, 3);
+  });
+
+  it("refreshes every observed session in the workspace without loading unrelated sessions or hosts", () => {
+    prepare(["workspace-a", "workspace-b", "workspace-c", "workspace-remote"],
+      ["shared", "shared", "other", "shared"], ["local", "local", "local", "remote"]);
+    handleServerMessage({
+      type: "session.mode.invalidated", sessionId: "workspace-a", workspaceId: "shared",
+      hostId: "local", revision: 2,
+    });
+    expect(reads().map((request) => request.sessionId)).toEqual(["workspace-a", "workspace-b"]);
+    for (const request of reads()) reply(request, 2);
+    expect(usePerchStore.getState().sessionModes["workspace-b"].mode).toBe("cli");
+    expect(usePerchStore.getState().sessionModes["workspace-c"].mode).toBe("hosted");
+  });
+
+  it("applies device invalidations across workspaces only for this device and host", () => {
+    prepare(["device-a", "device-b", "device-remote"], ["first", "second", "third"],
+      ["local", "local", "remote"]);
+    handleServerMessage({
+      type: "session.mode.invalidated", sessionId: "device-a", workspaceId: "first",
+      deviceId: "another-device", hostId: "local", revision: 2,
+    });
+    expect(reads()).toEqual([]);
+    handleServerMessage({
+      type: "session.mode.invalidated", sessionId: "device-a", workspaceId: "first",
+      deviceId: "invalidation-device", hostId: "local", revision: 2,
+    });
+    expect(reads().map((request) => request.sessionId)).toEqual(["device-a", "device-b"]);
+    for (const request of reads()) reply(request, 2);
+  });
+
+  it("refetches when an invalidation races an older read instead of losing the policy update", () => {
+    prepare(["race-mode"], ["race-workspace"]);
+    usePerchStore.getState().fetchSessionMode("race-mode");
+    const original = reads()[0];
+    handleServerMessage({
+      type: "session.mode.invalidated", sessionId: "race-mode", workspaceId: "race-workspace",
+      hostId: "local", revision: 3,
+    });
+    expect(reads()).toHaveLength(1);
+    reply(original, 2);
+    expect(reads()).toHaveLength(2);
+    expect(usePerchStore.getState().sessionModes["race-mode"].revision).toBe(1);
+    reply(reads()[1], 3);
+    expect(usePerchStore.getState().sessionModes["race-mode"]).toMatchObject({
+      mode: "cli", revision: 3, authoritative: true, state: "ready",
+    });
+  });
+});
+
 describe("omitKey (per-session map cleanup on session.deleted)", () => {
   it("drops exactly the given key, immutably", () => {
     const map = { a: "claude", b: "codex" };
@@ -641,5 +844,148 @@ describe("per-session chat multiplexing (messagesBySession / streamingMessageIdB
     expect(state.messagesBySession.A!.map((m) => m.id)).toEqual(["u1", "a1"]);
     expect(state.messagesBySession.A![1]!.text).toBe("still typing");
     expect(state.streamingMessageIdBySession.A).toBe("a1");
+  });
+});
+
+describe("durable workspace navigation", () => {
+  const project = (id: string, hostId = "local", path = `/projects/${id}`) => ({
+    id,
+    hostId,
+    name: id,
+    path,
+    favorite: false,
+    archived: false,
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  const workspace = (id: string, projectId: string, hostId = "local", path = `/projects/${projectId}`) => ({
+    id,
+    projectId,
+    hostId,
+    path,
+    name: id,
+    dirty: false,
+    state: "active" as const,
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  it("keeps a scoped project snapshot from dropping another project", () => {
+    FakeWebSocket.sent = [];
+    usePerchStore.setState({
+      connected: true,
+      activeHostId: "local",
+      serverInfo: {
+        hostname: "test",
+        isSsh: false,
+        platform: "test",
+        protocolVersion: 1,
+        capabilities: ["workspace.snapshot"],
+      },
+      workspaceCapabilities: ["workspace.snapshot"],
+      workspaceCapabilitiesByHost: { local: ["workspace.snapshot"] },
+      workspaceProjects: [project("one"), project("two")],
+      workspaces: [workspace("one-w", "one"), workspace("two-w", "two")],
+      workspaceSnapshotByHost: { local: { state: "ready", snapshotEpoch: "epoch", revision: 3 } },
+    });
+
+    usePerchStore.getState().fetchWorkspaceSnapshot("local", "one");
+    const request = JSON.parse(FakeWebSocket.sent.at(-1)!) as { requestId: string };
+    handleServerMessage({
+      type: "workspace.snapshot",
+      requestId: request.requestId,
+      hostId: "local",
+      snapshotEpoch: "epoch",
+      snapshotRevision: 4,
+      projects: [project("one", "local", "/projects/one-renamed")],
+      workspaces: [workspace("one-w", "one", "local", "/projects/one-renamed")],
+      activeProjectId: "one",
+      activeWorkspaceId: "one-w",
+    });
+
+    expect(usePerchStore.getState().workspaceProjects.map((item) => item.id)).toEqual(["two", "one"]);
+    expect(usePerchStore.getState().workspaces.map((item) => item.id)).toEqual(["two-w", "one-w"]);
+  });
+
+  it("ignores an older frame from the same snapshot epoch", () => {
+    usePerchStore.setState({
+      workspaceProjects: [project("current")],
+      workspaceSnapshotByHost: { local: { state: "ready", snapshotEpoch: "epoch", revision: 8 } },
+    });
+    handleServerMessage({
+      type: "project.updated",
+      requestId: "late",
+      project: project("stale", "local", "/projects/stale"),
+      snapshotEpoch: "epoch",
+      snapshotRevision: 7,
+    });
+    expect(usePerchStore.getState().workspaceProjects.map((item) => item.id)).toEqual(["current"]);
+  });
+
+  it("does not let a delayed host A focus reply steal focus from host B", () => {
+    usePerchStore.setState({
+      connected: true,
+      activeHostId: "host-a",
+      activeProject: { hostId: "host-a", cwd: "/projects/a" },
+      activeProjectId: "a",
+      activeWorkspaceId: "a-w",
+      workspaceProjects: [project("a", "host-a", "/projects/a"), project("b", "host-b", "/projects/b")],
+      workspaces: [workspace("a-w", "a", "host-a", "/projects/a"), workspace("b-w", "b", "host-b", "/projects/b")],
+      workspaceCapabilitiesByHost: {
+        "host-a": ["workspace.snapshot", "workspace.focus"],
+        "host-b": ["workspace.snapshot", "workspace.focus"],
+      },
+      workspaceSnapshotByHost: {
+        "host-a": { state: "ready", snapshotEpoch: "epoch-a", revision: 2 },
+      },
+    });
+    usePerchStore.getState().focusWorkspace("a-w");
+    const request = JSON.parse(FakeWebSocket.sent.at(-1)!) as { requestId: string };
+    usePerchStore.setState({ activeHostId: "host-b" });
+
+    handleServerMessage({
+      type: "workspace.focus",
+      requestId: request.requestId,
+      hostId: "host-a",
+      snapshotEpoch: "epoch-a",
+      snapshotRevision: 3,
+      activeProjectId: "a",
+      activeWorkspaceId: "a-w",
+    });
+    expect(usePerchStore.getState().activeHostId).toBe("host-b");
+  });
+
+  it("keeps a failed registration editable and accepts a corrected retry", () => {
+    FakeWebSocket.sent = [];
+    usePerchStore.setState({
+      connected: true,
+      activeHostId: "local",
+      serverInfo: {
+        hostname: "test",
+        isSsh: false,
+        platform: "test",
+        protocolVersion: 1,
+        capabilities: ["project.create"],
+      },
+      workspaceCapabilities: ["project.create"],
+      workspaceCapabilitiesByHost: { local: ["project.create"] },
+      workspaceProjectCreate: null,
+    });
+
+    usePerchStore.getState().createWorkspaceProject("/missing", "Demo");
+    const first = JSON.parse(FakeWebSocket.sent.at(-1)!) as { requestId: string };
+    handleServerMessage({ type: "error", requestId: first.requestId, message: "invalid_path" });
+    expect(usePerchStore.getState().workspaceProjectCreate).toMatchObject({
+      path: "/missing",
+      name: "Demo",
+      status: "error",
+    });
+
+    usePerchStore.getState().createWorkspaceProject("/valid", "Demo");
+    expect(usePerchStore.getState().workspaceProjectCreate).toMatchObject({
+      path: "/valid",
+      name: "Demo",
+      status: "pending",
+    });
   });
 });

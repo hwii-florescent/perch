@@ -12,9 +12,9 @@
  *
  * It therefore runs under **both** projects (see `cli-rendering.config.ts`)
  * and writes screenshots to `screenshots-cli-rendering/<engine>/`. Those are
- * **committed on purpose** (unlike `artifacts/`, which the main config wipes
- * every run): rendering is the one thing an assertion can only partly
- * describe, so the images are kept to be looked at.
+ * retained locally and gitignored (unlike `artifacts/`, which the main config
+ * wipes every run): rendering needs visual review, and real account details
+ * in these captures must stay out of this public repository.
  *
  * The assertions target the specific failures that were seen by hand:
  *  - U+FFFD anywhere means the pty byte path corrupted a multi-byte glyph.
@@ -27,29 +27,10 @@
  */
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 
 const SHOTS = path.join(__dirname, "screenshots-cli-rendering");
-
-// Chat mode is global and lives in the developer's real ~/.perch/settings.json
-// (it is NOT isolated by --db-path/--hosts-path), so this spec has to set it
-// to "cli" and put back whatever was there — including on failure — or every
-// later spec, and the developer's own app, is left in the wrong mode.
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
-let savedChatMode: unknown;
-
-function setChatMode(mode: string | undefined): void {
-  try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
-    if (mode === undefined) delete data.chatMode;
-    else data.chatMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
-  } catch {
-    /* leave alone */
-  }
-}
+const fixtureTerminals = new WeakMap<Page, { created: Set<string>; exited: Set<string> }>();
 
 function shotDir(engine: string): string {
   const dir = path.join(SHOTS, engine);
@@ -121,6 +102,13 @@ async function rowGeometry(page: Page) {
 
 /** Start a CLI session in $HOME and wait for the agent to paint its banner. */
 async function openCliSession(page: Page): Promise<void> {
+  const terminals = { created: new Set<string>(), exited: new Set<string>() };
+  fixtureTerminals.set(page, terminals);
+  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+    const message = JSON.parse(String(payload));
+    if (message.type === "terminal.created" || message.type === "agent.terminal.opened") terminals.created.add(message.terminalId);
+    if (message.type === "terminal.exit") terminals.exited.add(message.terminalId);
+  }));
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.evaluate(() => {
     localStorage.removeItem("perch.sessionId");
@@ -129,6 +117,13 @@ async function openCliSession(page: Page): Promise<void> {
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 20000 });
 
+  // Exercise the current device-scoped policy through the visible control.
+  // Each Playwright context owns a fresh device id; no shared settings change.
+  const mode = page.getByTestId("session-mode-toggle");
+  await expect(mode).toBeEnabled();
+  await page.getByTestId("session-mode-scope").selectOption("device");
+  if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
+  await expect(mode).toHaveAttribute("aria-checked", "true");
   await expect(page.locator('[data-testid="cli-start-panel"]')).toBeVisible({ timeout: 15000 });
   await page.locator('[data-testid="cli-start-browse"]').click();
   const useFolder = page.locator('button:has-text("Use this folder")');
@@ -149,13 +144,6 @@ test.describe("CLI-mode terminal rendering", () => {
 
   let claudeAvailable = false;
   test.beforeAll(async () => {
-    try {
-      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
-      savedChatMode = data.chatMode;
-    } catch {
-      savedChatMode = undefined;
-    }
-    setChatMode("cli");
     const { execSync } = await import("child_process");
     try {
       execSync("which claude", { encoding: "utf8" });
@@ -165,8 +153,14 @@ test.describe("CLI-mode terminal rendering", () => {
     }
   });
 
-  test.afterAll(() => {
-    setChatMode(savedChatMode as string | undefined);
+  test.afterEach(async ({ page }) => {
+    const terminals = fixtureTerminals.get(page);
+    if (!terminals?.created.size) return;
+    // Stop through the owning visible viewer. Another raw WS connection is
+    // deliberately unable to kill an agent whose input belongs to this one.
+    const stop = page.getByRole("button", { name: "Stop CLI", exact: true });
+    if (await stop.isVisible()) await stop.click();
+    await expect.poll(() => [...terminals.created].every((id) => terminals.exited.has(id))).toBe(true);
   });
 
   test("R1. the agent TUI lands on a uniform grid with no corruption", async ({

@@ -1,3 +1,4 @@
+import { PersistentAgentTerminal } from "./PersistentAgentTerminal";
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -9,7 +10,7 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 
-export function AgentCliTerminal({
+function LegacyAgentCliTerminal({
   sessionId,
   agent,
   cliError,
@@ -183,4 +184,14 @@ export function AgentCliTerminal({
       )}
     </div>
   );
+}
+
+export function AgentCliTerminal(props: { sessionId: string; agent: string; cliError?: string | null; onExitCli?: () => void }) {
+  const persistent = usePerchStore((state) => {
+    const hostId = state.sessions.find((session) => session.id === props.sessionId)?.hostId ?? state.activeHostId;
+    return hostId === "local" && state.serverInfo?.capabilities?.includes("agent.terminal.open") === true;
+  });
+  if (persistent) return <PersistentAgentTerminal {...props} />;
+  if (props.agent === "claude" || props.agent === "codex") return <LegacyAgentCliTerminal {...props} agent={props.agent} />;
+  return <div className="terminal__cli-error" role="alert">This host does not support configured CLI providers.</div>;
 }

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "my-cli",
+      "display_name": "My CLI",
+      "launch": {
+        "executable": "/absolute/path/to/your-cli",
+        "prefix_args": [],
+        "prompt": "stdin",
+        "suffix_args": [],
+        "resume": "Unsupported"
+      },
+      "supported_modes": ["cli"],
+      "resumability": "persistentProcess",
+      "capabilities": ["interactiveTerminal"],
+      "status_detection": "ExitStatus",
+      "environment": {
+        "inherit": false,
+        "allow": ["HOME", "PATH"],
+        "set": {},
+        "unset": []
+      }
+    }
+  ]
+}

@@ -7,15 +7,152 @@
 //! world over an unbounded channel; that's the same shape as node-pty's
 //! event-emitter-over-libuv-thread design.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
+use crate::agent_fleet::{ClientIdentity, ControlLease};
+use anyhow::Context;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use uuid::Uuid;
 
 pub type TerminalDataListener = Arc<dyn Fn(String, String) + Send + Sync>;
 pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
+
+pub const MAX_TERMINAL_REPLAY_BYTES: usize = 128 * 1024;
+
+/// Bounded UTF-8 replay shared by shell and provider runtimes.
+#[derive(Default)]
+pub(crate) struct TerminalReplay {
+    chunks: VecDeque<String>,
+    bytes: usize,
+}
+
+impl TerminalReplay {
+    pub(crate) fn push(&mut self, data: &str) {
+        if data.is_empty() {
+            return;
+        }
+        let mut start = data.len().saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
+        while !data.is_char_boundary(start) {
+            start += 1;
+        }
+        let tail = &data[start..];
+        self.bytes += tail.len();
+        self.chunks.push_back(tail.to_string());
+        while self.bytes > MAX_TERMINAL_REPLAY_BYTES {
+            if let Some(chunk) = self.chunks.pop_front() {
+                self.bytes -= chunk.len();
+            }
+        }
+    }
+
+    pub(crate) fn text(&self) -> String {
+        self.chunks.iter().map(String::as_str).collect()
+    }
+}
+
+/// The local terminal-side copy of the lease that currently controls input
+/// or resize. Keeping it with the writer makes authorization and the write
+/// one critical section, so a stale lease cannot pass a check and then write
+/// after another client takes control.
+struct AgentWriter {
+    writer: Box<dyn Write + Send>,
+    input_owner: Option<ControlLease>,
+    resize_owner: Option<ControlLease>,
+}
+
+impl AgentWriter {
+    fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self {
+            writer,
+            input_owner: None,
+            resize_owner: None,
+        }
+    }
+
+    fn clear_for_client(&mut self, client_id: &str) {
+        if self
+            .input_owner
+            .as_ref()
+            .is_some_and(|lease| lease.client.id == client_id)
+        {
+            self.input_owner = None;
+        }
+        if self
+            .resize_owner
+            .as_ref()
+            .is_some_and(|lease| lease.client.id == client_id)
+        {
+            self.resize_owner = None;
+        }
+    }
+
+    fn input(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        self.writer.write_all(data).context("write terminal input")
+    }
+
+    fn input_owned(
+        &mut self,
+        client: &ClientIdentity,
+        generation: u64,
+        data: &[u8],
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let Some(owner) = self.input_owner.as_ref() else {
+            return Err(TerminalAuthorityError::NotOwned);
+        };
+        if owner.client.id != client.id {
+            return Err(TerminalAuthorityError::NotOwned);
+        }
+        if owner.generation != generation {
+            return Err(TerminalAuthorityError::StaleLease);
+        }
+        self.writer
+            .write_all(data)
+            .map_err(|_| TerminalAuthorityError::WriteFailed)
+    }
+
+    fn owns_resize(&self, client: &ClientIdentity, generation: u64) -> bool {
+        self.resize_owner
+            .as_ref()
+            .is_some_and(|owner| owner.client.id == client.id && owner.generation == generation)
+    }
+}
+
+/// Failure returned when a terminal write or resize is attempted without the
+/// current generation-bound control lease.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalAuthorityError {
+    NoTerminal,
+    NotOwned,
+    StaleLease,
+    WriteFailed,
+    ResizeFailed,
+}
+
+impl std::fmt::Display for TerminalAuthorityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoTerminal => write!(f, "agent terminal is not attached"),
+            Self::NotOwned => write!(f, "client does not own terminal control"),
+            Self::StaleLease => write!(f, "terminal control lease is stale"),
+            Self::WriteFailed => write!(f, "terminal input write failed"),
+            Self::ResizeFailed => write!(f, "terminal resize failed"),
+        }
+    }
+}
+
+impl std::error::Error for TerminalAuthorityError {}
+
+/// Identity of one actual PTY/tmux runtime. The terminal/session key alone
+/// is insufficient for safe hibernation because a later process can reuse it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalRuntimeIdentity {
+    pub session_id: String,
+    pub terminal_id: String,
+    pub process_id: Option<u32>,
+    pub tmux_session: Option<String>,
+}
 
 struct TerminalHandle {
     writer: Box<dyn Write + Send>,
@@ -103,6 +240,7 @@ fn apply_terminal_env(cmd: &mut CommandBuilder) {
 /// dance).
 struct SpawnedPty {
     id: String,
+    process_id: Option<u32>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: Box<dyn Read + Send>,
@@ -190,6 +328,7 @@ fn spawn_pty(
 
     Ok(SpawnedPty {
         id,
+        process_id: child.process_id(),
         master: pair.master,
         writer,
         reader,
@@ -226,6 +365,7 @@ impl TerminalManager {
     ) -> anyhow::Result<String> {
         let SpawnedPty {
             id,
+            process_id: _,
             master,
             writer,
             reader,
@@ -369,8 +509,10 @@ struct AgentViewer {
 }
 
 struct AgentTerminalEntry {
+    exited: std::sync::atomic::AtomicBool,
     terminal_id: String,
-    writer: Mutex<Box<dyn Write + Send>>,
+    process_id: Option<u32>,
+    writer: Mutex<AgentWriter>,
     // `Mutex`-wrapped (unlike `TerminalHandle::master`) because this entry is
     // itself shared across threads via `Arc` (reader/waiter threads, plus
     // whichever connection calls `resize`/`kill`) — `MasterPty` is `Send` but
@@ -378,10 +520,10 @@ struct AgentTerminalEntry {
     // on its own, not just reachable through one shared outer lock.
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
-    /// Keyed by viewer id (the WS connection's `conn_id`). Any viewer may
-    /// write input (shared-terminal semantics, like `tmux attach` — there is
-    /// one underlying conversation, not one per viewer, so there is no
-    /// principled way to say only one of them "owns" keyboard input).
+    /// Keyed by viewer id (the WS connection's `conn_id`). Input and resize
+    /// authority are tracked separately in `writer`; the legacy `input()` and
+    /// `resize()` methods remain available for protocol compatibility while
+    /// the runtime adapter uses the lease-checked methods.
     viewers: Mutex<HashMap<String, AgentViewer>>,
     /// Last time PTY output was observed, for Task 2's quiet-period → idle
     /// transition. Updated by the reader thread on every chunk.
@@ -433,6 +575,37 @@ impl AgentTerminalRegistry {
         }
     }
 
+    /// Observe this exact process without a fallback spawn. The ready hook
+    /// runs while output fan-out is locked, so a replay snapshot taken there
+    /// ends exactly where this viewer's subsequent live output begins.
+    pub fn observe(
+        &self,
+        identity: &TerminalRuntimeIdentity,
+        viewer_id: &str,
+        on_data: TerminalDataListener,
+        on_exit: TerminalExitListener,
+        ready: impl FnOnce(),
+    ) -> anyhow::Result<()> {
+        let entries = self.entries.lock().unwrap();
+        let entry = entries
+            .get(&identity.session_id)
+            .filter(|entry| {
+                entry.terminal_id == identity.terminal_id && entry.process_id == identity.process_id
+            })
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("terminal process is no longer available"))?;
+        // Exit callbacks may inspect the registry. Never hold its map lock
+        // while waiting for fan-out; the exit flag closes the resulting race.
+        drop(entries);
+        let mut viewers = entry.viewers.lock().unwrap();
+        if entry.exited.load(std::sync::atomic::Ordering::Acquire) {
+            anyhow::bail!("terminal process has exited");
+        }
+        ready();
+        viewers.insert(viewer_id.to_string(), AgentViewer { on_data, on_exit });
+        Ok(())
+    }
+
     /// Attach `viewer_id` to `session_id`'s agent terminal, spawning it if
     /// this is the first viewer. `cols`/`rows`/`cwd`/`command` are only used
     /// when a process actually has to be spawned; a reuse ignores them (the
@@ -449,6 +622,50 @@ impl AgentTerminalRegistry {
         command: Vec<String>,
         on_data: TerminalDataListener,
         on_exit: TerminalExitListener,
+    ) -> anyhow::Result<AttachOutcome> {
+        self.attach_inner(
+            session_id, viewer_id, cols, rows, cwd, command, on_data, on_exit, false,
+        )
+    }
+
+    /// Reattach only to an existing tmux process. Recovery must never start
+    /// a replacement command when a persisted process has disappeared.
+    #[allow(clippy::too_many_arguments)]
+    pub fn attach_existing_tmux(
+        &self,
+        session_id: &str,
+        viewer_id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<String>,
+        on_data: TerminalDataListener,
+        on_exit: TerminalExitListener,
+    ) -> anyhow::Result<AttachOutcome> {
+        self.attach_inner(
+            session_id,
+            viewer_id,
+            cols,
+            rows,
+            cwd,
+            Vec::new(),
+            on_data,
+            on_exit,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attach_inner(
+        &self,
+        session_id: &str,
+        viewer_id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<String>,
+        command: Vec<String>,
+        on_data: TerminalDataListener,
+        on_exit: TerminalExitListener,
+        existing_only: bool,
     ) -> anyhow::Result<AttachOutcome> {
         let mut entries = self.entries.lock().unwrap();
         if let Some(entry) = entries.get(session_id) {
@@ -476,23 +693,31 @@ impl AgentTerminalRegistry {
         // here degrades to the exact pre-tmux behavior (spawn the CLI directly)
         // instead of propagating and leaving the user with a dead pane.
         let direct_argv = command.clone();
-        let (spawn_argv, tmux_session) = match crate::agent_tmux::resolve_agent_spawn(
-            use_tmux,
-            session_id,
-            cols,
-            rows,
-            cwd.as_deref(),
-            command,
-        ) {
-            Ok(resolved) => resolved,
-            Err(err) => {
-                tracing::warn!(
-                    session_id,
-                    error = %err,
-                    "tmux-backed CLI spawn failed; falling back to a direct \
-                     (non-persistent) spawn"
-                );
-                (direct_argv, None)
+        let (spawn_argv, tmux_session) = if existing_only {
+            let name = crate::agent_tmux::tmux_session_name(session_id);
+            if !crate::agent_tmux::tmux_session_exists(&name) {
+                anyhow::bail!("persisted terminal process is no longer available");
+            }
+            (crate::agent_tmux::tmux_attach_argv(&name), Some(name))
+        } else {
+            match crate::agent_tmux::resolve_agent_spawn(
+                use_tmux,
+                session_id,
+                cols,
+                rows,
+                cwd.as_deref(),
+                command,
+            ) {
+                Ok(resolved) => resolved,
+                Err(err) => {
+                    tracing::warn!(
+                        session_id,
+                        error = %err,
+                        "tmux-backed CLI spawn failed; falling back to a direct \
+                         (non-persistent) spawn"
+                    );
+                    (direct_argv, None)
+                }
             }
         };
 
@@ -500,6 +725,7 @@ impl AgentTerminalRegistry {
         // client) directly — there is no shell in this pty for `-l` to apply to.
         let SpawnedPty {
             id,
+            process_id,
             master,
             writer,
             reader,
@@ -510,8 +736,10 @@ impl AgentTerminalRegistry {
         let mut viewers = HashMap::new();
         viewers.insert(viewer_id.to_string(), AgentViewer { on_data, on_exit });
         let entry = Arc::new(AgentTerminalEntry {
+            exited: std::sync::atomic::AtomicBool::new(false),
             terminal_id: id.clone(),
-            writer: Mutex::new(writer),
+            process_id,
+            writer: Mutex::new(AgentWriter::new(writer)),
             master: Mutex::new(master),
             killer: Mutex::new(killer),
             viewers: Mutex::new(viewers),
@@ -585,7 +813,17 @@ impl AgentTerminalRegistry {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
-            entries_map.lock().unwrap().remove(&session_id_for_exit);
+            exit_entry
+                .exited
+                .store(true, std::sync::atomic::Ordering::Release);
+            let mut entries = entries_map.lock().unwrap();
+            if entries
+                .get(&session_id_for_exit)
+                .is_some_and(|current| Arc::ptr_eq(current, &exit_entry))
+            {
+                entries.remove(&session_id_for_exit);
+            }
+            drop(entries);
             let viewers = exit_entry.viewers.lock().unwrap();
             for viewer in viewers.values() {
                 (viewer.on_exit)(exit_id.clone(), code);
@@ -637,18 +875,99 @@ impl AgentTerminalRegistry {
                 false
             }
         };
+        // Dropping a viewer also drops any lease it held. This is done under
+        // the same writer lock used by `input_owned`/`resize_owned`, so a
+        // disconnect cannot leave a stale client able to write afterward.
+        entry.writer.lock().unwrap().clear_for_client(viewer_id);
         if is_last {
             let _ = entry.killer.lock().unwrap().kill();
         }
     }
 
-    /// Write `data` into `session_id`'s terminal. Any registered viewer may
-    /// call this — a shared agent terminal has one keyboard, not one per
-    /// viewer, matching `tmux attach` semantics.
+    /// Write `data` into `session_id`'s terminal using the legacy shared
+    /// terminal route. New lifecycle-aware callers should use
+    /// [`Self::input_owned`], which checks the current control lease.
     pub fn input(&self, session_id: &str, data: &str) {
         if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
-            let _ = entry.writer.lock().unwrap().write_all(data.as_bytes());
+            let _ = entry.writer.lock().unwrap().input(data.as_bytes());
         }
+    }
+
+    /// Install or clear the lease that owns keyboard input for this terminal.
+    /// The adapter calls this immediately after acquiring/releasing the
+    /// corresponding lifecycle lease.
+    pub fn set_input_owner(
+        &self,
+        session_id: &str,
+        owner: Option<ControlLease>,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let mut writer = entry.writer.lock().unwrap();
+        if let (Some(current), Some(next)) = (writer.input_owner.as_ref(), owner.as_ref()) {
+            if current != next {
+                return Err(TerminalAuthorityError::StaleLease);
+            }
+        }
+        writer.input_owner = owner;
+        Ok(())
+    }
+
+    /// Clear input authority only if the terminal still carries this exact
+    /// lease. A release can race a new acquire after the lifecycle mutex is
+    /// dropped; conditional clearing prevents the old release from erasing
+    /// the new owner's terminal-side authority.
+    pub fn clear_input_owner(
+        &self,
+        session_id: &str,
+        client: &ClientIdentity,
+        generation: u64,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let mut writer = entry.writer.lock().unwrap();
+        match writer.input_owner.as_ref() {
+            None => Ok(()),
+            Some(owner) if owner.client == *client && owner.generation == generation => {
+                writer.input_owner = None;
+                Ok(())
+            }
+            Some(_) => Err(TerminalAuthorityError::StaleLease),
+        }
+    }
+
+    /// Write terminal input only when `client` still owns the exact lease
+    /// generation installed by [`Self::set_input_owner`].
+    pub fn input_owned(
+        &self,
+        session_id: &str,
+        client: &ClientIdentity,
+        generation: u64,
+        data: &str,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let result = entry
+            .writer
+            .lock()
+            .unwrap()
+            .input_owned(client, generation, data.as_bytes());
+        result
     }
 
     /// Resize `session_id`'s terminal. Last write wins when viewers disagree
@@ -668,6 +987,97 @@ impl AgentTerminalRegistry {
         }
     }
 
+    /// Install or clear the lease that owns terminal resize authority.
+    pub fn set_resize_owner(
+        &self,
+        session_id: &str,
+        owner: Option<ControlLease>,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let mut writer = entry.writer.lock().unwrap();
+        if let (Some(current), Some(next)) = (writer.resize_owner.as_ref(), owner.as_ref()) {
+            if current != next {
+                return Err(TerminalAuthorityError::StaleLease);
+            }
+        }
+        writer.resize_owner = owner;
+        Ok(())
+    }
+
+    /// Clear resize authority only for the exact lease that was released.
+    pub fn clear_resize_owner(
+        &self,
+        session_id: &str,
+        client: &ClientIdentity,
+        generation: u64,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let mut writer = entry.writer.lock().unwrap();
+        match writer.resize_owner.as_ref() {
+            None => Ok(()),
+            Some(owner) if owner.client == *client && owner.generation == generation => {
+                writer.resize_owner = None;
+                Ok(())
+            }
+            Some(_) => Err(TerminalAuthorityError::StaleLease),
+        }
+    }
+
+    /// Resize the terminal only when `client` still owns the exact resize
+    /// lease generation. The writer lock is held while resizing so replacing
+    /// the owner cannot race this check.
+    pub fn resize_owned(
+        &self,
+        session_id: &str,
+        client: &ClientIdentity,
+        generation: u64,
+        cols: u16,
+        rows: u16,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let writer_guard = entry.writer.lock().unwrap();
+        if !writer_guard.owns_resize(client, generation) {
+            if writer_guard
+                .resize_owner
+                .as_ref()
+                .is_some_and(|owner| owner.client.id == client.id)
+            {
+                return Err(TerminalAuthorityError::StaleLease);
+            }
+            return Err(TerminalAuthorityError::NotOwned);
+        }
+        let result = entry
+            .master
+            .lock()
+            .unwrap()
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|_| TerminalAuthorityError::ResizeFailed);
+        result
+    }
+
     /// Force-terminate `session_id`'s terminal regardless of how many viewers
     /// still hold it — used for explicit user actions (restart CLI,
     /// session delete) where "kill it" must mean kill it for everyone, not
@@ -685,6 +1095,118 @@ impl AgentTerminalRegistry {
                 crate::agent_tmux::kill_tmux_session(name);
             }
             let _ = entry.killer.lock().unwrap().kill();
+        }
+    }
+
+    /// Return the concrete PTY/tmux identity currently backing a session.
+    /// Callers retain this value and pass it back to [`Self::runtime_alive`]
+    /// or [`Self::terminate_for_hibernation`] to avoid acting on a later
+    /// runtime that reused the same logical session id.
+    pub fn runtime_identity(&self, session_id: &str) -> Option<TerminalRuntimeIdentity> {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|entry| TerminalRuntimeIdentity {
+                session_id: session_id.to_string(),
+                terminal_id: entry.terminal_id.clone(),
+                process_id: entry.process_id,
+                tmux_session: entry.tmux_session.clone(),
+            })
+    }
+
+    /// Check whether the exact runtime identity is still live. For tmux this
+    /// checks the persistent server directly, so a dropped attach PTY does
+    /// not look like a dead provider process.
+    pub fn runtime_alive(&self, identity: &TerminalRuntimeIdentity) -> bool {
+        if let Some(name) = identity.tmux_session.as_deref() {
+            return crate::agent_tmux::tmux_session_exists(name);
+        }
+        self.entries
+            .lock()
+            .unwrap()
+            .get(&identity.session_id)
+            .is_some_and(|entry| {
+                entry.terminal_id == identity.terminal_id && entry.process_id == identity.process_id
+            })
+    }
+
+    /// Stop the exact runtime represented by `identity` before a lifecycle
+    /// record is allowed to enter `Sleeping`. The entry is removed after the
+    /// termination signal, preventing a subsequent attach from confusing the
+    /// old process with a newly-created one. A tmux session is checked after
+    /// the kill request; a still-present session is an error, so callers never
+    /// mark an agent sleeping while its provider is demonstrably alive.
+    pub fn terminate_for_hibernation(
+        &self,
+        identity: &TerminalRuntimeIdentity,
+    ) -> anyhow::Result<()> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(&identity.session_id)
+            .cloned();
+        if let Some(entry) = entry.as_ref() {
+            if entry.terminal_id != identity.terminal_id || entry.process_id != identity.process_id
+            {
+                return Err(anyhow::anyhow!(
+                    "terminal identity changed for session {}",
+                    identity.session_id
+                ));
+            }
+        }
+
+        if let Some(name) = identity.tmux_session.as_deref() {
+            crate::agent_tmux::kill_tmux_session(name);
+            if crate::agent_tmux::tmux_session_exists(name) {
+                return Err(anyhow::anyhow!(
+                    "tmux runtime {} is still alive after termination",
+                    name
+                ));
+            }
+        }
+
+        if let Some(entry) = entry {
+            // The tmux session is the provider process; this additional kill
+            // only tears down the local attach client. For direct PTYs it is
+            // the provider process itself.
+            let _ = entry.killer.lock().unwrap().kill();
+            if identity.tmux_session.is_none() {
+                // For a direct PTY, the kill signal is asynchronous. Leave
+                // the registry entry in place until the waiter observes the
+                // child exit; `runtime_alive` therefore remains true while
+                // the process can still be running.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while self.runtime_alive(identity) && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                if self.runtime_alive(identity) {
+                    return Err(anyhow::anyhow!(
+                        "direct terminal process {} did not stop",
+                        identity
+                            .process_id
+                            .map_or_else(|| "unknown".to_string(), |pid| pid.to_string())
+                    ));
+                }
+            } else {
+                let mut entries = self.entries.lock().unwrap();
+                if entries.get(&identity.session_id).is_some_and(|current| {
+                    current.terminal_id == identity.terminal_id
+                        && current.process_id == identity.process_id
+                }) {
+                    entries.remove(&identity.session_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove both control leases held by `client_id` when a protocol client
+    /// disconnects without going through the lifecycle adapter.
+    pub fn clear_control_owner_for_client(&self, session_id: &str, client_id: &str) {
+        if let Some(entry) = self.entries.lock().unwrap().get(session_id).cloned() {
+            entry.writer.lock().unwrap().clear_for_client(client_id);
         }
     }
 
@@ -1150,10 +1672,11 @@ mod tests {
     #[test]
     fn a_silent_terminal_is_reported_quiet_after_the_threshold() {
         let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let session_id = format!("session-quiet-{}", uuid::Uuid::new_v4());
         let (on_data, on_exit) = noop_listeners();
         registry
             .attach(
-                "session-quiet",
+                &session_id,
                 "viewer-a",
                 80,
                 24,
@@ -1169,13 +1692,18 @@ mod tests {
             .unwrap();
 
         let short_threshold = Duration::from_millis(20);
-        std::thread::sleep(Duration::from_millis(60));
-        let quiet = registry.sessions_quiet_since(short_threshold);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let quiet = loop {
+            let quiet = registry.sessions_quiet_since(short_threshold);
+            if quiet.contains(&session_id) || std::time::Instant::now() >= deadline {
+                break quiet;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        registry.kill(&session_id);
         assert!(
-            quiet.contains(&"session-quiet".to_string()),
+            quiet.contains(&session_id),
             "a silent terminal should show up as quiet: {quiet:?}"
         );
-
-        registry.kill("session-quiet");
     }
 }

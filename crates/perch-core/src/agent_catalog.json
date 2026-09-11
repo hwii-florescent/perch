@@ -1,0 +1,475 @@
+[
+  {
+    "id": "claude",
+    "display_name": "Claude Code",
+    "executable": "claude",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://code.claude.com/docs",
+    "prefix_args": [],
+    "default_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "resume_flag": "--resume"
+  },
+  {
+    "id": "claude-agent-teams",
+    "display_name": "Claude Agent Teams",
+    "executable": "claude",
+    "aliases": [],
+    "environment": {
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    },
+    "homepage_url": "https://code.claude.com/docs/en/agent-teams",
+    "prefix_args": [
+      "--teammate-mode",
+      "in-process"
+    ],
+    "default_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "resume_flag": "--resume"
+  },
+  {
+    "id": "openclaude",
+    "display_name": "OpenClaude",
+    "executable": "openclaude",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://openclaude.gitlawb.com/",
+    "prefix_args": [],
+    "default_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "resume_flag": "--resume"
+  },
+  {
+    "id": "codex",
+    "display_name": "Codex",
+    "executable": "codex",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/openai/codex",
+    "prefix_args": [],
+    "default_args": [
+      "--dangerously-bypass-approvals-and-sandbox"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "grok",
+    "display_name": "Grok",
+    "executable": "grok",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://x.ai/cli",
+    "prefix_args": [],
+    "default_args": [
+      "--permission-mode",
+      "bypassPermissions"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "copilot",
+    "display_name": "GitHub Copilot",
+    "executable": "copilot",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "opencode",
+    "display_name": "OpenCode",
+    "executable": "opencode",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://opencode.ai/docs/cli/",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": "--session"
+  },
+  {
+    "id": "mimo-code",
+    "display_name": "MiMo Code",
+    "executable": "mimo",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://mimo.xiaomi.com/coder",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "ante",
+    "display_name": "Ante",
+    "executable": "ante",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/AntigmaLabs/ante-preview",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "trae",
+    "display_name": "Trae",
+    "executable": "traecli",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.trae.cn/cli_get-started-with-trae-cli",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "pi",
+    "display_name": "Pi",
+    "executable": "pi",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://pi.dev",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": "--session"
+  },
+  {
+    "id": "omp",
+    "display_name": "OMP",
+    "executable": "omp",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://omp.sh",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": "--resume"
+  },
+  {
+    "id": "prime-agent",
+    "display_name": "Prime Agent",
+    "executable": "prime-agent",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/PrimeIntellect-ai/prime-agent",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "gemini",
+    "display_name": "Gemini",
+    "executable": "gemini",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/google-gemini/gemini-cli",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "antigravity",
+    "display_name": "Antigravity",
+    "executable": "agy",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://antigravity.google/docs/cli-overview",
+    "prefix_args": [],
+    "default_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "aider",
+    "display_name": "Aider",
+    "executable": "aider",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://aider.chat/docs/",
+    "prefix_args": [],
+    "default_args": [
+      "--yes-always"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "goose",
+    "display_name": "Goose",
+    "executable": "goose",
+    "aliases": [],
+    "environment": {
+      "GOOSE_MODE": "auto"
+    },
+    "homepage_url": "https://block.github.io/goose/docs/quickstart/",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "amp",
+    "display_name": "Amp",
+    "executable": "amp",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://ampcode.com/manual#install",
+    "prefix_args": [],
+    "default_args": [
+      "--dangerously-allow-all"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "kilo",
+    "display_name": "Kilocode",
+    "executable": "kilo",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://kilo.ai/docs/cli",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "kiro",
+    "display_name": "Kiro",
+    "executable": "kiro-cli",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://kiro.dev/docs/cli/",
+    "prefix_args": [
+      "chat",
+      "--tui"
+    ],
+    "default_args": [
+      "--trust-all-tools"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "crush",
+    "display_name": "Charm",
+    "executable": "crush",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/charmbracelet/crush",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "aug",
+    "display_name": "Auggie",
+    "executable": "auggie",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.augmentcode.com/cli/overview",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "autohand",
+    "display_name": "Autohand Code",
+    "executable": "autohand",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/autohandai/code-cli",
+    "prefix_args": [],
+    "default_args": [
+      "--unrestricted"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "cline",
+    "display_name": "Cline",
+    "executable": "cline",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.cline.bot/cline-cli/overview",
+    "prefix_args": [],
+    "default_args": [
+      "--auto-approve",
+      "true"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "codebuff",
+    "display_name": "Codebuff",
+    "executable": "codebuff",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://www.codebuff.com/docs/help/quick-start",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  },
+  {
+    "id": "command-code",
+    "display_name": "Command Code",
+    "executable": "command-code",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://commandcode.ai/docs/quickstart",
+    "prefix_args": [
+      "--trust"
+    ],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "continue",
+    "display_name": "Continue",
+    "executable": "cn",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.continue.dev/guides/cli",
+    "prefix_args": [],
+    "default_args": [
+      "--allow",
+      "*"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "cursor",
+    "display_name": "Cursor",
+    "executable": "cursor-agent",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://cursor.com/cli",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "droid",
+    "display_name": "Droid",
+    "executable": "droid",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://docs.factory.ai/cli/getting-started/quickstart",
+    "prefix_args": [],
+    "default_args": [
+      "--auto",
+      "high"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "kimi",
+    "display_name": "Kimi",
+    "executable": "kimi",
+    "aliases": [
+      "kimi-code"
+    ],
+    "environment": {},
+    "homepage_url": "https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started.html",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "mistral-vibe",
+    "display_name": "Mistral Vibe",
+    "executable": "vibe",
+    "aliases": [
+      "mistral-vibe"
+    ],
+    "environment": {},
+    "homepage_url": "https://github.com/mistralai/mistral-vibe",
+    "prefix_args": [],
+    "default_args": [
+      "--agent",
+      "auto-approve"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "qwen-code",
+    "display_name": "Qwen Code",
+    "executable": "qwen",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/QwenLM/qwen-code",
+    "prefix_args": [],
+    "default_args": [
+      "--approval-mode",
+      "yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "rovo",
+    "display_name": "Rovo Dev",
+    "executable": "rovo",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/",
+    "prefix_args": [],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "hermes",
+    "display_name": "Hermes",
+    "executable": "hermes",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://hermes-agent.nousresearch.com/docs/",
+    "prefix_args": [
+      "--tui"
+    ],
+    "default_args": [
+      "--yolo"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "devin",
+    "display_name": "Devin",
+    "executable": "devin",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://devin.ai/cli",
+    "prefix_args": [],
+    "default_args": [
+      "--permission-mode",
+      "bypass"
+    ],
+    "resume_flag": null
+  },
+  {
+    "id": "openclaw",
+    "display_name": "OpenClaw",
+    "executable": "openclaw",
+    "aliases": [],
+    "environment": {},
+    "homepage_url": "https://github.com/openclaw/openclaw",
+    "prefix_args": [],
+    "default_args": [],
+    "resume_flag": null
+  }
+]

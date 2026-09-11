@@ -1,10 +1,13 @@
+import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "./agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentKind, ChatUsage, CommandEntry, FsBrowseResultMessage, ModelEntry, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "./ws";
 import { emitTerminalData } from "./terminalBus";
+import { handleWorkspaceTerminalMessage } from "./workspaceTerminals";
 import { defaultModel } from "./models";
 import { applyTheme } from "./themes";
 import { playBlockedTone, playDoneTone } from "./sound";
+import { ownsAgentRuntimeRequest, ownsGitReviewRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "./requestOwnership";
 
 export interface ToolCallEntry {
   name: string;
@@ -70,6 +73,116 @@ export interface StatusInfo {
   costUsd?: number;
 }
 
+/** Stable project identity returned by the foundation workspace protocol.
+ * Kept as a client-side view type until the shared protocol's first project
+ * family lands; all wire messages are still sent and received through the
+ * request-correlated helpers below. */
+export type WorkspaceProject = ProjectSummary;
+
+export type WorkspaceLifecycle = WorkspaceSummary["state"];
+
+/** A visible checkout/folder belonging to one stable project. */
+export type WorkspaceRecord = WorkspaceSummary;
+
+export interface WorkspaceSnapshotStatus {
+  state: "idle" | "loading" | "ready" | "error";
+  revision?: number;
+  snapshotEpoch?: string;
+  error?: string;
+}
+
+export interface WorkspaceProjectCreateState {
+  requestId: string;
+  hostId: string;
+  path: string;
+  name?: string;
+  status: "pending" | "success" | "error";
+  error?: string;
+}
+
+/** Server-authoritative mode for one session. The previous mode is retained
+ * while a write is pending so switching modes never flashes the wrong pane. */
+export interface SessionModeState {
+  mode: SessionMode;
+  scope: SessionModeScope;
+  revision: number;
+  deviceId: string;
+  workspaceId?: string;
+  /** True once a server result has established this session's mode. It stays
+   * true while a later read/write is pending so the last known mode remains
+   * safe to render during invalidation/refetch. */
+  authoritative?: boolean;
+  state: "idle" | "loading" | "ready" | "error";
+  error?: string;
+}
+
+/** Whether the owning host has completed the capability handshake needed to
+ * decide between the modern session-mode policy and the legacy global
+ * setting. An empty capability list is authoritative (it describes a legacy
+ * peer); a missing entry still means that the peer has not answered. */
+export function agentRuntimeCapabilitiesKnown(
+  state: Pick<PerchState, "serverInfo" | "workspaceCapabilitiesByHost">,
+  hostId: string,
+): boolean {
+  return hostId === "local"
+    ? state.serverInfo !== null
+    : Object.prototype.hasOwnProperty.call(state.workspaceCapabilitiesByHost, hostId);
+}
+
+export interface SessionModeViewResolution {
+  mode: SessionMode;
+  /** Keep the pane neutral until a modern peer returns an authoritative mode. */
+  pending: boolean;
+}
+
+/** Resolve the mode a Chat pane may safely mount from the handshake state.
+ *
+ * Before `server.info`/`host.info` arrives, the legacy global setting is not
+ * safe to use: a persisted `cli` value could mount an agent terminal before
+ * the server tells us that this is a modern peer and before its session mode
+ * is read. Modern peers likewise remain neutral until their first mode reply.
+ * Once a mode reply has established the value, keep it while a refetch is in
+ * flight so invalidation never flashes Hosted or mounts a second CLI.
+ */
+export function resolveSessionModeForView(
+  capabilityKnown: boolean,
+  runtimeModeAvailable: boolean,
+  modeState: SessionModeState | undefined,
+  legacyMode: SessionMode,
+): SessionModeViewResolution {
+  const authoritative = Boolean(
+    modeState?.authoritative ?? modeState?.state === "ready",
+  );
+  if (!capabilityKnown) return { mode: "hosted", pending: true };
+  if (!runtimeModeAvailable) return { mode: legacyMode, pending: false };
+  if (!authoritative || !modeState) return { mode: "hosted", pending: true };
+  return { mode: modeState.mode, pending: false };
+}
+
+/** Manifest discovery is host-scoped: a remote provider list must never
+ * replace the local host's availability. */
+export interface AgentManifestHostState {
+  manifests: AgentManifestSummary[];
+  state: "idle" | "loading" | "ready" | "error";
+  error?: string;
+}
+
+export interface AgentLifecycleState {
+  status?: AgentLifecycleStatus;
+  state: "idle" | "loading" | "ready" | "error";
+  error?: string;
+}
+
+export interface AgentControlState {
+  agentId: string;
+  input?: AgentControlLease;
+  resize?: AgentControlLease;
+  inputOwner?: AgentControlLease;
+  resizeOwner?: AgentControlLease;
+  state: "idle" | "loading" | "ready" | "error";
+  error?: string;
+}
+
 /** A single "session finished" toast (Phase 6). Created client-side when a
  * `session.updated` push shows a running→idle transition for a session that
  * isn't the one currently being viewed. */
@@ -127,16 +240,15 @@ interface PerchState {
    * persisted: the server's `cliStarted` is the durable half. */
   cliStartedSessions: Record<string, boolean>;
   /** Per-session CLI provider choice (Bug 1 fix): which agent binary
-   * (`claude`/`codex`) CLI mode launches for a given session, recorded when
+   * CLI mode launches for a given session, recorded when
    * the user picks one in `CliStartPanel`. This is *provider* selection only
    * — which CLI to spawn — not model/effort chrome; CLAUDE.md's "zero model
    * chrome in CLI mode" product decision stands, and providers/model pickers
    * still never render in CLI mode. Keyed by sessionId, same shape as
    * `cliStartedSessions`/`cliTerminalIds`/`effortBySession`. A session with no
-   * entry here falls back to the global `agent` field, which is exactly what
-   * every pre-existing session (and the pre-fix code path) already did. Not
-   * persisted server-side — client-only, like `effortBySession`. */
-  cliAgentBySession: Record<string, AgentKind>;
+   * entry here uses the server's persisted `cliProviderId`, then the global
+   * `agent` field for sessions that predate provider selection. */
+  cliAgentBySession: Record<string, string>;
   /** Per-session Hosted-mode provider choice, keyed by sessionId — the Hosted
    * counterpart to `cliAgentBySession`. A brand-new session created with an
    * explicit agent choice (the sidebar's "+ New session" popover or
@@ -159,8 +271,57 @@ interface PerchState {
   availableModels: Record<AgentKind, ModelEntry[]>;
   /** All sessions known to the server, refreshed via session.list pushes. */
   sessions: SessionSummary[];
+  /** Stable browser/device identity used by the session-mode policy. It is
+   * opaque to the UI and is sent back unchanged on mode reads/writes. */
+  deviceId: string;
+  /** Effective, server-confirmed mode keyed by session id. A missing entry
+   * means the peer has not answered yet and callers should use the legacy
+   * settings fallback. */
+  sessionModes: Record<string, SessionModeState>;
+  fetchSessionMode: (sessionId: string, workspaceId?: string) => string | null;
+  setSessionMode: (
+    sessionId: string,
+    scope: Exclude<SessionModeScope, "default">,
+    mode?: SessionMode,
+    workspaceId?: string,
+    clearOverride?: boolean,
+  ) => string | null;
+  /** Provider availability, kept per owning host because federated hosts can
+   * expose different binaries and capabilities. */
+  agentManifestsByHost: Record<string, AgentManifestHostState>;
+  fetchAgentManifests: (hostId?: string) => string | null;
+  /** Lifecycle is keyed by the durable workspace/session/provider tuple. */
+  agentLifecycleByKey: Record<string, AgentLifecycleState>;
+  fetchAgentLifecycle: (sessionId: string, workspaceId?: string, agentId?: string) => string | null;
+  /** Control leases are retained only in this connection's view. The server
+   * remains authoritative and requires the exact returned generation for
+   * terminal input/resize and release. */
+  agentControlBySession: Record<string, AgentControlState>;
+  acquireAgentControl: (
+    sessionId: string,
+    agentId: string,
+    channel: AgentControlChannel,
+    workspaceId?: string,
+  ) => string | null;
+  releaseAgentControl: (
+    sessionId: string,
+    agentId: string,
+    channel: AgentControlChannel,
+    generation: number,
+    workspaceId?: string,
+  ) => string | null;
   /** Host info sent once per connection by the server after WS handshake. */
-  serverInfo: { hostname: string; isSsh: boolean; platform: string } | null;
+  serverInfo: {
+    hostname: string;
+    isSsh: boolean;
+    platform: string;
+    /** Newer peers advertise the workspace foundation. Older peers omit all
+     * of these fields and continue to use the legacy session navigation. */
+    protocolVersion?: number;
+    capabilities?: string[];
+    snapshotEpoch?: string;
+    snapshotRevision?: number;
+  } | null;
   /** The user's real terminal appearance (font + ANSI palette from their
    * iTerm2 profile), sent in `server.info`. Every PTY-backed pane renders
    * with this so the agent CLIs look the way they do in the user's own
@@ -217,6 +378,37 @@ interface PerchState {
   setActiveHost: (hostId: string) => void;
   /** Pin the sidebar/tab bar to a project (also makes its host active). */
   setActiveProject: (hostId: string, cwd: string) => void;
+  /** Stable project/workspace navigation. These ids are persisted locally and
+   * focused on the server when the peer advertises the matching capability. */
+  workspaceProjects: WorkspaceProject[];
+  workspaces: WorkspaceRecord[];
+  workspaceSnapshotByHost: Record<string, WorkspaceSnapshotStatus>;
+  workspaceCapabilities: string[];
+  workspaceCapabilitiesByHost: Record<string, string[]>;
+  workspaceProjectCreate: WorkspaceProjectCreateState | null;
+  activeProjectId: string | null;
+  activeWorkspaceId: string | null;
+  fetchWorkspaceSnapshot: (hostId?: string, projectId?: string) => void;
+  createWorkspaceProject: (path: string, name?: string, hostId?: string) => string | null;
+  clearWorkspaceProjectCreate: () => void;
+  focusWorkspaceProject: (projectId: string) => void;
+  focusWorkspace: (workspaceId: string) => void;
+  renameWorkspaceProject: (projectId: string, name: string) => void;
+  archiveWorkspaceProject: (projectId: string, archived: boolean) => void;
+  renameWorkspace: (workspaceId: string, name: string) => void;
+  restoreWorkspace: (workspaceId: string) => void;
+  /** Workspace-relative file surface currently shown over the dock. The
+   * filesystem store owns tree/buffer wire state; this id only coordinates
+   * the navigation entry point with App's main canvas. */
+  workspaceFilesWorkspaceId: string | null;
+  openWorkspaceFiles: (workspaceId: string) => void;
+  closeWorkspaceFiles: () => void;
+  /** Workspace-scoped Git/status/diff/review surface currently requested by
+   * the navigation rail. Dockview consumes and clears this intent so the
+   * review view joins the same persisted mixed-pane layout as files. */
+  workspaceGitReviewWorkspaceId: string | null;
+  openWorkspaceGitReview: (workspaceId: string) => void;
+  closeWorkspaceGitReview: () => void;
   /** Cache of persisted dockview layout blobs, keyed by sessionId. Populated
    * from `session.layout` server replies (Phase 3: Workspace → Tab → Pane
    * model). A key mapped to `null` means the server has confirmed there is
@@ -326,7 +518,7 @@ interface PerchState {
    * matches the current global chat mode (plus, in Hosted mode, the live
    * `agent`/`model` fields so the pane header and the next `chat.send`
    * reflect it immediately). */
-  createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: AgentKind) => void;
+  createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: string) => void;
   /** Archive or unarchive a session. Archiving hides it everywhere in the
    * nav (sidebar, tab bar, navigator) immediately; the only place archived
    * sessions are listed is Settings → Archived sessions, which is also where
@@ -399,7 +591,7 @@ interface PerchState {
    * "Start" affordance for a session that already exists but has never had a
    * CLI launched in it. `agent`, when passed, also records the CLI provider
    * choice for this session in `cliAgentBySession` (see there). */
-  startCli: (sessionId: string, agent?: AgentKind) => void;
+  startCli: (sessionId: string, agent?: string) => void;
   /** Attach (or reattach) the real interactive agent CLI for a session.
    * `cols`/`rows` should be the pane's *actual* measured grid so the CLI
    * paints its first frame at the final width — see AgentCliTerminal. */
@@ -468,7 +660,7 @@ let expectCliStart = false;
  * in the `session.created` handler — same one-shot request/reply discipline
  * as `expectProjectFromStatus`.
  */
-let pendingAgentForNewSession: AgentKind | null = null;
+let pendingAgentForNewSession: string | null = null;
 
 /** Resolvers for in-flight `fs.browse` requests, keyed by requestId. See
  * `browseDirectory` and the `"fs.browse.result"` case in
@@ -489,6 +681,232 @@ export type WorktreeReply =
  * gets exactly one reply: `worktree.list.result`, `worktree.done`, or
  * `worktree.error`. */
 const pendingWorktrees = new Map<string, (msg: WorktreeReply) => void>();
+
+/** Request ids for the first durable project/workspace slice. Keeping the
+ * originating host beside each id lets a late reply be ignored after a host
+ * switch while still allowing unrelated session traffic to continue. */
+const pendingWorkspaceRequests = new Map<string, {
+  hostId: string;
+  kind: string;
+  projectId?: string;
+  previousFocus?: { projectId: string | null; workspaceId: string | null; legacy: ActiveProject | null };
+}>();
+const latestWorkspaceFocusRequestByHost = new Map<string, string>();
+
+type AgentRuntimeRequestKind = "mode" | "manifests" | "lifecycle" | "control";
+
+interface PendingAgentRuntimeRequest {
+  kind: AgentRuntimeRequestKind;
+  key: string;
+  sessionId?: string;
+  hostId?: string;
+  agentId?: string;
+  channel?: AgentControlChannel;
+  /** Highest policy revision observed while this mode request was in flight. */
+  minimumModeRevision?: number;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+const pendingAgentRuntimeRequests = new Map<string, PendingAgentRuntimeRequest>();
+const latestAgentRuntimeRequestByKey = new Map<string, string>();
+const AGENT_RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_AGENT_RUNTIME_REQUESTS = 64;
+
+function markAgentRuntimeError(request: PendingAgentRuntimeRequest, message: string): void {
+  if (request.kind === "mode" && request.sessionId) {
+    usePerchStore.setState((state) => {
+      const current = state.sessionModes[request.sessionId!];
+      return {
+        sessionModes: {
+          ...state.sessionModes,
+          [request.sessionId!]: {
+            ...(current ?? {
+              mode: state.settings?.chatMode ?? "hosted",
+              scope: "default" as const,
+              revision: 0,
+              deviceId: state.deviceId,
+            }),
+            state: "error",
+            error: message,
+          },
+        },
+      };
+    });
+    return;
+  }
+  if (request.kind === "manifests" && request.hostId) {
+    usePerchStore.setState((state) => ({
+      agentManifestsByHost: {
+        ...state.agentManifestsByHost,
+        [request.hostId!]: {
+          ...(state.agentManifestsByHost[request.hostId!] ?? { manifests: [] }),
+          state: "error",
+          error: message,
+        },
+      },
+    }));
+    return;
+  }
+  if (request.kind === "lifecycle" && request.key) {
+    usePerchStore.setState((state) => ({
+      agentLifecycleByKey: {
+        ...state.agentLifecycleByKey,
+        [request.key]: {
+          ...(state.agentLifecycleByKey[request.key] ?? { state: "idle" }),
+          state: "error",
+          error: message,
+        },
+      },
+    }));
+    return;
+  }
+  if (request.kind === "control" && request.sessionId) {
+    usePerchStore.setState((state) => ({
+      agentControlBySession: {
+        ...state.agentControlBySession,
+        [request.sessionId!]: {
+          ...(state.agentControlBySession[request.sessionId!] ?? {
+            agentId: request.agentId ?? "",
+          }),
+          state: "error",
+          error: message,
+        },
+      },
+    }));
+  }
+}
+
+function finishAgentRuntimeRequest(requestId: string): PendingAgentRuntimeRequest | undefined {
+  const pending = pendingAgentRuntimeRequests.get(requestId);
+  if (!pending) return undefined;
+  clearTimeout(pending.timeoutId);
+  pendingAgentRuntimeRequests.delete(requestId);
+  retireAgentRuntimeRequest(requestId);
+  if (latestAgentRuntimeRequestByKey.get(pending.key) === requestId) {
+    latestAgentRuntimeRequestByKey.delete(pending.key);
+  }
+  return pending;
+}
+
+function settleAgentRuntimeRequest(requestId: string): PendingAgentRuntimeRequest | undefined {
+  return finishAgentRuntimeRequest(requestId);
+}
+
+function expireAgentRuntimeRequest(requestId: string): void {
+  const pending = pendingAgentRuntimeRequests.get(requestId);
+  if (!pending) return;
+  const isLatest = latestAgentRuntimeRequestByKey.get(pending.key) === requestId;
+  const finished = finishAgentRuntimeRequest(requestId);
+  if (isLatest && finished) {
+    markAgentRuntimeError(finished, "The agent runtime request timed out. Check the host connection and try again.");
+  }
+}
+
+function beginAgentRuntimeRequest(
+  requestId: string,
+  request: Omit<PendingAgentRuntimeRequest, "timeoutId">,
+): void {
+  const previous = latestAgentRuntimeRequestByKey.get(request.key);
+  if (previous && previous !== requestId) settleAgentRuntimeRequest(previous);
+  while (pendingAgentRuntimeRequests.size >= MAX_AGENT_RUNTIME_REQUESTS) {
+    const oldest = pendingAgentRuntimeRequests.keys().next().value as string | undefined;
+    if (!oldest) break;
+    settleAgentRuntimeRequest(oldest);
+  }
+  const timeoutId = setTimeout(() => expireAgentRuntimeRequest(requestId), AGENT_RUNTIME_REQUEST_TIMEOUT_MS);
+  pendingAgentRuntimeRequests.set(requestId, { ...request, timeoutId });
+  latestAgentRuntimeRequestByKey.set(request.key, requestId);
+  registerAgentRuntimeRequest(requestId);
+}
+
+function sessionModeStateFor(state: Pick<PerchState, "sessionModes" | "settings">, sessionId: string | null): SessionMode {
+  if (sessionId) {
+    const mode = state.sessionModes[sessionId];
+    if (mode?.state === "ready" || mode?.authoritative === true) return mode.mode;
+  }
+  return state.settings?.chatMode ?? "hosted";
+}
+
+function agentLifecycleKeyFor(workspaceId: string | undefined, sessionId: string, agentId: string): string {
+  return `${workspaceId ?? ""}:${sessionId}:${agentId}`;
+}
+
+const WORKSPACE_CAPABILITIES = {
+  snapshot: "workspace.snapshot",
+  projectList: "project.list",
+  projectCreate: "project.create",
+  projectFocus: "project.focus",
+  projectRename: "project.rename",
+  projectArchive: "project.archive",
+  workspaceFocus: "workspace.focus",
+  workspaceRename: "workspace.rename",
+  workspaceRestore: "workspace.restore",
+} as const;
+
+const AGENT_RUNTIME_CAPABILITIES = {
+  modeGet: "session.mode.get",
+  modeSet: "session.mode.set",
+  manifests: "agent.manifest.list",
+  lifecycle: "agent.lifecycle.get",
+  acquire: "agent.control.acquire",
+  release: "agent.control.release",
+} as const;
+
+function hasWorkspaceCapability(
+  state: Pick<PerchState, "serverInfo" | "workspaceCapabilitiesByHost">,
+  hostId: string,
+  capability: string,
+): boolean {
+  // An absent capability list means an older peer. Do not optimistically send
+  // new messages: legacy hosts must stay on the session/cwd navigation path.
+  const capabilities = hostId === "local"
+    ? state.serverInfo?.capabilities
+    : state.workspaceCapabilitiesByHost[hostId];
+  return (hostId === "local" ? state.serverInfo?.protocolVersion : capabilities != null) != null &&
+    capabilities?.includes(capability) === true;
+}
+
+function hasAgentRuntimeCapability(
+  state: Pick<PerchState, "serverInfo" | "workspaceCapabilitiesByHost">,
+  hostId: string,
+  capability: string,
+): boolean {
+  const capabilities = hostId === "local"
+    ? state.serverInfo?.capabilities
+    : state.workspaceCapabilitiesByHost[hostId];
+  return capabilities?.includes(capability) === true;
+}
+
+function hostForSession(
+  state: Pick<PerchState, "sessions" | "activeHostId">,
+  sessionId: string,
+): string {
+  const session = state.sessions.find((session) => session.id === sessionId);
+  return session ? session.hostId ?? "local" : state.activeHostId;
+}
+
+function workspaceForSession(
+  state: Pick<PerchState, "sessions" | "sessionModes">,
+  sessionId: string,
+  workspaceId?: string,
+): string | undefined {
+  if (workspaceId) return workspaceId;
+  const session = state.sessions.find((candidate) => candidate.id === sessionId);
+  // Browsing another workspace does not move this session into it. Only
+  // echo an actual session association, never the navigation focus.
+  return session?.workspaceId ?? state.sessionModes[sessionId]?.workspaceId;
+}
+
+function sendWorkspaceMessage(
+  message: ClientMessage,
+  hostId: string,
+  kind: string,
+  context?: { projectId?: string; previousFocus?: { projectId: string | null; workspaceId: string | null; legacy: ActiveProject | null } },
+): void {
+  const requestId = "requestId" in message && typeof message.requestId === "string" ? message.requestId : null;
+  if (requestId) pendingWorkspaceRequests.set(requestId, { hostId, kind, ...context });
+  socket.send(message);
+}
 
 /**
  * Sessions currently being loaded in the background — a split pane bound to
@@ -564,6 +982,8 @@ export interface ActiveProject {
  * never round-trips the protocol. */
 const ACTIVE_HOST_STORAGE_KEY = "perch.activeHostId";
 const ACTIVE_PROJECT_STORAGE_KEY = "perch.activeProject";
+const ACTIVE_PROJECT_ID_STORAGE_KEY = "perch.activeProjectId";
+const ACTIVE_WORKSPACE_ID_STORAGE_KEY = "perch.activeWorkspaceId";
 
 function readActiveHostStored(): string {
   try {
@@ -627,6 +1047,42 @@ function writeActiveProjectStored(project: ActiveProject | null): void {
   } catch {
     // ignore
   }
+}
+
+function readStoredId(key: string): string | null {
+  try {
+    const value = localStorage.getItem(key);
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredId(key: string, value: string | null): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    // ignore — the legacy host/project scope remains available in memory
+  }
+}
+
+/** Keep one opaque browser identity stable across reconnects and mode policy
+ * reads. A fresh tab/profile gets a new id; no provider or host identity is
+ * derived from it. */
+const DEVICE_ID_STORAGE_KEY = "perch.deviceId";
+
+function readDeviceIdStored(): string {
+  const existing = readStoredId(DEVICE_ID_STORAGE_KEY);
+  if (existing) return existing;
+  const created = newId();
+  try {
+    localStorage.setItem(DEVICE_ID_STORAGE_KEY, created);
+  } catch {
+    // The in-memory value still correlates this connection when storage is
+    // unavailable (private browsing, test DOM, or a blocked origin).
+  }
+  return created;
 }
 
 /** localStorage key backing `lastAgentChoice` — same convention as
@@ -843,6 +1299,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   model: "",
   availableModels: { claude: [], codex: [] },
   sessions: [],
+  deviceId: readDeviceIdStored(),
+  sessionModes: {},
+  agentManifestsByHost: {},
+  agentLifecycleByKey: {},
+  agentControlBySession: {},
   serverInfo: null,
   terminalProfile: null,
   attachingCliForSession: null,
@@ -862,6 +1323,14 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   sessionLayouts: {},
   sidebarCollapsed: false,
   workspaceGit: {},
+  workspaceProjects: [],
+  workspaces: [],
+  workspaceSnapshotByHost: {},
+  workspaceCapabilities: [],
+  workspaceCapabilitiesByHost: {},
+  workspaceProjectCreate: null,
+  activeProjectId: readStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY),
+  activeWorkspaceId: readStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY),
   worktrees: {},
   worktreeMenuRequest: null,
   toasts: [],
@@ -880,6 +1349,244 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   setEffort: (sessionId, effort) => {
     set((state) => ({ effortBySession: { ...state.effortBySession, [sessionId]: effort } }));
+  },
+
+  fetchSessionMode: (sessionId, workspaceIdParam) => {
+    const state = get();
+    if (!sessionId) return null;
+    const hostId = hostForSession(state, sessionId);
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.modeGet)) return null;
+    const key = `mode:${sessionId}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
+    const requestId = newId();
+    const current = state.sessionModes[sessionId];
+    set((currentState) => ({
+      sessionModes: {
+        ...currentState.sessionModes,
+        [sessionId]: {
+          ...(current ?? {
+            mode: currentState.settings?.chatMode ?? "hosted",
+            scope: "default" as const,
+            revision: 0,
+            deviceId: currentState.deviceId,
+          }),
+          state: "loading",
+          error: undefined,
+        },
+      },
+    }));
+    beginAgentRuntimeRequest(requestId, {
+      kind: "mode",
+      key,
+      sessionId,
+    });
+    socket.send({
+      type: "session.mode.get",
+      requestId,
+      sessionId,
+      deviceId: state.deviceId,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
+    return requestId;
+  },
+
+  setSessionMode: (sessionId, scope, mode, workspaceIdParam, clearOverride = false) => {
+    const state = get();
+    if (!sessionId) return null;
+    const hostId = hostForSession(state, sessionId);
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.modeSet)) return null;
+    if (scope === "workspace" && !workspaceForSession(state, sessionId, workspaceIdParam)) return null;
+    if (!clearOverride && !mode) return null;
+    const key = `mode:${sessionId}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
+    const requestId = newId();
+    set((currentState) => {
+      const current = currentState.sessionModes[sessionId];
+      return {
+        sessionModes: {
+          ...currentState.sessionModes,
+          [sessionId]: {
+            ...(current ?? {
+              mode: currentState.settings?.chatMode ?? "hosted",
+              scope: "default" as const,
+              revision: 0,
+              deviceId: currentState.deviceId,
+            }),
+            state: "loading",
+            error: undefined,
+          },
+        },
+      };
+    });
+    beginAgentRuntimeRequest(requestId, {
+      kind: "mode",
+      key,
+      sessionId,
+    });
+    socket.send({
+      type: "session.mode.set",
+      requestId,
+      sessionId,
+      deviceId: state.deviceId,
+      scope,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(mode ? { mode } : {}),
+      ...(clearOverride ? { clearOverride: true } : {}),
+    });
+    return requestId;
+  },
+
+  fetchAgentManifests: (hostIdParam) => {
+    const state = get();
+    const hostId = hostIdParam ?? state.activeHostId;
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.manifests)) return null;
+    const key = `manifests:${hostId}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const requestId = newId();
+    set((currentState) => ({
+      agentManifestsByHost: {
+        ...currentState.agentManifestsByHost,
+        [hostId]: {
+          ...(currentState.agentManifestsByHost[hostId] ?? { manifests: [] }),
+          state: "loading",
+          error: undefined,
+        },
+      },
+    }));
+    beginAgentRuntimeRequest(requestId, {
+      kind: "manifests",
+      key,
+      hostId,
+    });
+    const message: AgentManifestListMessage = {
+      type: "agent.manifest.list",
+      requestId,
+      ...(hostId !== "local" ? { hostId } : {}),
+    };
+    socket.send(message);
+    return requestId;
+  },
+
+  fetchAgentLifecycle: (sessionId, workspaceIdParam, agentIdParam) => {
+    const state = get();
+    if (!sessionId) return null;
+    const hostId = hostForSession(state, sessionId);
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.lifecycle)) return null;
+    const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
+    const agentId = agentIdParam ?? state.cliAgentBySession[sessionId] ?? state.hostedAgentBySession[sessionId] ?? state.agent;
+    const key = `lifecycle:${workspaceId ?? ""}:${sessionId}:${agentId}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const requestId = newId();
+    const current = state.agentLifecycleByKey[key];
+    set((currentState) => ({
+      agentLifecycleByKey: {
+        ...currentState.agentLifecycleByKey,
+        [key]: {
+          ...(current ?? { state: "idle" as const }),
+          state: "loading",
+          error: undefined,
+        },
+      },
+    }));
+    beginAgentRuntimeRequest(requestId, {
+      kind: "lifecycle",
+      key,
+      sessionId,
+      agentId,
+    });
+    socket.send({
+      type: "agent.lifecycle.get",
+      requestId,
+      sessionId,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(agentId ? { agentId } : {}),
+    });
+    return requestId;
+  },
+
+  acquireAgentControl: (sessionId, agentId, channel, workspaceIdParam) => {
+    const state = get();
+    if (!sessionId || !agentId) return null;
+    const hostId = hostForSession(state, sessionId);
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.acquire)) return null;
+    const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
+    const key = `control:${sessionId}:${agentId}:${channel}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const requestId = newId();
+    set((currentState) => ({
+      agentControlBySession: {
+        ...currentState.agentControlBySession,
+        [sessionId]: {
+          ...(currentState.agentControlBySession[sessionId] ?? { agentId }),
+          agentId,
+          state: "loading",
+          error: undefined,
+        },
+      },
+    }));
+    beginAgentRuntimeRequest(requestId, {
+      kind: "control",
+      key,
+      sessionId,
+      agentId,
+      channel,
+    });
+    socket.send({
+      type: "agent.control.acquire",
+      requestId,
+      sessionId,
+      ...(workspaceId ? { workspaceId } : {}),
+      agentId,
+      channel,
+    });
+    return requestId;
+  },
+
+  releaseAgentControl: (sessionId, agentId, channel, generation, workspaceIdParam) => {
+    const state = get();
+    if (!sessionId || !agentId || !Number.isSafeInteger(generation) || generation < 1) return null;
+    const hostId = hostForSession(state, sessionId);
+    if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.release)) return null;
+    const workspaceId = workspaceForSession(state, sessionId, workspaceIdParam);
+    const key = `control:${sessionId}:${agentId}:${channel}`;
+    const existing = latestAgentRuntimeRequestByKey.get(key);
+    if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
+    const requestId = newId();
+    set((currentState) => ({
+      agentControlBySession: {
+        ...currentState.agentControlBySession,
+        [sessionId]: {
+          ...(currentState.agentControlBySession[sessionId] ?? { agentId }),
+          agentId,
+          state: "loading",
+          error: undefined,
+        },
+      },
+    }));
+    beginAgentRuntimeRequest(requestId, {
+      kind: "control",
+      key,
+      sessionId,
+      agentId,
+      channel,
+    });
+    socket.send({
+      type: "agent.control.release",
+      requestId,
+      sessionId,
+      ...(workspaceId ? { workspaceId } : {}),
+      agentId,
+      channel,
+      generation,
+    });
+    return requestId;
   },
 
   approvePlan: (messageId) => {
@@ -993,8 +1700,16 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // Opening a session from *anywhere* (sidebar row, tab, Navigator, mobile
     // switcher, toast) re-scopes the nav onto that session's host + project.
     const newProject = s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
+    const stableProjectId = s?.projectId ?? get().workspaceProjects.find(
+      (project) => project.hostId === newHostId && project.path === s?.cwd && !project.archived,
+    )?.id ?? null;
+    const stableWorkspaceId = s?.workspaceId ?? (stableProjectId
+      ? get().workspaces.find((workspace) => workspace.projectId === stableProjectId && workspace.state !== "archived")?.id ?? null
+      : null);
     writeActiveHostStored(newHostId);
     writeActiveProjectStored(newProject);
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, stableProjectId);
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, stableWorkspaceId);
     flushChunkBuffer();
     // If a background load for this session is already in flight (a split
     // pane mounted it before this switch), promote it to an ordinary switch
@@ -1014,7 +1729,17 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       cliError: null,
       activeHostId: newHostId,
       activeProject: newProject,
+      activeProjectId: stableProjectId,
+      activeWorkspaceId: stableWorkspaceId,
     }));
+    if (stableWorkspaceId && hasWorkspaceCapability(get(), newHostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
+      const requestId = newId();
+      sendWorkspaceMessage(
+        { type: "workspace.focus", requestId, workspaceId: stableWorkspaceId },
+        newHostId,
+        WORKSPACE_CAPABILITIES.workspaceFocus,
+      );
+    }
     socket.switchSession(sessionId);
   },
 
@@ -1025,13 +1750,224 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     writeActiveHostStored(hostId);
     if (get().activeHostId === hostId) return;
     writeActiveProjectStored(null);
-    set({ activeHostId: hostId, activeProject: null });
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, null);
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, null);
+    set({
+      activeHostId: hostId,
+      activeProject: null,
+      activeProjectId: null,
+      activeWorkspaceId: null,
+    });
+    if (get().connected) get().fetchWorkspaceSnapshot(hostId);
   },
 
   setActiveProject: (hostId, cwd) => {
+    const stableProject = get().workspaceProjects.find(
+      (project) => project.hostId === hostId && project.path === cwd && !project.archived,
+    );
+    if (stableProject && hasWorkspaceCapability(get(), hostId, WORKSPACE_CAPABILITIES.projectFocus)) {
+      get().focusWorkspaceProject(stableProject.id);
+      return;
+    }
     writeActiveHostStored(hostId);
     writeActiveProjectStored({ hostId, cwd });
-    set({ activeHostId: hostId, activeProject: { hostId, cwd } });
+    const stableWorkspace = stableProject
+      ? get().workspaces.find((workspace) => workspace.projectId === stableProject.id)
+      : undefined;
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, stableProject?.id ?? null);
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, stableWorkspace?.id ?? null);
+    set({
+      activeHostId: hostId,
+      activeProject: { hostId, cwd },
+      activeProjectId: stableProject?.id ?? null,
+      activeWorkspaceId: stableWorkspace?.id ?? null,
+    });
+  },
+
+  fetchWorkspaceSnapshot: (hostIdParam, projectId) => {
+    const state = get();
+    const hostId = hostIdParam ?? state.activeHostId;
+    if (!state.connected || !hasWorkspaceCapability(state, hostId, WORKSPACE_CAPABILITIES.snapshot)) return;
+    const requestId = newId();
+    set((current) => ({
+      workspaceSnapshotByHost: {
+        ...current.workspaceSnapshotByHost,
+        [hostId]: { ...current.workspaceSnapshotByHost[hostId], state: "loading", error: undefined },
+      },
+    }));
+    const message = {
+      type: "workspace.snapshot" as const,
+      requestId,
+      ...(hostId !== "local" ? { hostId } : {}),
+      ...(projectId ? { projectId } : {}),
+    };
+    sendWorkspaceMessage(message, hostId, WORKSPACE_CAPABILITIES.snapshot, { projectId });
+  },
+
+  createWorkspaceProject: (path, name, hostIdParam) => {
+    const state = get();
+    const hostId = hostIdParam ?? state.activeHostId;
+    const trimmedPath = path.trim();
+    if (!trimmedPath || !state.connected || !hasWorkspaceCapability(state, hostId, WORKSPACE_CAPABILITIES.projectCreate)) return null;
+    if (state.workspaceProjectCreate?.status === "pending") return null;
+    const requestId = newId();
+    set({
+      workspaceProjectCreate: {
+        requestId,
+        hostId,
+        path: trimmedPath,
+        ...(name?.trim() ? { name: name.trim() } : {}),
+        status: "pending",
+      },
+    });
+    sendWorkspaceMessage(
+      {
+        type: "project.create",
+        requestId,
+        ...(hostId !== "local" ? { hostId } : {}),
+        path: trimmedPath,
+        ...(name?.trim() ? { name: name.trim() } : {}),
+      },
+      hostId,
+      WORKSPACE_CAPABILITIES.projectCreate,
+    );
+    return requestId;
+  },
+
+  clearWorkspaceProjectCreate: () => {
+    set({ workspaceProjectCreate: null });
+  },
+
+  focusWorkspaceProject: (projectId) => {
+    const state = get();
+    const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
+    if (!project || project.archived) return;
+    if (!state.connected) return;
+    const previousFocus = {
+      projectId: state.activeProjectId,
+      workspaceId: state.activeWorkspaceId,
+      legacy: state.activeProject,
+    };
+    writeActiveHostStored(project.hostId);
+    writeActiveProjectStored({ hostId: project.hostId, cwd: project.path });
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+    const workspace = state.workspaces.find((candidate) => candidate.projectId === project.id && candidate.state !== "archived");
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspace?.id ?? null);
+    set({
+      activeHostId: project.hostId,
+      activeProject: { hostId: project.hostId, cwd: project.path },
+      activeProjectId: project.id,
+      activeWorkspaceId: workspace?.id ?? null,
+    });
+    if (state.connected && hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectFocus)) {
+      const requestId = newId();
+      latestWorkspaceFocusRequestByHost.set(project.hostId, requestId);
+      sendWorkspaceMessage(
+        { type: "project.focus", requestId, projectId },
+        project.hostId,
+        WORKSPACE_CAPABILITIES.projectFocus,
+        { previousFocus },
+      );
+    }
+  },
+
+  focusWorkspace: (workspaceId) => {
+    const state = get();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    const project = workspace && state.workspaceProjects.find((candidate) => candidate.id === workspace.projectId);
+    if (!workspace || !project || workspace.state === "archived" || project.archived) return;
+    if (!state.connected) return;
+    const previousFocus = {
+      projectId: state.activeProjectId,
+      workspaceId: state.activeWorkspaceId,
+      legacy: state.activeProject,
+    };
+    writeActiveHostStored(workspace.hostId);
+    writeActiveProjectStored({ hostId: workspace.hostId, cwd: workspace.path });
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspace.id);
+    set({
+      activeHostId: workspace.hostId,
+      activeProject: { hostId: workspace.hostId, cwd: workspace.path },
+      activeProjectId: project.id,
+      activeWorkspaceId: workspace.id,
+    });
+    if (state.connected && hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
+      const requestId = newId();
+      latestWorkspaceFocusRequestByHost.set(workspace.hostId, requestId);
+      sendWorkspaceMessage(
+        { type: "workspace.focus", requestId, workspaceId },
+        workspace.hostId,
+        WORKSPACE_CAPABILITIES.workspaceFocus,
+        { previousFocus },
+      );
+    }
+  },
+
+  renameWorkspaceProject: (projectId, name) => {
+    const state = get();
+    const trimmedName = name.trim();
+    const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
+    if (!trimmedName || !project || !state.connected || !hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectRename)) return;
+    const requestId = newId();
+    sendWorkspaceMessage(
+      { type: "project.rename", requestId, projectId, name: trimmedName },
+      project.hostId,
+      WORKSPACE_CAPABILITIES.projectRename,
+    );
+  },
+
+  archiveWorkspaceProject: (projectId, archived) => {
+    const state = get();
+    const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
+    if (!project || !state.connected || !hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectArchive)) return;
+    const requestId = newId();
+    sendWorkspaceMessage(
+      { type: "project.archive", requestId, projectId, archived },
+      project.hostId,
+      WORKSPACE_CAPABILITIES.projectArchive,
+    );
+  },
+
+  renameWorkspace: (workspaceId, name) => {
+    const state = get();
+    const trimmedName = name.trim();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!trimmedName || !workspace || !state.connected || !hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceRename)) return;
+    const requestId = newId();
+    sendWorkspaceMessage(
+      { type: "workspace.rename", requestId, workspaceId, name: trimmedName },
+      workspace.hostId,
+      WORKSPACE_CAPABILITIES.workspaceRename,
+    );
+  },
+
+  restoreWorkspace: (workspaceId) => {
+    const state = get();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!workspace || !state.connected || !hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceRestore)) return;
+    const requestId = newId();
+    sendWorkspaceMessage(
+      { type: "workspace.restore", requestId, workspaceId },
+      workspace.hostId,
+      WORKSPACE_CAPABILITIES.workspaceRestore,
+    );
+  },
+
+  workspaceFilesWorkspaceId: null,
+  openWorkspaceFiles: (workspaceId) => {
+    if (workspaceId) set({ workspaceFilesWorkspaceId: workspaceId });
+  },
+  closeWorkspaceFiles: () => {
+    set({ workspaceFilesWorkspaceId: null });
+  },
+
+  workspaceGitReviewWorkspaceId: null,
+  openWorkspaceGitReview: (workspaceId) => {
+    if (workspaceId) set({ workspaceGitReviewWorkspaceId: workspaceId });
+  },
+  closeWorkspaceGitReview: () => {
+    set({ workspaceGitReviewWorkspaceId: null });
   },
 
   setSettingsOpen: (open) => {
@@ -1074,7 +2010,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // `shouldReuseCurrentSession`. With `sessionId: null` (no session open at
     // all) there is nothing to focus, so it must not fire.
     const state = get();
-    const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
+    // A runtime-capable peer stores mode policy per session. Fall back to the
+    // legacy global setting only when this session has no mode result yet.
+    const cliMode = sessionModeStateFor(state, state.sessionId) === "cli";
     if (shouldReuseCurrentSession(state, hostId, cwd, cliMode, state.messages.length === 0)) {
       // Already on an empty session for this host — just focus the composer.
       return;
@@ -1265,11 +2203,32 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   sendTerminalInput: (terminalId, data) => {
-    socket.send({ type: "terminal.input", terminalId, data });
+    if (sendAgentTerminalInput(terminalId, data)) return;
+    const state = get();
+    const sessionId = Object.entries(state.cliTerminalIds).find(([, id]) => id === terminalId)?.[0];
+    const control = sessionId ? state.agentControlBySession[sessionId] : undefined;
+    const generation = control?.input?.generation;
+    socket.send({
+      type: "terminal.input",
+      terminalId,
+      data,
+      ...(generation != null ? { generation } : {}),
+    });
   },
 
   resizeTerminal: (terminalId, cols, rows) => {
-    socket.send({ type: "terminal.resize", terminalId, cols, rows });
+    if (resizeAgentTerminal(terminalId, cols, rows)) return;
+    const state = get();
+    const sessionId = Object.entries(state.cliTerminalIds).find(([, id]) => id === terminalId)?.[0];
+    const control = sessionId ? state.agentControlBySession[sessionId] : undefined;
+    const generation = control?.resize?.generation;
+    socket.send({
+      type: "terminal.resize",
+      terminalId,
+      cols,
+      rows,
+      ...(generation != null ? { generation } : {}),
+    });
     set((state) => {
       const existing = state.terminals[terminalId];
       if (!existing) return state;
@@ -1467,12 +2426,325 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
     // ignore
   }
   flushChunkBuffer();
+  writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, null);
+  writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, null);
   usePerchStore.setState({
     sessionId: null,
     messages: [],
     streamingMessageId: null,
     cliError: null,
+    activeProjectId: null,
+    activeWorkspaceId: null,
   });
+}
+
+type WorkspaceWireMessage = {
+  type: string;
+  requestId?: string;
+  hostId?: string;
+  snapshotEpoch?: string;
+  snapshotRevision?: number;
+  project?: WorkspaceProject;
+  projectId?: string;
+  projects?: WorkspaceProject[];
+  workspace?: WorkspaceRecord;
+  workspaceId?: string;
+  workspaces?: WorkspaceRecord[];
+  activeProjectId?: string;
+  activeWorkspaceId?: string;
+};
+
+function replaceHostRecords<T extends { hostId: string }>(
+  current: T[],
+  incoming: T[],
+  hostId: string,
+): T[] {
+  return [...current.filter((record) => record.hostId !== hostId), ...incoming];
+}
+
+function mergeHostRecordsScoped<T extends { hostId: string; id: string }>(
+  current: T[],
+  incoming: T[],
+  hostId: string,
+  projectId?: string,
+): T[] {
+  const incomingIds = new Set(incoming.filter((record) => record.hostId === hostId).map((record) => record.id));
+  return [
+    ...current.filter((record) =>
+      record.hostId !== hostId && !incomingIds.has(record.id) ||
+      record.hostId === hostId && !incomingIds.has(record.id) &&
+        (!("projectId" in record) || !projectId || (record as { projectId?: string }).projectId !== projectId),
+    ),
+    ...incoming,
+  ];
+}
+
+function stableLegacyProject(
+  project: WorkspaceProject | undefined,
+  workspace: WorkspaceRecord | undefined,
+): ActiveProject | null {
+  const path = workspace?.path ?? project?.path;
+  if (!path) return null;
+  return { hostId: workspace?.hostId ?? project?.hostId ?? "local", cwd: path };
+}
+
+function staleWorkspaceFrame(
+  state: Pick<PerchState, "workspaceSnapshotByHost">,
+  hostId: string,
+  epoch: string | undefined,
+  revision: number | undefined,
+): boolean {
+  const previous = state.workspaceSnapshotByHost[hostId];
+  return previous != null && previous.snapshotEpoch === epoch &&
+    previous.revision != null &&
+    revision != null &&
+    revision < previous.revision;
+}
+
+function workspaceRevisionStatus(
+  current: Record<string, WorkspaceSnapshotStatus>,
+  hostId: string,
+  epoch: string | undefined,
+  revision: number | undefined,
+): WorkspaceSnapshotStatus {
+  const previous = current[hostId];
+  return {
+    ...previous,
+    state: "ready",
+    ...(epoch !== undefined ? { snapshotEpoch: epoch } : {}),
+    ...(revision !== undefined ? { revision } : {}),
+    error: undefined,
+  };
+}
+
+/** Apply the additive project/workspace messages before the legacy switch. A
+ * boolean return keeps this handler tolerant of older peers and lets the
+ * existing `error`/session cases continue to own their messages. */
+function handleWorkspaceMessage(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const msg = raw as WorkspaceWireMessage;
+  const hostId = msg.hostId || msg.project?.hostId || msg.workspace?.hostId || "local";
+  const state = usePerchStore.getState();
+
+  if (msg.type === "workspace.snapshot" && Array.isArray(msg.projects) && Array.isArray(msg.workspaces)) {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : 0;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    const activeProject = msg.activeProjectId
+      ? msg.projects.find((project) => project.id === msg.activeProjectId)
+      : undefined;
+    const activeWorkspace = msg.activeWorkspaceId
+      ? msg.workspaces.find((workspace) => workspace.id === msg.activeWorkspaceId)
+      : undefined;
+    const useServerFocus = state.activeHostId === hostId &&
+      (!state.activeProjectId || !state.workspaceProjects.some((project) => project.id === state.activeProjectId));
+    const nextProjectId = useServerFocus ? msg.activeProjectId ?? null : state.activeProjectId;
+    const nextWorkspaceId = useServerFocus ? msg.activeWorkspaceId ?? null : state.activeWorkspaceId;
+    const focusedProject = nextProjectId
+      ? msg.projects.find((project) => project.id === nextProjectId) ?? state.workspaceProjects.find((project) => project.id === nextProjectId)
+      : activeProject;
+    const focusedWorkspace = nextWorkspaceId
+      ? msg.workspaces.find((workspace) => workspace.id === nextWorkspaceId) ?? state.workspaces.find((workspace) => workspace.id === nextWorkspaceId)
+      : activeWorkspace;
+    const requestContext = msg.requestId ? pendingWorkspaceRequests.get(msg.requestId) : undefined;
+    const scopedProjectId = requestContext?.projectId;
+    const createAck = msg.requestId != null && state.workspaceProjectCreate?.requestId === msg.requestId;
+    const legacy = state.activeHostId === hostId
+      ? stableLegacyProject(focusedProject, focusedWorkspace) ?? state.activeProject
+      : state.activeProject;
+
+    if (state.activeHostId === hostId) {
+      writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, nextProjectId);
+      writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, nextWorkspaceId);
+      if (legacy) writeActiveProjectStored(legacy);
+    }
+    usePerchStore.setState((current) => ({
+      workspaceProjects: scopedProjectId
+        ? mergeHostRecordsScoped(current.workspaceProjects, msg.projects ?? [], hostId, scopedProjectId)
+        : replaceHostRecords(current.workspaceProjects, msg.projects ?? [], hostId),
+      workspaces: scopedProjectId
+        ? mergeHostRecordsScoped(current.workspaces, msg.workspaces ?? [], hostId, scopedProjectId)
+        : replaceHostRecords(current.workspaces, msg.workspaces ?? [], hostId),
+      workspaceSnapshotByHost: {
+        ...current.workspaceSnapshotByHost,
+        [hostId]: { state: "ready", revision, snapshotEpoch: epoch },
+      },
+      ...(createAck && current.workspaceProjectCreate
+        ? { workspaceProjectCreate: { ...current.workspaceProjectCreate, status: "success", error: undefined } }
+        : {}),
+      ...(state.activeHostId === hostId
+        ? {
+            activeProjectId: nextProjectId,
+            activeWorkspaceId: nextWorkspaceId,
+            activeProject: legacy,
+          }
+        : {}),
+    }));
+    if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+    return true;
+  }
+
+  if (msg.type === "project.list" && Array.isArray(msg.projects)) {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : 0;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    usePerchStore.setState((current) => ({
+      workspaceProjects: replaceHostRecords(current.workspaceProjects, msg.projects ?? [], hostId),
+      workspaceSnapshotByHost: {
+        ...current.workspaceSnapshotByHost,
+        [hostId]: { state: "ready", revision, snapshotEpoch: epoch },
+      },
+    }));
+    if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+    return true;
+  }
+
+  if (msg.type === "project.updated" && msg.project) {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : undefined;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    const createAck = msg.requestId != null && state.workspaceProjectCreate?.requestId === msg.requestId;
+    usePerchStore.setState((current) => {
+      const projects = current.workspaceProjects.some((project) => project.id === msg.project?.id)
+        ? current.workspaceProjects.map((project) => project.id === msg.project?.id ? msg.project! : project)
+        : [...current.workspaceProjects, msg.project!];
+      const active = current.activeProjectId === msg.project!.id && current.activeHostId === msg.project!.hostId;
+      const legacy = active
+        ? stableLegacyProject(msg.project, current.workspaces.find((workspace) => workspace.projectId === msg.project!.id))
+        : current.activeProject;
+      if (active && legacy) writeActiveProjectStored(legacy);
+      return {
+        workspaceProjects: projects,
+        workspaceSnapshotByHost: {
+          ...current.workspaceSnapshotByHost,
+          [hostId]: workspaceRevisionStatus(current.workspaceSnapshotByHost, hostId, epoch, revision),
+        },
+        ...(createAck && current.workspaceProjectCreate
+          ? { workspaceProjectCreate: { ...current.workspaceProjectCreate, status: "success", error: undefined } }
+          : {}),
+        ...(active && legacy ? { activeProject: legacy } : {}),
+      };
+    });
+    if (msg.requestId) {
+      const pending = pendingWorkspaceRequests.get(msg.requestId);
+      // project.create is answered by a project.updated followed by a
+      // workspace.snapshot using the same request id. Keep the context so a
+      // filtered snapshot cannot erase the other projects in the navigator.
+      if (pending?.kind === WORKSPACE_CAPABILITIES.projectCreate) {
+        pendingWorkspaceRequests.set(msg.requestId, { ...pending, projectId: msg.project.id });
+      } else {
+        pendingWorkspaceRequests.delete(msg.requestId);
+      }
+    }
+    return true;
+  }
+
+  if (msg.type === "project.deleted" && msg.projectId) {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : undefined;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    usePerchStore.setState((current) => {
+      const active = current.activeProjectId === msg.projectId;
+      if (active) {
+        writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, null);
+        writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, null);
+        writeActiveProjectStored(null);
+      }
+      return {
+        workspaceProjects: current.workspaceProjects.filter((project) => project.id !== msg.projectId),
+        workspaces: current.workspaces.filter((workspace) => workspace.projectId !== msg.projectId),
+        workspaceSnapshotByHost: {
+          ...current.workspaceSnapshotByHost,
+          [hostId]: workspaceRevisionStatus(current.workspaceSnapshotByHost, hostId, epoch, revision),
+        },
+        ...(active ? { activeProjectId: null, activeWorkspaceId: null, activeProject: null } : {}),
+      };
+    });
+    if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+    return true;
+  }
+
+  if (msg.type === "workspace.updated" && msg.workspace) {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : undefined;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    usePerchStore.setState((current) => {
+      const workspaces = current.workspaces.some((workspace) => workspace.id === msg.workspace?.id)
+        ? current.workspaces.map((workspace) => workspace.id === msg.workspace?.id ? msg.workspace! : workspace)
+        : [...current.workspaces, msg.workspace!];
+      const active = current.activeWorkspaceId === msg.workspace!.id && current.activeHostId === msg.workspace!.hostId;
+      const project = current.workspaceProjects.find((candidate) => candidate.id === msg.workspace!.projectId);
+      const legacy = active ? stableLegacyProject(project, msg.workspace) : current.activeProject;
+      if (active && legacy) writeActiveProjectStored(legacy);
+      return {
+        workspaces,
+        workspaceSnapshotByHost: {
+          ...current.workspaceSnapshotByHost,
+          [hostId]: workspaceRevisionStatus(current.workspaceSnapshotByHost, hostId, epoch, revision),
+        },
+        ...(active && legacy ? { activeProject: legacy } : {}),
+      };
+    });
+    if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+    return true;
+  }
+
+  if (msg.type === "workspace.focus" && typeof msg.activeWorkspaceId === "string") {
+    const revision = typeof msg.snapshotRevision === "number" ? msg.snapshotRevision : undefined;
+    const epoch = typeof msg.snapshotEpoch === "string" ? msg.snapshotEpoch : undefined;
+    if (staleWorkspaceFrame(state, hostId, epoch, revision)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    const focusRequest = msg.requestId ? pendingWorkspaceRequests.get(msg.requestId) : undefined;
+    const latestRequestId = latestWorkspaceFocusRequestByHost.get(hostId);
+    // A focus reply belongs to a host and a request. A delayed reply from a
+    // previous host must never move the current navigation scope back.
+    if (state.activeHostId !== hostId || (msg.requestId && latestRequestId !== msg.requestId)) {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      return true;
+    }
+    const projectId = msg.activeProjectId;
+    const workspaceId = msg.activeWorkspaceId;
+    const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    const legacy = stableLegacyProject(project, workspace);
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, projectId ?? null);
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspaceId);
+    if (legacy) {
+      writeActiveHostStored(hostId);
+      writeActiveProjectStored(legacy);
+    }
+    usePerchStore.setState({
+      activeHostId: hostId,
+      activeProjectId: projectId ?? null,
+      activeWorkspaceId: workspaceId,
+      workspaceSnapshotByHost: {
+        ...state.workspaceSnapshotByHost,
+        [hostId]: workspaceRevisionStatus(state.workspaceSnapshotByHost, hostId, epoch, revision),
+      },
+      ...(legacy ? { activeProject: legacy } : {}),
+    });
+    if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+    return true;
+  }
+
+  return false;
 }
 
 /** Exported for `store.test.ts` only — everything else drives this
@@ -1482,6 +2754,8 @@ export function handleServerMessage(msg: ServerMessage): void {
   // so e.g. chat.done/error see the fully up-to-date message text instead of
   // racing a still-pending animation frame (see flushChunkBuffer above).
   if (msg.type !== "chat.chunk") flushChunkBuffer();
+  if (handleAgentTerminalMessage(msg) || handleWorkspaceTerminalMessage(msg)) return;
+  if (handleWorkspaceMessage(msg)) return;
   switch (msg.type) {
     case "session.created": {
       // A background-load resume (see `ensureSessionLive`) echoes back
@@ -1511,13 +2785,15 @@ export function handleServerMessage(msg: ServerMessage): void {
             // without this the new session kept whatever provider the
             // *previous* session happened to leave behind.
             next.cliAgentBySession = { ...state.cliAgentBySession, [msg.sessionId]: agentChoice };
-            next.hostedAgentBySession = { ...state.hostedAgentBySession, [msg.sessionId]: agentChoice };
-            const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
-            if (!cliMode) {
-              const hostModelEntry = state.hostModels[state.activeHostId];
-              const available = (hostModelEntry ? hostModelEntry[agentChoice] : undefined) ?? state.availableModels[agentChoice];
-              next.agent = agentChoice;
-              next.model = defaultModel(agentChoice, available);
+            if (agentChoice === "claude" || agentChoice === "codex") {
+              next.hostedAgentBySession = { ...state.hostedAgentBySession, [msg.sessionId]: agentChoice };
+              const cliMode = (state.settings?.chatMode ?? "hosted") === "cli";
+              if (!cliMode) {
+                const hostModelEntry = state.hostModels[state.activeHostId];
+                const available = (hostModelEntry ? hostModelEntry[agentChoice] : undefined) ?? state.availableModels[agentChoice];
+                next.agent = agentChoice;
+                next.model = defaultModel(agentChoice, available);
+              }
             }
           }
           return next;
@@ -1549,10 +2825,16 @@ export function handleServerMessage(msg: ServerMessage): void {
         }
         writeActiveHostStored(hostId); // also closes the latch
         writeActiveProjectStored({ hostId, cwd: newest.cwd });
+        const projectId = newest.projectId ?? null;
+        const workspaceId = newest.workspaceId ?? null;
+        writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, projectId);
+        writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspaceId);
         return {
           sessions: msg.sessions,
           activeHostId: hostId,
           activeProject: { hostId, cwd: newest.cwd },
+          activeProjectId: projectId,
+          activeWorkspaceId: workspaceId,
         };
       });
       break;
@@ -1626,14 +2908,24 @@ export function handleServerMessage(msg: ServerMessage): void {
         // from `status.update`, and re-pinning to the same value is a no-op.
         let activeProject = state.activeProject;
         let activeHostId = state.activeHostId;
-        if (!prev && msg.session.id === state.sessionId && msg.session.cwd) {
+        let activeProjectId = state.activeProjectId;
+        let activeWorkspaceId = state.activeWorkspaceId;
+        if (msg.session.id === state.sessionId && msg.session.cwd) {
           activeHostId = msg.session.hostId ?? "local";
           activeProject = { hostId: activeHostId, cwd: msg.session.cwd };
+          activeProjectId = msg.session.projectId ?? state.workspaceProjects.find(
+            (project) => project.hostId === activeHostId && project.path === msg.session.cwd && !project.archived,
+          )?.id ?? null;
+          activeWorkspaceId = msg.session.workspaceId ?? (activeProjectId
+            ? state.workspaces.find((workspace) => workspace.projectId === activeProjectId && workspace.state !== "archived")?.id ?? null
+            : null);
           writeActiveHostStored(activeHostId);
           writeActiveProjectStored(activeProject);
+          writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, activeProjectId);
+          writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, activeWorkspaceId);
         }
 
-        return { sessions, toasts, activeProject, activeHostId };
+        return { sessions, toasts, activeProject, activeHostId, activeProjectId, activeWorkspaceId };
       });
       // Archiving hides a session everywhere, so archiving the *open* one has
       // to close it exactly the way deleting it does — otherwise the chat
@@ -1649,6 +2941,72 @@ export function handleServerMessage(msg: ServerMessage): void {
       }
       break;
     }
+    case "session.mode.invalidated": {
+      const state = usePerchStore.getState();
+      if (msg.deviceId && msg.deviceId !== state.deviceId) break;
+      const hostId = msg.hostId ?? hostForSession(state, msg.sessionId);
+      // Refresh only observed sessions. Unmounted sessions read their policy
+      // on demand; changing a device default must not eagerly load all history.
+      const observed = new Set(Object.keys(state.sessionModes));
+      if (state.sessionId) observed.add(state.sessionId);
+      for (const sessionId of observed) {
+        if (hostForSession(state, sessionId) !== hostId) continue;
+        const workspaceId = workspaceForSession(state, sessionId);
+        const affected = Boolean(msg.deviceId)
+          || sessionId === msg.sessionId
+          || Boolean(msg.workspaceId && workspaceId === msg.workspaceId);
+        if (!affected) continue;
+        const current = state.sessionModes[sessionId];
+        if (current?.authoritative && current.revision >= msg.revision) continue;
+        const inFlight = latestAgentRuntimeRequestByKey.get(`mode:${sessionId}`);
+        const pending = inFlight ? pendingAgentRuntimeRequests.get(inFlight) : undefined;
+        if (pending) {
+          // A read may have sampled the DB before this invalidation. Do not
+          // lose the event, or replay an in-flight write; refetch after its
+          // reply only if that reply predates the required policy revision.
+          pending.minimumModeRevision = Math.max(pending.minimumModeRevision ?? 0, msg.revision);
+          continue;
+        }
+        usePerchStore.getState().fetchSessionMode(sessionId, workspaceId);
+      }
+      break;
+    }
+    case "session.mode": {
+      // A mode reply is scoped to the opaque device id. A different browser
+      // may legitimately receive a broadcast for the same session, but its
+      // device policy must never move this client to another mode.
+      const state = usePerchStore.getState();
+      if (msg.deviceId !== state.deviceId) break;
+      const pending = pendingAgentRuntimeRequests.get(msg.requestId);
+      if (pending && pending.kind !== "mode") break;
+      if (pending && pending.sessionId !== msg.sessionId) break;
+      // A retired request was superseded/timed out; do not let its equal or
+      // older revision roll a newer local choice back.
+      if (!pending && ownsAgentRuntimeRequest(msg.requestId)) break;
+      const current = state.sessionModes[msg.sessionId];
+      if (pending) finishAgentRuntimeRequest(msg.requestId);
+      if ((pending?.minimumModeRevision ?? 0) > msg.revision) {
+        usePerchStore.getState().fetchSessionMode(msg.sessionId);
+        break;
+      }
+      if (current && current.revision > msg.revision) break;
+      usePerchStore.setState((currentState) => ({
+        sessionModes: {
+          ...currentState.sessionModes,
+          [msg.sessionId]: {
+            mode: msg.mode,
+            scope: msg.scope,
+            revision: msg.revision,
+            deviceId: msg.deviceId,
+            workspaceId: msg.workspaceId,
+            authoritative: true,
+            state: "ready",
+            error: undefined,
+          },
+        },
+      }));
+      break;
+    }
     case "session.deleted": {
       const state = usePerchStore.getState();
       const wasActive = state.sessionId === msg.sessionId;
@@ -1659,9 +3017,22 @@ export function handleServerMessage(msg: ServerMessage): void {
         cliTerminalIds: omitKey(state.cliTerminalIds, msg.sessionId),
         cliAgentBySession: omitKey(state.cliAgentBySession, msg.sessionId),
         hostedAgentBySession: omitKey(state.hostedAgentBySession, msg.sessionId),
+        sessionModes: omitKey(state.sessionModes, msg.sessionId),
+        agentControlBySession: omitKey(state.agentControlBySession, msg.sessionId),
         messagesBySession: omitKey(state.messagesBySession, msg.sessionId),
         streamingMessageIdBySession: omitKey(state.streamingMessageIdBySession, msg.sessionId),
       });
+      for (const [requestId, pending] of pendingAgentRuntimeRequests) {
+        if (pending.sessionId !== msg.sessionId) continue;
+        finishAgentRuntimeRequest(requestId);
+      }
+      for (const key of Object.keys(usePerchStore.getState().agentLifecycleByKey)) {
+        if (key.includes(`:${msg.sessionId}:`)) {
+          usePerchStore.setState((current) => ({
+            agentLifecycleByKey: omitKey(current.agentLifecycleByKey, key),
+          }));
+        }
+      }
       pendingBackgroundLoads.delete(msg.sessionId);
       if (wasActive) {
         switchAwayFromActiveSession(
@@ -1672,16 +3043,18 @@ export function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "server.info": {
+      const info = msg as ServerInfoMessage;
       const availableModels: Record<AgentKind, ModelEntry[]> = {
-        claude: msg.claudeModels,
-        codex: msg.codexModels,
+        claude: info.claudeModels,
+        codex: info.codexModels,
       };
+      const capabilities = Array.isArray(info.capabilities) ? info.capabilities : [];
       usePerchStore.setState((state) => {
         // Seed hostModels["local"] from server.info so the ModelChip can use
         // the active host's model list when activeHostId is "local".
         const newHostModels = {
           ...state.hostModels,
-          local: { claude: msg.claudeModels, codex: msg.codexModels },
+          local: { claude: info.claudeModels, codex: info.codexModels },
         };
         // Reconcile the current model against the newly-arrived list.
         // Only reset if the current model is genuinely absent — don't fight
@@ -1695,18 +3068,28 @@ export function handleServerMessage(msg: ServerMessage): void {
           : defaultModel(state.agent, currentList);
         return {
           serverInfo: {
-            hostname: msg.hostname,
-            isSsh: msg.isSsh,
-            platform: msg.platform,
+            hostname: info.hostname,
+            isSsh: info.isSsh,
+            platform: info.platform,
+            protocolVersion: info.protocolVersion,
+            capabilities,
+            snapshotEpoch: info.snapshotEpoch,
+            snapshotRevision: info.snapshotRevision,
           },
           availableModels,
           hostModels: newHostModels,
           model: reconciledModel,
           // Absent when the server couldn't read one; `null` then means
           // "use xterm's own defaults" (see xtermSetup.ts).
-          terminalProfile: msg.terminalProfile ?? null,
+          terminalProfile: info.terminalProfile ?? null,
+          workspaceCapabilities: capabilities,
         };
       });
+      if (capabilities.includes(WORKSPACE_CAPABILITIES.snapshot)) {
+        // The server.info frame establishes the capability gate and the
+        // connection is already marked live by the transport callback.
+        usePerchStore.getState().fetchWorkspaceSnapshot();
+      }
       break;
     }
     case "session.history": {
@@ -1785,7 +3168,20 @@ export function handleServerMessage(msg: ServerMessage): void {
         writeActiveHostStored(hostId);
         if (sessionEntry.cwd) {
           writeActiveProjectStored({ hostId, cwd: sessionEntry.cwd });
-          usePerchStore.setState({ activeHostId: hostId, activeProject: { hostId, cwd: sessionEntry.cwd } });
+          const projectId = sessionEntry.projectId ?? usePerchStore.getState().workspaceProjects.find(
+            (project) => project.hostId === hostId && project.path === sessionEntry.cwd && !project.archived,
+          )?.id ?? null;
+          const workspaceId = sessionEntry.workspaceId ?? (projectId
+            ? usePerchStore.getState().workspaces.find((workspace) => workspace.projectId === projectId && workspace.state !== "archived")?.id ?? null
+            : null);
+          writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, projectId);
+          writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspaceId);
+          usePerchStore.setState({
+            activeHostId: hostId,
+            activeProject: { hostId, cwd: sessionEntry.cwd },
+            activeProjectId: projectId,
+            activeWorkspaceId: workspaceId,
+          });
         } else {
           usePerchStore.setState({ activeHostId: hostId });
         }
@@ -1915,7 +3311,149 @@ export function handleServerMessage(msg: ServerMessage): void {
       }));
       break;
     }
+    case "agent.manifest.list": {
+      const runtimeMessage = msg as typeof msg & { hostId?: string };
+      const pending = msg.requestId ? pendingAgentRuntimeRequests.get(msg.requestId) : undefined;
+      if (pending && pending.kind !== "manifests") break;
+      if (msg.requestId && !pending && ownsAgentRuntimeRequest(msg.requestId)) break;
+      const hostId = runtimeMessage.hostId ?? pending?.hostId ?? "local";
+      if (pending && msg.requestId) finishAgentRuntimeRequest(msg.requestId);
+      usePerchStore.setState((state) => ({
+        agentManifestsByHost: {
+          ...state.agentManifestsByHost,
+          [hostId]: {
+            manifests: msg.manifests,
+            state: "ready",
+            error: undefined,
+          },
+        },
+      }));
+      break;
+    }
+    case "agent.lifecycle": {
+      const status = msg.status;
+      const key = agentLifecycleKeyFor(status.key.workspaceId, status.key.sessionId, status.key.agentId);
+      const pending = pendingAgentRuntimeRequests.get(msg.requestId);
+      if (pending && pending.kind !== "lifecycle") break;
+      if (!pending && ownsAgentRuntimeRequest(msg.requestId)) break;
+      const current = usePerchStore.getState().agentLifecycleByKey[key];
+      if (current?.status && current.status.revision > status.revision) break;
+      if (pending) finishAgentRuntimeRequest(msg.requestId);
+      usePerchStore.setState((state) => ({
+        agentLifecycleByKey: {
+          ...state.agentLifecycleByKey,
+          [key]: {
+            status,
+            state: "ready",
+            error: undefined,
+          },
+        },
+        agentControlBySession: {
+          ...state.agentControlBySession,
+          [status.key.sessionId]: {
+            ...(state.agentControlBySession[status.key.sessionId] ?? { agentId: status.key.agentId, state: "idle" as const }),
+            agentId: status.key.agentId,
+            state: state.agentControlBySession[status.key.sessionId]?.state ?? "idle",
+            inputOwner: status.inputOwner,
+            resizeOwner: status.resizeOwner,
+          },
+        },
+      }));
+      break;
+    }
+    case "agent.control": {
+      // Control replies are unicast to the request owner. Ignore an unknown
+      // request id rather than clearing a lease acquired by this tab when a
+      // stale release response from another client arrives.
+      const pending = pendingAgentRuntimeRequests.get(msg.requestId);
+      if (!pending || pending.kind !== "control" || !pending.sessionId || !pending.agentId || !pending.channel) {
+        break;
+      }
+      finishAgentRuntimeRequest(msg.requestId);
+      usePerchStore.setState((state) => {
+        const current = state.agentControlBySession[pending.sessionId!];
+        const next: AgentControlState = {
+          ...(current ?? { agentId: pending.agentId! }),
+          agentId: pending.agentId!,
+          state: "ready",
+          error: undefined,
+        };
+        if (msg.lease) {
+          if (pending.channel === "input") {
+            next.input = msg.lease;
+            next.inputOwner = msg.lease;
+          } else {
+            next.resize = msg.lease;
+            next.resizeOwner = msg.lease;
+          }
+        } else if (pending.channel === "input") {
+          next.input = undefined;
+          next.inputOwner = undefined;
+        } else {
+          next.resize = undefined;
+          next.resizeOwner = undefined;
+        }
+        return { agentControlBySession: { ...state.agentControlBySession, [pending.sessionId!]: next } };
+      });
+      break;
+    }
     case "error": {
+      if (msg.requestId) {
+        // Feature stores subscribe after this generic store. Git/review owns
+        // its opaque request ids in a dependency-free registry so a
+        // correlated failure is rendered by that pane instead of becoming a
+        // misleading assistant error in the active chat transcript.
+        if (ownsGitReviewRequest(msg.requestId) || ownsAgentRuntimeRequest(msg.requestId)) {
+          const runtime = pendingAgentRuntimeRequests.get(msg.requestId);
+          if (runtime) {
+            finishAgentRuntimeRequest(msg.requestId);
+            markAgentRuntimeError(runtime, msg.message);
+          }
+          break;
+        }
+        const pending = pendingWorkspaceRequests.get(msg.requestId);
+        if (pending) {
+          pendingWorkspaceRequests.delete(msg.requestId);
+          if (pending.kind === WORKSPACE_CAPABILITIES.projectFocus || pending.kind === WORKSPACE_CAPABILITIES.workspaceFocus) {
+            if (latestWorkspaceFocusRequestByHost.get(pending.hostId) === msg.requestId) {
+              latestWorkspaceFocusRequestByHost.delete(pending.hostId);
+            }
+            const previous = pending.previousFocus;
+            const current = usePerchStore.getState();
+            if (previous && current.activeHostId === pending.hostId) {
+              writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, previous.projectId);
+              writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, previous.workspaceId);
+              if (previous.legacy) writeActiveProjectStored(previous.legacy);
+              else writeActiveProjectStored(null);
+              usePerchStore.setState({
+                activeProjectId: previous.projectId,
+                activeWorkspaceId: previous.workspaceId,
+                activeProject: previous.legacy,
+              });
+            }
+          }
+          usePerchStore.setState((state) => {
+            const creation = state.workspaceProjectCreate;
+            return {
+            workspaceSnapshotByHost: {
+              ...state.workspaceSnapshotByHost,
+              [pending.hostId]: { state: "error", error: msg.message },
+            },
+            ...(pending.kind === WORKSPACE_CAPABILITIES.projectCreate &&
+            creation != null && creation.requestId === msg.requestId
+              ? {
+                  workspaceProjectCreate: {
+                    ...creation,
+                    status: "error",
+                    error: msg.message,
+                  },
+                }
+              : {}),
+            };
+          });
+          break;
+        }
+      }
       // ErrorMessage carries no sessionId on the wire — it is inherently
       // attributed to whatever this connection currently considers active,
       // same as before this refactor.
@@ -1995,14 +3533,32 @@ export function handleServerMessage(msg: ServerMessage): void {
         if (!stale) return { hosts: msg.hosts };
         writeActiveHostStored("local");
         writeActiveProjectStored(null);
-        return { hosts: msg.hosts, activeHostId: "local", activeProject: null };
+        writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, null);
+        writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, null);
+        return {
+          hosts: msg.hosts,
+          activeHostId: "local",
+          activeProject: null,
+          activeProjectId: null,
+          activeWorkspaceId: null,
+        };
       });
       break;
     }
     case "host.info": {
+      const workspaceHostInfo = msg as HostInfoMessage & {
+        protocolVersion?: number;
+        capabilities?: string[];
+      };
       // Upsert into hostStates.
       usePerchStore.setState((state) => ({
         hostStates: { ...state.hostStates, [msg.hostId]: msg },
+        workspaceCapabilitiesByHost: {
+          ...state.workspaceCapabilitiesByHost,
+          [msg.hostId]: Array.isArray(workspaceHostInfo.capabilities)
+            ? workspaceHostInfo.capabilities
+            : [],
+        },
       }));
       // When the host transitions to connected and carries model lists,
       // update hostModels so the ModelChip can show the correct list when
@@ -2077,6 +3633,20 @@ socket.onConnectionChange((connected) => {
     // the tracking so a reconnect's `ensureSessionLive` retries instead of
     // finding a permanently-stuck "already loading" guard.
     pendingBackgroundLoads.clear();
+    pendingWorkspaceRequests.clear();
+    for (const requestId of [...pendingAgentRuntimeRequests.keys()]) {
+      const pending = finishAgentRuntimeRequest(requestId);
+      if (pending) markAgentRuntimeError(pending, "Connection lost. Reconnect and try again.");
+    }
+    usePerchStore.setState((state) => state.workspaceProjectCreate?.status === "pending"
+      ? {
+          workspaceProjectCreate: {
+            ...state.workspaceProjectCreate,
+            status: "error",
+            error: "Connection lost. Check the server and retry.",
+          },
+        }
+      : {});
   }
   usePerchStore.setState(connected ? { connected } : { connected, sessionId: null });
 });

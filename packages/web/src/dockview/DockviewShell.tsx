@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -26,6 +26,8 @@ import { PaneContextMenu } from "../components/PaneContextMenu";
 import { SessionSplitPopover } from "./SessionSplitPopover";
 import { isSessionDrag, readSessionDragId } from "./sessionDrag";
 import { usePaneLabelsEnabled } from "../paneLabels";
+import { WorkspaceFilesView } from "../components/WorkspaceFiles";
+import { WorkspaceGitReviewPane } from "../components/WorkspaceGitReviewPane";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
  * state (not React state) because `PaneTab` is a stable module-level
@@ -56,7 +58,15 @@ let openSessionSplitPopover: ((referencePanelId: string, x: number, y: number) =
  * our own wrapper div is visually and behaviorally transparent. */
 function PaneTab(props: IDockviewPanelHeaderProps) {
   const paneLabelsEnabled = usePaneLabelsEnabled();
-  const agent = usePerchStore((s) => s.agent);
+  const agent = usePerchStore((s) => {
+    const sessionId = typeof props.params?.sessionId === "string" ? props.params.sessionId : s.sessionId;
+    if (!sessionId) return s.agent;
+    const session = s.sessions.find((candidate) => candidate.id === sessionId);
+    const mode = s.sessionModes[sessionId]?.mode ?? s.settings?.chatMode ?? "hosted";
+    return mode === "cli"
+      ? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? s.agent
+      : s.hostedAgentBySession[sessionId] ?? session?.lastAgent ?? s.agent;
+  });
   const showAgentBadge = props.api.id === "chat" && paneLabelsEnabled;
   return (
     <div
@@ -112,6 +122,7 @@ function SessionChatPanel(props: IDockviewPanelProps) {
 
 function TerminalPanel(props: IDockviewPanelProps) {
   const [active, setActive] = useState(props.api.isVisible);
+  const [ownerSessionId] = useState(() => usePerchStore.getState().sessionId ?? undefined);
 
   useEffect(() => {
     setActive(props.api.isVisible);
@@ -119,13 +130,53 @@ function TerminalPanel(props: IDockviewPanelProps) {
     return () => disposable.dispose();
   }, [props.api]);
 
-  return <TerminalView active={active} />;
+  const paneId = typeof props.params?.shellPaneId === "string" ? props.params.shellPaneId : props.api.id;
+  return <TerminalView active={active} paneId={paneId} sessionId={ownerSessionId} layoutPanelId={props.api.id}
+    onPaneChange={(shellPaneId) => props.api.updateParameters({ shellPaneId })} />;
+}
+
+/** Workspace file panels are ordinary dockview components so the explorer,
+ * editor, and its selected workspace travel with the user's saved mixed-pane
+ * layout. The workspace id is carried in panel params and therefore survives
+ * a session layout round trip without coupling Dockview to the filesystem
+ * store. */
+function FilesPanel(props: IDockviewPanelProps) {
+  const workspaceId = typeof props.params?.workspaceId === "string"
+    ? props.params.workspaceId
+    : undefined;
+  if (!workspaceId) {
+    return <div className="inactive-session-pane">File pane is missing its workspace id.</div>;
+  }
+  const initialPath = typeof props.params?.path === "string" ? props.params.path : undefined;
+  return (
+    <WorkspaceFilesView
+      workspaceId={workspaceId}
+      initialPath={initialPath}
+      onPathChange={(path) => props.api.updateParameters({ workspaceId, path })}
+      onClose={() => props.api.close()}
+    />
+  );
+}
+
+/** Workspace Git/status/diff/review surface. Git data is keyed by the durable
+ * workspace id carried in Dockview params, so a restored mixed layout cannot
+ * accidentally display another project's branch or comments. */
+function GitReviewPanel(props: IDockviewPanelProps) {
+  const workspaceId = typeof props.params?.workspaceId === "string"
+    ? props.params.workspaceId
+    : undefined;
+  if (!workspaceId) {
+    return <div className="inactive-session-pane">Git pane is missing its workspace id.</div>;
+  }
+  return <WorkspaceGitReviewPane workspaceId={workspaceId} />;
 }
 
 const components = {
   chat: ChatPanel,
   terminal: TerminalPanel,
   sessionChat: SessionChatPanel,
+  files: FilesPanel,
+  gitReview: GitReviewPanel,
 };
 
 /** Group-header "+" action (Bug 3): dockview applies `rightHeaderActionsComponent`
@@ -222,9 +273,14 @@ function applyDefaultLayout(api: DockviewApi) {
 
 export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => void }) {
   const apiRef = useRef<DockviewApi | null>(null);
+  const [readyApi, setReadyApi] = useState<DockviewApi | null>(null);
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
   const sessionLayouts = usePerchStore((s) => s.sessionLayouts);
+  const workspaceFilesWorkspaceId = usePerchStore((s) => s.workspaceFilesWorkspaceId);
+  const closeWorkspaceFiles = usePerchStore((s) => s.closeWorkspaceFiles);
+  const workspaceGitReviewWorkspaceId = usePerchStore((s) => s.workspaceGitReviewWorkspaceId);
+  const closeWorkspaceGitReview = usePerchStore((s) => s.closeWorkspaceGitReview);
   const fetchSessionLayout = usePerchStore((s) => s.fetchSessionLayout);
   const saveSessionLayout = usePerchStore((s) => s.saveSessionLayout);
 
@@ -272,6 +328,7 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
   // flush it immediately instead of silently dropping the edit.
   const pendingSaveRef = useRef<{ sessionId: string; snapshot: unknown } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedPanelIdsRef = useRef("");
 
   const flushPendingSave = useCallback(() => {
     if (saveTimerRef.current != null) {
@@ -285,9 +342,22 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
     }
   }, [saveSessionLayout]);
 
+  useEffect(() => {
+    window.addEventListener("pagehide", flushPendingSave);
+    window.addEventListener("beforeunload", flushPendingSave);
+    return () => {
+      window.removeEventListener("pagehide", flushPendingSave);
+      window.removeEventListener("beforeunload", flushPendingSave);
+      flushPendingSave();
+    };
+  }, [flushPendingSave]);
+
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
+      // A fast layout reply can precede Dockview's onReady callback. Ref
+      // assignment alone would never rerun the restore effect in that case.
+      setReadyApi(event.api);
       // Default panel so the shell never renders empty while the first
       // session.layout round-trip is in flight.
       event.api.addPanel({ id: "chat", component: "chat", title: "Chat" });
@@ -295,13 +365,36 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
 
       // Phase 4: expose this dockview instance to keybinds.ts (leader,x/v/-/z)
       // via the module-level controller — see dockviewController.ts for why.
-      registerDockviewController(createDockviewController(event.api));
+      const controller = createDockviewController(event.api);
+      registerDockviewController(controller);
+      // A click can arrive before Dockview has emitted onReady (especially
+      // while restoring a cold page). Consume the pending navigation now
+      // that a live controller exists instead of dropping the user's action.
+      const pendingWorkspaceId = usePerchStore.getState().workspaceFilesWorkspaceId;
+      if (pendingWorkspaceId) {
+        controller.openFiles(pendingWorkspaceId);
+        usePerchStore.getState().closeWorkspaceFiles();
+      }
+      const pendingGitWorkspaceId = usePerchStore.getState().workspaceGitReviewWorkspaceId;
+      if (pendingGitWorkspaceId) {
+        controller.openGitReview(pendingGitWorkspaceId);
+        usePerchStore.getState().closeWorkspaceGitReview();
+      }
 
       event.api.onDidLayoutChange(() => {
         if (restoringRef.current) return;
         const activeId = appliedSessionIdRef.current;
         if (!activeId) return;
-        pendingSaveRef.current = { sessionId: activeId, snapshot: event.api.toJSON() };
+        const snapshot = event.api.toJSON();
+        pendingSaveRef.current = { sessionId: activeId, snapshot };
+        const panelIds = Object.keys(snapshot.panels).sort().join("\0");
+        // Opening/closing a pane is already a completed user action. Save it
+        // immediately; only frequent layout/resize updates need debouncing.
+        if (panelIds !== savedPanelIdsRef.current) {
+          savedPanelIdsRef.current = panelIds;
+          flushPendingSave();
+          return;
+        }
         if (saveTimerRef.current != null) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(flushPendingSave, LAYOUT_SAVE_DEBOUNCE_MS);
       });
@@ -334,6 +427,26 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
     },
     [onReady, flushPendingSave],
   );
+
+  // WorkspaceOverview lives outside Dockview and records an intent in the
+  // store. Turning that intent into a real panel here keeps navigation robust
+  // across desktop/mobile shells and makes the file surface part of the same
+  // persisted layout as chat and terminals.
+  useEffect(() => {
+    if (!workspaceFilesWorkspaceId) return;
+    const controller = getDockviewController();
+    if (!controller) return;
+    controller.openFiles(workspaceFilesWorkspaceId);
+    closeWorkspaceFiles();
+  }, [closeWorkspaceFiles, workspaceFilesWorkspaceId]);
+
+  useEffect(() => {
+    if (!workspaceGitReviewWorkspaceId) return;
+    const controller = getDockviewController();
+    if (!controller) return;
+    controller.openGitReview(workspaceGitReviewWorkspaceId);
+    closeWorkspaceGitReview();
+  }, [closeWorkspaceGitReview, workspaceGitReviewWorkspaceId]);
 
   // On every session switch: flush any pending save for the session being
   // left, mark this activation as "not yet applied", and — critically —
@@ -371,7 +484,7 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
   // it reliably observes the invalidation performed by the effect above
   // within the same commit (see comment there).
   useEffect(() => {
-    const api = apiRef.current;
+    const api = readyApi;
     if (!api || !sessionId) return;
     if (appliedSessionIdRef.current === sessionId) return; // already applied this activation
 
@@ -382,13 +495,8 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
     restoringRef.current = true;
     try {
       if (layout) {
-        // Stale-terminal-panel policy: a saved layout's "terminal" panel
-        // entries carry only a dockview-internal panel id, never a backend
-        // PTY/terminal id — `TerminalView` always spawns a brand-new PTY on
-        // mount regardless of that id (see views/Terminal.tsx). So there is
-        // nothing "stale" to reconcile: restoring old terminal panes just
-        // respawns fresh shells in the same pane positions, which is the
-        // simplest robust behavior and requires no special-casing here.
+        // Stable Dockview pane IDs reattach to server-owned shells. Restoring
+        // a layout or changing viewport releases views without closing shells.
         api.fromJSON(layout as Parameters<DockviewApi["fromJSON"]>[0]);
       } else {
         applyDefaultLayout(api);
@@ -400,11 +508,12 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
     } finally {
       restoringRef.current = false;
       appliedSessionIdRef.current = sessionId;
+      savedPanelIdsRef.current = Object.keys(api.toJSON().panels).sort().join("\0");
     }
     // sessionLayouts is intentionally in the dependency array (to re-run
     // this effect when a new reply arrives) even though the value used
     // inside is read fresh via getState().
-  }, [sessionId, sessionLayouts]);
+  }, [sessionId, sessionLayouts, readyApi]);
 
   return (
     <>

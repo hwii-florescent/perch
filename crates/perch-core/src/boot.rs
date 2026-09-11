@@ -305,6 +305,7 @@ pub async fn boot(
             web_dist_dir,
             db_path: args.db_path,
             hosts_path: args.hosts_path,
+            providers_path: args.providers_path,
             ready_tx,
         },
         registry,

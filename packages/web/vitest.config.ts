@@ -7,14 +7,12 @@ import { defineConfig } from "vitest/config";
 // has no DOM dependency at all or already guards its DOM/localStorage
 // access behind try/catch (see store.ts, ws.ts, tabOrder.ts) — a real
 // runner exercising those catch paths in plain Node is exactly the
-// "unavailable" case they're written for. Tests that truly need a DOM
-// element (popoverPosition.test.ts) construct a minimal fake rather than
-// paying for jsdom repo-wide; see that file's comment if a future test
-// needs more than that.
+// "unavailable" case they're written for. DOM-heavy interaction tests opt
+// into jsdom at the file level so the rest of the suite stays lightweight.
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
     reporters: ["default"],
   },
 });

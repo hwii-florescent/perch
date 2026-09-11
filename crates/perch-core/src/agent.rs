@@ -32,6 +32,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::agent_fleet::ProviderSignal;
 use crate::protocol::ChatUsage;
 
 /// Events streamed back from an in-flight turn, one per protocol-level
@@ -54,6 +55,56 @@ pub enum AgentEvent {
     },
     Done(Option<ChatUsage>),
     Error(String),
+}
+
+impl AgentEvent {
+    /// Whether this event proves that the provider accepted and began the
+    /// requested turn. A terminal `Done` is deliberately excluded: runners
+    /// may synthesize it after an empty launch or after an error, and process
+    /// scheduling alone is not delivery evidence.
+    pub fn is_provider_progress(&self) -> bool {
+        match self {
+            Self::Chunk(text) | Self::Thinking(text) => !text.is_empty(),
+            Self::ToolUse { .. } | Self::ToolResult { .. } | Self::Plan { .. } => true,
+            Self::Done(_) | Self::Error(_) => false,
+        }
+    }
+
+    /// Translate one provider stream event into the lifecycle signal used by
+    /// the runtime adapter. The runner still owns transcript/UI delivery;
+    /// this projection only supplies bounded status information and never
+    /// forwards the potentially large tool payload to lifecycle state.
+    pub fn provider_signal(&self) -> ProviderSignal {
+        match self {
+            Self::Chunk(text) => ProviderSignal::Output {
+                bytes: lifecycle_bytes(text.len()),
+            },
+            Self::Thinking(text) => ProviderSignal::Output {
+                bytes: lifecycle_bytes(text.len()),
+            },
+            // Tool payloads can contain large files or base64 data. Lifecycle
+            // state only needs a bounded activity marker, so do not serialize
+            // either payload merely to estimate its size.
+            Self::ToolUse { name, .. } | Self::ToolResult { name, .. } => ProviderSignal::Output {
+                bytes: lifecycle_bytes(name.len()),
+            },
+            Self::Plan { content } => ProviderSignal::Output {
+                bytes: lifecycle_bytes(content.len()),
+            },
+            Self::Done(_) => ProviderSignal::Completed {
+                reason: "provider turn completed".to_string(),
+            },
+            Self::Error(reason) => ProviderSignal::Error {
+                reason: reason.clone(),
+            },
+        }
+    }
+}
+
+const MAX_LIFECYCLE_EVENT_BYTES: usize = 64 * 1024;
+
+fn lifecycle_bytes(bytes: usize) -> usize {
+    bytes.min(MAX_LIFECYCLE_EVENT_BYTES)
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +269,13 @@ pub trait AgentRunner: Send + Sync {
 
     /// Abort the in-flight turn, if any. Safe to call when idle.
     fn cancel(&self);
+
+    /// Return the provider-owned continuation identity currently tracked by
+    /// this runner. Runners that cannot prove one return `None`; callers must
+    /// preserve that distinction instead of inventing a session id.
+    fn provider_session_id(&self) -> Option<String> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -966,6 +1024,10 @@ impl AgentRunner for ClaudeRunner {
             }
         }
     }
+
+    fn provider_session_id(&self) -> Option<String> {
+        self.claude_session_id()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,6 +1230,10 @@ impl AgentRunner for CodexRunner {
             }
         }
     }
+
+    fn provider_session_id(&self) -> Option<String> {
+        self.thread_id()
+    }
 }
 
 // Minimal libc::kill shim so we don't need to pull in the `libc` or `nix`
@@ -1186,6 +1252,7 @@ unsafe fn raw_kill(pid: i32, sig: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_fleet::ProviderSignal;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AgentEvent>) -> Vec<AgentEvent> {
@@ -1194,6 +1261,41 @@ mod tests {
             out.push(e);
         }
         out
+    }
+
+    #[test]
+    fn lifecycle_projection_keeps_large_tool_payloads_out_of_status_state() {
+        assert_eq!(
+            AgentEvent::Done(None).provider_signal(),
+            ProviderSignal::Completed {
+                reason: "provider turn completed".to_string()
+            }
+        );
+        assert_eq!(
+            AgentEvent::ToolUse {
+                name: "Read".to_string(),
+                input: serde_json::json!({"data": "large"}),
+            }
+            .provider_signal(),
+            ProviderSignal::Output { bytes: 4 }
+        );
+        assert!(matches!(
+            AgentEvent::Error("provider failed".to_string()).provider_signal(),
+            ProviderSignal::Error { reason } if reason == "provider failed"
+        ));
+    }
+
+    #[test]
+    fn provider_acceptance_requires_real_progress() {
+        assert!(!AgentEvent::Done(None).is_provider_progress());
+        assert!(!AgentEvent::Error("spawn failed".to_string()).is_provider_progress());
+        assert!(!AgentEvent::Chunk(String::new()).is_provider_progress());
+        assert!(AgentEvent::Chunk("reply".to_string()).is_provider_progress());
+        assert!(AgentEvent::ToolUse {
+            name: "Read".to_string(),
+            input: Value::Null,
+        }
+        .is_provider_progress());
     }
 
     // -- F2: plan detection ------------------------------------------------

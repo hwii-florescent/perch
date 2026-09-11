@@ -2,11 +2,11 @@
  * responsive.spec.ts — e2e tests for Phase 5's narrow-width collapse: below
  * `MOBILE_WIDTH_BREAKPOINT` (700px, see `responsive.ts`), `App.tsx` swaps the
  * desktop `<Sidebar/>`+`<TabBar/>` chrome for `<MobileHeader/>`+
- * `<MobileSwitcher/>` while the dockview area and `<StatusBar/>` stay
- * mounted unchanged.
+ * `<MobileSwitcher/>` while the `<StatusBar/>` stays mounted and the canvas
+ * switches to one active pane.
  *
  *   R1 — at <=700px, the sidebar and tab bar are hidden and the mobile
- *        header is shown instead.
+ *        header and one-pane canvas are shown instead.
  *   R2 — tapping the mobile header's "Switch" button opens the slide-over.
  *   R3 — selecting a session from the slide-over switches to it and closes
  *        the slide-over (requires two real, persisted sessions — see
@@ -86,8 +86,13 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     await expect(page.locator('[data-testid="mobile-header"]')).toBeVisible({ timeout: 15000 });
     await expect(page.locator(".sidebar")).not.toBeVisible();
     await expect(page.locator(".tab-bar")).not.toBeVisible();
-    // Dockview area and status bar remain mounted at narrow widths.
+    // The outer canvas and status bar remain, while the multi-pane Dockview
+    // tree is replaced by one mounted mobile pane.
     await expect(page.locator(".dock-area")).toBeVisible();
+    await expect(page.getByTestId("mobile-pane-shell")).toBeVisible();
+    await expect(page.locator(".dockview-theme-perch")).toHaveCount(0);
+    await expect(page.locator('[data-testid^="pane-tab-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(1);
     await expect(page.locator(".chat")).toBeVisible({ timeout: 10000 });
 
     await page.screenshot({ path: "artifacts/r1-mobile-header.png" });
@@ -111,6 +116,27 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     // Closing it via its own close button dismisses it again.
     await page.locator('[data-testid="mobile-switcher-close"]').click();
     await expect(switcher).not.toBeVisible({ timeout: 5000 });
+  });
+
+  // -------------------------------------------------------------------------
+  // R2b — selecting another pane replaces the content component rather than
+  // leaving all desktop pane/editor instances mounted underneath it.
+  // -------------------------------------------------------------------------
+  test("R2b. mobile pane switch keeps exactly one active mounted surface", async ({ page }) => {
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await freshPage(page);
+
+    await page.locator('[data-testid="mobile-pane-files"]').click();
+    await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(1);
+    await expect(page.locator(".chat")).toHaveCount(0);
+    await expect(page.locator(".dockview-theme-perch")).toHaveCount(0);
+
+    await page.locator('[data-testid="mobile-pane-chat"]').click();
+    await expect(page.getByTestId("mobile-active-pane-chat")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(1);
+    await expect(page.locator(".chat")).toBeVisible({ timeout: 10000 });
+    await page.screenshot({ path: "artifacts/r2b-mobile-single-pane.png" });
   });
 
   // -------------------------------------------------------------------------

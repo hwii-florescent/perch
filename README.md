@@ -5,7 +5,7 @@ A personal agent-babysitting IDE. The Rust core (`perch-core`) owns all logic an
 ## Layout
 
 - `crates/perch-core/` — Rust server: WS protocol, agent runners (Claude/Codex), PTY terminals, SQLite history, settings/hosts, hub federation
-- `crates/perch-desktop/` — Tauri v2 shell; boots the core in-process on a free localhost port and opens a window (Mac only)
+- `crates/perch-desktop/` — Tauri v2 shell; boots the core in-process on a free localhost port and opens a native window (Mac only)
 - `packages/shared/` — TypeScript protocol types, kept field-for-field in sync with `crates/perch-core/src/protocol.rs`
 - `packages/web/` — React/Vite UI (Zustand, dockview, xterm), built to `packages/web/dist`, served by the Rust core
 - `e2e/` — Playwright suite (boots two core instances: hub `:7799` + federated remote `:7800`)

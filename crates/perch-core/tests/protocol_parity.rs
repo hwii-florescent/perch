@@ -93,6 +93,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use perch_core::protocol::ServerMessage;
 use regex::Regex;
 
 /// Shared value-type names to check for field-name-set parity in both files.
@@ -100,6 +101,7 @@ use regex::Regex;
 /// rather than message types themselves — see the module doc's limitations
 /// for what's intentionally not checked about them.
 const VALUE_TYPES: &[&str] = &[
+    "WorkspaceTerminal",
     "ModelEntry",
     "ChatUsage",
     "CommandEntry",
@@ -112,6 +114,9 @@ const VALUE_TYPES: &[&str] = &[
     "SettingsPatch",
     "SshHostEntry",
     "AgentAttach",
+    "ProjectSummary",
+    "WorkspaceSummary",
+    "GitPreviewReceipt",
 ];
 
 /// A single field's wire name plus the two independent facts this test
@@ -141,8 +146,14 @@ fn repo_root() -> PathBuf {
 }
 
 fn rust_source() -> String {
-    let path = repo_root().join("crates/perch-core/src/protocol.rs");
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"))
+    ["protocol.rs", "workspace_terminals.rs"]
+        .iter()
+        .map(|file| {
+            let path = repo_root().join("crates/perch-core/src").join(file);
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn ts_source() -> String {
@@ -618,4 +629,35 @@ fn protocol_rs_and_protocol_ts_agree() {
         errors.len(),
         errors.join("\n")
     );
+}
+
+/// A rolling upgrade must continue accepting a pre-foundation peer's
+/// `server.info`, which has no capability/version fields. Local clients still
+/// receive the populated fields from the current server implementation.
+#[test]
+fn old_server_info_without_foundation_fields_deserializes() {
+    let old = r#"{
+        "type":"server.info",
+        "hostname":"legacy",
+        "isSsh":false,
+        "platform":"macos",
+        "claudeModels":[],
+        "codexModels":[]
+    }"#;
+    let parsed: ServerMessage = serde_json::from_str(old).expect("legacy server.info parses");
+    match parsed {
+        ServerMessage::ServerInfo {
+            protocol_version,
+            capabilities,
+            snapshot_epoch,
+            snapshot_revision,
+            ..
+        } => {
+            assert_eq!(protocol_version, 0);
+            assert!(capabilities.is_empty());
+            assert!(snapshot_epoch.is_empty());
+            assert_eq!(snapshot_revision, 0);
+        }
+        other => panic!("expected server.info, got {other:?}"),
+    }
 }
