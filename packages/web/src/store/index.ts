@@ -1,13 +1,13 @@
-import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "./agentTerminals";
+import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
 import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorkspaceSummary } from "@perch/shared";
-import { socket } from "./ws";
-import { emitTerminalData } from "./terminalBus";
-import { handleWorkspaceTerminalMessage } from "./workspaceTerminals";
-import { defaultModel } from "./models";
-import { applyTheme } from "./themes";
-import { playBlockedTone, playDoneTone } from "./sound";
-import { ownsAgentRuntimeRequest, ownsGitReviewRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "./requestOwnership";
+import { socket } from "../ws";
+import { emitTerminalData } from "../terminalBus";
+import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
+import { defaultModel } from "../models";
+import { applyTheme } from "../themes";
+import { playBlockedTone, playDoneTone } from "../sound";
+import { ownsAgentRuntimeRequest, ownsGitReviewRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 
 export interface ToolCallEntry {
   name: string;
