@@ -396,12 +396,6 @@ impl<C: SqliteConnectionAdapter> AgentPersistence<C> {
         })
     }
 
-    pub fn device_default(&self, device_id: &str) -> anyhow::Result<Option<AgentMode>> {
-        Ok(self
-            .device_default_preference(device_id)?
-            .map(|preference| preference.mode))
-    }
-
     pub fn device_default_preference(
         &self,
         device_id: &str,
@@ -437,16 +431,6 @@ impl<C: SqliteConnectionAdapter> AgentPersistence<C> {
         at_ms: u64,
     ) -> anyhow::Result<u64> {
         self.set_mode_override(ModeScope::Workspace, workspace_id, mode, at_ms)
-    }
-
-    pub fn mode_override(
-        &self,
-        scope: ModeScope,
-        scope_id: &str,
-    ) -> anyhow::Result<Option<AgentMode>> {
-        Ok(self
-            .mode_override_preference(scope, scope_id)?
-            .map(|preference| preference.mode))
     }
 
     pub fn mode_override_preference(

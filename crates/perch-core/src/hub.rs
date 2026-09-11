@@ -1680,11 +1680,6 @@ impl HubManager {
             .insert(key, PendingUnicast { conn_id, tx });
     }
 
-    /// Remove the unicast registration for `key`.
-    pub fn unregister_unicast(&self, key: &PendingKey) {
-        self.pending_unicast.lock().unwrap().remove(key);
-    }
-
     /// Remove all unicast registrations for the given connection id (called on
     /// socket close to prevent leaking senders to dead connections).
     pub fn unregister_all_for_connection(&self, conn_id: &str) {

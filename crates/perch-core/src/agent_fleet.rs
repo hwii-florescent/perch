@@ -322,11 +322,6 @@ impl<'a> LaunchRequest<'a> {
             provider_session_id: None,
         }
     }
-
-    pub fn with_provider_session(mut self, provider_session_id: &'a str) -> Self {
-        self.provider_session_id = Some(provider_session_id);
-        self
-    }
 }
 
 /// A launch plan returned after manifest validation.  No process is started;

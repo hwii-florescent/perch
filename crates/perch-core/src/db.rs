@@ -1602,18 +1602,6 @@ impl HistoryDb {
         Ok(get_file_buffer_locked(&conn, workspace_id, path)?)
     }
 
-    /// Return the bounded list of open buffers for one workspace. The caller
-    /// supplies a cap so a corrupted or very old database cannot force an
-    /// unbounded response.
-    pub fn list_file_buffers(
-        &self,
-        workspace_id: &str,
-        limit: usize,
-    ) -> anyhow::Result<Vec<FileBufferRow>> {
-        let conn = self.conn.lock().unwrap();
-        Ok(list_file_buffers_locked(&conn, Some(workspace_id), limit)?)
-    }
-
     /// Return only the bounded metadata needed to populate a buffer list.
     /// Draft and base text are loaded by `get_file_buffer` for one requested
     /// path, so a list response cannot amplify a workspace's retained text
@@ -2388,11 +2376,6 @@ impl HistoryDb {
             .ok_or_else(|| anyhow::anyhow!("Git preview disappeared after insertion: {preview_id}"))
     }
 
-    pub fn get_git_preview(&self, preview_id: &str) -> anyhow::Result<Option<GitPreviewRow>> {
-        let conn = self.conn.lock().unwrap();
-        get_git_preview_locked(&conn, preview_id)
-    }
-
     /// Atomically consume an unexpired preview for one workspace. Returning
     /// `None` covers unknown, expired, already-consumed, and cross-workspace
     /// receipts; callers must obtain a fresh preview rather than guessing.
@@ -3043,15 +3026,6 @@ impl HistoryDb {
                 Err(error)
             }
         }
-    }
-
-    pub fn get_agent_change_snapshot(
-        &self,
-        snapshot_id: &str,
-    ) -> anyhow::Result<Option<AgentChangeSnapshotRow>> {
-        validate_agent_snapshot_identity(snapshot_id, "snapshot")?;
-        let conn = self.conn.lock().unwrap();
-        get_agent_change_snapshot_locked(&conn, snapshot_id)
     }
 
     /// Return completed and in-flight turn boundaries newest first.  The
@@ -4037,39 +4011,6 @@ fn get_file_buffer_locked(
         file_buffer_row_from_row,
     )
     .optional()
-}
-
-fn list_file_buffers_locked(
-    conn: &Connection,
-    workspace_id: Option<&str>,
-    limit: usize,
-) -> rusqlite::Result<Vec<FileBufferRow>> {
-    let limit = limit.min(i64::MAX as usize) as i64;
-    let mut result = Vec::new();
-    if let Some(workspace_id) = workspace_id {
-        let mut stmt = conn.prepare(
-            "SELECT workspace_id, path, content, base_content, base_version,
-                    external_version, revision, dirty, conflict, created_at, updated_at
-             FROM file_buffers WHERE workspace_id = ?1
-             ORDER BY updated_at DESC, path ASC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![workspace_id, limit], file_buffer_row_from_row)?;
-        for row in rows {
-            result.push(row?);
-        }
-    } else {
-        let mut stmt = conn.prepare(
-            "SELECT workspace_id, path, content, base_content, base_version,
-                    external_version, revision, dirty, conflict, created_at, updated_at
-             FROM file_buffers
-             ORDER BY updated_at DESC, workspace_id ASC, path ASC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit], file_buffer_row_from_row)?;
-        for row in rows {
-            result.push(row?);
-        }
-    }
-    Ok(result)
 }
 
 fn file_buffer_metadata_from_row(
