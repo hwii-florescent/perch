@@ -2063,6 +2063,41 @@ fn fail(
     ));
 }
 
+/// Forward a request to the remote host that owns `session_id`, if any.
+/// Registers the unicast pending-request key before forwarding so the hub
+/// can route the reply back to this exact connection, or fails with
+/// `host_unavailable` when the owning host is known but not connected.
+/// Returns `true` when the session is remote (handled or failed here) — the
+/// caller must return immediately in that case; `false` means the session is
+/// local and the caller should continue its own handling.
+fn route_to_remote_host_or_fail(
+    state: &Arc<ConnState>,
+    session_id: &str,
+    request_id: &str,
+    raw_text: &str,
+) -> bool {
+    let Some(host_id) = state.app.hub.route_for_session(session_id) else {
+        return false;
+    };
+    if !state.app.hub.is_connected(&host_id) {
+        fail(
+            &state.out_tx,
+            request_id.to_string(),
+            "host_unavailable",
+            format!("host {host_id} is not connected"),
+            true,
+        );
+        return true;
+    }
+    state.app.hub.register_unicast(
+        PendingKey::Request(request_id.to_string()),
+        state.conn_id.clone(),
+        state.out_tx.clone(),
+    );
+    state.app.hub.forward(&host_id, raw_text);
+    true
+}
+
 fn wire_session_mode(mode: AgentMode) -> WireSessionMode {
     match mode {
         AgentMode::Hosted => WireSessionMode::Hosted,
@@ -3159,6 +3194,27 @@ fn git_workspace_error(request_id: String, message: String) -> ServerMessage {
     )
 }
 
+/// Resolve `workspace_id` to a `WorkspaceTarget`, or send a
+/// `git_workspace_error` reply and return `None`. This is the
+/// `git_workspace_target(&app, &workspace_id)` resolve-or-send-error prelude
+/// used at the top of every git.* arm; callers keep the original
+/// `let target = match ... { Some(target) => target, None => return };`
+/// shape.
+fn resolve_git_target_or_fail(
+    app: &AppState,
+    workspace_id: &str,
+    request_id: &str,
+    out_tx: &UnboundedSender<ServerMessage>,
+) -> Option<WorkspaceTarget> {
+    match git_workspace_target(app, workspace_id) {
+        Ok(target) => Some(target),
+        Err(message) => {
+            let _ = out_tx.send(git_workspace_error(request_id.to_string(), message));
+            None
+        }
+    }
+}
+
 fn route_git_review_request(
     state: &Arc<ConnState>,
     host_id: Option<&str>,
@@ -3187,12 +3243,9 @@ fn spawn_git_status(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         match app
             .git
@@ -3217,12 +3270,9 @@ fn spawn_git_refs(state: &Arc<ConnState>, request_id: String, workspace_id: Stri
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         match app.git.branch_refs(&target).await {
             Ok(refs) => {
@@ -3253,13 +3303,11 @@ fn spawn_git_diff(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let workspace_target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
-        };
+        let workspace_target =
+            match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+                Some(target) => target,
+                None => return,
+            };
         let options = DiffOptions {
             target,
             include_untracked,
@@ -3374,12 +3422,9 @@ fn spawn_git_path_action(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         let result = match (paths, patch) {
             (Some(paths), None) if !paths.is_empty() => {
@@ -3425,12 +3470,9 @@ fn spawn_git_discard_preview(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         match app.git.preview_discard(&target, mode, &paths).await {
             Ok(preview) => {
@@ -3487,12 +3529,9 @@ fn spawn_git_discard(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         let Some(row) =
             (match app
@@ -3563,12 +3602,9 @@ fn spawn_git_commit_preview(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         match app.git.preview_commit(&target, &message).await {
             Ok(preview) => {
@@ -3626,12 +3662,9 @@ fn spawn_git_commit(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         let Some(row) =
             (match app
@@ -3755,12 +3788,9 @@ fn spawn_review_create(
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         let source = match app
             .git
@@ -4068,12 +4098,9 @@ fn spawn_review_batch_preview(
         // Resolve the Git target and the destination before reading or
         // inserting any packet row. A packet for a missing/mismatched session
         // is not useful durable work and must never become an orphaned send.
-        let target = match git_workspace_target(&app, &workspace_id) {
-            Ok(target) => target,
-            Err(message) => {
-                let _ = out_tx.send(git_workspace_error(request_id, message));
-                return;
-            }
+        let target = match resolve_git_target_or_fail(&app, &workspace_id, &request_id, &out_tx) {
+            Some(target) => target,
+            None => return,
         };
         let (target_session_id, target_agent) = match resolve_review_target(
             &app,
@@ -5806,23 +5833,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             // A remote session owns its mode policy on the remote perch. The
             // request id is registered before forwarding so the hub can route
             // the response back to this exact connection.
-            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-                if !state.app.hub.is_connected(&host_id) {
-                    fail(
-                        &state.out_tx,
-                        request_id,
-                        "host_unavailable",
-                        format!("host {host_id} is not connected"),
-                        true,
-                    );
-                    return;
-                }
-                state.app.hub.register_unicast(
-                    PendingKey::Request(request_id.clone()),
-                    state.conn_id.clone(),
-                    state.out_tx.clone(),
-                );
-                state.app.hub.forward(&host_id, raw_text);
+            if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
                 return;
             }
             let workspace_id =
@@ -5859,23 +5870,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             mode,
             clear_override,
         } => {
-            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-                if !state.app.hub.is_connected(&host_id) {
-                    fail(
-                        &state.out_tx,
-                        request_id,
-                        "host_unavailable",
-                        format!("host {host_id} is not connected"),
-                        true,
-                    );
-                    return;
-                }
-                state.app.hub.register_unicast(
-                    PendingKey::Request(request_id.clone()),
-                    state.conn_id.clone(),
-                    state.out_tx.clone(),
-                );
-                state.app.hub.forward(&host_id, raw_text);
+            if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
                 return;
             }
             let workspace_id =
@@ -6038,23 +6033,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             workspace_id,
             agent_id,
         } => {
-            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-                if !state.app.hub.is_connected(&host_id) {
-                    fail(
-                        &state.out_tx,
-                        request_id,
-                        "host_unavailable",
-                        format!("host {host_id} is not connected"),
-                        true,
-                    );
-                    return;
-                }
-                state.app.hub.register_unicast(
-                    PendingKey::Request(request_id.clone()),
-                    state.conn_id.clone(),
-                    state.out_tx.clone(),
-                );
-                state.app.hub.forward(&host_id, raw_text);
+            if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
                 return;
             }
             let key = match lifecycle_key_for_request(
@@ -6100,23 +6079,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             agent_id,
             channel,
         } => {
-            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-                if !state.app.hub.is_connected(&host_id) {
-                    fail(
-                        &state.out_tx,
-                        request_id,
-                        "host_unavailable",
-                        format!("host {host_id} is not connected"),
-                        true,
-                    );
-                    return;
-                }
-                state.app.hub.register_unicast(
-                    PendingKey::Request(request_id.clone()),
-                    state.conn_id.clone(),
-                    state.out_tx.clone(),
-                );
-                state.app.hub.forward(&host_id, raw_text);
+            if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
                 return;
             }
             let key = match lifecycle_key_for_request(
@@ -6223,23 +6186,7 @@ fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
             channel,
             generation,
         } => {
-            if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-                if !state.app.hub.is_connected(&host_id) {
-                    fail(
-                        &state.out_tx,
-                        request_id,
-                        "host_unavailable",
-                        format!("host {host_id} is not connected"),
-                        true,
-                    );
-                    return;
-                }
-                state.app.hub.register_unicast(
-                    PendingKey::Request(request_id.clone()),
-                    state.conn_id.clone(),
-                    state.out_tx.clone(),
-                );
-                state.app.hub.forward(&host_id, raw_text);
+            if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
                 return;
             }
             let key = match lifecycle_key_for_request(
