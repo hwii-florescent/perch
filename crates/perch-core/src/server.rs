@@ -9620,9 +9620,22 @@ mod filesystem_buffer_tests {
         ))
     }
 
-    #[test]
-    fn watcher_rereads_current_draft_after_metadata_queue_snapshot() {
-        let db_path = temp_db_path("watch-current-row");
+    /// Shared setup for these tests: a temp project root with one file
+    /// (`note.txt`), a fresh DB with that project's default workspace, and an
+    /// initial (clean) file buffer seeded from the file's current content.
+    #[allow(clippy::type_complexity)]
+    fn fixture(
+        name: &str,
+    ) -> (
+        PathBuf,
+        PathBuf,
+        HistoryDb,
+        crate::db::WorkspaceRow,
+        FileService,
+        crate::filesystem::FileRead,
+        FileBufferRow,
+    ) {
+        let db_path = temp_db_path(name);
         let root = std::env::temp_dir().join(format!("perch-server-fs-root-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("note.txt"), b"base").unwrap();
@@ -9647,6 +9660,13 @@ mod filesystem_buffer_tests {
                 MAX_FILE_BUFFERS_PER_WORKSPACE,
             )
             .unwrap();
+        (db_path, root, db, workspace, service, baseline, initial)
+    }
+
+    #[test]
+    fn watcher_rereads_current_draft_after_metadata_queue_snapshot() {
+        let (db_path, root, db, workspace, service, baseline, initial) =
+            fixture("watch-current-row");
         let queued = db
             .list_file_buffers_for_watch(MAX_FILE_BUFFER_WATCHES)
             .unwrap()
@@ -9696,32 +9716,8 @@ mod filesystem_buffer_tests {
 
     #[test]
     fn save_intent_recovery_retains_unpublished_and_records_completed_receipts() {
-        let db_path = temp_db_path("save-recovery");
-        let root = std::env::temp_dir().join(format!("perch-server-fs-root-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
+        let (db_path, root, db, workspace, service, baseline, initial) = fixture("save-recovery");
         let file_path = root.join("note.txt");
-        std::fs::write(&file_path, b"base").unwrap();
-        let db = HistoryDb::open(&db_path).unwrap();
-        let (_, workspace) = db
-            .create_project("local", &root.to_string_lossy(), None)
-            .unwrap();
-        let service = FileService::new(&root).unwrap();
-        let baseline = service.read_file("note.txt").unwrap();
-        let initial = db
-            .ensure_file_buffer(
-                &workspace.id,
-                "note.txt",
-                FileBufferUpdate {
-                    content: baseline.content.clone(),
-                    base_content: baseline.content.clone(),
-                    base_version: Some(baseline.version.clone()),
-                    external_version: Some(baseline.version.clone()),
-                    dirty: false,
-                    conflict: false,
-                },
-                MAX_FILE_BUFFERS_PER_WORKSPACE,
-            )
-            .unwrap();
         let draft = db
             .set_file_buffer(
                 &workspace.id,
