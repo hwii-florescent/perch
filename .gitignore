@@ -13,3 +13,5 @@ reference/jean/
 # Local UI captures can contain real session titles and account details.
 .impeccable/review/
 e2e/artifacts-provider-config/
+e2e/artifacts-native-ui/
+e2e/artifacts-native-review/

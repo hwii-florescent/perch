@@ -1,3 +1,4 @@
+import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
 import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorkspaceSummary } from "@perch/shared";
@@ -161,6 +162,7 @@ export function agentRuntimeCapabilitiesKnown(
  * replace the local host's availability. */
 export interface AgentManifestHostState {
   manifests: AgentManifestSummary[];
+  revision?: number;
   state: "idle" | "loading" | "ready" | "error";
   error?: string;
 }
@@ -287,7 +289,7 @@ export interface PerchState {
   /** Provider availability, kept per owning host because federated hosts can
    * expose different binaries and capabilities. */
   agentManifestsByHost: Record<string, AgentManifestHostState>;
-  fetchAgentManifests: (hostId?: string) => string | null;
+  fetchAgentManifests: (hostId?: string, update?: { providerId: string; enabled?: boolean; isDefault?: boolean }) => string | null;
   /** Lifecycle is keyed by the durable workspace/session/provider tuple. */
   agentLifecycleByKey: Record<string, AgentLifecycleState>;
   fetchAgentLifecycle: (sessionId: string, workspaceId?: string, agentId?: string) => string | null;
@@ -337,6 +339,8 @@ export interface PerchState {
   /** Controls whether the settings panel is open. Stage D renders the modal;
    * Stage C only wires up the open action from the sidebar gear button. */
   settingsOpen: boolean;
+  settingsPage: "main" | "agents";
+  openAgentCatalog: () => void;
   /** Current settings from the server, populated after fetchSettings(). */
   settings: SettingsData | null;
   /** Current SSH hosts from the server, populated after fetchHosts(). */
@@ -516,7 +520,7 @@ export interface PerchState {
    * matches the current global chat mode (plus, in Hosted mode, the live
    * `agent`/`model` fields so the pane header and the next `chat.send`
    * reflect it immediately). */
-  createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: string) => void;
+  createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: string, mode?: SessionMode) => void;
   /** Archive or unarchive a session. Archiving hides it everywhere in the
    * nav (sidebar, tab bar, navigator) immediately; the only place archived
    * sessions are listed is Settings → Archived sessions, which is also where
@@ -659,6 +663,10 @@ let expectCliStart = false;
  * as `expectProjectFromStatus`.
  */
 let pendingAgentForNewSession: string | null = null;
+let pendingModeForNewSession: SessionMode | null = null;
+// A launch request selects an initial view, but must not pin a session that
+// already inherits that view from its workspace/device. Resolve first.
+const initialLaunchModes = new Map<string, SessionMode>();
 
 /** Resolvers for in-flight `fs.browse` requests, keyed by requestId. See
  * `browseDirectory` and the `"fs.browse.result"` case in
@@ -1025,6 +1033,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   attachingCliForSession: null,
   cliError: null,
   settingsOpen: false,
+  settingsPage: "main",
   settings: null,
   hosts: [],
   hostStates: {},
@@ -1156,10 +1165,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     return requestId;
   },
 
-  fetchAgentManifests: (hostIdParam) => {
+  fetchAgentManifests: (hostIdParam, update) => {
     const state = get();
     const hostId = hostIdParam ?? state.activeHostId;
     if (!state.connected || !hasAgentRuntimeCapability(state, hostId, AGENT_RUNTIME_CAPABILITIES.manifests)) return null;
+    if (update && !hasAgentRuntimeCapability(state, hostId, "agent.provider.configure")) return null;
     const key = `manifests:${hostId}`;
     const existing = latestAgentRuntimeRequestByKey.get(key);
     if (existing && pendingAgentRuntimeRequests.has(existing)) return existing;
@@ -1184,7 +1194,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       requestId,
       ...(hostId !== "local" ? { hostId } : {}),
     };
-    socket.send(message);
+    socket.send(update ? { ...message, ...update, type: "agent.provider.configure" } : message);
     return requestId;
   },
 
@@ -1665,8 +1675,9 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   setSettingsOpen: (open) => {
-    set({ settingsOpen: open });
+    set({ settingsOpen: open, settingsPage: "main" });
   },
+  openAgentCatalog: () => set({ settingsOpen: true, settingsPage: "agents" }),
 
   fetchSettings: () => {
     socket.send({ type: "settings.get" });
@@ -1688,7 +1699,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     socket.send({ type: "hosts.delete", id });
   },
 
-  createSessionOnHost: (hostId, cwd, agentChoice) => {
+  createSessionOnHost: (hostId, cwd, agentChoice, mode) => {
     // Fix 3: If the active session on this host has no messages (empty) and
     // no different cwd is requested, just focus the composer — don't create
     // another blank session.
@@ -1706,7 +1717,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const state = get();
     // A runtime-capable peer stores mode policy per session. Fall back to the
     // legacy global setting only when this session has no mode result yet.
-    const cliMode = sessionModeStateFor(state, state.sessionId) === "cli";
+    const cliMode = (mode ?? sessionModeStateFor(state, state.sessionId)) === "cli";
     if (shouldReuseCurrentSession(state, hostId, cwd, cliMode, state.messages.length === 0)) {
       // Already on an empty session for this host — just focus the composer.
       return;
@@ -1733,6 +1744,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // a stale choice from an earlier call can never leak onto an unrelated
     // create.
     pendingAgentForNewSession = agentChoice ?? null;
+    pendingModeForNewSession = mode ?? null;
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });
       set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });
@@ -2448,7 +2460,7 @@ export function handleServerMessage(msg: ServerMessage): void {
   // so e.g. chat.done/error see the fully up-to-date message text instead of
   // racing a still-pending animation frame (see flushChunkBuffer above).
   if (msg.type !== "chat.chunk") flushChunkBuffer();
-  if (handleAgentTerminalMessage(msg) || handleWorkspaceTerminalMessage(msg)) return;
+  if (handleNativeUiMessage(msg) || handleAgentTerminalMessage(msg) || handleWorkspaceTerminalMessage(msg)) return;
   if (handleWorkspaceMessage(msg)) return;
   switch (msg.type) {
     case "session.created": {
@@ -2494,6 +2506,12 @@ export function handleServerMessage(msg: ServerMessage): void {
         });
       }
       usePerchStore.setState({ sessionId: msg.sessionId });
+      if (pendingModeForNewSession) {
+        if (initialLaunchModes.size >= 128) initialLaunchModes.delete(initialLaunchModes.keys().next().value!);
+        initialLaunchModes.set(msg.sessionId, pendingModeForNewSession);
+        pendingModeForNewSession = null;
+        if (!usePerchStore.getState().fetchSessionMode(msg.sessionId)) initialLaunchModes.delete(msg.sessionId);
+      }
       // Refresh the session list so the sidebar shows the new entry.
       usePerchStore.getState().listSessions();
       break;
@@ -2684,6 +2702,12 @@ export function handleServerMessage(msg: ServerMessage): void {
         break;
       }
       if (current && current.revision > msg.revision) break;
+      const launchMode = initialLaunchModes.get(msg.sessionId);
+      initialLaunchModes.delete(msg.sessionId);
+      if (launchMode && launchMode !== msg.mode) {
+        usePerchStore.getState().setSessionMode(msg.sessionId, "session", launchMode, msg.workspaceId);
+        break;
+      }
       usePerchStore.setState((currentState) => ({
         sessionModes: {
           ...currentState.sessionModes,
@@ -3012,11 +3036,19 @@ export function handleServerMessage(msg: ServerMessage): void {
       if (msg.requestId && !pending && ownsAgentRuntimeRequest(msg.requestId)) break;
       const hostId = runtimeMessage.hostId ?? pending?.hostId ?? "local";
       if (pending && msg.requestId) finishAgentRuntimeRequest(msg.requestId);
+      const current = usePerchStore.getState().agentManifestsByHost[hostId];
+      if ((current?.revision ?? 0) > (msg.revision ?? 0)) {
+        if (pending) usePerchStore.setState((state) => ({ agentManifestsByHost: {
+          ...state.agentManifestsByHost, [hostId]: { ...current!, state: "ready" },
+        } }));
+        break;
+      }
       usePerchStore.setState((state) => ({
         agentManifestsByHost: {
           ...state.agentManifestsByHost,
           [hostId]: {
             manifests: msg.manifests,
+            revision: msg.revision,
             state: "ready",
             error: undefined,
           },

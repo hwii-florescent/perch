@@ -3523,6 +3523,7 @@ body {
    provider toggle) so every agent picker in the app reads as one family. --- */
 
 .agent-picker {
+  flex-wrap: wrap;
   display: flex;
   gap: 0.25rem;
   border: 1px solid var(--overlay-0);
@@ -3531,6 +3532,7 @@ body {
 }
 
 .agent-picker__btn {
+  min-height: 44px;
   flex: 1;
   background: none;
   color: var(--subtext-0);
@@ -4228,7 +4230,7 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   min-width: 200px;
-  max-width: 320px;
+  max-width: min(320px, calc(100vw - 24px));
   /* `max-height` is set inline (Sidebar.tsx), clamped to the viewport below
    * the anchor. This flex column + the `min-height: 0` flex children below
    * (`__projects`, `.dir-browser` → `.dir-browser__list`) let the popover's
@@ -6746,3 +6748,83 @@ body {
     overflow-x: auto;
   }
 }
+
+/* Host agent catalog shares the settings surface and the CLI launch controls. */
+.agent-catalog { padding: 0.25rem 1rem 1rem; }
+.settings-modal__panel--agents { width: min(960px, calc(100vw - 2rem)); }
+.agent-catalog__toolbar,
+.agent-catalog__controls,
+.agent-catalog__toggle,
+.agent-catalog__name,
+.agent-catalog__heading,
+.agent-catalog__action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.agent-catalog__toolbar { justify-content: space-between; margin: 1rem 0; }
+.agent-catalog__toolbar label { display: flex; align-items: center; gap: 0.5rem; }
+.agent-catalog__toolbar select,
+.agent-catalog__search {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  color: var(--text);
+  font: inherit;
+}
+.agent-catalog__search { width: 100%; box-sizing: border-box; }
+.agent-catalog__heading { margin: 1.75rem 0 0.5rem; font-size: 1rem; }
+.agent-catalog__heading span { color: var(--subtext-0); font-size: 0.8rem; font-weight: 400; }
+.agent-catalog__row { padding: 1rem 0; border-bottom: 1px solid var(--surface-1); }
+.agent-catalog__row:last-child { border-bottom: 0; }
+.agent-catalog__identity { min-width: 0; }
+.agent-catalog__name { flex-wrap: wrap; font-weight: 600; }
+.agent-catalog__command { display: block; margin-top: 0.3rem; color: var(--subtext-0); font-size: 0.8rem; overflow-wrap: anywhere; }
+.agent-catalog__controls { flex-wrap: wrap; margin-top: 0.75rem; }
+.agent-catalog__toggle { gap: 0; padding: 2px; border: 1px solid var(--surface-2); border-radius: var(--radius); }
+.agent-catalog__toggle button,
+.agent-catalog__action {
+  min-height: 44px;
+  padding: 0.45rem 0.7rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--subtext-0);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.agent-catalog__toggle button[aria-pressed="true"] { color: var(--text); background: var(--surface-1); }
+.agent-catalog__action:hover,
+.agent-catalog__toggle button:hover { background: var(--surface-1); color: var(--text); }
+.agent-catalog__action:disabled,
+.agent-catalog__toggle button:disabled { opacity: 0.55; cursor: default; }
+.agent-catalog__default { color: var(--accent); font-size: 0.75rem; font-weight: 500; }
+.agent-catalog__action:focus-visible,
+.agent-catalog__toggle button:focus-visible,
+.agent-catalog__search:focus-visible,
+.agent-catalog__toolbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cli-start__card > .agent-catalog__action { margin: 0 auto 1rem; }
+@media (min-width: 620px) {
+  .agent-catalog__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: center; }
+  .agent-catalog__controls { justify-content: flex-end; margin-top: 0; }
+}
+.new-session-popover > div:first-child { flex-shrink: 0; max-height: 35vh; overflow-y: auto; }
+
+
+/* Structured view of the interactive CLI's native conversation. */
+.native-cli-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.native-cli-chat__toolbar { flex-wrap: wrap; }
+.native-cli-chat__model { margin-left: auto; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.native-cli-chat__hint { color: var(--subtext-0); font-size: 12px; }
+.native-cli-chat__input textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; max-height: 30vh; background: transparent; color: inherit; border: 0; font: inherit; padding: 8px; }
+.native-cli-chat__input textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.native-cli-chat__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; }
+.native-cli-chat__actions .native-cli-chat__hint { flex: 1; }
+.native-cli-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; }

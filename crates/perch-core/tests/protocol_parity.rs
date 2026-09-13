@@ -101,6 +101,10 @@ use regex::Regex;
 /// rather than message types themselves — see the module doc's limitations
 /// for what's intentionally not checked about them.
 const VALUE_TYPES: &[&str] = &[
+    "AgentManifestSummary",
+    "NativeUiTool",
+    "NativeUiMessage",
+    "NativeUiSnapshot",
     "WorkspaceTerminal",
     "ModelEntry",
     "ChatUsage",

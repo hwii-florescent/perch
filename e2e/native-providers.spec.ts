@@ -26,12 +26,14 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   const secondContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const second = await secondContext.newPage();
   const keys = new Map<string, { workspaceId: string; sessionId: string; agentId: string }>();
+  const shellIds = new Set<string>();
   const errors: string[] = [];
   for (const current of [page, second]) {
-    current.on("pageerror", (error) => errors.push(error.message));
+    current.on("pageerror", (error) => errors.push(error.stack ?? error.message));
     current.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
       const message = JSON.parse(String(payload));
       if (message.type === "agent.terminal.opened") keys.set(message.terminalId, message.status.key);
+      if (message.type === "terminal.opened") shellIds.add(message.terminal.id);
     }));
   }
   const seed = (directory: string) => {
@@ -48,7 +50,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(toggle).toBeEnabled();
     await current.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
-    for (const provider of ["claude", "codex", "omp", "pi", "opencode"]) {
+    for (const provider of ["claude", "codex", "omp", "pi"]) {
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeVisible();
     }
   }
@@ -64,13 +66,18 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await prepare(second);
     for (const [current, provider] of [[page, "omp"], [second, "pi"]] as const) {
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeEnabled();
-      await current.getByTestId(`cli-start-agent-${provider}`).click();
-      await current.getByTestId("cli-start-browse").click();
+      if (provider === "pi") {
+        await current.getByTestId("new-session-local").click();
+        await current.getByTestId("new-session-popover-agent-pi").click();
+      } else {
+        await current.getByTestId(`cli-start-agent-${provider}`).click();
+        await current.getByTestId("cli-start-browse").click();
+      }
       await current.getByRole("button", { name: "Use this folder", exact: true }).click();
       const terminal = current.getByTestId("persistent-agent-terminal");
       await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
       await expect(terminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-      await expect(terminal.locator(".xterm-rows")).toContainText(provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding/i, { timeout: 30_000 });
+      await expect(terminal.locator(".xterm-rows")).toContainText(provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
       await terminal.locator(".xterm-helper-textarea").pressSequentially(`perch_${provider}_draft`, { delay: 20 });
       await expect(terminal.locator(".xterm-rows")).toContainText(`perch_${provider}_draft`);
     }
@@ -95,6 +102,17 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(omp.locator(".xterm-rows")).toContainText("perch_omp_draft");
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft_split");
     expect(keys.size).toBe(2);
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(page.getByTestId("navigator-command-omp")).toBeVisible();
+    await expect(page.getByTestId("navigator-command-pi")).toBeVisible();
+    await page.getByTestId("navigator-input").fill("new terminal");
+    await page.getByTestId("navigator-command-terminal").click();
+    const shell = page.locator(".terminal--persistent").filter({ has: page.getByRole("button", { name: "Close shell", exact: true }) });
+    await expect(shell.getByText("Shell running", { exact: true })).toBeVisible();
+    await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
+    await shell.locator(".xterm-helper-textarea").press("Enter");
+    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${fixture}`);
+    await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });
     for (const terminal of [omp, pi]) {
@@ -119,6 +137,9 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
         hash.update(length); hash.update(bytes);
       }
       try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-agent-${hash.digest("hex")}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
+    }
+    for (const id of shellIds) {
+      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-shell-${id}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }
     fs.closeSync(log);
     await testInfo.attach("fixture-core.log", { body: fs.readFileSync(path.join(fixture, "core.log")), contentType: "text/plain" });

@@ -36,6 +36,8 @@ mod projects;
 pub use projects::{ProjectRow, WorkspaceRow, WorkspaceSnapshot};
 mod sessions;
 pub use sessions::{MessageRow, SessionListRow, SessionRow};
+mod providers;
+pub use providers::ProviderPreference;
 
 pub struct HistoryDb {
     conn: Mutex<Connection>,
@@ -90,6 +92,18 @@ impl HistoryDb {
                 claude_session_id TEXT,
                 created_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_preferences (
+                provider_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                is_default INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS provider_default
+                ON provider_preferences(is_default) WHERE is_default = 1;
+            CREATE TABLE IF NOT EXISTS provider_catalog_state (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                revision INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO provider_catalog_state(id, revision) VALUES (1, 0);
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,

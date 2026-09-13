@@ -82,6 +82,10 @@ socket.onConnectionChange((connected) => {
   views.clear();
 });
 
+export function agentInputGeneration(terminalId: string): number | undefined {
+  return views.get(terminalId)?.leases.input?.generation;
+}
+
 export function sendAgentTerminalInput(terminalId: string, data: string): boolean {
   const view = views.get(terminalId);
   if (!view) return false;

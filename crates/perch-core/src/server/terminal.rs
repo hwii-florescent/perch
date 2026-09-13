@@ -65,6 +65,15 @@ fn open_agent_terminal(
             .get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown provider {provider_id}"))?;
         let live = state.app.agent_runtime.runtime(&key);
+        if live.is_none() && row.cli_provider_id.as_deref() != Some(provider_id) {
+            let (_, preferences) = state.app.db.provider_preferences()?;
+            anyhow::ensure!(
+                preferences
+                    .get(provider_id)
+                    .is_none_or(|preference| preference.enabled),
+                "This agent is disabled. Enable it in Agents before starting a new session."
+            );
+        }
         anyhow::ensure!(
             state.app.agent_terminals.runtime_identity(session_id).is_none()
                 && !crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(session_id)),
@@ -136,6 +145,17 @@ fn open_agent_terminal(
         });
         if let Some(model) = model {
             extra.extend(["--model".to_string(), model]);
+        }
+        if crate::native_ui::supported(provider_id) {
+            let fresh = live.is_none()
+                && !crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(
+                    &crate::agent_runtime::terminal_key(&key),
+                ));
+            let paths = crate::native_ui::prepare(&key, provider_id, fresh)?;
+            extra.extend([
+                "--extension".into(),
+                paths.extension.to_string_lossy().into_owned(),
+            ]);
         }
         let registration = crate::agent_fleet::AgentRegistration {
             key: key.clone(),
@@ -221,6 +241,11 @@ fn open_agent_terminal(
     );
     match result {
         Ok(_) if !state.out_tx.is_closed() => {
+            if crate::native_ui::supported(provider_id) {
+                if let Err(error) = native_ui::observe(&state.app, key.clone()) {
+                    tracing::warn!(%error, "native UI observation unavailable; terminal remains attached");
+                }
+            }
             views
                 .entry(key.clone())
                 .or_default()

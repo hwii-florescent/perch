@@ -555,7 +555,7 @@ fn spawn_review_batch_preview(
             send_operation_id,
             workspace_id,
             target_session_id: Some(target_session_id),
-            target_agent_id: Some(agent_str(target_agent).to_string()),
+            target_agent_id: Some(target_agent),
             current_revision: canonical_revision,
             instruction,
             comments: refreshed_comments,
@@ -580,7 +580,10 @@ fn spawn_review_batch_preview(
     });
 }
 
-fn review_delivery_result(request_id: String, row: crate::db::ReviewPacketRow) -> ServerMessage {
+pub(super) fn review_delivery_result(
+    request_id: String,
+    row: crate::db::ReviewPacketRow,
+) -> ServerMessage {
     ServerMessage::ReviewBatchSendResult {
         request_id,
         workspace_id: row.packet.workspace_id.clone(),
@@ -848,6 +851,15 @@ fn spawn_review_batch_send(
                 fail(&out_tx, request_id, "review_target_invalid", message, false);
                 return;
             }
+        };
+        if crate::native_ui::supported(&agent) {
+            native_ui::send_review(&state, request_id, row, &session_id, &agent).await;
+            return;
+        }
+        let agent = match agent.as_str() {
+            "claude" => AgentKind::Claude,
+            "codex" => AgentKind::Codex,
+            _ => unreachable!("review target validated"),
         };
         let Some(session) = (match app.db.get_session(&session_id) {
             Ok(session) => session,

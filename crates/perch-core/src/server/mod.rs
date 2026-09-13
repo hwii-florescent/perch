@@ -83,6 +83,7 @@ mod workspace;
 #[cfg(test)]
 use workspace::effective_focus;
 mod agents;
+mod native_ui;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
 mod terminal;
 #[cfg(test)]
@@ -296,6 +297,9 @@ struct AppState {
     /// Keeping this beside the shared terminal registry prevents a second WS
     /// connection from launching a duplicate provider for the same session.
     agent_runtime: Arc<AgentRuntimeAdapter>,
+    native_ui: Arc<crate::native_ui::NativeUiRegistry>,
+    // ponytail: lifecycle mutations serialize across local sessions; shard by
+    // session if measured contention warrants it, preserving lock ordering.
     agent_operation_lock: Arc<Mutex<()>>,
     /// Durable lifecycle/provider identity and mode policy, backed by the same
     /// HistoryDb connection as sessions and messages.
@@ -572,6 +576,7 @@ pub async fn run(
         agent_terminals,
         workspace_terminals,
         agent_runtime,
+        native_ui: Arc::new(crate::native_ui::NativeUiRegistry::default()),
         agent_operation_lock: Arc::new(Mutex::new(())),
         agent_persistence,
         agent_modes: Arc::new(Mutex::new(agent_modes)),
@@ -1738,6 +1743,10 @@ fn foundation_capabilities() -> Vec<String> {
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",
+        "agent.provider.configure",
+        "agent.ui.get",
+        "agent.ui.prompt",
+        "agent.ui.cancel",
         "agent.terminal.open",
         "agent.terminal.release",
         "agent.lifecycle.get",
@@ -2231,6 +2240,18 @@ mod session_viewer_filter_tests {
             conn_ids.iter().map(|c| c.to_string()).collect(),
         );
         map
+    }
+
+    #[test]
+    fn native_transcripts_only_reach_viewers_of_their_session() {
+        let msg: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type": "agent.ui.snapshot", "sessionId": "s1", "providerId": "pi",
+            "snapshot": { "version": 1, "revision": 1, "pid": 123, "providerSessionId": "/native.jsonl", "cwd": "/workspace", "model": null, "running": false, "messages": [], "truncated": false }
+        })).unwrap();
+        let viewers = viewers_of("s1", &["conn-a"]);
+        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers));
+        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers));
+        assert!(!should_forward_to_viewer(&msg, "conn-a", &HashMap::new()));
     }
 
     #[test]

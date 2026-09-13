@@ -19,7 +19,7 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
     () => workspace
       ? sessions
         .filter((session) => !session.archived && (session.workspaceId === workspace.id || ((session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path)))
-        .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.lastAgent }))
+        .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId ?? session.lastAgent }))
       : [],
     [sessions, workspace],
   );

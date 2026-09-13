@@ -107,7 +107,7 @@ mod tests {
         manifest.launch.mode_overrides.clear();
         fixture.write(serde_json::json!({ "version": 1, "providers": [manifest] }));
         let registry = load_registry(Some(&fixture.0)).unwrap();
-        assert_eq!(registry.list().len(), 6);
+        assert_eq!(registry.list().len(), 37);
         assert!(registry.contains("claude") && registry.contains("codex"));
         assert_eq!(
             registry.get("extra-agent").unwrap().display_name,

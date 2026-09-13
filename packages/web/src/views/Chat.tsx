@@ -23,6 +23,7 @@ import {
   filterCommands,
 } from "../composerCommands";
 import { uploadAttachment, type StagedAttachment } from "../attachments";
+import { NativeCliChat } from "./NativeCliChat";
 import { AgentCliTerminal } from "./AgentCliTerminal";
 import { CliStartPanel } from "../components/CliStartPanel";
 import { NoSessionPanel } from "../components/NoSessionPanel";
@@ -655,6 +656,10 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
       : s.workspaceCapabilitiesByHost[owningHostId];
     return Boolean(capabilities?.includes("session.mode.get") && capabilities.includes("session.mode.set"));
   });
+  const nativeUiAvailable = usePerchStore((s) => {
+    const capabilities = owningHostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[owningHostId];
+    return Boolean(capabilities?.includes("agent.ui.get")) && (cliAgent === "pi" || cliAgent === "omp");
+  });
   const sessionModeState = usePerchStore((s) =>
     sessionId ? s.sessionModes[sessionId] : undefined,
   );
@@ -955,6 +960,8 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
         />
       ) : mode === "cli" ? (
         <CliStartPanel agent={cliAgent} />
+      ) : cliReady && nativeUiAvailable ? (
+        <NativeCliChat key={`${sessionId}-${cliAgent}`} sessionId={sessionId} providerId={cliAgent} />
       ) : !sessionExists ? (
         // The session this pane is bound to no longer exists — see
         // `InactiveSessionPane`'s doc comment. A merely-inactive (but real)

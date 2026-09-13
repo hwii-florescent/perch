@@ -70,7 +70,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
           if (!disposed) { updateInput(); created.fit(); }
         });
       },
-      (data) => created.term.write(data),
+      (data) => { if (!disposed) created.term.write(data); },
       (snapshot, owned) => {
         if (disposed) return;
         ownsInput = owned;

@@ -47,6 +47,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
   const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
   const startCli = usePerchStore((s) => s.startCli);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
+  const openAgentCatalog = usePerchStore((s) => s.openAgentCatalog);
   const [browsing, setBrowsing] = useState(false);
   // The provider the user has picked in *this* panel, defaulting to whatever
   // Chat.tsx resolved (this session's remembered choice, or the global
@@ -54,6 +55,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
   // instantly responsive; it's written back into the store only when the
   // user actually starts/creates a session (see the button handlers below).
   const [selectedAgent, setSelectedAgent] = useState(agent);
+  const [picked, setPicked] = useState(false);
 
   const capabilities = activeHostId === "local"
     ? serverInfo?.capabilities ?? []
@@ -77,7 +79,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
   const selectedManifest = manifestByAgent.get(selectedAgent);
   const choices = manifestCapability
     ? (manifestState?.manifests ?? [])
-      .filter((manifest) => manifest.supportedModes.includes("cli") && manifest.capabilities.includes("interactiveTerminal"))
+      .filter((manifest) => manifest.available && manifest.enabled !== false && manifest.supportedModes.includes("cli") && manifest.capabilities.includes("interactiveTerminal"))
       .map((manifest) => ({ id: manifest.id, label: manifest.displayName, available: manifest.available, reason: manifest.reason }))
     : AGENTS.map((candidate) => ({ ...candidate, available: true, reason: undefined }));
   // Once a host advertises manifest discovery, wait for its authoritative
@@ -87,6 +89,8 @@ export function CliStartPanel({ agent }: { agent: string }) {
     manifestState?.state === "ready" && choices.some((choice) => choice.id === selectedAgent && choice.available)
   );
   const firstAvailableId = choices.find((choice) => choice.available)?.id;
+  const preferredId = manifestState?.manifests.find((manifest) => manifest.isDefault && manifest.available && manifest.enabled !== false)?.id;
+  useEffect(() => { if (!picked && preferredId) setSelectedAgent(preferredId); }, [picked, preferredId]);
 
   useEffect(() => {
     if (manifestState?.state !== "ready" || selectedAvailable || !firstAvailableId) return;
@@ -134,12 +138,14 @@ export function CliStartPanel({ agent }: { agent: string }) {
               )}
               title={a.reason}
               aria-pressed={a.id === selectedAgent}
-              onClick={() => setSelectedAgent(a.id)}
+              onClick={() => { setPicked(true); setSelectedAgent(a.id); }}
             >
               {a.label}
             </button>
           ))}
         </div>
+
+        {manifestCapability && <button type="button" className="agent-catalog__action" data-testid="cli-manage-agents" onClick={openAgentCatalog}>Manage agents</button>}
 
         {manifestCapability && manifestState?.state === "ready" && !firstAvailableId && (
           <div className="cli-start__provider-status" role="status">
@@ -190,7 +196,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
                   data-testid={`cli-start-project-${i}`}
                   title={cwd}
                   disabled={!selectedAvailable}
-                  onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent)}
+                  onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent, "cli")}
                 >
                   {basename(cwd)}
                   <span className="cli-start__cwd">{cwd}</span>
@@ -206,7 +212,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
             <DirectoryBrowser
               hostId={activeHostId}
               onUseFolder={(path) => {
-                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent);
+                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent, "cli");
               }}
             />
           </div>

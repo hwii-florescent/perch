@@ -461,6 +461,7 @@ export function WorkspaceGitReview({
 
   async function sendBatch() {
     if (!batchPreview || batchSending) return;
+    setLocalActionError(null);
     setBatchSending(true);
     try {
       await actions.sendBatch(batchPreview.packetId, batchPreview.sendOperationId);
@@ -717,7 +718,7 @@ export function WorkspaceGitReview({
             )}
             {unresolvedCount > 0 && (
               <div className="workspace-git__batch-form">
-                <label className="workspace-git__field"><span>Send to agent session</span><select value={selectedSessionId ?? ""} onChange={(event) => setSelectedSessionId(event.target.value || undefined)}><option value="">Choose a session</option>{sessions.map((session) => <option value={session.id} key={session.id}>{session.title}{session.agent ? ` · ${session.agent}` : ""}</option>)}</select></label>
+                <label className="workspace-git__field"><span>Send to agent session</span><select aria-label="Send to agent session" value={selectedSessionId ?? ""} onChange={(event) => setSelectedSessionId(event.target.value || undefined)}><option value="">Choose a session</option>{sessions.map((session) => <option value={session.id} key={session.id}>{session.title}{session.agent ? ` · ${session.agent}` : ""}</option>)}</select></label>
                 <label className="workspace-git__field workspace-git__field--grow"><span>Request</span><input value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}

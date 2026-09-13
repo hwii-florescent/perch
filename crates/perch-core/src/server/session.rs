@@ -132,7 +132,7 @@ pub(super) fn resolve_review_target(
     workspace_id: &str,
     target_session_id: Option<&str>,
     target_agent_id: Option<&str>,
-) -> Result<(String, AgentKind), String> {
+) -> Result<(String, String), String> {
     let session_id = target_session_id
         .filter(|session_id| !session_id.trim().is_empty())
         .ok_or_else(|| "a target session is required to send review notes".to_string())?;
@@ -144,17 +144,37 @@ pub(super) fn resolve_review_target(
     if session.workspace_id.as_deref() != Some(workspace_id) {
         return Err("target session does not belong to this workspace".to_string());
     }
-    let provider = target_agent_id
-        .or(session.last_agent.as_deref())
-        .ok_or_else(|| {
-            "choose a target provider before sending review notes to a new session".to_string()
-        })?;
-    let agent = match provider {
-        "claude" => AgentKind::Claude,
-        "codex" => AgentKind::Codex,
-        other => return Err(format!("unsupported target provider {other:?}")),
-    };
-    Ok((session_id.to_string(), agent))
+    let provider = review_provider_choice(
+        target_agent_id,
+        session.cli_provider_id.as_deref(),
+        session.last_agent.as_deref(),
+    )?;
+    if session.cli_provider_id.is_some() && !crate::native_ui::supported(provider) {
+        return Err(format!("{provider}'s native review connection is not available yet. Use its CLI to send these notes."));
+    }
+    if !matches!(provider, "claude" | "codex") && !crate::native_ui::supported(provider) {
+        return Err(format!(
+            "{provider} does not yet expose native review controls"
+        ));
+    }
+    Ok((session_id.to_string(), provider.to_string()))
+}
+
+fn review_provider_choice<'a>(
+    requested: Option<&'a str>,
+    cli: Option<&'a str>,
+    last: Option<&'a str>,
+) -> Result<&'a str, String> {
+    if let (Some(requested), Some(owner)) = (requested, cli) {
+        if requested != owner {
+            return Err(format!(
+                "This session is owned by {owner}; choose its session to send review notes."
+            ));
+        }
+    }
+    requested.or(cli).or(last).ok_or_else(|| {
+        "choose a target provider before sending review notes to a new session".to_string()
+    })
 }
 
 /// Produce a stable aggregate for the exact source selected for each comment.
@@ -720,7 +740,8 @@ pub(super) fn should_forward_to_viewer(
         | ServerMessage::ChatToolUse { session_id, .. }
         | ServerMessage::ChatToolResult { session_id, .. }
         | ServerMessage::ChatDone { session_id, .. }
-        | ServerMessage::ChatPlan { session_id, .. } => session_id,
+        | ServerMessage::ChatPlan { session_id, .. }
+        | ServerMessage::AgentUiSnapshot { session_id, .. } => session_id,
         // `error` (the bare `ServerMessage::Error` variant) carries no
         // session id at all, so it can't be session-scoped-filtered — always
         // forward it. Everything else (session.list/updated/created/deleted,
@@ -1772,5 +1793,27 @@ pub(super) fn handle_session_rename(
                 retryable: false,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod native_review_target_tests {
+    use super::review_provider_choice;
+    #[test]
+    fn native_owner_wins_over_legacy_history_and_cannot_be_replaced_by_a_packet() {
+        assert_eq!(
+            review_provider_choice(None, Some("pi"), Some("claude")).unwrap(),
+            "pi"
+        );
+        assert!(review_provider_choice(Some("claude"), Some("pi"), Some("claude")).is_err());
+        assert_eq!(
+            review_provider_choice(Some("omp"), Some("omp"), None).unwrap(),
+            "omp"
+        );
+        assert_eq!(
+            review_provider_choice(None, None, Some("codex")).unwrap(),
+            "codex"
+        );
+        assert!(review_provider_choice(None, None, None).is_err());
     }
 }

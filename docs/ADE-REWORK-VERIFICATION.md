@@ -3,6 +3,201 @@
 Status: in progress. The complete contract remains `goals.md` and `SPEC.md`.
 No acceptance exception has been approved. No rework phase is complete yet.
 
+## Native review delivery checkpoint — 2026-09-12
+
+Pi/OMP packets now use the same native connection as the composer. The target
+resolver selects the session's CLI owner before legacy message history and
+rejects a different requested provider. A Git view borrows input only when no
+other browser owns it; enqueue validates the existing lease generation, then
+releases a borrowed lease. The existing atomic prompt/packet settlement writes
+uncertainty before enqueue and delivery after native acceptance. Retries reuse
+the frozen operation and cannot replay its prompt. Unsupported native providers
+are rejected during preview, before creating an unusable packet.
+
+`cd e2e && npx playwright test --config=native-review.config.ts` passed all four
+real Pi/OMP cases in headless Chromium and WebKit (43.7 seconds). Each case:
+
+1. Registers a disposable Git workspace, opens the native CLI, and sends a
+   real initial prompt from UI mode.
+2. Adds two line-anchored comments and previews them in a separate 390 × 844
+   phone browser. The session picker identifies the native provider.
+3. Attempts delivery while the desktop owns input, observes the refusal, and
+   confirms no prompt reached the native conversation.
+4. Releases desktop control, sends the packet from the phone, and observes
+   the CLI acknowledge both notes in the desktop conversation.
+5. Retries the same packet and waits for a correlated server receipt. All
+   attempts retain one packet/operation ID, and the native user count stays
+   at two: the initial prompt and one review packet.
+6. Confirms unchanged native PID/session and source bytes, then reacquires
+   desktop input, proving the Git view released its temporary control.
+
+Screenshot review covered the populated phone packet/delivery view and desktop
+native conversation alongside the diff. Private captures are under
+`.impeccable/review/native-review-{pi,omp}-{mobile,desktop}-{chromium,webkit}.png`.
+The phone session selector needed an explicit accessible name; this was fixed
+at the shared select and the interaction rerun successfully. No page errors
+occurred. Tests clean up only their own core, native tmux session, and workspace.
+
+Validation: 254 core tests plus two protocol tests, 222 web tests, production
+build, formatting, and Clippy with the five existing warnings passed. Logs:
+`/tmp/perch-native-review-final-core.log`,
+`/tmp/perch-native-review-web-tests.log`, `/tmp/perch-native-review-build.log`,
+`/tmp/perch-native-review-final-clippy.log`, and
+`/tmp/perch-native-review-browser-final.log`.
+
+V-08 remains partial across the complete provider requirement: native Pi/OMP
+are verified, while native Claude Code/Codex/OpenCode are still pending. This
+loopback phone check does not establish secure pairing or remote delivery.
+
+## Native Pi/OMP UI checkpoint — 2026-09-12
+
+Implemented directly in the moved checkout after reading `refactor_logs.md`;
+no agents were spawned. Testing ran entirely in headless browsers.
+
+`native_ui/pi-extension.ts` loads into the actual interactive Pi/OMP process.
+Native session entries and message events supply the transcript, and native
+`sendUserMessage`/`abort` APIs control it. Rust validates the existing terminal
+input lease, journals each operation before enqueueing, and preserves uncertain
+delivery across disconnect. Native receipts deduplicate an operation within
+the CLI. History/frame/command/client limits are explicit; streaming no longer
+rescans every old turn. Native hidden custom messages are excluded, matching
+the CLI's display flag. The bridge does not read or export provider authentication files or environment.
+
+The live continuation capture originally changed only lifecycle state, which
+made Pi reattach fail. It now updates the live runtime handle under the same
+operation lock. OMP's native follow-up delivery option queued an idle prompt;
+the bridge now uses normal prompt flow when idle and follow-up while running.
+Native status prevents a terminal repaint from falsely changing Done to
+Working. UI mode displays the correct provider and preserves composer drafts
+across view changes; stopped CLIs disable the composer.
+
+Observed real interaction for each provider in Chromium and WebKit:
+
+1. Start the installed CLI through Perch's workspace picker.
+2. Switch to UI and read a unique sentinel using the provider's real file tool.
+   Inspect its native tool call, result, and assistant response in the web view.
+3. Switch to CLI, run `/reload`, then type a follow-up that recalls the token.
+   Pi reloads its extension and reconnects the bridge. OMP's built-in command
+   reports `Plugins reloaded.` and retains CLI extensions. Both preserve the
+   native conversation and accept the next turn.
+4. Switch repeatedly while preserving an unsent UI draft.
+5. Kill only the fixture Perch core with SIGKILL, restart against the same
+   isolated DB, and reload the browser. The native PID, native session file,
+   conversation, and logical agent key remain identical. The PTY attachment
+   ID is allowed to change when the core recreates its transport.
+6. Connect a separate 390 × 844 browser to that session. Its composer is
+   disabled while the desktop owns input. Release desktop control, take it on
+   the phone, and send a third real prompt. Both views show the same native
+   response. Release phone control and regain it on desktop.
+7. Start a fourth native turn calling bash with `sleep 20`; cancel it through
+   the phone's Cancel turn button. Both native UI views return to Ready
+   within the 10-second assertion window, without the requested final reply.
+8. Confirm no page errors or horizontal overflow and explicitly stop the
+   fixture CLI. Cleanup addresses only fixture-owned tmux sessions.
+
+Validation:
+
+- `cargo test -p perch-core`: 253 core tests plus two protocol tests passed.
+  The workspace suite also passed before adding the final viewer-scope test.
+- `cargo clippy --workspace --all-targets`: five existing warnings; no new
+  warning. Formatting and production TypeScript/Vite build passed.
+- `npm test -w @perch/web`: 222 tests passed. Added coverage includes native
+  hidden messages, bounded tool data, duplicate dispatch, session-scoped
+  subscriptions, wrong-session acknowledgements, and no reconnect resend.
+- Rust bridge tests cover partial frames interrupted by cancellation, frame
+  size rejection, disconnect without replay, subsequent controls after
+  reconnect, continuation capture, and stale input-lease rejection.
+- `cd e2e && npx playwright test --config=native-ui.config.ts`: four real
+  Pi/OMP tests passed in Chromium/WebKit, including phone control/prompt and
+  native turn cancellation (final run: 1.4 minutes).
+- `cd e2e && npx playwright test --config=provider-config.config.ts`: all four
+  native/configured-provider catalog and persistent-pane regressions passed.
+  Final captures are `.impeccable/review/native-ui-{pi,omp}-{chromium,webkit}.png`
+  and `native-ui-{pi,omp}-mobile-{chromium,webkit}.png`. They remain private.
+
+Logs are in `/tmp/perch-native-ui-{core-final,workspace-tests,clippy,web-final,build}.log`
+and `/tmp/perch-native-ui-cancel-verified.log`; the catalog regression log is
+`/tmp/perch-native-ui-catalog-regression.log`. Private browser artifacts are
+under `e2e/artifacts-native-ui/`. Screenshot review identified hidden custom
+messages being shown; the display-flag fix passed its focused test and the
+real-browser rerun. The final populated phone screenshot was inspected with
+native conversation visible, controls reachable, and no hidden instructions.
+
+Limits: only Pi/OMP have this native UI bridge. Claude/Codex/OpenCode still
+need their own native history/control adapters, and the separate local Hosted
+path remains to be retired. Attachments/model/approval
+controls, queued-message interactions, paired remote access,
+hibernation, and full resource measurements are not established by these
+checks. V-04 remains partial and V-10 remains unverified; no full goal or ADE
+phase is complete.
+
+## Orca catalog and launch checkpoint — 2026-09-11
+
+Read the complete `refactor_logs.md` before resuming in
+`/Users/hwiii/Github/perch`. The refactored baseline passed 248 core tests plus
+two protocol tests, 216 web tests, build, typecheck, formatting, and Clippy
+with five existing warnings. Work continued directly, without new agents.
+
+The 36-entry Orca catalog now supplies the runtime's native registry. The
+availability response and actual process launch share the executable/alias
+resolver. Host SQLite preferences persist enabled/default state; revisioned
+snapshots update every client and prevent an older refresh from undoing a
+newer preference. Disabled agents disappear from launch choices, while their
+existing sessions remain attachable. Settings → Agents groups installed and
+available-to-install entries, shows the public command, supports search and
+Refresh, and links official install/docs pages. Install is a documentation
+link, as in the adapted Orca UI, not an automatic package installation.
+
+The CLI start screen, sidebar/tab-bar picker, and command palette share the
+installed/enabled provider choices. Native OMP and Pi ran in separate
+sessions in the same workspace: OMP started through the CLI start screen,
+Pi through the sidebar picker. Their drafts stayed isolated, the Pi pane
+retained its draft through split and reload, and both terminal identities
+remained unchanged. The command palette listed both agents and opened a plain
+shell whose `PWD` matched the workspace. Processes were stopped explicitly
+and test cleanup addressed only fixture-owned tmux names.
+
+The first native rerun confirmed the Pi layout repair but exposed xterm 5.5's
+uncancelled viewport callbacks after disposal. A narrowly scoped compatibility
+guard now prevents those callbacks touching a destroyed renderer; terminals
+still dispose immediately. The wider regression suite then caught an initial
+launch setting a redundant session CLI override. Launch now first resolves
+the new session's inherited mode and adds an override only when necessary,
+preserving device-mode control on the phone.
+
+Validation and evidence:
+
+- `cargo test --workspace`: 249 core tests + two protocol tests passed.
+- `cargo clippy --workspace --all-targets`: the same five baseline warnings.
+- `cargo fmt --check`, TypeScript check, `npm run build`: passed.
+- `npx vitest run --root packages/web`: 218 passed, including stale catalog
+  snapshots and inherited launch mode. The Rust preference test reopens the
+  database and checks that the default remains unique and enabled.
+- `cd e2e && npx playwright test --config=provider-config.config.ts`: four
+  tests passed in Chromium/WebKit, covering the 36 built-ins plus three
+  configured test fixtures, installed/available grouping, enable/disable,
+  cross-device default updates, search, mobile layout, environment isolation,
+  native OMP/Pi panes, command-palette shell launch, and reload persistence.
+- `npx playwright test --config=cli-rendering.config.ts`: ten terminal/grid/
+  crash-recovery checks passed; two ownership checks exposed the redundant
+  mode override. After the fix, rerunning `agent-terminal-ownership.spec.ts`
+  with that config passed both engines, followed by all four catalog tests.
+- Reviewed wide/narrow screenshots in the private ignored directory
+  `.impeccable/review/agent-catalog-{desktop,mobile}-{chromium,webkit}.png`.
+  The catalog was widened for readable desktop commands; mobile controls wrap
+  and remain usable at 390px. Native pane screenshots are
+  `.impeccable/review/native-omp-pi-split-{chromium,webkit}.png`.
+- Impeccable detection found no new component findings. Its one CSS finding
+  is the pre-existing 3px side-tab border, outside this change.
+
+V-03 is now observed with real OMP and Pi, not only test programs. The catalog
+does not prove all 36 external CLIs authenticated and completed turns.
+OpenCode is offered for installation when absent. Claude Agent Teams uses
+Claude's native in-process mode, not Orca's app-specific pane wrapper.
+V-04 remains incomplete: the separate Hosted runner still needs replacement
+with a structured view/control connection to the live CLI. Full worktree,
+pairing, agent snapshots, hibernation, and resource-budget gates remain open.
+
 ## Configured CLI checkpoint — 2026-09-11
 
 Provider manifests load from the default or an explicit configuration file;
@@ -455,13 +650,13 @@ verification.
 | --- | --- |
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | UNVERIFIED |
-| V-03 two different persistent CLI agents | UNVERIFIED |
-| V-04 same-session Chat/CLI switching and recovery | UNVERIFIED |
+| V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
+| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Claude/Codex/OpenCode and full UI controls remain |
 | V-05 tree, sentinel edit, save, disk/status verification | PARTIAL (file/tree/save and Git status/diff observed separately; combined edit/save/status gate remains) |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
-| V-08 anchored comments and exactly-once review packet | PASS (actual local UI two-note preview/send, provider receipt, and same-operation retry observed on 2026-09-10) |
-| V-09 full host/client recovery | PARTIAL (file draft/path recovery and real tmux shell/core restart verified; complete mixed workspace and agent recovery remains unverified) |
+| V-08 anchored comments and exactly-once review packet | PARTIAL: native Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; legacy Claude passed earlier; native Claude/Codex/OpenCode remain |
+| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Pi/OMP same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
 | V-10 paired mobile interaction and reconnect | UNVERIFIED |
 | V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |
 | V-12 safe hibernation and resume | UNVERIFIED |

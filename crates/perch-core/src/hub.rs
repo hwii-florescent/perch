@@ -1176,6 +1176,7 @@ impl HubManager {
             | ServerMessage::AgentLifecycle { ref request_id, .. }
             | ServerMessage::AgentTerminalOpened { ref request_id, .. }
             | ServerMessage::AgentControl { ref request_id, .. }
+            | ServerMessage::AgentUiResult { ref request_id, .. }
             | ServerMessage::TerminalOpened { ref request_id, .. }
             | ServerMessage::TerminalListResult { ref request_id, .. }
             | ServerMessage::TerminalClosed { ref request_id, .. } => {
@@ -1183,9 +1184,19 @@ impl HubManager {
                 self.relay_unicast(&key, Arc::new(msg));
                 self.pending_unicast.lock().unwrap().remove(&key);
             }
+            ServerMessage::AgentUiSnapshot { ref request_id, .. } => {
+                if let Some(id) = request_id {
+                    let key = PendingKey::Request(id.clone());
+                    self.relay_unicast(&key, Arc::new(msg));
+                    self.pending_unicast.lock().unwrap().remove(&key);
+                } else {
+                    let _ = self.hub_events_tx.send(Arc::new(msg));
+                }
+            }
             ServerMessage::AgentManifestList {
                 request_id,
                 manifests,
+                revision,
                 ..
             } => {
                 // The remote cannot choose the origin field. Stamp it from
@@ -1195,7 +1206,12 @@ impl HubManager {
                     request_id: request_id.clone(),
                     host_id: Some(host_id.to_string()),
                     manifests,
+                    revision,
                 };
+                if request_id.is_empty() {
+                    let _ = self.hub_events_tx.send(Arc::new(tagged));
+                    return;
+                }
                 let key = PendingKey::Request(request_id);
                 self.relay_unicast(&key, Arc::new(tagged));
                 self.pending_unicast.lock().unwrap().remove(&key);

@@ -46,7 +46,8 @@ real CLI terminal, and continue from a phone or another browser.
   prompts, file tree, diffs/source control, and reconnect after interruption.
 - The desktop UI adopts Orca's information architecture—projects/worktrees at
   the edge, tabs and mixed panes in the workspace, editor/diff/terminal views,
-  and compact agent state—without copying Orca branding, assets, or source.
+  and compact agent state—with distinct Perch branding and assets; MIT-licensed
+  source may be adapted with attribution as authorized below.
 - Herdr-inspired runtime behavior is preserved or improved: one lightweight
   Rust-owned background runtime, server-owned terminals, bounded buffers,
   reconnectability, explicit working/blocked/done/idle states, and hibernation

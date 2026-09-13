@@ -24,7 +24,6 @@
  * `new-session-agent-{claude,codex}` testids (see `AgentPicker`).
  */
 import { useState } from "react";
-import type { AgentKind } from "@perch/shared";
 import { usePerchStore, effectiveActiveProject } from "../store";
 import { AgentPicker } from "./AgentPicker";
 
@@ -39,7 +38,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   const project = usePerchStore((s) => effectiveActiveProject(s));
   const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
   const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
-  const [selectedAgent, setSelectedAgent] = useState<AgentKind>(lastAgentChoice);
+  const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
 
   if (!connected) {
     return (
@@ -65,14 +64,14 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
           value={selectedAgent}
           onChange={(a) => {
             setSelectedAgent(a);
-            setLastAgentChoice(a);
+            if (a === "claude" || a === "codex") setLastAgentChoice(a);
           }}
         />
         <button
           type="button"
           className="no-session__primary"
           data-testid="no-session-create"
-          onClick={() => createSessionOnHost(activeHostId, project?.cwd, selectedAgent)}
+          onClick={() => createSessionOnHost(activeHostId, project?.cwd, selectedAgent, "cli")}
         >
           {project ? `New session in ${basename(project.cwd)}` : "New session"}
         </button>

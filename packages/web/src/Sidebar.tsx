@@ -42,7 +42,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker } from "./components/AgentPicker";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
-import type { SessionSummary, SshHostEntry, HostConnectionState, AgentKind } from "@perch/shared";
+import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -557,18 +557,15 @@ export interface NewSessionPopoverProps {
   projectCwds: string[];
   anchorRect: DOMRect;
   onClose: () => void;
-  /** `agent` is the provider picked in this popover's `AgentPicker` at the
-   * moment of the click (Bug 2/3 fix) — TabBar's caller (a file this task
-   * doesn't touch) only reads `cwd` and simply drops the second argument,
-   * which TypeScript allows for a narrower callback. */
-  onSelect: (cwd: string | undefined, agent: AgentKind) => void;
+  /** Provider selected before opening a session in the chosen directory. */
+  onSelect: (cwd: string | undefined, agent: string) => void;
 }
 
 export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
   const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
-  const [selectedAgent, setSelectedAgent] = useState<AgentKind>(lastAgentChoice);
+  const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
 
   // Position: open below the anchor button, left-aligned. Clamped to the
   // viewport: the known-projects quick-pick list grows one row per distinct
@@ -582,7 +579,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
   const style: React.CSSProperties = {
     position: "fixed",
     top,
-    left: anchorRect.left,
+    left: Math.max(12, Math.min(anchorRect.left, window.innerWidth - 344)),
     zIndex: 9999,
     minWidth: 200,
     maxHeight: `min(70vh, calc(100vh - ${top}px - 12px))`,
@@ -607,10 +604,12 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
   return createPortal(
     <div className="new-session-popover" ref={popoverRef} style={style}>
       <AgentPicker
+        hostId={hostId}
+        onManage={onClose}
         value={selectedAgent}
         onChange={(a) => {
           setSelectedAgent(a);
-          setLastAgentChoice(a);
+          if (a === "claude" || a === "codex") setLastAgentChoice(a);
         }}
         testIdPrefix="new-session-popover-agent"
         className="new-session-popover__agent"
@@ -858,7 +857,7 @@ export function Sidebar() {
           projectCwds={projectCwds}
           anchorRect={newAnchor}
           onClose={() => setNewAnchor(null)}
-          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent)}
+          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent, "cli")}
         />
       )}
     </aside>

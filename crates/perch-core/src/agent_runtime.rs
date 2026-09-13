@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use crate::agent_fleet::{
     now_millis, AgentKey, AgentLifecycleRegistry, AgentMode, AgentRegistration, AgentSnapshot,
@@ -67,6 +68,7 @@ struct ActiveRuntime {
     /// turn a deliberate stop into `Exited` before `hibernate()` commits
     /// `Sleeping`.
     suppress_exit_signal: Arc<AtomicBool>,
+    native_status: Arc<AtomicBool>,
     replay: Arc<Mutex<TerminalReplay>>,
     _bootstrap: Option<crate::provider_environment::BootstrapFile>,
 }
@@ -222,6 +224,25 @@ impl AgentRuntimeAdapter {
             .map(|runtime| runtime.handle.clone())
     }
 
+    /// Capture the continuation chosen by the live CLI. Keep both the
+    /// durable lifecycle and live handle in sync before another view attaches.
+    pub fn record_provider_session_id(
+        &self,
+        key: &AgentKey,
+        id: String,
+    ) -> Result<(), RuntimeAdapterError> {
+        let _authority = self.authority.lock().unwrap();
+        let mut active = self.active.lock().unwrap();
+        let runtime = active
+            .get_mut(key)
+            .ok_or_else(|| RuntimeAdapterError::NoRuntime(key.clone()))?;
+        self.lifecycle
+            .set_provider_session_id(key, Some(id.clone()))?;
+        runtime.handle.provider_session_id = Some(id);
+        runtime.native_status.store(true, Ordering::Release);
+        Ok(())
+    }
+
     pub fn runtime_cwd(&self, key: &AgentKey) -> Option<PathBuf> {
         self.active
             .lock()
@@ -304,7 +325,12 @@ impl AgentRuntimeAdapter {
             return Err(RuntimeAdapterError::InteractiveStdinUnsupported);
         }
         let mut command = Vec::with_capacity(plan.args.len() + 1);
-        command.push(plan.executable.to_string_lossy().into_owned());
+        let executable = crate::agent_catalog::resolve_executable(
+            provider_id,
+            &plan.executable.to_string_lossy(),
+        )
+        .map_err(|reason| RuntimeAdapterError::Process(anyhow::anyhow!(reason)))?;
+        command.push(executable.to_string_lossy().into_owned());
         command.extend(plan.args);
         if extra_args.len() > MAX_FIXED_ARGUMENTS {
             return Err(RuntimeAdapterError::Launch(LaunchError::InvalidInput(
@@ -514,11 +540,14 @@ impl AgentRuntimeAdapter {
         let event_identity_slot = identity_slot.clone();
         let event_suppress = suppress_exit_signal.clone();
         let data_suppress = suppress_exit_signal.clone();
+        let native_status = Arc::new(AtomicBool::new(false));
+        let data_native_status = native_status.clone();
         let replay = Arc::new(Mutex::new(TerminalReplay::default()));
         let replay_for_output = replay.clone();
         let wrapped_on_data: TerminalDataListener = Arc::new(move |_, text| {
             replay_for_output.lock().unwrap().push(&text);
-            if !data_suppress.load(Ordering::Acquire) {
+            if !data_suppress.load(Ordering::Acquire) && !data_native_status.load(Ordering::Acquire)
+            {
                 let _ = lifecycle.signal(
                     &event_key,
                     ProviderSignal::Output { bytes: text.len() },
@@ -629,6 +658,7 @@ impl AgentRuntimeAdapter {
                     handle: handle.clone(),
                     cwd,
                     suppress_exit_signal,
+                    native_status,
                     replay: replay.clone(),
                     _bootstrap: prepared.bootstrap,
                 },
@@ -845,6 +875,27 @@ impl AgentRuntimeAdapter {
         self.terminals
             .input_owned(&terminal_key(key), &lease.client, lease.generation, data)?;
         Ok(())
+    }
+
+    /// Native UI commands share the input lease and its linearization point
+    /// with PTY writes. Queue synchronously while authority is held; await
+    /// the native acknowledgement only after releasing this lock.
+    pub fn dispatch_native_control<R>(
+        &self,
+        key: &AgentKey,
+        lease: &ControlLease,
+        dispatch: impl FnOnce() -> anyhow::Result<R>,
+    ) -> anyhow::Result<R> {
+        let _authority = self.authority.lock().unwrap();
+        self.lifecycle.record_control_activity(
+            key,
+            ControlChannel::Input,
+            &lease.client,
+            lease.generation,
+            now_millis(),
+            Duration::from_secs(5),
+        )?;
+        dispatch()
     }
 
     pub fn resize(
@@ -1384,6 +1435,21 @@ mod tests {
                 channel: ControlChannel::Input
             }))
         ));
+        let mut dispatched = false;
+        assert!(adapter
+            .dispatch_native_control(&key, &stale, || {
+                dispatched = true;
+                Ok(())
+            })
+            .is_err());
+        assert!(!dispatched);
+        adapter
+            .dispatch_native_control(&key, &lease, || {
+                dispatched = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(dispatched);
         assert!(adapter.stop(&key, &stale, 4).is_err());
         assert!(adapter.runtime_alive(&key));
         adapter
@@ -1391,6 +1457,63 @@ mod tests {
             .unwrap();
         assert!(adapter.stop(&key, &lease, 5).is_err());
         assert!(adapter.runtime_alive(&key));
+        adapter.terminals.kill(&terminal_key(&key));
+    }
+
+    #[test]
+    fn native_continuation_capture_keeps_reattaches_on_the_live_runtime() {
+        let adapter = adapter();
+        let key = key();
+        let mut registration = AgentRegistration {
+            key: key.clone(),
+            provider_id: "fixture".into(),
+            provider_session_id: None,
+            resumable: true,
+            now_ms: 1,
+        };
+        let first = adapter
+            .attach_cli(
+                registration.clone(),
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        adapter
+            .record_provider_session_id(&key, "native-selected-id".into())
+            .unwrap();
+        assert_eq!(
+            adapter
+                .snapshot(&key)
+                .unwrap()
+                .provider_session_id
+                .as_deref(),
+            Some("native-selected-id")
+        );
+        assert_eq!(
+            adapter
+                .runtime(&key)
+                .unwrap()
+                .provider_session_id
+                .as_deref(),
+            Some("native-selected-id")
+        );
+        registration.provider_session_id = Some("native-selected-id".into());
+        let second = adapter
+            .attach_cli(
+                registration,
+                "/tmp",
+                client("phone"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert_eq!(first.handle.terminal, second.handle.terminal);
         adapter.terminals.kill(&terminal_key(&key));
     }
 
@@ -1449,13 +1572,13 @@ mod tests {
             .build_launch("claude", Path::new("/tmp"), AgentMode::Cli, None, None)
             .unwrap();
         assert_eq!(claude.executable, PathBuf::from("claude"));
-        assert!(claude.args.is_empty());
+        assert_eq!(claude.args, ["--dangerously-skip-permissions"]);
         assert!(claude.stdin.is_none());
         let codex = registry
             .build_launch("codex", Path::new("/tmp"), AgentMode::Cli, None, None)
             .unwrap();
         assert_eq!(codex.executable, PathBuf::from("codex"));
-        assert!(codex.args.is_empty());
+        assert_eq!(codex.args, ["--dangerously-bypass-approvals-and-sandbox"]);
         assert!(codex.stdin.is_none());
     }
 }

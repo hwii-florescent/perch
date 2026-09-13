@@ -79,18 +79,7 @@ export function TabBar() {
   }
 
   function handleNewClick(e: React.MouseEvent<HTMLButtonElement>) {
-    // Fast path: an active project means we already know exactly where the
-    // session belongs — create it straight away. `cwd` is always absolute
-    // here (it comes from an existing session's cwd), so `createSessionOnHost`
-    // pins the nav on it synchronously and never hits the "reuse the empty
-    // active session" shortcut (that shortcut only applies to cwd-less
-    // creates).
-    if (cwd) {
-      createSessionOnHost(hostId, cwd);
-      return;
-    }
-    // Blank state (no project on this host yet): nothing to infer a cwd from,
-    // so fall back to the directory browser, same as the sidebar's button.
+    // The launcher always lets the user choose the CLI before starting it.
     setPopoverAnchor(e.currentTarget.getBoundingClientRect());
   }
 
@@ -189,7 +178,7 @@ export function TabBar() {
           projectCwds={cwd ? [cwd] : []}
           anchorRect={popoverAnchor}
           onClose={() => setPopoverAnchor(null)}
-          onSelect={(selectedCwd) => createSessionOnHost(hostId, selectedCwd)}
+          onSelect={(selectedCwd, provider) => createSessionOnHost(hostId, selectedCwd, provider, "cli")}
         />
       )}
     </div>

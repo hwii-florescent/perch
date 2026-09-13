@@ -700,11 +700,9 @@ impl ProviderRegistry {
     /// of an `expect` panic after the listener has already been created.
     pub fn native() -> Result<Self, RegistryError> {
         let registry = Self::empty();
-        registry.register(ProviderManifest::claude())?;
-        registry.register(ProviderManifest::codex())?;
-        registry.register(ProviderManifest::omp())?;
-        registry.register(ProviderManifest::pi())?;
-        registry.register(ProviderManifest::opencode())?;
+        for entry in crate::agent_catalog::entries()? {
+            registry.register(entry.manifest())?;
+        }
         Ok(registry)
     }
 
@@ -744,10 +742,21 @@ impl ProviderRegistry {
         self.manifests.read().unwrap().contains_key(provider_id)
     }
 
-    /// Return manifests in deterministic id order for a picker/sidebar.
+    /// Keep built-ins in catalog order, followed by configured providers.
     pub fn list(&self) -> Vec<ProviderManifest> {
         let mut manifests: Vec<_> = self.manifests.read().unwrap().values().cloned().collect();
-        manifests.sort_by(|left, right| left.id.cmp(&right.id));
+        let catalog = crate::agent_catalog::entries().unwrap_or_default();
+        // ponytail: linear rank lookup for 36 built-ins; precompute ranks if
+        // the bounded catalog grows enough to make picker refresh measurable.
+        manifests.sort_by_key(|manifest| {
+            (
+                catalog
+                    .iter()
+                    .position(|entry| entry.id == manifest.id)
+                    .unwrap_or(usize::MAX),
+                manifest.id.clone(),
+            )
+        });
         manifests
     }
 
@@ -2716,24 +2725,38 @@ mod tests {
             .build_launch("claude", cwd, AgentMode::Cli, None, None)
             .unwrap();
         assert_eq!(claude.executable, PathBuf::from("claude"));
-        assert!(claude.args.is_empty(), "interactive Claude must have no -p");
+        assert_eq!(claude.args, ["--dangerously-skip-permissions"]);
         assert!(claude.stdin.is_none());
 
         let claude_resume = registry
             .build_launch("claude", cwd, AgentMode::Cli, None, Some("claude-session"))
             .unwrap();
-        assert_eq!(claude_resume.args, ["--resume", "claude-session"]);
+        assert_eq!(
+            claude_resume.args,
+            [
+                "--dangerously-skip-permissions",
+                "--resume",
+                "claude-session"
+            ]
+        );
 
         let codex = registry
             .build_launch("codex", cwd, AgentMode::Cli, None, None)
             .unwrap();
         assert_eq!(codex.executable, PathBuf::from("codex"));
-        assert!(codex.args.is_empty(), "interactive Codex must not use exec");
+        assert_eq!(codex.args, ["--dangerously-bypass-approvals-and-sandbox"]);
 
         let codex_resume = registry
             .build_launch("codex", cwd, AgentMode::Cli, None, Some("codex-thread"))
             .unwrap();
-        assert_eq!(codex_resume.args, ["resume", "codex-thread"]);
+        assert_eq!(
+            codex_resume.args,
+            [
+                "--dangerously-bypass-approvals-and-sandbox",
+                "resume",
+                "codex-thread"
+            ]
+        );
 
         for (provider, resume_flag) in [
             ("omp", "--resume"),
@@ -2754,7 +2777,7 @@ mod tests {
                 .unwrap();
             assert_eq!(resumed.args, [resume_flag, "exact-session"]);
         }
-        assert_eq!(registry.list().len(), 5);
+        assert_eq!(registry.list().len(), 36);
     }
 
     #[test]

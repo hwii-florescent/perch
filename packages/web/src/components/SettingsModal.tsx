@@ -18,6 +18,7 @@ import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, SessionMo
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
+import { AgentCatalog } from "./AgentCatalog";
 import type { SessionModeOverrideScope } from "./SessionModeControl";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
 // `createPerchTerminal` actually clamps to cannot drift apart.
@@ -875,10 +876,11 @@ function ArchivedSessionsPanel() {
 /** Which view the modal body is showing. The modal is a flat scrolling list of
  * sections by default; "archived" swaps the body for the archived-sessions
  * subpage (reached from the Archived Sessions section's "Manage…" button). */
-type SettingsView = "main" | "archived";
+type SettingsView = "main" | "archived" | "agents";
 
 export function SettingsModal() {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const settingsPage = usePerchStore((s) => s.settingsPage);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const fetchSettings = usePerchStore((s) => s.fetchSettings);
   const fetchHosts = usePerchStore((s) => s.fetchHosts);
@@ -889,11 +891,11 @@ export function SettingsModal() {
   // Fetch data every time the modal opens, and always open on the main view.
   useEffect(() => {
     if (settingsOpen) {
-      setView("main");
+      setView(settingsPage);
       fetchSettings();
       fetchHosts();
     }
-  }, [settingsOpen, fetchSettings, fetchHosts]);
+  }, [settingsOpen, settingsPage, fetchSettings, fetchHosts]);
 
   // Escape: back out of the subpage first, close the modal from the main view.
   useEffect(() => {
@@ -916,12 +918,15 @@ export function SettingsModal() {
     >
       <div
         ref={panelRef}
-        className="settings-modal__panel"
+        className={"settings-modal__panel" + (view === "agents" ? " settings-modal__panel--agents" : "")}
         data-testid="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={view === "agents" ? "Agents" : view === "archived" ? "Archived Sessions" : "Settings"}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="settings-modal__header">
-          {view === "archived" && (
+          {view !== "main" && (
             <button
               type="button"
               className="settings-modal__back"
@@ -933,7 +938,7 @@ export function SettingsModal() {
             </button>
           )}
           <h2 className="settings-modal__title">
-            {view === "archived" ? "Archived Sessions" : "Settings"}
+            {view === "archived" ? "Archived Sessions" : view === "agents" ? "Agents" : "Settings"}
           </h2>
           <button
             type="button"
@@ -946,12 +951,17 @@ export function SettingsModal() {
         </div>
 
         <div className="settings-modal__body">
-          {view === "archived" ? (
+          {view === "agents" ? <AgentCatalog /> : view === "archived" ? (
             <ArchivedSessionsPanel />
           ) : (
             <>
               <ThemeSection />
               <ChatModeSection />
+              <section className="settings-modal__section">
+                <h3 className="settings-modal__section-title">Agents</h3>
+                <p className="settings-modal__muted">Installed CLIs, available agents, and your default launcher.</p>
+                <button type="button" className="agent-catalog__action" onClick={() => setView("agents")}>Manage agents</button>
+              </section>
               <NotificationsSection />
               <InterfaceSection />
               <TerminalSection />

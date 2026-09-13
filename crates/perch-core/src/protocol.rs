@@ -523,6 +523,53 @@ pub struct AgentManifestSummary {
     pub executable: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_default: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_ui: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiTool {
+    pub name: String,
+    pub input: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiMessage {
+    pub id: String,
+    pub role: String,
+    pub text: String,
+    pub thinking: String,
+    pub tools: Vec<NativeUiTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiSnapshot {
+    pub version: u32,
+    pub revision: u64,
+    pub pid: u32,
+    pub provider_session_id: String,
+    pub cwd: String,
+    pub model: Option<String>,
+    pub running: bool,
+    pub messages: Vec<NativeUiMessage>,
+    pub truncated: bool,
 }
 
 /// Connection-authenticated ownership token returned by the control endpoint.
@@ -771,6 +818,42 @@ pub enum ClientMessage {
         request_id: String,
         #[serde(default)]
         host_id: Option<String>,
+    },
+
+    /// Configure the host's launcher. Existing sessions remain attachable.
+    #[serde(rename = "agent.provider.configure", rename_all = "camelCase")]
+    AgentProviderConfigure {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        provider_id: String,
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        is_default: Option<bool>,
+    },
+
+    #[serde(rename = "agent.ui.get", rename_all = "camelCase")]
+    AgentUiGet {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+    },
+    #[serde(rename = "agent.ui.prompt", rename_all = "camelCase")]
+    AgentUiPrompt {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        operation_id: String,
+        generation: u64,
+        text: String,
+    },
+    #[serde(rename = "agent.ui.cancel", rename_all = "camelCase")]
+    AgentUiCancel {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        generation: u64,
     },
 
     /// Read one provider lifecycle snapshot.  When `agent_id` is omitted the
@@ -1427,6 +1510,23 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host_id: Option<String>,
         manifests: Vec<AgentManifestSummary>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revision: Option<u64>,
+    },
+
+    #[serde(rename = "agent.ui.snapshot", rename_all = "camelCase")]
+    AgentUiSnapshot {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        session_id: String,
+        provider_id: String,
+        snapshot: NativeUiSnapshot,
+    },
+    #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
+    AgentUiResult {
+        request_id: String,
+        session_id: String,
+        accepted: bool,
     },
 
     #[serde(rename = "agent.lifecycle", rename_all = "camelCase")]

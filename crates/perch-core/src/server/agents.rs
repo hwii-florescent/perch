@@ -14,6 +14,7 @@ use super::*;
 
 fn provider_manifest_summary(
     manifest: &crate::agent_fleet::ProviderManifest,
+    preference: &crate::db::ProviderPreference,
 ) -> crate::protocol::AgentManifestSummary {
     let cli_executable = manifest
         .launch
@@ -21,15 +22,12 @@ fn provider_manifest_summary(
         .get(&AgentMode::Cli)
         .map(|recipe| &recipe.executable)
         .unwrap_or(&manifest.launch.executable);
-    let executable = crate::agent_fleet::resolve_executable(cli_executable, None)
+    let executable = crate::agent_catalog::resolve_executable(&manifest.id, cli_executable)
         .ok()
         .map(|path| path.to_string_lossy().into_owned());
-    let reason = executable.is_none().then(|| {
-        format!(
-            "executable `{}` is not available on the configured PATH",
-            cli_executable
-        )
-    });
+    let reason = executable
+        .is_none()
+        .then(|| format!("executable `{}` was not found on this host", cli_executable));
     let capabilities = manifest
         .capabilities
         .iter()
@@ -69,6 +67,144 @@ fn provider_manifest_summary(
         available: executable.is_some(),
         executable,
         reason,
+        homepage_url: crate::agent_catalog::lookup(&manifest.id)
+            .map(|entry| entry.homepage_url.clone()),
+        // Only publish the catalog's public command, never configured argv or
+        // environment values (a custom provider may carry credentials there).
+        launch_command: Some(
+            crate::agent_catalog::lookup(&manifest.id)
+                .map(|entry| {
+                    std::iter::once(entry.executable.as_str())
+                        .chain(entry.prefix_args.iter().map(String::as_str))
+                        .chain(entry.default_args.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_else(|| cli_executable.clone()),
+        ),
+        enabled: Some(preference.enabled),
+        is_default: Some(preference.is_default),
+        native_ui: Some(crate::native_ui::supported(&manifest.id)),
+    }
+}
+
+fn catalog_response(state: &Arc<ConnState>, request_id: String) -> anyhow::Result<ServerMessage> {
+    let (revision, preferences) = state.app.db.provider_preferences()?;
+    let manifests = state
+        .app
+        .agent_runtime
+        .providers()
+        .list()
+        .iter()
+        .map(|manifest| {
+            provider_manifest_summary(
+                manifest,
+                preferences
+                    .get(&manifest.id)
+                    .unwrap_or(&crate::db::ProviderPreference::default()),
+            )
+        })
+        .collect();
+    Ok(ServerMessage::AgentManifestList {
+        request_id,
+        host_id: Some("local".into()),
+        manifests,
+        revision: Some(revision),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_agent_provider_configure(
+    state: &Arc<ConnState>,
+    raw_text: &str,
+    request_id: String,
+    host_id: Option<String>,
+    provider_id: String,
+    enabled: Option<bool>,
+    is_default: Option<bool>,
+) {
+    if request_id.trim().is_empty() || (enabled.is_none() && is_default.is_none()) {
+        fail(
+            &state.out_tx,
+            request_id,
+            "invalid_request",
+            "Choose an agent preference to change",
+            false,
+        );
+        return;
+    }
+    let target = host_id.as_deref().unwrap_or("local").trim();
+    if !target.is_empty() && target != "local" {
+        if !state.app.hub.is_connected(target) {
+            fail(
+                &state.out_tx,
+                request_id,
+                "host_unavailable",
+                format!("host {target} is not connected"),
+                true,
+            );
+            return;
+        }
+        state.app.hub.register_unicast(
+            PendingKey::Request(request_id),
+            state.conn_id.clone(),
+            state.out_tx.clone(),
+        );
+        state.app.hub.forward(target, &strip_host_id(raw_text));
+        return;
+    }
+    let result = (|| -> anyhow::Result<ServerMessage> {
+        let _operation = state.app.agent_operation_lock.lock().unwrap();
+        let manifest = state
+            .app
+            .agent_runtime
+            .providers()
+            .get(&provider_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown provider {provider_id}"))?;
+        if is_default == Some(true) {
+            anyhow::ensure!(
+                provider_manifest_summary(&manifest, &crate::db::ProviderPreference::default())
+                    .available,
+                "Install this agent before making it the default"
+            );
+        }
+        state
+            .app
+            .db
+            .configure_provider(&provider_id, enabled, is_default)?;
+        catalog_response(state, request_id.clone())
+    })();
+    match result {
+        Ok(reply) => {
+            let _ = state.out_tx.send(reply.clone());
+            // An empty request id denotes a host-wide snapshot push. Revision
+            // guards prevent an older concurrent refresh replacing this state.
+            if let ServerMessage::AgentManifestList {
+                manifests,
+                revision,
+                ..
+            } = reply
+            {
+                let _ =
+                    state
+                        .app
+                        .hub
+                        .hub_events_tx
+                        .send(Arc::new(ServerMessage::AgentManifestList {
+                            request_id: String::new(),
+                            host_id: Some("local".into()),
+                            manifests,
+                            revision,
+                        }));
+            }
+        }
+        Err(error) => fail(
+            &state.out_tx,
+            request_id,
+            "provider_configure_failed",
+            error.to_string(),
+            false,
+        ),
     }
 }
 
@@ -209,19 +345,18 @@ pub(super) fn handle_agent_manifest_list(
         state.app.hub.forward(target, &strip_host_id(raw_text));
         return;
     }
-    let manifests = state
-        .app
-        .agent_runtime
-        .providers()
-        .list()
-        .iter()
-        .map(provider_manifest_summary)
-        .collect();
-    let _ = state.out_tx.send(ServerMessage::AgentManifestList {
-        request_id,
-        host_id: Some("local".to_string()),
-        manifests,
-    });
+    match catalog_response(state, request_id.clone()) {
+        Ok(reply) => {
+            let _ = state.out_tx.send(reply);
+        }
+        Err(error) => fail(
+            &state.out_tx,
+            request_id,
+            "provider_catalog_failed",
+            error.to_string(),
+            true,
+        ),
+    }
 }
 
 pub(super) fn handle_agent_lifecycle_get(

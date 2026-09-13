@@ -63,7 +63,7 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
     if (!sessionId) return s.agent;
     const session = s.sessions.find((candidate) => candidate.id === sessionId);
     const mode = s.sessionModes[sessionId]?.mode ?? s.settings?.chatMode ?? "hosted";
-    return mode === "cli"
+    return mode === "cli" || session?.cliProviderId === "pi" || session?.cliProviderId === "omp"
       ? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? s.agent
       : s.hostedAgentBySession[sessionId] ?? session?.lastAgent ?? s.agent;
   });

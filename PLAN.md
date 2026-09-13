@@ -91,7 +91,78 @@ implemented. The completed configuration checkpoint passed 247 core tests,
 two protocol tests, 216 web tests, build, and the isolated desktop/mobile
 provider suite in both Chromium and WebKit. Screenshot review also fixed the
 provider pane badge and terminal-response bytes leaking into session titles.
-The five built-in choices and native UI connection are the next active slice.
+The native UI connection was the next active slice; its Pi/OMP checkpoint follows.
+
+Native CLI UI checkpoint, 2026-09-12: Pi and OMP now load a private native
+extension into their existing interactive CLI. The CLI owns conversation,
+models, tools, extensions, authentication, and execution. The extension exposes
+bounded native history/events and prompt/cancel controls over a private Unix
+socket; no second provider process or Perch prompt loop is started. Rust checks
+input leases and journals prompt operations before delivery. The web view
+renders native messages, thinking, tool calls/results, and visible custom
+messages, preserving the CLI's hidden-message flags. Native continuation IDs
+update both lifecycle persistence and the live handle, so reattaches preserve
+identity. Native status also prevents terminal repaint from marking a settled
+agent Working.
+
+Real Pi/OMP tests in Chromium and WebKit exercise a sentinel read from UI,
+a follow-up typed in CLI, native /reload, UI/CLI draft retention, core SIGKILL
+and restart with the same native PID/session, and a separate 390px phone
+browser taking control and sending a third prompt. Pi reloads the native
+extension; OMP's built-in /reload refreshes plugins while preserving CLI
+extensions. Headless screenshots are private and were reviewed. Final command
+results and current limits are recorded in docs/ADE-REWORK-VERIFICATION.md.
+
+Native review checkpoint, 2026-09-12: Pi/OMP review packets now enter the
+existing CLI through its native user-input API. A Git view borrows input only
+when unowned and releases it after enqueueing; another browser's control is
+preserved. Packet and prompt delivery use the existing atomic journal, and a
+retry returns the same operation's receipt without sending another prompt.
+Four real-provider desktop/phone checks pass in Chromium and WebKit, including
+two anchored notes, an ownership refusal, successful delivery after release,
+a correlated retry receipt, unchanged native PID/session, and control recovery.
+254 core tests, two protocol tests, 222 web tests, production build, formatting,
+and Clippy with the five existing warnings pass. Native Claude/Codex review
+remains explicitly unavailable until their same-session adapters are ready.
+
+The full goal is still active. Next: native UI controls
+(attachments, model selection, approvals, queue verification), then
+Claude Code/Codex/OpenCode native UI connections and retirement of local
+Hosted dispatch. Existing remote paths must remain compatible. Worktree
+lifecycle, secure pairing, hibernation, combined recovery, and measured resource
+budgets still need their complete acceptance evidence. The Pi/OMP slice does
+not establish the full V-04 or V-10 gates.
+
+Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
+catalog entries are now wired through the provider registry, the shared
+detection/launch resolver, host-persisted enabled/default preferences, and
+Settings → Agents. The CLI start view, sidebar/tab-bar pickers, and command
+palette use installed, enabled agents; install actions open the official
+instructions. The command palette also opens a persistent shell. OMP and Pi
+were launched through separate UI entry points in one workspace, retained
+their drafts and identities through split/reload, and accepted isolated input.
+The four catalog/native checks pass in Chromium and WebKit. The wider terminal
+suite found and led to fixes for xterm's disposed-viewport callback and an
+unnecessary session mode override; the two desktop/phone ownership checks now
+pass again. Rust: 249 core + two parity tests; web: 218 tests; build/typecheck
+and formatting clean; Clippy retains five baseline warnings. Details and
+private artifact locations are in `docs/ADE-REWORK-VERIFICATION.md`.
+
+CLI-owned UI sequence (updated 2026-09-12):
+
+1. Completed for Pi/OMP: bounded native events/history and prompt/cancel
+   controls inside the same interactive CLI, actual continuation capture,
+   view/reload/core-crash continuity, and separate phone control/prompt.
+2. Completed for Pi/OMP: review packets use the native bridge and existing
+   input authority, with real-provider delivery and retry verification. Complete
+   UI attachments, native model/approval controls, and queued-message checks.
+3. Connect Claude Code, Codex, and OpenCode through their native session
+   events/control paths with equivalent identity and restart guarantees.
+   Keep unsupported provider behavior explicit while these adapters are built.
+4. Retire the separate local Hosted runner after those paths are verified;
+   preserve existing remote behavior until the corresponding transport is
+   migrated. Then finish the remaining worktree, pairing, snapshot,
+   hibernation, and measured resource gates in SPEC.md.
 
 Implemented and browser-verified mode policy discovery, stable blank-session
 identity, server-owned workspace associations, multi-view invalidation, and

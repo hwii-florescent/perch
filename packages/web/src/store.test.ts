@@ -989,3 +989,48 @@ describe("durable workspace navigation", () => {
     });
   });
 });
+
+// Catalog updates are host-owned: a refresh can race another device changing
+// preferences, and its older snapshot must not bring disabled agents back.
+describe("agent catalog revisions", () => {
+  it("keeps a newer broadcast when an earlier refresh completes", () => {
+    const { serverInfo } = usePerchStore.getState();
+    usePerchStore.setState({ connected: true, activeHostId: "local", serverInfo: {
+      ...serverInfo!, hostname: "test", isSsh: false, platform: "test", capabilities: ["agent.manifest.list", "agent.provider.configure"],
+    }, agentManifestsByHost: {} });
+    FakeWebSocket.sent = [];
+    usePerchStore.getState().fetchAgentManifests("local");
+    const request = JSON.parse(FakeWebSocket.sent.at(-1)!) as { requestId: string };
+    const manifest = { id: "pi", displayName: "Pi", supportedModes: ["cli" as const], capabilities: ["interactiveTerminal"], resumability: "providerSession", statusDetection: "exitStatus", available: true, enabled: false };
+    handleServerMessage({ type: "agent.manifest.list", requestId: "", hostId: "local", manifests: [manifest], revision: 2 });
+    handleServerMessage({ type: "agent.manifest.list", requestId: request.requestId, hostId: "local", manifests: [{ ...manifest, enabled: true }], revision: 1 });
+    expect(usePerchStore.getState().agentManifestsByHost.local).toMatchObject({ revision: 2, state: "ready", manifests: [{ enabled: false }] });
+    handleServerMessage({ type: "agent.manifest.list", requestId: "", hostId: "remote", manifests: [{ ...manifest, enabled: true }], revision: 10 });
+    expect(usePerchStore.getState().agentManifestsByHost.local.manifests[0].enabled).toBe(false);
+    expect(usePerchStore.getState().agentManifestsByHost.remote.manifests[0].enabled).toBe(true);
+  });
+});
+
+it("a CLI launch preserves an inherited CLI mode and only overrides Hosted", () => {
+  usePerchStore.setState({ connected: true, sessionId: null, sessions: [], messages: [], sessionModes: {}, activeHostId: "local", serverInfo: {
+    hostname: "test", isSsh: false, platform: "test", capabilities: ["session.mode.get", "session.mode.set"],
+  } });
+  const deviceId = usePerchStore.getState().deviceId;
+  for (const [sessionId, inheritedMode] of [["launch-inherits", "cli"], ["launch-overrides", "hosted"]] as const) {
+    FakeWebSocket.sent = [];
+    usePerchStore.getState().createSessionOnHost("local", "/tmp/launch-mode", "pi", "cli");
+    handleServerMessage({ type: "session.created", sessionId });
+    const get = FakeWebSocket.sent.map((text) => JSON.parse(text)).find((message) => message.type === "session.mode.get");
+    expect(get).toBeDefined();
+    handleServerMessage({ type: "session.mode", requestId: get.requestId, sessionId, deviceId, mode: inheritedMode, scope: "device", revision: 1 });
+    const set = FakeWebSocket.sent.map((text) => JSON.parse(text)).find((message) => message.type === "session.mode.set");
+    if (inheritedMode === "cli") {
+      expect(set).toBeUndefined();
+      expect(usePerchStore.getState().sessionModes[sessionId]).toMatchObject({ mode: "cli", scope: "device", state: "ready" });
+    } else {
+      expect(set).toMatchObject({ mode: "cli", scope: "session", sessionId });
+      handleServerMessage({ type: "session.mode", requestId: set.requestId, sessionId, deviceId, mode: "cli", scope: "session", revision: 2 });
+      expect(usePerchStore.getState().sessionModes[sessionId]).toMatchObject({ mode: "cli", scope: "session", state: "ready" });
+    }
+  }
+});

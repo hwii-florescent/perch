@@ -1,49 +1,48 @@
-/**
- * AgentPicker.tsx — Bug 2/3 fix: a small, reusable claude/codex segmented
- * control for session-*create* flows (as opposed to `CliStartPanel`'s own
- * inline toggle, which is CLI-mode-only and pre-dates this component).
- *
- * Used by the sidebar's "+ New session" popover and `NoSessionPanel` so a
- * provider choice is available at every hosted-mode create entry point, not
- * just CLI mode's. See `store.ts`'s `hostedAgentBySession`/`lastAgentChoice`
- * for how the choice is threaded through and remembered.
- */
-import type { AgentKind } from "@perch/shared";
+import { useEffect, useRef } from "react";
+import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 
-export function AgentPicker({
-  value,
-  onChange,
-  testIdPrefix = "new-session-agent",
-  className,
-}: {
-  value: AgentKind;
-  onChange: (agent: AgentKind) => void;
-  /** Overrides the default `new-session-agent-{claude,codex}` testids —
-   * needed wherever a second instance of this picker can be mounted at the
-   * same time as another one (e.g. the sidebar popover open on top of
-   * `NoSessionPanel`), so `data-testid` stays unique in the DOM. */
+/** Installed CLI choices for workspace/session creation. Legacy hosts retain
+ * their two known integrations until they advertise manifest discovery. */
+export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, testIdPrefix = "new-session-agent", className }: {
+  value: string;
+  onChange: (agent: string) => void;
+  onManage?: () => void;
+  hostId?: string;
   testIdPrefix?: string;
   className?: string;
 }) {
-  return (
-    <div
-      className={"agent-picker" + (className ? ` ${className}` : "")}
-      role="group"
-      aria-label="Agent"
-    >
-      {AGENTS.map((a) => (
-        <button
-          key={a.id}
-          type="button"
-          className={"agent-picker__btn" + (a.id === value ? " agent-picker__btn--active" : "")}
-          data-testid={`${testIdPrefix}-${a.id}`}
-          aria-pressed={a.id === value}
-          onClick={() => onChange(a.id)}
-        >
-          {a.label}
-        </button>
-      ))}
+  const activeHost = usePerchStore((s) => s.activeHostId);
+  const hostId = hostIdProp ?? activeHost;
+  const connected = usePerchStore((s) => s.connected);
+  const discovery = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("agent.manifest.list") ?? false);
+  const catalog = usePerchStore((s) => s.agentManifestsByHost[hostId]);
+  const fetch = usePerchStore((s) => s.fetchAgentManifests);
+  const manage = usePerchStore((s) => s.openAgentCatalog);
+  const seededHost = useRef<string | null>(null);
+  useEffect(() => { if (connected && discovery) fetch(hostId); }, [connected, discovery, fetch, hostId]);
+  const choices = discovery ? (catalog?.manifests ?? []).filter((entry) => entry.available && entry.enabled !== false && entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"))
+    .map((entry) => ({ id: entry.id, label: entry.displayName, isDefault: entry.isDefault })) : AGENTS;
+  const preferred = choices.find((entry) => "isDefault" in entry && entry.isDefault)?.id;
+  const first = choices[0]?.id;
+  const valid = choices.some((entry) => entry.id === value);
+  useEffect(() => {
+    if (!discovery || catalog?.state !== "ready") return;
+    if (seededHost.current !== hostId) {
+      seededHost.current = hostId;
+      if (preferred && preferred !== value) { onChange(preferred); return; }
+    }
+    if (!valid && first) onChange(first);
+  }, [catalog?.state, discovery, first, hostId, onChange, preferred, valid, value]);
+  return <div>
+    <div className={"agent-picker" + (className ? ` ${className}` : "")} role="group" aria-label="Agent">
+      {choices.map((entry) => <button key={entry.id} type="button"
+        className={"agent-picker__btn" + (entry.id === value ? " agent-picker__btn--active" : "")}
+        data-testid={`${testIdPrefix}-${entry.id}`} disabled={!connected || (discovery && catalog?.state !== "ready")}
+        aria-pressed={entry.id === value} onClick={() => onChange(entry.id)}>{entry.label}</button>)}
     </div>
-  );
+    {discovery && <button type="button" className="agent-catalog__action" onClick={() => { onManage?.(); manage(); }}>Manage agents</button>}
+    {discovery && catalog?.state === "error" && <p role="alert">{catalog.error}</p>}
+    {discovery && catalog?.state === "ready" && !choices.length && <p role="status">Enable or install an agent in Manage agents.</p>}
+  </div>;
 }

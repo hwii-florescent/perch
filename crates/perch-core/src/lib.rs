@@ -16,6 +16,7 @@ pub mod hosts;
 pub mod hub;
 pub mod iterm_profile;
 pub mod models;
+pub mod native_ui;
 pub mod protocol;
 pub mod provider_config;
 mod provider_environment;

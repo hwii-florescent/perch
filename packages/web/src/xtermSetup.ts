@@ -255,6 +255,18 @@ export function createPerchTerminal(
 
   term.open(container);
 
+  // xterm 5.5's Viewport schedules constructor/reset callbacks without
+  // cancelling them on dispose. A short-lived Dockview pane can disappear
+  // before those callbacks run and they then read a destroyed renderer.
+  // Keep this compatibility guard local to the pinned 5.x viewport API;
+  // do not defer disposal or retain detached terminal buffers.
+  let disposed = false;
+  const viewport = (term as unknown as { _core?: { viewport?: { syncScrollArea: (immediate?: boolean) => void } } })._core?.viewport;
+  if (viewport) {
+    const sync = viewport.syncScrollArea.bind(viewport);
+    viewport.syncScrollArea = (immediate) => { if (!disposed) sync(immediate); };
+  }
+
   let lastCols = 0;
   let lastRows = 0;
 
@@ -333,7 +345,7 @@ export function createPerchTerminal(
     // degenerate grid, and pushing it to the PTY makes the CLI reflow its
     // whole UI to ~1 column — damage that is done server-side and survives
     // the pane becoming visible again. Skip instead.
-    if (container.offsetWidth === 0 || container.offsetHeight === 0) return null;
+    if (disposed || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
     try {
       fitWithScaling();
     } catch {
@@ -371,6 +383,8 @@ export function createPerchTerminal(
     term,
     fit,
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
       if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
       mql?.removeEventListener("change", handleSchemeChange);

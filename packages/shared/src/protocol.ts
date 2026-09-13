@@ -23,6 +23,68 @@ export interface ModelEntry {
   isDefault?: boolean;
 }
 
+export interface NativeUiTool {
+  name: string;
+  input: string;
+}
+export interface NativeUiMessage {
+  id: string;
+  role: string;
+  text: string;
+  thinking: string;
+  tools: NativeUiTool[];
+  toolName?: string;
+  model?: string;
+  error?: string;
+}
+export interface NativeUiSnapshot {
+  version: number;
+  revision: number;
+  pid: number;
+  providerSessionId: string;
+  cwd: string;
+  model: string | null;
+  running: boolean;
+  messages: NativeUiMessage[];
+  truncated: boolean;
+}
+
+export interface AgentUiGetMessage {
+  type: "agent.ui.get";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+}
+export interface AgentUiPromptMessage {
+  type: "agent.ui.prompt";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+  operationId: string;
+  generation: number;
+  text: string;
+}
+export interface AgentUiCancelMessage {
+  type: "agent.ui.cancel";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+  generation: number;
+}
+export interface AgentUiSnapshotMessage {
+  type: "agent.ui.snapshot";
+  requestId?: string;
+  sessionId: string;
+  providerId: string;
+  snapshot: NativeUiSnapshot;
+}
+export interface AgentUiResultMessage {
+  type: "agent.ui.result";
+  requestId: string;
+  sessionId: string;
+  accepted: boolean;
+}
+
 export interface ChatUsage {
   inputTokens: number;
   outputTokens: number;
@@ -228,6 +290,11 @@ export interface AgentManifestSummary {
   available: boolean;
   executable?: string;
   reason?: string;
+  homepageUrl?: string;
+  launchCommand?: string;
+  enabled?: boolean;
+  isDefault?: boolean;
+  nativeUi?: boolean;
 }
 
 /** Connection-authenticated lease returned by the Rust runtime. */
@@ -750,6 +817,15 @@ export interface AgentManifestListMessage {
   hostId?: string;
 }
 
+export interface AgentProviderConfigureMessage {
+  type: "agent.provider.configure";
+  requestId: string;
+  hostId?: string;
+  providerId: string;
+  enabled?: boolean;
+  isDefault?: boolean;
+}
+
 export interface AgentLifecycleGetMessage {
   type: "agent.lifecycle.get";
   requestId: string;
@@ -1237,6 +1313,10 @@ export type ClientMessage =
   | TerminalResizeMessage
   | TerminalKillMessage
   | AgentManifestListMessage
+  | AgentProviderConfigureMessage
+  | AgentUiGetMessage
+  | AgentUiPromptMessage
+  | AgentUiCancelMessage
   | AgentLifecycleGetMessage
   | AgentControlAcquireMessage
   | AgentControlReleaseMessage
@@ -1402,6 +1482,7 @@ export interface AgentManifestListResponseMessage {
   /** Authenticated origin host; local replies use `local`. */
   hostId?: string;
   manifests: AgentManifestSummary[];
+  revision?: number;
 }
 
 export interface AgentLifecycleMessage {
@@ -1884,6 +1965,8 @@ export type ServerMessage =
   | ChatPlanMessage
   | CommandsListResponseMessage
   | AgentManifestListResponseMessage
+  | AgentUiSnapshotMessage
+  | AgentUiResultMessage
   | SessionModeInvalidatedMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
