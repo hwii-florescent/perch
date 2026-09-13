@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-ui-"));
   const port = await new Promise<number>((resolve) => {
@@ -37,13 +37,14 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
     socket.on("framesent", ({ payload }) => { const message = JSON.parse(String(payload)); if (message.type === "agent.ui.prompt") actions.push(message); });
   });
   await context.addInitScript((directory) => {
+    if (location.protocol !== "http:" || window !== window.top) return;
     localStorage.setItem("perch.onboarding.seen", "1");
     localStorage.setItem("perch.dirBrowser.lastPath.local", directory);
   }, fixture);
   const shots = path.join(root, ".impeccable/review");
   fs.mkdirSync(shots, { recursive: true });
   async function start() {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
   }
   async function stop() {
@@ -66,17 +67,20 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-    await expect(cli.locator(".xterm-rows")).toContainText(provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
+    await expect(cli.locator(".xterm-rows")).toContainText(provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
+    if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
     await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
+    if (provider === "claude") await expect(ui.locator(".native-cli-chat__model")).toContainText("haiku");
     const pid = await ui.getAttribute("data-native-pid");
     const nativeId = await ui.getAttribute("data-native-session");
     expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
     const firstPrompt = "Read sentinel.txt with your file tool. Reply with its exact contents only.";
     await ui.getByTestId("native-cli-composer").fill(firstPrompt);
     await ui.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(ui.getByTestId("native-cli-composer")).toHaveValue("", { timeout: 15_000 });
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
     await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 20_000 });
     expect(actions).toHaveLength(1);
@@ -89,11 +93,23 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
     const beforeReload = snapshots.length;
     const beforeRevision = snapshots.at(-1)!.revision;
-    await cli.locator(".xterm-helper-textarea").pressSequentially("/reload", { delay: 10 });
-    await cli.locator(".xterm-helper-textarea").press("Enter");
+    if (provider === "claude") {
+      await cli.locator(".xterm-helper-textarea").pressSequentially("CLI draft that must survive", { delay: 10 });
+      await toggle.click();
+      await ui.getByTestId("native-cli-composer").fill("Do not append to that CLI draft.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(ui.getByRole("alert")).toContainText("draft or dialog open");
+      await expect(ui.getByTestId("native-cli-composer")).toHaveValue("Do not append to that CLI draft.");
+      await toggle.click();
+      await expect(cli.locator(".xterm-rows")).toContainText("CLI draft that must survive");
+      await cli.locator(".xterm-helper-textarea").press("Control+u");
+    } else {
+      await cli.locator(".xterm-helper-textarea").pressSequentially("/reload", { delay: 10 });
+      await cli.locator(".xterm-helper-textarea").press("Enter");
+    }
     if (provider === "pi") {
       await expect.poll(() => snapshots.slice(beforeReload).some((value) => value.revision < beforeRevision), { timeout: 20_000 }).toBe(true);
-    } else {
+    } else if (provider === "omp") {
       // OMP's built-in /reload reloads plugins, retaining CLI extensions.
       await expect(cli.locator(".xterm-rows")).toContainText("Plugins reloaded.");
     }
@@ -115,11 +131,12 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2);
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     expect(new Set([...keys.values()].map((key) => JSON.stringify(key))).size).toBe(1); // The PTY attachment is recreated; the native process and logical identity survive.
-    expect(actions).toHaveLength(1); // The CLI-typed turn bypasses Perch's composer.
+    expect(actions).toHaveLength(provider === "claude" ? 2 : 1); // The rejected draft attempt remains unsent; the CLI turn bypasses the composer.
     expect(new Set(snapshots.map((value) => value.pid)).size).toBe(1);
     expect(errors).toEqual([]);
     phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
     await phoneContext.addInitScript((sessionId) => {
+      if (location.protocol !== "http:" || window !== window.top) return;
       localStorage.setItem("perch.onboarding.seen", "1");
       localStorage.setItem("perch.sessionId", sessionId);
     }, [...keys.values()][0].sessionId);
@@ -146,7 +163,7 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
     await mobile.getByTestId("native-cli-composer").fill("Use your bash tool to run sleep 20. After it finishes, reply slow_turn_finished.");
     await mobile.getByRole("button", { name: "Send", exact: true }).click();
     await expect(mobile.locator('[data-native-role="user"]')).toHaveCount(4);
-    await expect(mobile.locator('[data-native-role="assistant"] details').filter({ has: phone.locator("summary", { hasText: /^bash$/ }) }).last()).toContainText("sleep 20", { timeout: 90_000 });
+    await expect(mobile.locator('[data-native-role="assistant"] details').filter({ has: phone.locator("summary", { hasText: /^bash$/i }) }).last()).toContainText("sleep 20", { timeout: 90_000 });
     const cancelStarted = Date.now();
     await mobile.getByRole("button", { name: "Cancel turn", exact: true }).click();
     await expect(mobile.getByRole("status")).toHaveText("Ready", { timeout: 10_000 });
@@ -167,7 +184,7 @@ for (const provider of ["pi", "omp"]) test(`${provider}: UI and CLI share native
       await page.screenshot({ path: path.join(shots, `native-ui-${provider}-failure-${testInfo.project.name}.png`) }).catch(() => {});
       await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
     }
-    await phoneContext?.close();
+    await phoneContext?.close().catch(() => {});
     await stop();
     for (const key of keys.values()) {
       const hash = createHash("sha256");

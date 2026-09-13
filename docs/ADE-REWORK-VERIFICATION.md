@@ -3,6 +3,89 @@
 Status: in progress. The complete contract remains `goals.md` and `SPEC.md`.
 No acceptance exception has been approved. No rework phase is complete yet.
 
+## Claude native UI checkpoint — 2026-09-13
+
+Claude Code 2.1.270 now participates through its native hook and transcript
+interfaces. `native_ui/claude.rs` adds per-session hooks, keeps bounded private
+event files, and follows the native JSONL parent chain. It reads at most 2 MiB
+of recent JSONL and retains at most 128 normalized messages / 192 KiB. Hidden
+metadata, attachment payloads, and thinking signatures stay out of the web
+view. Unchanged native data produces no repeated transcript serialization or
+snapshot push. No additional provider process or model loop is launched.
+
+The existing input authority now supplies a guarded terminal writer alongside
+the durable dispatch closure. Claude prompt/cancel input verifies the actual
+active pane's PID; prompt submission also requires the native empty editor.
+This preserves unfinished CLI drafts and refuses dialogs rather than typing
+into them. The tmux guard discovers pane identity and supports the host's
+nonzero window numbering. Native UserPromptSubmit hooks acknowledge receipt;
+uncertain journal operations are never automatically replayed. Review packets
+reuse this same input and settlement path. The native session ID updates both
+the live handle and persisted Claude continuation. Provider manifests now
+control native UI routing and pane badges, including after reload.
+
+Real headless Chromium and WebKit checks verified:
+
+1. A UI prompt reads a unique sentinel with Claude's file tool; the native
+   assistant/tool result appears in Perch.
+2. A CLI draft survives an attempted UI send. The UI reports the refusal and
+   retains its own draft. After explicitly clearing the fixture CLI draft,
+   a CLI-typed follow-up recalls the same sentinel in the shared conversation.
+3. Core SIGKILL/restart and browser reload preserve the native PID, session
+   UUID, and conversation. No additional prompt is sent during recovery.
+4. A separate 390 × 844 phone browser observes, takes control after release,
+   sends a third prompt, and cancels a fourth turn's native bash `sleep 20`.
+   Both views return to Ready within the 10-second check.
+5. Two anchored Git notes are sent from a phone. Another browser's ownership
+   initially prevents delivery. After release, native receipt and assistant
+   acknowledgement arrive. Retrying the same packet yields a correlated
+   delivered response with one operation ID and one native copy.
+
+The Git fixture exposed Claude's own workspace-trust dialog. Tests approve
+only their disposable workspace through that CLI dialog. Inspection of the
+installed 2.1.270 CLI established its 150 ms input cooldown and selection
+remount; the test waits 300 ms before selecting Yes, then verifies that row
+before Enter. This resolved the intermittent early-confirmation refusal in
+six consecutive runs (three per engine). An independent shared title-parser
+fix consumes SS3 application-mode arrows across WebSocket frames, preventing
+the arrow's final `B` from becoming a session title. Its focused check passes.
+Perch's unavailable-UI message now directs the
+user to finish startup prompts in CLI view. One initial default-model run
+refused the harmless cancellation fixture; final Claude tests use a
+process-local `ANTHROPIC_MODEL=claude-haiku-4-5`. An initial `/model` probe
+changed the user's native default; it was restored from the existing backup.
+The final tests avoid that persistent command and the restored default was
+checked afterwards. Test configurations run sequentially because concurrent
+Playwright discovery can race another configuration's artifact cleanup.
+
+Validation: 255 core tests plus two protocol tests, 222 web tests, production
+build, formatting, and Clippy with the five existing warnings pass. Final
+Claude UI checks pass in both engines (33.8 seconds); the final repeated Claude
+review checks pass six cases (1 minute). The earlier review regression passed
+all four Pi/OMP cases but exposed the Claude cooldown failure fixed above. Pi/OMP
+UI/recovery/cancel checks also passed in both engines during this slice.
+Private populated phone UI and review-delivery screenshots were inspected;
+the transcript, ownership controls, packet, and delivery state are visible.
+No page errors occurred in the passing runs.
+
+Logs: `/tmp/perch-claude-native-core-verified.log`,
+`/tmp/perch-claude-native-web-tests.log`, `/tmp/perch-claude-native-build.log`,
+`/tmp/perch-claude-native-ui-verified.log`, and
+`/tmp/perch-claude-native-review-verified.log`,
+`/tmp/perch-claude-review-cooldown-verified.log`,
+`/tmp/perch-claude-title-check.log`, and
+`/tmp/perch-claude-native-clippy-final.log`. Private captures are
+`.impeccable/review/native-ui-claude-{chromium,webkit}.png`,
+`native-ui-claude-mobile-{chromium,webkit}.png`, and
+`native-review-claude-{desktop,mobile}-{chromium,webkit}.png`.
+
+Limits: the input guard recognizes the observed Claude TUI and refuses an
+unfamiliar layout. Startup and approval dialogs require CLI view. UI model
+selection, attachments, complete queue behavior, native Codex/OpenCode
+adapters, legacy Hosted retirement, paired remote access, and the remaining
+SPEC gates are still unfinished. These local phone tests do not prove secure
+pairing or remote transport. The full goal remains active.
+
 ## Native review delivery checkpoint — 2026-09-12
 
 Pi/OMP packets now use the same native connection as the composer. The target
@@ -651,12 +734,12 @@ verification.
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | UNVERIFIED |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
-| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Claude/Codex/OpenCode and full UI controls remain |
+| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Codex/OpenCode and full UI controls remain |
 | V-05 tree, sentinel edit, save, disk/status verification | PARTIAL (file/tree/save and Git status/diff observed separately; combined edit/save/status gate remains) |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
-| V-08 anchored comments and exactly-once review packet | PARTIAL: native Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; legacy Claude passed earlier; native Claude/Codex/OpenCode remain |
-| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Pi/OMP same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
+| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; native Codex/OpenCode remain |
+| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Claude/Pi/OMP same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
 | V-10 paired mobile interaction and reconnect | UNVERIFIED |
 | V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |
 | V-12 safe hibernation and resume | UNVERIFIED |

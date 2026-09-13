@@ -658,8 +658,10 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
   });
   const nativeUiAvailable = usePerchStore((s) => {
     const capabilities = owningHostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[owningHostId];
-    return Boolean(capabilities?.includes("agent.ui.get")) && (cliAgent === "pi" || cliAgent === "omp");
+    return Boolean(capabilities?.includes("agent.ui.get") && s.agentManifestsByHost[owningHostId]?.manifests.some((entry) => entry.id === cliAgent && entry.nativeUi));
   });
+  const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
+  useEffect(() => { if (connected && runtimeModeAvailable) fetchAgentManifests(owningHostId); }, [connected, runtimeModeAvailable, owningHostId, fetchAgentManifests]);
   const sessionModeState = usePerchStore((s) =>
     sessionId ? s.sessionModes[sessionId] : undefined,
   );

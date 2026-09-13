@@ -1,6 +1,6 @@
-//! Native CLI extension bridge. The interactive provider owns the Unix socket,
-//! transcript, turn loop, and deduplication receipts; Perch only observes and
-//! forwards explicit controls. No extra provider process is started here.
+//! Native CLI UI bridges: Pi/OMP extension sockets and Claude hooks/transcripts.
+//! Each interactive provider owns its conversation and turn loop. Perch observes
+//! native state and forwards explicit controls without a second provider process.
 use crate::{agent_fleet::AgentKey, agent_runtime::terminal_key, protocol::NativeUiSnapshot};
 use anyhow::{bail, ensure, Context};
 use serde::Deserialize;
@@ -16,11 +16,13 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
 };
 
+pub mod claude;
+
 const MAX_FRAME: usize = 256 * 1024;
 const MAX_BRIDGES: usize = 128;
 
 pub fn supported(provider: &str) -> bool {
-    cfg!(unix) && matches!(provider, "pi" | "omp")
+    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude")
 }
 
 pub struct NativePaths {
@@ -50,7 +52,14 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
         let hash = terminal_key(key);
         let name = &hash[6..38];
         Ok(NativePaths {
-            extension: root.join(format!("{name}.ts")),
+            extension: root.join(format!(
+                "{name}.{}",
+                if key.agent_id == "claude" {
+                    "json"
+                } else {
+                    "ts"
+                }
+            )),
             socket: root.join(format!("{name}.sock")),
         })
     }
@@ -80,15 +89,19 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
             Err(error) => return Err(error.into()),
         }
     }
-    let source = include_str!("pi-extension.ts")
-        .replace(
-            "\"__PERCH_NATIVE_SOCKET__\"",
-            &serde_json::to_string(&paths.socket)?,
-        )
-        .replace(
-            "\"__PERCH_NATIVE_PROVIDER__\"",
-            &serde_json::to_string(provider)?,
-        );
+    let source = if provider == "claude" {
+        claude::settings(&paths.extension, fresh)?
+    } else {
+        include_str!("pi-extension.ts")
+            .replace(
+                "\"__PERCH_NATIVE_SOCKET__\"",
+                &serde_json::to_string(&paths.socket)?,
+            )
+            .replace(
+                "\"__PERCH_NATIVE_PROVIDER__\"",
+                &serde_json::to_string(provider)?,
+            )
+    };
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let temporary = paths
@@ -135,6 +148,7 @@ struct Command {
 }
 
 pub struct NativeBridge {
+    key: AgentKey,
     snapshot: watch::Receiver<Option<NativeUiSnapshot>>,
     commands: mpsc::Sender<Command>,
 }
@@ -163,10 +177,13 @@ impl NativeBridge {
         text: Option<&str>,
     ) -> anyhow::Result<oneshot::Receiver<Result<bool, String>>> {
         let (tx, rx) = oneshot::channel();
-        let payload = match text {
+        let mut payload = match text {
             Some(text) => serde_json::json!({ "type": "prompt", "requestId": id, "text": text }),
             None => serde_json::json!({ "type": "cancel", "requestId": id }),
         };
+        if self.key.agent_id == "claude" {
+            payload["after"] = claude::prompt_stamp(&paths(&self.key)?.extension).into();
+        }
         self.commands
             .try_send(Command {
                 id: id.to_string(),
@@ -205,9 +222,23 @@ impl NativeUiRegistry {
         let socket = paths(&key)?.socket;
         let (snapshot_tx, snapshot) = watch::channel(None);
         let (commands, mut commands_rx) = mpsc::channel::<Command>(16);
-        bridges.insert(key.clone(), Arc::new(NativeBridge { snapshot, commands }));
+        bridges.insert(
+            key.clone(),
+            Arc::new(NativeBridge {
+                key: key.clone(),
+                snapshot,
+                commands,
+            }),
+        );
         let registry = Arc::downgrade(self);
         tokio::spawn(async move {
+            if key.agent_id == "claude" {
+                claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
+                if let Some(registry) = registry.upgrade() {
+                    registry.bridges.lock().unwrap().remove(&key);
+                }
+                return;
+            }
             let mut pending = HashMap::<String, oneshot::Sender<Result<bool, String>>>::new();
             while alive() {
                 let stream = match UnixStream::connect(&socket).await {

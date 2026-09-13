@@ -32,6 +32,11 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                     || old.state != state
             });
             if changed {
+                if key.agent_id == "claude" {
+                    let _ = app
+                        .db
+                        .set_claude_session_id(&key.session_id, &snapshot.provider_session_id);
+                }
                 let _ = app
                     .agent_runtime
                     .record_provider_session_id(key, snapshot.provider_session_id.clone());
@@ -134,7 +139,7 @@ pub(super) fn get(
     tokio::spawn(async move {
         match bridge.snapshot().await {
             Ok(snapshot) => { let _ = tx.send(ServerMessage::AgentUiSnapshot { request_id: Some(request_id), session_id, provider_id, snapshot }); }
-            Err(error) => fail(&tx, request_id, "native_ui_unavailable", format!("{error}. A CLI opened before this update needs an explicit restart to load its web connection."), true),
+            Err(error) => fail(&tx, request_id, "native_ui_unavailable", format!("{error}. Open CLI view to finish any startup prompts, then reconnect UI. A CLI opened before this update needs an explicit restart to load its web connection."), true),
         }
     });
 }
@@ -179,20 +184,27 @@ pub(super) fn control(
                 .native_ui
                 .get(&key)
                 .ok_or_else(|| anyhow::anyhow!("native CLI UI is unavailable"))?;
-            state.app.agent_runtime.dispatch_native_control(&key, &lease, || {
+            state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
             if let Some((operation, text)) = &prompt {
                 anyhow::ensure!(!operation.is_empty() && operation.len() <= 128 && !text.trim().is_empty() && text.len() <= 64 * 1024, "invalid prompt");
                 let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
                 let (existing, _) = state.app.db.reserve_prompt_operation(operation, &session_id, Some(&key.workspace_id), &digest, text, Some(&provider_id), None)?;
                 if existing.state == "delivered" { return Ok(None); }
+                let input = crate::native_ui::claude::prepare_input(&key, Some(text))?;
                 let claim = state.app.db.claim_prompt_operation(operation)?.ok_or_else(|| anyhow::anyhow!("missing prompt operation"))?;
                 anyhow::ensure!(claim.won_claim, "This prompt was already dispatched; delivery is still unconfirmed. It will not be sent twice.");
                 // Persist uncertainty before any bytes cross to the native CLI.
                 state.app.db.set_prompt_operation_state(operation, "unconfirmed")?;
                 let reply = bridge.enqueue(operation, Some(text))?;
+                if let Some(input) = input { write(&input)?; }
                 let _ = state.app.db.set_cli_title(&session_id, text);
                 Ok(Some(reply))
-            } else { bridge.enqueue(&request_id, None).map(Some) }
+            } else {
+                let input = crate::native_ui::claude::prepare_input(&key, None)?;
+                let reply = bridge.enqueue(&request_id, None)?;
+                if let Some(input) = input { write(&input)?; }
+                Ok(Some(reply))
+            }
         })
         })();
     match prepared {
@@ -257,13 +269,14 @@ pub(super) async fn send_review(
         let borrowed = before.input_owner.is_none();
         let lease = state.app.agent_runtime.acquire_control(&key, ControlChannel::Input, client.clone(), now_millis())
             .map_err(|error| anyhow::anyhow!("Release this agent's control in the other view before sending review notes: {error}"))?;
-        let result = state.app.agent_runtime.dispatch_native_control(&key, &lease, || {
+        let result = state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
             let operation = &packet.packet.send_operation_id;
             let text = &packet.packet.markdown;
             anyhow::ensure!(!text.trim().is_empty() && text.len() <= 64 * 1024, "Invalid review packet size");
             let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
             let (existing, _) = state.app.db.reserve_prompt_operation(operation, session_id, Some(&key.workspace_id), &digest, text, Some(provider_id), None)?;
             if existing.state == "delivered" { return Ok(None); }
+            let input = crate::native_ui::claude::prepare_input(&key, Some(text))?;
             let (_, won) = state.app.db.claim_review_packet(&packet.packet.packet_id, operation, &key.workspace_id, wall_clock_millis())?
                 .ok_or_else(|| anyhow::anyhow!("Review packet disappeared"))?;
             if !won { return Ok(None); }
@@ -271,7 +284,9 @@ pub(super) async fn send_review(
             anyhow::ensure!(claim.won_claim, "Review delivery is already in progress or unconfirmed; it will not be sent twice");
             session::settle_prompt_dispatch(&state.app, operation, "unconfirmed")
                 .map_err(anyhow::Error::msg)?;
-            bridge.enqueue(operation, Some(text)).map(Some)
+            let reply = bridge.enqueue(operation, Some(text))?;
+            if let Some(input) = input { write(&input)?; }
+            Ok(Some(reply))
         });
         if borrowed {
             let _ = state.app.agent_runtime.release_control(&key, ControlChannel::Input, &client, lease.generation);

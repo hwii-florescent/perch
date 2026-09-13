@@ -62,11 +62,11 @@ CLI's history, tools, approvals, configuration, and input channel; Perch must
 not replace them with a separate agent harness. The legacy Hosted runner is
 still present and its migration is unfinished.
 
-Pi and OMP currently support the native structured UI connection on Unix
+Claude Code, Pi, and OMP support the native structured UI connection on Unix
 hosts. Start a CLI session, then switch its view to **UI**. The same CLI
 process supplies its recent conversation, thinking, tool calls/results, model,
-and running state. The composer calls the CLI's native user-input API;
-Cancel turn calls its native abort API. Take/Release control uses the same
+and running state. Pi/OMP use native prompt/abort APIs; Claude uses its own
+terminal editor and native receipt hooks. Take/Release control uses the same
 ownership lease as terminal input. A second browser can observe and take
 over after release. Switching views or restarting Perch reconnects to the
 existing tmux-owned CLI and its native session file.
@@ -80,13 +80,25 @@ writing and never automatically resends an uncertain prompt after disconnect.
 A CLI started before the extension was introduced needs an explicit restart
 to load it; Perch never silently replaces that process.
 
-Git review packets can be sent to an open Pi/OMP session in the same workspace.
+Claude loads additional hook settings through `--settings`. Private hook files
+report the native PID, session, transcript, prompt acceptance, and turn state.
+Perch reads at most 2 MiB of recent native JSONL, follows its conversation
+branch, and publishes at most 128 messages / 192 KiB. Hidden metadata, image
+payloads, and thinking signatures are excluded. Unchanged transcripts are not
+rebuilt or broadcast on each poll. The native prompt must be visibly empty
+before UI input; finish drafts and startup/approval dialogs in CLI view.
+Perch never clears that editor to make room for a UI prompt. Input and cancel
+also verify that the active tmux pane belongs to this native Claude process.
+This guard supports the observed Claude TUI layout and rejects an unfamiliar
+layout rather than guessing where input will go.
+
+Git review packets can be sent to an open Claude/Pi/OMP session in the same workspace.
 The destination is its native CLI owner. Release control in another browser
 before sending; a Git view briefly borrows unowned input and releases it after
 enqueueing. Retrying a frozen packet returns its existing delivery status and
 never dispatches a second copy. An uncertain receipt stays unconfirmed.
 
-This UI connection is not yet available for Claude Code, Codex, OpenCode, or
+This UI connection is not yet available for Codex, OpenCode, or
 configured generic CLIs. UI attachments, model
 selection, approval dialogs, and complete queue verification remain
 unfinished. Use the CLI's controls for these operations in the meantime.
@@ -125,7 +137,7 @@ environment isolation, and reload recovery without changing user settings.
 
 The native UI integration suite is
 `cd e2e && npx playwright test --config=native-ui.config.ts`. It uses real
-installed Pi/OMP CLIs and their existing authentication in temporary workspace
+installed Claude/Pi/OMP CLIs and their existing authentication in temporary workspace
 folders, with isolated Perch databases/configuration and headless Chromium
 and WebKit. It sends real prompts, tests native continuation and core crash
 recovery, and transfers control to a separate phone-sized browser.

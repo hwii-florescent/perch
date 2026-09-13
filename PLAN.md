@@ -122,12 +122,31 @@ Four real-provider desktop/phone checks pass in Chromium and WebKit, including
 two anchored notes, an ownership refusal, successful delivery after release,
 a correlated retry receipt, unchanged native PID/session, and control recovery.
 254 core tests, two protocol tests, 222 web tests, production build, formatting,
-and Clippy with the five existing warnings pass. Native Claude/Codex review
-remains explicitly unavailable until their same-session adapters are ready.
+and Clippy with the five existing warnings pass. Claude's following checkpoint
+extends this path; native Codex/OpenCode review still needs its adapters.
+
+Claude native UI checkpoint, 2026-09-13: the interactive CLI now supplies
+native hooks and a bounded view of its own JSONL conversation. Additional
+hook settings leave Claude responsible for configuration, tools, approvals,
+models, and execution. Prompt/cancel input uses the existing terminal lease
+and checks the actual active tmux pane's native PID. A prompt is typed only
+into a visibly empty Claude editor, preserving any unfinished CLI draft or
+dialog. Native prompt hooks confirm receipt; the existing journal prevents
+replay. Review packets use this same path. No second provider process starts.
+
+Real Claude checks pass in Chromium/WebKit for UI tool use, a CLI follow-up,
+draft refusal and retention, native PID/session continuity across core SIGKILL,
+phone control/prompt/cancel, and two-note review delivery with correlated
+same-operation retries. The input guard discovers the active pane instead of
+assuming tmux window 0. Startup trust remains Claude's own CLI dialog; tests
+respect its native input cooldown and pass three repetitions per browser.
+Application-mode arrow bytes no longer leak into the shared CLI title parser. Native
+UI discovery and pane labels now follow host manifests. Validation and private
+artifacts are recorded in docs/ADE-REWORK-VERIFICATION.md.
 
 The full goal is still active. Next: native UI controls
 (attachments, model selection, approvals, queue verification), then
-Claude Code/Codex/OpenCode native UI connections and retirement of local
+Codex/OpenCode native UI connections and retirement of local
 Hosted dispatch. Existing remote paths must remain compatible. Worktree
 lifecycle, secure pairing, hibernation, combined recovery, and measured resource
 budgets still need their complete acceptance evidence. The Pi/OMP slice does
@@ -148,26 +167,15 @@ pass again. Rust: 249 core + two parity tests; web: 218 tests; build/typecheck
 and formatting clean; Clippy retains five baseline warnings. Details and
 private artifact locations are in `docs/ADE-REWORK-VERIFICATION.md`.
 
-CLI-owned UI sequence (updated 2026-09-12):
+CLI-owned UI sequence (updated 2026-09-13):
 
-Claude adapter investigation: a disposable interactive Claude Code 2.1.270
-session confirmed that additional native hooks report the actual session ID,
-transcript path, parent CLI PID, prompt submission, and stop event while the
-ordinary CLI keeps its native configuration. The transcript stores separate
-assistant content blocks and private attachment/bridge metadata; normalize
-only displayable conversation fields, not whole JSONL rows. The probe CLI was
-stopped and its workspace removed. No Claude UI capability is advertised yet.
-Before implementing delivery, verify a native input path that preserves an
-unfinished CLI draft; blind terminal paste can append to that draft.
-Reference: [Claude Code hook contract](https://code.claude.com/docs/en/hooks).
-
-1. Completed for Pi/OMP: bounded native events/history and prompt/cancel
+1. Completed for Claude/Pi/OMP: bounded native events/history and prompt/cancel
    controls inside the same interactive CLI, actual continuation capture,
    view/reload/core-crash continuity, and separate phone control/prompt.
-2. Completed for Pi/OMP: review packets use the native bridge and existing
+2. Completed for Claude/Pi/OMP: review packets use the native bridge and existing
    input authority, with real-provider delivery and retry verification. Complete
    UI attachments, native model/approval controls, and queued-message checks.
-3. Connect Claude Code, Codex, and OpenCode through their native session
+3. Connect Codex and OpenCode through their native session
    events/control paths with equivalent identity and restart guarantees.
    Keep unsupported provider behavior explicit while these adapters are built.
 4. Retire the separate local Hosted runner after those paths are verified;

@@ -884,7 +884,7 @@ impl AgentRuntimeAdapter {
         &self,
         key: &AgentKey,
         lease: &ControlLease,
-        dispatch: impl FnOnce() -> anyhow::Result<R>,
+        dispatch: impl FnOnce(&dyn Fn(&str) -> anyhow::Result<()>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         let _authority = self.authority.lock().unwrap();
         self.lifecycle.record_control_activity(
@@ -895,7 +895,15 @@ impl AgentRuntimeAdapter {
             now_millis(),
             Duration::from_secs(5),
         )?;
-        dispatch()
+        dispatch(&|data| {
+            self.terminals.input_owned(
+                &terminal_key(key),
+                &lease.client,
+                lease.generation,
+                data,
+            )?;
+            Ok(())
+        })
     }
 
     pub fn resize(
@@ -1437,14 +1445,14 @@ mod tests {
         ));
         let mut dispatched = false;
         assert!(adapter
-            .dispatch_native_control(&key, &stale, || {
+            .dispatch_native_control(&key, &stale, |_| {
                 dispatched = true;
                 Ok(())
             })
             .is_err());
         assert!(!dispatched);
         adapter
-            .dispatch_native_control(&key, &lease, || {
+            .dispatch_native_control(&key, &lease, |_| {
                 dispatched = true;
                 Ok(())
             })

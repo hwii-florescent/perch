@@ -40,7 +40,8 @@ enum EscState {
     /// two-character sequence (e.g. Alt+Enter, which many CLIs send as
     /// `ESC CR` for "newline, don't submit").
     Esc,
-    /// Inside `ESC [ … final`, terminated by a byte in 0x40..=0x7E. This is
+    /// Inside CSI (`ESC [`) or SS3 (`ESC O`), terminated by a byte in
+    /// 0x40..=0x7E. SS3 carries application-mode arrow/function keys. This is
     /// also what swallows bracketed-paste markers (`ESC [ 200 ~`), so pasted
     /// text lands in the buffer as plain characters.
     Csi,
@@ -72,7 +73,7 @@ impl CliTitleBuffer {
             match self.esc {
                 EscState::Esc => {
                     self.esc = match ch {
-                        '[' => EscState::Csi,
+                        '[' | 'O' => EscState::Csi,
                         ']' | 'P' | '_' | '^' => EscState::Osc,
                         // Any other byte completes a two-char sequence. Note
                         // this is what makes Alt/Shift+Enter (`ESC CR`)
@@ -238,6 +239,13 @@ mod tests {
         buf.feed("[C");
         buf.feed("cd");
         assert_eq!(buf.feed("\r"), Some("abcd".to_string()));
+
+        // Application-cursor arrows must not title a trust-dialog session B.
+        let mut buf = CliTitleBuffer::new();
+        for chunk in ["\u{1b}", "O", "B", "\r", "\u{1b}OP", "\r"] {
+            assert_eq!(buf.feed(chunk), None);
+        }
+        assert_eq!(buf.feed("real prompt\r"), Some("real prompt".into()));
     }
 
     #[test]

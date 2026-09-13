@@ -153,7 +153,12 @@ fn open_agent_terminal(
                 ));
             let paths = crate::native_ui::prepare(&key, provider_id, fresh)?;
             extra.extend([
-                "--extension".into(),
+                if provider_id == "claude" {
+                    "--settings"
+                } else {
+                    "--extension"
+                }
+                .into(),
                 paths.extension.to_string_lossy().into_owned(),
             ]);
         }

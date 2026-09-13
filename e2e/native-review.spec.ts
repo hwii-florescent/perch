@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-review-"));
   const fixture = path.join(scratch, "workspace"); fs.mkdirSync(fixture);
@@ -39,7 +39,7 @@ for (const provider of ["pi", "omp"]) test(`${provider}: phone review respects c
     await expect(current.locator(".workspace-git__comment").filter({ hasText: body })).toBeVisible();
   }
   try {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("workspace-add-project").click();
@@ -59,10 +59,26 @@ for (const provider of ["pi", "omp"]) test(`${provider}: phone review respects c
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    if (provider === "claude") {
+      await expect(terminal.locator(".xterm-rows")).toContainText(/bypass permissions on|Yes, I trust this folder/, { timeout: 30_000 });
+      // Claude 2.1.270 rejects early confirmations and remounts this native
+      // dialog after 150 ms. Wait for its cooldown before choosing an option.
+      await page.waitForTimeout(300);
+      const startup = await terminal.locator(".xterm-rows").innerText();
+      if (startup.includes("Yes, I trust this folder")) {
+        // Trust only the disposable workspace created by this test, using
+        // Claude's own dialog, without bypassing its workspace trust check.
+        if (startup.includes("❯ No, exit")) await terminal.locator(".xterm-helper-textarea").press("ArrowDown");
+        await expect(terminal.locator(".xterm-rows")).toContainText("❯ Yes, I trust this folder");
+        await terminal.locator(".xterm-helper-textarea").press("Enter");
+      }
+      await expect(terminal.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
+      await expect(terminal.locator(".xterm-rows")).toContainText(/Haiku 4.5/i);
+    }
     await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     const ui = page.getByTestId("native-cli-chat");
-    await expect(ui).toHaveAttribute("data-native-pid", /\d+/);
+    await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     const pid = await ui.getAttribute("data-native-pid");
     const nativeId = await ui.getAttribute("data-native-session");
     expect(nativeKey!.workspaceId).toBe(workspaceId);
