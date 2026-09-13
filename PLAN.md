@@ -152,6 +152,26 @@ lifecycle, secure pairing, hibernation, combined recovery, and measured resource
 budgets still need their complete acceptance evidence. The Pi/OMP slice does
 not establish the full V-04 or V-10 gates.
 
+Codex native-interface probe, 2026-09-13: installed CLI 0.154.0 exposes an
+app-server Unix socket and a native `codex --remote unix://PATH` terminal.
+In a private disposable server, the terminal created a thread; a second API
+connection joined that loaded thread, submitted a sentinel-file read, and
+received native item/turn events. The terminal displayed that API turn and a
+later terminal prompt recalled its result. Reconnecting joined the same thread
+and returned all three completed turns. This proves the native interface path,
+not a Perch integration or browser acceptance. Implementation is next.
+
+The installed transport rejects WebSocket compression negotiation; disable
+per-message deflate. Identify the non-ephemeral user thread rather than the
+CLI's ephemeral system thread used for naming. `turn/start` acknowledgements
+can precede active status updates, so completion must match the turn ID.
+Use native paginated history and the existing bounded Perch snapshot/control
+path. Keep the native server and terminal in the same persistent runtime,
+preserve native configuration/authentication, and rejoin only its loaded
+thread. Perch must never start a parallel thread to implement UI mode.
+The private probe and generated installed-version schema are under
+`/tmp/perch-codex-native-*` and `/tmp/perch-codex-probe-1Som07/`.
+
 Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
 catalog entries are now wired through the provider registry, the shared
 detection/launch resolver, host-persisted enabled/default preferences, and
