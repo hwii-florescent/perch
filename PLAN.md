@@ -150,6 +150,17 @@ private artifact locations are in `docs/ADE-REWORK-VERIFICATION.md`.
 
 CLI-owned UI sequence (updated 2026-09-12):
 
+Claude adapter investigation: a disposable interactive Claude Code 2.1.270
+session confirmed that additional native hooks report the actual session ID,
+transcript path, parent CLI PID, prompt submission, and stop event while the
+ordinary CLI keeps its native configuration. The transcript stores separate
+assistant content blocks and private attachment/bridge metadata; normalize
+only displayable conversation fields, not whole JSONL rows. The probe CLI was
+stopped and its workspace removed. No Claude UI capability is advertised yet.
+Before implementing delivery, verify a native input path that preserves an
+unfinished CLI draft; blind terminal paste can append to that draft.
+Reference: [Claude Code hook contract](https://code.claude.com/docs/en/hooks).
+
 1. Completed for Pi/OMP: bounded native events/history and prompt/cancel
    controls inside the same interactive CLI, actual continuation capture,
    view/reload/core-crash continuity, and separate phone control/prompt.
