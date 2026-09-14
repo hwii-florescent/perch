@@ -101,7 +101,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     <div className="chat__list-container">
       <div className="chat__list" ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         {snapshot?.truncated && <p className="native-cli-chat__hint">Showing recent messages. The complete conversation remains in the CLI.</p>}
-        {snapshot && !snapshot.messages.length && <p className="native-cli-chat__hint">Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : "Pi"}. You can switch to CLI at any time.</p>}
+        {snapshot && !snapshot.messages.length && <p className="native-cli-chat__hint">Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {snapshot?.messages.map((message, index) => <NativeMessage key={message.id} message={message} streaming={snapshot.running && index === snapshot.messages.length - 1} />)}
       </div>
       {showBottom && <button className="scroll-bottom-pill" type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
