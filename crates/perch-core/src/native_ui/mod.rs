@@ -18,6 +18,7 @@ use tokio::{
 
 pub mod claude;
 pub mod codex;
+pub mod opencode;
 
 fn clip(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
@@ -31,7 +32,7 @@ const MAX_FRAME: usize = 256 * 1024;
 const MAX_BRIDGES: usize = 128;
 
 pub fn supported(provider: &str) -> bool {
-    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude" | "codex")
+    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude" | "codex" | "opencode")
 }
 
 pub struct NativePaths {
@@ -65,7 +66,7 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
                 "{name}.{}",
                 match key.agent_id.as_str() {
                     "claude" => "json",
-                    "codex" => "sh",
+                    "codex" | "opencode" => "sh",
                     _ => "ts",
                 }
             )),
@@ -84,22 +85,33 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
 pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<NativePaths> {
     ensure!(supported(provider), "provider has no native UI bridge");
     let paths = paths(key)?;
+    if fresh && matches!(provider, "codex" | "opencode") {
+        reap_native_server(&paths.extension.with_extension("pid"), provider);
+    }
     if fresh && paths.socket.exists() {
-        match std::os::unix::net::UnixStream::connect(&paths.socket) {
-            Ok(_) => bail!("the native CLI session is already running"),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-                ) =>
-            {
-                let _ = std::fs::remove_file(&paths.socket);
+        if provider == "opencode" {
+            // OpenCode uses this path as a readiness marker, not a Unix
+            // socket. A dead marker is safe to replace.
+            let _ = std::fs::remove_file(&paths.socket);
+        } else {
+            match std::os::unix::net::UnixStream::connect(&paths.socket) {
+                Ok(_) => bail!("the native CLI session is already running"),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                    ) =>
+                {
+                    let _ = std::fs::remove_file(&paths.socket);
+                }
+                Err(error) => return Err(error.into()),
             }
-            Err(error) => return Err(error.into()),
         }
     }
     let source = if provider == "codex" {
         codex::LAUNCHER.to_string()
+    } else if provider == "opencode" {
+        opencode::LAUNCHER.to_string()
     } else if provider == "claude" {
         claude::settings(&paths.extension, fresh)?
     } else {
@@ -135,6 +147,42 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
     result?;
     Ok(paths)
 }
+
+#[cfg(unix)]
+fn reap_native_server(path: &std::path::Path, provider: &str) {
+    let Ok(value) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(pid) = value.trim().parse::<libc::pid_t>() else {
+        return;
+    };
+    let command = std::process::Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .unwrap_or_default();
+    let expected = if provider == "codex" {
+        "app-server"
+    } else {
+        "serve"
+    };
+    if pid > 1 && command.contains(provider) && command.contains(expected) {
+        // The sidecar is mode 0600 in our mode 0700 directory and is written
+        // only by the matching launcher. Fresh means its tmux owner is gone.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+            std::thread::sleep(Duration::from_millis(50));
+            if libc::kill(pid, 0) == 0 {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[cfg(not(unix))]
+fn reap_native_server(_: &std::path::Path, _: &str) {}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -244,7 +292,7 @@ impl NativeUiRegistry {
         );
         let registry = Arc::downgrade(self);
         tokio::spawn(async move {
-            if matches!(key.agent_id.as_str(), "claude" | "codex") {
+            if matches!(key.agent_id.as_str(), "claude" | "codex" | "opencode") {
                 if key.agent_id == "codex" {
                     codex::observe(
                         &key,
@@ -255,8 +303,18 @@ impl NativeUiRegistry {
                         commands_rx,
                     )
                     .await;
-                } else {
+                } else if key.agent_id == "claude" {
                     claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
+                } else {
+                    opencode::observe(
+                        &key,
+                        provider_session_id,
+                        alive,
+                        on_snapshot,
+                        snapshot_tx,
+                        commands_rx,
+                    )
+                    .await;
                 }
                 if let Some(registry) = registry.upgrade() {
                     registry.bridges.lock().unwrap().remove(&key);

@@ -37,6 +37,8 @@ pub struct SessionRow {
     /// codex turn — what gets passed to `codex resume` to restore context.
     /// `None` if no codex turn has completed yet.
     pub codex_thread_id: Option<String>,
+    /// OpenCode's own session id for this Perch CLI session.
+    pub opencode_session_id: Option<String>,
     /// Agent name ("claude" | "codex") from the most recently completed turn.
     /// Persisted so that after a server restart, entering CLI mode can restore
     /// the correct model alias via `update_session_last_model` / `get_session`.
@@ -206,7 +208,7 @@ impl HistoryDb {
     pub fn get_session(&self, id: &str) -> anyhow::Result<Option<SessionRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT cwd, claude_session_id, codex_thread_id, last_agent, last_model, host_id,
+            "SELECT cwd, claude_session_id, codex_thread_id, opencode_session_id, last_agent, last_model, host_id,
                     project_id, workspace_id, cli_provider_id
              FROM sessions WHERE id = ?1",
         )?;
@@ -216,15 +218,16 @@ impl HistoryDb {
                 cwd: row.get(0)?,
                 claude_session_id: row.get(1)?,
                 codex_thread_id: row.get(2)?,
-                last_agent: row.get(3)?,
-                last_model: row.get(4)?,
+                opencode_session_id: row.get(3)?,
+                last_agent: row.get(4)?,
+                last_model: row.get(5)?,
                 host_id: row
-                    .get::<_, Option<String>>(5)?
+                    .get::<_, Option<String>>(6)?
                     .filter(|h| !h.is_empty())
                     .unwrap_or_else(|| "local".to_string()),
-                project_id: row.get(6)?,
-                workspace_id: row.get(7)?,
-                cli_provider_id: row.get(8)?,
+                project_id: row.get(7)?,
+                workspace_id: row.get(8)?,
+                cli_provider_id: row.get(9)?,
             }))
         } else {
             Ok(None)
@@ -255,6 +258,18 @@ impl HistoryDb {
         self.conn.lock().unwrap().execute(
             "UPDATE sessions SET codex_thread_id = ?2 WHERE id = ?1",
             params![id, codex_thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_opencode_session_id(
+        &self,
+        id: &str,
+        opencode_session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET opencode_session_id = ?2 WHERE id = ?1",
+            params![id, opencode_session_id],
         )?;
         Ok(())
     }

@@ -115,6 +115,7 @@ fn open_agent_terminal(
                     Some(id)
                 }
                 "codex" => row.codex_thread_id.clone(),
+                "opencode" => row.opencode_session_id.clone(),
                 _ => state
                     .app
                     .agent_runtime
@@ -145,7 +146,7 @@ fn open_agent_terminal(
         });
         // Codex resumes its own model/settings; a stale Hosted selection must
         // not override the native conversation when attaching its UI.
-        if let Some(model) = model.filter(|_| provider_id != "codex") {
+        if let Some(model) = model.filter(|_| !matches!(provider_id, "codex" | "opencode")) {
             extra.extend(["--model".to_string(), model]);
         }
         if crate::native_ui::supported(provider_id) {
@@ -154,7 +155,7 @@ fn open_agent_terminal(
                     &crate::agent_runtime::terminal_key(&key),
                 ));
             let paths = crate::native_ui::prepare(&key, provider_id, fresh)?;
-            if provider_id != "codex" {
+            if !matches!(provider_id, "codex" | "opencode") {
                 extra.extend([
                     if provider_id == "claude" {
                         "--settings"

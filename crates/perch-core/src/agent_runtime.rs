@@ -521,10 +521,14 @@ impl AgentRuntimeAdapter {
         };
 
         let prepared = match (|| {
-            let command = if provider_id == "codex" && crate::native_ui::supported(&provider_id) {
-                crate::native_ui::codex::launch(&key, command)?
-            } else {
-                command
+            let command = match provider_id.as_str() {
+                "codex" if crate::native_ui::supported(&provider_id) => {
+                    crate::native_ui::codex::launch(&key, command)?
+                }
+                "opencode" if crate::native_ui::supported(&provider_id) => {
+                    crate::native_ui::opencode::launch(&key, command)?
+                }
+                _ => command,
             };
             crate::provider_environment::prepare(command, &manifest.environment)
         })() {

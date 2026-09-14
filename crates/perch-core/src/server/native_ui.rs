@@ -45,6 +45,10 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                     let _ = app
                         .db
                         .set_codex_thread_id(&key.session_id, &snapshot.provider_session_id);
+                } else if key.agent_id == "opencode" {
+                    let _ = app
+                        .db
+                        .set_opencode_session_id(&key.session_id, &snapshot.provider_session_id);
                 }
                 let _ = app
                     .agent_runtime

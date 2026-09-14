@@ -90,6 +90,7 @@ impl HistoryDb {
                 id TEXT PRIMARY KEY,
                 cwd TEXT NOT NULL,
                 claude_session_id TEXT,
+                opencode_session_id TEXT,
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS provider_preferences (
@@ -353,6 +354,12 @@ impl HistoryDb {
         }
         if !existing_session_columns.contains("codex_thread_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN codex_thread_id TEXT", [])?;
+        }
+        if !existing_session_columns.contains("opencode_session_id") {
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN opencode_session_id TEXT",
+                [],
+            )?;
         }
         if !existing_session_columns.contains("last_agent") {
             conn.execute("ALTER TABLE sessions ADD COLUMN last_agent TEXT", [])?;

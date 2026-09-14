@@ -62,8 +62,8 @@ CLI's history, tools, approvals, configuration, and input channel; Perch must
 not replace them with a separate agent harness. The legacy Hosted runner is
 still present and its migration is unfinished.
 
-Claude Code, Pi, and OMP support the native structured UI connection on Unix
-hosts. Start a CLI session, then switch its view to **UI**. The same CLI
+Claude Code, Codex, Pi, OMP, and OpenCode support the native structured UI
+connection on Unix hosts. Start a CLI session, then switch its view to **UI**. The same CLI
 process supplies its recent conversation, thinking, tool calls/results, model,
 and running state. Pi/OMP use native prompt/abort APIs; Claude uses its own
 terminal editor and native receipt hooks. Take/Release control uses the same
@@ -92,16 +92,16 @@ also verify that the active tmux pane belongs to this native Claude process.
 This guard supports the observed Claude TUI layout and rejects an unfamiliar
 layout rather than guessing where input will go.
 
-Git review packets can be sent to an open Claude/Pi/OMP session in the same workspace.
+Git review packets can be sent to an open Claude/Codex/Pi/OMP/OpenCode session in the same workspace.
 The destination is its native CLI owner. Release control in another browser
 before sending; a Git view briefly borrows unowned input and releases it after
 enqueueing. Retrying a frozen packet returns its existing delivery status and
 never dispatches a second copy. An uncertain receipt stays unconfirmed.
 
-This UI connection is not yet available for Codex, OpenCode, or
-configured generic CLIs. UI attachments, model
-selection, approval dialogs, and complete queue verification remain
-unfinished. Use the CLI's controls for these operations in the meantime.
+Codex uses its native app-server Unix socket and OpenCode uses its native
+loopback `serve` HTTP API. Both keep the interactive TUI and Perch UI on the
+same provider-owned session. Their approval dialogs remain in the CLI; Perch
+does not replace native configuration or start a second model loop.
 
 Environment rules apply inside the actual provider process, including when
 tmux owns that process:

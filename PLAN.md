@@ -192,6 +192,17 @@ and the five baseline Clippy warnings. Extended `/new`, WebKit, and native
 Codex review-delivery acceptance are still being finished; this is an
 implementation checkpoint, not completion of the full native UI or SPEC gates.
 
+OpenCode implementation checkpoint, 2026-09-14: OpenCode now follows its own
+documented `serve`/`attach` architecture inside the same persistent terminal.
+Perch starts one private loopback server, attaches the real OpenCode TUI to it,
+polls that server's native session/messages/status APIs, and sends prompts or
+abort requests back through those APIs. The OpenCode session id is persisted
+separately in SQLite and restored on restart. The bridge is bounded and leaves
+models, tools, permissions, and approvals to OpenCode. The installed machine
+does not have an OpenCode executable, so real OpenCode browser/provider-turn
+acceptance remains unverified; its launcher, projection, and full Rust suite
+checks pass.
+
 Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
 catalog entries are now wired through the provider registry, the shared
 detection/launch resolver, host-persisted enabled/default preferences, and
