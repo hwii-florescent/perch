@@ -121,6 +121,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await cli.locator(".xterm-helper-textarea").press("Enter");
     if (provider === "codex") {
       await expect(cli.locator(".xterm-rows")).toContainText("What exact token did you just read?");
+      await expect.poll(async () => (await cli.locator(".xterm-rows").innerText()).split(token).length - 1, { timeout: 90_000 }).toBeGreaterThan(1);
       await testInfo.attach("CLI-follow-up", { body: await cli.locator(".xterm-rows").innerText(), contentType: "text/plain" });
     }
     await toggle.click();
