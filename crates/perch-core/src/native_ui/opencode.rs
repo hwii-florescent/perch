@@ -159,6 +159,15 @@ async fn read_snapshot(
     let list = sessions
         .as_array()
         .context("invalid OpenCode session list")?;
+    if selected.as_ref().is_some_and(|id| {
+        !list
+            .iter()
+            .any(|session| session["id"].as_str() == Some(id))
+    }) {
+        // A deleted or stale persisted id must not pin the bridge forever;
+        // this private server's first session is the only safe fallback.
+        *selected = None;
+    }
     if selected.is_none() {
         *selected = list
             .first()
