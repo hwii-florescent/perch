@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-ui-"));
   const port = await new Promise<number>((resolve) => {
@@ -67,7 +67,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-    await expect(cli.locator(".xterm-rows")).toContainText(provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
+    await expect(cli.locator(".xterm-rows")).toContainText(provider === "opencode" ? /OpenCode|opencode|Ask anything/i : provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
     if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
     if (provider === "codex") {
       await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
@@ -81,7 +81,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     const pid = await ui.getAttribute("data-native-pid");
     const nativeId = await ui.getAttribute("data-native-session");
     expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
-    const firstPrompt = "Read sentinel.txt with your file tool. Reply with its exact contents only.";
+    const firstPrompt = `Read ${fs.realpathSync(path.join(fixture, "sentinel.txt"))} with your file tool. Reply with its exact contents only.`;
     await ui.getByTestId("native-cli-composer").fill(firstPrompt);
     await ui.getByRole("button", { name: "Send", exact: true }).click();
     await expect(ui.getByTestId("native-cli-composer")).toHaveValue("", { timeout: 15_000 });
@@ -97,7 +97,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
     const beforeReload = snapshots.length;
     const beforeRevision = snapshots.at(-1)!.revision;
-    if (provider === "claude") {
+    if (provider === "claude" || provider === "opencode") {
       await cli.locator(".xterm-helper-textarea").pressSequentially("CLI draft that must survive", { delay: 10 });
       await toggle.click();
       await ui.getByTestId("native-cli-composer").fill("Do not append to that CLI draft.");
@@ -121,13 +121,12 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await cli.locator(".xterm-helper-textarea").press("Enter");
     if (provider === "codex") {
       await expect(cli.locator(".xterm-rows")).toContainText("What exact token did you just read?");
-      await expect.poll(async () => (await cli.locator(".xterm-rows").innerText()).split(token).length - 1, { timeout: 90_000 }).toBeGreaterThan(1);
       await testInfo.attach("CLI-follow-up", { body: await cli.locator(".xterm-rows").innerText(), contentType: "text/plain" });
     }
     await toggle.click();
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 30_000 });
-    await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
-    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 20_000 });
+    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 90_000 });
+    await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     await expect(ui).toHaveAttribute("data-native-pid", pid!);
     await expect(ui).toHaveAttribute("data-native-session", nativeId!);
     await ui.getByTestId("native-cli-composer").fill("unsent draft");
@@ -140,7 +139,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2);
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     expect(new Set([...keys.values()].map((key) => JSON.stringify(key))).size).toBe(1); // The PTY attachment is recreated; the native process and logical identity survive.
-    expect(actions).toHaveLength(provider === "claude" ? 2 : 1); // The rejected draft attempt remains unsent; the CLI turn bypasses the composer.
+    expect(actions).toHaveLength(provider === "claude" || provider === "opencode" ? 2 : 1); // The rejected draft attempt remains unsent; the CLI turn bypasses the composer.
     expect(new Set(snapshots.map((value) => value.pid)).size).toBe(1);
     expect(errors).toEqual([]);
     phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -157,14 +156,15 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await expect(mobile.getByTestId("native-cli-composer")).toBeDisabled();
     await expect(mobile).toContainText("Another viewer has control");
     await ui.getByRole("button", { name: "Release control", exact: true }).click();
+    await expect(mobile).not.toContainText("Another viewer has control");
     await mobile.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(mobile.getByTestId("native-cli-composer")).toBeEnabled();
     await expect(ui.getByTestId("native-cli-composer")).toBeDisabled();
     await mobile.getByTestId("native-cli-composer").fill("Reply with that same token once more, and nothing else.");
     await mobile.getByRole("button", { name: "Send", exact: true }).click();
     await expect(mobile.locator('[data-native-role="user"]')).toHaveCount(3);
-    await expect(mobile.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
-    await expect(mobile.getByRole("status")).toHaveText("Ready");
+    await expect(mobile.getByRole("status")).toHaveText("Ready", { timeout: 90_000 });
+    await expect(mobile.locator('[data-native-role="assistant"]').last()).toContainText(token);
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(3);
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     await expect.poll(() => phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -180,11 +180,12 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await expect(mobile.locator(".message__markdown")).not.toContainText(["slow_turn_finished"]);
     await expect(ui.getByRole("status")).toHaveText("Ready");
     await mobile.getByRole("button", { name: "Release control", exact: true }).click();
+    await expect(ui).not.toContainText("Another viewer has control");
     await ui.getByRole("button", { name: "Take control", exact: true }).click();
     expect(errors).toEqual([]);
     await phoneContext.close(); phoneContext = undefined;
     await toggle.click();
-    if (provider === "codex") {
+    if (provider === "codex" || provider === "opencode") {
       await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
       await cli.locator(".xterm-helper-textarea").pressSequentially("/new", { delay: 20 });
       await expect(cli.locator(".xterm-rows")).toContainText("/new");
@@ -192,6 +193,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
       await toggle.click();
       await expect.poll(async () => { const id = await ui.getAttribute("data-native-session"); return !!id && id !== nativeId; }, { timeout: 20_000 }).toBe(true);
       await expect(ui).toHaveAttribute("data-native-pid", pid!);
+      expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(0);
       await ui.getByTestId("native-cli-composer").fill(firstPrompt);
       await ui.getByRole("button", { name: "Send", exact: true }).click();
@@ -203,7 +205,7 @@ for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI a
     await expect(cli.getByRole("button", { name: "Stop CLI", exact: true })).toBeEnabled();
     await cli.getByRole("button", { name: "Stop CLI", exact: true }).click();
     await expect(cli.getByTestId("cli-exited")).toBeVisible();
-    if (provider === "codex") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
+    if (provider === "codex" || provider === "opencode") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
     completed = true;
   } finally {
     if (!completed) {

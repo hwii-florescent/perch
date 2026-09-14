@@ -192,16 +192,22 @@ and the five baseline Clippy warnings. Extended `/new`, WebKit, and native
 Codex review-delivery acceptance are still being finished; this is an
 implementation checkpoint, not completion of the full native UI or SPEC gates.
 
-OpenCode implementation checkpoint, 2026-09-14: OpenCode now follows its own
-documented `serve`/`attach` architecture inside the same persistent terminal.
-Perch starts one private loopback server, attaches the real OpenCode TUI to it,
-polls that server's native session/messages/status APIs, and sends prompts or
-abort requests back through those APIs. The OpenCode session id is persisted
-separately in SQLite and restored on restart. The bridge is bounded and leaves
-models, tools, permissions, and approvals to OpenCode. The installed machine
-does not have an OpenCode executable, so real OpenCode browser/provider-turn
-acceptance remains unverified; its launcher, projection, and full Rust suite
-checks pass.
+OpenCode review correction, 2026-09-14: the initial HTTP adapter was unsound:
+it selected arbitrary saved sessions, could attach to another server, forwarded
+TUI flags to `attach`, read responses before applying bounds, and republished
+unchanged history. A shared PID-file reaper could also kill a live native
+server. The reaper was removed and covered by a live-socket regression check.
+
+The replacement loads a plugin into the real OpenCode 1.18.30 TUI, reusing
+Perch's private Unix socket transport. It follows the TUI's active route,
+projects bounded native messages and tools, submits through the TUI's own
+prompt ref, preserves drafts/dialogs, and confirms delivery from native user
+messages. No additional OpenCode server is launched. Global/project native
+settings remain native; an explicit custom `OPENCODE_TUI_CONFIG` remains
+CLI-only instead of being overwritten. Both independent Opus review output
+and real headless provider validation are recorded in the verification report.
+This supersedes the initial HTTP-adapter checkpoint; full SPEC gates remain
+open.
 
 Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
 catalog entries are now wired through the provider registry, the shared

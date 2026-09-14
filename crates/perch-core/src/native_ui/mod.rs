@@ -66,7 +66,8 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
                 "{name}.{}",
                 match key.agent_id.as_str() {
                     "claude" => "json",
-                    "codex" | "opencode" => "sh",
+                    "codex" => "sh",
+                    "opencode" => "mjs",
                     _ => "ts",
                 }
             )),
@@ -86,29 +87,26 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
     ensure!(supported(provider), "provider has no native UI bridge");
     let paths = paths(key)?;
     if fresh && paths.socket.exists() {
-        if provider == "opencode" {
-            // OpenCode uses this path as a readiness marker, not a Unix
-            // socket. A dead marker is safe to replace.
-            let _ = std::fs::remove_file(&paths.socket);
-        } else {
-            match std::os::unix::net::UnixStream::connect(&paths.socket) {
-                Ok(_) => bail!("the native CLI session is already running"),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-                    ) =>
-                {
-                    let _ = std::fs::remove_file(&paths.socket);
-                }
-                Err(error) => return Err(error.into()),
+        match std::os::unix::net::UnixStream::connect(&paths.socket) {
+            Ok(_) => bail!("the native CLI session is already running"),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                let _ = std::fs::remove_file(&paths.socket);
             }
+            Err(error) => return Err(error.into()),
         }
     }
     let source = if provider == "codex" {
         codex::LAUNCHER.to_string()
     } else if provider == "opencode" {
-        opencode::LAUNCHER.to_string()
+        include_str!("opencode-plugin.mjs").replace(
+            "\"__PERCH_NATIVE_SOCKET__\"",
+            &serde_json::to_string(&paths.socket)?,
+        )
     } else if provider == "claude" {
         claude::settings(&paths.extension, fresh)?
     } else {
@@ -122,11 +120,14 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
                 &serde_json::to_string(provider)?,
             )
     };
+    write_private(&paths.extension, &source)?;
+    Ok(paths)
+}
+
+fn write_private(path: &std::path::Path, source: &str) -> anyhow::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let temporary = paths
-        .extension
-        .with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| -> anyhow::Result<()> {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -135,14 +136,13 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
             .open(&temporary)?;
         file.write_all(source.as_bytes())?;
         file.sync_all()?;
-        std::fs::rename(&temporary, &paths.extension)?;
+        std::fs::rename(&temporary, path)?;
         Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
-    result?;
-    Ok(paths)
+    result
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,7 +253,7 @@ impl NativeUiRegistry {
         );
         let registry = Arc::downgrade(self);
         tokio::spawn(async move {
-            if matches!(key.agent_id.as_str(), "claude" | "codex" | "opencode") {
+            if matches!(key.agent_id.as_str(), "claude" | "codex") {
                 if key.agent_id == "codex" {
                     codex::observe(
                         &key,
@@ -264,18 +264,8 @@ impl NativeUiRegistry {
                         commands_rx,
                     )
                     .await;
-                } else if key.agent_id == "claude" {
-                    claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
                 } else {
-                    opencode::observe(
-                        &key,
-                        provider_session_id,
-                        alive,
-                        on_snapshot,
-                        snapshot_tx,
-                        commands_rx,
-                    )
-                    .await;
+                    claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
                 }
                 if let Some(registry) = registry.upgrade() {
                     registry.bridges.lock().unwrap().remove(&key);
@@ -382,7 +372,11 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&paths.socket).unwrap();
         let pid_path = paths.extension.with_extension("pid");
         std::fs::write(&pid_path, std::process::id().to_string()).unwrap();
-        assert!(prepare(&key, "codex", true).err().unwrap().to_string().contains("already running"));
+        assert!(prepare(&key, "codex", true)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("already running"));
         assert!(pid_path.exists());
         assert!(std::os::unix::net::UnixStream::connect(&paths.socket).is_ok());
         drop(listener);

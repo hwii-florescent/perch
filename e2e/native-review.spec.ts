@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-review-"));
   const fixture = path.join(scratch, "workspace"); fs.mkdirSync(fixture);

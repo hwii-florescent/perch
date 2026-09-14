@@ -98,10 +98,22 @@ before sending; a Git view briefly borrows unowned input and releases it after
 enqueueing. Retrying a frozen packet returns its existing delivery status and
 never dispatches a second copy. An uncertain receipt stays unconfirmed.
 
-Codex uses its native app-server Unix socket and OpenCode uses its native
-loopback `serve` HTTP API. Both keep the interactive TUI and Perch UI on the
-same provider-owned session. Their approval dialogs remain in the CLI; Perch
-does not replace native configuration or start a second model loop.
+Codex uses its native app-server Unix socket. OpenCode uses a plugin inside
+its real TUI, tested against OpenCode 1.18.30's
+[public TUI plugin API](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/plugin/src/tui.ts).
+The plugin follows the TUI's active route, observes its native state, and uses
+its own prompt editor to preserve the selected model and agent. An empty UI
+session is created by OpenCode and selected in the TUI; saved sessions are
+never guessed from a list. The connection uses the same private Unix socket
+transport as Pi/OMP, bounded history, native prompt receipts, and duplicate
+protection. Approval dialogs and existing CLI drafts stay in the CLI.
+
+OpenCode loads the extra plugin with a private `OPENCODE_TUI_CONFIG` file;
+OpenCode still merges global and project settings. An explicitly configured
+`OPENCODE_TUI_CONFIG` is preserved and currently keeps that launch CLI-only.
+Older OpenCode versions without the TUI plugin API, `--pure`, and `--mini`
+also remain CLI-only. The CLI is launched with its original arguments; Perch
+does not start an additional OpenCode server or expose a new HTTP listener.
 
 Environment rules apply inside the actual provider process, including when
 tmux owns that process:
@@ -137,10 +149,13 @@ environment isolation, and reload recovery without changing user settings.
 
 The native UI integration suite is
 `cd e2e && npx playwright test --config=native-ui.config.ts`. It uses real
-installed Claude/Pi/OMP CLIs and their existing authentication in temporary workspace
+installed Claude/Codex/Pi/OMP/OpenCode CLIs and their existing authentication in temporary workspace
 folders, with isolated Perch databases/configuration and headless Chromium
 and WebKit. It sends real prompts, tests native continuation and core crash
 recovery, and transfers control to a separate phone-sized browser.
+
+The OpenCode plugin's focused check runs without provider credentials:
+`node crates/perch-core/src/native_ui/opencode-plugin.test.mjs`.
 
 `cd e2e && npx playwright test --config=native-review.config.ts` verifies
 two-note review delivery from a separate phone browser into those same native
