@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp", "claude"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-review-"));
   const fixture = path.join(scratch, "workspace"); fs.mkdirSync(fixture);
@@ -59,6 +59,10 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: phone review 
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    if (provider === "codex") {
+      await expect(terminal.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
+      if ((await terminal.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await terminal.locator(".xterm-helper-textarea").press("Enter");
+    }
     if (provider === "claude") {
       await expect(terminal.locator(".xterm-rows")).toContainText(/bypass permissions on|Yes, I trust this folder/, { timeout: 30_000 });
       // Claude 2.1.270 rejects early confirmations and remounts this native

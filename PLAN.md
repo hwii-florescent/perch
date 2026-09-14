@@ -172,6 +172,26 @@ thread. Perch must never start a parallel thread to implement UI mode.
 The private probe and generated installed-version schema are under
 `/tmp/perch-codex-native-*` and `/tmp/perch-codex-probe-1Som07/`.
 
+Codex implementation checkpoint, 2026-09-14: the native TUI and the structured
+view now join one private native app-server in the persistent terminal runtime.
+The adapter reads native history/events, sends native prompt/interrupt requests,
+persists the actual thread ID, and uses the existing input lease and delivery
+journal. A cold, empty native thread accepts its first real UI prompt before
+Codex creates the rollout needed for a history subscription. No synthetic
+prompt or parallel provider thread is created. Native system/title threads are
+excluded. Messages, tool results, and native errors are bounded; model changes
+come from native events. Closing the terminal stops both native children.
+
+The Chromium UI/CLI/core-crash/phone prompt/cancel/stop flow passed. Claude Opus
+reviewed the implementation; its actionable fixes include cancellation IDs,
+pending thread selection, dynamic tool output, bounded incremental accounting,
+stale snapshot invalidation, and preserving Codex's own model choice. The
+launcher cleanup has a runnable regression check. Full validation so far:
+257 core tests, two protocol tests, 222 web tests, production build, formatting,
+and the five baseline Clippy warnings. Extended `/new`, WebKit, and native
+Codex review-delivery acceptance are still being finished; this is an
+implementation checkpoint, not completion of the full native UI or SPEC gates.
+
 Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
 catalog entries are now wired through the provider registry, the shared
 detection/launch resolver, host-persisted enabled/default preferences, and

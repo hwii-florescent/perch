@@ -143,7 +143,9 @@ fn open_agent_terminal(
                 .then_some(row.last_model)
                 .flatten()
         });
-        if let Some(model) = model {
+        // Codex resumes its own model/settings; a stale Hosted selection must
+        // not override the native conversation when attaching its UI.
+        if let Some(model) = model.filter(|_| provider_id != "codex") {
             extra.extend(["--model".to_string(), model]);
         }
         if crate::native_ui::supported(provider_id) {
@@ -152,15 +154,17 @@ fn open_agent_terminal(
                     &crate::agent_runtime::terminal_key(&key),
                 ));
             let paths = crate::native_ui::prepare(&key, provider_id, fresh)?;
-            extra.extend([
-                if provider_id == "claude" {
-                    "--settings"
-                } else {
-                    "--extension"
-                }
-                .into(),
-                paths.extension.to_string_lossy().into_owned(),
-            ]);
+            if provider_id != "codex" {
+                extra.extend([
+                    if provider_id == "claude" {
+                        "--settings"
+                    } else {
+                        "--extension"
+                    }
+                    .into(),
+                    paths.extension.to_string_lossy().into_owned(),
+                ]);
+            }
         }
         let registration = crate::agent_fleet::AgentRegistration {
             key: key.clone(),

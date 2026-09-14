@@ -92,13 +92,6 @@ fn read_event(path: &Path) -> anyhow::Result<(u32, Value)> {
     Ok((pid, event))
 }
 
-fn clip(text: &str, limit: usize) -> String {
-    let mut end = text.len().min(limit);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].to_string()
-}
 fn text(value: &Value) -> String {
     if let Some(value) = value.as_str() {
         return clip(value, 16 * 1024);

@@ -520,7 +520,14 @@ impl AgentRuntimeAdapter {
             }
         };
 
-        let prepared = match crate::provider_environment::prepare(command, &manifest.environment) {
+        let prepared = match (|| {
+            let command = if provider_id == "codex" && crate::native_ui::supported(&provider_id) {
+                crate::native_ui::codex::launch(&key, command)?
+            } else {
+                command
+            };
+            crate::provider_environment::prepare(command, &manifest.environment)
+        })() {
             Ok(prepared) => prepared,
             Err(error) => {
                 let _ = self.lifecycle.detach_observer(&key, &client.id);

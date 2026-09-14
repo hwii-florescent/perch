@@ -6,7 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
+for (const provider of ["pi", "omp", "claude", "codex"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-ui-"));
   const port = await new Promise<number>((resolve) => {
@@ -67,8 +67,12 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI sh
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-    await expect(cli.locator(".xterm-rows")).toContainText(provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
+    await expect(cli.locator(".xterm-rows")).toContainText(provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
     if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
+    if (provider === "codex") {
+      await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
+      if ((await cli.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await cli.locator(".xterm-helper-textarea").press("Enter");
+    }
     await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
@@ -103,7 +107,7 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI sh
       await toggle.click();
       await expect(cli.locator(".xterm-rows")).toContainText("CLI draft that must survive");
       await cli.locator(".xterm-helper-textarea").press("Control+u");
-    } else {
+    } else if (provider === "pi" || provider === "omp") {
       await cli.locator(".xterm-helper-textarea").pressSequentially("/reload", { delay: 10 });
       await cli.locator(".xterm-helper-textarea").press("Enter");
     }
@@ -115,6 +119,10 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI sh
     }
     await cli.locator(".xterm-helper-textarea").pressSequentially("What exact token did you just read? Reply only with the token.", { delay: 10 });
     await cli.locator(".xterm-helper-textarea").press("Enter");
+    if (provider === "codex") {
+      await expect(cli.locator(".xterm-rows")).toContainText("What exact token did you just read?");
+      await testInfo.attach("CLI-follow-up", { body: await cli.locator(".xterm-rows").innerText(), contentType: "text/plain" });
+    }
     await toggle.click();
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 30_000 });
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
@@ -163,7 +171,7 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI sh
     await mobile.getByTestId("native-cli-composer").fill("Use your bash tool to run sleep 20. After it finishes, reply slow_turn_finished.");
     await mobile.getByRole("button", { name: "Send", exact: true }).click();
     await expect(mobile.locator('[data-native-role="user"]')).toHaveCount(4);
-    await expect(mobile.locator('[data-native-role="assistant"] details').filter({ has: phone.locator("summary", { hasText: /^bash$/i }) }).last()).toContainText("sleep 20", { timeout: 90_000 });
+    await expect(mobile.locator('[data-native-role="assistant"] details').filter({ has: phone.locator("summary", { hasText: /^(bash|shell)$/i }) }).last()).toContainText("sleep 20", { timeout: 90_000 });
     const cancelStarted = Date.now();
     await mobile.getByRole("button", { name: "Cancel turn", exact: true }).click();
     await expect(mobile.getByRole("status")).toHaveText("Ready", { timeout: 10_000 });
@@ -175,14 +183,39 @@ for (const provider of ["pi", "omp", "claude"]) test(`${provider}: UI and CLI sh
     expect(errors).toEqual([]);
     await phoneContext.close(); phoneContext = undefined;
     await toggle.click();
+    if (provider === "codex") {
+      await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+      await cli.locator(".xterm-helper-textarea").pressSequentially("/new", { delay: 20 });
+      await expect(cli.locator(".xterm-rows")).toContainText("/new");
+      await cli.locator(".xterm-helper-textarea").press("Enter");
+      await toggle.click();
+      await expect.poll(async () => { const id = await ui.getAttribute("data-native-session"); return !!id && id !== nativeId; }, { timeout: 20_000 }).toBe(true);
+      await expect(ui).toHaveAttribute("data-native-pid", pid!);
+      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(0);
+      await ui.getByTestId("native-cli-composer").fill(firstPrompt);
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
+      await expect(ui.getByRole("status")).toHaveText("Ready");
+      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
+      await toggle.click();
+    }
     await expect(cli.getByRole("button", { name: "Stop CLI", exact: true })).toBeEnabled();
     await cli.getByRole("button", { name: "Stop CLI", exact: true }).click();
     await expect(cli.getByTestId("cli-exited")).toBeVisible();
+    if (provider === "codex") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
     completed = true;
   } finally {
     if (!completed) {
       await page.screenshot({ path: path.join(shots, `native-ui-${provider}-failure-${testInfo.project.name}.png`) }).catch(() => {});
       await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
+      if (terminalId) {
+        const key = keys.get(terminalId);
+        if (key) {
+          const hash = createHash("sha256");
+          for (const value of [key.workspaceId, key.sessionId, key.agentId]) { const bytes = Buffer.from(value); const size = Buffer.alloc(8); size.writeBigUInt64LE(BigInt(bytes.length)); hash.update(size); hash.update(bytes); }
+          try { await testInfo.attach("native-terminal", { body: execFileSync("tmux", ["capture-pane", "-p", "-t", `=perch-cli-agent-${hash.digest("hex")}:`, "-S", "-120"], { stdio: ["ignore", "pipe", "ignore"] }), contentType: "text/plain" }); } catch { /* Already stopped. */ }
+        }
+      }
     }
     await phoneContext?.close().catch(() => {});
     await stop();

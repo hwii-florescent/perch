@@ -9,8 +9,13 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
     let alive_key = key.clone();
     let event_app = app.clone();
     let event_key = key.clone();
+    let provider_session_id = app
+        .agent_runtime
+        .runtime(&key)
+        .and_then(|runtime| runtime.provider_session_id);
     app.native_ui.start(
         key,
+        provider_session_id,
         Arc::new(move || runtime.runtime(&alive_key).is_some()),
         Arc::new(move |snapshot| {
             let app = &event_app;
@@ -36,6 +41,10 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                     let _ = app
                         .db
                         .set_claude_session_id(&key.session_id, &snapshot.provider_session_id);
+                } else if key.agent_id == "codex" {
+                    let _ = app
+                        .db
+                        .set_codex_thread_id(&key.session_id, &snapshot.provider_session_id);
                 }
                 let _ = app
                     .agent_runtime

@@ -17,12 +17,21 @@ use tokio::{
 };
 
 pub mod claude;
+pub mod codex;
+
+fn clip(text: &str, limit: usize) -> String {
+    let mut end = text.len().min(limit);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
 
 const MAX_FRAME: usize = 256 * 1024;
 const MAX_BRIDGES: usize = 128;
 
 pub fn supported(provider: &str) -> bool {
-    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude")
+    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude" | "codex")
 }
 
 pub struct NativePaths {
@@ -54,10 +63,10 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
         Ok(NativePaths {
             extension: root.join(format!(
                 "{name}.{}",
-                if key.agent_id == "claude" {
-                    "json"
-                } else {
-                    "ts"
+                match key.agent_id.as_str() {
+                    "claude" => "json",
+                    "codex" => "sh",
+                    _ => "ts",
                 }
             )),
             socket: root.join(format!("{name}.sock")),
@@ -89,7 +98,9 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
             Err(error) => return Err(error.into()),
         }
     }
-    let source = if provider == "claude" {
+    let source = if provider == "codex" {
+        codex::LAUNCHER.to_string()
+    } else if provider == "claude" {
         claude::settings(&paths.extension, fresh)?
     } else {
         include_str!("pi-extension.ts")
@@ -208,6 +219,7 @@ impl NativeUiRegistry {
     pub fn start(
         self: &Arc<Self>,
         key: AgentKey,
+        provider_session_id: Option<String>,
         alive: Arc<dyn Fn() -> bool + Send + Sync>,
         on_snapshot: Arc<dyn Fn(NativeUiSnapshot) + Send + Sync>,
     ) -> anyhow::Result<()> {
@@ -232,8 +244,20 @@ impl NativeUiRegistry {
         );
         let registry = Arc::downgrade(self);
         tokio::spawn(async move {
-            if key.agent_id == "claude" {
-                claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
+            if matches!(key.agent_id.as_str(), "claude" | "codex") {
+                if key.agent_id == "codex" {
+                    codex::observe(
+                        &key,
+                        provider_session_id,
+                        alive,
+                        on_snapshot,
+                        snapshot_tx,
+                        commands_rx,
+                    )
+                    .await;
+                } else {
+                    claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
+                }
                 if let Some(registry) = registry.upgrade() {
                     registry.bridges.lock().unwrap().remove(&key);
                 }
@@ -369,6 +393,7 @@ mod tests {
         registry
             .start(
                 key.clone(),
+                None,
                 Arc::new(move || running.load(Ordering::SeqCst)),
                 Arc::new(|_| {}),
             )
