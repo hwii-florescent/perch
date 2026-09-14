@@ -85,9 +85,6 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
 pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<NativePaths> {
     ensure!(supported(provider), "provider has no native UI bridge");
     let paths = paths(key)?;
-    if fresh && matches!(provider, "codex" | "opencode") {
-        reap_native_server(&paths.extension.with_extension("pid"), provider);
-    }
     if fresh && paths.socket.exists() {
         if provider == "opencode" {
             // OpenCode uses this path as a readiness marker, not a Unix
@@ -147,42 +144,6 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
     result?;
     Ok(paths)
 }
-
-#[cfg(unix)]
-fn reap_native_server(path: &std::path::Path, provider: &str) {
-    let Ok(value) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let Ok(pid) = value.trim().parse::<libc::pid_t>() else {
-        return;
-    };
-    let command = std::process::Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
-        .output()
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .unwrap_or_default();
-    let expected = if provider == "codex" {
-        "app-server"
-    } else {
-        "serve"
-    };
-    if pid > 1 && command.contains(provider) && command.contains(expected) {
-        // The sidecar is mode 0600 in our mode 0700 directory and is written
-        // only by the matching launcher. Fresh means its tmux owner is gone.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-            std::thread::sleep(Duration::from_millis(50));
-            if libc::kill(pid, 0) == 0 {
-                libc::kill(pid, libc::SIGKILL);
-            }
-        }
-    }
-    let _ = std::fs::remove_file(path);
-}
-
-#[cfg(not(unix))]
-fn reap_native_server(_: &std::path::Path, _: &str) {}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -413,6 +374,21 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::UnixListener;
+
+    #[test]
+    fn prepare_preserves_live_codex_session_even_with_pid_sidecar() {
+        let key = AgentKey::new("native-test", uuid::Uuid::new_v4().to_string(), "codex").unwrap();
+        let paths = paths(&key).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&paths.socket).unwrap();
+        let pid_path = paths.extension.with_extension("pid");
+        std::fs::write(&pid_path, std::process::id().to_string()).unwrap();
+        assert!(prepare(&key, "codex", true).err().unwrap().to_string().contains("already running"));
+        assert!(pid_path.exists());
+        assert!(std::os::unix::net::UnixStream::connect(&paths.socket).is_ok());
+        drop(listener);
+        std::fs::remove_file(&paths.socket).unwrap();
+        std::fs::remove_file(pid_path).unwrap();
+    }
 
     #[tokio::test]
     async fn framing_preserves_partial_data_after_cancellation_and_rejects_oversize() {
