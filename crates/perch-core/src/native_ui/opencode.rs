@@ -18,11 +18,17 @@ pub fn launch(key: &AgentKey, command: Vec<String>) -> anyhow::Result<Vec<String
         // configs are merged by OpenCode itself when this extra file is used.
         // ponytail: custom OPENCODE_TUI_CONFIG remains CLI-only until OpenCode
         // provides an additive plugin flag; do not rewrite user JSONC settings.
-        r#"if [ -n "$OPENCODE_TUI_CONFIG" ]; then
-printf '%s\n' 'Perch UI is unavailable with a custom OPENCODE_TUI_CONFIG. The CLI keeps your configuration.' >&2
+        r#"/bin/rm -f -- "$1.error"
+if [ -n "$OPENCODE_TUI_CONFIG" ]; then
+(umask 077; printf '%s\n' 'Perch UI is unavailable with a custom OPENCODE_TUI_CONFIG. The CLI keeps your configuration.' > "$1.error")
 else
 export OPENCODE_TUI_CONFIG="$1"
 fi
+for arg do
+case "$arg" in --pure|--mini)
+(umask 077; printf '%s\n' 'This OpenCode launch disables TUI plugins. Continue in CLI mode.' > "$1.error");;
+esac
+done
 shift
 exec "$@""#.into(),
         "perch-opencode".into(), config.to_string_lossy().into_owned(),
@@ -79,6 +85,12 @@ mod tests {
             run(Some("/custom/tui '$().jsonc")),
             "/custom/tui '$().jsonc"
         );
+        let error_path = format!("{}.error", args[4]);
+        assert!(std::fs::read_to_string(&error_path)
+            .unwrap()
+            .contains("OPENCODE_TUI_CONFIG"));
+        assert_eq!(run(None), args[4]);
+        assert!(!std::path::Path::new(&error_path).exists());
         std::fs::remove_file(&args[4]).unwrap();
     }
 }

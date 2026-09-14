@@ -84,12 +84,13 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     const pid = await ui.getAttribute("data-native-pid");
-    const nativeId = await ui.getAttribute("data-native-session");
     expect(nativeKey!.workspaceId).toBe(workspaceId);
     await ui.getByTestId("native-cli-composer").fill("Reply READY only. Do not use tools or modify files.");
     await ui.getByRole("button", { name: "Send", exact: true }).click();
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("READY", { timeout: 90_000 });
     await expect(ui.getByRole("status")).toHaveText("Ready");
+    const nativeId = await ui.getAttribute("data-native-session");
+    expect(nativeId).not.toBe("");
     await gitButton.click();
     await expect(page.getByTestId("workspace-git-review")).toBeVisible();
     await page.locator('.workspace-git__path-button[title="notes.txt"]').click();
@@ -124,6 +125,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(phone.getByRole("alert")).toContainText("Release this agent's control", { timeout: 15_000 });
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
     await ui.getByRole("button", { name: "Release control", exact: true }).click();
+    await expect(ui.getByRole("button", { name: "Take control", exact: true })).toBeEnabled();
     await phone.getByTestId("git-review-send").click();
     await expect(phone.getByTestId("git-review-delivery")).toHaveText("Agent received the review packet.", { timeout: 20_000 });
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(`ACCEPTED_${token}`, { timeout: 90_000 });

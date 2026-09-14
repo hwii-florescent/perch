@@ -30,21 +30,32 @@ let dispose;
 let submits = 0;
 let creates = 0;
 let abortResult = false;
+let shellMode = false;
+let rejectSubmit = false;
 let promptRef;
+let slots;
 const route = { current: { name: "session", params: { sessionID: "ses_current" } }, navigate(name, params) { this.current = { name, params }; } };
 const api = {
   route, state: { ready: true, path: { directory: dir }, part: id => parts.get(id) ?? [],
     session: { get: id => ({ id, directory: dir }), messages: () => rows, status: () => ({ type: "idle" }) } },
   ui: { dialog: { open: false }, Slot() {}, Prompt(props) {
-    promptRef = { current: { input: "", parts: [] }, set(value) { this.current = value; }, submit() {
+    promptRef = { current: { input: "", parts: [] }, set(value) { this.current = value; }, reset() { this.current = { input: "", parts: [] }; }, submit() {
+      if (rejectSubmit) return;
       submits++;
+      if (route.current.name === "home") {
+        creates++;
+        rows.length = 0;
+        events.get("session.created")?.({ properties: { info: { id: "ses_created_by_tui" } } });
+        route.navigate("session", { sessionID: "ses_created_by_tui" });
+      }
       const id = `msg_${submits}`;
       rows.push({ id, role: "user" }); parts.set(id, [{ type: "text", text: this.current.input }]);
       this.current = { input: "", parts: [] }; events.get("message.updated")?.();
     } };
     props.ref(promptRef);
   } },
-  slots: { register(value) { value.slots.session_prompt({}, { session_id: "ses_current" }); } },
+  slots: { register(value) { slots = value.slots; slots.session_prompt({}, { session_id: "ses_current" }); } },
+  keymap: { getActiveKeys: () => [{ bindings: [{ attrs: { desc: shellMode ? "Exit shell mode" : "Shell mode" } }] }] },
   event: { on(type, fn) { events.set(type, fn); } },
   client: { session: { create: async () => { creates++; return { data: { id: "ses_new" } }; }, abort: async () => ({ data: abortResult }) } },
   lifecycle: { onDispose(fn) { dispose = fn; } },
@@ -52,7 +63,7 @@ const api = {
 let peer;
 const received = [];
 async function until(predicate) {
-  for (let attempt = 0; attempt < 200; attempt++) { if (predicate()) return; await delay(10); }
+  for (let attempt = 0; attempt < 900; attempt++) { if (predicate()) return; await delay(10); }
   throw new Error("native plugin check timed out");
 }
 async function request(requestId, type, text) {
@@ -81,6 +92,13 @@ try {
   assert.equal(promptRef.current.input, "CLI draft");
   assert.equal(submits, 0);
   promptRef.current.input = "";
+  shellMode = true;
+  assert.equal((await request("shell", "prompt", "touch should-not-exist")).accepted, false);
+  assert.equal(submits, 0); // ref.current.mode is absent even in native shell mode.
+  assert.equal(promptRef.current.input, "");
+  shellMode = false;
+  assert.equal((await request("escape", "prompt", "bad\x1btext")).accepted, false);
+  assert.equal((await request("slash", "prompt", "/new")).accepted, false);
   assert.equal((await request("once", "prompt", "actual prompt")).accepted, true);
   assert.equal((await request("once", "prompt", "actual prompt")).accepted, true);
   assert.equal(submits, 1);
@@ -92,7 +110,21 @@ try {
   assert.equal(creates, 0);
   assert.equal((await request("changed", "prompt", "wrong prompt ref")).accepted, false);
   assert.equal(submits, 1);
-  console.log("OpenCode plugin: projection bounds, exact route, idle behavior, native receipts, draft guard, retry, and cancellation passed");
+  route.navigate("home");
+  await until(() => received.some(value => value.providerSessionId === ""));
+  await delay(600);
+  assert.equal(creates, 0); // Observing the home route never creates a session.
+  slots.home_prompt({}, {});
+  assert.equal((await request("home", "prompt", "first\r\nturn")).accepted, true);
+  assert.equal(creates, 1);
+  assert.equal(route.current.params.sessionID, "ses_created_by_tui");
+  assert.equal(parts.get(rows.at(-1).id)[0].text, "first\nturn");
+  slots.session_prompt({}, { session_id: "ses_created_by_tui" });
+  rejectSubmit = true;
+  assert.equal((await request("rejected-native-submit", "prompt", "not sent")).accepted, false);
+  assert.equal(promptRef.current.input, "");
+  assert.equal(submits, 2);
+  console.log("OpenCode plugin: bounds, exact route, home view, shell-mode guard, draft safety, native receipts, retry, rejected-submit cleanup, and cancellation passed");
 } finally {
   peer?.destroy(); dispose?.(); fs.rmSync(dir, { recursive: true, force: true });
 }

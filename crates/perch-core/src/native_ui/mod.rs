@@ -175,7 +175,7 @@ pub struct NativeBridge {
 impl NativeBridge {
     pub async fn snapshot(&self) -> anyhow::Result<NativeUiSnapshot> {
         let mut receiver = self.snapshot.clone();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Some(snapshot) = receiver.borrow().clone() {
                     return Ok(snapshot);
@@ -186,8 +186,18 @@ impl NativeBridge {
                     .context("native CLI UI disconnected")?;
             }
         })
-        .await
-        .context("waiting for the CLI's native UI bridge timed out")?
+        .await;
+        if result.is_err() && self.key.agent_id == "opencode" {
+            use std::io::Read;
+            if let Ok(file) =
+                std::fs::File::open(paths(&self.key)?.extension.with_extension("tui.json.error"))
+            {
+                let mut message = String::new();
+                file.take(4096).read_to_string(&mut message)?;
+                bail!("{}", message.trim());
+            }
+        }
+        result.context("waiting for the CLI's native UI bridge timed out")?
     }
     // Called while the runtime's input authority lock is held. Once enqueued,
     // this command has the same ordering guarantee as accepted PTY input.
@@ -293,7 +303,7 @@ impl NativeUiRegistry {
                             };
                             match event {
                                 NativeEvent::Snapshot { snapshot } => {
-                                    if snapshot.version != 1 || snapshot.provider_session_id.is_empty() || snapshot.messages.len() > 129 { break; }
+                                    if snapshot.version != 1 || (snapshot.provider_session_id.is_empty() && key.agent_id != "opencode") || snapshot.messages.len() > 129 { break; }
                                     on_snapshot(snapshot.clone());
                                     let _ = snapshot_tx.send(Some(snapshot));
                                 }

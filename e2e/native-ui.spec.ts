@@ -79,7 +79,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
     if (provider === "claude") await expect(ui.locator(".native-cli-chat__model")).toContainText("haiku");
     const pid = await ui.getAttribute("data-native-pid");
-    const nativeId = await ui.getAttribute("data-native-session");
+    let nativeId = await ui.getAttribute("data-native-session");
+    if (provider === "opencode") expect(nativeId).toBe("");
     expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
     const firstPrompt = `Read ${fs.realpathSync(path.join(fixture, "sentinel.txt"))} with your file tool. Reply with its exact contents only.`;
     await ui.getByTestId("native-cli-composer").fill(firstPrompt);
@@ -89,6 +90,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 20_000 });
     expect(actions).toHaveLength(1);
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
+    if (provider === "opencode") { nativeId = await ui.getAttribute("data-native-session"); expect(nativeId).toMatch(/^ses/); }
     await expect(ui.locator('[data-native-role="toolResult"]')).not.toHaveCount(0);
     await page.screenshot({ path: path.join(shots, `native-ui-${provider}-${testInfo.project.name}.png`) });
     await toggle.click();
@@ -97,6 +99,19 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
     const beforeReload = snapshots.length;
     const beforeRevision = snapshots.at(-1)!.revision;
+    if (provider === "opencode") {
+      await cli.locator(".xterm-helper-textarea").press("!");
+      await expect(cli.locator(".xterm-rows")).toContainText("Shell");
+      await toggle.click();
+      await ui.getByTestId("native-cli-composer").fill("touch should-not-exist");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(ui.getByRole("alert")).toContainText("normal prompt mode");
+      expect(fs.existsSync(path.join(fixture, "should-not-exist"))).toBe(false);
+      await toggle.click();
+      await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+      await cli.locator(".xterm-helper-textarea").press("Escape");
+      await expect(cli.locator(".xterm-rows")).not.toContainText(/\bShell\b/);
+    }
     if (provider === "claude" || provider === "opencode") {
       await cli.locator(".xterm-helper-textarea").pressSequentially("CLI draft that must survive", { delay: 10 });
       await toggle.click();
@@ -139,7 +154,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2);
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     expect(new Set([...keys.values()].map((key) => JSON.stringify(key))).size).toBe(1); // The PTY attachment is recreated; the native process and logical identity survive.
-    expect(actions).toHaveLength(provider === "claude" || provider === "opencode" ? 2 : 1); // The rejected draft attempt remains unsent; the CLI turn bypasses the composer.
+    expect(actions).toHaveLength(provider === "opencode" ? 3 : provider === "claude" ? 2 : 1); // Rejected draft/shell attempts remain unsent; the CLI turn bypasses the composer.
     expect(new Set(snapshots.map((value) => value.pid)).size).toBe(1);
     expect(errors).toEqual([]);
     phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -191,7 +206,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(cli.locator(".xterm-rows")).toContainText("/new");
       await cli.locator(".xterm-helper-textarea").press("Enter");
       await toggle.click();
-      await expect.poll(async () => { const id = await ui.getAttribute("data-native-session"); return !!id && id !== nativeId; }, { timeout: 20_000 }).toBe(true);
+      if (provider === "opencode") await expect(ui).toHaveAttribute("data-native-session", "");
+      else await expect.poll(async () => { const id = await ui.getAttribute("data-native-session"); return !!id && id !== nativeId; }, { timeout: 20_000 }).toBe(true);
       await expect(ui).toHaveAttribute("data-native-pid", pid!);
       expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(0);
@@ -200,6 +216,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });
       await expect(ui.getByRole("status")).toHaveText("Ready");
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
+      if (provider === "opencode") { expect(await ui.getAttribute("data-native-session")).toMatch(/^ses/); expect(await ui.getAttribute("data-native-session")).not.toBe(nativeId); }
       await toggle.click();
     }
     await expect(cli.getByRole("button", { name: "Stop CLI", exact: true })).toBeEnabled();

@@ -102,11 +102,14 @@ Codex uses its native app-server Unix socket. OpenCode uses a plugin inside
 its real TUI, tested against OpenCode 1.18.30's
 [public TUI plugin API](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/plugin/src/tui.ts).
 The plugin follows the TUI's active route, observes its native state, and uses
-its own prompt editor to preserve the selected model and agent. An empty UI
-session is created by OpenCode and selected in the TUI; saved sessions are
-never guessed from a list. The connection uses the same private Unix socket
+its own prompt editor to preserve the selected model and agent. Opening UI or
+returning to the home view does not create a conversation; the TUI creates
+one when the first prompt is submitted. Saved sessions are never guessed
+from a list. The connection uses the same private Unix socket
 transport as Pi/OMP, bounded history, native prompt receipts, and duplicate
-protection. Approval dialogs and existing CLI drafts stay in the CLI.
+protection. Approval dialogs, existing CLI drafts, shell mode, and slash
+commands stay in the CLI. A refused native submission clears only the
+unchanged text that this UI operation placed in that same native prompt.
 
 OpenCode loads the extra plugin with a private `OPENCODE_TUI_CONFIG` file;
 OpenCode still merges global and project settings. An explicitly configured

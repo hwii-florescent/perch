@@ -32,11 +32,13 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             } else {
                 AgentState::Done
             };
-            let changed = old.as_ref().is_none_or(|old| {
-                old.provider_session_id.as_deref() != Some(&snapshot.provider_session_id)
-                    || old.state != state
-            });
-            if changed {
+            // OpenCode's home view has no conversation yet. Keep the last real
+            // continuation until the TUI itself creates/selects another session.
+            let session_changed = !snapshot.provider_session_id.is_empty()
+                && old.as_ref().is_none_or(|old| {
+                    old.provider_session_id.as_deref() != Some(&snapshot.provider_session_id)
+                });
+            if session_changed {
                 if key.agent_id == "claude" {
                     let _ = app
                         .db
@@ -53,6 +55,8 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                 let _ = app
                     .agent_runtime
                     .record_provider_session_id(key, snapshot.provider_session_id.clone());
+            }
+            if session_changed || old.as_ref().is_none_or(|old| old.state != state) {
                 let _ = app.agent_runtime.lifecycle().transition(
                     key,
                     state,

@@ -41,6 +41,7 @@ export interface NativeUiSnapshot {
   version: number;
   revision: number;
   pid: number;
+  /** Empty on OpenCode's home view until the native TUI creates a conversation. */
   providerSessionId: string;
   cwd: string;
   model: string | null;

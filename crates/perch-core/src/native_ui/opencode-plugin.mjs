@@ -47,7 +47,6 @@ export default {
     let prompt;
     let promptSession;
     let stopped = false;
-    let creating = false;
     let revision = 0;
     let timer;
     let lastIdentity;
@@ -89,8 +88,8 @@ export default {
     }
     function snapshot() {
       const id = sessionID();
-      if (!id || !api.state.ready || !api.state.session.get(id)) return;
-      const messages = api.state.session.messages(id);
+      if (!api.state.ready || (id && !api.state.session.get(id))) return;
+      const messages = id ? api.state.session.messages(id) : [];
       const rows = [];
       let bytes = 0;
       let truncated = false;
@@ -101,12 +100,12 @@ export default {
         bytes += size;
         rows.unshift(...normalized);
       }
-      const status = api.state.session.status(id)?.type;
-      const session = api.state.session.get(id);
+      const status = id ? api.state.session.status(id)?.type : undefined;
+      const session = id ? api.state.session.get(id) : undefined;
       return { type: "snapshot", version: 1, revision: ++revision, pid: process.pid,
-        providerSessionId: id, cwd: clip(session.directory ?? api.state.path.directory, 4096),
+        providerSessionId: id ?? "", cwd: clip(session?.directory ?? api.state.path.directory, 4096),
         model: rows.findLast(row => row.model)?.model ?? null,
-        running: status === "busy" || status === "retry", messages: rows, truncated };
+        running: !!status && status !== "idle", messages: rows, truncated };
     }
     function publish() {
       timer = undefined;
@@ -121,6 +120,9 @@ export default {
       if (!pending) return;
       clearTimeout(pending.timer);
       const { client, requestId } = pending;
+      // Only clear text that this operation placed in this exact native ref.
+      // A changed draft, a different session, and attachments belong to the user.
+      if (!accepted && prompt === pending.prompt && sessionID() === pending.id && prompt.current.input === pending.text && !prompt.current.parts.length) prompt.reset();
       pending = undefined;
       const result = receipt(requestId, accepted, error);
       if (!client.destroyed) send(client, result);
@@ -132,8 +134,9 @@ export default {
       if (receipts.has(requestId)) return send(client, receipts.get(requestId));
       try {
         const id = sessionID();
-        if (!id || !api.state.session.get(id)) throw new Error("OpenCode session is not ready");
+        if (!api.state.ready || (id ? !api.state.session.get(id) : api.route.current.name !== "home")) throw new Error("OpenCode session is not ready");
         if (request.type === "cancel") {
+          if (!id) throw new Error("OpenCode has no active turn");
           const result = await api.client.session.abort({ sessionID: id }, { throwOnError: true });
           if (result.data !== true) throw new Error("OpenCode did not confirm cancellation");
           send(client, receipt(requestId, true));
@@ -142,13 +145,23 @@ export default {
         }
         if (request.type !== "prompt" || typeof request.text !== "string" || !request.text.trim() || Buffer.byteLength(request.text) > 64 * 1024) throw new Error("Invalid prompt");
         if (pending) throw new Error("Another prompt is awaiting native confirmation");
-        if (!prompt || promptSession !== id || api.ui.dialog.open || prompt.current.input || prompt.current.parts.length || prompt.current.mode === "shell") throw new Error("OpenCode has a draft or dialog open; finish it in CLI mode first");
+        if (!prompt || promptSession !== id || api.ui.dialog.open || prompt.current.input || prompt.current.parts.length) throw new Error("OpenCode has a draft or dialog open; finish it in CLI mode first");
+        // OpenCode 1.18's ref.current omits its actual shell mode. The active
+        // native 'Shell mode' binding exists ONLY in an empty, focused normal
+        // prompt with no autocomplete. Require that positive proof; an unknown
+        // keymap is refused rather than submitting user text as a shell command.
+        // ponytail: pinned native binding metadata; replace with ref.current.mode
+        // when OpenCode exposes that value correctly through its public API.
+        if (!api.keymap.getActiveKeys({ includeBindings: true }).some(key => key.bindings?.some(binding => binding.attrs?.desc === "Shell mode"))) throw new Error("OpenCode is not in its normal prompt mode; return to the empty CLI prompt first");
+        request.text = request.text.replace(/\r\n?/g, "\n");
+        if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(request.text)) throw new Error("Prompt contains terminal control characters");
+        if (request.text.startsWith("/")) throw new Error("Run OpenCode slash commands in CLI mode");
         if (["exit", "quit", ":q"].includes(request.text.trim())) throw new Error("Close the session with Stop CLI");
         // A receipt is confirmed only by the resulting native user message.
         // Uncertain delivery is retained so reconnect/retry never resubmits it.
         receipt(requestId, false, "Native prompt delivery has not been confirmed; check the CLI before sending again");
-        pending = { client, requestId, id, text: request.text, before: new Set(api.state.session.messages(id).map(message => message.id)), timer: setTimeout(() => finish(false, "OpenCode did not confirm the prompt; check the CLI before sending again"), 10_000) };
-        prompt.set({ input: request.text, parts: [], mode: "normal" });
+        pending = { client, requestId, id, prompt, text: request.text, created: new Set(), before: new Set((id ? api.state.session.messages(id) : []).map(message => message.id)), timer: setTimeout(() => finish(false, "OpenCode did not confirm the prompt; check the CLI before sending again"), 7000) };
+        prompt.set({ input: request.text, parts: [] });
         prompt.submit();
       } catch (error) {
         if (pending?.requestId === requestId) finish(false, error.message);
@@ -158,6 +171,10 @@ export default {
     for (const type of ["message.updated", "message.part.updated", "message.part.delta", "message.part.removed", "message.removed", "session.status", "session.updated", "session.error", "permission.asked", "permission.replied"]) {
       api.event.on(type, () => schedule());
     }
+    api.event.on("session.created", event => {
+      if (pending && !pending.id && pending.created.size < 16) pending.created.add(event.properties.info.id);
+      schedule();
+    });
     // Only route/receipt metadata is polled. Transcript projection is batched
     // on native events; an idle session does not serialize history repeatedly.
     const poll = setInterval(() => {
@@ -165,16 +182,9 @@ export default {
       const id = sessionID();
       if (id !== lastIdentity) { lastIdentity = id; schedule(); }
       if (pending) {
+        if (!pending.id && id && pending.created.has(id)) pending.id = id;
         if (id !== pending.id) finish(false, "The CLI changed sessions before confirming the prompt");
-        else if (api.state.session.messages(id).some(message => message.role === "user" && !pending.before.has(message.id) && api.state.part(message.id).filter(part => part.type === "text" && !part.synthetic && !part.ignored).map(part => part.text).join("") === pending.text)) finish(true);
-      }
-      if (!id && api.route.current.name === "home" && api.state.ready && clients.size && !creating && !api.ui.dialog.open && prompt && !prompt.current.input && !prompt.current.parts.length) {
-        creating = true;
-        // Materialize one empty native session for UI-first input, then make
-        // the TUI itself select it. Never select from persisted session lists.
-        api.client.session.create({}, { throwOnError: true }).then(result => {
-          if (!stopped && api.route.current.name === "home" && !prompt?.current.input) api.route.navigate("session", { sessionID: result.data.id });
-        }).catch(() => { for (const client of clients) client.destroy(); }).finally(() => { creating = false; schedule(); });
+        else if (id && api.state.session.messages(id).some(message => message.role === "user" && !pending.before.has(message.id) && api.state.part(message.id).filter(part => part.type === "text" && !part.synthetic && !part.ignored).map(part => part.text).join("") === pending.text)) finish(true);
       }
     }, 250);
     poll.unref?.();

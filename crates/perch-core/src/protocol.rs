@@ -564,6 +564,7 @@ pub struct NativeUiSnapshot {
     pub version: u32,
     pub revision: u64,
     pub pid: u32,
+    /// Empty on OpenCode's home view until the native TUI creates a conversation.
     pub provider_session_id: String,
     pub cwd: String,
     pub model: Option<String>,
