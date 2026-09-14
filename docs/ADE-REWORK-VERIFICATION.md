@@ -129,7 +129,8 @@ build, formatting, and Clippy with the five existing warnings passed. Logs:
 `/tmp/perch-native-review-browser-final.log`.
 
 V-08 remains partial across the complete provider requirement: native Pi/OMP
-are verified, while native Claude Code/Codex/OpenCode are still pending. This
+and the Claude/Codex bridge paths are implemented, while complete Codex review
+delivery and real OpenCode provider acceptance remain unverified. This
 loopback phone check does not establish secure pairing or remote delivery.
 
 ## Native Pi/OMP UI checkpoint — 2026-09-12
@@ -734,11 +735,11 @@ verification.
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | UNVERIFIED |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
-| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Codex/OpenCode and full UI controls remain |
+| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Codex basic Chromium path passes, while extended Codex/WebKit and OpenCode real-provider checks remain |
 | V-05 tree, sentinel edit, save, disk/status verification | PARTIAL (file/tree/save and Git status/diff observed separately; combined edit/save/status gate remains) |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
-| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; native Codex/OpenCode remain |
+| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; Codex/OpenCode review delivery remains unverified |
 | V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Claude/Pi/OMP same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
 | V-10 paired mobile interaction and reconnect | UNVERIFIED |
 | V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |

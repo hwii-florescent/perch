@@ -88,7 +88,7 @@ async fn http(port: u16, method: &str, path: &str, body: Option<&Value>) -> anyh
     if bytes.len() == split + 4 {
         return Ok(Value::Null);
     }
-    Ok(serde_json::from_slice(&bytes[split + 4..]).context("invalid OpenCode JSON")?)
+    serde_json::from_slice(&bytes[split + 4..]).context("invalid OpenCode JSON")
 }
 
 fn text(value: &Value, limit: usize) -> String {
