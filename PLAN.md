@@ -209,6 +209,15 @@ and real headless provider validation are recorded in the verification report.
 This supersedes the initial HTTP-adapter checkpoint; full SPEC gates remain
 open.
 
+The hardened OpenCode native UI suite passes in Chromium and WebKit, including
+shell-mode refusal, native home/new-session behavior, same-PID core recovery,
+phone input ownership, cancellation and process exit. Two-note phone review
+delivery and receipt-confirmed duplicate prevention also pass in both engines.
+The Rust suite passes 259 core and two protocol tests; the standalone plugin
+check covers the native API edge cases and bounds. Formatting is clean and
+Clippy remains at its five baseline warnings. See the 2026-09-14 OpenCode
+section in `docs/ADE-REWORK-VERIFICATION.md` for commands and evidence.
+
 Orca catalog and launcher checkpoint, 2026-09-11: all 36 MIT-attributed
 catalog entries are now wired through the provider registry, the shared
 detection/launch resolver, host-persisted enabled/default preferences, and

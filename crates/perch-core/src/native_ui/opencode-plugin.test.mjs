@@ -124,6 +124,16 @@ try {
   assert.equal((await request("rejected-native-submit", "prompt", "not sent")).accepted, false);
   assert.equal(promptRef.current.input, "");
   assert.equal(submits, 2);
+  rows.length = 0;
+  for (let i = 0; i < 100; i++) {
+    const id = `large_${i}`;
+    rows.push({ id, role: "assistant" });
+    parts.set(id, [{ type: "text", text: "é".repeat(20_000) }]);
+  }
+  events.get("message.updated")();
+  await until(() => received.at(-1).truncated === true);
+  assert.ok(Buffer.byteLength(JSON.stringify(received.at(-1).messages)) <= 192 * 1024);
+  assert.ok(received.at(-1).messages.length <= 128);
   console.log("OpenCode plugin: bounds, exact route, home view, shell-mode guard, draft safety, native receipts, retry, rejected-submit cleanup, and cancellation passed");
 } finally {
   peer?.destroy(); dispose?.(); fs.rmSync(dir, { recursive: true, force: true });

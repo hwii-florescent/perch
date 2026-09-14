@@ -728,6 +728,85 @@ also passes. Review batch delivery is intentionally not marked successful:
 the provider-acceptance/receipt path still needs an integrated real-agent
 verification.
 
+### OpenCode review and native TUI acceptance — 2026-09-14
+
+Review of Luna's HTTP adapter found unsafe PID-based termination before the
+live-socket guard, arbitrary selection of saved OpenCode sessions, port
+collisions/foreign-server adoption, incompatible launch arguments, unbounded
+HTTP reads, incomplete projection bounds, and continuous idle broadcasts.
+The HTTP adapter and PID reaper were removed. Commits `cab173f`, `8f87ecd`,
+and `e410a79` preserve live native processes and replace the adapter with a
+plugin inside the real OpenCode TUI, using Perch's existing private socket
+transport. No additional OpenCode server or model loop is started.
+
+Two completed `claude -p ... --model opus` reviews are saved locally as
+`.impeccable/review/opencode-native-opus-review.md` and
+`.impeccable/review/opencode-tui-opus-review.md`. The older
+`opencode-native-review.md` was agent-written after a stopped review process;
+that file now records its provenance correction. The second actual review
+identified a false shell-mode guard and eager home-screen session creation.
+The fixes require positive native keymap evidence of an empty normal prompt,
+keep the native home view empty, and let OpenCode create the conversation on
+the first real prompt. Empty home snapshots never overwrite the last real
+continuation identity. The public prompt ref's missing mode field is not
+trusted. A rejected submission clears only this operation's unchanged text
+in the same native ref, and its receipt timeout precedes the Rust timeout.
+Slash commands remain in CLI mode rather than receiving a guessed receipt.
+
+Validation used OpenCode **1.18.30**, installed only under
+`/tmp/perch-opencode-runtime`, with its native Big Pickle default. The app's
+provider catalog and the user's model/auth/settings files were not edited
+for these tests. All browser interaction was headless and did not focus an
+external window. Commands (with the temporary native binary directory on PATH):
+
+```text
+cargo test -p perch-core
+node crates/perch-core/src/native_ui/opencode-plugin.test.mjs
+cargo fmt --check
+cargo clippy -p perch-core --all-targets
+cargo build -p perch-core
+cd e2e
+npx playwright test --config=native-ui.config.ts -g 'opencode:'
+npx playwright test --config=native-review.config.ts -g 'opencode:'
+```
+
+The full Rust run passed **259 core tests and two protocol tests**. The
+focused native checks passed after the final startup-diagnostic change.
+Formatting passes; Clippy retains exactly the five baseline warnings. The
+standalone plugin check covers UTF-8/history bounds, hidden parts, exact TUI
+route selection, idle behavior, shell-mode refusal with no `current.mode`,
+home view without session creation, first native submission, draft safety,
+duplicate receipts, rejected-submit cleanup, and native cancellation results.
+
+The hardened UI suite passed **Chromium (19.1 s) and WebKit (23.1 s)**:
+UI-first native file-tool prompt; CLI follow-up in the same conversation;
+web prompt refusal while the real CLI is in shell mode; native and web draft
+preservation; core SIGKILL/restart with the same native PID/session; phone
+ownership transfer and prompt; native `sleep 20` cancellation; `/new` showing
+the native home view followed by a new CLI-owned conversation; and Stop CLI
+terminating the actual native process. Desktop/mobile captures were visually
+inspected, including long-path wrapping and reachable input/control buttons:
+`.impeccable/review/native-ui-opencode-chromium.png` and
+`.impeccable/review/native-ui-opencode-mobile-webkit.png`.
+
+The final review-packet run passed **Chromium (11.3 s) and WebKit (13.4 s)**
+with the hardened adapter; results are in
+`/tmp/perch-opencode-reviewed-delivery.json`. It checks two anchored notes
+sent from a separate phone browser, refusal while the desktop owns control,
+release/retry, native receipt and response, duplicate prevention, unchanged
+fixture files, and the same native PID/session. Earlier runs exposed test
+races around cross-browser control release and native Escape parsing; the
+checks now wait for the observed state before the next action. Fixture paths
+are canonical because OpenCode treats macOS's `/var` alias as external to a
+`/private/var` workspace and correctly prompts for permission.
+
+Remaining limits: OpenCode versions without this public TUI plugin API,
+`--pure`, `--mini`, and explicit custom `OPENCODE_TUI_CONFIG` launches remain
+CLI-only. The custom config is preserved and reported in the UI instead of
+being replaced. Native approval dialogs, shell mode, and slash commands stay
+in the CLI. Full model/attachment/approval/queue controls, Codex's remaining
+acceptance, remote compatibility, and the other SPEC gates remain open.
+
 ### Acceptance matrix
 
 | Gate | Current disposition |
@@ -735,12 +814,12 @@ verification.
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | UNVERIFIED |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
-| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP native UI/CLI turns and same-PID core recovery pass in both engines; Codex basic Chromium path passes, while extended Codex/WebKit and OpenCode real-provider checks remain |
+| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP/OpenCode native UI/CLI turns and same-PID core recovery pass in both engines; OpenCode shell-mode refusal and native home/new-session flow pass; Codex basic Chromium passes, extended Codex/WebKit checks remain |
 | V-05 tree, sentinel edit, save, disk/status verification | PARTIAL (file/tree/save and Git status/diff observed separately; combined edit/save/status gate remains) |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
-| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; Codex/OpenCode review delivery remains unverified |
-| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Claude/Pi/OMP same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
+| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; Codex review delivery remains unverified |
+| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Claude/Pi/OMP/OpenCode same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
 | V-10 paired mobile interaction and reconnect | UNVERIFIED |
 | V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |
 | V-12 safe hibernation and resume | UNVERIFIED |
