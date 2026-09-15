@@ -119,7 +119,14 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const openMenu = useCallback(() => {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      setPopoverStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, zIndex: 9999 });
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      setPopoverStyle({
+        position: "fixed", zIndex: 9999,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - Math.min(420, window.innerWidth - 16) - 8)),
+        ...(below >= above ? { top: rect.bottom + 4 } : { bottom: window.innerHeight - rect.top + 4 }),
+        maxHeight: Math.max(0, Math.max(above, below)), overflowY: "auto",
+      });
     }
     setOpen(true);
     setShowCreateForm(false);
@@ -175,7 +182,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
 
   function handleOpenWorktree(entry: WorktreeEntry) {
     setOpen(false);
-    createSessionOnHost(hostId, entry.path);
+    createSessionOnHost(hostId, entry.path, undefined, "cli");
   }
 
   async function submitCreate() {
@@ -224,6 +231,8 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     ? createPortal(
         <div
           className="worktree-menu__popover"
+          role="dialog"
+          aria-label="Git worktrees"
           data-testid={`worktree-popover-${hostId}-${cwd}`}
           ref={popoverRef}
           style={popoverStyle}
@@ -278,7 +287,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                       className="worktree-menu__action"
                       data-testid={`worktree-open-${entry.path}`}
                       onClick={() => handleOpenWorktree(entry)}
-                      title="New session in this worktree"
+                      title="New CLI session in this worktree"
                     >
                       Open
                     </button>
@@ -315,6 +324,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                 className="worktree-menu__input"
                 data-testid="worktree-branch-input"
                 placeholder="branch name"
+                aria-label="Branch name"
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 onKeyDown={(e) => {
@@ -335,6 +345,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                 type="text"
                 className="worktree-menu__input"
                 data-testid="worktree-path-input"
+                aria-label="Checkout path"
                 placeholder={defaultRoot ? `${defaultRoot}/<branch>` : "custom path (optional)"}
                 value={customPath}
                 onChange={(e) => {
@@ -351,6 +362,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   type="button"
                   className="worktree-menu__action"
                   data-testid="worktree-create-cancel"
+                  disabled={creating}
                   onClick={() => setShowCreateForm(false)}
                 >
                   Cancel
@@ -394,6 +406,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
         onClick={handleBtnClick}
         title="Git worktrees"
         aria-label="Git worktrees"
+        aria-expanded={open}
       >
         ⑂
       </button>

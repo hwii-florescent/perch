@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
+import { WorktreeMenu } from "./WorktreeMenu";
 import type { SessionSummary } from "@perch/shared";
 
 function basename(path: string): string {
@@ -116,10 +117,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       onNavigate?.();
       return;
     }
-    const nextSession = sessionsForWorkspace(sessions, workspace).find(
-      (candidate) => candidate.id !== sessionId,
-    );
-    if (nextSession) switchSession(nextSession.id);
+    const workspaceSessions = sessionsForWorkspace(sessions, workspace);
+    if (!workspaceSessions.some((candidate) => candidate.id === sessionId) && workspaceSessions[0]) {
+      switchSession(workspaceSessions[0].id);
+    }
     onNavigate?.();
   }
 
@@ -224,6 +225,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
+                <div className="workspace-project__header">
                 <button
                   type="button"
                   className="workspace-project__button"
@@ -238,7 +240,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   </span>
                   <span className="workspace-project__chevron" aria-hidden="true">›</span>
                 </button>
-
+                {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
+                </div>
                 {projectWorkspaces.length > 0 && (
                   <div className="workspace-project__workspaces">
                     {projectWorkspaces.map((workspace) => {
@@ -262,6 +265,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               {workspace.state === "sleeping" ? "sleeping" : workspace.dirty ? "dirty" : "ready"}
                             </span>
                           </button>
+                          <div className="workspace-entry__actions">
                           <button
                             type="button"
                             className="workspace-entry__files"
@@ -290,6 +294,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             Git
                           </button>
+                          </div>
                           {workspace.state === "sleeping" && (
                             <button
                               type="button"

@@ -8,6 +8,7 @@
  * alone.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -30,11 +31,35 @@ interface DurableBuffer {
   conflict: boolean;
 }
 
+/** V-05 asks for the dirty/status update as well as the on-disk change, so the
+ * fixture is a real repository with the sentinel committed: a save has to move
+ * the file from clean to modified in the Git surface. `input: ""` plus a timeout
+ * mirrors worktrees.spec.ts — this machine has githooks middleware that reads
+ * stdin and would otherwise hang the synchronous call. */
+function git(args: string, cwd: string): void {
+  execSync(`git ${args}`, {
+    cwd,
+    stdio: "pipe",
+    input: "",
+    timeout: 15000,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "perch e2e",
+      GIT_AUTHOR_EMAIL: "e2e@perch.test",
+      GIT_COMMITTER_NAME: "perch e2e",
+      GIT_COMMITTER_EMAIL: "e2e@perch.test",
+    },
+  });
+}
+
 function prepareFixture(): void {
   fs.rmSync(FIXTURE_ROOT, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(FILE_PATH), { recursive: true });
   fs.writeFileSync(path.join(FIXTURE_ROOT, "README.md"), "files fixture\n");
   fs.writeFileSync(FILE_PATH, "initial sentinel\n");
+  git("-c init.defaultBranch=main init -q", FIXTURE_ROOT);
+  git("add -A", FIXTURE_ROOT);
+  git('commit -q -m "initial"', FIXTURE_ROOT);
 }
 
 function removeFixture(): void {
@@ -196,6 +221,27 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect.poll(() => fs.readFileSync(FILE_PATH, "utf8"), { timeout: 15000 }).toBe("saved sentinel\n");
       await expect(restoredEditor).toHaveValue("saved sentinel\n");
 
+      // The save must be visible as a Git change, not just as bytes on disk —
+      // this is the combined edit/save/status half of V-05.
+      await project.locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
+      await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
+      await page.getByTestId("git-refresh").click();
+      await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE, { timeout: 15000 });
+      const changedFile = page.getByTestId("git-diff-file").filter({ hasText: RELATIVE_FILE });
+      await expect(changedFile).toHaveCount(1, { timeout: 15000 });
+      await expect(changedFile).toContainText("modified");
+      await expect(page.getByTestId("git-diff")).toContainText("saved sentinel", { timeout: 15000 });
+      await page.screenshot({ path: testInfo.outputPath("files-durable-status.png"), fullPage: true });
+
+      // Back to the editor for the external-conflict half.
+      await project.locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
+      await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
+      if (!(await page.getByTestId("workspace-file-entry-src/main.txt").count())) {
+        await page.getByTestId("workspace-file-entry-src").click();
+      }
+      await page.getByTestId("workspace-file-entry-src/main.txt").click();
+      await expect(restoredEditor).toHaveValue("saved sentinel\n", { timeout: 15000 });
+
       // An external write must preserve the editor draft and offer explicit
       // compare/reload/overwrite actions rather than silently replacing it.
       await restoredEditor.fill("local draft after save\n");
@@ -223,6 +269,19 @@ test.describe("V-05/V-06 durable file workflow", () => {
       expect(reloaded.conflict).toBe(false);
 
       await page.setViewportSize({ width: 390, height: 844 });
+      // The mobile shell mounts exactly one surface (responsive.spec.ts R2b) and
+      // opens on Chat, so the editor is genuinely unmounted until the Files pane
+      // is selected. Drive the real switcher rather than assuming the desktop
+      // pane survived the resize.
+      await page.getByTestId("mobile-pane-files").click();
+      await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
+      // The mobile file surface opens on the Explorer half with no selection, so
+      // walk the nested tree the way a phone user would before the editor exists.
+      await page.getByTestId("workspace-file-entry-src").click();
+      await page.getByTestId("workspace-file-entry-src/main.txt").click();
+      const mobileEditor = page.getByTestId("workspace-file-editor");
+      await expect(mobileEditor).toBeVisible({ timeout: 15000 });
+      await expect(mobileEditor).toHaveValue("external sentinel\n", { timeout: 15000 });
       await page.screenshot({ path: testInfo.outputPath("files-durable-mobile.png"), fullPage: true });
       const mobileBounds = await page.evaluate(() => {
         const save = document.querySelector(".workspace-files__save")?.getBoundingClientRect();

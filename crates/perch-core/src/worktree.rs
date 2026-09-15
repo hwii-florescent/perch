@@ -407,6 +407,9 @@ pub async fn create(
     if branch.is_empty() {
         return Err(WorktreeOpError::plain("branch is required"));
     }
+    run_git(&["check-ref-format", "--branch", branch], GIT_QUICK_TIMEOUT)
+        .await
+        .map_err(WorktreeOpError::plain)?;
 
     // Normalize to the parent checkout so the default location is named after
     // the repo, not after whichever linked worktree the user started from.
@@ -438,6 +441,20 @@ pub async fn create(
     }
 
     let target_str = target.to_string_lossy().to_string();
+    // A lost success reply or a failed metadata write must be retryable without
+    // creating a second checkout. Reuse only Git's matching path AND branch.
+    if target.exists() {
+        let listing = list(&primary).await.map_err(WorktreeOpError::plain)?;
+        if listing.worktrees.iter().any(|entry| {
+            !entry.is_primary
+                && canonical_or_original(Path::new(&entry.path)) == canonical_or_original(&target)
+                && entry.branch.as_deref() == Some(branch)
+        }) {
+            return Ok(canonical_or_original(&target)
+                .to_string_lossy()
+                .into_owned());
+        }
+    }
     let branch_exists = run_git(
         &[
             "-C",

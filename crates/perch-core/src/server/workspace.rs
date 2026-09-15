@@ -280,6 +280,98 @@ pub(super) fn effective_focus(
         .unwrap_or((None, None))
 }
 
+/// Whether a stored workspace row already reflects `entry`, so registering it
+/// again would write nothing. Mirrors the SQL in `create_worktree_workspace`
+/// and `update_workspace_git_state`: `branch`/`base_branch` are `COALESCE`d
+/// (a `None` never clears a stored value), `start_snapshot` is first-write-
+/// wins, and `dirty` is a plain overwrite.
+fn workspace_matches_worktree(
+    row: &crate::db::WorkspaceRow,
+    entry: &crate::worktree::WorktreeInfo,
+) -> bool {
+    let branch_current = entry.branch.is_none() || entry.branch == row.branch;
+    let snapshot_current = row.start_snapshot.is_some() || entry.head.is_none();
+    branch_current && snapshot_current && row.dirty == entry.is_dirty
+}
+
+/// Register every checkout in `listing` as a workspace under the repo's
+/// project, returning the wire rows in listing order.
+///
+/// `worktree.list` is a read path — opening the worktree menu must not cost a
+/// write and a `WorkspaceUpdated` fan-out per checkout every time. One read of
+/// the local workspaces establishes what is already registered; an entry whose
+/// stored row already matches is returned from that read untouched, so an
+/// unchanged listing does no writes and broadcasts nothing.
+fn register_worktree_listing(
+    app: &AppState,
+    listing: &crate::worktree::WorktreeListing,
+) -> anyhow::Result<Vec<WorkspaceSummary>> {
+    let primary = listing
+        .worktrees
+        .iter()
+        .find(|entry| entry.is_primary)
+        .ok_or_else(|| anyhow::anyhow!("repository has no primary checkout"))?;
+    let _guard = app.foundation_lock.lock().unwrap();
+    let known: std::collections::HashMap<String, crate::db::WorkspaceRow> = app
+        .db
+        .list_workspaces("local", None)?
+        .into_iter()
+        .map(|row| (row.path.clone(), row))
+        .collect();
+    let mut workspaces = Vec::new();
+    for entry in &listing.worktrees {
+        let path = crate::db::canonical_path_for_host("local", &entry.path);
+        if let Some(current) = known
+            .get(&path)
+            .filter(|row| workspace_matches_worktree(row, entry))
+        {
+            workspaces.push(workspace_to_wire(current.clone()));
+            continue;
+        }
+        let workspace = app.db.create_worktree_workspace(
+            "local",
+            &primary.path,
+            &entry.path,
+            entry.branch.as_deref(),
+            None,
+            entry.head.as_deref(),
+        )?;
+        let workspace = app.db.update_workspace_git_state(
+            &workspace.id,
+            entry.branch.as_deref(),
+            None,
+            entry.is_dirty,
+            entry.head.as_deref(),
+        )?;
+        let project = app
+            .db
+            .get_project(&workspace.project_id)?
+            .ok_or_else(|| anyhow::anyhow!("worktree project disappeared"))?;
+        let revision = next_snapshot_revision_locked(app);
+        broadcast_foundation(
+            app,
+            ServerMessage::ProjectUpdated {
+                request_id: None,
+                project: project_to_wire(project),
+                snapshot_epoch: app.snapshot_epoch.clone(),
+                snapshot_revision: revision,
+            },
+        );
+        let workspace = workspace_to_wire(workspace);
+        broadcast_foundation(
+            app,
+            ServerMessage::WorkspaceUpdated {
+                request_id: None,
+                workspace: workspace.clone(),
+                snapshot_epoch: app.snapshot_epoch.clone(),
+                snapshot_revision: revision,
+            },
+        );
+        workspaces.push(workspace);
+    }
+    Ok(workspaces)
+}
+
 pub(super) fn handle_worktree_list(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -291,9 +383,16 @@ pub(super) fn handle_worktree_list(
         return;
     }
     let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
     tokio::spawn(async move {
         match crate::worktree::list(&repo_path).await {
             Ok(listing) => {
+                // Registration is a side effect of a read. Git already told us
+                // what the checkouts are, so a DB failure here must not blank
+                // the worktree menu — log it and still answer the listing.
+                if let Err(error) = register_worktree_listing(&app, &listing) {
+                    tracing::warn!(%repo_path, %error, "could not register worktree checkouts");
+                }
                 let _ = out_tx.send(ServerMessage::WorktreeListResult {
                     request_id,
                     host_id: "local".to_string(),
@@ -339,22 +438,39 @@ pub(super) fn handle_worktree_create(
         return;
     }
     let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
     tokio::spawn(async move {
-        let result =
-            crate::worktree::create(&repo_path, &branch, new_branch, path.as_deref()).await;
+        let result = async {
+            let created = crate::worktree::create(&repo_path, &branch, new_branch, path.as_deref())
+                .await
+                .map_err(|error| anyhow::anyhow!(error.message))?;
+            let listing = crate::worktree::list(&repo_path)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            let workspaces = register_worktree_listing(&app, &listing)?;
+            let canonical = crate::db::canonical_path_for_host("local", &created);
+            let workspace = workspaces
+                .into_iter()
+                .find(|workspace| workspace.path == canonical)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("created checkout is missing from the workspace list")
+                })?;
+            anyhow::Ok((canonical, workspace))
+        }
+        .await;
         let _ = out_tx.send(match result {
-            Ok(created) => ServerMessage::WorktreeDone {
+            Ok((created, workspace)) => ServerMessage::WorktreeDone {
                 request_id,
                 host_id: "local".to_string(),
                 action: "create".to_string(),
                 path: created,
-                workspace: None,
+                workspace: Some(workspace),
             },
             Err(err) => ServerMessage::WorktreeError {
                 request_id,
                 host_id: "local".to_string(),
-                message: err.message,
-                dirty: err.dirty,
+                message: err.to_string(),
+                dirty: false,
             },
         });
     });
@@ -787,5 +903,85 @@ pub(super) fn handle_workspace_restore(
                 false,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod worktree_registration_tests {
+    use super::*;
+
+    fn row(
+        branch: Option<&str>,
+        dirty: bool,
+        start_snapshot: Option<&str>,
+    ) -> crate::db::WorkspaceRow {
+        crate::db::WorkspaceRow {
+            id: "w1".into(),
+            project_id: "p1".into(),
+            host_id: "local".into(),
+            path: "/repo/wt".into(),
+            name: "wt".into(),
+            branch: branch.map(str::to_string),
+            base_branch: None,
+            dirty,
+            start_snapshot: start_snapshot.map(str::to_string),
+            parent_workspace_id: Some("w0".into()),
+            state: "active".into(),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn info(
+        branch: Option<&str>,
+        dirty: bool,
+        head: Option<&str>,
+    ) -> crate::worktree::WorktreeInfo {
+        crate::worktree::WorktreeInfo {
+            path: "/repo/wt".into(),
+            branch: branch.map(str::to_string),
+            head: head.map(str::to_string),
+            is_primary: false,
+            is_dirty: dirty,
+        }
+    }
+
+    /// The skip must be exact: a row that is *not* current has to be written and
+    /// broadcast, or the menu keeps showing a stale branch/dirty marker.
+    #[test]
+    fn only_a_row_git_would_not_change_is_treated_as_current() {
+        assert!(workspace_matches_worktree(
+            &row(Some("feat"), true, Some("sha1")),
+            &info(Some("feat"), true, Some("sha1"))
+        ));
+        // dirty is a plain overwrite, so any difference needs the write.
+        assert!(!workspace_matches_worktree(
+            &row(Some("feat"), false, Some("sha1")),
+            &info(Some("feat"), true, Some("sha1"))
+        ));
+        // A moved branch needs the write.
+        assert!(!workspace_matches_worktree(
+            &row(Some("feat"), true, Some("sha1")),
+            &info(Some("other"), true, Some("sha1"))
+        ));
+        // Detached HEAD sends branch: None, which COALESCE would not clear.
+        assert!(workspace_matches_worktree(
+            &row(Some("feat"), true, Some("sha1")),
+            &info(None, true, Some("sha1"))
+        ));
+        // start_snapshot is first-write-wins: unset + a head still needs it,
+        // already set never changes again.
+        assert!(!workspace_matches_worktree(
+            &row(Some("feat"), true, None),
+            &info(Some("feat"), true, Some("sha1"))
+        ));
+        assert!(workspace_matches_worktree(
+            &row(Some("feat"), true, None),
+            &info(Some("feat"), true, None)
+        ));
+        assert!(workspace_matches_worktree(
+            &row(Some("feat"), true, Some("sha1")),
+            &info(Some("feat"), true, Some("sha2"))
+        ));
     }
 }

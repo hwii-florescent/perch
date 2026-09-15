@@ -561,10 +561,17 @@ body {
 }
 
 .workspace-project__button {
+  flex: 1;
   gap: 0.45rem;
   padding: 0.5rem 0.55rem 0.45rem 0.65rem;
   background: transparent;
   color: var(--text);
+}
+
+.workspace-project__header {
+  display: flex;
+  align-items: center;
+  padding-right: 0.35rem;
 }
 
 .workspace-project__button:hover,
@@ -666,10 +673,19 @@ body {
   font-size: 0.6rem;
 }
 
-.workspace-entry__files {
+/* Files and Git share one anchored row. They used to carry the absolute
+ * positioning individually, which stacked them in the same corner: the later
+ * Git button covered Files completely, so a real click on Files always landed
+ * on Git. */
+.workspace-entry__actions {
   position: absolute;
   right: 0.3rem;
   bottom: 0.3rem;
+  display: flex;
+  gap: 0.2rem;
+}
+
+.workspace-entry__files {
   padding: 0.14rem 0.28rem;
   background: transparent;
   border: 1px solid transparent;
@@ -5513,8 +5529,7 @@ body {
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   overflow: hidden;
-  min-width: 280px;
-  max-width: 420px;
+  width: min(420px, calc(100vw - 16px));
 }
 
 .worktree-menu__header {

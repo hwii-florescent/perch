@@ -404,6 +404,8 @@ function ProjectSubline({ projectKey, hostId, cwd }: { projectKey: string; hostI
  * without first switching projects. */
 function ProjectWorktrees({ projectKey, hostId, cwd }: { projectKey: string; hostId: string; cwd: string }) {
   const git = usePerchStore((s) => s.workspaceGit[projectKey]);
+  const registered = usePerchStore((s) => s.workspaceProjects.some((project) => project.hostId === hostId && project.repoPath === cwd && !project.archived));
+  if (registered) return null; // The project rail owns this menu and shortcut.
   // Non-git projects have no worktrees (backend `worktree.rs list` errors on a
   // non-git cwd, matching herdr's `not_git_worktree` guard). Rather than hide
   // the affordance entirely — which left users guessing why the branch glyph

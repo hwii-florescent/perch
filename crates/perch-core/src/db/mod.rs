@@ -663,6 +663,20 @@ fn ensure_project_workspace_locked(
 ) -> anyhow::Result<(String, String)> {
     let host_id = normalized_host_id(host_id);
     let path = canonical_path_for_host(host_id, raw_path);
+    // A registered linked checkout already belongs to its primary project.
+    // Session creation and legacy import must reuse that pair before trying
+    // to mint a standalone project at the checkout path.
+    if let Some(pair) = conn
+        .query_row(
+            "SELECT project_id, id FROM workspaces WHERE host_id = ?1 AND path = ?2
+         ORDER BY created_at ASC, id ASC LIMIT 1",
+            params![host_id, path],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+    {
+        return Ok(pair);
+    }
     let existing_project: Option<(String, bool)> = {
         let mut stmt =
             conn.prepare("SELECT id, archived FROM projects WHERE host_id = ?1 AND path = ?2")?;
@@ -710,24 +724,7 @@ fn ensure_project_workspace_locked(
         id
     };
 
-    let workspace_id: Option<(String, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, project_id FROM workspaces WHERE host_id = ?1 AND path = ?2
-             ORDER BY created_at ASC, id ASC LIMIT 1",
-        )?;
-        let mut rows = stmt.query(params![host_id, path])?;
-        rows.next()?
-            .map(|row| Ok::<(String, String), rusqlite::Error>((row.get(0)?, row.get(1)?)))
-            .transpose()?
-    };
-    let workspace_id = if let Some((id, workspace_project_id)) = workspace_id {
-        if workspace_project_id != project_id {
-            return Err(anyhow::anyhow!(
-                "workspace path already belongs to another project"
-            ));
-        }
-        id
-    } else {
+    let workspace_id = {
         let id = Uuid::new_v4().to_string();
         let now = now_millis();
         let name = project_name_for_path(&path);
@@ -1170,6 +1167,15 @@ mod tests {
             .unwrap();
         assert_eq!(same.id, child.id);
         assert_eq!(same.start_snapshot.as_deref(), Some("head-1"));
+        db.create_session("linked-session", &child_dir.to_string_lossy())
+            .unwrap();
+        let session = db.get_session("linked-session").unwrap().unwrap();
+        assert_eq!(session.workspace_id.as_deref(), Some(child.id.as_str()));
+        assert_eq!(
+            session.project_id.as_deref(),
+            Some(child.project_id.as_str())
+        );
+        assert_eq!(db.list_projects("local", true).unwrap().len(), 1);
 
         let updated = db
             .update_workspace_git_state(

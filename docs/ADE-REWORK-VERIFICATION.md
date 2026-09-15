@@ -3,6 +3,143 @@
 Status: in progress. The complete contract remains `goals.md` and `SPEC.md`.
 No acceptance exception has been approved. No rework phase is complete yet.
 
+## Combined file workflow and mixed-recovery checkpoint — 2026-09-14
+
+### V-05 — PASS
+
+`workspace-files-durable.spec.ts` already covered the tree/draft/conflict half.
+The gate's missing piece was the *combined* edit → save → **status** path, so the
+fixture is now a real repository with the sentinel committed, and the spec asserts
+after the save that the Git surface reports the change: `1 changed path`,
+`modified src/main.txt` in `git-status`, exactly one `git-diff-file` row for that
+path labelled `modified`, and a diff body containing the saved text. Capture:
+`files-durable-status.png` (status rail, `− initial sentinel` / `+ saved sentinel`,
+Dirty badge). The spec then returns to the editor and finishes the existing
+external-conflict flow, so one run now spans nested tree expansion, open, edit,
+save, on-disk bytes, Git status/diff, reload, conflict compare/keep/discard, and
+the phone-width file surface.
+
+Two defects had to be fixed first; both reproduce on a clean `HEAD`, so neither
+came from the worktree work:
+
+1. **"Files" was unclickable wherever a workspace row rendered.** `Files` and
+   `Git` both carry `.workspace-entry__files`, which was `position: absolute`
+   at `right/bottom: 0.3rem` — so the two buttons stacked in the same corner and
+   the later `Git` button covered `Files` completely. Playwright reported it as
+   `workspace-entry__git intercepts pointer events`; a user clicking Files would
+   simply get Git. Fixed by wrapping both in one anchored `.workspace-entry__actions`
+   flex row and dropping the per-button absolute positioning.
+2. **The mobile assertions were stale.** The spec resized to 390px and expected
+   the desktop editor to still be mounted, but the mobile shell mounts exactly one
+   surface (responsive.spec.ts R2b) and opens on Chat. The spec now drives the real
+   switcher — `mobile-pane-files`, then walks the nested tree to the file, since
+   the mobile surface opens on the Explorer half with no selection.
+
+### V-09 — still PARTIAL, blocked on a reproducible crash
+
+`workspace-recovery.spec.ts` is new and covers the *mixed* case the gate names:
+one project with a primary checkout and a linked worktree, a session inside the
+worktree, a persistent tmux shell, an unsaved editor draft left in the external-
+conflict state, and an anchored review comment — then `SIGKILL` on the core and a
+re-boot. It runs its own core on a free port with its own database, so it never
+touches the shared hub or `~/.perch`.
+
+Everything except the last step recovers: one project card with both checkouts,
+the worktree session id unchanged, the shell reattached under its original
+terminal id with the **same** process (`after_survived_PID_<pid>_END` matches the
+pre-kill pid), and the durable buffer still holding the draft with its conflict
+banner.
+
+**The page then tears itself down.** On the recovered page React aborts with
+`Maximum update depth exceeded` (minified #185) and the app renders blank. A
+development React build names the cause: `The result of getSnapshot should be
+cached to avoid an infinite loop` — a store selector returning a freshly
+allocated snapshot on every read, the same class of bug `views/Chat.tsx` already
+documents at its `EMPTY_MESSAGES` and `runtimeModeAvailable` selectors. It was
+not found by inspection; every selector reached so far returns a scalar or a
+stored reference.
+
+What bisection established:
+
+- **Not a plain-reload bug.** Reloading the page with exactly the same panes,
+  against the still-running core, is clean. That control was briefly left in the
+  spec and made it pass 5/5 — it masks the defect, so it has been removed.
+- **Restart-specific.** Without that extra reload the spec fails **3/3** against
+  the production bundle.
+- **Needs the persistent shell.** With the shell terminal left out of the mix,
+  the recovered page raised no React error at the same checkpoint.
+
+The spec is registered in `testMatch` and is **currently red on purpose**: it is
+the regression guard for this defect, and hiding it would make a blank-screen
+crash on restart invisible. V-09 stays PARTIAL until the selector is found and
+fixed.
+
+## Isolated worktree checkpoint — 2026-09-14
+
+V-02 is now exercised end to end in a real browser. `worktrees.spec.ts` gained
+**WT6**, which creates two checkouts (`wt-alpha`, `wt-beta`) from one fixture
+repo and asserts every axis SPEC.md V-02 names:
+
+- **Paths/branches** — distinct default locations under
+  `~/.perch/worktrees/<repo>/<branch>`, confirmed against
+  `git rev-parse --abbrev-ref HEAD` in each checkout.
+- **One project** — exactly one workspace-project card matches the fixture, and
+  it carries one `.workspace-entry` per branch. This is the acceptance for
+  `server/workspace.rs::register_worktree_listing`: before it, `worktree.create`
+  registered nothing, and creating a session inside a checkout minted a *second*
+  standalone project at the checkout path.
+- **Sessions** — opening each checkout yields different session ids.
+- **Tabs** — the tab strip is scoped to the active workspace. Standing in
+  `wt-beta`, only beta's tab exists; navigating to `wt-alpha`'s workspace row
+  swaps both the strip and the resolved cwd. The two checkouts never share a
+  strip.
+- **File changes** — a `sentinel.txt` written into `wt-alpha` is absent from
+  `wt-beta` and leaves the primary checkout's `README.md` untouched; only
+  `wt-alpha`'s row shows the dirty badge on the next listing.
+
+Capture: `e2e/artifacts/worktrees-wt6-two-worktrees.png` — one project card
+holding `main` (primary), `wt-alpha` (dirty), `wt-beta`, each with its own
+sessions, and the worktree popover showing the same three rows.
+
+Three defects were fixed to get there, all of them pre-existing and none
+introduced by the worktree registration work (confirmed by re-running against a
+stashed tree):
+
+1. **The spec was stale against the native-UI session model.** Its seed step
+   typed into the Hosted `.chat__input textarea`, but every "New session"
+   launcher now passes an explicit `mode: "cli"`, and a CLI-owned session
+   renders `native-cli-chat` instead. The seed hung until the 120 s timeout. It
+   was also redundant — `cli_activity` alone satisfies db.rs's
+   `SESSION_VISIBILITY_FILTER` — so it was removed rather than ported, which
+   also drops a real agent turn from the spec.
+2. **No worktree affordance on a clean database.** The branch glyph hangs off a
+   project card, and a project row is minted only lazily by a session that has
+   produced a message or CLI activity, so a first run found no menu at all. The
+   spec now registers the folder through the rail's own "+ Add" flow first.
+3. **The menu helper was not idempotent.** The glyph toggles, so re-opening an
+   already-open popover closed it.
+
+Commands (headless, background, no focused window):
+
+```text
+cargo test -p perch-core        # 260 passed + 2 protocol parity
+cargo fmt --check               # clean
+cargo clippy --workspace --all-targets   # the 5 baseline warnings, no new ones
+npm run build
+cd e2e && npx playwright test worktrees.spec.ts   # 6/6
+```
+
+The suite passes both from a wiped `/tmp/perch-e2e-hub.sqlite` and on a warm
+one (13.8 s each), so registration is idempotent across runs.
+
+Open on this gate: a duplicate-testid window exists while a project is
+unregistered — `Sidebar.tsx`'s `ProjectWorktrees` suppresses its own menu only
+once the project appears in `workspaceProjects`, so both it and
+`WorkspaceOverview`'s copy can render `worktree-menu-local-<cwd>` at the same
+time. Harmless to users, ambiguous to tests. V-02's recovery half (restart the
+host and confirm both checkouts come back separate) is **not** covered by WT6
+and remains part of V-09.
+
 ## Claude native UI checkpoint — 2026-09-13
 
 Claude Code 2.1.270 now participates through its native hook and transcript
@@ -812,14 +949,14 @@ acceptance, remote compatibility, and the other SPEC gates remain open.
 | Gate | Current disposition |
 | --- | --- |
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
-| V-02 two isolated worktrees | UNVERIFIED |
+| V-02 two isolated worktrees | PASS (headless Chromium observed): two checkouts from one project with separate paths/branches, one project card, separate sessions, workspace-scoped tab strips, and isolated file changes; see the isolated worktree checkpoint above. Restart recovery for worktrees remains part of V-09. |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
 | V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP/OpenCode native UI/CLI turns and same-PID core recovery pass in both engines; OpenCode shell-mode refusal and native home/new-session flow pass; Codex basic Chromium passes, extended Codex/WebKit checks remain |
-| V-05 tree, sentinel edit, save, disk/status verification | PARTIAL (file/tree/save and Git status/diff observed separately; combined edit/save/status gate remains) |
+| V-05 tree, sentinel edit, save, disk/status verification | PASS (headless Chromium observed): one run spans nested tree expansion, open, edit, save, on-disk bytes, Git status/diff of the save, reload, external-conflict compare/keep/discard, and the phone-width file surface; see the combined file workflow checkpoint above. |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
 | V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; Codex review delivery remains unverified |
-| V-09 full host/client recovery | PARTIAL (file draft/path recovery, real tmux shell/core restart, and native Claude/Pi/OMP/OpenCode same-PID/session recovery verified; complete mixed workspace and agent recovery remains unverified) |
+| V-09 full host/client recovery | PARTIAL — **blocked on a defect**. Mixed recovery now has a spec (`workspace-recovery.spec.ts`): project/worktree identity, session id, same-PID tmux shell and the conflicted draft all recover, but the recovered page then dies with React "Maximum update depth exceeded" (uncached store snapshot) and renders blank. Reproduces 3/3; a plain reload with the same panes is clean. See the mixed-recovery checkpoint above. |
 | V-10 paired mobile interaction and reconnect | UNVERIFIED |
 | V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |
 | V-12 safe hibernation and resume | UNVERIFIED |

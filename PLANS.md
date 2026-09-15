@@ -29,7 +29,7 @@ marked done; `PLAN.md` is the record.
     com.apple.quarantine` by hand. Notarizing needs an Apple Developer account;
   - the build is **arm64-only** (deliberate — see the decision note in the doc).
   A filled-in cask template is ready at `packaging/homebrew/perch.rb`.
-- **Universal command/skill palette** (supersedes `BUGS.md` Bug 2 — do this
+- **Universal command/skill palette** (do this
   *before* the jean-parity backlog below). Today the composer sigil is
   per-agent (`AGENT_SIGIL = {claude:'/', codex:'$'}` in
   `packages/web/src/composerCommands.ts`) and only the *selected* model's list
@@ -53,3 +53,33 @@ marked done; `PLAN.md` is the record.
 - **jean-parity backlog** (earlier menu, untouched): @-file mentions, AI commit
   messages / PR descriptions, MCP support, GitHub #-issue mentions, worktree
   auto-cleanup.
+
+## From the interrupted Codex goals.md session (2026-09-11)
+
+The "Follow goals.md with Luna" session ran out of quota mid-turn twice. These are
+the items it stated or left unfinished; the structural refactor that followed was
+deliberately behavior-free and did not address any of them.
+
+- **UI mode is still a second harness, not a view of the CLI-owned session.**
+  `goals.md` requires "UI mode is a web view of the same CLI-owned session, not a
+  separate agent harness"; Codex's own words were "the current separate Chat runner
+  still needs to be replaced." Two implementations still run side by side: the
+  headless per-turn runner (`ClaudeRunner`/`CodexRunner` at
+  `crates/perch-core/src/server/session.rs:248` and `:1347`, driven by
+  `handle_chat_send` at `session.rs:1078`) and the real interactive PTY
+  (`open_agent_terminal` at `crates/perch-core/src/server/terminal.rs:20`).
+  Unifying them touches the protocol pair and the store's chat handling — plan it
+  as its own phased slice.
+- **Provider parity is partial.** Claude Code, Codex, OMP and Pi resolve on this
+  machine; `opencode` does not. Decide whether it is "offer to install" or out of
+  scope and record it in `SPEC.md`.
+- **Unwired scaffolding.** 12 `pub fn`s exist with zero callers, and 20 more are
+  referenced only by their own unit tests (notably `hibernation_decision`, the
+  agent-change-snapshot trio, `create_worktree_workspace`,
+  `archive_workspace_for_path`, `wake_cli`). Each is a completed, tested slice of a
+  `goals.md` capability that no protocol handler calls. Decide per item: wire it or
+  delete it — do not leave it in the middle state a third time.
+- **Unverified:** the `savedPanelIdsRef` fix at
+  `packages/web/src/dockview/DockviewShell.tsx:331,393,511` ("Pi pane missing after
+  reload") passes its unit test but was never re-checked against
+  `e2e/native-providers.spec.ts`.

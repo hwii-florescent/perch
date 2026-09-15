@@ -84,11 +84,39 @@ async function freshPage(page: Page): Promise<void> {
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }
 
-/** Create a local session with `cwd` via the picker's "Type path" fallback,
- * then send a seed message so server.rs's lazy DB insert runs and the session
- * (and therefore its sidebar project group) becomes visible. We never wait for
- * the agent's reply — only for the insert side effect. */
-async function createSeededSession(page: Page, cwd: string): Promise<void> {
+/** Register `cwd` as a workspace project (idempotent).
+ *
+ * Needed before any worktree assertion: the branch glyph hangs off a project
+ * card, and a project row is only minted lazily — by a session that has actually
+ * produced a message or CLI activity. Registering the folder explicitly through
+ * the rail's own "+ Add" flow is the deterministic way in, and it needs no agent
+ * turn. Without it, a first run against a clean DB finds no menu at all. */
+async function registerProject(page: Page, cwd: string): Promise<void> {
+  const rail = page.getByTestId("workspace-overview");
+  await expect(rail).toBeVisible({ timeout: 15000 });
+  const card = rail.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+  if ((await card.count()) > 0) return;
+  await page.getByTestId("workspace-add-project").click();
+  const pathInput = page.getByTestId("workspace-project-path");
+  await expect(pathInput).toBeVisible({ timeout: 5000 });
+  await pathInput.fill(cwd);
+  await rail.locator('button[type="submit"]').click();
+  await expect(card).toHaveCount(1, { timeout: 20000 });
+}
+
+/** Create a local session whose cwd is `cwd`, via the picker's "Type path"
+ * fallback, and wait for it to become a visible sidebar project group.
+ *
+ * This used to send a seed chat message to force server.rs's lazy DB insert.
+ * That no longer works and is no longer needed: every "New session" launcher
+ * now passes an explicit `mode: "cli"` (Sidebar.tsx's picker `onSelect`), and a
+ * CLI-owned session renders the native view (`native-cli-chat`), never the
+ * Hosted `.chat__input textarea` the old seed typed into. It is also redundant —
+ * `cli_activity` alone satisfies db.rs's `SESSION_VISIBILITY_FILTER`, so the
+ * group appears as soon as the CLI starts. Dropping it also drops a real agent
+ * turn from this spec.
+ */
+async function createSessionForCwd(page: Page, cwd: string): Promise<void> {
   const newBtn = page.locator('[data-testid="new-session-local"]');
   await expect(newBtn).toBeEnabled({ timeout: 10000 });
   await newBtn.click();
@@ -98,21 +126,23 @@ async function createSeededSession(page: Page, cwd: string): Promise<void> {
   await input.fill(cwd);
   await page.locator('[data-testid="dir-browser-use"]').click();
   await expect(input).not.toBeVisible({ timeout: 3000 });
-
-  const textarea = page.locator(".chat__input textarea");
-  await expect(textarea).toBeEnabled({ timeout: 8000 });
-  await textarea.fill("worktree e2e seed " + Date.now());
-  await page.locator(".chat__send").click();
+  // The status bar carries the resolved session cwd — proof the create landed
+  // on this checkout before any worktree assertion runs.
+  await expect(page.locator(".status-bar")).toContainText(cwd, { timeout: 20000 });
 }
 
 /** Open the fixture project's worktree popover and return it. The branch-glyph
  * button only renders once `workspace.git` has reported a branch for the cwd
  * (the 5s background poll), hence the generous timeout. */
 async function openWorktreeMenu(page: Page): Promise<Locator> {
-  const btn = page.locator(`[data-testid="worktree-menu-local-${FIXTURE}"]`);
+  await registerProject(page, FIXTURE);
+  const btn = page.locator(`[data-testid="worktree-menu-local-${FIXTURE}"]`).first();
   await expect(btn).toBeVisible({ timeout: 20000 });
-  await btn.click();
   const popover = page.locator(`[data-testid="worktree-popover-local-${FIXTURE}"]`);
+  // The glyph toggles, so clicking it while the popover is already open closes
+  // it. Callers open the menu repeatedly (create, then open each checkout) —
+  // make the helper idempotent rather than making every caller remember.
+  if (!(await popover.isVisible())) await btn.click();
   await expect(popover).toBeVisible({ timeout: 5000 });
   return popover;
 }
@@ -175,7 +205,8 @@ test.describe("Git worktrees", () => {
   // -------------------------------------------------------------------------
   test("WT1. Worktree menu lists the primary checkout", async ({ page }) => {
     await freshPage(page);
-    await createSeededSession(page, FIXTURE);
+    await registerProject(page, FIXTURE);
+    await createSessionForCwd(page, FIXTURE);
 
     const popover = await openWorktreeMenu(page);
     const mainEntry = entryForBranch(popover, "main");
@@ -294,5 +325,93 @@ test.describe("Git worktrees", () => {
     expect(fs.existsSync(worktreePath)).toBe(false);
 
     await page.screenshot({ path: "artifacts/worktrees-wt5-forced.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // WT6 — SPEC.md V-02: two worktrees from one project, both open, with
+  // separate paths, branches, sessions, tabs and file changes.
+  //
+  // This is also the acceptance for the registration work in
+  // `server/workspace.rs::register_worktree_listing`: both checkouts must land
+  // as workspaces of the SAME project. Before that landed, `worktree.create`
+  // never registered the checkout at all, and creating a session inside one
+  // minted a second standalone project at the checkout path.
+  // -------------------------------------------------------------------------
+  test("WT6. Two worktrees stay separate in paths, branches, sessions, tabs and files", async ({ page }) => {
+    await freshPage(page);
+
+    const popover = await openWorktreeMenu(page);
+    const alphaPath = await createWorktree(popover, "wt-alpha");
+    const betaPath = await createWorktree(popover, "wt-beta");
+
+    // Separate paths and branches.
+    expect(alphaPath).not.toBe(betaPath);
+    expect(alphaPath).toBe(path.join(WORKTREES_ROOT, "wt-alpha"));
+    expect(betaPath).toBe(path.join(WORKTREES_ROOT, "wt-beta"));
+    expect(execSync("git rev-parse --abbrev-ref HEAD", { cwd: alphaPath }).toString().trim()).toBe("wt-alpha");
+    expect(execSync("git rev-parse --abbrev-ref HEAD", { cwd: betaPath }).toString().trim()).toBe("wt-beta");
+
+    // Both checkouts registered under exactly one project for this repo.
+    const projectCard = page
+      .locator('[data-testid^="workspace-project-"]')
+      .filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard).toHaveCount(1, { timeout: 20000 });
+    for (const branch of ["wt-alpha", "wt-beta"]) {
+      await expect(
+        projectCard.locator(".workspace-entry").filter({ hasText: branch }),
+      ).toHaveCount(1, { timeout: 20000 });
+    }
+
+    // Separate sessions: open each checkout and keep its session id.
+    async function openFrom(branch: string, expectedPath: string): Promise<string> {
+      const menu = await openWorktreeMenu(page);
+      const entry = entryForBranch(menu, branch);
+      await expect(entry).toBeVisible({ timeout: 10000 });
+      await entry.locator('[data-testid^="worktree-open-"]').click();
+      await expect(menu).not.toBeVisible({ timeout: 5000 });
+      await expect(page.locator(".status-item--cwd")).toHaveText(expectedPath, { timeout: 20000 });
+      const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      expect(id).toBeTruthy();
+      return id as string;
+    }
+    const alphaSession = await openFrom("wt-alpha", alphaPath);
+    const betaSession = await openFrom("wt-beta", betaPath);
+    expect(alphaSession).not.toBe(betaSession);
+
+    // Separate tabs. The tab bar is scoped to the active workspace, so the two
+    // checkouts must never share a tab strip: standing in wt-beta, only beta's
+    // tab exists, and navigating to wt-alpha's workspace row swaps the strip
+    // and the resolved cwd together.
+    const alphaTab = page.locator(`[data-testid="tab-${alphaSession}"]`);
+    const betaTab = page.locator(`[data-testid="tab-${betaSession}"]`);
+    await expect(betaTab).toBeVisible({ timeout: 10000 });
+    await expect(alphaTab).toHaveCount(0);
+
+    await projectCard
+      .locator(".workspace-entry")
+      .filter({ hasText: "wt-alpha" })
+      .locator("button")
+      .first()
+      .click();
+    await expect(page.locator(".status-item--cwd")).toHaveText(alphaPath, { timeout: 20000 });
+    await expect(alphaTab).toBeVisible({ timeout: 15000 });
+    await expect(betaTab).toHaveCount(0);
+
+    // Separate file changes: a write in one checkout is invisible in the other,
+    // and only its own row goes dirty.
+    fs.writeFileSync(path.join(alphaPath, "sentinel.txt"), "alpha only\n");
+    expect(fs.existsSync(path.join(betaPath, "sentinel.txt"))).toBe(false);
+    expect(fs.readFileSync(path.join(FIXTURE, "README.md"), "utf8")).toBe("worktree fixture\n");
+
+    await page.keyboard.press("Escape");
+    const after = await openWorktreeMenu(page);
+    await expect(
+      entryForBranch(after, "wt-alpha").locator('[data-testid^="worktree-dirty-"]'),
+    ).toBeVisible({ timeout: 20000 });
+    await expect(
+      entryForBranch(after, "wt-beta").locator('[data-testid^="worktree-dirty-"]'),
+    ).toHaveCount(0);
+
+    await page.screenshot({ path: "artifacts/worktrees-wt6-two-worktrees.png" });
   });
 });
