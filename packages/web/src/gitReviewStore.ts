@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  AgentTurnSummary,
   ClientMessage,
   ErrorMessage,
   GitActionResultMessage,
@@ -27,6 +28,7 @@ import type {
   ReviewSide,
   WorkspaceGitReviewActions,
 } from "./components/gitReviewModels";
+import { newId } from "./ids";
 
 export interface WorkspaceGitReviewState {
   status: GitStatusSnapshot | null;
@@ -40,6 +42,8 @@ export interface WorkspaceGitReviewState {
   actionState: "idle" | "loading" | "error";
   actionError?: string;
   batchDelivery: ReviewBatchDelivery | null;
+  /** Newest completed agent turn here, reported alongside every status. */
+  lastAgentTurn: AgentTurnSummary | null;
 }
 
 const EMPTY_WORKSPACE_STATE: WorkspaceGitReviewState = Object.freeze({
@@ -51,6 +55,7 @@ const EMPTY_WORKSPACE_STATE: WorkspaceGitReviewState = Object.freeze({
   refs: [],
   actionState: "idle",
   batchDelivery: null,
+  lastAgentTurn: null,
 });
 
 export const EMPTY_GIT_REVIEW_STATE = EMPTY_WORKSPACE_STATE;
@@ -81,9 +86,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_PENDING_REQUESTS = 64;
 
 function newRequestId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `git-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return newId();
 }
 
 function workspaceStateFor(state: GitReviewStoreState, workspaceId: string): WorkspaceGitReviewState {
@@ -572,7 +575,15 @@ export function handleGitReviewMessage(message: ServerMessage): boolean {
 
   if (message.type === "git.status.result") {
     const result = message as GitStatusResultMessage;
-    setWorkspace(result.workspaceId, { status: updateStatusFromWire(result), statusState: "ready", statusError: undefined });
+    // A status that carries no turn keeps the last one we were told about:
+    // only `git.status.result` reports it, and an action reply (below)
+    // rebuilds this message without it.
+    setWorkspace(result.workspaceId, {
+      status: updateStatusFromWire(result),
+      statusState: "ready",
+      statusError: undefined,
+      ...(result.lastAgentTurn ? { lastAgentTurn: result.lastAgentTurn } : {}),
+    });
     return true;
   }
   if (message.type === "git.diff.result") {

@@ -182,7 +182,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
 
   function handleOpenWorktree(entry: WorktreeEntry) {
     setOpen(false);
-    createSessionOnHost(hostId, entry.path, undefined, "cli");
+    createSessionOnHost(hostId, entry.path, undefined);
   }
 
   async function submitCreate() {

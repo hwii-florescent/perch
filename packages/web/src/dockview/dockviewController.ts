@@ -13,6 +13,7 @@
  * the dockview instance exists (e.g. very early in a page's lifecycle).
  */
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel, Position } from "dockview-react";
+import { newId } from "../ids";
 
 /** Directions accepted by `focusPaneDirection` — mirrors dockview-core's own
  * `GroupNavigationDirection` (dockview-react re-exports dockview-core's types
@@ -221,9 +222,7 @@ export function getDockviewController(): DockviewController | null {
 }
 
 function newPanelId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `terminal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return newId();
 }
 
 /** Build a controller bound to a live dockview `api` instance. */

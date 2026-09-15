@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -82,6 +82,7 @@ use fs::{filesystem_operation_lock, workspace_file_service};
 mod workspace;
 #[cfg(test)]
 use workspace::effective_focus;
+mod agent_history;
 mod agents;
 mod native_ui;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -109,6 +110,10 @@ pub struct CliArgs {
     pub hosts_path: Option<PathBuf>,
     /// Optional provider manifest file; defaults to ~/.perch/providers.json.
     pub providers_path: Option<PathBuf>,
+    /// Override the devices.json path (default: `~/.perch/devices.json`).
+    /// Can also be set via `PERCH_DEVICES`. Tests need it for the same reason
+    /// they need `--hosts-path`: pairing must not touch the real machine.
+    pub devices_path: Option<PathBuf>,
 }
 
 impl CliArgs {
@@ -124,6 +129,7 @@ impl CliArgs {
             db_path: std::env::var("PERCH_DB").ok().map(PathBuf::from),
             hosts_path: std::env::var("PERCH_HOSTS").ok().map(PathBuf::from),
             providers_path: std::env::var_os("PERCH_PROVIDERS").map(PathBuf::from),
+            devices_path: std::env::var_os("PERCH_DEVICES").map(PathBuf::from),
         };
 
         let mut i = 0;
@@ -168,6 +174,12 @@ impl CliArgs {
                         args.hosts_path = Some(PathBuf::from(v));
                     }
                 }
+                "--devices-path" => {
+                    i += 1;
+                    if let Some(v) = argv.get(i) {
+                        args.devices_path = Some(PathBuf::from(v));
+                    }
+                }
                 _ => {}
             }
             i += 1;
@@ -195,6 +207,8 @@ pub struct ServerOptions {
     pub db_path: Option<PathBuf>,
     /// Override hosts.json path (from `--hosts-path` / `PERCH_HOSTS`).
     pub hosts_path: Option<PathBuf>,
+    /// Override devices.json path (from `--devices-path` / `PERCH_DEVICES`).
+    pub devices_path: Option<PathBuf>,
     /// Optional provider manifest file; defaults to ~/.perch/providers.json.
     pub providers_path: Option<PathBuf>,
     /// If `Some`, fired with the bound `SocketAddr` right after the TCP
@@ -291,7 +305,15 @@ struct AppState {
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
     /// outlive any single WS connection so a second tab/device can find and
     /// share what the first one started, exactly like `running_sessions`.
+    /// Paired phones/devices and the live pairing code. perch binds
+    /// `0.0.0.0`, so anything off the loopback interface must present a token
+    /// this store issued — see `authorize_request`.
+    devices: Arc<crate::devices::DeviceStore>,
     agent_terminals: Arc<AgentTerminalRegistry>,
+    /// The runtime adapter's own registry, kept here so the idle sweep can
+    /// see configured-provider terminals too. Keyed by
+    /// `agent_runtime::terminal_key`, not by session id.
+    agent_runtime_terminals: Arc<AgentTerminalRegistry>,
     workspace_terminals: Arc<crate::workspace_terminals::WorkspaceTerminals>,
     /// Process-wide provider/lifecycle bridge used by local CLI attaches.
     /// Keeping this beside the shared terminal registry prevents a second WS
@@ -498,7 +520,17 @@ pub async fn run(
     let running_sessions: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let agent_activity_running = running_sessions.clone();
     let agent_activity_events_tx = session_events_tx.clone();
-    let agent_terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(
+    // This callback is the *only* place a CLI-origin turn is seen going
+    // running, and it fires from a pty reader thread before `AppState`
+    // exists — hence the same deferred wire-up `DetachedSink` uses, filled in
+    // right after the state is built.
+    let agent_activity_app: Arc<std::sync::OnceLock<AppState>> =
+        Arc::new(std::sync::OnceLock::new());
+    let agent_activity_state = agent_activity_app.clone();
+    let mark_session_running: Arc<dyn Fn(&str) + Send + Sync> = Arc::new({
+        let agent_activity_running = agent_activity_running.clone();
+        let agent_activity_events_tx = agent_activity_events_tx.clone();
+        let agent_activity_state = agent_activity_state.clone();
         move |session_id: &str| {
             // Only notify on the actual idle->running transition — PTY
             // output fires this on every read, often many times a second
@@ -510,12 +542,19 @@ pub async fn run(
                 .unwrap()
                 .insert(session_id.to_string());
             if became_running {
+                if let Some(app) = agent_activity_state.get() {
+                    agent_history::observe_session(app, session_id);
+                }
                 let _ = agent_activity_events_tx.send(SessionUpdatedEvent {
                     session_id: session_id.to_string(),
                 });
             }
-        },
-    )));
+        }
+    });
+    let agent_terminals = Arc::new(AgentTerminalRegistry::new({
+        let mark_session_running = mark_session_running.clone();
+        Arc::new(move |session_id: &str| mark_session_running(session_id))
+    }));
 
     // Agent lifecycle rows share the existing HistoryDb connection.  Restore
     // durable provider identities before accepting clients; transient process
@@ -544,10 +583,26 @@ pub async fn run(
     // constructor after other startup work has begun.
     let provider_registry =
         crate::provider_config::load_registry(options.providers_path.as_deref())?;
+    // The runtime adapter owns a *second* terminal registry, keyed by
+    // `agent_runtime::terminal_key` rather than by session id. It used to
+    // carry a no-op activity callback, so a configured CLI provider never
+    // reported working/idle at all — the states goals.md requires, and the
+    // boundary `agent_history` records, both depend on it. Resolve the key
+    // back to its session through the lifecycle registry and then run the
+    // exact same bookkeeping as the shared-terminal path.
+    let runtime_lifecycle = agent_lifecycle.clone();
+    let runtime_terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(
+        move |terminal_key: &str| {
+            if let Some(session_id) = session_for_runtime_terminal(&runtime_lifecycle, terminal_key)
+            {
+                mark_session_running(&session_id);
+            }
+        },
+    )));
     let agent_runtime = Arc::new(AgentRuntimeAdapter::new(
         Arc::new(provider_registry),
-        agent_lifecycle,
-        Arc::new(AgentTerminalRegistry::new(Arc::new(|_| {}))),
+        agent_lifecycle.clone(),
+        runtime_terminals.clone(),
     ));
 
     let workspace_terminals = Arc::new(crate::workspace_terminals::WorkspaceTerminals::new(
@@ -573,7 +628,12 @@ pub async fn run(
         detached,
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
+        devices: Arc::new(match options.devices_path {
+            Some(path) => crate::devices::DeviceStore::load(path),
+            None => crate::devices::DeviceStore::load_default(),
+        }),
         agent_terminals,
+        agent_runtime_terminals: runtime_terminals,
         workspace_terminals,
         agent_runtime,
         native_ui: Arc::new(crate::native_ui::NativeUiRegistry::default()),
@@ -609,6 +669,11 @@ pub async fn run(
     state
         .detached
         .attach_sink(Arc::new(DetachedSink { app: state.clone() }));
+    // Turn boundaries are recorded from a pty reader thread as well as from
+    // async handlers, so `agent_history` needs both this state and a runtime
+    // handle it can spawn on.
+    let _ = agent_activity_app.set(state.clone());
+    agent_history::attach_runtime(tokio::runtime::Handle::current());
     // A claimed prompt or review packet may have crossed the dispatch barrier
     // immediately before a prior process exited. Preserve it as explicitly
     // unconfirmed so reconnect/reload paths cannot launch a duplicate.
@@ -631,12 +696,15 @@ pub async fn run(
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
+    spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
 
+    let pair_path = format!("{base_path}pair");
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
         .route(&clipboard_image_path, post(clipboard_image_upload))
         .route(&upload_path, post(attachment_upload))
+        .route(&pair_path, get(pair_status).post(pair_claim))
         .with_state(state);
 
     if options.web_dist_dir.is_dir() {
@@ -666,7 +734,13 @@ pub async fn run(
     if let Some(tx) = options.ready_tx {
         let _ = tx.send(bound_addr);
     }
-    axum::serve(listener, router).await?;
+    // `ConnectInfo` is what tells `authorize_request` whether a caller is on
+    // the loopback interface; without it every request would look remote.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -1146,14 +1220,159 @@ fn spawn_agent_lifecycle_task(state: AppState) {
     });
 }
 
+/// Map one runtime terminal key back to the perch session that owns it.
+/// `terminal_key` is a digest, so this is a scan of the (single-digit) live
+/// agent list rather than a reverse lookup.
+fn session_for_runtime_terminal(
+    lifecycle: &crate::agent_fleet::AgentLifecycleRegistry,
+    terminal_key: &str,
+) -> Option<String> {
+    lifecycle
+        .list()
+        .into_iter()
+        .find(|snapshot| crate::agent_runtime::terminal_key(&snapshot.key) == terminal_key)
+        .map(|snapshot| snapshot.key.session_id)
+}
+
+/// How long a configured provider's pty must be silent before its lifecycle
+/// record is moved to Idle. Deliberately longer than `AGENT_QUIET_THRESHOLD`
+/// (which only drives the session's running dot): this one makes an agent
+/// eligible for hibernation, so a provider that is merely thinking between
+/// two bursts of output must not cross it.
+const LIFECYCLE_QUIET_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Default idle window before a safe agent is hibernated, overridable with
+/// `PERCH_HIBERNATE_AFTER_SECS` (0 disables hibernation entirely). This is a
+/// process-wide constant rather than a setting on purpose — every blocker in
+/// `HibernationPolicy::evaluate` (a viewer, input ownership, an unfinished
+/// state, a missing resume identity) already refuses the unsafe cases, so the
+/// window is the only knob and nobody has asked to tune it per host yet.
+///
+/// ponytail: if that changes, it belongs in `~/.perch/settings.json` next to
+/// the other device policies, which costs a protocol field in both files.
+fn hibernate_after() -> Option<std::time::Duration> {
+    let seconds = std::env::var("PERCH_HIBERNATE_AFTER_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(15 * 60);
+    (seconds > 0).then(|| std::time::Duration::from_secs(seconds))
+}
+
+/// Hibernate safe idle agents: the pty is terminated but the lifecycle record
+/// keeps the provider continuation identity, so the next attach resumes the
+/// same conversation instead of starting a new one (see the `RequiresWake`
+/// branch in `server/terminal.rs`). `HibernationPolicy::evaluate` owns every
+/// safety rule; this task only supplies the clock.
+fn spawn_agent_hibernation_task(state: AppState) {
+    let Some(idle_after) = hibernate_after() else {
+        tracing::info!("[perch] agent hibernation disabled (PERCH_HIBERNATE_AFTER_SECS=0)");
+        return;
+    };
+    tokio::spawn(async move {
+        let policy = crate::agent_fleet::HibernationPolicy::new(idle_after);
+        // A quarter of the window, bounded so a short test window still ticks
+        // promptly and a long one does not wake the process every second.
+        let tick = (idle_after / 4).clamp(
+            std::time::Duration::from_millis(500),
+            std::time::Duration::from_secs(30),
+        );
+        loop {
+            tokio::time::sleep(tick).await;
+            let now = now_millis();
+            let eligible: Vec<_> = {
+                let _operation = state.agent_operation_lock.lock().unwrap();
+                state
+                    .agent_runtime
+                    .lifecycle()
+                    .list()
+                    .into_iter()
+                    .filter(|snapshot| policy.evaluate(snapshot, now).eligible)
+                    .map(|snapshot| snapshot.key)
+                    .collect()
+            };
+            for key in eligible {
+                let _operation = state.agent_operation_lock.lock().unwrap();
+                match state.agent_runtime.hibernate(&key, policy, now_millis()) {
+                    Ok(transition) => {
+                        tracing::info!(
+                            session_id = %key.session_id,
+                            agent = %key.agent_id,
+                            "hibernated idle agent ({} -> {:?})",
+                            transition.reason,
+                            transition.to
+                        );
+                        if let Err(error) = persist_agent_runtime(&state, &key) {
+                            tracing::warn!(%error, "could not checkpoint hibernated agent");
+                        }
+                        // The pty is gone, so the session is not mid-turn any
+                        // more. The attached connection's exit listener would
+                        // normally say so, but hibernation happens precisely
+                        // when no connection is attached.
+                        state
+                            .running_sessions
+                            .lock()
+                            .unwrap()
+                            .remove(&key.session_id);
+                        notify_session_updated(&state, &key.session_id);
+                    }
+                    // A racing attach, focus, or prompt between the scan and
+                    // the call is the common case, not an error.
+                    Err(error) => tracing::debug!(
+                        session_id = %key.session_id,
+                        %error,
+                        "agent was no longer eligible for hibernation"
+                    ),
+                }
+            }
+        }
+    });
+}
+
 fn spawn_agent_idle_sweep_task(state: AppState) {
     tokio::spawn(async move {
         let tick = AGENT_QUIET_THRESHOLD / 4;
         loop {
             tokio::time::sleep(tick).await;
-            let quiet_sessions = state
+            let lifecycle = state.agent_runtime.lifecycle();
+            let mut quiet_sessions = state
                 .agent_terminals
                 .sessions_quiet_since(AGENT_QUIET_THRESHOLD);
+            // Configured providers live in the runtime registry under a
+            // digest key; resolve those to sessions before sweeping.
+            quiet_sessions.extend(
+                state
+                    .agent_runtime_terminals
+                    .sessions_quiet_since(AGENT_QUIET_THRESHOLD)
+                    .iter()
+                    .filter_map(|key| session_for_runtime_terminal(lifecycle, key)),
+            );
+            // Nothing else ever moves a CLI agent off Working. A configured
+            // provider has no structured status stream at all, and a native
+            // one only reports when its own hooks fire — a Claude session that
+            // is started and then left alone emits no further events, so its
+            // record stayed Working forever and it could never become eligible
+            // for hibernation. A pty silent for `LIFECYCLE_QUIET_THRESHOLD` is
+            // honest idle evidence for both: a provider that is actually
+            // working repaints its TUI far more often than that, and a real
+            // native snapshot always overrides this the moment one arrives.
+            let quiet_runtimes = state
+                .agent_runtime_terminals
+                .sessions_quiet_since(LIFECYCLE_QUIET_THRESHOLD);
+            for snapshot in lifecycle.list() {
+                if snapshot.state != crate::agent_fleet::AgentState::Working {
+                    continue;
+                }
+                let terminal = crate::agent_runtime::terminal_key(&snapshot.key);
+                if !quiet_runtimes.iter().any(|key| key == &terminal) {
+                    continue;
+                }
+                let _ = lifecycle.transition(
+                    &snapshot.key,
+                    crate::agent_fleet::AgentState::Idle,
+                    "provider output quiet",
+                    now_millis(),
+                );
+            }
             for session_id in quiet_sessions {
                 // `running_sessions` already covers Hosted-mode turns and
                 // detached turns; a CLI terminal that never went "running" in
@@ -1185,8 +1404,137 @@ fn placeholder_html(base_path: &str) -> String {
     )
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+/// Is this request allowed to reach perch's data plane?
+///
+/// Loopback is always allowed: the desktop shell talks to a core bound on
+/// `127.0.0.1`, and requiring a token there would mean pairing with yourself.
+/// Everything else — a phone on the LAN, a browser on a devpod's forwarded
+/// port — must present a token issued by `POST {base}pair`, in the
+/// `perch_device` cookie (browsers send it on the WS handshake too) or as
+/// `?token=`. `PERCH_REQUIRE_PAIRING=1` drops the loopback exemption, which is
+/// how the pairing flow is tested without a second machine.
+fn authorize_request(
+    state: &AppState,
+    peer: &SocketAddr,
+    headers: &HeaderMap,
+    params: &HashMap<String, String>,
+) -> bool {
+    let require_everywhere = std::env::var("PERCH_REQUIRE_PAIRING").as_deref() == Ok("1");
+    if peer.ip().is_loopback() && !require_everywhere {
+        return true;
+    }
+    let token = params
+        .get("token")
+        .cloned()
+        .or_else(|| cookie_value(headers, "perch_device"));
+    token.is_some_and(|token| {
+        state
+            .devices
+            .authenticate(&token, wall_clock_millis())
+            .is_some()
+    })
+}
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| key.trim() == name)
+        .map(|(_, value)| value.trim().to_string())
+}
+
+async fn ws_upgrade(
+    ws: WebSocketUpgrade,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if !authorize_request(&state, &peer, &headers, &params) {
+        // 401 rather than a silent close: the client turns exactly this into
+        // its "pair this device" screen.
+        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
+        .into_response()
+}
+
+/// `GET {base}pair` — does this caller already have data-plane access?
+///
+/// A browser cannot see the status of a failed WebSocket handshake, so it
+/// cannot tell "not paired" from "host is down" on its own. This is the one
+/// bit it needs to decide whether to show the pairing screen, and it says
+/// nothing else.
+async fn pair_status(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    axum::Json(serde_json::json!({
+        "paired": authorize_request(&state, &peer, &headers, &params),
+    }))
+}
+
+/// `POST {base}pair` — exchange a pairing code for a device token.
+///
+/// Deliberately the only unauthenticated data route: it is how an unpaired
+/// device becomes paired. The code is one-shot, expires in five minutes and
+/// burns after a handful of wrong guesses (`devices.rs`), and the token comes
+/// back both as a cookie (so the WS handshake carries it) and in the body.
+async fn pair_claim(
+    State(state): State<AppState>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let code = body["code"].as_str().unwrap_or_default();
+    let name = body["name"].as_str().unwrap_or_default();
+    match state
+        .devices
+        .claim(code, name, std::time::Instant::now(), wall_clock_millis())
+    {
+        Ok(paired) => {
+            // Push the new list to every open client: the host window is
+            // usually showing the code when this lands, and a device that
+            // appears only after a manual refresh reads as a failed pairing.
+            // An empty request id marks it unsolicited.
+            let _ = state
+                .hub
+                .hub_events_tx
+                .send(Arc::new(ServerMessage::DeviceListResult {
+                    request_id: String::new(),
+                    devices: state
+                        .devices
+                        .list()
+                        .into_iter()
+                        .map(|device| crate::protocol::DeviceSummary {
+                            id: device.id,
+                            name: device.name,
+                            created_at: device.created_at,
+                            last_seen_at: device.last_seen_at,
+                        })
+                        .collect(),
+                }));
+            let mut response = axum::Json(serde_json::json!({
+                "deviceId": paired.record.id,
+                "name": paired.record.name,
+                "token": paired.token,
+            }))
+            .into_response();
+            if let Ok(cookie) = axum::http::HeaderValue::from_str(&format!(
+                "perch_device={}; Path=/; Max-Age=31536000; SameSite=Lax",
+                paired.token
+            )) {
+                response
+                    .headers_mut()
+                    .insert(axum::http::header::SET_COOKIE, cookie);
+            }
+            response
+        }
+        Err(error) => (StatusCode::FORBIDDEN, error.to_string()).into_response(),
+    }
 }
 
 /// `POST {base}clipboard-image?ext=png` — Wave 2 item 9: stages a pasted
@@ -1201,10 +1549,17 @@ async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 /// machine's `~/.perch/`; pasting into a remote terminal pane is a
 /// documented no-op on the client side for now.
 async fn clipboard_image_upload(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    // Writes a file to `~/.perch/clipboard-images`, so it is as much a data
+    // route as the WS is and gets the same gate.
+    if !authorize_request(&state, &peer, &headers, &params) {
+        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    }
     const MAX_BYTES: usize = 10 * 1024 * 1024;
     if body.len() > MAX_BYTES {
         return (StatusCode::PAYLOAD_TOO_LARGE, "image too large (max 10MB)").into_response();
@@ -1246,9 +1601,15 @@ async fn clipboard_image_upload(
 /// `detached.rs` copies the staged file into the turn's remote run directory
 /// and rewrites the path before launching the CLI.
 async fn attachment_upload(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> impl IntoResponse {
+    if !authorize_request(&state, &peer, &headers, &params) {
+        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    }
     const MAX_BYTES: usize = 25 * 1024 * 1024;
     if body.len() > MAX_BYTES {
         return (StatusCode::PAYLOAD_TOO_LARGE, "file too large (max 25MB)").into_response();
@@ -2004,6 +2365,10 @@ fn route_git_review_request(
 /// all connected clients receive a `session.updated` with `status: "running"`.
 /// Errors are ignored — a missed broadcast is not fatal.
 fn notify_session_updated(app: &AppState, session_id: &str) {
+    // Every running/idle transition in the process reaches this function, so
+    // it is where an agent turn's Git boundary is recorded (see
+    // `agent_history`); the call is a no-op unless the flag actually moved.
+    agent_history::observe_session(app, session_id);
     let _ = app.session_events_tx.send(SessionUpdatedEvent {
         session_id: session_id.to_string(),
     });
@@ -2486,7 +2851,7 @@ mod filesystem_buffer_tests {
         std::fs::write(root.join("note.txt"), b"base").unwrap();
         let db = HistoryDb::open(&db_path).unwrap();
         let (_, workspace) = db
-            .create_project("local", &root.to_string_lossy(), None)
+            .create_project("local", &root.to_string_lossy(), None, None)
             .unwrap();
         let service = FileService::new(&root).unwrap();
         let baseline = service.read_file("note.txt").unwrap();
@@ -2847,6 +3212,7 @@ mod boot_smoke_tests {
                 db_path: Some(db_path.clone()),
                 hosts_path: Some(hosts_path.clone()),
                 providers_path: None,
+                devices_path: Some(hosts_path.with_file_name("smoke-devices.json")),
                 ready_tx: Some(ready_tx),
             },
             Arc::new(SessionRegistry::new()),

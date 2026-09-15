@@ -1508,7 +1508,12 @@ impl HubManager {
             // ----------------------------------------------------------------
             // Drop messages that should not propagate to browsers.
             // ----------------------------------------------------------------
-            ServerMessage::SettingsCurrent { .. }
+            // Pairing is per host: a remote perch's paired devices are its own
+            // business, and this instance's gate only ever consults its own
+            // store.
+            ServerMessage::DevicePairCode { .. }
+            | ServerMessage::DeviceListResult { .. }
+            | ServerMessage::SettingsCurrent { .. }
             | ServerMessage::HostsList { .. }
             | ServerMessage::HostsUpdated { .. }
             | ServerMessage::HostInfo { .. }

@@ -13,7 +13,7 @@
 //! so a prompting or unexpectedly noisy Git process cannot wedge the server.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use uuid::Uuid;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
@@ -247,11 +248,104 @@ impl Default for GitService {
 }
 
 impl GitService {
+    /// A creation ref, without enumerating files or modifying the index.
+    /// Non-repositories and unborn HEADs have no commit to compare against.
+    pub async fn head_revision(&self, target: &WorkspaceTarget) -> Option<String> {
+        self.optional_text(target, &["rev-parse", "--verify", "HEAD^{commit}"])
+            .await
+    }
+
     pub fn new(config: GitConfig) -> Self {
         Self {
             config,
             git_binary: OsString::from("git"),
         }
+    }
+
+    /// Capture the workspace's current content — index, worktree, and
+    /// untracked-but-not-ignored files — as one dangling commit, without
+    /// touching the real index, the worktree, or any ref. This is the only
+    /// honest before/after boundary for an agent turn: an agent that edits
+    /// without committing leaves HEAD unmoved, so a HEAD-only boundary would
+    /// report no changes at all.
+    ///
+    /// ponytail: the commit is unreferenced, so `git gc` prunes it once it
+    /// passes `gc.pruneExpire` (two weeks by default). Turn history older
+    /// than that keeps its metadata but loses its diff. Upgrade path if that
+    /// ever matters: write the same commit under `refs/perch/turns/<id>` and
+    /// delete the ref when the row is pruned.
+    pub async fn content_snapshot(&self, target: &WorkspaceTarget) -> Option<String> {
+        let index = std::env::temp_dir().join(format!("perch-snapshot-{}.index", Uuid::new_v4()));
+        let result = self.content_snapshot_with_index(target, &index).await;
+        let _ = std::fs::remove_file(&index);
+        result
+    }
+
+    async fn content_snapshot_with_index(
+        &self,
+        target: &WorkspaceTarget,
+        index: &Path,
+    ) -> Option<String> {
+        let env = [("GIT_INDEX_FILE", index.as_os_str())];
+        let head = self.head_revision(target).await;
+        // An unborn HEAD has no tree to seed the scratch index with; `add -A`
+        // then builds the whole snapshot from the worktree alone.
+        if head.is_some() && !self.env_ok(target, &["read-tree", "HEAD"], &env).await {
+            return None;
+        }
+        if !self.env_ok(target, &["add", "-A", "."], &env).await {
+            return None;
+        }
+        let tree = self.env_text(target, &["write-tree"], &env).await?;
+        let mut args = vec![
+            "-c",
+            "user.name=perch",
+            "-c",
+            "user.email=perch@localhost",
+            "commit-tree",
+            tree.as_str(),
+            "-m",
+            "perch agent turn boundary",
+        ];
+        if let Some(head) = head.as_deref() {
+            args.push("-p");
+            args.push(head);
+        }
+        self.env_text(target, &args, &env).await
+    }
+
+    async fn env_output(
+        &self,
+        target: &WorkspaceTarget,
+        args: &[&str],
+        env: &[(&str, &OsStr)],
+    ) -> Option<GitOutput> {
+        let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        let output = self
+            .run_with_env(target.root(), &args, None, env)
+            .await
+            .ok()?;
+        (output.code == Some(0) && !output.truncated).then_some(output)
+    }
+
+    async fn env_ok(
+        &self,
+        target: &WorkspaceTarget,
+        args: &[&str],
+        env: &[(&str, &OsStr)],
+    ) -> bool {
+        self.env_output(target, args, env).await.is_some()
+    }
+
+    async fn env_text(
+        &self,
+        target: &WorkspaceTarget,
+        args: &[&str],
+        env: &[(&str, &OsStr)],
+    ) -> Option<String> {
+        let output = self.env_output(target, args, env).await?;
+        let text = bounded_utf8(&output.stdout).ok()?.trim().to_string();
+        (!text.is_empty()).then_some(text)
     }
 
     #[cfg(test)]
@@ -430,8 +524,16 @@ impl GitService {
             return Err(command_failed(&args, &output));
         }
         let mut files = parse_unified_diff(&output.stdout)?;
-        let include_untracked =
-            options.include_untracked && !matches!(options.target, DiffTarget::Staged);
+        // Untracked files are a *working-tree* fact. Synthesizing them into a
+        // comparison that names both of its endpoints (`Staged`, or a compare
+        // with an explicit head) would attribute whatever is lying around the
+        // workspace right now to that comparison — and would list a file twice
+        // when the endpoint already contains it.
+        let include_untracked = options.include_untracked
+            && !matches!(
+                options.target,
+                DiffTarget::Staged | DiffTarget::Compare { head: Some(_), .. }
+            );
         if include_untracked {
             let status = self
                 .status(
@@ -1068,6 +1170,19 @@ impl GitService {
         args: &[OsString],
         input: Option<&[u8]>,
     ) -> Result<GitOutput, GitError> {
+        self.run_with_env(cwd, args, input, &[]).await
+    }
+
+    /// `run` plus extra environment entries. The only current caller needs
+    /// `GIT_INDEX_FILE` so a snapshot can be staged into a scratch index
+    /// without touching the workspace's real one.
+    async fn run_with_env(
+        &self,
+        cwd: &Path,
+        args: &[OsString],
+        input: Option<&[u8]>,
+        env: &[(&str, &OsStr)],
+    ) -> Result<GitOutput, GitError> {
         if input.is_some_and(|bytes| bytes.len() > self.config.max_patch_bytes) {
             return Err(GitError::OutputLimit);
         }
@@ -1076,6 +1191,7 @@ impl GitService {
             .current_dir(cwd)
             .arg("--literal-pathspecs")
             .args(args)
+            .envs(env.iter().copied())
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_LITERAL_PATHSPECS", "1")
@@ -2308,6 +2424,65 @@ mod tests {
         assert_eq!((lines[0].old_line, lines[0].new_line), (Some(2), Some(2)));
         assert_eq!((lines[1].old_line, lines[1].new_line), (None, Some(3)));
         assert_eq!((lines[2].old_line, lines[2].new_line), (Some(3), Some(4)));
+    }
+
+    /// The turn boundary must survive an agent that never commits: the
+    /// snapshot has to carry uncommitted edits and untracked additions, leave
+    /// the real index and worktree alone, and still be diffable afterwards.
+    #[tokio::test]
+    async fn content_snapshot_captures_uncommitted_and_untracked_work() {
+        let root = temp_repo("snapshot");
+        fs::write(root.join("tracked.txt"), "before\n").unwrap();
+        git(&root, &["add", "tracked.txt"]);
+        git(&root, &["commit", "-qm", "base"]);
+        let service = GitService::default();
+        let target = target(&root);
+
+        let before = service.content_snapshot(&target).await.expect("snapshot");
+        // The agent edits a tracked file and adds an untracked one, without
+        // committing or staging anything.
+        fs::write(root.join("tracked.txt"), "after\n").unwrap();
+        fs::write(root.join("added.txt"), "new file\n").unwrap();
+        fs::write(root.join("ignored.txt"), "noise\n").unwrap();
+        fs::write(root.join(".gitignore"), "ignored.txt\n").unwrap();
+        let after = service.content_snapshot(&target).await.expect("snapshot");
+        // Written after the boundary closed: a comparison that names both of
+        // its endpoints must not adopt whatever appears in the worktree next.
+        fs::write(root.join("later.txt"), "not part of the turn\n").unwrap();
+
+        assert_ne!(before, after, "a changed worktree must change the boundary");
+        let diff = service
+            .diff(
+                &target,
+                DiffOptions {
+                    target: DiffTarget::Compare {
+                        base: before.clone(),
+                        head: Some(after),
+                    },
+                    ..DiffOptions::default()
+                },
+            )
+            .await
+            .expect("turn diff");
+        let paths: Vec<&str> = diff
+            .files
+            .iter()
+            .filter_map(|file| file.new_path.as_deref())
+            .collect();
+        assert!(
+            paths.contains(&"tracked.txt"),
+            "uncommitted edit: {paths:?}"
+        );
+        assert!(paths.contains(&"added.txt"), "untracked add: {paths:?}");
+        assert!(!paths.contains(&"ignored.txt"), "ignored file: {paths:?}");
+        assert!(
+            !paths.contains(&"later.txt"),
+            "post-boundary file: {paths:?}"
+        );
+
+        // Nothing may have been staged or committed on the user's behalf.
+        assert_eq!(git(&root, &["diff", "--cached", "--name-only"]), "");
+        assert_eq!(git(&root, &["rev-list", "--count", "HEAD"]), "1");
     }
 
     #[tokio::test]

@@ -244,6 +244,18 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         // -----------------------------------------------------------------------
         // Settings & hosts (Stage D)
         // -----------------------------------------------------------------------
+        ClientMessage::DevicePairStart { request_id } => {
+            config::handle_device_pair_start(state, request_id)
+        }
+        ClientMessage::DevicePairCancel { request_id } => {
+            config::handle_device_pair_cancel(state, request_id)
+        }
+        ClientMessage::DeviceList { request_id } => config::handle_device_list(state, request_id),
+        ClientMessage::DeviceRevoke {
+            request_id,
+            device_id,
+        } => config::handle_device_revoke(state, request_id, device_id),
+
         ClientMessage::SettingsGet {} => config::handle_settings_get(state),
         ClientMessage::SettingsUpdate { patch } => config::handle_settings_update(state, patch),
         ClientMessage::HostsList {} => config::handle_hosts_list(state),
@@ -664,7 +676,12 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             host_id,
             path,
             name,
-        } => workspace::handle_project_create(state, request_id, host_id, path, name),
+        } => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                workspace::handle_project_create(&state, request_id, host_id, path, name).await;
+            });
+        }
         ClientMessage::ProjectRename {
             request_id,
             project_id,

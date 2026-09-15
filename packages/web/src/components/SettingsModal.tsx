@@ -14,15 +14,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore, archivedSessions } from "../store";
-import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, SessionMode } from "@perch/shared";
+import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, SessionMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
+import { socket } from "../ws";
 import { AgentCatalog } from "./AgentCatalog";
 import type { SessionModeOverrideScope } from "./SessionModeControl";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
 // `createPerchTerminal` actually clamps to cannot drift apart.
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
+import { newId } from "../ids";
 
 // ---------------------------------------------------------------------------
 // HostStateDot (reusable in the modal host rows)
@@ -256,7 +258,7 @@ function SshHostsSection() {
     const directUrl = newDirectUrl.trim() || undefined;
     const remoteCmd = newRemoteCmd.trim() || undefined;
     upsertHost({
-      id: crypto.randomUUID(),
+      id: newId(),
       name,
       sshHost,
       remotePort: Number.isFinite(port) ? port : 7788,
@@ -878,6 +880,104 @@ function ArchivedSessionsPanel() {
  * subpage (reached from the Archived Sessions section's "Manage…" button). */
 type SettingsView = "main" | "archived" | "agents";
 
+
+// ---------------------------------------------------------------------------
+// DevicesSection — pairing codes and paired devices
+// ---------------------------------------------------------------------------
+
+/**
+ * perch's host binds `0.0.0.0`, so a phone on the same network can reach it.
+ * A device only gets in once someone here hands it a code (see
+ * `crates/perch-core/src/devices.rs`); this is where that code is produced and
+ * where access is taken back.
+ */
+function DevicesSection() {
+  const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [code, setCode] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const off = socket.onMessage((message) => {
+      if (message.type === "device.list.result") setDevices(message.devices);
+      if (message.type === "device.pair.code") {
+        setCode(message.code);
+        setExpiresAt(Date.now() + message.expiresInMs);
+      }
+    });
+    socket.send({ type: "device.list", requestId: newId() });
+    return off;
+  }, []);
+
+  // Only ticks while a code is on screen: the countdown is the only reason
+  // this component needs a clock at all.
+  useEffect(() => {
+    if (!code) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [code]);
+  const remaining = Math.max(0, Math.round((expiresAt - now) / 1000));
+  useEffect(() => {
+    if (code && remaining === 0) setCode(null);
+  }, [code, remaining]);
+
+  return (
+    <section className="settings-modal__section" data-testid="settings-devices">
+      <h3 className="settings-modal__section-title">Devices</h3>
+      <p className="settings-modal__muted">
+        Anything reaching this host from another machine needs a paired device. Local access never does.
+      </p>
+      {code ? (
+        <div className="settings-modal__pair-code" data-testid="pair-code">
+          <strong>{code}</strong>
+          <span className="settings-modal__muted">
+            Enter it on the other device. Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
+          </span>
+          <button
+            type="button"
+            data-testid="pair-cancel"
+            onClick={() => {
+              setCode(null);
+              socket.send({ type: "device.pair.cancel", requestId: newId() });
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-testid="pair-start"
+          onClick={() => socket.send({ type: "device.pair.start", requestId: newId() })}
+        >
+          Pair a device
+        </button>
+      )}
+      {devices.length === 0 ? (
+        <p className="settings-modal__empty">No paired devices.</p>
+      ) : (
+        <ul className="settings-modal__host-list" data-testid="paired-devices">
+          {devices.map((device) => (
+            <li key={device.id} className="settings-modal__host-row">
+              <span className="settings-modal__host-name">{device.name}</span>
+              <span className="settings-modal__host-addr">
+                last seen {new Date(device.lastSeenAt).toLocaleString()}
+              </span>
+              <button
+                type="button"
+                data-testid={`device-revoke-${device.id}`}
+                onClick={() => socket.send({ type: "device.revoke", requestId: newId(), deviceId: device.id })}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function SettingsModal() {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const settingsPage = usePerchStore((s) => s.settingsPage);
@@ -966,6 +1066,7 @@ export function SettingsModal() {
               <InterfaceSection />
               <TerminalSection />
               <ArchivedSessionsSection onOpen={() => setView("archived")} />
+              <DevicesSection />
               <SshHostsSection />
               <CustomModelsSection />
               <DefaultCwdSection />

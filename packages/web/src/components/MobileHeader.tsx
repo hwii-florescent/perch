@@ -25,6 +25,11 @@ export interface MobileHeaderProps {
 
 export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
   const sessionId = usePerchStore((s) => s.sessionId);
+  // Settings used to live only in the desktop `<Sidebar/>`, which this header
+  // replaces below 700px — so chat mode, themes, agents, hosts and paired
+  // devices were unreachable from a phone. Same testid as the desktop control:
+  // it opens the same modal.
+  const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const knownSession = usePerchStore((s) => s.sessions.find((sess) => sess.id === sessionId));
   const status = usePerchStore((s) => s.status);
   const activeHostId = usePerchStore((s) => s.activeHostId);
@@ -44,6 +49,16 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
       <div className="mobile-header__row mobile-header__row--top">
         {activeSession && <StatusDot session={activeSession} className="mobile-header__dot" />}
         <span className="mobile-header__title">{title}</span>
+        <button
+          type="button"
+          className="mobile-header__gear"
+          data-testid="settings-gear"
+          title="Settings"
+          aria-label="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          ⚙
+        </button>
         <button
           type="button"
           className="mobile-header__switch"

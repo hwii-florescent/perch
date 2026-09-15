@@ -98,10 +98,12 @@ fn spawn_git_status(
             .await
         {
             Ok(status) => {
+                let last_agent_turn = agent_history::last_completed_turn(&app, &workspace_id);
                 let _ = out_tx.send(ServerMessage::GitStatusResult {
                     request_id,
                     workspace_id,
                     status,
+                    last_agent_turn,
                 });
             }
             Err(error) => {

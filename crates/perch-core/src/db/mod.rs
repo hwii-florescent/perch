@@ -535,7 +535,7 @@ impl HistoryDb {
                 .copied()
                 .unwrap_or(archived);
             let (imported_project_id, imported_workspace_id) =
-                ensure_project_workspace_locked(conn, host_id, &path, None, archive_project)?;
+                ensure_project_workspace_locked(conn, host_id, &path, None, archive_project, None)?;
             // Do not disturb explicit associations created by a newer client,
             // but fill both columns for every pre-foundation row.
             let project_id = project_id
@@ -660,6 +660,7 @@ fn ensure_project_workspace_locked(
     raw_path: &str,
     requested_name: Option<&str>,
     archive_project: bool,
+    start_snapshot: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
     let host_id = normalized_host_id(host_id);
     let path = canonical_path_for_host(host_id, raw_path);
@@ -732,8 +733,8 @@ fn ensure_project_workspace_locked(
             "INSERT INTO workspaces
                 (id, project_id, host_id, path, name, branch, base_branch, dirty,
                  start_snapshot, parent_workspace_id, state, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, 0, NULL, NULL, 'active', ?6, ?6)",
-            params![id, project_id, host_id, path, name, now],
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, 0, ?7, NULL, 'active', ?6, ?6)",
+            params![id, project_id, host_id, path, name, now, start_snapshot],
         )?;
         id
     };
@@ -1101,16 +1102,28 @@ mod tests {
         let db = HistoryDb::open(&path).unwrap();
 
         let (first, workspace) = db
-            .create_project("local", &project_dir.to_string_lossy(), Some("Original"))
+            .create_project(
+                "local",
+                &project_dir.to_string_lossy(),
+                Some("Original"),
+                Some("creation-head"),
+            )
             .unwrap();
         db.set_project_archived(&first.id, true).unwrap();
         let (again, same_workspace) = db
-            .create_project("local", &project_dir.to_string_lossy(), Some("Changed"))
+            .create_project(
+                "local",
+                &project_dir.to_string_lossy(),
+                Some("Changed"),
+                Some("later-head"),
+            )
             .unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(again.name, "Original");
         assert!(again.archived);
         assert_eq!(same_workspace.id, workspace.id);
+        assert_eq!(workspace.start_snapshot.as_deref(), Some("creation-head"));
+        assert_eq!(same_workspace.start_snapshot, workspace.start_snapshot);
         assert!(db.focus_project(&first.id).is_err());
 
         let restored = db.set_project_archived(&first.id, false).unwrap();
@@ -1214,10 +1227,10 @@ mod tests {
         std::fs::create_dir_all(&second_dir).unwrap();
         let db = HistoryDb::open(&path).unwrap();
         let (first, _) = db
-            .create_project("local", &first_dir.to_string_lossy(), None)
+            .create_project("local", &first_dir.to_string_lossy(), None, None)
             .unwrap();
         let (second, second_workspace) = db
-            .create_project("local", &second_dir.to_string_lossy(), None)
+            .create_project("local", &second_dir.to_string_lossy(), None, None)
             .unwrap();
         db.focus_project(&first.id).unwrap();
         db.set_project_archived(&first.id, true).unwrap();
@@ -1249,7 +1262,7 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).unwrap();
         let db = HistoryDb::open(&path).unwrap();
         let (_, workspace) = db
-            .create_project("local", &workspace_path.to_string_lossy(), None)
+            .create_project("local", &workspace_path.to_string_lossy(), None, None)
             .unwrap();
         let row = db
             .ensure_file_buffer(
@@ -1353,7 +1366,7 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).unwrap();
         let db = HistoryDb::open(&path).unwrap();
         let (_, workspace) = db
-            .create_project("local", &workspace_path.to_string_lossy(), None)
+            .create_project("local", &workspace_path.to_string_lossy(), None, None)
             .unwrap();
         let update = |content: &str| FileBufferUpdate {
             content: content.to_string(),
@@ -1405,7 +1418,7 @@ mod tests {
         std::fs::create_dir_all(&workspace_path).unwrap();
         let db = HistoryDb::open(&path).unwrap();
         let (_, workspace) = db
-            .create_project("local", &workspace_path.to_string_lossy(), None)
+            .create_project("local", &workspace_path.to_string_lossy(), None, None)
             .unwrap();
         let baseline = db
             .ensure_file_buffer(

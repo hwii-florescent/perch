@@ -8,6 +8,7 @@ import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { closeWorkspaceTerminal, listWorkspaceTerminals, openWorkspaceTerminal } from "../workspaceTerminals";
 import { getDockviewController } from "../dockview/dockviewController";
+import { newId } from "../ids";
 
 export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, onPaneChange }: {
   active: boolean; sessionId: string; paneId?: string; layoutPanelId?: string; onPaneChange?: (paneId: string) => void;
@@ -133,7 +134,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
       <button type="button" disabled={!connected || closing} onClick={() => {
         explicitlyClosed.current = false;
         if (layoutPanelId) getDockviewController()?.addTerminalTabInGroup(layoutPanelId);
-        else setSelected(crypto.randomUUID());
+        else setSelected(newId());
       }}>New shell</button>
       <button type="button" disabled={!connected || !current || closing} onClick={() => void closeShell()}>{closing ? "Closing…" : "Close shell"}</button>
     </div>

@@ -3,6 +3,7 @@
  * counts; paths, line numbers, targets, anchors, and revisions come directly
  * from the shared protocol. */
 import type {
+  AgentTurnSummary,
   GitDiffFile,
   GitDiffHunk,
   GitDiffLine,
@@ -22,6 +23,7 @@ import type {
 } from "@perch/shared";
 
 export type {
+  AgentTurnSummary,
   GitDiffFile,
   GitDiffHunk,
   GitDiffLine,

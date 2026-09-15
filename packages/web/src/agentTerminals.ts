@@ -1,6 +1,7 @@
 import type { AgentControlChannel, AgentControlLease, AgentLifecycleStatus, ClientMessage, ServerMessage } from "@perch/shared";
 import { socket } from "./ws";
 import { onTerminalData } from "./terminalBus";
+import { newId } from "./ids";
 
 type Reply = Extract<ServerMessage, { type: "agent.terminal.opened" | "agent.control" }>;
 interface Pending {
@@ -105,7 +106,7 @@ export function openAgentTerminal(
   onData: (data: string) => void,
   onStatus: (status: AgentLifecycleStatus, controlling: boolean) => void,
 ) {
-  const viewId = crypto.randomUUID();
+  const viewId = newId();
   let terminalId: string | undefined;
   let unsubscribe: (() => void) | undefined;
   let released = false;
@@ -128,7 +129,7 @@ export function openAgentTerminal(
     if (!acquire && !lease) return;
     await request({
       ...(acquire ? { type: "agent.control.acquire" as const } : { type: "agent.control.release" as const, generation: lease!.generation }),
-      requestId: crypto.randomUUID(), sessionId, agentId: providerId, workspaceId: view.status.key.workspaceId, channel,
+      requestId: newId(), sessionId, agentId: providerId, workspaceId: view.status.key.workspaceId, channel,
     }, (reply) => {
       if (reply.type !== "agent.control" || reply.sessionId !== sessionId || reply.agentId !== providerId || reply.channel !== channel) throw new Error("Unexpected agent control response");
       // A released view cannot reclaim a lease after its response arrives.

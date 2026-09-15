@@ -102,13 +102,17 @@ impl HistoryDb {
         host_id: &str,
         path: &str,
         name: Option<&str>,
+        start_snapshot: Option<&str>,
     ) -> anyhow::Result<(ProjectRow, WorkspaceRow)> {
+        if let Some(revision) = start_snapshot {
+            validate_workspace_metadata(revision, "start snapshot")?;
+        }
         let conn = self.conn.lock().unwrap();
         let host_id = normalized_host_id(host_id);
         conn.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
             let (project_id, workspace_id) =
-                ensure_project_workspace_locked(&conn, host_id, path, name, false)?;
+                ensure_project_workspace_locked(&conn, host_id, path, name, false, start_snapshot)?;
             let project = get_project_locked(&conn, &project_id)?
                 .ok_or_else(|| anyhow::anyhow!("project disappeared after creation"))?;
             let workspace = get_workspace_locked(&conn, &workspace_id)?
@@ -200,7 +204,7 @@ impl HistoryDb {
         conn.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
             let (project_id, parent_workspace_id) =
-                ensure_project_workspace_locked(&conn, host_id, &project_path, None, false)?;
+                ensure_project_workspace_locked(&conn, host_id, &project_path, None, false, None)?;
             let existing = conn
                 .query_row(
                     "SELECT id FROM workspaces WHERE host_id = ?1 AND path = ?2

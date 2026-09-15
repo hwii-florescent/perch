@@ -10,6 +10,7 @@ pub mod clipboard_image;
 pub mod commands;
 pub mod db;
 pub mod detached;
+pub mod devices;
 pub mod filesystem;
 pub mod ghostty_profile;
 pub mod hosts;

@@ -128,7 +128,11 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
     } catch (reason) { setError((reason as Error).message); }
     finally { setPending(false); }
   }
-  const label = !connected ? "Reconnecting…" : exitCode !== null ? "Agent exited" : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? "You control this agent" : status.inputOwner ? "Another viewer has control" : "Viewing agent";
+  // A hibernated agent has no process, so the pty closes exactly like an
+  // exit — but its conversation is kept and reattaching resumes it. Saying
+  // "exited (code 0)" for that would read as lost work.
+  const sleeping = status?.state === "sleeping";
+  const label = !connected ? "Reconnecting…" : sleeping ? "Agent sleeping" : exitCode !== null ? "Agent exited" : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? "You control this agent" : status.inputOwner ? "Another viewer has control" : "Viewing agent";
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined}>
     <div className="terminal__toolbar">
       <span role="status">{label}</span>
@@ -141,10 +145,10 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
-    {exitCode !== null && <div className="terminal__exited terminal__exited--cli" data-testid="cli-exited">
-      <span className="terminal__exited-text">{agent} exited (code {exitCode})</span>
+    {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
+      <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>
       <span className="terminal__exited-actions">
-        <button type="button" className="terminal__exited-btn terminal__exited-btn--primary" data-testid="cli-restart" onClick={() => setRestart((value) => value + 1)}>Restart CLI</button>
+        <button type="button" className="terminal__exited-btn terminal__exited-btn--primary" data-testid={sleeping ? "cli-resume" : "cli-restart"} onClick={() => setRestart((value) => value + 1)}>{sleeping ? "Resume agent" : "Restart CLI"}</button>
         {onExitCli && <button type="button" className="terminal__exited-btn" onClick={onExitCli}>Back to Hosted</button>}
       </span>
     </div>}

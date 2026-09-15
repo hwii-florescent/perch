@@ -37,6 +37,7 @@ export {
   shouldReuseCurrentSession,
 } from "./selectors";
 export type { ProjectGroup, ProjectNavState, SessionModeViewResolution } from "./selectors";
+import { newId } from "../ids";
 
 export interface ToolCallEntry {
   name: string;
@@ -994,11 +995,11 @@ function sendWorktreeRequest(
 }
 
 
-export function newId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+/** Re-exported so the store's existing importers keep working; the one
+ * implementation lives in `ids.ts` (its guard has to be `typeof ... ===
+ * "function"`, because outside a secure context the property exists but is
+ * not callable). */
+export { newId };
 
 /** The sidebar/tab-bar "active project" pin — a `(hostId, cwd)` pair. */
 export interface ActiveProject {
@@ -1744,6 +1745,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // a stale choice from an earlier call can never leak onto an unrelated
     // create.
     pendingAgentForNewSession = agentChoice ?? null;
+    // `undefined` means "no session-scoped override": the new session takes
+    // the device default, which is what goals.md asks for ("a device default
+    // and a per-session override"). Only a launcher whose whole purpose is a
+    // CLI start (`CliStartPanel`) passes an explicit mode — the ordinary
+    // "New session" launchers used to hardcode "cli", which made the device
+    // default dead on arrival for every session a user creates.
     pendingModeForNewSession = mode ?? null;
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });

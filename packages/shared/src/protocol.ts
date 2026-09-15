@@ -866,6 +866,48 @@ export interface SessionListMessage {
 
 // Stage D — settings & hosts client messages
 
+/**
+ * One device paired with this host. Only the token's hash is ever stored, so
+ * this summary is safe to show to any authorized client.
+ */
+export interface DeviceSummary {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+}
+
+/** Offer a pairing code another device can claim at `POST {base}pair`. */
+export interface DevicePairStartMessage {
+  type: "device.pair.start";
+  requestId: string;
+}
+export interface DevicePairCancelMessage {
+  type: "device.pair.cancel";
+  requestId: string;
+}
+export interface DeviceListMessage {
+  type: "device.list";
+  requestId: string;
+}
+/** Revoke one paired device; its token stops working immediately. */
+export interface DeviceRevokeMessage {
+  type: "device.revoke";
+  requestId: string;
+  deviceId: string;
+}
+export interface DevicePairCodeMessage {
+  type: "device.pair.code";
+  requestId: string;
+  code: string;
+  expiresInMs: number;
+}
+export interface DeviceListResultMessage {
+  type: "device.list.result";
+  requestId: string;
+  devices: DeviceSummary[];
+}
+
 export interface SettingsGetMessage {
   type: "settings.get";
 }
@@ -1321,6 +1363,10 @@ export type ClientMessage =
   | AgentLifecycleGetMessage
   | AgentControlAcquireMessage
   | AgentControlReleaseMessage
+  | DevicePairStartMessage
+  | DevicePairCancelMessage
+  | DeviceListMessage
+  | DeviceRevokeMessage
   | SettingsGetMessage
   | SettingsUpdateMessage
   | HostsListMessage
@@ -1655,11 +1701,29 @@ export interface WorkspaceGitMessage {
   behind: number;
 }
 
+/**
+ * The newest completed agent turn for a workspace. `beforeRef` / `afterRef`
+ * are server-recorded content commits (they include uncommitted and untracked
+ * work, so they are not necessarily branch HEADs); use them as a `compare`
+ * diff target and do not interpret them otherwise.
+ */
+export interface AgentTurnSummary {
+  snapshotId: string;
+  sessionId: string;
+  agent: string;
+  beforeRef: string;
+  afterRef?: string;
+  changedPaths: string[];
+  completedAt?: number;
+}
+
 export interface GitStatusResultMessage {
   type: "git.status.result";
   requestId: string;
   workspaceId: string;
   status: GitStatus;
+  /** Newest completed turn here; absent until one has finished. */
+  lastAgentTurn?: AgentTurnSummary;
 }
 
 export interface GitRefsResultMessage {
@@ -1987,6 +2051,8 @@ export type ServerMessage =
   | HostInfoMessage
   | SessionLayoutMessage
   | WorkspaceGitMessage
+  | DevicePairCodeMessage
+  | DeviceListResultMessage
   | GitStatusResultMessage
   | GitRefsResultMessage
   | GitDiffResultMessage

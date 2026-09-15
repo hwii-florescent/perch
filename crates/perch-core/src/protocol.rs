@@ -438,6 +438,36 @@ pub struct GitPreviewReceipt {
     pub expires_at: i64,
 }
 
+/// One device that has been paired with this host. The token itself is never
+/// on the wire or on disk in the clear — only its hash is stored, so this
+/// summary is safe to broadcast to any authorized client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSummary {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+}
+
+/// The newest completed agent turn for a workspace. `beforeRef` / `afterRef`
+/// are server-recorded content commits (they include uncommitted and
+/// untracked work, so they are not necessarily branch HEADs); a client uses
+/// them as a `compare` diff target and must not interpret them otherwise.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTurnSummary {
+    pub snapshot_id: String,
+    pub session_id: String,
+    pub agent: String,
+    pub before_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_ref: Option<String>,
+    pub changed_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatUsage {
@@ -900,6 +930,24 @@ pub enum ClientMessage {
     /// blocking a fresh attach) after the view that owned it is gone.
     #[serde(rename = "terminal.kill", rename_all = "camelCase")]
     TerminalKill { terminal_id: String },
+
+    /// Offer a pairing code so another device can claim a token from
+    /// `POST {base}pair`. Only an already-authorized client can ask.
+    #[serde(rename = "device.pair.start", rename_all = "camelCase")]
+    DevicePairStart { request_id: String },
+
+    #[serde(rename = "device.pair.cancel", rename_all = "camelCase")]
+    DevicePairCancel { request_id: String },
+
+    #[serde(rename = "device.list", rename_all = "camelCase")]
+    DeviceList { request_id: String },
+
+    /// Revoke one paired device. Its token stops working immediately.
+    #[serde(rename = "device.revoke", rename_all = "camelCase")]
+    DeviceRevoke {
+        request_id: String,
+        device_id: String,
+    },
 
     #[serde(rename = "settings.get")]
     SettingsGet {},
@@ -1673,6 +1721,21 @@ pub enum ServerMessage {
         behind: u32,
     },
 
+    /// A live pairing code and how long it has left. Shown to the user, typed
+    /// into the device being paired; never persisted.
+    #[serde(rename = "device.pair.code", rename_all = "camelCase")]
+    DevicePairCode {
+        request_id: String,
+        code: String,
+        expires_in_ms: i64,
+    },
+
+    #[serde(rename = "device.list.result", rename_all = "camelCase")]
+    DeviceListResult {
+        request_id: String,
+        devices: Vec<DeviceSummary>,
+    },
+
     /// Request-correlated Git status for a durable workspace. The workspace
     /// root is server-owned and is included only inside the status snapshot
     /// for display/debugging; clients never supply it.
@@ -1681,6 +1744,11 @@ pub enum ServerMessage {
         request_id: String,
         workspace_id: String,
         status: GitStatus,
+        /// The newest completed agent turn in this workspace, so the review
+        /// surface can offer its boundary as a diff base without a second
+        /// request family. Absent until one turn has finished here.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_agent_turn: Option<AgentTurnSummary>,
     },
 
     /// Branch refs available for selecting a diff/review base.

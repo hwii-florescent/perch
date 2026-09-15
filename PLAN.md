@@ -1,5 +1,18 @@
 # perch — Personal AI IDE / Agent App: Full Plan (Rust / Tauri)
 
+## Workspace-start comparison checkpoint — 2026-09-14
+
+New explicit project registration records its Git HEAD before acknowledgement;
+existing workspace refs remain immutable. The Git view offers Workspace start
+through the existing compare/anchor path, including mobile. The real Chromium
+flow verifies an intervening commit, untracked content, an anchored note and
+reload. Three focused Git/review browser checks pass, as do 260 core tests,
+two protocol tests, 222 web tests, production build and formatting; Clippy has
+only its five baseline warnings. V-07 remains PARTIAL: agent-turn history and
+creation-boundary coverage for implicit/legacy workspaces remain unfinished.
+See the latest section of handoff.md for changed files, artifacts and next work.
+
+
 ## Context
 
 A personal IDE/agent app to **babysit coding agents from anywhere**, including your phone, built to
@@ -68,6 +81,132 @@ corp-SSH) swappable so the open-source split is a strip-out, not a rewrite.
 ---
 
 ## Phases & Milestones
+
+### Device default at session creation — 2026-09-15
+
+The ordinary "New session" launchers hardcoded `mode: "cli"`, a session-scoped
+override that made goals.md's device default unreachable for every session a
+user creates. They now omit it and inherit the default; `CliStartPanel` keeps
+its explicit CLI start. No behaviour change on a CLI-default machine.
+
+### V-07 and V-11 completion — 2026-09-15
+
+V-07: implicit (session-created) workspaces now record a creation ref within a
+five-minute grace window — anything older stays "not recorded" rather than
+being back-dated — the Git surface states whose turn it was and how many paths
+it touched, and the rename, delete and empty-comparison states are exercised
+against a real repository. V-07 is PASS for local workspaces; direct-host turns
+stay out of scope.
+
+V-11: the visual QA spec now spans a narrow desktop pane, a wide desktop
+viewport and 390px across the Git, file, terminal and settings surfaces,
+checking clipped controls per *pane*, page-level horizontal scroll, a visible
+focus indicator, readable status text, and phone reachability of every pane.
+That last check found a real dead end — Settings existed only in the desktop
+sidebar, so it was unreachable from a phone — now fixed in `MobileHeader`.
+V-11 is PASS.
+
+### Device pairing — 2026-09-15
+
+perch binds `0.0.0.0` and had no authentication at all, so anything on the LAN
+could drive real agents. `devices.rs` adds paired devices (`~/.perch/devices.json`,
+`--devices-path` to override) storing only each token's SHA-256, plus in-memory
+pairing codes that expire in five minutes, work once, and burn after five wrong
+guesses. `authorize_request` gates the WS upgrade and both upload routes;
+loopback stays exempt so the desktop shell never pairs with itself. `GET/POST
+{base}pair` let an unpaired browser learn it is unpaired and claim a token
+(returned as a cookie, so the WS handshake carries it), and `device.*` protocol
+messages drive Settings → Devices.
+
+It also exposed a real bug: `crypto.randomUUID` only exists in a secure context,
+and ten unguarded call sites (plus four home-grown fallbacks whose
+`"randomUUID" in crypto` guard is true-but-uncallable) crashed the whole app for
+a phone on plain http. They now share `packages/web/src/ids.ts`.
+
+`e2e/device-pairing.spec.ts` drives two real origins — host on loopback, a 390px
+phone on the machine's LAN address — through pairing, a real agent turn,
+scrollback after reload, files and Git, a host restart, and revocation. V-10 is
+PASS; no QR code, per-device scope or TLS yet.
+
+### Hibernation and resume — 2026-09-15
+
+The hibernation machinery had no runtime caller. `spawn_agent_hibernation_task`
+now hibernates idle agents nobody is watching (15 min, `PERCH_HIBERNATE_AFTER_SECS`
+to override, 0 to disable) and the attach path wakes a sleeping agent by
+resuming its recorded provider session instead of failing — never a fresh one.
+The CLI pane says "sleeping … its conversation is kept" with a Resume button
+rather than reporting an exit.
+
+Two real defects fell out: a CLI agent could never leave `Working` (a configured
+provider has no status stream, a native one only reports when its hooks fire),
+so the idle sweep now moves a Working agent to Idle after 20s of pty silence;
+and a hibernated or crashed CLI left its session permanently "running", which
+stuck the status dot and made the next attach fail with "a Chat turn is still
+running in this session".
+
+`e2e/agent-hibernation.spec.ts` verifies it with a real Claude CLI: sleeping
+observed on the wire, the tmux session gone, and the same `providerSessionId`
+resumed when the client returns. V-12 is PASS for local CLI agents; direct-host
+agents stay out of scope.
+
+### Pane-width responsiveness — 2026-09-15
+
+Dockview can give a pane a narrow width inside a wide window, so the file and
+Git surfaces' collapse rules are now `@container` rules keyed to the pane's own
+inline size instead of the viewport. Files collapse at 460px (where the 230px
+tree rail stops leaving a usable editor) rather than the viewport's 700px; the
+Git pane's viewport rules became container rules, and the five that contradicted
+the existing container block were deleted — at phone width both sets had been
+applying, which is why the changed-file rail rendered behind the diff. The
+editor action row now takes its own bounded line so Save is no longer clipped.
+
+`e2e/workspace-visual-qa.spec.ts` guards it: populated surfaces measured against
+each pane's own box at a narrow desktop pane and at 390px, plus a real review
+interaction, with screenshots in `e2e/screenshots-visual-qa/` (gitignored).
+`workspace-files-durable.spec.ts` now reopens the tree through the real
+"‹ Explorer" control after a reload. V-11 stays PARTIAL — terminal/chat/settings
+surfaces and the explicit focus/loading/error/empty pass remain.
+
+### Last-agent-turn review — 2026-09-14
+
+`agent_change_snapshots` finally has a runtime caller: `server/agent_history.rs`
+records a durable before/after boundary per agent turn, hooked at the session's
+running/idle transition (`notify_session_updated`) so a turn typed straight into
+the CLI counts the same as one sent from the UI or a review packet. Both sides
+are content commits from `GitService::content_snapshot` — a scratch-index
+`commit-tree` covering index, worktree and untracked files, touching no ref,
+index or worktree — because agents mostly do not commit and a HEAD-only
+boundary would report an empty turn. The Git surface offers it as a
+"Last agent turn" diff base via the existing compare target and one optional
+field on `git.status.result` (protocol.rs/protocol.ts both updated).
+
+Two defects found on the way, both fixed at the shared function: configured CLI
+providers had a no-op activity callback in the runtime adapter's terminal
+registry, so they never reported working/idle at all (now resolved back to
+their session and swept like shared terminals); and `GitService::diff`
+synthesized working-tree untracked files into *every* non-staged target,
+which attributed post-turn files to a two-endpoint comparison and double-listed
+files the endpoint already had.
+
+Verified in a real browser against a real pty-owned CLI process
+(`e2e/agent-turn-review.spec.ts`, 1/1): the turn's edit and new file appear
+under "Last agent turn", a later human edit does not, and the boundary survives
+a reload. 261 core tests, 2 protocol parity tests, 222 web tests, production
+build, `cargo fmt --check` and the 5 baseline clippy warnings all hold. V-07 is
+still PARTIAL — implicit-workspace creation refs, direct-host turns and the
+rendered change summary remain; see docs/ADE-REWORK-VERIFICATION.md.
+
+### Mixed recovery correction — 2026-09-14
+
+Fixed the disconnected `NoSessionPanel` store selector: the derived fallback
+project allocated a new object on each snapshot read, crashing React after
+core shutdown. Selecting its scalar cwd preserves navigation and stops the
+loop. The mixed-workspace browser check now verifies the disconnected screen
+and exact restored pane IDs as well as projects, linked checkout, session,
+same-PID shell, draft conflict, and anchored note. It passes three repetitions
+each in Chromium and WebKit; 222 web tests and the production build pass.
+V-09 is PASS. Populated narrow split controls still need V-11 work. Full goal
+and remaining gates stay open; details are in the verification report.
 
 ### ADE rework checkpoint — 2026-09-10 (in progress)
 

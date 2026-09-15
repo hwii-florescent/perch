@@ -71,6 +71,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
   const hosts = path.join(home, "hosts.json");
   const dbPath = path.join(home, "history.sqlite");
   let core: ChildProcess | null = null;
+  let restarting = false;
   let terminalId: string | null = null;
   const errors: string[] = [];
   const coreLog: string[] = [];
@@ -118,6 +119,13 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
   await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
   page.on("pageerror", (error) => errors.push(error.message + "\n" + (error.stack ?? "")));
   page.on("console", (message) => {
+    // WebKit reports the socket severed by our deliberate SIGKILL as a
+    // console error. Keep every application error, including React warnings.
+    if (restarting && message.text().startsWith(`WebSocket connection to 'ws://127.0.0.1:${port}/ws' failed:`)) return;
+    // With the host down, the client's pairing probe (`pairing.ts`, which is
+    // how it tells "not paired" from "host unreachable") also fails, and
+    // Chromium logs every failed fetch. Same deliberate-disconnect noise.
+    if (restarting && message.text().includes("ERR_CONNECTION_REFUSED")) return;
     if (message.type() === "error") errors.push("console: " + message.text().slice(0, 2000));
   });
   page.on("websocket", (socket) =>
@@ -203,20 +211,22 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await page.getByTestId("git-comment-body").fill(commentBody);
     await page.getByRole("button", { name: "Add comment", exact: true }).click();
     await expect(page.locator(".workspace-git__comment").filter({ hasText: commentBody })).toBeVisible({ timeout: 15000 });
+    const paneIds = await page.locator('[data-testid^="pane-tab-"]').evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute("data-testid")).sort());
     await page.screenshot({ path: testInfo.outputPath("recovery-before-kill.png"), fullPage: true });
 
     // --- kill and recover -------------------------------------------------
+    restarting = true;
     await stop();
+    // Exercise the disconnected fallback before restoring the client. Its
+    // derived project selector previously returned an uncached object and
+    // crashed React while sessionId was null but listed sessions remained.
+    await expect(page.getByTestId("no-session-panel")).toContainText("Connecting");
+    expect(errors, "disconnected page must not raise React errors").toEqual([]);
     await boot();
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 25000 });
-    // KNOWN DEFECT — see docs/ADE-REWORK-VERIFICATION.md (V-09). Reloading into a
-    // restored layout that contains a persistent shell terminal, against a
-    // freshly booted core, drives a zustand selector to return an uncached
-    // snapshot ("The result of getSnapshot should be cached to avoid an
-    // infinite loop") and React tears the tree down with "Maximum update depth
-    // exceeded", blanking the app. The control assertion above proves a plain
-    // reload with the very same panes is clean, so this is restart-specific.
+    restarting = false;
     expect(errors, "recovered page must not raise React errors").toEqual([]);
 
     // Project/worktree identity: still ONE project, still both checkouts.
@@ -231,6 +241,8 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     // Terminal: same id, same underlying process.
     const recoveredShell = page.locator(".terminal--persistent[data-pane-id]:visible");
     await expect(recoveredShell).toHaveAttribute("data-terminal-id", originalTerminalId, { timeout: 25_000 });
+    await expect.poll(() => page.locator('[data-testid^="pane-tab-"]').evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute("data-testid")).sort())).toEqual(paneIds);
     await shellCommand(page, `printf 'after_%s_PID_%s_END\\n' "$PERCH_MIX" "$$"`);
     await expect(recoveredShell.locator(".xterm-rows")).toContainText(`after_survived_PID_${shellPid}_END`, { timeout: 20000 });
 
@@ -246,13 +258,6 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     // The anchored comment is still on the review list.
     await recoveredProject.locator(`[data-testid="workspace-git-${primaryWorkspaceId}"]`).click();
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 20000 });
-    // KNOWN DEFECT — see docs/ADE-REWORK-VERIFICATION.md (V-09). Mounting the
-    // review pane on the recovered page drives a zustand selector to return an
-    // uncached snapshot ("The result of getSnapshot should be cached to avoid an
-    // infinite loop"); React then tears the whole tree down with "Maximum update
-    // depth exceeded" and the app goes blank. The control assertion earlier
-    // proves a plain reload with the very same panes is clean, so this is
-    // specific to reloading against a freshly restarted core.
     expect(errors, "recovered page must not raise React errors").toEqual([]);
     // A recovered comment renders inline when its anchor still resolves against
     // the current source, and drops to the review list when it does not — accept
@@ -270,9 +275,13 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     throw error;
   } finally {
     await stop();
-    if (terminalId) {
+    // A worktree launcher also starts its configured CLI. Reap every tmux
+    // process this isolated core actually launched, not only the plain shell.
+    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
+    if (terminalId) ownedTmux.add(`perch-cli-shell-${terminalId}`);
+    for (const name of ownedTmux) {
       try {
-        execFileSync("tmux", ["kill-session", "-t", `perch-cli-shell-${terminalId}`], { stdio: "ignore" });
+        execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" });
       } catch {
         /* already gone */
       }

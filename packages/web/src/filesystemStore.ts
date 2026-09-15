@@ -16,6 +16,7 @@ import type {
   ServerMessage,
 } from "@perch/shared";
 import { socket } from "./ws";
+import { newId } from "./ids";
 
 /** The loading/error state for one lazy directory level. Entries are kept
  * while a refresh is in flight so expanding a folder never flashes an empty
@@ -130,9 +131,7 @@ export const MAX_CACHED_DOCUMENTS = 32;
 type FilesystemRequestKind = PendingFilesystemRequest["kind"];
 
 function newRequestId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return newId();
 }
 
 /** Paths in the tree are already workspace-relative and server-normalized.

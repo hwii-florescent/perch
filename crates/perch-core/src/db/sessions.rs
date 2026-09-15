@@ -176,7 +176,7 @@ impl HistoryDb {
         conn.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
             let (project_id, workspace_id) =
-                ensure_project_workspace_locked(&conn, host_id, cwd, None, false)?;
+                ensure_project_workspace_locked(&conn, host_id, cwd, None, false, None)?;
             conn.execute(
                 "INSERT OR IGNORE INTO sessions
                     (id, cwd, created_at, host_id, project_id, workspace_id)

@@ -35,7 +35,9 @@ function basename(path: string): string {
 export function NoSessionPanel({ connected }: { connected: boolean }) {
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
-  const project = usePerchStore((s) => effectiveActiveProject(s));
+  // The fallback project is derived; subscribe to its scalar path so a
+  // disconnect cannot turn repeated snapshot reads into a render loop.
+  const projectCwd = usePerchStore((s) => effectiveActiveProject(s)?.cwd);
   const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
   const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
   const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
@@ -56,8 +58,8 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
       <div className="no-session__card">
         <h2 className="no-session__title">No session open</h2>
         <p className="no-session__hint">
-          {project
-            ? `Start a new chat in ${basename(project.cwd)}, or pick a session from the sidebar.`
+          {projectCwd
+            ? `Start a new chat in ${basename(projectCwd)}, or pick a session from the sidebar.`
             : "Create a new session to get started, or pick one from the sidebar."}
         </p>
         <AgentPicker
@@ -71,9 +73,9 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
           type="button"
           className="no-session__primary"
           data-testid="no-session-create"
-          onClick={() => createSessionOnHost(activeHostId, project?.cwd, selectedAgent, "cli")}
+          onClick={() => createSessionOnHost(activeHostId, projectCwd, selectedAgent)}
         >
-          {project ? `New session in ${basename(project.cwd)}` : "New session"}
+          {projectCwd ? `New session in ${basename(projectCwd)}` : "New session"}
         </button>
       </div>
     </div>

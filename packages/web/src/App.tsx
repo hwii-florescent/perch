@@ -18,6 +18,8 @@ import { useLeaderKey } from "./keybinds";
 import { getDockviewController } from "./dockview/dockviewController";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
+import { PairingGate } from "./components/PairingGate";
+import { isPaired } from "./pairing";
 
 export default function App() {
   const apiRef = useRef<DockviewApi | null>(null);
@@ -104,6 +106,26 @@ export default function App() {
     setKeybindHelpOpen(true);
   }, []);
   useLeaderKey({ openNavigator, openKeybindHelp });
+
+  // A rejected WebSocket handshake looks exactly like an unreachable host from
+  // the browser's side, so ask the host which it is whenever the socket is
+  // down. Only an explicit "not paired" replaces the app.
+  const connected = usePerchStore((state) => state.connected);
+  const [unpaired, setUnpaired] = useState(false);
+  useEffect(() => {
+    if (connected) {
+      setUnpaired(false);
+      return;
+    }
+    let cancelled = false;
+    void isPaired().then((paired) => {
+      if (!cancelled) setUnpaired(!paired);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected]);
+  if (unpaired) return <PairingGate onPaired={() => window.location.reload()} />;
 
   return (
     <div className={"app" + (isMobile ? " app--mobile" : "")}>

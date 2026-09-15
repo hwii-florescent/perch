@@ -1,6 +1,7 @@
 import type { ClientMessage, ServerMessage, WorkspaceTerminal } from "@perch/shared";
 import { socket } from "./ws";
 import { onTerminalData } from "./terminalBus";
+import { newId } from "./ids";
 
 type Reply = Extract<ServerMessage, { type: "terminal.opened" | "terminal.list.result" | "terminal.closed" }>;
 interface Pending {
@@ -63,7 +64,7 @@ socket.onConnectionChange((connected) => {
 
 export async function listWorkspaceTerminals(sessionId: string): Promise<WorkspaceTerminal[]> {
   let terminals: WorkspaceTerminal[] = [];
-  await request({ type: "terminal.list", requestId: crypto.randomUUID(), sessionId }, (reply) => {
+  await request({ type: "terminal.list", requestId: newId(), sessionId }, (reply) => {
     if (reply.type !== "terminal.list.result" || reply.sessionId !== sessionId) throw new Error("Unexpected terminal list response");
     terminals = reply.terminals;
   });
@@ -74,7 +75,7 @@ export function openWorkspaceTerminal(
   sessionId: string, paneId: string, cols: number, rows: number,
   onReady: (terminal: WorkspaceTerminal, replay: string) => void, onData: (data: string) => void,
 ): { ready: Promise<void>; release: () => void } {
-  const viewId = crypto.randomUUID();
+  const viewId = newId();
   let terminalId: string | null = null;
   let unsubscribe: (() => void) | undefined;
   let released = false;
@@ -96,7 +97,7 @@ export function openWorkspaceTerminal(
 }
 
 export function closeWorkspaceTerminal(sessionId: string, terminalId: string): Promise<void> {
-  return request({ type: "terminal.close", requestId: crypto.randomUUID(), sessionId, terminalId }, (reply) => {
+  return request({ type: "terminal.close", requestId: newId(), sessionId, terminalId }, (reply) => {
     if (reply.type !== "terminal.closed" || reply.sessionId !== sessionId || reply.terminalId !== terminalId) throw new Error("Unexpected terminal close response");
   });
 }

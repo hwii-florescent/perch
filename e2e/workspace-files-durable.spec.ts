@@ -128,6 +128,15 @@ async function waitForDraftSync(page: Page): Promise<void> {
   }
 }
 
+/**
+ * A narrow file pane (phone, or a cramped dockview pane on desktop) shows the
+ * tree and the editor one at a time. Reopen the tree before walking it.
+ */
+async function showExplorer(page: Page): Promise<void> {
+  const toggle = page.locator(".workspace-files__mobile-explorer");
+  if (await toggle.isVisible().catch(() => false)) await toggle.click();
+}
+
 test.describe("V-05/V-06 durable file workflow", () => {
   test("refreshes the tree, recovers a draft, and exposes external conflict choices", async ({ page }, testInfo) => {
     prepareFixture();
@@ -236,6 +245,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       // Back to the editor for the external-conflict half.
       await project.locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
       await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
+      await showExplorer(page);
       if (!(await page.getByTestId("workspace-file-entry-src/main.txt").count())) {
         await page.getByTestId("workspace-file-entry-src").click();
       }
@@ -277,6 +287,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
       // The mobile file surface opens on the Explorer half with no selection, so
       // walk the nested tree the way a phone user would before the editor exists.
+      await showExplorer(page);
       await page.getByTestId("workspace-file-entry-src").click();
       await page.getByTestId("workspace-file-entry-src/main.txt").click();
       const mobileEditor = page.getByTestId("workspace-file-editor");

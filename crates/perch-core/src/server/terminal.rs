@@ -220,35 +220,65 @@ fn open_agent_terminal(
         views.values().map(HashSet::len).sum::<usize>() < 64,
         "too many agent views"
     );
-    let tx = state.out_tx.clone();
-    let on_data = Arc::new(move |terminal_id, data| {
-        let _ = tx.send(ServerMessage::TerminalData { terminal_id, data });
-    });
-    let tx = state.out_tx.clone();
-    let on_exit = Arc::new(move |terminal_id, code| {
-        let _ = tx.send(ServerMessage::TerminalExit { terminal_id, code });
-    });
+    let listeners = || {
+        let tx = state.out_tx.clone();
+        let on_data: crate::terminal::TerminalDataListener = Arc::new(move |terminal_id, data| {
+            let _ = tx.send(ServerMessage::TerminalData { terminal_id, data });
+        });
+        let tx = state.out_tx.clone();
+        let on_exit: crate::terminal::TerminalExitListener = Arc::new(move |terminal_id, code| {
+            let _ = tx.send(ServerMessage::TerminalExit { terminal_id, code });
+        });
+        (on_data, on_exit)
+    };
+    let announce = |handle: &crate::agent_runtime::AgentRuntimeHandle, replay: &str| {
+        if let Ok(snapshot) = state.app.agent_runtime.snapshot(&key) {
+            let _ = state.out_tx.send(ServerMessage::AgentTerminalOpened {
+                request_id: request_id.to_string(),
+                terminal_id: handle.terminal.terminal_id.clone(),
+                status: lifecycle_status_to_wire(snapshot),
+                replay: replay.to_string(),
+            });
+        }
+    };
+    let (on_data, on_exit) = listeners();
     let result = state.app.agent_runtime.attach_cli_with_ready(
         registration,
-        cwd,
+        cwd.clone(),
         client.clone(),
         cols,
         rows,
-        &extra_args,
+        extra_args.as_slice(),
         resume_existing,
         on_data,
         on_exit,
-        |handle, replay| {
-            if let Ok(snapshot) = state.app.agent_runtime.snapshot(&key) {
-                let _ = state.out_tx.send(ServerMessage::AgentTerminalOpened {
-                    request_id: request_id.to_string(),
-                    terminal_id: handle.terminal.terminal_id.clone(),
-                    status: lifecycle_status_to_wire(snapshot),
-                    replay: replay.to_string(),
-                });
-            }
-        },
+        // Borrowed rather than moved: the wake retry below announces too.
+        |handle, replay| announce(handle, replay),
     );
+    // The agent was hibernated while nobody was watching it. Wake resumes the
+    // recorded provider session; it never falls back to a fresh one, so an
+    // attach either restores the same conversation or fails loudly.
+    let result = match result {
+        Err(crate::agent_runtime::RuntimeAdapterError::RequiresWake(_)) => {
+            let (on_data, on_exit) = listeners();
+            let woken = state.app.agent_runtime.wake_cli_with_args(
+                &key,
+                cwd,
+                client.clone(),
+                cols,
+                rows,
+                &extra_args,
+                on_data,
+                on_exit,
+                now_millis(),
+            );
+            if let Ok(attach) = &woken {
+                announce(&attach.handle, &attach.replay);
+            }
+            woken
+        }
+        other => other,
+    };
     match result {
         Ok(_) if !state.out_tx.is_closed() => {
             if crate::native_ui::supported(provider_id) {

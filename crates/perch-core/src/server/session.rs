@@ -1644,6 +1644,7 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
     // Drop every other piece of in-memory bookkeeping keyed by this
     // session id.
     state.app.registry.remove(&session_id);
+    super::agent_history::forget_session(&session_id);
     state
         .app
         .running_sessions

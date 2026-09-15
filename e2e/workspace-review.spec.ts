@@ -20,9 +20,9 @@ import * as path from "node:path";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const RUN_ID = `${Date.now()}-${process.pid}`;
-const FIXTURE_ROOT = path.join(os.tmpdir(), `perch-e2e-review-${RUN_ID}`);
-const REVIEW_FILE = path.join(FIXTURE_ROOT, "src", "main.txt");
-const PROJECT_NAME = `Review UI ${RUN_ID}`;
+let FIXTURE_ROOT: string;
+let REVIEW_FILE: string;
+let PROJECT_NAME: string;
 const RELATIVE_FILE = "src/main.txt";
 const HEAD_TEXT = "HEAD_ANCHOR";
 const INDEX_TEXT = "INDEX_ANCHOR";
@@ -45,7 +45,11 @@ function git(args: string[]): void {
 }
 
 function prepareFixture(): void {
-  fs.rmSync(FIXTURE_ROOT, { recursive: true, force: true });
+  // A new repository needs a new durable workspace identity. Recreating one
+  // path across tests leaves the previous test's immutable start ref behind.
+  FIXTURE_ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `perch-e2e-review-${RUN_ID}-`)));
+  REVIEW_FILE = path.join(FIXTURE_ROOT, "src", "main.txt");
+  PROJECT_NAME = `Review UI ${RUN_ID} ${path.basename(FIXTURE_ROOT).slice(-6)}`;
   fs.mkdirSync(path.dirname(REVIEW_FILE), { recursive: true });
   fs.writeFileSync(REVIEW_FILE, `${HEAD_TEXT}\n`);
   git(["-c", "core.hooksPath=/dev/null", "init", "-q", "-b", "main"]);
@@ -355,6 +359,63 @@ test.describe("Workspace Git/review UI", () => {
       await expect(thread).toHaveCount(0, { timeout: 15000 });
 
       await page.screenshot({ path: testInfo.outputPath("workspace-review-crud.png"), fullPage: true });
+    } finally {
+      removeFixture();
+    }
+  });
+
+  test("workspace start keeps its creation ref across commits, reload and mobile review", async ({ page }, testInfo) => {
+    prepareFixture();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    try {
+      await installWireCapture(page);
+      const workspaceId = await openReview(page);
+      const selector = page.getByTestId("git-diff-target");
+      const diff = page.getByTestId("git-diff");
+      await expect(selector.locator('option[value="workspaceStart"]')).toBeEnabled();
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText(WORKTREE_TEXT);
+      const initial = await latestDiff(page, "compare");
+      expect(initial.target?.base).toMatch(/^[0-9a-f]{40,64}$/);
+      expect(initial.target?.head).toBeUndefined();
+
+      // Advance the real HEAD while preserving the unstaged edit. The start
+      // comparison must remain pinned to registration, not the latest commit.
+      git(["commit", "-q", "-m", "advance head"]);
+      fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
+      await page.getByTestId("git-refresh").click();
+      await selector.selectOption("head");
+      await expect(diff).toContainText(INDEX_TEXT);
+      await expect(diff).not.toContainText(HEAD_TEXT);
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText("UNTRACKED_AFTER_START");
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      const body = "Keep the workspace-start anchor";
+      await addComment(page, WORKTREE_TEXT, "new", body);
+      expect((await latestCreate(page, body)).base).toEqual(initial.target);
+      await page.screenshot({ path: testInfo.outputPath("workspace-start-desktop.png"), fullPage: true });
+
+      await page.reload({ waitUntil: "networkidle" });
+      const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
+      await project.getByTestId(`workspace-git-${workspaceId}`).click();
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId("mobile-switch").click();
+      await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText(WORKTREE_TEXT);
+      await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      await page.screenshot({ path: testInfo.outputPath("workspace-start-mobile.png"), fullPage: true });
+      expect(errors).toEqual([]);
     } finally {
       removeFixture();
     }

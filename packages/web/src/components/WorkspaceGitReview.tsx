@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
+  AgentTurnSummary,
   GitDiffFile,
   GitDiffLine,
   GitDiffSnapshot,
@@ -14,10 +15,14 @@ import type {
   ReviewTargetSession,
   WorkspaceGitReviewActions,
 } from "./gitReviewModels";
+import { newId } from "../ids";
 
 export interface WorkspaceGitReviewProps {
   workspaceId: string;
   workspaceName?: string;
+  startSnapshot?: string;
+  /** Newest completed agent turn, offered as a diff base. */
+  lastAgentTurn?: AgentTurnSummary;
   status: GitStatusSnapshot | null;
   statusState: "idle" | "loading" | "ready" | "error";
   statusError?: string;
@@ -116,8 +121,7 @@ function statusTone(entry: GitStatusEntry): string {
 }
 
 function newOperationId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `review-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return newId();
 }
 
 function sourceRevisionFor(diff: GitDiffSnapshot | null | undefined, path: string, side: ReviewSide): string | undefined {
@@ -217,6 +221,8 @@ function EmptyDiffState({ state, error }: { state: WorkspaceGitReviewProps["diff
 export function WorkspaceGitReview({
   workspaceId,
   workspaceName,
+  startSnapshot,
+  lastAgentTurn,
   status,
   statusState,
   statusError,
@@ -232,6 +238,9 @@ export function WorkspaceGitReview({
   actions,
 }: WorkspaceGitReviewProps) {
   const [target, setTarget] = useState<GitDiffTarget>({ kind: "workingTree" });
+  // Which named preset produced a `compare` target, so the selector can tell
+  // "Workspace start" from "Last agent turn" — both are compare targets.
+  const [preset, setPreset] = useState<"workspaceStart" | "lastAgentTurn" | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareBase, setCompareBase] = useState("");
   const [compareHead, setCompareHead] = useState("");
@@ -345,11 +354,26 @@ export function WorkspaceGitReview({
   function chooseTarget(value: string) {
     if (value === "compare") {
       setCompareOpen(true);
+      setPreset(null);
       setTarget({ kind: "head" });
       return;
     }
     setCompareOpen(false);
-    setTarget({ kind: value as "workingTree" | "staged" | "head" });
+    if (value === "workspaceStart") {
+      if (!startSnapshot) return;
+      setPreset("workspaceStart");
+      setTarget({ kind: "compare", base: startSnapshot });
+    } else if (value === "lastAgentTurn") {
+      if (!lastAgentTurn) return;
+      setPreset("lastAgentTurn");
+      // The recorded after side pins the turn's own end. Without one (an
+      // interrupted turn) the working tree stands in, which still shows the
+      // agent's work rather than nothing.
+      setTarget({ kind: "compare", base: lastAgentTurn.beforeRef, ...(lastAgentTurn.afterRef ? { head: lastAgentTurn.afterRef } : {}) });
+    } else {
+      setPreset(null);
+      setTarget({ kind: value as "workingTree" | "staged" | "head" });
+    }
     setActiveFile(undefined);
     setSelection(null);
   }
@@ -614,10 +638,12 @@ export function WorkspaceGitReview({
             <div className="workspace-git__toolbar-group">
               <label className="workspace-git__field">
                 <span>Compare</span>
-                <select data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
+                <select data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
                   <option value="workingTree">Working tree</option>
                   <option value="staged">Staged</option>
                   <option value="head">HEAD</option>
+                  <option value="workspaceStart" disabled={!startSnapshot}>{startSnapshot ? "Workspace start" : "Workspace start (not recorded)"}</option>
+                  <option value="lastAgentTurn" disabled={!lastAgentTurn}>{lastAgentTurn ? `Last agent turn (${lastAgentTurn.agent})` : "Last agent turn (none recorded)"}</option>
                   <option value="compare">Another ref…</option>
                 </select>
               </label>
@@ -638,6 +664,18 @@ export function WorkspaceGitReview({
               <label className="workspace-git__field workspace-git__field--compact"><span>Context</span><select value={contextLines} onChange={(event) => setContextLines(Number(event.target.value))}><option value={0}>0 lines</option><option value={3}>3 lines</option><option value={8}>8 lines</option></select></label>
             </div>
           </div>
+
+          {preset === "lastAgentTurn" && lastAgentTurn && (
+            /* The gate asks for the *agent's* changes, so say whose turn this
+               is and how much it touched — a diff alone does not answer that. */
+            <p className="workspace-git__turn-summary" data-testid="git-turn-summary">
+              <strong>{lastAgentTurn.agent}</strong>
+              {" changed "}
+              {lastAgentTurn.changedPaths.length} {lastAgentTurn.changedPaths.length === 1 ? "path" : "paths"}
+              {lastAgentTurn.completedAt ? ` · ${new Date(lastAgentTurn.completedAt).toLocaleTimeString()}` : ""}
+              {lastAgentTurn.afterRef ? "" : " · still open, comparing against the working tree"}
+            </p>
+          )}
 
           <div className="workspace-git__diff-layout">
             <nav className="workspace-git__diff-files" aria-label="Changed files">

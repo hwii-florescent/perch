@@ -4,6 +4,7 @@ artifacts-cli-rendering/
 test-results/
 screenshots-federation/
 screenshots-detached/
+screenshots-visual-qa/
 # Kept local, never committed: these are captures of a REAL agent session and
 # carry the developer's account email, machine name and session titles. This
 # repo is public — see the sanitization note in CLAUDE.md.

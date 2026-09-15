@@ -32,6 +32,8 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
     <WorkspaceGitReview
       workspaceId={workspaceId}
       workspaceName={workspace?.name}
+      startSnapshot={workspace?.startSnapshot}
+      lastAgentTurn={state.lastAgentTurn ?? undefined}
       status={state.status}
       statusState={state.statusState}
       statusError={state.statusError}

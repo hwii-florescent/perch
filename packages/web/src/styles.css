@@ -780,6 +780,9 @@ body {
 /* --- Workspace file explorer/editor -------------------------------------- */
 
 .workspace-files {
+  /* Its own rules below are container queries — the pane, not the window,
+     decides when the explorer and editor stop fitting side by side. */
+  container-type: inline-size;
   position: relative;
   width: 100%;
   height: 100%;
@@ -1354,7 +1357,19 @@ body {
     border-color: var(--overlay-0);
     text-align: left;
   }
+}
 
+/* Dockview can hand the file pane a narrow width while the window is wide,
+ * so these are keyed to the pane's own inline size rather than the viewport:
+ * a phone is simply the case where the two coincide. Without it the
+ * explorer's fixed 230px column plus the editor keep a ~490px floor and the
+ * header's Reload/Save/search controls are clipped away by dockview.
+ *
+ * 460px, not the viewport rules' 700px: that is where the 230px tree rail
+ * stops leaving a usable editor beside it. A wider pane keeps both columns —
+ * collapsing a 600px desktop pane to one column would be a regression, not
+ * responsiveness. */
+@container (max-width: 460px) {
   .workspace-files {
     border-width: 0 1px 1px;
   }
@@ -1392,7 +1407,12 @@ body {
   }
 
   .workspace-files__editor-actions {
+    /* Its own line, never wider than it: left to size itself the row keeps
+       its content width and the last button (Save) is clipped by the pane. */
+    flex: 1 1 100%;
     flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .workspace-files__mobile-explorer,
@@ -1456,6 +1476,7 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
 
 .session-item {
   display: flex;
@@ -6611,7 +6632,11 @@ body {
   font-size: 0.7rem;
 }
 
-@media (max-width: 700px) {
+/* Pane width, not window width: a Git pane can be this narrow inside a wide
+ * window, and when these were viewport rules they fought the container rules
+ * below — a phone got the horizontal file rail *and* the narrow vertical
+ * column at once, which is what made the file list render behind the diff. */
+@container (max-width: 700px) {
   .workspace-git__header {
     align-items: flex-start;
     padding: 0.55rem;
@@ -6651,37 +6676,8 @@ body {
     justify-content: flex-start;
   }
 
-  .workspace-git__diff-layout {
-    display: block;
-    overflow: auto;
-  }
-
-  .workspace-git__diff-files {
-    display: flex;
-    flex-direction: row;
-    width: auto;
-    min-width: 0;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--git-border);
-  }
-
-  .workspace-git__diff-files .workspace-git__section-heading {
-    min-width: 5rem;
-  }
-
-  .workspace-git__diff-file {
-    width: 10rem;
-    flex: 0 0 10rem;
-  }
-
   .workspace-git__diff {
     min-height: 12rem;
-  }
-
-  .workspace-git__diff-line {
-    grid-template-columns: 2.6rem 2.6rem 1rem minmax(18rem, 1fr) auto;
-    min-width: 26rem;
   }
 
   .workspace-git__line-comments {
@@ -6843,3 +6839,134 @@ body {
 .native-cli-chat__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; }
 .native-cli-chat__actions .native-cli-chat__hint { flex: 1; }
 .native-cli-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* --- Device pairing ------------------------------------------------------ */
+
+/* The gate replaces the whole app, so it owns the viewport rather than
+   layering over a UI that cannot work yet. */
+.pairing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background: var(--base);
+  color: var(--text);
+}
+
+.pairing__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: min(26rem, 100%);
+  padding: 1.5rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--overlay-0);
+  border-radius: calc(var(--radius) * 2);
+}
+
+.pairing__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.pairing__hint {
+  margin: 0;
+  color: var(--subtext-0);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.pairing__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--subtext-0);
+}
+
+.pairing__field input {
+  min-height: 2.75rem;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  font: 1rem/1.2 var(--font-mono, monospace);
+  letter-spacing: 0.08em;
+}
+
+.pairing__field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pairing__error {
+  margin: 0;
+  color: var(--red, #f38ba8);
+  font-size: 0.78rem;
+}
+
+.pairing__submit {
+  min-height: 2.75rem;
+  color: var(--base);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  font: 600 0.85rem/1 inherit;
+  cursor: pointer;
+}
+
+.pairing__submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-modal__pair-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+  background: var(--surface-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+}
+
+.settings-modal__pair-code strong {
+  font: 1.15rem/1 var(--font-mono, monospace);
+  letter-spacing: 0.22em;
+}
+
+.workspace-git__turn-summary {
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--git-border);
+  color: var(--git-muted);
+  font-size: 0.72rem;
+}
+
+.mobile-header__gear {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  margin-left: auto;
+  color: var(--subtext-0);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* The gear takes over the auto margin, so the switch button sits next to it. */
+.mobile-header__gear + .mobile-header__switch {
+  margin-left: 0.4rem;
+}
+
+.mobile-header__gear:hover,
+.mobile-header__gear:focus-visible {
+  color: var(--text);
+  border-color: var(--overlay-0);
+}

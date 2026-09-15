@@ -1,5 +1,516 @@
 # ADE rework verification
 
+## Device default at session creation — 2026-09-15
+
+goals.md requires the Chat/UI ↔ CLI mode to work "with a device default and a
+per-session override". It did not: `Sidebar.tsx`, `TabBar.tsx`,
+`NoSessionPanel.tsx` and `WorktreeMenu.tsx` each passed an explicit
+`mode: "cli"` into `createSessionOnHost`, which is a *session-scoped* override —
+so every session a user created ignored the device default, and the default was
+effectively dead. (`CliStartPanel` still passes it: starting a CLI agent is that
+panel's entire purpose.)
+
+Those four now omit the mode, so a new session inherits the device default and
+the per-session override remains available from the pane's own control. On a
+machine whose default is CLI — including this one — behaviour is unchanged,
+which is why the worktree suite (6/6), the recovery, pairing, turn-review and
+visual-QA specs all stay green across the change.
+
+`sidebar.spec.ts` "2. First session listed + active" and `workspace-tabs.spec.ts`
+W1 fail either way: they were verified failing with the change **stashed**, and
+belong to the stale Hosted-composer family documented above.
+
+## Stale Hosted-composer specs — root cause found, 2026-09-15
+
+`responsive.spec.ts` R3, `pane-splitting.spec.ts` P3, `chat-power.spec.ts` P1
+and `workspace-git.spec.ts` GB1 were assumed to be failing because this
+machine's shared `~/.perch/settings.json` is in CLI mode. It is deeper than
+that, and worth recording precisely so nobody else spends the time:
+
+**The Hosted composer they drive (`model-chip`, `.chat__input textarea`) is
+unreachable by design for these sessions, in any chat mode.** Two things
+compose:
+
+1. Every "New session" launcher (`Sidebar.tsx`, `TabBar.tsx`,
+   `NoSessionPanel.tsx`) passes an explicit `mode: "cli"`, which is a
+   *session-scoped* override and therefore beats the device default. Flipping
+   the global setting — or the device-scoped toggle — does not move it.
+2. Even with the session flipped to Hosted, `views/Chat.tsx` renders
+   `NativeCliChat` whenever `cliReady && nativeUiAvailable`, which is true for
+   any session that has started a CLI. That is the native-binding decision
+   CLAUDE.md states: UI mode is a web view of the same CLI-owned session, not a
+   second agent harness.
+
+So these four are **stale, not flaky**: they exercise the pre-native-binding
+Hosted-only composer. The fix is to port them to the native UI composer
+(`native-cli-composer`, as `native-ui.spec.ts` already does), not to force a
+chat mode. Verified by flipping the session-scoped override to Hosted in R3 and
+watching the pane still render the real Claude TUI.
+
+One related bug *was* fixed: five specs forced `chatMode` back to a hardcoded
+`"hosted"` in `afterAll`, silently overwriting a real CLI-mode preference on the
+developer's own machine. `e2e/chatMode.ts` now remembers the user's value and
+puts *that* back, and offers `setChatMode` / `useHostedSession` helpers so a
+spec asks for a mode through the real UI rather than a file write the running
+server never reads.
+
+## V-11 completion — 2026-09-15
+
+`e2e/workspace-visual-qa.spec.ts` now covers both viewports SPEC.md V-11 names
+and each of its failure modes, against populated surfaces:
+
+- **No clipped controls** — measured per pane, not per window, so a cramped
+  dockview pane inside a wide browser is caught (that is the defect this spec
+  was written for). Checked on the Git review, file, terminal and settings
+  surfaces at a narrow desktop pane (900px window, three panes), at a wide
+  desktop viewport (1440×900) and at 390px.
+- **No accidental horizontal scroll** — `documentElement.scrollWidth` against
+  `clientWidth` after every surface change.
+- **Focus is visible** — a representative control per surface is focused and
+  its computed style must show an outline, ring or border change; "we set
+  `:focus-visible` somewhere" is not evidence for a given control.
+- **Status is readable** — the desktop status bar's cwd and the mobile header
+  must be non-empty, at least 11px, and not collapsed to nothing.
+- **No desktop-only dead end** — every phone pane (chat, terminal, files, Git)
+  is opened from the phone shell, and Settings is reachable at phone width.
+
+**Defect found and fixed: Settings was a desktop-only dead end.** The gear lived
+only in `<Sidebar/>`, which is replaced below 700px, so chat mode, theme,
+agents, hosts and the new paired-devices panel were unreachable from a phone.
+`MobileHeader` now carries the same control (same testid, same modal).
+
+Captures (gitignored, local only): `e2e/screenshots-visual-qa/` —
+`git-narrow-desktop`, `files-narrow-desktop`, `git-phone`, `files-phone`,
+`settings-wide-desktop`, `settings-phone`. They were inspected, not only
+asserted on; the phone settings sheet wraps its theme chips, keeps 44px touch
+targets and scrolls cleanly.
+
+**V-11 is PASS.** What is deliberately not claimed: the focus sweep samples one
+control per surface rather than every control, and contrast ratios were judged
+by eye rather than computed.
+
+## V-07 completion — 2026-09-15
+
+The last three gaps closed, all in `e2e/agent-turn-review.spec.ts` against the
+same real repository, plus `e2e/device-pairing.spec.ts` for the implicit case:
+
+- **Implicit workspaces now record a creation ref.** A session mints its
+  workspace with no Git metadata; `backfill_implicit_start_snapshots` records
+  HEAD for such a row the first time a client asks for a workspace snapshot,
+  and only within a five-minute grace window — anything older stays
+  "Workspace start (not recorded)" rather than being back-dated to a late HEAD.
+  The write preserves the row's `dirty` flag (that column is a plain overwrite
+  in the shared statement) and broadcasts `workspace.updated`, without which
+  connected clients keep their cached, snapshot-less copy. Observed on the
+  phone's session-created workspace in the pairing run.
+- **Last-agent-change summary.** The Git surface now states whose turn it was
+  and how many paths it touched, and says explicitly when a turn is still open
+  and therefore compared against the working tree.
+- **Rename, delete and the empty comparison.** The spec renames one tracked
+  file, deletes another, and asserts both states in the changed-file rail and
+  the status list; it then commits and selects the staged-only comparison,
+  where the surface must render its empty state rather than a blank pane.
+
+With the working-tree/staged/HEAD sources, workspace-start and last-agent-turn
+bases, line numbers, and anchored comments already recorded, that is every axis
+SPEC.md V-07 names. **V-07 is PASS** for local workspaces.
+
+Two limits stay explicit and are not claimed: a direct-host (remote) session's
+turns are not recorded, because that workspace's Git is not reachable from this
+process; and the boundary capture is spawned, so a turn that edits within its
+first few milliseconds would land on the before side. Real providers take
+seconds to reach a first edit, so this has not been observed.
+
+## Codex and WebKit status — 2026-09-15
+
+Two of the remaining gates were re-checked against the real providers today.
+
+**V-08 — Codex review delivery: observed.** `native-review.spec.ts` with
+`provider=codex` passes in Chromium (10.2s):
+
+```text
+cd e2e && npx playwright test --config=native-review.config.ts --project=chromium -g codex
+                                                          1/1 PASS
+```
+
+That was V-08's last unverified provider for local delivery, so V-08's
+"Codex review delivery unverified" remainder is closed for Chromium.
+
+**V-04 — Codex extended checks: blocked on quota, not on perch.** The same
+account's `native-ui.spec.ts` codex run reached the composer, sent the turn, and
+the CLI itself answered:
+
+> You've hit your usage limit. Upgrade to Pro …, visit
+> https://chatgpt.com/codex/settings/usage to purchase more credits or try
+> again at 4:10 AM.
+
+Recorded as blocked rather than failed: the app did its part, the provider
+refused. Re-run after the quota resets.
+
+**WebKit is currently blocked at the browser, on this machine.** Every WebKit
+run — any provider, and a bare `webkit.launch()` with no perch involved — hangs
+in Playwright's "setting up page" phase until the 180s timeout. Playwright is
+1.61.1 with `webkit-2311` installed. Earlier sessions ran WebKit successfully,
+so this is environment drift (most likely an OS/WebKit build mismatch), not a
+product regression. `npx playwright install webkit` was run and **did not fix
+it** — a bare `webkit.launch()` still hangs past seven minutes. Until someone
+gets WebKit launching again no WebKit evidence can be collected, and gates that
+name both engines stay partial on that axis. Chromium is unaffected (every spec
+in these slices runs there).
+
+## Device pairing checkpoint — 2026-09-15
+
+### V-10 — PASS (pairing, phone operation, reconnect, revocation)
+
+perch's core binds `0.0.0.0`. Until now that meant anything on the same network
+could drive real agents on the machine: there was no authentication anywhere in
+the HTTP or WebSocket surface. V-10 asked for *secure* pairing, so the gate had
+to exist before the phone flows could be called done.
+
+**What was added**
+
+- `crates/perch-core/src/devices.rs` — paired devices in `~/.perch/devices.json`
+  (overridable with `--devices-path` / `PERCH_DEVICES`, which tests need for the
+  same reason they need `--hosts-path`). Only the SHA-256 of each token is
+  stored, so a stolen file cannot be replayed; revoking is deleting a row. A
+  pairing code is 8 characters from a 30-symbol alphabet, lives only in memory,
+  expires in five minutes, is single-use, and burns after five wrong guesses.
+- `authorize_request` in `server/mod.rs` gates every data route — the WS
+  upgrade, `POST {base}upload` and `POST {base}clipboard-image` (which writes
+  into `~/.perch`, so it is a data route too). **Loopback is exempt**: the
+  desktop shell talks to a core on `127.0.0.1` and would otherwise have to pair
+  with itself. Static assets stay public; they are only the bundle.
+- `GET {base}pair` answers one bit — may this caller reach the data plane —
+  because a browser cannot see the status of a rejected WebSocket handshake and
+  would otherwise show "reconnecting…" forever instead of a pairing screen.
+  `POST {base}pair` exchanges a code for a token and sets it as a cookie, so
+  the next WS handshake carries it with no client-side plumbing.
+- Protocol (both files): `device.pair.start` / `device.pair.cancel` /
+  `device.list` / `device.revoke`, answered by `device.pair.code` and
+  `device.list.result`. A successful claim also broadcasts the list, so the
+  host window showing the code sees the device appear.
+- UI: `PairingGate` replaces the whole app for an unpaired device (a workspace
+  behind a banner would just be dead controls), and Settings → Devices issues
+  codes, counts them down and revokes access.
+
+**Defect found and fixed: `crypto.randomUUID` is secure-context only.**
+Ten call sites used it unguarded, and four modules had each grown their own
+copy of a fallback guarded by `"randomUUID" in crypto` — which is *true* in an
+insecure context while the property is not callable. A phone opening perch over
+plain http on a LAN address therefore crashed the React tree outright
+(`crypto.randomUUID is not a function`, observed in this run before the fix).
+All of them now share `packages/web/src/ids.ts`, whose guard is
+`typeof crypto.randomUUID === "function"` with a `getRandomValues` fallback;
+the store's exported `newId` re-exports it rather than keeping a fifth copy.
+
+### Observed result (two origins, real network path)
+
+`e2e/device-pairing.spec.ts` (registered in `testMatch`) boots its own core and
+drives *two* origins: the host window on `127.0.0.1` and a 390px "phone"
+context, with its own cookie jar, on this machine's real LAN address. It skips
+with a recorded reason if the machine has no non-loopback IPv4 rather than
+pretending to have tested the gate.
+
+Observed, in one run: the phone gets the pairing screen and no workspace; a
+wrong code is refused; the host issues a code from Settings → Devices; the
+phone pairs and the app appears; the host's device list shows "e2e phone"; the
+phone starts a CLI agent, prompts it and reads the reply; scrollback survives a
+phone reload; the Git pane shows the working-tree change and the file tree
+lists the repo; the host is SIGKILLed and rebooted and the phone reconnects on
+its stored token alone; revoking from the host sends the phone back to the
+pairing screen and empties `devices.json`. Captures:
+`pairing-gate-phone.png`, `pairing-phone-agent.png`, `pairing-phone-files.png`.
+
+```text
+cd e2e && npx playwright test device-pairing.spec.ts     1/1 PASS
+npx playwright test workspace-review.spec.ts -g 'reads distinct|workspace start|mobile Git'
+                                                         3/3 PASS
+npx playwright test workspace-files-durable.spec.ts workspace-terminals.spec.ts
+  workspace-recovery.spec.ts agent-terminal-ownership.spec.ts
+  workspace-visual-qa.spec.ts agent-turn-review.spec.ts   all PASS
+cargo test -p perch-core         263 core + 2 protocol parity PASS
+cargo fmt --check / clippy       PASS / exactly the 5 baseline warnings
+npm test / npm run build         222 PASS / PASS
+```
+
+`workspace-recovery.spec.ts` needed one line: with the host deliberately killed,
+the client's pairing probe fails too and Chromium logs it, which is the same
+deliberate-disconnect noise its WebSocket filter already ignores.
+
+### Pre-existing failures, one shared cause
+
+`responsive.spec.ts` R3, `pane-splitting.spec.ts` P3, `chat-power.spec.ts` P1
+and `workspace-git.spec.ts` GB1 all wait for Hosted-mode chat chrome
+(`model-chip`, `.chat__input textarea`). This machine's shared
+`~/.perch/settings.json` has `"chatMode": "cli"`, and per CLAUDE.md there is no
+`--settings-path`, so that chrome never renders and they time out. Nothing in
+these slices touches chat mode. The fix is the one handoff.md §5 already
+proposes: those specs should read the current mode, set `"hosted"`, and restore
+the original value — not hardcode it.
+
+### Remaining V-10 scope
+
+Pairing is host-local by design: a federated remote manages its own devices,
+and this instance's gate only consults its own store. There is no QR code yet
+(the code is typed), no per-device scope (a paired device has the same access
+as a local one), and no TLS — on an untrusted network the token still crosses
+the wire in the clear, so the honest deployment remains a trusted LAN or an
+ssh-forwarded port.
+
+## Hibernation and resume checkpoint — 2026-09-15
+
+### V-12 — PASS (local CLI agents)
+
+`HibernationPolicy`, `hibernate` and `wake_cli` existed with no runtime caller,
+so no agent ever slept and no attach ever woke one. That is now wired, and the
+wiring exposed three genuine defects along the way.
+
+**What was added**
+
+- `spawn_agent_hibernation_task` (`server/mod.rs`) evaluates every live agent
+  against `HibernationPolicy` and hibernates the eligible ones. The policy owns
+  every safety rule — a viewer, input/resize ownership, an unfinished state, a
+  missing resume identity, active typing, a mobile driver each refuse — so the
+  task only supplies the clock. The window is 15 minutes, overridable with
+  `PERCH_HIBERNATE_AFTER_SECS` (0 disables it).
+- The attach path (`server/terminal.rs`) handles `RequiresWake` by calling
+  `wake_cli_with_args`, which resumes the recorded provider session. It never
+  falls back to a fresh session, so returning to a sleeping agent either
+  restores that conversation or fails loudly.
+- The CLI pane renders a sleeping agent as "sleeping to save memory — its
+  conversation is kept" with a **Resume agent** button, instead of the
+  "exited (code 0)" that a terminated pty would otherwise produce.
+
+**Defects found and fixed**
+
+- **A CLI agent could never leave `Working`.** A configured provider has no
+  status stream at all, and a native one only reports when its own hooks fire —
+  a Claude session that was started and then left alone emitted nothing further,
+  so its record stayed Working forever. That broke the explicit
+  working/blocked/done/idle states goals.md requires, and made hibernation
+  unreachable. The idle sweep now moves a Working agent to Idle when its pty has
+  been silent for 20s; a real native snapshot still overrides that instantly.
+- **A hibernated or crashed CLI left its session permanently "running".** The
+  idle sweep can only clear sessions whose terminal is still registered, and a
+  dead one is not — so the running dot stuck, and worse, the next attach was
+  refused with "a Chat turn is still running in this session". Both the exit
+  listener and the hibernation task now clear it.
+- Diagnosing the above showed the policy refusing on `InputOwned`/`ResizeOwned`
+  from a second browser page that had silently reopened the same session. That
+  one was the test's fault, not the product's — the observer client now runs in
+  its own context — but it is worth knowing that any open viewer legitimately
+  blocks hibernation.
+
+### Observed result (real Claude CLI, no prompt cost beyond one short turn)
+
+`e2e/agent-hibernation.spec.ts` (registered in `testMatch`) boots its own core
+with `PERCH_HIBERNATE_AFTER_SECS=2`, starts a real Claude CLI session, sends one
+short prompt so there is a conversation to resume, then closes the client:
+
+- observed `sleeping` on the wire, with the resume identity unchanged;
+- the tmux session backing the agent is gone — the process really was released;
+- reopening the client resumes **the same** `providerSessionId`, the Claude TUI
+  renders again, and the agent is no longer sleeping.
+
+```text
+cd e2e && npx playwright test agent-hibernation.spec.ts    1/1 PASS (41s)
+npx playwright test agent-terminal-ownership.spec.ts workspace-terminals.spec.ts workspace-recovery.spec.ts
+                                                           4/4 PASS
+cargo test -p perch-core        261 core + 2 protocol parity PASS
+cargo fmt --check / clippy      PASS / exactly the 5 baseline warnings
+npm test / npm run build        222 PASS / PASS
+```
+
+`native-ui.spec.ts` (claude) fails **pre-existing and unrelated**: it asserts the
+native model chip contains "haiku" and the CLI reports `claude-opus-5`. Nothing
+in this slice touches model selection.
+
+### Remaining V-12 scope
+
+The gate is met for local CLI agents. Not covered: direct-host (remote) agents
+never hibernate, because their process is not ours to terminate; Hosted-mode
+turns are unaffected by design; and the window is a constant plus an env
+override rather than a setting, which is called out with a `ponytail:` note.
+
+## Pane-width responsiveness checkpoint — 2026-09-15
+
+### V-11 — the narrow-pane defect is fixed and now has a guard
+
+The open V-11 defect was pane-width responsiveness: dockview can hand a pane a
+narrow width while the window is wide, so viewport media queries never fire.
+Observed at a 900px window with three panes (`screenshots-visual-qa/`, local
+only): the Files pane's content had a ~490px floor inside a 218px pane, so
+Reload/Save/search were clipped away entirely, and at phone width the Git
+pane's file rail rendered *behind* the diff.
+
+Both were the same root cause, and both are fixed at the stylesheet rather
+than per-component:
+
+- The file pane's collapse rules were viewport-keyed; they are now
+  `@container` rules on `.workspace-files` (which declares
+  `container-type: inline-size`) at **460px** — the width where the 230px tree
+  rail stops leaving a usable editor. A 600px desktop pane therefore keeps
+  both columns; a 218px pane switches to one column with the existing
+  "‹ Explorer" toggle, which was previously phone-only.
+- The Git pane had *both* the viewport rules (file rail as a horizontal strip)
+  and the container rules (file rail as a narrow vertical column) applying at
+  phone width, in conflict. The viewport rules are now container rules too, and
+  the five that duplicated the container block in a conflicting form were
+  deleted. One behaviour, roughly 30 fewer lines of CSS.
+- `.workspace-files__editor-actions` now takes its own bounded line; left to
+  size itself it kept its content width and the Save button was clipped.
+
+### Guard
+
+`e2e/workspace-visual-qa.spec.ts` (registered in `testMatch`) populates a real
+repository, then measures **against each pane's own box, not the window's**:
+every visible control outside a scroll container must sit inside its pane, and
+no surface may make the page scroll sideways. It checks the Git review pane and
+the file pane at a narrow desktop pane width (900px window, three panes) and at
+390px, and exercises the review action at the narrow width rather than only
+measuring boxes. Screenshots land in `e2e/screenshots-visual-qa/` (gitignored,
+they carry real paths) to be looked at, not only asserted on.
+
+```text
+cd e2e && npx playwright test workspace-visual-qa.spec.ts          1/1 PASS
+npx playwright test workspace-files-durable.spec.ts               1/1 PASS
+npx playwright test workspace-review.spec.ts -g 'reads distinct|workspace start|mobile Git'
+                                                                  3/3 PASS
+npx playwright test workspace-recovery.spec.ts workspace-terminals.spec.ts
+                                                                  3/3 PASS
+npm test                                                          222 PASS
+```
+
+`workspace-files-durable.spec.ts` needed one change, not a workaround: after a
+reload restores a draft the pane opens on the editor, so the spec now reopens
+the tree through the real "‹ Explorer" control before walking it.
+
+`responsive.spec.ts` R3 fails **pre-existing** — it waits for `model-chip`,
+Hosted-mode chat chrome that does not render while the shared
+`~/.perch/settings.json` is in CLI mode (handoff.md §5). No selector this slice
+touched is involved.
+
+### Remaining V-11 scope
+
+V-11 stays **PARTIAL**: the terminal, chat and settings surfaces have not been
+through the same populated narrow-pane pass, and focus/loading/error/empty
+states are still only covered incidentally. The new spec is the place to add
+them.
+
+## Last-agent-turn review checkpoint — 2026-09-14
+
+### V-07 — agent-turn history now exists and is reviewable
+
+The `agent_change_snapshots` table and its idempotent begin/finish pair had no
+runtime caller. `server/agent_history.rs` is that caller. It records one
+durable before/after boundary per agent turn and the Git surface offers it as
+a diff base ("Last agent turn"), so the gate's remaining implementation piece
+— the current agent's last-turn changes — is now real product behavior.
+
+Four decisions worth keeping:
+
+- **The hook is the session's running flag, not the prompt dispatch path.** A
+  native turn can begin from the structured UI, from a review packet, or from
+  the user typing into the CLI pty; only the first two reserve a prompt
+  operation. All three move the session through `running_sessions` and
+  therefore through `notify_session_updated`, which is where the transition is
+  observed (detected inside `agent_history`, not at the ~8 mutation sites).
+- **Both boundaries are content commits, not HEADs.** Agents mostly do not
+  commit, so a HEAD-to-HEAD boundary would report an empty turn for exactly
+  the work a user wants to review. `GitService::content_snapshot` stages the
+  index + worktree + untracked-but-not-ignored files into a scratch index
+  (`GIT_INDEX_FILE`) and writes a dangling `commit-tree`: no ref, no index and
+  no worktree mutation. The commit is unreferenced, so `git gc` prunes it
+  after `gc.pruneExpire`; that ceiling and its upgrade path are marked with a
+  `ponytail:` comment.
+- **Configured CLI providers had no working/idle signal at all.** The runtime
+  adapter owns a second terminal registry (keyed by `agent_runtime::
+  terminal_key`) whose activity callback was a no-op, so any provider outside
+  the native-UI set never reported running, never went idle, and produced no
+  turn boundary. That callback now resolves the key back to its session and
+  runs the same bookkeeping as the shared-terminal path, and the idle sweep
+  sweeps both registries. This closes a real gap against goals.md's explicit
+  working/blocked/done/idle requirement, not only against V-07.
+- **Untracked files are no longer synthesized into two-endpoint diffs.**
+  `GitService::diff` added working-tree untracked files to every target except
+  `Staged`. A `compare` with an explicit head therefore attributed whatever
+  was lying around the workspace to that comparison, and listed a file twice
+  when the endpoint already contained it. Both were visible in the first run
+  of the new browser test.
+
+### Observed result (real browser, real CLI process)
+
+`e2e/agent-turn-review.spec.ts` (registered in `testMatch`) boots its own core
+on a free port with its own database and providers file, registers a real
+repository, starts a configured CLI provider in it, drives one real turn
+through the pty, and then reviews that turn from the Git surface:
+
+- the provider process is a `/bin/sh` fixture (the `provider-config.spec.ts`
+  pattern) that edits a tracked file and creates an untracked one per prompt.
+  Everything the boundary depends on is real — a pty-owned process, the
+  running/idle transitions it produces, Git, SQLite and the browser. The
+  agent's *text* is the only fixture, and it is not what V-07 is about; the
+  real-provider review-delivery gate is V-08 and is tracked separately.
+- observed: "Last agent turn (turnbot)" becomes selectable after the turn
+  closes; the diff shows `− BEFORE_TURN` / `+ AGENT_EDIT alpha` and the added
+  `AGENT_NEW alpha` file; a file written by a human *after* the turn does not
+  appear in it, and does appear under Working tree. After a page reload the
+  same boundary is still selectable and still shows the same content.
+- capture: `agent-turn-desktop.png` in the spec's artifacts directory.
+
+```text
+cd e2e && npx playwright test agent-turn-review.spec.ts   1/1 PASS (3.7s)
+npx playwright test workspace-review.spec.ts              3/4 PASS
+npx playwright test workspace-git.spec.ts                 0/1
+cargo test -p perch-core        261 core + 2 protocol parity PASS
+cargo fmt --check               PASS
+cargo clippy --workspace --all-targets   exactly the 5 baseline warnings
+npm run build / npm test        PASS / 222 web tests PASS
+```
+
+Two of those e2e failures are **pre-existing and unrelated to this slice**,
+both the stale-Hosted-seed shape handoff.md §2 already recorded for
+`worktrees.spec.ts`:
+
+- `workspace-git.spec.ts` GB1 seeds a session by typing into the Hosted
+  `.chat__input textarea`, but every "New session" launcher now creates a
+  CLI-owned session, so that composer never appears and the seed times out at
+  120s. Same fix as `worktrees.spec.ts`: the seed is redundant, delete it.
+- `workspace-review.spec.ts`'s "sends two reviewed anchors … to the selected
+  real agent" needs a live provider session in its dropdown; it is the
+  real-provider delivery test the previous handoff explicitly did not run.
+
+### Remaining V-07 scope
+
+V-07 stays **PARTIAL**. What remains is narrower than before:
+
+- an implicit session-created workspace still has no recorded creation ref
+  (only explicit registration and worktree discovery record one);
+- turn boundaries only exist for local workspaces — a direct-host session's
+  turns are not recorded, because Git for that workspace is not reachable
+  from this process;
+- a turn that begins before the boundary capture finishes (the capture is
+  spawned, a few bounded Git commands) would attribute those first
+  milliseconds of edits to the turn's *before* side. Real providers take
+  seconds to reach their first edit, so this has not been observed, but it is
+  a real ordering ceiling rather than a proof;
+- the full "change summary" the gate names (counts/narrative across a turn)
+  is stored (`changed_paths`, bounded status JSON) but is not rendered beyond
+  the diff itself.
+
+## Workspace-start comparison checkpoint — 2026-09-14
+
+New explicit project registration records its Git HEAD before acknowledgement;
+existing workspace refs remain immutable. The Git view offers Workspace start
+through the existing compare/anchor path, including mobile. The real Chromium
+flow verifies an intervening commit, untracked content, an anchored note and
+reload. Three focused Git/review browser checks pass, as do 260 core tests,
+two protocol tests, 222 web tests, production build and formatting; Clippy has
+only its five baseline warnings. V-07 remains PARTIAL: agent-turn history and
+creation-boundary coverage for implicit/legacy workspaces remain unfinished.
+See the latest section of handoff.md for changed files, artifacts and next work.
+
+
 Status: in progress. The complete contract remains `goals.md` and `SPEC.md`.
 No acceptance exception has been approved. No rework phase is complete yet.
 
@@ -35,44 +546,46 @@ came from the worktree work:
    switcher — `mobile-pane-files`, then walks the nested tree to the file, since
    the mobile surface opens on the Explorer half with no selection.
 
-### V-09 — still PARTIAL, blocked on a reproducible crash
+### V-09 — PASS, mixed recovery correction (2026-09-14)
 
-`workspace-recovery.spec.ts` is new and covers the *mixed* case the gate names:
-one project with a primary checkout and a linked worktree, a session inside the
-worktree, a persistent tmux shell, an unsaved editor draft left in the external-
-conflict state, and an anchored review comment — then `SIGKILL` on the core and a
-re-boot. It runs its own core on a free port with its own database, so it never
-touches the shared hub or `~/.perch`.
+The crash was in `NoSessionPanel`, mounted during disconnect when `sessionId`
+becomes null while the session list remains populated. Its Zustand selector
+called `effectiveActiveProject`, whose fallback creates a fresh object on each
+read. The selector now returns only the path it consumes. Other helper callers
+already derive their results outside store subscriptions; no shared navigation
+semantics or terminal/layout behavior needed changing.
 
-Everything except the last step recovers: one project card with both checkouts,
-the worktree session id unchanged, the shell reattached under its original
-terminal id with the **same** process (`after_survived_PID_<pid>_END` matches the
-pre-kill pid), and the durable buffer still holding the draft with its conflict
-banner.
+The original production repro failed before the fix and passed afterwards.
+`workspace-recovery.spec.ts` now also waits for the visible disconnected
+"Connecting" panel before restarting, checks for React errors at that boundary,
+and compares the complete pane-tab ID set before/after recovery. It retains the
+original SIGKILL → reboot → reload sequence without an intervening control
+reload. WebKit's expected socket error during the intentional kill is excluded
+only for this fixture's WebSocket URL and restart interval; all application
+errors remain failures. Cleanup now reaps both the shell and configured CLI
+that the isolated core launched.
 
-**The page then tears itself down.** On the recovered page React aborts with
-`Maximum update depth exceeded` (minified #185) and the app renders blank. A
-development React build names the cause: `The result of getSnapshot should be
-cached to avoid an infinite loop` — a store selector returning a freshly
-allocated snapshot on every read, the same class of bug `views/Chat.tsx` already
-documents at its `EMPTY_MESSAGES` and `runtimeModeAvailable` selectors. It was
-not found by inspection; every selector reached so far returns a scalar or a
-stored reference.
+Observed on macOS, production bundle, headless Chromium and WebKit (Retina):
+register project; create/open linked checkout; open shell and set a variable;
+edit a primary-checkout file without saving; cause an external conflict; add an
+anchored comment; kill core; see Connecting; reboot and reload. The same project
+and both checkouts, session ID, pane IDs, shell terminal ID and PID/variable,
+unsaved draft, conflict banner, and anchored comment all recover. Together with
+the provider-specific recovery checks below, this closes V-09.
 
-What bisection established:
+```text
+npm run build                         # pass; production bundle restored
+npm test                              # 222 passed
+cd e2e && npx playwright test workspace-recovery.spec.ts  # 1 passed
+npx playwright test --config=cli-rendering.config.ts workspace-recovery.spec.ts --repeat-each=3
+                                      # 6/6, three per engine
+```
 
-- **Not a plain-reload bug.** Reloading the page with exactly the same panes,
-  against the still-running core, is clean. That control was briefly left in the
-  spec and made it pass 5/5 — it masks the defect, so it has been removed.
-- **Restart-specific.** Without that extra reload the spec fails **3/3** against
-  the production bundle.
-- **Needs the persistent shell.** With the shell terminal left out of the mix,
-  the recovered page raised no React error at the same checkpoint.
-
-The spec is registered in `testMatch` and is **currently red on purpose**: it is
-the regression guard for this defect, and hiding it would make a blank-screen
-crash on restart invisible. V-09 stays PARTIAL until the selector is found and
-fixed.
+Artifacts: `e2e/artifacts-cli-rendering/workspace-recovery-mixed-w-d28fd-s-recover-after-a-core-kill-{webkit,chromium}/recovery-{before-kill,after-restart}.png`.
+Both recovery captures were inspected: all four panes are restored and the
+shell shows identical before/after PID. The narrow split editor/Git surfaces
+still clip controls; that remains a V-11 defect, not visual completion.
+Retained private copies: `e2e/screenshots-cli-rendering/{webkit,chromium}/mixed-recovery/recovery-{before-kill,after-restart}.png`.
 
 ## Isolated worktree checkpoint — 2026-09-14
 
@@ -951,15 +1464,15 @@ acceptance, remote compatibility, and the other SPEC gates remain open.
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | PASS (headless Chromium observed): two checkouts from one project with separate paths/branches, one project card, separate sessions, workspace-scoped tab strips, and isolated file changes; see the isolated worktree checkpoint above. Restart recovery for worktrees remains part of V-09. |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
-| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP/OpenCode native UI/CLI turns and same-PID core recovery pass in both engines; OpenCode shell-mode refusal and native home/new-session flow pass; Codex basic Chromium passes, extended Codex/WebKit checks remain |
+| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP/OpenCode native UI/CLI turns and same-PID core recovery pass in both engines; OpenCode shell-mode refusal and native home/new-session flow pass; Codex basic Chromium passes. The extended Codex check is **blocked on the Codex account's usage limit** and the WebKit pass is **blocked on a browser-launch failure** — both recorded 2026-09-15, neither a perch defect |
 | V-05 tree, sentinel edit, save, disk/status verification | PASS (headless Chromium observed): one run spans nested tree expansion, open, edit, save, on-disk bytes, Git status/diff of the save, reload, external-conflict compare/keep/discard, and the phone-width file surface; see the combined file workflow checkpoint above. |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
-| V-07 complete Git and agent change review | PARTIAL (working-tree/staged/current-HEAD source snapshots, status, and target-aware inline placement observed; workspace-start/last-agent-turn history and full change summary remain) |
-| V-08 anchored comments and exactly-once review packet | PARTIAL: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership, and receipt-confirmed retry pass in both engines; Codex review delivery remains unverified |
-| V-09 full host/client recovery | PARTIAL — **blocked on a defect**. Mixed recovery now has a spec (`workspace-recovery.spec.ts`): project/worktree identity, session id, same-PID tmux shell and the conflicted draft all recover, but the recovered page then dies with React "Maximum update depth exceeded" (uncached store snapshot) and renders blank. Reproduces 3/3; a plain reload with the same panes is clean. See the mixed-recovery checkpoint above. |
-| V-10 paired mobile interaction and reconnect | UNVERIFIED |
-| V-11 populated desktop/mobile visual and interaction QA | PARTIAL (corrected Git desktop and populated mobile screenshots inspected; populated full-surface QA remains) |
-| V-12 safe hibernation and resume | UNVERIFIED |
+| V-07 complete Git and agent change review | PASS (local workspaces): working-tree/staged/HEAD sources, workspace-start (explicit **and** implicit) and last-agent-turn bases, rename, delete, line numbers, empty state and the last-agent-change summary all observed in real browser runs against real repositories; direct-host turns are out of scope and the capture-ordering ceiling is recorded |
+| V-08 anchored comments and exactly-once review packet | PASS in Chromium for every built-in provider: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership and receipt-confirmed retry, plus **Codex delivery observed 2026-09-15**; WebKit re-confirmation is blocked by the browser-launch failure recorded above |
+| V-09 full host/client recovery | PASS: mixed project/worktree, session, exact pane set, same-PID shell, draft conflict and anchored comment recovery passes three times per engine in Chromium/WebKit; see mixed recovery correction above and provider-specific recovery evidence below. |
+| V-10 paired mobile interaction and reconnect | PASS (two real origins observed): a phone-sized client on this machine's LAN address pairs with a code issued by the host, drives a CLI agent, reads scrollback after reload, opens files and Git, reconnects across a host restart on its stored token, and loses access when revoked; no QR, no per-device scope, no TLS — see the pairing checkpoint above |
+| V-11 populated desktop/mobile visual and interaction QA | PASS: Git, file, terminal and settings surfaces measured per pane at a narrow desktop pane, a wide desktop viewport and 390px — no clipped controls, no horizontal scroll, visible focus, readable status, and no desktop-only dead end (Settings was one; fixed). Screenshots inspected. Focus sampling and contrast limits recorded. |
+| V-12 safe hibernation and resume | PASS (local CLI agents, real Claude observed): an unwatched idle agent sleeps, its process is released, and returning resumes the same provider session; remote/direct-host agents are out of scope — see the hibernation checkpoint above |
 
 Full Git/review, provider lifecycle and mode scope, worktree orchestration,
 secure pairing, remote/mobile workflows, populated performance budgets, and

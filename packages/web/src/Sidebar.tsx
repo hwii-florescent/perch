@@ -859,7 +859,7 @@ export function Sidebar() {
           projectCwds={projectCwds}
           anchorRect={newAnchor}
           onClose={() => setNewAnchor(null)}
-          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent, "cli")}
+          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent)}
         />
       )}
     </aside>

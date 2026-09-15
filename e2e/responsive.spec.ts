@@ -20,6 +20,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { restoreChatMode } from "./chatMode";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const MOBILE_VIEWPORT = { width: 375, height: 700 };
@@ -74,6 +75,10 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     } catch {
       claudeAvailable = false;
     }
+  });
+
+  test.afterAll(() => {
+    restoreChatMode();
   });
 
   // -------------------------------------------------------------------------
@@ -142,6 +147,15 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
   // -------------------------------------------------------------------------
   // R3 — selecting a session from the slide-over switches + closes it.
   // -------------------------------------------------------------------------
+  // STALE, not flaky: this drives the Hosted-only composer (`model-chip`,
+  // `.chat__input textarea`). Every "New session" launcher now creates a
+  // CLI-owned session, and `views/Chat.tsx` renders `NativeCliChat` for any
+  // session that has started a CLI *even in Hosted mode* (the native binding
+  // decision in CLAUDE.md: UI mode is a web view of the CLI-owned session, not
+  // a second harness). So the composer this test needs is unreachable by
+  // design, in any chat mode. Porting it to `native-cli-composer` is the fix;
+  // until then it fails fast with this reason instead of burning four minutes
+  // on a timeout. Same for pane-splitting P3, chat-power P1, workspace-git GB1.
   test("R3. selecting a session in the slide-over switches to it and closes", async ({ page }) => {
     test.setTimeout(240000);
     if (!claudeAvailable) {
@@ -157,7 +171,6 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await freshPage(page);
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-
     await openLocalPicker(page);
     await page.locator('[data-testid="project-option-none"]').click();
     await sendAndWait(page, "Reply with exactly: RESP-ALPHA");

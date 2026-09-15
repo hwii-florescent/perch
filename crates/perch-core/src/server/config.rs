@@ -152,3 +152,71 @@ pub(super) fn wire_to_host(h: SshHostEntry) -> crate::hosts::SshHost {
         remote_cmd: h.remote_cmd,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Paired devices
+// ---------------------------------------------------------------------------
+
+fn device_to_wire(device: crate::devices::DeviceRecord) -> crate::protocol::DeviceSummary {
+    crate::protocol::DeviceSummary {
+        id: device.id,
+        name: device.name,
+        created_at: device.created_at,
+        last_seen_at: device.last_seen_at,
+    }
+}
+
+fn send_device_list(state: &Arc<ConnState>, request_id: String) {
+    let _ = state.out_tx.send(ServerMessage::DeviceListResult {
+        request_id,
+        devices: state
+            .app
+            .devices
+            .list()
+            .into_iter()
+            .map(device_to_wire)
+            .collect(),
+    });
+}
+
+/// Offer a pairing code. Reaching this handler already means the connection
+/// passed `authorize_request`, so only a paired device or a local client can
+/// invite another one.
+pub(super) fn handle_device_pair_start(state: &Arc<ConnState>, request_id: String) {
+    let now = std::time::Instant::now();
+    let code = state.app.devices.start_pairing(now);
+    let expires_in_ms = crate::devices::CODE_TTL.as_millis() as i64;
+    let _ = state.out_tx.send(ServerMessage::DevicePairCode {
+        request_id,
+        code,
+        expires_in_ms,
+    });
+}
+
+pub(super) fn handle_device_pair_cancel(state: &Arc<ConnState>, request_id: String) {
+    state.app.devices.cancel_pairing();
+    send_device_list(state, request_id);
+}
+
+pub(super) fn handle_device_list(state: &Arc<ConnState>, request_id: String) {
+    send_device_list(state, request_id);
+}
+
+pub(super) fn handle_device_revoke(state: &Arc<ConnState>, request_id: String, device_id: String) {
+    match state.app.devices.revoke(&device_id) {
+        Ok(devices) => {
+            let _ = state.out_tx.send(ServerMessage::DeviceListResult {
+                request_id,
+                devices: devices.into_iter().map(device_to_wire).collect(),
+            });
+        }
+        Err(error) => {
+            let _ = state.out_tx.send(ServerMessage::Error {
+                message: format!("could not revoke that device: {error}"),
+                request_id: Some(request_id),
+                code: Some("device_revoke_failed".to_string()),
+                retryable: true,
+            });
+        }
+    }
+}

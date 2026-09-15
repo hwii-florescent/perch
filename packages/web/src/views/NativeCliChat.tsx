@@ -5,6 +5,7 @@ import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
+import { newId } from "../ids";
 
 // Keep drafts and retry identities across UI/CLI switches, bounded like the
 // transcript. A lost acknowledgement never turns Retry into a new operation.
@@ -57,7 +58,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     });
     opened.ready.then(async () => {
       if (disposed) return;
-      const history = requestNativeUi({ type: "agent.ui.get", requestId: crypto.randomUUID(), sessionId, providerId });
+      const history = requestNativeUi({ type: "agent.ui.get", requestId: newId(), sessionId, providerId });
       if (initiallyUnowned) await opened.takeControl().catch((reason: Error) => { if (!disposed) setError(reason.message); });
       await history;
     }).catch((reason: Error) => { if (!disposed) setError(reason.message); });
@@ -67,7 +68,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   function updateDraft(value: string) {
     if (new TextEncoder().encode(value).length > 64 * 1024) return;
     setText(value);
-    drafts.set(draftKey, { text: value, operationId: crypto.randomUUID() });
+    drafts.set(draftKey, { text: value, operationId: newId() });
     if (drafts.size > 128) drafts.delete(drafts.keys().next().value!);
   }
   async function changeControl() {
@@ -80,11 +81,11 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   async function send(cancel = false) {
     const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
     if (generation === undefined || pending || !connected || (!cancel && !text.trim())) return;
-    const draft = drafts.get(draftKey) ?? { text, operationId: crypto.randomUUID() };
+    const draft = drafts.get(draftKey) ?? { text, operationId: newId() };
     drafts.set(draftKey, draft);
     setPending(true); setError(null);
     try {
-      const base = { requestId: crypto.randomUUID(), sessionId, providerId, generation };
+      const base = { requestId: newId(), sessionId, providerId, generation };
       const reply = await requestNativeUi(cancel ? { type: "agent.ui.cancel", ...base } : { type: "agent.ui.prompt", ...base, ...draft });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
       if (!cancel && drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); setText(""); }
