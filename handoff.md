@@ -121,6 +121,31 @@ themes, agents, hosts and the new devices panel were unreachable from a phone.
    boundaries, hibernation for remote agents, pairing QR/TLS, a broader focus
    and contrast sweep.
 
+### One thing I started and deliberately dropped
+
+I began a single combined `final-verification.spec.ts` that would run goals.md's
+eight-step "Non-negotiable verification" against one host in one pass. Steps 1-3
+worked (project + worktree, two different CLI agents plus a shell terminal in
+one project, Chat/UI <-> CLI round-trip proven by an unchanged terminal id
+across a reload), as did the edit/diff/comment half of step 4. I removed it
+rather than leave a red spec, because every step it covers already has dedicated
+passing evidence, and two things need real work first:
+
+- **Review delivery needs the provider's native bridge to be live.** Sending the
+  packet to a Claude session whose hooks had not yet fired answers "waiting for
+  the CLI's native UI bridge timed out". `native-ui.spec.ts` waits for the TUI's
+  "bypass permissions on" line before switching to UI mode; a combined run has
+  to do the same and prime the bridge with one turn.
+- **Claude now shows a folder-trust prompt** ("Yes, I trust this folder") in a
+  fresh temp directory, which any spec starting Claude in a new fixture must
+  answer with Enter, exactly as `native-ui.spec.ts` already does for Codex.
+
+One real isolation gap found while doing it, worth knowing for any spec that
+creates worktrees: **worktrees are created under the developer's real
+`~/.perch/worktrees/<repo basename>/`, which `--db-path` does not isolate.** Two
+runs using the same repo directory name collide ("fatal: ... already exists"),
+and a spec that does not clean up leaves that tree behind.
+
 ### New tests (all registered in `e2e/playwright.config.ts` `testMatch`)
 
 ```sh
