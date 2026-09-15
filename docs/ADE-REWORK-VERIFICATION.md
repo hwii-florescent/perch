@@ -1,5 +1,25 @@
 # ADE rework verification
 
+## V-04 Codex check — PASS, 2026-09-15 07:50 EDT
+
+The Codex account's usage limit had reset, so the check that was blocked
+overnight ran:
+
+```text
+cd e2e && npx playwright test --config=native-ui.config.ts --project=chromium -g codex
+  codex: UI and CLI share native turns across a core crash    1/1 PASS (36.2s)
+```
+
+That was V-04's outstanding provider check. Every built-in provider — Claude,
+Codex, OMP, Pi, OpenCode — now has observed UI/CLI turn sharing across a core
+crash in Chromium, and V-08's Codex delivery passed earlier the same night.
+
+**WebKit is still blocked at the browser.** Retested after the quota reset: a
+bare `webkit.launch()` with no perch involved still hangs past three minutes
+(Playwright 1.61.1, `webkit-2311`, reinstalled). So V-04 is PASS on Chromium and
+its WebKit re-confirmation stays UNVERIFIED-blocked with the reason recorded —
+not inferred from the Chromium pass.
+
 ## Device default at session creation — 2026-09-15
 
 goals.md requires the Chat/UI ↔ CLI mode to work "with a device default and a
@@ -1464,7 +1484,7 @@ acceptance, remote compatibility, and the other SPEC gates remain open.
 | V-01 project registration and stable reload identity | PASS (headless UI observed) |
 | V-02 two isolated worktrees | PASS (headless Chromium observed): two checkouts from one project with separate paths/branches, one project card, separate sessions, workspace-scoped tab strips, and isolated file changes; see the isolated worktree checkpoint above. Restart recovery for worktrees remains part of V-09. |
 | V-03 two different persistent CLI agents | PASS: real OMP/Pi, isolated drafts, split and reload, both engines; see catalog checkpoint above |
-| V-04 same-session Chat/CLI switching and recovery | PARTIAL: real Claude/Pi/OMP/OpenCode native UI/CLI turns and same-PID core recovery pass in both engines; OpenCode shell-mode refusal and native home/new-session flow pass; Codex basic Chromium passes. The extended Codex check is **blocked on the Codex account's usage limit** and the WebKit pass is **blocked on a browser-launch failure** — both recorded 2026-09-15, neither a perch defect |
+| V-04 same-session Chat/CLI switching and recovery | PASS in Chromium for every built-in provider: real Claude/Pi/OMP/OpenCode/**Codex** native UI/CLI turns and same-PID core recovery, plus OpenCode's shell-mode refusal and native home/new-session flow. WebKit re-confirmation is UNVERIFIED-blocked: the browser itself will not launch on this machine (recorded 2026-09-15, not a perch defect) |
 | V-05 tree, sentinel edit, save, disk/status verification | PASS (headless Chromium observed): one run spans nested tree expansion, open, edit, save, on-disk bytes, Git status/diff of the save, reload, external-conflict compare/keep/discard, and the phone-width file surface; see the combined file workflow checkpoint above. |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
 | V-07 complete Git and agent change review | PASS (local workspaces): working-tree/staged/HEAD sources, workspace-start (explicit **and** implicit) and last-agent-turn bases, rename, delete, line numbers, empty state and the last-agent-change summary all observed in real browser runs against real repositories; direct-host turns are out of scope and the capture-ordering ceiling is recorded |

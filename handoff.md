@@ -14,7 +14,7 @@ each slice below has a full checkpoint there with commands and observations.
 | V-01 project registration / reload identity | PASS |
 | V-02 two isolated worktrees | PASS |
 | V-03 two persistent CLI agents | PASS |
-| V-04 same-session Chat/CLI switching | PARTIAL — **blocked**, not failing: Codex quota + WebKit launch |
+| V-04 same-session Chat/CLI switching | **PASS in Chromium** — Codex check ran once its quota reset; WebKit re-confirmation blocked by the browser |
 | V-05 tree, edit, save, disk/status | PASS |
 | V-06 external-edit conflict recovery | PASS |
 | V-07 complete Git and agent change review | **PASS** (local workspaces; moved this session) |
@@ -24,8 +24,8 @@ each slice below has a full checkpoint there with commands and observations.
 | V-11 populated desktop/mobile visual QA | **PASS** (moved this session) |
 | V-12 safe hibernation and resume | **PASS** (moved this session) |
 
-11 PASS / 1 PARTIAL. Only V-04 is open, and its last checks are *blocked*
-rather than failing —
+**12 PASS in Chromium.** Every gate now has observed evidence; the only thing
+still missing is WebKit re-confirmation, which is *blocked* rather than failing —
 the Codex account is over its usage limit ("try again at 4:10 AM", reported by
 the CLI itself), and **every WebKit run on this machine now hangs in
 Playwright's browser setup**, including a bare `webkit.launch()` with no perch
@@ -105,11 +105,10 @@ themes, agents, hosts and the new devices panel were unreachable from a phone.
 
 ### Where to pick up
 
-1. **V-04** is the only open gate and both halves are environment-blocked, not
-   broken: the Codex account is over its usage limit (the CLI itself said "try
-   again at 4:10 AM" on 2026-09-15) and WebKit will not launch on this machine.
-   Re-run `npx playwright test --config=native-ui.config.ts -g codex` once the
-   quota resets.
+1. **WebKit.** Every gate passes in Chromium; the dual-engine half of V-04 (and
+   any other "both engines" claim) waits on WebKit launching again — a bare
+   `webkit.launch()` hangs, reinstalling did not help. That is the one
+   environment fix worth doing first.
 2. **Port the four stale Hosted-composer specs** onto `native-cli-composer`
    (see the section below) so the suite stops producing false negatives.
 3. ~~Decide the launcher/mode question~~ — **done this session**: the ordinary
@@ -216,10 +215,9 @@ contains "haiku" while the CLI reports `claude-opus-5`.
 
 ### Explicit remaining scope
 
-- **V-04** is the only provider gate left, and both of its checks are blocked
-  by the environment (Codex quota; WebKit browser launch), not by perch. Re-run
-  `npx playwright test --config=native-ui.config.ts -g codex` after the quota
-  resets, and fix WebKit before trusting any dual-engine claim.
+- **V-04** passed in Chromium for every built-in provider once the Codex quota
+  reset (2026-09-15 07:50 EDT). Its WebKit re-confirmation is still blocked by
+  the browser itself; do not read the Chromium pass as covering WebKit.
 - **V-07** is PASS for local workspaces. Two limits are recorded rather than
   fixed: a direct-host session's turns are never captured (that workspace's Git
   is not reachable from this process), and the boundary capture is spawned, so a
