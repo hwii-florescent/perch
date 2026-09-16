@@ -1,6 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -21,6 +20,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const url = `http://127.0.0.1:${port}`;
   const token = `review_${provider}_${Date.now()}`;
   const log = fs.openSync(path.join(scratch, "core.log"), "a");
+  const ownedTmux = () => new Set([...fs.readFileSync(path.join(scratch, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
   const shots = path.join(root, ".impeccable/review"); fs.mkdirSync(shots, { recursive: true });
   let core: ChildProcess | undefined;
   let phoneContext: BrowserContext | undefined;
@@ -39,7 +39,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(current.locator(".workspace-git__comment").filter({ hasText: body })).toBeVisible();
   }
   try {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("workspace-add-project").click();
@@ -160,10 +160,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     }
     await phoneContext?.close().catch(() => {});
     if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
-    if (nativeKey) {
-      const hash = createHash("sha256");
-      for (const value of [nativeKey.workspaceId, nativeKey.sessionId, nativeKey.agentId]) { const bytes = Buffer.from(value); const size = Buffer.alloc(8); size.writeBigUInt64LE(BigInt(bytes.length)); hash.update(size); hash.update(bytes); }
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-agent-${hash.digest("hex")}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
+    for (const name of ownedTmux()) {
+      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(scratch, "core.log")), contentType: "text/plain" });

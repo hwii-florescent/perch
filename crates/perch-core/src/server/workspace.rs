@@ -764,69 +764,6 @@ pub(super) fn handle_project_focus(state: &Arc<ConnState>, request_id: String, p
     }
 }
 
-/// How long after a workspace row appears its current HEAD can still honestly
-/// be called its creation boundary. A session mints its workspace implicitly
-/// (`create_session_on_host`) with no Git metadata, and this is the first
-/// moment the server can ask Git about it — sub-second in practice, because
-/// the client requests a snapshot as soon as it has created the session.
-/// Anything older is left unrecorded rather than back-dated: "Workspace start
-/// (not recorded)" is honest, a late HEAD labelled as the start is not.
-const IMPLICIT_START_GRACE_MS: i64 = 5 * 60 * 1000;
-
-/// Record a creation ref for workspaces that were created implicitly and are
-/// still inside that grace window. First-write-wins in SQL, so this can never
-/// replace a real registration boundary, and a workspace only qualifies once.
-fn backfill_implicit_start_snapshots(state: &Arc<ConnState>) {
-    let app = state.app.clone();
-    tokio::spawn(async move {
-        let Ok(workspaces) = app.db.list_workspaces("local", None) else {
-            return;
-        };
-        let cutoff = wall_clock_millis() - IMPLICIT_START_GRACE_MS;
-        for workspace in workspaces {
-            if workspace.start_snapshot.is_some() || workspace.created_at < cutoff {
-                continue;
-            }
-            let Ok(target) = WorkspaceTarget::new(workspace.id.clone(), &workspace.path) else {
-                continue;
-            };
-            let Some(head) = app.git.head_revision(&target).await else {
-                continue;
-            };
-            // `dirty` is a plain overwrite in this statement (branch and the
-            // start snapshot are not), so the row's own value goes back in:
-            // recording a creation ref must not clear a dirty marker.
-            match app.db.update_workspace_git_state(
-                &workspace.id,
-                None,
-                None,
-                workspace.dirty,
-                Some(&head),
-            ) {
-                Ok(updated) => {
-                    // Clients cache the workspace list, so a row that changed
-                    // behind their back has to be pushed or the Git surface
-                    // keeps offering "Workspace start (not recorded)".
-                    let _foundation_guard = app.foundation_lock.lock().unwrap();
-                    let revision = next_snapshot_revision_locked(&app);
-                    broadcast_foundation(
-                        &app,
-                        ServerMessage::WorkspaceUpdated {
-                            request_id: None,
-                            workspace: workspace_to_wire(updated),
-                            snapshot_epoch: app.snapshot_epoch.clone(),
-                            snapshot_revision: revision,
-                        },
-                    );
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "could not record implicit workspace start")
-                }
-            }
-        }
-    });
-}
-
 pub(super) fn handle_workspace_snapshot(
     state: &Arc<ConnState>,
     request_id: String,
@@ -837,7 +774,6 @@ pub(super) fn handle_workspace_snapshot(
         let _ = state.out_tx.send(message);
         return;
     }
-    backfill_implicit_start_snapshots(state);
     send_workspace_snapshot(state, request_id, project_id);
 }
 

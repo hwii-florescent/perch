@@ -262,18 +262,9 @@ impl GitService {
         }
     }
 
-    /// Capture the workspace's current content — index, worktree, and
-    /// untracked-but-not-ignored files — as one dangling commit, without
-    /// touching the real index, the worktree, or any ref. This is the only
-    /// honest before/after boundary for an agent turn: an agent that edits
-    /// without committing leaves HEAD unmoved, so a HEAD-only boundary would
-    /// report no changes at all.
-    ///
-    /// ponytail: the commit is unreferenced, so `git gc` prunes it once it
-    /// passes `gc.pruneExpire` (two weeks by default). Turn history older
-    /// than that keeps its metadata but loses its diff. Upgrade path if that
-    /// ever matters: write the same commit under `refs/perch/turns/<id>` and
-    /// delete the ref when the row is pruned.
+    /// Capture working-tree content (including untracked, non-ignored files)
+    /// in an immutable commit without changing the user's index or branch.
+    /// An internal ref keeps the boundary reachable through Git garbage collection.
     pub async fn content_snapshot(&self, target: &WorkspaceTarget) -> Option<String> {
         let index = std::env::temp_dir().join(format!("perch-snapshot-{}.index", Uuid::new_v4()));
         let result = self.content_snapshot_with_index(target, &index).await;
@@ -311,7 +302,59 @@ impl GitService {
             args.push("-p");
             args.push(head);
         }
-        self.env_text(target, &args, &env).await
+        let commit = self.env_text(target, &args, &env).await?;
+        let reference = format!("refs/perch/agent-snapshots/{commit}");
+        // Internal snapshot refs must not invoke the user's branch hooks.
+        self.env_ok(
+            target,
+            &[
+                "-c",
+                "core.hooksPath=/dev/null",
+                "update-ref",
+                &reference,
+                &commit,
+            ],
+            &[],
+        )
+        .await
+        .then_some(commit)
+    }
+
+    /// Compare immutable endpoints without materializing patch contents.
+    pub async fn compare_changed_paths(
+        &self,
+        target: &WorkspaceTarget,
+        before: &str,
+        after: &str,
+    ) -> Result<Vec<String>, GitError> {
+        validate_ref(before)?;
+        validate_ref(after)?;
+        let args: Vec<OsString> = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            before,
+            after,
+            "--",
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+        let output = self.run(target.root(), &args, None).await?;
+        if output.truncated {
+            return Err(GitError::OutputLimit);
+        }
+        if output.code != Some(0) {
+            return Err(command_failed(&args, &output));
+        }
+        Ok(bounded_utf8(&output.stdout)?
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+            .collect())
     }
 
     async fn env_output(
@@ -2450,6 +2493,13 @@ mod tests {
         // its endpoints must not adopt whatever appears in the worktree next.
         fs::write(root.join("later.txt"), "not part of the turn\n").unwrap();
 
+        // Both snapshots remain reviewable even under explicit aggressive GC.
+        git(&root, &["gc", "--prune=now"]);
+        let changed = service
+            .compare_changed_paths(&target, &before, &after)
+            .await
+            .unwrap();
+        assert_eq!(changed, [".gitignore", "added.txt", "tracked.txt"]);
         assert_ne!(before, after, "a changed worktree must change the boundary");
         let diff = service
             .diff(
@@ -2821,7 +2871,8 @@ mod tests {
 
         let service = GitService::with_git_binary(
             GitConfig {
-                timeout: Duration::from_millis(500),
+                // Allow the fixture to fork its descendant under parallel test load.
+                timeout: Duration::from_secs(2),
                 ..GitConfig::default()
             },
             &fake_git,

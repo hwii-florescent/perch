@@ -361,6 +361,11 @@ impl StatusDetection {
                 return Err(ManifestError::TooManyStatusPatterns);
             }
             for pattern in blocked.iter().chain(done.iter()) {
+                if pattern.is_empty() {
+                    return Err(ManifestError::InvalidStatusPattern(
+                        "empty status pattern".into(),
+                    ));
+                }
                 validate_token(pattern).map_err(ManifestError::InvalidStatusPattern)?;
             }
         }
@@ -1211,12 +1216,26 @@ pub enum AgentState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderSignal {
     Started,
-    Output { bytes: usize },
-    InputRequested { reason: String },
-    Completed { reason: String },
-    ProcessExited { code: Option<i32> },
-    TransportLost { reason: String },
-    Error { reason: String },
+    /// A prompt was submitted to an already-running interactive provider.
+    TurnStarted,
+    Output {
+        bytes: usize,
+    },
+    InputRequested {
+        reason: String,
+    },
+    Completed {
+        reason: String,
+    },
+    ProcessExited {
+        code: Option<i32>,
+    },
+    TransportLost {
+        reason: String,
+    },
+    Error {
+        reason: String,
+    },
 }
 
 /// Principal that may observe or own a terminal control channel.
@@ -1465,6 +1484,7 @@ pub struct AgentLifecycleRegistry {
     inner: Mutex<LifecycleInner>,
     max_agents: usize,
     history_limit: usize,
+    provider_transitions: tokio::sync::broadcast::Sender<(AgentKey, AgentTransition, bool)>,
 }
 
 impl AgentLifecycleRegistry {
@@ -1489,7 +1509,17 @@ impl AgentLifecycleRegistry {
             }),
             max_agents,
             history_limit,
+            provider_transitions: tokio::sync::broadcast::channel(1024).0,
         })
+    }
+
+    /// Subscribe before starting providers so short turns between snapshot
+    /// polls retain both their working and completion events. The final bool
+    /// distinguishes a submitted turn from process startup or terminal repaint.
+    pub fn subscribe_provider_transitions(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<(AgentKey, AgentTransition, bool)> {
+        self.provider_transitions.subscribe()
     }
 
     pub fn register(
@@ -1574,8 +1604,12 @@ impl AgentLifecycleRegistry {
         signal: ProviderSignal,
         at_ms: u64,
     ) -> Result<AgentTransition, LifecycleError> {
+        let starts_turn = matches!(signal, ProviderSignal::TurnStarted);
         let (state, reason, activity) = match signal {
             ProviderSignal::Started => (AgentState::Working, "provider started".to_string(), true),
+            ProviderSignal::TurnStarted => {
+                (AgentState::Working, "prompt submitted".to_string(), true)
+            }
             ProviderSignal::Output { bytes } => (
                 AgentState::Working,
                 format!("provider output ({bytes} bytes)"),
@@ -1609,6 +1643,11 @@ impl AgentLifecycleRegistry {
                 bump_revision(record);
             }
         }
+        if transition.changed || starts_turn {
+            let _ = self
+                .provider_transitions
+                .send((key.clone(), transition.clone(), starts_turn));
+        }
         Ok(transition)
     }
 
@@ -1631,7 +1670,16 @@ impl AgentLifecycleRegistry {
             .agents
             .get_mut(key)
             .ok_or_else(|| LifecycleError::NotFound(key.clone()))?;
-        transition_record(record, state, reason.into(), at_ms, self.history_limit)
+        let transition =
+            transition_record(record, state, reason.into(), at_ms, self.history_limit)?;
+        if transition.changed {
+            let _ = self.provider_transitions.send((
+                key.clone(),
+                transition.clone(),
+                state == AgentState::Working,
+            ));
+        }
+        Ok(transition)
     }
 
     pub fn record_activity(
@@ -2869,6 +2917,7 @@ mod tests {
     #[test]
     fn lifecycle_scopes_two_agents_and_translates_event_driven_status() {
         let registry = AgentLifecycleRegistry::new();
+        let mut transitions = registry.subscribe_provider_transitions();
         let first = key("workspace-a", "session-a", "agent-a");
         let second = key("workspace-b", "session-b", "agent-b");
         registry
@@ -2878,7 +2927,7 @@ mod tests {
             .register(registration(second.clone(), "codex", false))
             .unwrap();
         registry
-            .signal(&first, ProviderSignal::Started, 200)
+            .signal(&first, ProviderSignal::TurnStarted, 200)
             .unwrap();
         registry
             .signal(
@@ -2893,6 +2942,33 @@ mod tests {
         assert_eq!(registry.get(&second).unwrap().state, AgentState::Idle);
         assert_eq!(registry.list_workspace("workspace-a").len(), 1);
         assert_eq!(registry.get(&first).unwrap().recent_transitions.len(), 2);
+        registry
+            .signal(
+                &first,
+                ProviderSignal::Completed {
+                    reason: "finished".into(),
+                },
+                301,
+            )
+            .unwrap();
+        // Consume only after the entire short turn: sampling the current
+        // snapshot here would have lost Working and Blocked.
+        for expected in [AgentState::Working, AgentState::Blocked, AgentState::Done] {
+            let (event_key, transition, starts_turn) = transitions.try_recv().unwrap();
+            assert_eq!(starts_turn, expected == AgentState::Working);
+            assert_eq!(event_key, first);
+            assert_eq!(transition.to, expected);
+        }
+        registry
+            .signal(
+                &first,
+                ProviderSignal::Completed {
+                    reason: "duplicate".into(),
+                },
+                302,
+            )
+            .unwrap();
+        assert!(transitions.try_recv().is_err());
     }
 
     #[test]

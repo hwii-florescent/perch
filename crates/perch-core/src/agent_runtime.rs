@@ -32,6 +32,8 @@ use crate::terminal::{
 
 const RUNTIME_VIEWER: &str = "__perch_runtime__";
 
+pub type TurnBoundaryListener = Arc<dyn Fn(&AgentKey, bool) -> anyhow::Result<()> + Send + Sync>;
+
 /// All logical scopes participate in process identity. Length prefixes prevent
 /// delimiter collisions, and the digest is safe as an exact tmux target.
 pub fn terminal_key(key: &AgentKey) -> String {
@@ -69,6 +71,7 @@ struct ActiveRuntime {
     /// `Sleeping`.
     suppress_exit_signal: Arc<AtomicBool>,
     native_status: Arc<AtomicBool>,
+    native_running: bool,
     replay: Arc<Mutex<TerminalReplay>>,
     _bootstrap: Option<crate::provider_environment::BootstrapFile>,
 }
@@ -183,6 +186,7 @@ pub struct AgentRuntimeAdapter {
     active: Arc<Mutex<HashMap<AgentKey, ActiveRuntime>>>,
     starts: Arc<(Mutex<HashSet<AgentKey>>, Condvar)>,
     authority: Mutex<()>,
+    turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
 }
 
 impl AgentRuntimeAdapter {
@@ -198,11 +202,43 @@ impl AgentRuntimeAdapter {
             active: Arc::new(Mutex::new(HashMap::new())),
             starts: Arc::new((Mutex::new(HashSet::new()), Condvar::new())),
             authority: Mutex::new(()),
+            turn_boundary: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
     pub fn providers(&self) -> &Arc<ProviderRegistry> {
         &self.providers
+    }
+
+    pub fn set_turn_boundary_listener(&self, listener: TurnBoundaryListener) -> anyhow::Result<()> {
+        self.turn_boundary
+            .set(listener)
+            .map_err(|_| anyhow::anyhow!("turn recorder already installed"))
+    }
+
+    /// Complete the persistence barrier before releasing input or completion.
+    pub fn record_turn_boundary(&self, key: &AgentKey, before: bool) -> anyhow::Result<()> {
+        self.turn_boundary
+            .get()
+            .map_or(Ok(()), |record| record(key, before))
+    }
+
+    /// Only a native running-to-ready edge completes a native turn. Startup
+    /// dialogs and replayed ready snapshots do not complete pending input.
+    pub fn observe_native_turn(&self, key: &AgentKey, running: bool) -> anyhow::Result<()> {
+        let completed = self
+            .active
+            .lock()
+            .unwrap()
+            .get(key)
+            .is_some_and(|runtime| runtime.native_running && !running);
+        if completed {
+            self.record_turn_boundary(key, false)?;
+        }
+        if let Some(runtime) = self.active.lock().unwrap().get_mut(key) {
+            runtime.native_running = running;
+        }
+        Ok(())
     }
 
     pub fn lifecycle(&self) -> &Arc<AgentLifecycleRegistry> {
@@ -241,6 +277,13 @@ impl AgentRuntimeAdapter {
         runtime.handle.provider_session_id = Some(id);
         runtime.native_status.store(true, Ordering::Release);
         Ok(())
+    }
+
+    /// Native session events outrank terminal repaint/activity heuristics.
+    pub fn has_native_status(&self, session_id: &str) -> bool {
+        self.active.lock().unwrap().iter().any(|(key, runtime)| {
+            key.session_id == session_id && runtime.native_status.load(Ordering::Acquire)
+        })
     }
 
     pub fn runtime_cwd(&self, key: &AgentKey) -> Option<PathBuf> {
@@ -555,19 +598,37 @@ impl AgentRuntimeAdapter {
         let data_native_status = native_status.clone();
         let replay = Arc::new(Mutex::new(TerminalReplay::default()));
         let replay_for_output = replay.clone();
+        let status_detection = manifest.status_detection.clone();
+        let status_tail = Mutex::new(String::new());
+        let turn_boundary = self.turn_boundary.clone();
         let wrapped_on_data: TerminalDataListener = Arc::new(move |_, text| {
             replay_for_output.lock().unwrap().push(&text);
             if !data_suppress.load(Ordering::Acquire) && !data_native_status.load(Ordering::Acquire)
             {
-                let _ = lifecycle.signal(
-                    &event_key,
-                    ProviderSignal::Output { bytes: text.len() },
-                    now_millis(),
-                );
+                if let Some(signal) =
+                    output_status_signal(&status_detection, &mut status_tail.lock().unwrap(), &text)
+                {
+                    if matches!(signal, ProviderSignal::Completed { .. }) {
+                        if let Some(record) = turn_boundary.get() {
+                            if let Err(error) = record(&event_key, false) {
+                                tracing::error!(%error, "could not persist completed provider turn");
+                                return;
+                            }
+                        }
+                    }
+                    let _ = lifecycle.signal(&event_key, signal, now_millis());
+                } else if !text.trim().is_empty() {
+                    let _ = lifecycle.signal(
+                        &event_key,
+                        ProviderSignal::Output { bytes: text.len() },
+                        now_millis(),
+                    );
+                }
             }
         });
         let lifecycle = self.lifecycle.clone();
         let event_key = key.clone();
+        let turn_boundary = self.turn_boundary.clone();
         let wrapped_on_exit: TerminalExitListener = Arc::new(move |terminal_id, code| {
             let intentional_stop = event_suppress.load(Ordering::Acquire);
             let identity = event_identity_slot.lock().unwrap().clone();
@@ -585,6 +646,13 @@ impl AgentRuntimeAdapter {
                 .as_ref()
                 .is_some_and(|identity| terminal_registry.runtime_alive(identity));
             if !intentional_stop {
+                if !alive {
+                    if let Some(record) = turn_boundary.get() {
+                        if let Err(error) = record(&event_key, false) {
+                            tracing::error!(%error, "could not persist exited provider turn");
+                        }
+                    }
+                }
                 // A tmux attach client can exit while the provider itself
                 // remains alive. That is a transport loss and is
                 // reconnectable; a direct PTY exit is terminal.
@@ -614,6 +682,10 @@ impl AgentRuntimeAdapter {
             }
         });
 
+        // Publish start before the reader can deliver a ready/completion
+        // marker; a fast provider must not be put back into Working afterward.
+        self.lifecycle
+            .signal(&key, ProviderSignal::Started, now_millis())?;
         let outcome = match self.terminals.attach(
             &terminal_key(&key),
             RUNTIME_VIEWER,
@@ -626,6 +698,13 @@ impl AgentRuntimeAdapter {
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
+                let _ = self.lifecycle.signal(
+                    &key,
+                    ProviderSignal::Error {
+                        reason: format!("provider launch failed: {error}"),
+                    },
+                    now_millis(),
+                );
                 let _ = self.lifecycle.detach_observer(&key, &client.id);
                 return Err(RuntimeAdapterError::Process(error));
             }
@@ -670,19 +749,11 @@ impl AgentRuntimeAdapter {
                     cwd,
                     suppress_exit_signal,
                     native_status,
+                    native_running: false,
                     replay: replay.clone(),
                     _bootstrap: prepared.bootstrap,
                 },
             );
-            if let Err(error) = self
-                .lifecycle
-                .signal(&key, ProviderSignal::Started, now_millis())
-            {
-                self.active.lock().unwrap().remove(&key);
-                self.terminals.kill(&terminal_key(&key));
-                let _ = self.lifecycle.detach_observer(&key, &client.id);
-                return Err(error.into());
-            }
         }
 
         let mut snapshot = String::new();
@@ -883,6 +954,17 @@ impl AgentRuntimeAdapter {
             at_ms,
             active_for,
         )?;
+        let native_ready = self.has_native_status(&key.session_id);
+        if data.contains(['\r', '\n'])
+            && (!crate::native_ui::supported(&key.agent_id) || native_ready)
+        {
+            self.record_turn_boundary(key, true)
+                .map_err(RuntimeAdapterError::Process)?;
+            if !native_ready {
+                self.lifecycle
+                    .signal(key, ProviderSignal::TurnStarted, at_ms)?;
+            }
+        }
         self.terminals
             .input_owned(&terminal_key(key), &lease.client, lease.generation, data)?;
         Ok(())
@@ -1043,6 +1125,57 @@ impl AgentRuntimeAdapter {
     }
 }
 
+/// Match only newly completed literal markers, including markers split across
+/// PTY reads. Retain at most the longest marker minus one byte, never a transcript.
+/// ponytail: configured markers can be spoofed by provider output; native
+/// structured status takes precedence and is the upgrade path for TUIs.
+fn output_status_signal(
+    detection: &crate::agent_fleet::StatusDetection,
+    tail: &mut String,
+    text: &str,
+) -> Option<ProviderSignal> {
+    use crate::agent_fleet::StatusDetection;
+    let StatusDetection::OutputPatterns { blocked, done } = detection else {
+        return None;
+    };
+    let previous = tail.len();
+    tail.push_str(text);
+    let signal = done
+        .iter()
+        .map(|marker| (marker, false))
+        .chain(blocked.iter().map(|marker| (marker, true)))
+        .filter_map(|(marker, blocked)| {
+            tail.rfind(marker)
+                .filter(|start| start + marker.len() > previous)
+                .map(|start| (start + marker.len(), blocked))
+        })
+        .max()
+        .map(|(_, blocked)| {
+            if blocked {
+                ProviderSignal::InputRequested {
+                    reason: "configured blocked marker".into(),
+                }
+            } else {
+                ProviderSignal::Completed {
+                    reason: "configured completion marker".into(),
+                }
+            }
+        });
+    let keep = blocked
+        .iter()
+        .chain(done)
+        .map(String::len)
+        .max()
+        .unwrap_or(1)
+        .saturating_sub(1);
+    let mut cut = tail.len().saturating_sub(keep);
+    while !tail.is_char_boundary(cut) {
+        cut += 1;
+    }
+    tail.drain(..cut);
+    signal
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,6 +1188,47 @@ mod tests {
     use std::time::Duration;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn configured_status_markers_survive_split_reads_without_replaying_old_matches() {
+        let detection = StatusDetection::OutputPatterns {
+            blocked: vec!["WAIT_FOR_APPROVAL".into()],
+            done: vec!["TURN_COMPLETE".into()],
+        };
+        for split in 1.."TURN_COMPLETE".len() {
+            let mut tail = String::new();
+            assert!(
+                output_status_signal(&detection, &mut tail, &"TURN_COMPLETE"[..split]).is_none()
+            );
+            assert!(matches!(
+                output_status_signal(&detection, &mut tail, &"TURN_COMPLETE"[split..]),
+                Some(ProviderSignal::Completed { .. })
+            ));
+            assert!(output_status_signal(&detection, &mut tail, "\r\n").is_none());
+        }
+        let mut tail = String::new();
+        assert!(matches!(
+            output_status_signal(&detection, &mut tail, "TURN_COMPLETE WAIT_FOR_APPROVAL"),
+            Some(ProviderSignal::InputRequested { .. })
+        ));
+        assert!(matches!(
+            output_status_signal(&detection, &mut tail, "TURN_COMPLETE"),
+            Some(ProviderSignal::Completed { .. })
+        ));
+        output_status_signal(&detection, &mut tail, &"é".repeat(10_000));
+        assert!(tail.len() < "WAIT_FOR_APPROVAL".len());
+        assert!(
+            output_status_signal(&StatusDetection::ExitStatus, &mut tail, "TURN_COMPLETE")
+                .is_none()
+        );
+        let invalid = StatusDetection::OutputPatterns {
+            blocked: vec![],
+            done: vec![String::new()],
+        };
+        let mut manifest = fixture_manifest();
+        manifest.status_detection = invalid;
+        assert!(ProviderRegistry::empty().register(manifest).is_err());
+    }
 
     fn key() -> AgentKey {
         let suffix = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);

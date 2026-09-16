@@ -305,15 +305,11 @@ struct AppState {
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
     /// outlive any single WS connection so a second tab/device can find and
     /// share what the first one started, exactly like `running_sessions`.
+    agent_terminals: Arc<AgentTerminalRegistry>,
     /// Paired phones/devices and the live pairing code. perch binds
     /// `0.0.0.0`, so anything off the loopback interface must present a token
     /// this store issued — see `authorize_request`.
     devices: Arc<crate::devices::DeviceStore>,
-    agent_terminals: Arc<AgentTerminalRegistry>,
-    /// The runtime adapter's own registry, kept here so the idle sweep can
-    /// see configured-provider terminals too. Keyed by
-    /// `agent_runtime::terminal_key`, not by session id.
-    agent_runtime_terminals: Arc<AgentTerminalRegistry>,
     workspace_terminals: Arc<crate::workspace_terminals::WorkspaceTerminals>,
     /// Process-wide provider/lifecycle bridge used by local CLI attaches.
     /// Keeping this beside the shared terminal registry prevents a second WS
@@ -532,6 +528,12 @@ pub async fn run(
         let agent_activity_events_tx = agent_activity_events_tx.clone();
         let agent_activity_state = agent_activity_state.clone();
         move |session_id: &str| {
+            if agent_activity_state
+                .get()
+                .is_some_and(|app| app.agent_runtime.has_native_status(session_id))
+            {
+                return;
+            }
             // Only notify on the actual idle->running transition — PTY
             // output fires this on every read, often many times a second
             // under a repainting TUI, and re-broadcasting on every one of
@@ -583,22 +585,9 @@ pub async fn run(
     // constructor after other startup work has begun.
     let provider_registry =
         crate::provider_config::load_registry(options.providers_path.as_deref())?;
-    // The runtime adapter owns a *second* terminal registry, keyed by
-    // `agent_runtime::terminal_key` rather than by session id. It used to
-    // carry a no-op activity callback, so a configured CLI provider never
-    // reported working/idle at all — the states goals.md requires, and the
-    // boundary `agent_history` records, both depend on it. Resolve the key
-    // back to its session through the lifecycle registry and then run the
-    // exact same bookkeeping as the shared-terminal path.
-    let runtime_lifecycle = agent_lifecycle.clone();
-    let runtime_terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(
-        move |terminal_key: &str| {
-            if let Some(session_id) = session_for_runtime_terminal(&runtime_lifecycle, terminal_key)
-            {
-                mark_session_running(&session_id);
-            }
-        },
-    )));
+    // Managed providers publish lifecycle transitions; terminal repaints must
+    // not create a second, conflicting source of turn completion.
+    let runtime_terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(|_| {})));
     let agent_runtime = Arc::new(AgentRuntimeAdapter::new(
         Arc::new(provider_registry),
         agent_lifecycle.clone(),
@@ -633,7 +622,6 @@ pub async fn run(
             None => crate::devices::DeviceStore::load_default(),
         }),
         agent_terminals,
-        agent_runtime_terminals: runtime_terminals,
         workspace_terminals,
         agent_runtime,
         native_ui: Arc::new(crate::native_ui::NativeUiRegistry::default()),
@@ -648,6 +636,29 @@ pub async fn run(
         filesystem_operation_overflow: Arc::new(Mutex::new(())),
         git: Arc::new(GitService::new(GitConfig::default())),
     };
+
+    // No AppState cycle: the recorder owns only the DB/Git services and this
+    // core's runtime handle. PTY reader threads can use the same barrier.
+    let turn_db = state.db.clone();
+    let turn_git = state.git.clone();
+    let turn_runtime = tokio::runtime::Handle::current();
+    state
+        .agent_runtime
+        .set_turn_boundary_listener(Arc::new(move |key, before| {
+            let capture = || {
+                turn_runtime.block_on(agent_history::capture(
+                    &turn_db,
+                    &turn_git,
+                    &key.session_id,
+                    before,
+                ))
+            };
+            if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(capture)
+            } else {
+                capture()
+            }
+        }))?;
 
     // Persist restart recovery's Reconnecting revision before any asynchronous
     // attach callback can race a delayed pre-restart snapshot write.
@@ -696,6 +707,7 @@ pub async fn run(
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
+    spawn_agent_turn_state_task(state.clone());
     spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
 
@@ -1220,26 +1232,53 @@ fn spawn_agent_lifecycle_task(state: AppState) {
     });
 }
 
-/// Map one runtime terminal key back to the perch session that owns it.
-/// `terminal_key` is a digest, so this is a scan of the (single-digit) live
-/// agent list rather than a reverse lookup.
-fn session_for_runtime_terminal(
-    lifecycle: &crate::agent_fleet::AgentLifecycleRegistry,
-    terminal_key: &str,
-) -> Option<String> {
-    lifecycle
-        .list()
-        .into_iter()
-        .find(|snapshot| crate::agent_runtime::terminal_key(&snapshot.key) == terminal_key)
-        .map(|snapshot| snapshot.key.session_id)
+/// Consume provider transitions in order, including a whole turn that fits
+/// between lifecycle snapshot polls. Native and configured providers share it.
+fn spawn_agent_turn_state_task(state: AppState) {
+    let mut transitions = state
+        .agent_runtime
+        .lifecycle()
+        .subscribe_provider_transitions();
+    tokio::spawn(async move {
+        loop {
+            let (key, transition, starts_turn) = match transitions.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    tracing::error!(
+                        count,
+                        "provider turn transitions were lost; turn history is incomplete"
+                    );
+                    continue;
+                }
+            };
+            use crate::agent_fleet::AgentState;
+            let running = match transition.to {
+                // Repainting a completed terminal is output, not a new turn.
+                AgentState::Working if !starts_turn => continue,
+                AgentState::Working | AgentState::Blocked => true,
+                AgentState::Done | AgentState::Idle | AgentState::Exited | AgentState::Error => {
+                    false
+                }
+                _ => continue, // Transport loss is not proof a turn finished.
+            };
+            let changed = {
+                let mut sessions = state.running_sessions.lock().unwrap();
+                if running {
+                    sessions.insert(key.session_id.clone())
+                } else {
+                    sessions.remove(&key.session_id)
+                }
+            };
+            if changed {
+                if !running {
+                    mark_unseen_if_unviewed(&state, &key.session_id);
+                }
+                notify_session_updated(&state, &key.session_id);
+            }
+        }
+    });
 }
-
-/// How long a configured provider's pty must be silent before its lifecycle
-/// record is moved to Idle. Deliberately longer than `AGENT_QUIET_THRESHOLD`
-/// (which only drives the session's running dot): this one makes an agent
-/// eligible for hibernation, so a provider that is merely thinking between
-/// two bursts of output must not cross it.
-const LIFECYCLE_QUIET_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Default idle window before a safe agent is hibernated, overridable with
 /// `PERCH_HIBERNATE_AFTER_SECS` (0 disables hibernation entirely). This is a
@@ -1333,46 +1372,12 @@ fn spawn_agent_idle_sweep_task(state: AppState) {
         let tick = AGENT_QUIET_THRESHOLD / 4;
         loop {
             tokio::time::sleep(tick).await;
-            let lifecycle = state.agent_runtime.lifecycle();
-            let mut quiet_sessions = state
+            // Silence is only a legacy terminal display heuristic. Managed
+            // agents require provider completion evidence before becoming idle;
+            // a quiet working or blocked process must never become sleepable.
+            let quiet_sessions = state
                 .agent_terminals
                 .sessions_quiet_since(AGENT_QUIET_THRESHOLD);
-            // Configured providers live in the runtime registry under a
-            // digest key; resolve those to sessions before sweeping.
-            quiet_sessions.extend(
-                state
-                    .agent_runtime_terminals
-                    .sessions_quiet_since(AGENT_QUIET_THRESHOLD)
-                    .iter()
-                    .filter_map(|key| session_for_runtime_terminal(lifecycle, key)),
-            );
-            // Nothing else ever moves a CLI agent off Working. A configured
-            // provider has no structured status stream at all, and a native
-            // one only reports when its own hooks fire — a Claude session that
-            // is started and then left alone emits no further events, so its
-            // record stayed Working forever and it could never become eligible
-            // for hibernation. A pty silent for `LIFECYCLE_QUIET_THRESHOLD` is
-            // honest idle evidence for both: a provider that is actually
-            // working repaints its TUI far more often than that, and a real
-            // native snapshot always overrides this the moment one arrives.
-            let quiet_runtimes = state
-                .agent_runtime_terminals
-                .sessions_quiet_since(LIFECYCLE_QUIET_THRESHOLD);
-            for snapshot in lifecycle.list() {
-                if snapshot.state != crate::agent_fleet::AgentState::Working {
-                    continue;
-                }
-                let terminal = crate::agent_runtime::terminal_key(&snapshot.key);
-                if !quiet_runtimes.iter().any(|key| key == &terminal) {
-                    continue;
-                }
-                let _ = lifecycle.transition(
-                    &snapshot.key,
-                    crate::agent_fleet::AgentState::Idle,
-                    "provider output quiet",
-                    now_millis(),
-                );
-            }
             for session_id in quiet_sessions {
                 // `running_sessions` already covers Hosted-mode turns and
                 // detached turns; a CLI terminal that never went "running" in
@@ -1404,35 +1409,72 @@ fn placeholder_html(base_path: &str) -> String {
     )
 }
 
-/// Is this request allowed to reach perch's data plane?
-///
-/// Loopback is always allowed: the desktop shell talks to a core bound on
-/// `127.0.0.1`, and requiring a token there would mean pairing with yourself.
-/// Everything else — a phone on the LAN, a browser on a devpod's forwarded
-/// port — must present a token issued by `POST {base}pair`, in the
-/// `perch_device` cookie (browsers send it on the WS handshake too) or as
-/// `?token=`. `PERCH_REQUIRE_PAIRING=1` drops the loopback exemption, which is
-/// how the pairing flow is tested without a second machine.
+/// Browser credentials are valid only at this request's origin. Native
+/// clients omit Origin; a browser cannot opt out of sending it on WebSockets.
+fn same_origin(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(axum::http::header::ORIGIN) else {
+        return true;
+    };
+    let Some(origin) = origin
+        .to_str()
+        .ok()
+        .and_then(|s| s.parse::<axum::http::Uri>().ok())
+    else {
+        return false;
+    };
+    matches!(origin.scheme_str(), Some("http" | "https"))
+        && origin
+            .authority()
+            .zip(
+                headers
+                    .get(axum::http::header::HOST)
+                    .and_then(|h| h.to_str().ok()),
+            )
+            .is_some_and(|(origin, host)| origin.as_str().eq_ignore_ascii_case(host))
+}
+
+fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.parse::<axum::http::uri::Authority>().ok());
+    peer.ip().is_loopback()
+        && !headers.contains_key("forwarded")
+        && !headers.contains_key("x-forwarded-host")
+        && !headers.contains_key("x-forwarded-for")
+        && host.is_some_and(|host| {
+            host.host().eq_ignore_ascii_case("localhost")
+                || host
+                    .host()
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        })
+}
+
+/// Resolve authorization to a paired device identity, or a trusted local
+/// client (None). Retain the identity for the lifetime of a WebSocket.
 fn authorize_request(
     state: &AppState,
     peer: &SocketAddr,
     headers: &HeaderMap,
     params: &HashMap<String, String>,
-) -> bool {
+) -> Result<Option<String>, StatusCode> {
+    if !same_origin(headers) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let require_everywhere = std::env::var("PERCH_REQUIRE_PAIRING").as_deref() == Ok("1");
-    if peer.ip().is_loopback() && !require_everywhere {
-        return true;
+    if local_request(peer, headers) && !require_everywhere {
+        return Ok(None);
     }
     let token = params
         .get("token")
         .cloned()
         .or_else(|| cookie_value(headers, "perch_device"));
-    token.is_some_and(|token| {
-        state
-            .devices
-            .authenticate(&token, wall_clock_millis())
-            .is_some()
-    })
+    token
+        .and_then(|token| state.devices.authenticate(&token, wall_clock_millis()))
+        .map(|device| Some(device.id))
+        .ok_or(StatusCode::UNAUTHORIZED)
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -1453,13 +1495,12 @@ async fn ws_upgrade(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if !authorize_request(&state, &peer, &headers, &params) {
-        // 401 rather than a silent close: the client turns exactly this into
-        // its "pair this device" screen.
-        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    match authorize_request(&state, &peer, &headers, &params) {
+        Ok(device_id) => ws
+            .on_upgrade(move |socket| handle_socket(socket, state, device_id))
+            .into_response(),
+        Err(status) => (status, "device access denied").into_response(),
     }
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
-        .into_response()
 }
 
 /// `GET {base}pair` — does this caller already have data-plane access?
@@ -1475,7 +1516,7 @@ async fn pair_status(
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     axum::Json(serde_json::json!({
-        "paired": authorize_request(&state, &peer, &headers, &params),
+        "paired": authorize_request(&state, &peer, &headers, &params).is_ok(),
     }))
 }
 
@@ -1487,8 +1528,12 @@ async fn pair_status(
 /// back both as a cookie (so the WS handshake carries it) and in the body.
 async fn pair_claim(
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    if !same_origin(&headers) {
+        return (StatusCode::FORBIDDEN, "origin is not allowed").into_response();
+    }
     let code = body["code"].as_str().unwrap_or_default();
     let name = body["name"].as_str().unwrap_or_default();
     match state
@@ -1524,7 +1569,7 @@ async fn pair_claim(
             }))
             .into_response();
             if let Ok(cookie) = axum::http::HeaderValue::from_str(&format!(
-                "perch_device={}; Path=/; Max-Age=31536000; SameSite=Lax",
+                "perch_device={}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict",
                 paired.token
             )) {
                 response
@@ -1557,8 +1602,8 @@ async fn clipboard_image_upload(
 ) -> impl IntoResponse {
     // Writes a file to `~/.perch/clipboard-images`, so it is as much a data
     // route as the WS is and gets the same gate.
-    if !authorize_request(&state, &peer, &headers, &params) {
-        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    if let Err(status) = authorize_request(&state, &peer, &headers, &params) {
+        return (status, "device access denied").into_response();
     }
     const MAX_BYTES: usize = 10 * 1024 * 1024;
     if body.len() > MAX_BYTES {
@@ -1607,8 +1652,8 @@ async fn attachment_upload(
     Query(params): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    if !authorize_request(&state, &peer, &headers, &params) {
-        return (StatusCode::UNAUTHORIZED, "device is not paired").into_response();
+    if let Err(status) = authorize_request(&state, &peer, &headers, &params) {
+        return (status, "device access denied").into_response();
     }
     const MAX_BYTES: usize = 25 * 1024 * 1024;
     if body.len() > MAX_BYTES {
@@ -1691,6 +1736,8 @@ struct ConnState {
     /// Unique id for this WS connection — scopes unicast registrations in the
     /// hub so they can all be torn down atomically when the socket closes.
     conn_id: String,
+    /// Authenticated pairing identity; local clients have no paired device.
+    device_id: Option<String>,
     out_tx: UnboundedSender<ServerMessage>,
     runtimes: Mutex<HashMap<String, SessionRuntime>>,
     terminals: TerminalManager,
@@ -1741,7 +1788,14 @@ impl Drop for ConnCountGuard {
     }
 }
 
-async fn handle_socket(socket: WebSocket, app: AppState) {
+async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<String>) {
+    let mut revoked = app.devices.subscribe_revocations();
+    if device_id
+        .as_ref()
+        .is_some_and(|id| !app.devices.is_paired(id))
+    {
+        return;
+    }
     // Counted for `spawn_git_poll_task`'s zero-client gate; notify it so a
     // fresh pass runs now instead of the client waiting up to 5s for the
     // next tick. The guard's `Drop` decrements on every exit path below.
@@ -1757,8 +1811,16 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     // so they can all be cleaned up atomically when the socket closes.
     let conn_id = Uuid::new_v4().to_string();
 
+    let writer_devices = app.devices.clone();
+    let writer_device_id = device_id.clone();
     let writer = tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
+            if writer_device_id
+                .as_ref()
+                .is_some_and(|id| !writer_devices.is_paired(id))
+            {
+                break;
+            }
             let Ok(text) = serde_json::to_string(&message) else {
                 continue;
             };
@@ -1841,6 +1903,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let state = Arc::new(ConnState {
         app: app.clone(),
         conn_id: conn_id.clone(),
+        device_id: device_id.clone(),
         out_tx,
         runtimes: Mutex::new(HashMap::new()),
         terminals: TerminalManager::new(on_data, on_exit),
@@ -2018,7 +2081,24 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         }
     });
 
-    while let Some(Ok(msg)) = receiver.next().await {
+    loop {
+        let message = tokio::select! {
+            biased;
+            _ = revoked.changed() => {
+                if device_id.as_ref().is_some_and(|id| !app.devices.is_paired(id)) {
+                    break;
+                }
+                continue;
+            }
+            message = receiver.next() => message,
+        };
+        if device_id
+            .as_ref()
+            .is_some_and(|id| !app.devices.is_paired(id))
+        {
+            break;
+        }
+        let Some(Ok(msg)) = message else { break };
         let text = match msg {
             Message::Text(t) => t,
             Message::Close(_) => break,
@@ -3192,6 +3272,100 @@ mod review_delivery_tests {
 mod boot_smoke_tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn browser_origin_and_live_device_revocation_gate_the_socket() {
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as WsMessage};
+        let root = std::env::temp_dir().join(format!("perch-access-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let devices_path = root.join("devices.json");
+        let devices = crate::devices::DeviceStore::load(&devices_path);
+        let now = std::time::Instant::now();
+        let code = devices.start_pairing(now);
+        let paired = devices.claim(&code, "test phone", now, 1).unwrap();
+        drop(devices);
+        let db_path = root.join("history.sqlite");
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(run(
+            ServerOptions {
+                port: 0,
+                base_path: "/".into(),
+                web_dist_dir: root.join("web"),
+                db_path: Some(db_path.clone()),
+                hosts_path: Some(root.join("hosts.json")),
+                providers_path: None,
+                devices_path: Some(devices_path.clone()),
+                ready_tx: Some(ready_tx),
+            },
+            Arc::new(SessionRegistry::new()),
+            Arc::new(HistoryDb::open(&db_path).unwrap()),
+            root.display().to_string(),
+        ));
+        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let url = format!("ws://{address}/ws");
+        let mut hostile = url.clone().into_client_request().unwrap();
+        hostile
+            .headers_mut()
+            .insert("origin", "https://untrusted.example".parse().unwrap());
+        let error = tokio_tungstenite::connect_async(hostile).await.unwrap_err();
+        assert!(
+            matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == StatusCode::FORBIDDEN)
+        );
+
+        // A hostname pointing to loopback must not inherit local authority.
+        let mut rebound = url.clone().into_client_request().unwrap();
+        rebound
+            .headers_mut()
+            .insert("host", "phone.example".parse().unwrap());
+        rebound
+            .headers_mut()
+            .insert("origin", "http://phone.example".parse().unwrap());
+        let error = tokio_tungstenite::connect_async(rebound.clone())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == StatusCode::UNAUTHORIZED)
+        );
+        rebound.headers_mut().insert(
+            "cookie",
+            format!("perch_device={}", paired.token).parse().unwrap(),
+        );
+        let (mut phone, _) = tokio_tungstenite::connect_async(rebound.clone())
+            .await
+            .unwrap();
+        let (mut host, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        host.send(WsMessage::Text(
+            serde_json::json!({
+                "type": "device.revoke", "requestId": "revoke", "deviceId": paired.record.id,
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(Ok(message)) = phone.next().await {
+                if matches!(message, WsMessage::Close(_)) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("revoked socket must close without another inbound message");
+        assert!(crate::devices::DeviceStore::load(devices_path)
+            .list()
+            .is_empty());
+        let error = tokio_tungstenite::connect_async(rebound).await.unwrap_err();
+        assert!(
+            matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == StatusCode::UNAUTHORIZED)
+        );
+        host.close(None).await.ok();
+        server.abort();
+        let _ = server.await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn boot_validates_native_manifests_and_stays_bound() {

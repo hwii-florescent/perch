@@ -12,7 +12,7 @@
 //! * **A pairing code is one-shot, short-lived and rate-limited in memory.**
 //!   It never touches disk, so a code cannot outlive the process that showed
 //!   it, and a brute-force attempt burns the code rather than the clock.
-//! * **Loopback is always allowed** (see `server::mod`), so the desktop shell
+//! * **Local requests are exempt after Origin/Host checks** (see `server`), so the desktop shell
 //!   and local development never need a token and this file stays empty until
 //!   someone actually pairs a phone.
 //!
@@ -34,8 +34,7 @@ use uuid::Uuid;
 /// How long a pairing code stays valid. Long enough to walk to the phone,
 /// short enough that a code left on screen is not a standing invitation.
 pub const CODE_TTL: Duration = Duration::from_secs(5 * 60);
-/// Wrong guesses before the code is burned. The code is 8 characters from a
-/// 32-symbol alphabet (40 bits), so this is belt and braces.
+/// Wrong guesses before the eight-character pairing code is burned.
 const MAX_ATTEMPTS: u8 = 5;
 /// Excludes I, L, O, U and digits that look like them: a pairing code is read
 /// off one screen and typed into another.
@@ -83,6 +82,7 @@ pub struct DeviceStore {
     /// At most one code is offered at a time: a second "Pair a device" click
     /// replaces the first, so an abandoned code cannot stay usable.
     pending: Mutex<Option<PendingCode>>,
+    revoked: tokio::sync::watch::Sender<()>,
 }
 
 /// What a successful claim hands back to the device.
@@ -99,6 +99,7 @@ impl DeviceStore {
             path,
             inner: Mutex::new(inner),
             pending: Mutex::new(None),
+            revoked: tokio::sync::watch::channel(()).0,
         }
     }
 
@@ -120,6 +121,19 @@ impl DeviceStore {
 
     pub fn list(&self) -> Vec<DeviceRecord> {
         self.inner.lock().unwrap().devices.clone()
+    }
+
+    pub fn is_paired(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .devices
+            .iter()
+            .any(|device| device.id == id)
+    }
+
+    pub fn subscribe_revocations(&self) -> tokio::sync::watch::Receiver<()> {
+        self.revoked.subscribe()
     }
 
     /// Issue (or replace) the pairing code a device must present.
@@ -164,7 +178,7 @@ impl DeviceStore {
                 anyhow::bail!("that pairing code has expired");
             }
             // Compared case-insensitively because the code is typed by hand;
-            // the entropy is in the 40 bits, not in the letter case.
+            // letter case is not part of the secret.
             if !code.trim().eq_ignore_ascii_case(&current.code) {
                 current.attempts += 1;
                 if current.attempts >= MAX_ATTEMPTS {
@@ -182,43 +196,48 @@ impl DeviceStore {
             created_at: now_ms,
             last_seen_at: now_ms,
         };
-        let snapshot = {
-            let mut guard = self.inner.lock().unwrap();
-            guard.devices.push(record.clone());
-            guard.devices.clone()
-        };
+        let mut guard = self.inner.lock().unwrap();
+        let mut snapshot = guard.devices.clone();
+        snapshot.push(record.clone());
         self.write_to_disk(&snapshot)?;
+        guard.devices = snapshot;
         Ok(PairedDevice { record, token })
     }
 
     /// Resolve a bearer token to its device, refreshing `last_seen_at`.
-    /// Comparison is over the stored hashes, so an unknown token costs the
-    /// same work as a known one.
+    /// Serialize persistence with claim/revoke so a timestamp refresh cannot
+    /// restore a revoked token on disk.
     pub fn authenticate(&self, token: &str, now_ms: i64) -> Option<DeviceRecord> {
         let hash = hash_token(token);
-        let (record, snapshot) = {
-            let mut guard = self.inner.lock().unwrap();
-            let device = guard
-                .devices
-                .iter_mut()
-                .find(|device| device.token_hash == hash)?;
+        let mut guard = self.inner.lock().unwrap();
+        let device = guard
+            .devices
+            .iter_mut()
+            .find(|device| device.token_hash == hash)?;
+        // Last-seen is informational; at most one write per minute per device.
+        let persist = now_ms.saturating_sub(device.last_seen_at) >= 60_000;
+        if persist {
             device.last_seen_at = now_ms;
-            (device.clone(), guard.devices.clone())
-        };
+        }
+        let record = device.clone();
         // A failed write only loses a timestamp; the device stays paired.
-        if let Err(error) = self.write_to_disk(&snapshot) {
+        if let Err(error) = if persist {
+            self.write_to_disk(&guard.devices)
+        } else {
+            Ok(())
+        } {
             tracing::warn!(%error, "could not persist device last-seen time");
         }
         Some(record)
     }
 
     pub fn revoke(&self, id: &str) -> anyhow::Result<Vec<DeviceRecord>> {
-        let snapshot = {
-            let mut guard = self.inner.lock().unwrap();
-            guard.devices.retain(|device| device.id != id);
-            guard.devices.clone()
-        };
+        let mut guard = self.inner.lock().unwrap();
+        let mut snapshot = guard.devices.clone();
+        snapshot.retain(|device| device.id != id);
         self.write_to_disk(&snapshot)?;
+        guard.devices = snapshot.clone();
+        self.revoked.send_replace(());
         Ok(snapshot)
     }
 
@@ -350,5 +369,55 @@ mod tests {
             store.claim(&code, "phone", now, 1).is_err(),
             "burned after repeated guesses"
         );
+    }
+
+    #[test]
+    fn failed_writes_do_not_publish_pairing_or_revocation() {
+        let store = store();
+        let now = Instant::now();
+        let code = store.start_pairing(now);
+        // A directory at the temporary-file path forces a real write failure.
+        let tmp = store.path.with_extension("json.tmp");
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(store.claim(&code, "phone", now, 1).is_err());
+        assert!(store.list().is_empty());
+        std::fs::remove_dir(&tmp).unwrap();
+        let code = store.start_pairing(now);
+        let paired = store.claim(&code, "phone", now, 2).unwrap();
+        let revoked = store.subscribe_revocations();
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(store.revoke(&paired.record.id).is_err());
+        assert!(store.is_paired(&paired.record.id));
+        assert!(!revoked.has_changed().unwrap());
+        std::fs::remove_dir(&tmp).unwrap();
+        store.revoke(&paired.record.id).unwrap();
+        assert!(revoked.has_changed().unwrap());
+        assert!(DeviceStore::load(&store.path)
+            .authenticate(&paired.token, 3)
+            .is_none());
+        std::fs::remove_dir_all(store.path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn concurrent_last_seen_writes_cannot_restore_revoked_tokens() {
+        let store = store();
+        let now = Instant::now();
+        let code = store.start_pairing(now);
+        let paired = store.claim(&code, "phone", now, 1).unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for timestamp in 1..50 {
+                        store.authenticate(&paired.token, timestamp * 60_000);
+                    }
+                });
+            }
+            store.revoke(&paired.record.id).unwrap();
+        });
+        assert!(store.authenticate(&paired.token, 4_000_000).is_none());
+        assert!(DeviceStore::load(&store.path)
+            .authenticate(&paired.token, 4_000_000)
+            .is_none());
+        std::fs::remove_dir_all(store.path.parent().unwrap()).unwrap();
     }
 }

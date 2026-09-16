@@ -295,8 +295,12 @@ pub(super) fn lifecycle_status_to_wire(
 }
 
 pub(super) fn connection_client_identity(state: &Arc<ConnState>) -> Result<ClientIdentity, String> {
-    ClientIdentity::new(state.conn_id.clone(), "local", ClientKind::Desktop)
-        .map_err(|error| format!("connection identity is invalid: {error}"))
+    ClientIdentity::new(
+        state.conn_id.clone(),
+        state.device_id.as_deref().unwrap_or("local"),
+        ClientKind::Desktop,
+    )
+    .map_err(|error| format!("connection identity is invalid: {error}"))
 }
 
 pub(super) fn lifecycle_control_key(key: &AgentKey, channel: ControlChannel) -> String {

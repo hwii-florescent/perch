@@ -1727,20 +1727,14 @@ mod tests {
                 after_branch: Some("main"),
                 after_status: r#"{"head":"head-2"}"#,
                 after_paths: &after_paths,
+                changed_paths: &["new.rs".to_string()],
                 completed_at: 20,
             })
             .unwrap()
             .unwrap();
         assert!(finished.completed);
         assert_eq!(finished.after_head.as_deref(), Some("head-2"));
-        assert_eq!(
-            finished.changed_paths,
-            Some(vec![
-                "new.rs".to_string(),
-                "old.rs".to_string(),
-                "shared.rs".to_string(),
-            ])
-        );
+        assert_eq!(finished.changed_paths, Some(vec!["new.rs".to_string()]));
 
         // Completion is first-writer-wins. A late callback cannot replace the
         // visible after boundary or changed-path set.
@@ -1752,6 +1746,7 @@ mod tests {
                 after_branch: Some("other"),
                 after_status: r#"{"head":"head-3"}"#,
                 after_paths: &late_paths,
+                changed_paths: &late_paths,
                 completed_at: 30,
             })
             .unwrap()

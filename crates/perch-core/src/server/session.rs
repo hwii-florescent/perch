@@ -820,32 +820,42 @@ pub(super) fn handle_session_create(
     } else {
         state.app.default_cwd.clone()
     };
-    let session_id = Uuid::new_v4().to_string();
-    // Persist the identity before publishing it. Empty sessions stay
-    // out of navigation via SESSION_VISIBILITY_FILTER, but their mode
-    // overrides and a second viewer must survive reconnect/restart.
-    if let Err(error) = state.app.db.create_session(&session_id, &resolved_cwd) {
-        fail(
-            &state.out_tx,
-            None,
-            "session_create_failed",
-            format!("could not persist session: {error}"),
-            true,
-        );
-        return;
-    }
-    state.app.registry.create(&session_id, &resolved_cwd);
-    insert_runtime(state, &session_id, &resolved_cwd, None, None, None);
-    set_active_session(state, &session_id);
-    let _ = state.out_tx.send(ServerMessage::SessionCreated {
-        session_id: session_id.clone(),
+    let state = state.clone();
+    tokio::spawn(async move {
+        let session_id = Uuid::new_v4().to_string();
+        // Use the same creation boundary as explicit project registration,
+        // before a client can start an agent. Existing workspaces are returned
+        // untouched: a later session must never backfill their missing ref.
+        let start_snapshot = match WorkspaceTarget::new(&resolved_cwd, &resolved_cwd) {
+            Ok(target) => state.app.git.head_revision(&target).await,
+            Err(_) => None,
+        };
+        let persisted = state
+            .app
+            .db
+            .create_project("local", &resolved_cwd, None, start_snapshot.as_deref())
+            .and_then(|_| state.app.db.create_session(&session_id, &resolved_cwd));
+        if let Err(error) = persisted {
+            fail(
+                &state.out_tx,
+                None,
+                "session_create_failed",
+                format!("could not persist session: {error}"),
+                true,
+            );
+            return;
+        }
+        state.app.registry.create(&session_id, &resolved_cwd);
+        insert_runtime(&state, &session_id, &resolved_cwd, None, None, None);
+        set_active_session(&state, &session_id);
+        let _ = state.out_tx.send(ServerMessage::SessionCreated {
+            session_id: session_id.clone(),
+        });
+        let _ = state
+            .out_tx
+            .send(status_message(get_status(&resolved_cwd, None)));
+        // Empty sessions stay out of navigation until their first activity.
     });
-    let _ = state
-        .out_tx
-        .send(status_message(get_status(&resolved_cwd, None)));
-    // Do NOT broadcast session.updated yet — session has no messages,
-    // so it won't appear in list_sessions() until the first
-    // chat.send or terminal.create agentAttach.
 }
 
 pub(super) fn handle_session_resume(state: &Arc<ConnState>, session_id: String) {
@@ -880,17 +890,7 @@ pub(super) fn handle_session_resume(state: &Arc<ConnState>, session_id: String) 
             // restart lost it — shouldn't happen since we read from
             // SQLite, but be defensive) — behave like session.create:
             // mint a brand-new session with no history.
-            let new_id = Uuid::new_v4().to_string();
-            let cwd = state.app.default_cwd.clone();
-            state.app.registry.create(&new_id, &cwd);
-            let _ = state.app.db.create_session(&new_id, &cwd);
-            insert_runtime(state, &new_id, &cwd, None, None, None);
-            set_active_session(state, &new_id);
-            let _ = state.out_tx.send(ServerMessage::SessionCreated {
-                session_id: new_id.clone(),
-            });
-            let _ = state.out_tx.send(status_message(get_status(&cwd, None)));
-            notify_session_updated(&state.app, &new_id);
+            handle_session_create(state, None, None);
         }
     }
 }

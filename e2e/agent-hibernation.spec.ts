@@ -10,7 +10,7 @@
  * `RequiresWake` branch).
  *
  * Real Claude CLI, because the safety rules require a real resume identity —
- * but **no prompt is ever sent**, so the run costs no model tokens. The idle
+ * including an initial response and a post-resume recall turn. The idle
  * window is set to 2s through `PERCH_HIBERNATE_AFTER_SECS`; every other
  * blocker (a viewer, input ownership, an unfinished state) is the product's.
  *
@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 
 interface AgentStatusFrame {
   state: string;
@@ -89,7 +89,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
       try { return (await fetch(url)).ok; } catch { return false; }
     }, { timeout: 20_000 }).toBe(true);
 
-    // 1. A real CLI agent, started but never prompted.
+    // 1. Start a real CLI agent and complete a conversation turn.
     await page.goto(url, { waitUntil: "networkidle" });
     const toggle = page.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled({ timeout: 15000 });
@@ -107,7 +107,19 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const input = cli.locator(".xterm-helper-textarea");
     await input.pressSequentially("Reply with exactly: PERCH_READY", { delay: 10 });
     await input.press("Enter");
-    await expect(cli.locator(".xterm-rows")).toContainText(/PERCH_READY/, { timeout: 120_000 });
+    await page.getByTestId("session-mode-scope").selectOption("session");
+    await toggle.click();
+    const ui = page.getByTestId("native-cli-chat");
+    // An assistant-only row and Ready status cannot match the echoed prompt.
+    await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("PERCH_READY", { timeout: 90_000 });
+    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 30_000 });
+    const originalPid = await ui.getAttribute("data-native-pid");
+    expect(originalPid).toMatch(/^\d+$/);
+    const tmuxNames = [...new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]))];
+    expect(tmuxNames, "one concrete runtime was launched").toHaveLength(1);
+    const tmuxName = tmuxNames[0];
+    execFileSync("tmux", ["has-session", "-t", `=${tmuxName}`], { stdio: "ignore" });
+    await toggle.click();
 
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     expect(sessionId).toBeTruthy();
@@ -136,11 +148,10 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const asleep = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(asleep.providerSessionId, "hibernation keeps the resume identity").toBe(providerSessionId);
     // The process is really gone: its tmux session is not listed any more.
-    const tmux = spawn("tmux", ["ls"], { stdio: ["ignore", "pipe", "ignore"] });
-    let tmuxOut = "";
-    tmux.stdout?.on("data", (chunk) => { tmuxOut += String(chunk); });
-    await new Promise<void>((resolve) => tmux.once("exit", () => resolve()));
-    expect(tmuxOut).not.toContain(`perch-cli-agent-${sessionId}`);
+    expect(() => execFileSync("tmux", ["has-session", "-t", `=${tmuxName}`], { stdio: "ignore" })).toThrow();
+    await expect.poll(() => {
+      try { process.kill(Number(originalPid), 0); return true; } catch { return false; }
+    }, { timeout: 5_000, message: "the original native process must exit after tmux termination" }).toBe(false);
 
     // 4. The original client returns. Its session reopens, which resumes the
     //    recorded conversation — wake never falls back to a fresh session, so
@@ -154,7 +165,21 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const awake = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(awake.state, "a woken agent is not still sleeping").not.toBe("sleeping");
     expect(awake.providerSessionId, "wake resumed the same provider session").toBe(providerSessionId);
+    await toggle.click();
+    await expect(ui).toHaveAttribute("data-native-session", providerSessionId, { timeout: 30_000 });
+    await expect(ui).toHaveAttribute("data-native-pid", /\d+/);
+    expect(await ui.getAttribute("data-native-pid")).not.toBe(originalPid);
+    await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("PERCH_READY");
+    const beforeAnswers = await ui.locator('[data-native-role="assistant"]').count();
+    const beforeRecall = await ui.locator('[data-native-role="user"]').count();
+    await ui.getByTestId("native-cli-composer").fill("Repeat the exact token from your previous reply, with no other text.");
+    await ui.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(ui.locator('[data-native-role="user"]')).toHaveCount(beforeRecall + 1);
+    await expect.poll(() => ui.locator('[data-native-role="assistant"]').count(), { timeout: 90_000 }).toBeGreaterThan(beforeAnswers);
+    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 90_000 });
+    await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("PERCH_READY");
     await page.screenshot({ path: testInfo.outputPath("hibernation-resumed.png"), fullPage: true });
+    await observerContext.close();
 
     expect(errors).toEqual([]);
   } finally {
@@ -165,6 +190,10 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
         child.once("exit", () => resolve());
         child.kill("SIGKILL");
       });
+    }
+    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
+    for (const name of ownedTmux) {
+      try { execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" }); } catch { /* already stopped */ }
     }
     fs.rmSync(fixture, { recursive: true, force: true });
   }

@@ -3,15 +3,14 @@
  *
  * The gate asks for "the current agent's last-turn changes" as a reviewable
  * diff base. The boundary is recorded by the server whenever a session moves
- * running -> idle (see `server/agent_history.rs`), so this drives a real CLI
+ * working -> completed (see `server/agent_history.rs`), so this drives a real CLI
  * agent turn in a real repository and then reviews it from the Git surface.
  *
- * The agent is a fixture provider (the pattern in provider-config.spec.ts): a
+ * Exercise a configured fixture provider and the real Claude CLI. The fixture is a
  * `/bin/sh` loop that edits a tracked file and creates an untracked one per
- * prompt. A real provider would add a quota dependency and a nondeterministic
- * edit to a test whose subject is the boundary, not the model. What is real
- * here is everything the boundary depends on: a pty-owned CLI process, the
- * running/idle transitions it produces, Git, SQLite, and the browser.
+ * prompt. Claude additionally verifies the native completion hook and input
+ * barrier with actual file-tool edits. Both runs use a pty-owned process, the
+ * explicit completion markers, lifecycle events, Git, SQLite, and the browser.
  *
  * Boots its own core on a free port with its own database, so it never
  * touches the shared hub or ~/.perch. Headless only.
@@ -21,7 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 
 const RELATIVE_FILE = "src/main.txt";
 const BASE_TEXT = "BEFORE_TURN";
@@ -63,7 +62,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-test("a real CLI agent turn becomes a reviewable diff base", async ({ page, context }, testInfo) => {
+for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agent turn becomes a reviewable diff base`, async ({ page, context }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "perch-turn-home-"));
   // macOS /var -> /private/var: the server stores canonical paths, so every
@@ -75,6 +74,21 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
   const providers = path.join(home, "providers.json");
   const coreLog: string[] = [];
   const errors: string[] = [];
+  let terminalOutput = "";
+  const lifecycle: unknown[] = [];
+  const sentInputs: string[] = [];
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const frame = JSON.parse(String(payload));
+      if (frame.type === "terminal.input") sentInputs.push(frame.data);
+    });
+    socket.on("framereceived", ({ payload }) => {
+    const frame = JSON.parse(String(payload));
+    if (frame.type === "terminal.data") terminalOutput = (terminalOutput + frame.data).slice(-64 * 1024);
+    if (frame.type === "agent.lifecycle.changed") lifecycle.push(frame.status);
+    if (frame.type === "error") errors.push(`wire: ${frame.message}`);
+  });
+  });
   let core: ChildProcess | null = null;
 
   fs.mkdirSync(path.join(repo, "src"), { recursive: true });
@@ -96,7 +110,7 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
       supported_modes: ["cli"],
       resumability: "persistentProcess",
       capabilities: ["interactiveTerminal"],
-      status_detection: "ExitStatus",
+      status_detection: { OutputPatterns: { blocked: ["turnbot_waiting"], done: ["turnbot ready", "turnbot_done"] } },
       environment: { inherit: true, allow: [], set: {}, unset: [] },
     }],
   }));
@@ -111,7 +125,7 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", path.join(home, "history.sqlite"), "--hosts-path", hosts, "--providers-path", providers, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "warn" }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info" }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -138,20 +152,37 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
     await expect(mode).toBeEnabled({ timeout: 15000 });
     await page.getByTestId("session-mode-scope").selectOption("device");
     if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
-    await page.getByTestId("cli-start-agent-turnbot").click();
+    await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
-    await expect(terminal.locator(".xterm-rows")).toContainText("turnbot ready", { timeout: 30_000 });
+    await expect(terminal.locator(".xterm-rows")).toContainText(provider === "turnbot" ? "turnbot ready" : "Claude Code", { timeout: 30_000 });
+
+    if (provider === "claude") {
+      const rows = terminal.locator(".xterm-rows");
+      await expect(rows).toContainText(/Yes, I trust this folder|bypass permissions on/, { timeout: 30_000 });
+      for (let attempt = 0; attempt < 3 && (await rows.innerText()).includes("Yes, I trust this folder"); attempt++) {
+        // This is the exact temporary repository created above by this test.
+        const input = terminal.locator(".xterm-helper-textarea");
+        await input.press("ArrowDown");
+        await expect(rows).toContainText(/❯\s*Yes, I trust this folder/);
+        await input.press("Enter");
+        await expect.poll(() => sentInputs.at(-1)).toBe("\r");
+        await expect(rows).toContainText(/❯\s*No, exit|bypass permissions on/, { timeout: 10_000 });
+      }
+      await expect(rows).toContainText("bypass permissions on", { timeout: 30_000 });
+    }
 
     // 3. One turn: the agent edits a tracked file and adds an untracked one.
-    //    The idle sweep closes the boundary ~700ms after the output stops.
+    //    The configured completion marker closes the turn; silence does not.
+    fs.writeFileSync(path.join(repo, "human_before_turn.txt"), "PREEXISTING_HUMAN_EDIT\n");
     const input = terminal.locator(".xterm-helper-textarea");
-    await input.pressSequentially("alpha", { delay: 10 });
+    const prompt = provider === "turnbot" ? "alpha" : 'Set src/main.txt to "AGENT_EDIT alpha\\n" and create agent_new.txt with "AGENT_NEW alpha\\n". Change only those two files. Reply TURN_FINISHED.';
+    await input.pressSequentially(prompt, { delay: 10 });
     await input.press("Enter");
-    await expect(terminal.locator(".xterm-rows")).toContainText("turnbot_done alpha", { timeout: 30_000 });
-    await expect.poll(() => fs.readFileSync(path.join(repo, RELATIVE_FILE), "utf8"), { timeout: 15_000 })
+    await expect(terminal.locator(".xterm-rows")).toContainText(provider === "turnbot" ? "turnbot_done alpha" : "TURN_FINISHED", { timeout: 90_000 });
+    await expect.poll(() => fs.readFileSync(path.join(repo, RELATIVE_FILE), "utf8"), { timeout: 90_000 })
       .toContain("AGENT_EDIT alpha");
 
     // 4. Open the Git surface and wait for the server to close the boundary.
@@ -164,7 +195,7 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
       await page.getByTestId("git-refresh").click();
       await page.waitForTimeout(400);
       return (await option.textContent()) ?? "";
-    }, { timeout: 30_000 }).toBe("Last agent turn (turnbot)");
+    }, { timeout: 30_000 }).toBe(`Last agent turn (${provider})`);
     await expect(option).not.toHaveAttribute("disabled", /.*/);
 
     // 5. A human edit *after* the recorded turn, which its diff must not claim.
@@ -174,11 +205,12 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
     await selector.selectOption("lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT alpha", { timeout: 15000 });
     // The summary answers "whose turn, how much" — a diff alone does not.
-    await expect(page.getByTestId("git-turn-summary")).toContainText(/turnbot changed \d+ paths?/);
+    await expect(page.getByTestId("git-turn-summary")).toContainText(`${provider} changed 2 paths`);
     await expect(diff).toContainText(BASE_TEXT);
     await expect(diff).toContainText("AGENT_NEW alpha");
     // Pinned to the turn, not to "whatever is dirty now".
     await expect(diff).not.toContainText("HUMAN_AFTER_TURN");
+    await expect(diff).not.toContainText("PREEXISTING_HUMAN_EDIT");
     await page.screenshot({ path: testInfo.outputPath("agent-turn-desktop.png"), fullPage: true });
 
     // 6. The remaining V-07 states, against the same real repository: a
@@ -200,6 +232,7 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
 
     // 7. Durable: the boundary survives a reload, and the working tree base
     //    still reports the human edit the turn correctly excluded.
+    git("gc --prune=now", repo);
     await page.reload({ waitUntil: "networkidle" });
     await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
@@ -211,12 +244,19 @@ test("a real CLI agent turn becomes a reviewable diff base", async ({ page, cont
     expect(errors).toEqual([]);
   } finally {
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
+    fs.writeFileSync(testInfo.outputPath("terminal.txt"), terminalOutput);
+    fs.writeFileSync(testInfo.outputPath("input.json"), JSON.stringify(sentInputs));
+    fs.writeFileSync(testInfo.outputPath("lifecycle.json"), JSON.stringify(lifecycle, null, 2));
     if (core && core.exitCode === null) {
       const child = core;
       await new Promise<void>((resolve) => {
         child.once("exit", () => resolve());
         child.kill("SIGKILL");
       });
+    }
+    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
+    for (const name of ownedTmux) {
+      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already stopped */ }
     }
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });

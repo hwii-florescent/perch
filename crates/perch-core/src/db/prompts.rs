@@ -81,6 +81,7 @@ pub struct AgentChangeSnapshotFinish<'a> {
     pub after_branch: Option<&'a str>,
     pub after_status: &'a str,
     pub after_paths: &'a [String],
+    pub changed_paths: &'a [String],
     pub completed_at: i64,
 }
 
@@ -365,9 +366,8 @@ impl HistoryDb {
         }
     }
 
-    /// Finish one agent turn's Git change boundary exactly once.  The changed
-    /// path set is the union of before and after status paths, which preserves
-    /// a path that an agent modified and then restored to clean.  A retry
+    /// Finish one agent turn's Git change boundary exactly once. Changed paths
+    /// come from comparing its immutable endpoints, not current dirty status. A retry
     /// after completion returns the first durable after snapshot unchanged.
     pub fn finish_agent_change_snapshot(
         &self,
@@ -385,8 +385,7 @@ impl HistoryDb {
             if current.completed {
                 return anyhow::Ok(Some(current));
             }
-            let mut changed_paths = current.before_paths.clone();
-            changed_paths.extend(finish.after_paths.iter().cloned());
+            let mut changed_paths = finish.changed_paths.to_vec();
             changed_paths.sort();
             changed_paths.dedup();
             let changed_paths_json = encode_agent_snapshot_paths(&changed_paths)?;

@@ -22,7 +22,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 
 const AGENT_SCRIPT = [
   "printf 'phonebot ready\\n'",
@@ -146,6 +146,15 @@ test("a phone pairs over the network, drives the session, and loses access when 
   });
   const phone = await phoneContext.newPage();
   const phoneErrors: string[] = [];
+  let agentState: string | undefined;
+  let inputDevice: string | undefined;
+  phone.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+    const frame = JSON.parse(String(payload));
+    if (frame.type === "agent.lifecycle.changed" && frame.status.key.agentId === "phonebot") {
+      agentState = frame.status.state;
+      if (frame.status.inputOwner) inputDevice = frame.status.inputOwner.deviceId;
+    }
+  }));
   phone.on("pageerror", (error) => phoneErrors.push(error.message));
 
   try {
@@ -197,6 +206,13 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await input.pressSequentially("from-the-phone", { delay: 10 });
     await input.press("Enter");
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot_reply from-the-phone", { timeout: 30_000 });
+    // This configured provider has no completion signal. Quiet output must
+    // not fabricate one, even beyond the former 20-second idle sweep cutoff.
+    await expect.poll(() => agentState).toBe("working");
+    const pairedId = JSON.parse(fs.readFileSync(devicesPath, "utf8")).devices[0].id;
+    await expect.poll(() => inputDevice, { message: "input ownership must identify the paired phone" }).toBe(pairedId);
+    await new Promise((resolve) => setTimeout(resolve, 22_000));
+    expect(agentState, "PTY silence must not make an unfinished agent idle").toBe("working");
     await phone.screenshot({ path: testInfo.outputPath("pairing-phone-agent.png"), fullPage: true });
 
     // 5. Scrollback survives a reload on the phone.
@@ -212,11 +228,11 @@ test("a phone pairs over the network, drives the session, and loses access when 
     const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
     await gitButton.click();
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS", { timeout: 20_000 });
-    // This workspace was never registered by hand — the session minted it —
-    // so it also covers the implicit creation ref: the server records HEAD for
-    // a freshly created workspace, and "Workspace start" is therefore usable.
-    await expect(phone.getByTestId("git-diff-target").locator('option[value="workspaceStart"]'))
-      .toHaveText("Workspace start");
+    // Session creation records this workspace's boundary before starting
+    // the CLI, so the phone can compare against the original committed line.
+    await phone.getByTestId("git-diff-target").selectOption("workspaceStart");
+    await expect(phone.getByTestId("git-diff")).toContainText("committed line");
+    await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS");
     await phone.getByTestId("mobile-switch").click();
     await phone.getByTestId("mobile-switcher").locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
     await expect(phone.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20_000 });
@@ -237,13 +253,18 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await page.locator('[data-testid^="device-revoke-"]').first().click();
     await expect(page.getByTestId("paired-devices")).toHaveCount(0, { timeout: 10_000 });
     expect(JSON.parse(fs.readFileSync(devicesPath, "utf8")).devices).toEqual([]);
-    await phone.reload({ waitUntil: "domcontentloaded" });
+    // Revocation must close the existing connection, without a page reload.
     await expect(phone.getByTestId("pairing-gate")).toBeVisible({ timeout: 30_000 });
 
     expect(phoneErrors).toEqual([]);
   } finally {
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
+    await phoneContext.close();
     await stop();
+    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
+    for (const name of ownedTmux) {
+      try { execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" }); } catch { /* already exited */ }
+    }
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

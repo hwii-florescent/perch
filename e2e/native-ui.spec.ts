@@ -1,6 +1,5 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -18,6 +17,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   fs.writeFileSync(path.join(fixture, "hosts.json"), '{"hosts":[]}');
   fs.writeFileSync(path.join(fixture, "providers.json"), '{"version":1,"providers":[]}');
   const log = fs.openSync(path.join(fixture, "core.log"), "a");
+  const ownedTmux = () => new Set([...fs.readFileSync(path.join(fixture, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
   const url = `http://127.0.0.1:${port}`;
   let completed = false;
   let core: ChildProcess | undefined;
@@ -44,7 +44,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const shots = path.join(root, ".impeccable/review");
   fs.mkdirSync(shots, { recursive: true });
   async function start() {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
   }
   async function stop() {
@@ -225,24 +225,18 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     if (provider === "codex" || provider === "opencode") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
     completed = true;
   } finally {
+    fs.writeFileSync(testInfo.outputPath("native-snapshots.json"), JSON.stringify(snapshots.slice(-12), null, 2));
     if (!completed) {
       await page.screenshot({ path: path.join(shots, `native-ui-${provider}-failure-${testInfo.project.name}.png`) }).catch(() => {});
       await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
-      if (terminalId) {
-        const key = keys.get(terminalId);
-        if (key) {
-          const hash = createHash("sha256");
-          for (const value of [key.workspaceId, key.sessionId, key.agentId]) { const bytes = Buffer.from(value); const size = Buffer.alloc(8); size.writeBigUInt64LE(BigInt(bytes.length)); hash.update(size); hash.update(bytes); }
-          try { await testInfo.attach("native-terminal", { body: execFileSync("tmux", ["capture-pane", "-p", "-t", `=perch-cli-agent-${hash.digest("hex")}:`, "-S", "-120"], { stdio: ["ignore", "pipe", "ignore"] }), contentType: "text/plain" }); } catch { /* Already stopped. */ }
-        }
+      for (const name of ownedTmux()) {
+        try { await testInfo.attach("native-terminal", { body: execFileSync("tmux", ["capture-pane", "-p", "-t", `=${name}:`, "-S", "-120"], { stdio: ["ignore", "pipe", "ignore"] }), contentType: "text/plain" }); } catch { /* Already stopped. */ }
       }
     }
     await phoneContext?.close().catch(() => {});
     await stop();
-    for (const key of keys.values()) {
-      const hash = createHash("sha256");
-      for (const value of [key.workspaceId, key.sessionId, key.agentId]) { const bytes = Buffer.from(value); const size = Buffer.alloc(8); size.writeBigUInt64LE(BigInt(bytes.length)); hash.update(size); hash.update(bytes); }
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-agent-${hash.digest("hex")}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
+    for (const name of ownedTmux()) {
+      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log")), contentType: "text/plain" });

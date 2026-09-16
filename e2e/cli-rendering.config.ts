@@ -1,18 +1,16 @@
 /**
- * cli-rendering.config.ts — dedicated config for `cli-rendering.spec.ts`.
+ * cli-rendering.config.ts — focused Chromium/WebKit interaction checks.
  *
- * Separate from `playwright.config.ts` because this is the one spec that must
- * run in **more than one browser engine**: the desktop app renders in WebKit
- * (WKWebView) while the main suite runs Chromium, and terminal rendering is
- * exactly the area where the two disagree — font matching, glyph fallback and
- * cell metrics. Bolting a second project onto the main config would double
- * every other spec's runtime for no benefit.
+ * Focused cross-engine checks for the desktop WebKit path and Chromium.
+ * Includes terminal rendering, lifecycle/recovery and workspace review.
+ * Keeping these separate avoids doubling every main-suite test by default.
  *
  *   npx playwright test --config=cli-rendering.config.ts                # both
  *   npx playwright test --config=cli-rendering.config.ts --project=webkit
  *
- * Screenshots land in `screenshots-cli-rendering/<engine>/` and are kept
- * between runs (unlike `artifacts/`, which the main config wipes).
+ * Test attachments land in `artifacts-cli-rendering/` (wiped each run).
+ * The rendering fixture also keeps its named captures in
+ * `screenshots-cli-rendering/<engine>/`; copy other keepers there explicitly.
  */
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
@@ -20,7 +18,7 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["cli-rendering.spec.ts", "workspace-terminals.spec.ts", "agent-terminal-ownership.spec.ts", "workspace-recovery.spec.ts"],
+  testMatch: ["cli-rendering.spec.ts", "workspace-terminals.spec.ts", "agent-terminal-ownership.spec.ts", "workspace-recovery.spec.ts", "workspace-review.spec.ts", "agent-turn-review.spec.ts", "agent-hibernation.spec.ts", "device-pairing.spec.ts"],
   outputDir: "artifacts-cli-rendering",
   timeout: 180000,
   workers: 1,

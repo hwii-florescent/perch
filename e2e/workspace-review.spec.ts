@@ -75,17 +75,41 @@ async function dismissOnboarding(page: Page): Promise<void> {
   if (await dismiss.count()) await dismiss.click();
 }
 
-async function openReview(page: Page): Promise<string> {
+async function openReview(page: Page, creation: "project" | "session" = "project"): Promise<string> {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await dismissOnboarding(page);
   await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
 
-  const emptyAdd = page.getByTestId("workspace-empty-add");
-  if (await emptyAdd.count()) await emptyAdd.click();
-  else await page.getByTestId("workspace-add-project").click();
-  await page.getByTestId("workspace-project-path").fill(FIXTURE_ROOT);
-  await page.getByTestId("workspace-project-name").fill(PROJECT_NAME);
-  await page.getByRole("button", { name: "Register project", exact: true }).click();
+  if (creation === "session") {
+    // Exercise the session-create protocol without launching a paid CLI turn.
+    // All comparison/comment/reload/mobile steps below still use the real UI.
+    PROJECT_NAME = path.basename(FIXTURE_ROOT);
+    await page.evaluate(async (cwd) => {
+      const sessionId = await new Promise<string>((resolve, reject) => {
+        const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws`);
+        const timer = setTimeout(() => { socket.close(); reject(new Error("session.create timed out")); }, 15000);
+        socket.onopen = () => socket.send(JSON.stringify({ type: "session.create", cwd }));
+        socket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "session.created" || message.type === "error") {
+            clearTimeout(timer);
+            socket.close();
+            if (message.type === "error") reject(new Error(message.message));
+            else resolve(message.sessionId);
+          }
+        };
+      });
+      localStorage.setItem("perch.sessionId", sessionId);
+    }, FIXTURE_ROOT);
+    await page.reload({ waitUntil: "networkidle" });
+  } else {
+    const emptyAdd = page.getByTestId("workspace-empty-add");
+    if (await emptyAdd.count()) await emptyAdd.click();
+    else await page.getByTestId("workspace-add-project").click();
+    await page.getByTestId("workspace-project-path").fill(FIXTURE_ROOT);
+    await page.getByTestId("workspace-project-name").fill(PROJECT_NAME);
+    await page.getByRole("button", { name: "Register project", exact: true }).click();
+  }
 
   const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
   await expect(project).toBeVisible({ timeout: 15000 });
@@ -364,62 +388,70 @@ test.describe("Workspace Git/review UI", () => {
     }
   });
 
-  test("workspace start keeps its creation ref across commits, reload and mobile review", async ({ page }, testInfo) => {
-    prepareFixture();
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    try {
-      await installWireCapture(page);
-      const workspaceId = await openReview(page);
-      const selector = page.getByTestId("git-diff-target");
-      const diff = page.getByTestId("git-diff");
-      await expect(selector.locator('option[value="workspaceStart"]')).toBeEnabled();
-      await selector.selectOption("workspaceStart");
-      await expect(diff).toContainText(HEAD_TEXT);
-      await expect(diff).toContainText(WORKTREE_TEXT);
-      const initial = await latestDiff(page, "compare");
-      expect(initial.target?.base).toMatch(/^[0-9a-f]{40,64}$/);
-      expect(initial.target?.head).toBeUndefined();
+  for (const creation of ["project", "session"] as const) {
+    test(`${creation} workspace start keeps its creation ref across commits, reload and mobile review`, async ({ page }, testInfo) => {
+      prepareFixture();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      try {
+        await installWireCapture(page);
+        const workspaceId = await openReview(page, creation);
+        const selector = page.getByTestId("git-diff-target");
+        const diff = page.getByTestId("git-diff");
+        await expect(selector.locator('option[value="workspaceStart"]')).toBeEnabled();
+        await selector.selectOption("workspaceStart");
+        await expect(diff).toContainText(HEAD_TEXT);
+        await expect(diff).toContainText(WORKTREE_TEXT);
+        const initial = await latestDiff(page, "compare");
+        expect(initial.target?.base).toMatch(/^[0-9a-f]{40,64}$/);
+        expect(initial.target?.head).toBeUndefined();
 
-      // Advance the real HEAD while preserving the unstaged edit. The start
-      // comparison must remain pinned to registration, not the latest commit.
-      git(["commit", "-q", "-m", "advance head"]);
-      fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
-      await page.getByTestId("git-refresh").click();
-      await selector.selectOption("head");
-      await expect(diff).toContainText(INDEX_TEXT);
-      await expect(diff).not.toContainText(HEAD_TEXT);
-      await selector.selectOption("workspaceStart");
-      await expect(diff).toContainText(HEAD_TEXT);
-      await expect(diff).toContainText("UNTRACKED_AFTER_START");
-      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-      const body = "Keep the workspace-start anchor";
-      await addComment(page, WORKTREE_TEXT, "new", body);
-      expect((await latestCreate(page, body)).base).toEqual(initial.target);
-      await page.screenshot({ path: testInfo.outputPath("workspace-start-desktop.png"), fullPage: true });
+        // Advance the real HEAD while preserving the unstaged edit. The start
+        // comparison must remain pinned to registration, not the latest commit.
+        git(["commit", "-q", "-m", "advance head"]);
+        fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
+        if (creation === "session") {
+          // A second session after HEAD moved must reuse the original workspace
+          // and baseline rather than recording this later commit as its start.
+          expect(await openReview(page, creation)).toBe(workspaceId);
+        }
+        await page.getByTestId("git-refresh").click();
+        await selector.selectOption("head");
+        await expect(diff).toContainText(INDEX_TEXT);
+        await expect(diff).not.toContainText(HEAD_TEXT);
+        await selector.selectOption("workspaceStart");
+        await expect(diff).toContainText(HEAD_TEXT);
+        await expect(diff).toContainText("UNTRACKED_AFTER_START");
+        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+        const body = "Keep the workspace-start anchor";
+        await addComment(page, WORKTREE_TEXT, "new", body);
+        expect((await latestCreate(page, body)).base).toEqual(initial.target);
+        await page.screenshot({ path: testInfo.outputPath("workspace-start-desktop.png"), fullPage: true });
 
-      await page.reload({ waitUntil: "networkidle" });
-      const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
-      await project.getByTestId(`workspace-git-${workspaceId}`).click();
-      await selector.selectOption("workspaceStart");
-      await expect(diff).toContainText(HEAD_TEXT);
-      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-      await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
+        await page.reload({ waitUntil: "networkidle" });
+        const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
+        await project.getByTestId(`workspace-git-${workspaceId}`).click();
+        await selector.selectOption("workspaceStart");
+        await expect(diff).toContainText(HEAD_TEXT);
+        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+        await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
 
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.getByTestId("mobile-switch").click();
-      await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
-      await selector.selectOption("workspaceStart");
-      await expect(diff).toContainText(HEAD_TEXT);
-      await expect(diff).toContainText(WORKTREE_TEXT);
-      await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
-      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-      await page.screenshot({ path: testInfo.outputPath("workspace-start-mobile.png"), fullPage: true });
-      expect(errors).toEqual([]);
-    } finally {
-      removeFixture();
-    }
-  });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.getByTestId("mobile-switch").click();
+        await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+        await selector.selectOption("workspaceStart");
+        await expect(diff).toContainText(HEAD_TEXT);
+        await expect(diff).toContainText(WORKTREE_TEXT);
+        await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
+        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+        await page.screenshot({ path: testInfo.outputPath("workspace-start-mobile.png"), fullPage: true });
+        expect(errors).toEqual([]);
+      } finally {
+        removeFixture();
+      }
+    });
+
+  }
 
   test("mobile Git pane renders a populated diff and reachable comment action", async ({ page }, testInfo) => {
     prepareFixture();

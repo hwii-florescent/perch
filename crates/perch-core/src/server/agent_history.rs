@@ -1,22 +1,14 @@
-//! Durable before/after boundaries for agent turns (`agent_change_snapshots`).
+//! Before/after boundaries for agent turns (`agent_change_snapshots`).
 //!
-//! The DB rows and their idempotent begin/finish pair already existed in
-//! `db/prompts.rs` with no runtime caller. This module is that caller.
+//! Managed CLI input and structured prompts capture before dispatch; native
+//! completion, configured markers and process exit capture after completion.
+//! Those synchronous barriers prevent Perch from delivering the next input
+//! before its baseline exists. Repaint and session-status notifications do
+//! not create managed turns. Legacy hosted runners retain the status observer
+//! below; their asynchronous capture still needs migration to the barriers.
 //!
-//! **Why the hook is `running_sessions` and not the prompt dispatch path.**
-//! A native turn can start from the structured UI (`agent.ui.prompt`), from a
-//! review packet, *or* from the user typing straight into the CLI pty — only
-//! the first two ever reserve a prompt operation. Every one of them, however,
-//! moves the session through `running_sessions` and therefore through
-//! `notify_session_updated`, so recording the transition there is the one
-//! place that cannot miss a terminal-origin turn. The transition itself is
-//! detected here rather than at the ~8 insert/remove sites.
-//!
-//! **Why `content_snapshot` and not HEAD.** Agents mostly do not commit. A
-//! HEAD-to-HEAD boundary would report an empty turn for exactly the work the
-//! user wants to review, so both boundaries are content commits (see
-//! `source_control::GitService::content_snapshot`) and `before_head` /
-//! `after_head` hold those, not necessarily a branch HEAD.
+//! Content commits preserve uncommitted work. GitService retains them under
+//! internal refs so recorded comparisons remain reachable through Git GC.
 
 use super::*;
 
@@ -39,9 +31,8 @@ struct TurnHistory {
     /// `session.updated` for an unchanged session records nothing.
     running: Mutex<HashMap<String, bool>>,
     /// ponytail: one global async lock serializes every boundary capture.
-    /// A capture is a handful of bounded git calls and turns are rare, so
-    /// contention is not measurable; if concurrent turns across many
-    /// workspaces ever make it one, key this by workspace id.
+    /// Concurrent workspaces queue behind a slow capture. Upgrade to
+    /// workspace-keyed locks when populated performance measurements require it.
     capture: tokio::sync::Mutex<HashMap<String, String>>,
 }
 
@@ -49,6 +40,17 @@ struct TurnHistory {
 /// Called from `notify_session_updated`, which fans out from every transition
 /// site; anything but a real change returns without touching Git or SQLite.
 pub(super) fn observe_session(app: &AppState, session_id: &str) {
+    // Managed CLI turns have synchronous input/completion barriers. A later
+    // status notification must not race or duplicate their boundary writes.
+    if app
+        .agent_runtime
+        .lifecycle()
+        .list()
+        .iter()
+        .any(|snapshot| snapshot.key.session_id == session_id)
+    {
+        return;
+    }
     let running = app.running_sessions.lock().unwrap().contains(session_id);
     let was_running = HISTORY
         .running
@@ -75,7 +77,7 @@ pub(super) fn observe_session(app: &AppState, session_id: &str) {
         return;
     };
     runtime.spawn(async move {
-        if let Err(error) = capture(&app, &session_id, running).await {
+        if let Err(error) = capture(&app.db, &app.git, &session_id, running).await {
             tracing::warn!(session_id, %error, "could not record agent turn boundary");
         }
     });
@@ -95,8 +97,13 @@ pub(super) fn forget_session(session_id: &str) {
     HISTORY.running.lock().unwrap().remove(session_id);
 }
 
-async fn capture(app: &AppState, session_id: &str, running: bool) -> anyhow::Result<()> {
-    let Some(session) = app.db.get_session(session_id)? else {
+pub(super) async fn capture(
+    db: &HistoryDb,
+    git: &GitService,
+    session_id: &str,
+    running: bool,
+) -> anyhow::Result<()> {
+    let Some(session) = db.get_session(session_id)? else {
         // Deleted mid-turn: nothing durable left to anchor a boundary to.
         return Ok(());
     };
@@ -108,7 +115,7 @@ async fn capture(app: &AppState, session_id: &str, running: bool) -> anyhow::Res
     let Some(workspace_id) = session.workspace_id else {
         return Ok(());
     };
-    let workspace = app.db.resolve_workspace(&workspace_id)?;
+    let workspace = db.resolve_workspace(&workspace_id)?;
     let target = match WorkspaceTarget::new(workspace.id.clone(), workspace.path) {
         Ok(target) => target,
         Err(_) => return Ok(()),
@@ -121,40 +128,50 @@ async fn capture(app: &AppState, session_id: &str, running: bool) -> anyhow::Res
             // exactly like the durable row's own idempotence.
             return Ok(());
         }
-        let boundary = boundary(app, &target).await;
+        let boundary = boundary(git, &target).await;
         let snapshot_id = Uuid::new_v4().to_string();
         let agent = session
             .cli_provider_id
             .or(session.last_agent)
             .unwrap_or_else(|| "unknown".to_string());
-        app.db
-            .begin_agent_change_snapshot(AgentChangeSnapshotStart {
-                snapshot_id: &snapshot_id,
-                operation_id: &snapshot_id,
-                workspace_id: &workspace_id,
-                session_id,
-                agent: &agent,
-                before_head: boundary.revision.as_deref(),
-                before_branch: boundary.branch.as_deref(),
-                before_status: &boundary.status,
-                before_paths: &boundary.paths,
-                created_at: wall_clock_millis(),
-            })?;
+        db.begin_agent_change_snapshot(AgentChangeSnapshotStart {
+            snapshot_id: &snapshot_id,
+            operation_id: &snapshot_id,
+            workspace_id: &workspace_id,
+            session_id,
+            agent: &agent,
+            before_head: boundary.revision.as_deref(),
+            before_branch: boundary.branch.as_deref(),
+            before_status: &boundary.status,
+            before_paths: &boundary.paths,
+            created_at: wall_clock_millis(),
+        })?;
         open.insert(session_id.to_string(), snapshot_id);
     } else {
-        let Some(snapshot_id) = open.remove(session_id) else {
+        let Some(snapshot_id) = open.get(session_id).cloned() else {
             return Ok(());
         };
-        let boundary = boundary(app, &target).await;
-        app.db
-            .finish_agent_change_snapshot(AgentChangeSnapshotFinish {
-                snapshot_id: &snapshot_id,
-                after_head: boundary.revision.as_deref(),
-                after_branch: boundary.branch.as_deref(),
-                after_status: &boundary.status,
-                after_paths: &boundary.paths,
-                completed_at: wall_clock_millis(),
-            })?;
+        let boundary = boundary(git, &target).await;
+        let before = db
+            .get_agent_change_snapshot(&snapshot_id)?
+            .and_then(|row| row.before_head);
+        let mut changed_paths = match (before.as_deref(), boundary.revision.as_deref()) {
+            (Some(before), Some(after)) => {
+                git.compare_changed_paths(&target, before, after).await?
+            }
+            _ => Vec::new(), // Missing endpoints remain unavailable in the review selector.
+        };
+        changed_paths.truncate(MAX_AGENT_CHANGE_PATHS);
+        db.finish_agent_change_snapshot(AgentChangeSnapshotFinish {
+            snapshot_id: &snapshot_id,
+            after_head: boundary.revision.as_deref(),
+            after_branch: boundary.branch.as_deref(),
+            after_status: &boundary.status,
+            after_paths: &boundary.paths,
+            changed_paths: &changed_paths,
+            completed_at: wall_clock_millis(),
+        })?;
+        open.remove(session_id);
     }
     Ok(())
 }
@@ -168,10 +185,9 @@ struct Boundary {
 
 /// One side of a turn: a content commit that includes uncommitted and
 /// untracked work, plus the bounded status summary the row stores.
-async fn boundary(app: &AppState, target: &WorkspaceTarget) -> Boundary {
-    let revision = app.git.content_snapshot(target).await;
-    let status = app
-        .git
+async fn boundary(git: &GitService, target: &WorkspaceTarget) -> Boundary {
+    let revision = git.content_snapshot(target).await;
+    let status = git
         .status(target, source_control::StatusOptions::default())
         .await
         .ok();
@@ -212,7 +228,7 @@ pub(super) fn last_completed_turn(
     let rows = app.db.list_agent_change_snapshots(workspace_id, 16).ok()?;
     let row = rows
         .into_iter()
-        .find(|row| row.completed && row.before_head.is_some())?;
+        .find(|row| row.completed && row.before_head.is_some() && row.after_head.is_some())?;
     Some(crate::protocol::AgentTurnSummary {
         snapshot_id: row.snapshot_id,
         session_id: row.session_id,

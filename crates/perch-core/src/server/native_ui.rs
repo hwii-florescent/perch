@@ -24,6 +24,10 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             if !app.db.session_exists(&key.session_id).unwrap_or(false) {
                 return;
             }
+            if let Err(error) = app.agent_runtime.observe_native_turn(key, snapshot.running) {
+                tracing::error!(%error, "could not persist completed native turn");
+                return;
+            }
             let old = app.agent_runtime.snapshot(key).ok();
             let state = if snapshot.running {
                 AgentState::Working
@@ -52,6 +56,10 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                         .db
                         .set_opencode_session_id(&key.session_id, &snapshot.provider_session_id);
                 }
+            }
+            // Also establish native authority after resuming an already-known
+            // identity; terminal repaints must not override these events.
+            if !snapshot.provider_session_id.is_empty() {
                 let _ = app
                     .agent_runtime
                     .record_provider_session_id(key, snapshot.provider_session_id.clone());
@@ -64,17 +72,6 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                     now_millis(),
                 );
                 let _ = persist_agent_runtime(app, key);
-            }
-            let running_changed = {
-                let mut running = app.running_sessions.lock().unwrap();
-                if snapshot.running {
-                    running.insert(key.session_id.clone())
-                } else {
-                    running.remove(&key.session_id)
-                }
-            };
-            if running_changed {
-                notify_session_updated(app, &key.session_id);
             }
             let _ = app
                 .hub
@@ -212,6 +209,7 @@ pub(super) fn control(
                 anyhow::ensure!(claim.won_claim, "This prompt was already dispatched; delivery is still unconfirmed. It will not be sent twice.");
                 // Persist uncertainty before any bytes cross to the native CLI.
                 state.app.db.set_prompt_operation_state(operation, "unconfirmed")?;
+                state.app.agent_runtime.record_turn_boundary(&key, true)?;
                 let reply = bridge.enqueue(operation, Some(text))?;
                 if let Some(input) = input { write(&input)?; }
                 let _ = state.app.db.set_cli_title(&session_id, text);
@@ -301,6 +299,7 @@ pub(super) async fn send_review(
             anyhow::ensure!(claim.won_claim, "Review delivery is already in progress or unconfirmed; it will not be sent twice");
             session::settle_prompt_dispatch(&state.app, operation, "unconfirmed")
                 .map_err(anyhow::Error::msg)?;
+            state.app.agent_runtime.record_turn_boundary(&key, true)?;
             let reply = bridge.enqueue(operation, Some(text))?;
             if let Some(input) = input { write(&input)?; }
             Ok(Some(reply))
