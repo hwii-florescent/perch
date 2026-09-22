@@ -53,25 +53,30 @@ What makes Orca feel solid is three invariants. perch keeps all three:
                           └────────────────────────────────┘
 ```
 
-**One binary, several roles.** `perch-core` gains subcommands instead of new
-crates. Deployment, remote install and version matching then stay one
-artifact:
+**Crates and binaries.** The daemon is its own small crate, `crates/perchd`
+(`portable-pty`, `vt100`, `serde_json`, `libc`; no tokio, axum or SQLite), so
+the same few-MB binary can be copied to remote hosts. `perch-core` links it as
+a library: locally the runtime re-executes its own binary with `__perchd`, so
+nothing extra ships with the desktop app.
 
-| Subcommand | Role | Orca source |
+| Entry point | Role | Orca source |
 |---|---|---|
-| `perch-core` / `serve` (default) | runtime, as today | `src/main`, `src/main/orcad` |
-| `perch-core daemon` | PTY daemon, spawned detached by the runtime | `src/main/daemon/daemon-entry.ts` |
+| `perch-core` (default) | runtime, as today | `src/main`, `src/main/orcad` |
+| `perch-core __perchd serve` / `perchd serve` | PTY daemon, spawned detached by the runtime | `src/main/daemon/daemon-entry.ts` |
+| `perchd connect` | bridges stdin/stdout to the daemon socket, starting it if needed; the remote transport | `src/relay` |
 | `perch-core hook <source>` | reads hook JSON on stdin and POSTs it to the runtime; replaces curl in hook scripts | `src/main/agent-hooks/hook-post-command.ts` |
 | `perch-core <noun> <verb>` (e.g. `worktree create`, `terminal read`) | agent-facing CLI | `src/cli`, `docs/site/.../cli/reference.mdx` |
 
-The desktop app (`perch-desktop`) keeps booting the runtime in-process, but
-spawns `perchd` from its own executable (`current_exe() daemon`). Quitting the
-window then leaves agents running, as Orca does.
+The desktop app (`perch-desktop`) keeps booting the runtime in-process and
+spawns the daemon from its own executable (`current_exe() __perchd serve`).
+Quitting the window then leaves agents running, as Orca does.
 
 ## 3. perchd — the terminal daemon
 
-Replaces `agent_tmux.rs` (local), `workspace_terminals.rs` and the PTY half of
-`terminal.rs`. tmux remains only for `direct` remote hosts.
+Replaces tmux everywhere: `agent_tmux.rs` locally, and the `ssh -tt … tmux`
+attach plus `detached.rs`'s `nohup`/`tail -F` machinery on `direct` remote hosts.
+Terminals keep their stable perch keys (`shell-<id>`, the session id), which
+become daemon session ids.
 
 **Endpoint and lifecycle** (`daemon-spawner.ts`, `daemon-endpoint-*.ts`)
 - Socket `~/.perch/daemon/daemon-v<N>.sock`, mode 0600, plus a PID record
@@ -87,7 +92,8 @@ Replaces `agent_tmux.rs` (local), `workspace_terminals.rs` and the PTY half of
 - Crash-loop guard: at most 5 spawns per 60 s rolling window, then terminal
   creation fails with a clear error (`daemon-respawn-throttle.ts`).
 
-**Wire.** Length-prefixed frames over the socket. Control messages are JSON,
+**Wire.** Length-prefixed frames over the socket (or over `perchd connect`'s
+stdio through ssh — the same bytes). Control messages are JSON,
 and output is raw bytes tagged with a session id and sequence number. A hello
 handshake exchanges protocol version and capabilities
 (`daemon-hello-protocol.ts`). Operations:
@@ -105,11 +111,13 @@ handshake exchanges protocol version and capabilities
 `terminal-history-*.ts`, `headless-emulator.ts`)
 1. PTY read; carry a split trailing UTF-8 sequence across reads (the
    existing `split_utf8_tail` fix).
-2. Append to an in-memory **replay ring** (bounded; the existing
-   `registry.rs` idea).
-3. Append to an **on-disk history log** `~/.perch/daemon/history/<id>.log`,
-   size-capped with tail truncation. This is what makes scrollback survive a
-   reboot (`model/session-restore.mdx`).
+2. Append to an **on-disk history log** `<dir>/history/<id>.log` with a
+   metadata sidecar, size-capped by keeping the newest half. It is the only
+   replay source: an attach replays from any byte offset (`since`), the page
+   cache keeps recent bytes hot, and scrollback survives a reboot
+   (`model/session-restore.mdx`). Sessions whose process died with a previous
+   daemon reload as exited-but-replayable.
+3. (no separate in-memory ring — the log is the ring.)
 4. Feed a **headless screen** (`vt100` crate, the only new dependency) so
    `snapshot` answers without a client attached.
 5. **OSC scan** in the same pass: OSC 0/2 title, OSC 7 cwd, OSC 9 / OSC 777
@@ -123,6 +131,18 @@ handshake exchanges protocol version and capabilities
 `PERCH_LAUNCH_TOKEN`, `PERCH_RUNTIME_URL`, plus the existing `TERM`,
 `COLORTERM` and `LANG` overrides (`apply_terminal_env`). Mirrors Orca's
 `ORCA_*` set.
+
+## 3a. Remote hosts: one model
+
+`direct` hosts stop needing tmux. On first contact perch uploads the matching
+`perchd` build to `~/.perch/bin/perchd-v<N>` (user space, no root) and runs
+`ssh host ~/.perch/bin/perchd-v<N> connect` through the existing ControlMaster.
+From there the remote speaks the exact local protocol. A Hosted turn on a
+direct host becomes a daemon session running `claude -p …`; its exit code and
+byte-offset replay replace `detached.rs`'s pgid/`tail -F`/exit-marker logic.
+Linux builds (`x86_64`/`aarch64` musl) are cross-compiled; a host that cannot
+execute an uploaded binary is unsupported. `perch` host mode (full remote
+runtime) stays for now and is revisited once this lands.
 
 ## 4. Status store — one per execution host
 
@@ -238,8 +258,11 @@ Luna.
 
 1. **perchd.** Daemon, socket protocol, attach/replay, history log, headless
    snapshot, adoption. Move local agent and workspace terminals onto it and
-   retire local tmux. *Done when:* killing the runtime leaves the shell
+   delete `agent_tmux.rs`. *Done when:* killing the runtime leaves the shell
    running, and a new runtime reattaches with the scrollback intact.
+1b. **Remote perchd.** Cross-built binary, upload + `connect` transport, CLI
+   panes and Hosted turns on direct hosts; delete the tmux/`nohup` paths in
+   `detached.rs`.
 2. **Status store + hooks.** Managed hook install for claude/codex, the
    `/hook` endpoint, OSC rules, WS fan-out, notifications. *Done when:* a
    fake agent script driving hooks and OSC produces working → blocked → done
