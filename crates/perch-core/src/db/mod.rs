@@ -1141,6 +1141,117 @@ mod tests {
     }
 
     #[test]
+    fn worktree_refresh_never_invents_a_missing_creation_snapshot() {
+        let path = temp_db_path("worktree-missing-start");
+        let root = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = HistoryDb::open(&path).unwrap();
+        let (_, original) = db
+            .create_project("local", root.to_str().unwrap(), None, None)
+            .unwrap();
+        // First commit after registration, or a legacy workspace whose start
+        // was never recorded: a worktree listing must not label today's HEAD
+        // as the workspace's creation boundary.
+        let listed = db
+            .create_worktree_workspace(
+                "local",
+                root.to_str().unwrap(),
+                root.to_str().unwrap(),
+                Some("main"),
+                None,
+                Some("later-head"),
+            )
+            .unwrap();
+        assert_eq!(listed.id, original.id);
+        assert_eq!(listed.start_snapshot, None);
+        let refreshed = db
+            .update_workspace_git_state(&original.id, Some("changed"), None, true)
+            .unwrap();
+        assert_eq!(refreshed.start_snapshot, None);
+        assert_eq!(refreshed.branch.as_deref(), Some("changed"));
+        assert!(refreshed.dirty);
+        drop(db);
+        let reopened = HistoryDb::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .get_workspace(&original.id)
+                .unwrap()
+                .unwrap()
+                .start_snapshot,
+            None
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// Why `register_worktree_listing` registers the primary checkout itself
+    /// before walking the listing: binding a child implicitly creates the
+    /// parent workspace with no creation ref, and nothing may back-fill one
+    /// later. Registering the primary first is the only chance to record it.
+    #[test]
+    fn a_child_bound_first_leaves_the_primary_without_a_creation_ref() {
+        let path = temp_db_path("worktree-primary-order");
+        let project_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
+        let child_dir = std::env::temp_dir().join(format!("perch-worktree-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&child_dir).unwrap();
+        let db = HistoryDb::open(&path).unwrap();
+
+        let child = db
+            .create_worktree_workspace(
+                "local",
+                project_dir.to_str().unwrap(),
+                child_dir.to_str().unwrap(),
+                Some("feature/one"),
+                None,
+                Some("child-head"),
+            )
+            .unwrap();
+        assert_eq!(child.start_snapshot.as_deref(), Some("child-head"));
+        let parent = db
+            .get_workspace(child.parent_workspace_id.as_deref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(parent.start_snapshot, None);
+
+        // Registering the primary first records it, and the later child bind
+        // reuses that project without disturbing the stored boundary.
+        let other_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
+        let other_child = std::env::temp_dir().join(format!("perch-worktree-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&other_dir).unwrap();
+        std::fs::create_dir_all(&other_child).unwrap();
+        db.create_project(
+            "local",
+            other_dir.to_str().unwrap(),
+            None,
+            Some("primary-head"),
+        )
+        .unwrap();
+        let bound = db
+            .create_worktree_workspace(
+                "local",
+                other_dir.to_str().unwrap(),
+                other_child.to_str().unwrap(),
+                Some("feature/two"),
+                None,
+                Some("other-child-head"),
+            )
+            .unwrap();
+        let other_parent = db
+            .get_workspace(bound.parent_workspace_id.as_deref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(other_parent.start_snapshot.as_deref(), Some("primary-head"));
+
+        drop(db);
+        for dir in [project_dir, child_dir, other_dir, other_child] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn linked_worktree_workspace_is_idempotent_and_preserves_start_snapshot() {
         let path = temp_db_path("worktree-workspace");
         let project_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
@@ -1191,13 +1302,7 @@ mod tests {
         assert_eq!(db.list_projects("local", true).unwrap().len(), 1);
 
         let updated = db
-            .update_workspace_git_state(
-                &child.id,
-                Some("feature/demo"),
-                Some("main"),
-                true,
-                Some("head-3"),
-            )
+            .update_workspace_git_state(&child.id, Some("feature/demo"), Some("main"), true)
             .unwrap();
         assert!(updated.dirty);
         assert_eq!(updated.start_snapshot.as_deref(), Some("head-1"));
@@ -1679,6 +1784,51 @@ mod tests {
     }
 
     #[test]
+    fn agent_change_history_filters_session_before_limiting_and_survives_reopen() {
+        let path = temp_db_path("agent-change-session");
+        let db = HistoryDb::open(&path).unwrap();
+        for (id, workspace, session, created_at) in [
+            ("a-old", "workspace-1", "session-a", 10),
+            ("a-new", "workspace-1", "session-a", 20),
+            ("b-new", "workspace-1", "session-b", 30),
+            ("other", "workspace-2", "session-a", 40),
+        ] {
+            db.begin_agent_change_snapshot(AgentChangeSnapshotStart {
+                snapshot_id: id,
+                operation_id: id,
+                workspace_id: workspace,
+                session_id: session,
+                agent: "turnbot",
+                before_head: None,
+                before_branch: None,
+                before_status: "{}",
+                before_paths: &[],
+                created_at,
+            })
+            .unwrap();
+        }
+        drop(db);
+        let db = HistoryDb::open(&path).unwrap();
+        let latest = |session| {
+            db.list_agent_change_snapshots("workspace-1", session, 1)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.snapshot_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(latest(None), ["b-new"]);
+        // No fallback to an older or another session's turn when capture is incomplete.
+        assert_eq!(latest(Some("session-a")), ["a-new"]);
+        assert_eq!(latest(Some("session-b")), ["b-new"]);
+        assert!(latest(Some("no-turns")).is_empty());
+        assert!(db
+            .list_agent_change_snapshots("workspace-1", Some(""), 1)
+            .is_err());
+        drop(db);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
     fn agent_change_snapshot_records_one_before_after_boundary_idempotently() {
         let path = temp_db_path("agent-change-snapshot");
         let db = HistoryDb::open(&path).unwrap();
@@ -1753,7 +1903,8 @@ mod tests {
             .unwrap();
         assert_eq!(late, finished);
         assert_eq!(
-            db.list_agent_change_snapshots("workspace-1", 8).unwrap(),
+            db.list_agent_change_snapshots("workspace-1", None, 8)
+                .unwrap(),
             vec![finished]
         );
 

@@ -155,13 +155,13 @@ pub(super) async fn capture(
             agent: &agent,
             before_head: boundary.revision.as_deref(),
             before_branch: boundary.branch.as_deref(),
-            before_status: &boundary.status,
+            before_status: &boundary.status.to_string(),
             before_paths: &boundary.paths,
             created_at: wall_clock_millis(),
         })?;
         open.insert(session_id.to_string(), snapshot_id);
     } else if let Some(snapshot_id) = completing {
-        let boundary = boundary(git, &target).await;
+        let mut boundary = boundary(git, &target).await;
         let before = db
             .get_agent_change_snapshot(&snapshot_id)?
             .and_then(|row| row.before_head);
@@ -171,12 +171,15 @@ pub(super) async fn capture(
             }
             _ => Vec::new(), // Missing endpoints remain unavailable in the review selector.
         };
+        if before.is_some() && boundary.revision.is_some() {
+            boundary.status["turnChangedPathCount"] = changed_paths.len().into();
+        }
         changed_paths.truncate(MAX_AGENT_CHANGE_PATHS);
         db.finish_agent_change_snapshot(AgentChangeSnapshotFinish {
             snapshot_id: &snapshot_id,
             after_head: boundary.revision.as_deref(),
             after_branch: boundary.branch.as_deref(),
-            after_status: &boundary.status,
+            after_status: &boundary.status.to_string(),
             after_paths: &boundary.paths,
             changed_paths: &changed_paths,
             completed_at: wall_clock_millis(),
@@ -188,7 +191,7 @@ pub(super) async fn capture(
 struct Boundary {
     revision: Option<String>,
     branch: Option<String>,
-    status: String,
+    status: serde_json::Value,
     paths: Vec<String>,
 }
 
@@ -213,16 +216,16 @@ async fn boundary(git: &GitService, target: &WorkspaceTarget) -> Boundary {
         .unwrap_or_default();
     paths.sort();
     paths.dedup();
-    paths.truncate(MAX_AGENT_CHANGE_PATHS);
     let summary = serde_json::json!({
         "dirty": status.as_ref().is_some_and(|status| status.dirty()),
         "conflicted": status.as_ref().is_some_and(|status| status.conflicted()),
         "changed": paths.len(),
     });
+    paths.truncate(MAX_AGENT_CHANGE_PATHS);
     Boundary {
         revision,
         branch,
-        status: summary.to_string(),
+        status: summary,
         paths,
     }
 }
@@ -262,10 +265,11 @@ fn turn_in_flight(app: &AppState, workspace_id: &str, session_id: &str) -> bool 
 pub(super) fn last_agent_turn(
     app: &AppState,
     workspace_id: &str,
+    session_id: Option<&str>,
 ) -> Option<crate::protocol::AgentTurnSummary> {
     let row = app
         .db
-        .list_agent_change_snapshots(workspace_id, 1)
+        .list_agent_change_snapshots(workspace_id, session_id, 1)
         .ok()?
         .into_iter()
         .next()?;
@@ -288,6 +292,20 @@ fn summarize_turn(
     } else {
         AgentTurnState::Unavailable
     };
+    let paths = row.changed_paths.unwrap_or_default();
+    let changed_path_count = if state == AgentTurnState::Complete {
+        row.after_status
+            .as_deref()
+            .and_then(|status| serde_json::from_str::<serde_json::Value>(status).ok())
+            .and_then(|status| status["turnChangedPathCount"].as_u64())
+            .and_then(|count| usize::try_from(count).ok())
+            .filter(|count| *count >= paths.len())
+            // Older records at the cap may have omitted paths. Their exact
+            // total is unknown, but a shorter list was never truncated.
+            .or_else(|| (paths.len() < MAX_AGENT_CHANGE_PATHS).then_some(paths.len()))
+    } else {
+        None
+    };
     crate::protocol::AgentTurnSummary {
         snapshot_id: row.snapshot_id,
         session_id: row.session_id,
@@ -296,7 +314,8 @@ fn summarize_turn(
         // never recorded either; `state` is what gates comparing at all.
         before_ref: row.before_head.unwrap_or_default(),
         after_ref: row.after_head,
-        changed_paths: row.changed_paths.unwrap_or_default(),
+        changed_paths: paths,
+        changed_path_count,
         completed_at: row.completed_at,
         state,
     }
@@ -305,6 +324,65 @@ fn summarize_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_bounded_path_list_keeps_the_full_turn_count_after_reopen() {
+        let root = std::env::temp_dir().join(format!("perch-turn-count-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let init = std::process::Command::new("git")
+            .args(["-c", "core.hooksPath=/dev/null", "init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(init.success());
+        let db_path = root.join("history.sqlite");
+        let db = HistoryDb::open(&db_path).unwrap();
+        let session = Uuid::new_v4().to_string();
+        db.create_session(&session, repo.to_str().unwrap()).unwrap();
+        let workspace = db
+            .get_session(&session)
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+        let git = GitService::default();
+        capture(&db, &git, &session, true).await.unwrap();
+        for index in 0..=MAX_AGENT_CHANGE_PATHS {
+            std::fs::write(repo.join(format!("file-{index:04}.txt")), "new\n").unwrap();
+        }
+        capture(&db, &git, &session, false).await.unwrap();
+        drop(db);
+        let db = HistoryDb::open(&db_path).unwrap();
+        let mut row = db
+            .list_agent_change_snapshots(&workspace, None, 1)
+            .unwrap()
+            .remove(0);
+        let report = summarize_turn(row.clone(), false);
+        assert_eq!(report.state, AgentTurnState::Complete);
+        assert_eq!(report.changed_paths.len(), MAX_AGENT_CHANGE_PATHS);
+        assert_eq!(report.changed_path_count, Some(MAX_AGENT_CHANGE_PATHS + 1));
+        // A legacy capped row cannot claim the list length is the exact total.
+        row.after_status = Some("{}".into());
+        assert_eq!(summarize_turn(row, false).changed_path_count, None);
+
+        // Dirty working-tree paths are not this turn's changed-path count.
+        capture(&db, &git, &session, true).await.unwrap();
+        std::fs::write(repo.join("file-0000.txt"), "next turn\n").unwrap();
+        capture(&db, &git, &session, false).await.unwrap();
+        let mut row = db
+            .list_agent_change_snapshots(&workspace, None, 1)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            summarize_turn(row.clone(), false).changed_path_count,
+            Some(1)
+        );
+        row.after_status = Some("{}".into());
+        assert_eq!(summarize_turn(row, false).changed_path_count, Some(1));
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn failed_completion_never_reuses_the_previous_turn_boundary() {
@@ -350,7 +428,7 @@ mod tests {
                 .unwrap();
             let git = GitService::default();
             capture(&db, &git, &session, true).await.unwrap();
-            let first = db.list_agent_change_snapshots(&workspace, 8).unwrap()[0]
+            let first = db.list_agent_change_snapshots(&workspace, None, 8).unwrap()[0]
                 .snapshot_id
                 .clone();
             std::fs::write(repo.join("first.txt"), "first turn\n").unwrap();
@@ -383,7 +461,7 @@ mod tests {
             capture(&db, &git, &session, true).await.unwrap();
             std::fs::write(repo.join("second.txt"), "second turn\n").unwrap();
             capture(&db, &git, &session, false).await.unwrap();
-            let rows = db.list_agent_change_snapshots(&workspace, 8).unwrap();
+            let rows = db.list_agent_change_snapshots(&workspace, None, 8).unwrap();
             assert_eq!(rows.len(), 2);
             assert_eq!(rows.iter().filter(|row| row.completed).count(), 1);
             let complete = rows.iter().find(|row| row.completed).unwrap();
@@ -443,7 +521,7 @@ mod tests {
             .unwrap();
         let git = GitService::default();
         let newest = |db: &HistoryDb| {
-            db.list_agent_change_snapshots(&workspace, 1)
+            db.list_agent_change_snapshots(&workspace, None, 1)
                 .unwrap()
                 .into_iter()
                 .next()

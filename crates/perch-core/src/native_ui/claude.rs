@@ -289,6 +289,24 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
     Ok(Some(format!("\u{1b}[200~{prompt}\u{1b}[201~\r")))
 }
 
+/// Did this `UserPromptSubmit` event report the text we sent?
+///
+/// Not equality: the CLI decorates what it accepts. Claude Code wraps every
+/// bracketed paste — which is how [`prepare_input`] submits — in
+/// `<pasted_content id="…">` tags carrying a random id, so an exact match is
+/// never true and *every* prompt perch sends went unacknowledged, leaving a
+/// delivered review packet reported as "could not be confirmed". The invariant
+/// that actually matters is that the CLI submitted our text; the caller
+/// already pins the same process, the same provider session, and a submission
+/// newer than the stamp taken before the write, so containment is the whole
+/// remaining question and it survives the wrapper changing shape again.
+fn submitted(event: &Value, payload: &Value) -> bool {
+    let (Some(reported), Some(sent)) = (event["prompt"].as_str(), payload["text"].as_str()) else {
+        return false;
+    };
+    !sent.is_empty() && reported.contains(sent)
+}
+
 pub(super) async fn observe(
     key: &AgentKey,
     alive: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -355,7 +373,7 @@ pub(super) async fn observe(
                 for index in (0..pending.len()).rev() {
                     let Ok(payload) = serde_json::from_str::<Value>(&pending[index].payload) else { continue; };
                     let accepted = if payload["type"] == "cancel" { !running } else {
-                        events.get("UserPromptSubmit").is_some_and(|(marker, event_pid, event)| event_pid == pid && event["session_id"] == session && event["prompt"] == payload["text"] && marker != payload["after"].as_str().unwrap_or_default())
+                        events.get("UserPromptSubmit").is_some_and(|(marker, event_pid, event)| event_pid == pid && event["session_id"] == session && submitted(event, &payload) && marker != payload["after"].as_str().unwrap_or_default())
                     };
                     if accepted { let command = pending.swap_remove(index); let _ = command.reply.send(Ok(true)); }
                 }
@@ -367,6 +385,41 @@ pub(super) async fn observe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The exact payload Claude Code wrote for a prompt perch had sent as a
+    /// bracketed paste, captured from `UserPromptSubmit` on the installed CLI.
+    /// Equality against it is false, which is what silently turned every
+    /// delivered prompt into "delivery could not be confirmed".
+    #[test]
+    fn a_prompt_the_cli_wrapped_in_paste_tags_still_counts_as_submitted() {
+        let sent = "Reply with exactly PHONE_UI_tyrz2w. Do not use tools or modify files.";
+        let wrapped = serde_json::json!({
+            "prompt": format!("\n\n<pasted_content id=\"cafd\">\n{sent}\n</pasted_content id=\"cafd\">\n"),
+        });
+        let payload = serde_json::json!({ "text": sent });
+        assert_ne!(
+            wrapped["prompt"], payload["text"],
+            "fixture must be the decorated form"
+        );
+        assert!(submitted(&wrapped, &payload));
+
+        // Undecorated CLIs keep working, and a different prompt is not ours.
+        assert!(submitted(&serde_json::json!({ "prompt": sent }), &payload));
+        assert!(!submitted(
+            &serde_json::json!({ "prompt": "something the user typed instead" }),
+            &payload
+        ));
+        // An empty send must never be satisfied by an arbitrary submission.
+        assert!(!submitted(
+            &serde_json::json!({ "prompt": "anything at all" }),
+            &serde_json::json!({ "text": "" })
+        ));
+        // A cancel payload carries no text and cannot match this way.
+        assert!(!submitted(
+            &serde_json::json!({ "prompt": sent }),
+            &serde_json::json!({ "type": "cancel" })
+        ));
+    }
+
     #[test]
     fn native_messages_hide_metadata_and_bound_content_and_prompt_guard_preserves_drafts() {
         assert!(empty_prompt("❯\u{a0}\n"));

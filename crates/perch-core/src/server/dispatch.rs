@@ -378,6 +378,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::GitStatus {
             request_id,
             workspace_id,
+            session_id,
             host_id,
             include_ignored,
         } => git::handle_git_status(
@@ -385,6 +386,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             raw_text,
             request_id,
             workspace_id,
+            session_id,
             host_id,
             include_ignored,
         ),

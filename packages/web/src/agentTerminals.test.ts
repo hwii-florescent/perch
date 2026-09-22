@@ -43,7 +43,8 @@ it("does not kill or activate a process when its open reply arrives after unmoun
 });
 
 it("keeps new lease replies ahead of old status pushes, then revokes input on transfer", async () => {
-  const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {});
+  const size = { cols: 80, rows: 24 };
+  const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {}, () => size);
   handleAgentTerminalMessage(opened(0, "controlled"));
   await binding.ready;
   const input: AgentControlLease = { clientId: "local-viewer", deviceId: "local", generation: 7, acquiredAtMs: 0, lastActivityMs: 0 };
@@ -55,8 +56,11 @@ it("keeps new lease replies ahead of old status pushes, then revokes input on tr
   };
   reply(input, { ...snapshot("claude", 2), inputOwner: input });
   await vi.waitFor(() => expect(transport.send.mock.calls.at(-1)![0].channel).toBe("resize"));
+  size.cols = 130;
+  size.rows = 33;
   reply(resize, { ...snapshot("claude", 3), inputOwner: input, resizeOwner: resize });
   await taking;
+  expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.resize", terminalId: "controlled", cols: 130, rows: 33, generation: 8 });
   handleAgentTerminalMessage({ type: "agent.lifecycle.changed", hostId: "local", status: snapshot("claude", 1) });
   sendAgentTerminalInput("controlled", "still-owned");
   expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.input", terminalId: "controlled", data: "still-owned", generation: 7 });

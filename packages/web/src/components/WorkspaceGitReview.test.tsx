@@ -106,6 +106,7 @@ const packet: ReviewBatchPreview = {
 function actions(overrides: Partial<WorkspaceGitReviewActions> = {}): WorkspaceGitReviewActions {
   return {
     refreshStatus: vi.fn(() => "status-request"),
+    selectAgentSession: vi.fn(),
     loadDiff: vi.fn(() => "diff-request"),
     stage: vi.fn(),
     unstage: vi.fn(),

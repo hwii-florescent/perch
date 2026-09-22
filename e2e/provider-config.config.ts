@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // project. Build the web client and perch-core before running this suite.
 export default defineConfig({
   testDir: ".",
-  testMatch: ["provider-config.spec.ts", "native-providers.spec.ts"],
+  testMatch: ["provider-config.spec.ts", "native-providers.spec.ts", "cheap-model.spec.ts"],
   outputDir: "artifacts-provider-config",
   timeout: 120_000,
   workers: 1,

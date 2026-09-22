@@ -4,9 +4,11 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
+import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
+  test.setTimeout(240_000);
+  const expectedModel = provider === "claude" || provider === "opencode" ? CHEAP_CLAUDE_MODEL : CHEAP_CODEX_MODEL;
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-ui-"));
   const port = await new Promise<number>((resolve) => {
@@ -85,7 +87,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
     // Fail here, before any real turn, if the cheap-model pin did not take.
-    if (provider !== "opencode") await expect(ui.locator(".native-cli-chat__model")).toContainText(provider === "claude" ? "haiku" : CHEAP_CODEX_MODEL);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
     const pid = await ui.getAttribute("data-native-pid");
     let nativeId = await ui.getAttribute("data-native-session");
     if (provider === "opencode") expect(nativeId).toBe("");
@@ -183,6 +185,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await mobile.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(mobile.getByTestId("native-cli-composer")).toBeEnabled();
     await expect(ui.getByTestId("native-cli-composer")).toBeDisabled();
+    await expect(mobile.locator(".native-cli-chat__model")).toHaveText(expectedModel);
     await mobile.getByTestId("native-cli-composer").fill("Reply with that same token once more, and nothing else.");
     await mobile.getByRole("button", { name: "Send", exact: true }).click();
     await expect(mobile.locator('[data-native-role="user"]')).toHaveCount(3);
@@ -219,6 +222,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(ui).toHaveAttribute("data-native-pid", pid!);
       expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(0);
+      await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
       await ui.getByTestId("native-cli-composer").fill(firstPrompt);
       await ui.getByRole("button", { name: "Send", exact: true }).click();
       await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });

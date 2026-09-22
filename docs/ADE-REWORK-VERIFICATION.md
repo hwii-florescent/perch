@@ -1,5 +1,552 @@
 # ADE rework verification
 
+## Session-specific turn review and terminal resize leases — 2026-09-22 UTC
+
+### Product behavior
+
+`git.status` accepts optional `sessionId` in Rust and TypeScript. The existing
+`list_agent_change_snapshots` query filters the workspace and session before
+limiting results; an incomplete latest row remains the latest row, with no
+fallback to older captured work. The DB regression interleaves two sessions
+and another workspace, reopens SQLite, and checks scoped/latest/empty results.
+
+The shared desktop/mobile Git pane adds “Turn session”. It clears the old
+comparison and path/line selection when scope changes, then offers the selected
+session's last recorded turn. Status refresh keeps the filter. A reloaded
+browser can select that same durable session again. The request store discards
+superseded responses and rejects another session returned by an older peer
+that ignores the filter. Comments on that exact recorded comparison retain
+its session ID instead of the globally active chat tab's ID.
+
+### Blank-terminal root cause and fix
+
+The new two-session interaction failed in both engines before it could test
+review: the second terminal rendered blank despite live output arriving.
+Diagnostics showed a valid 130x33 emulator, while the process retained the
+80x41 grid of its first short-lived view. The new view acquired resize control,
+but `fit()` had already cached the same local dimensions and emitted no resize.
+Tmux's 41-row repaint consequently scrolled its text out of the 33-row viewport.
+
+`openAgentTerminal` now synchronizes the current dimensions immediately after
+its resize lease is acquired. The terminal supplies a getter for the live grid;
+the native structured view uses its existing fixed dimensions. Both automatic
+and manual control acquisition use this path. The lease unit regression changes
+dimensions while control is pending and checks the outgoing resize generation.
+The browser failure is now green with its original “turnbot ready” assertion.
+
+### Checks and interaction evidence
+
+```sh
+cargo test -p perch-core agent_change_history_filters_session
+cargo test -p perch-core
+cargo build -p perch-core
+cargo fmt --check
+cargo clippy --workspace --all-targets
+npm test -w @perch/web
+npm run build
+# from e2e/, headless, free shell fixtures only:
+npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'turnbot:' --project=webkit --project=chromium
+npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'turnbot: a real' --project=webkit --project=chromium
+```
+
+Core **278 + 2 protocol**, web **223/19 files**, both builds and format pass.
+Clippy retains **five baseline warnings**. Logs:
+`/tmp/perch-session-turn-tests-2026-09-22.log`,
+`/tmp/perch-session-turn-web-tests-2026-09-22.log`,
+`/tmp/perch-session-turn-clippy-2026-09-22.log`.
+Impeccable's one detector pass for the toolbar returned `[]`; no styling change.
+
+Final two-session cases: **2 passed (13.9s)**, WebKit **5.9s**, Chromium **5.4s**.
+Observed two actual shell processes editing the same tracked/untracked files;
+workspace latest shows beta, selecting alpha restores its older pinned diff and
+excludes beta; refresh and reload preserve access, and the mobile pane can
+select either session or return to workspace latest. Created an inline alpha
+comment while beta remained active, verified its `comment_json.sessionId` in
+SQLite, and observed the comment after mobile navigation.
+
+The other two cases (running turn, failed capture, recovery, 513-path count,
+legacy lower bound) passed in the preceding run on the same production code:
+WebKit **19.6s**, Chromium **17.9s**. That run's two-session checks stopped on a
+new test query incorrectly expecting a `review_comments.session_id` column;
+the column is `comment_json`, so the final rerun uses
+`json_extract(comment_json, '$.sessionId')`. There was no product change between
+these runs. Do not describe the full four-case run as green.
+
+Settled WebKit desktop/mobile screenshots inspected together: selector labels,
+actual alpha content, and mobile comment fit the existing surface at 390px.
+Final keepers: `e2e/screenshots-cli-rendering/session-turn-2026-09-22-final/`
+contains each engine's `agent-turn-review-turnbot--2f222-omes-a-reviewable-diff-base-*`
+folder with `turn-session-desktop.png`, `turn-session-mobile.png` and logs.
+Earlier evidence directories share `session-turn-2026-09-22-` and end in
+`first-failure`, `geometry-failure`, `geometry`, `wire-failure`, `option-wait`,
+`pass`, or `comment-query`. `wire-failure/` preserves the terminal-ID-specific
+frames proving the old grid and the reattachment sequence. The browser helper
+also explicitly waits for the last-turn option's native `disabled` property:
+Playwright `selectOption` can dispatch while that option is disabled.
+
+### Limits
+
+No paid model calls, global setting changes, commit or push. This is latest-turn
+selection per session, not a picker for arbitrary earlier turns in the same
+session. Capture ordering/cost/retention, direct-host/remote capture, V-10,
+broader V-12 and measured resource budgets remain unverified/incomplete. The
+native paid providers were not rerun for the shared resize-control change.
+No active test/build handles remain from these checks. Full goal stays open.
+
+
+## Exact counts for bounded agent-turn history — 2026-09-22 UTC
+
+### Problem and change
+
+Turn capture trimmed `changed_paths` to `MAX_AGENT_CHANGE_PATHS` (512), and the
+review summary displayed that list's length as the number changed. A 513-path
+turn therefore claimed 512. The recorder now saves `turnChangedPathCount` in
+the existing `after_status` JSON before trimming; boundary status counts are
+also computed before their path lists are trimmed. This reuses the existing
+Git comparison and JSON storage, with no extra scan or schema migration.
+
+Rust and TypeScript expose optional `changedPathCount` in `AgentTurnSummary`.
+The core supplies the exact total for new completed rows. A legacy row below
+the cap has a complete list; a capped legacy row has an unknown total. The UI
+uses the exact count where available and otherwise says “at least N paths”.
+A peer predating the new field is handled conservatively the same way. The
+persisted path list stays bounded at 512.
+
+### Automated evidence
+
+```sh
+cargo test -p perch-core a_bounded_path_list_keeps_the_full_turn_count_after_reopen
+cargo test -p perch-core
+cargo build -p perch-core
+cargo fmt --check
+cargo clippy --workspace --all-targets
+npm test -w @perch/web
+npm run build
+```
+
+**277 core tests + 2 protocol tests pass; 223 web tests pass.** Both builds and
+format pass. Clippy retains the five baseline warnings; the web build retains
+its existing large-chunk warning. The new real Git/SQLite test captures 513
+new files, reopens the DB, verifies a 512-path list and exact total 513, verifies
+legacy capped fallback, and then changes one file while all 513 remain dirty:
+the next turn correctly reports one, including under legacy uncapped metadata.
+
+Logs: `/tmp/perch-turn-count-tests-2026-09-22.log`,
+`/tmp/perch-turn-count-web-tests-2026-09-22.log`,
+`/tmp/perch-turn-count-clippy-2026-09-22.log`.
+The Impeccable clarify workflow preserved the incumbent component/CSS. Its one
+mechanical detector pass returned `[]` for `WorkspaceGitReview.tsx`:
+`/tmp/perch-turn-count-design-2026-09-22.json`.
+
+### Actual browser interactions
+
+From `e2e/`, headless, using only a local `/bin/sh` fixture (no paid models):
+
+```sh
+npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'turnbot:' --project=webkit --project=chromium
+```
+
+**4 passed (32.9s)**: WebKit 6.5s / 10.4s, Chromium 3.7s / 8.1s.
+The state/recovery test now sends `bulk`, creating 511 new files in addition to
+the two files the fixture edits. The visible summary reports 513, SQLite keeps
+512 paths, browser reload preserves the exact count, and replacing only this
+fixture row's `after_status` with legacy `{}` yields “at least 512 paths”. The
+phone viewport performs the same selection and verifies the lower-bound text.
+
+Initial screenshots captured the correct summary while the diff was loading.
+Added a wait for `AGENT_NEW bulk` in the actual diff before both screenshots,
+then ran the two affected cases:
+
+```sh
+npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'uncaptured newest' --project=webkit --project=chromium
+```
+
+**2 passed (48.7s)**, WebKit 23.7s / Chromium 22.3s. Inspected the settled
+WebKit wide and 390px phone images together: summary text fits, exact/lower-bound
+wording is correct, diff lines are rendered and readable. No layout changes.
+This is scoped visual evidence, not a full V-11 audit or a performance claim.
+
+Preserved screenshot/core-log artifacts:
+`e2e/screenshots-cli-rendering/{webkit,chromium}/turn-count-2026-09-22-settled/`.
+First-run artifacts remain in sibling `turn-count-2026-09-22/` directories;
+pre-run Playwright output was saved to `/tmp/perch-turn-count-before-2026-09-22/`.
+
+### Limits
+
+Old capped rows cannot recover their exact total from stored metadata alone;
+the lower-bound label is deliberate. This does not change retained snapshot
+refs, capture ordering, capture cost, prompt-acceptance semantics, per-session
+history selection or remote-host recording. V-07/V-10/V-12 and measured resource
+budgets remain incomplete. No paid provider calls, commit or push; all handles
+completed and fixture-owned processes were cleaned up.
+
+
+## Review delivery routing and workspace creation refs — 2026-09-22 UTC
+
+Picked up from a Codex session that stopped mid-edit on `usage_limit_exceeded`
+(its last `apply_patch` landed, the tree did not compile). Two product defects
+fixed, one long-standing e2e blocker closed, two stale `AGENTS.md` claims
+corrected.
+
+### D1 — a worktree refresh invented a workspace start
+
+`update_workspace_git_state` and `create_worktree_workspace`'s update branch
+both carried `start_snapshot = CASE WHEN start_snapshot IS NULL THEN ?…`, and
+`workspace_matches_worktree` treated a row with no creation ref as *not*
+current. Opening the worktree menu on a workspace registered before its first
+commit therefore back-filled today's HEAD and the UI offered it as "Workspace
+start" — a boundary the user never had. Refresh now never writes a creation
+ref: it is recorded at first registration or not at all. Registering the
+primary checkout up front (`register_worktree_listing`) closes the sibling
+case where binding a child first created the parent with no ref. An entry not
+yet known is still registered with its current head, which is the honest
+registration boundary — the same rule `project.create` follows.
+
+- `db::tests::worktree_refresh_never_invents_a_missing_creation_snapshot`
+  (from the Codex session, completed here) FAILS with the old back-fill
+  restored, PASSES with the fix. Verified both ways.
+- `db::tests::a_child_bound_first_leaves_the_primary_without_a_creation_ref`
+  (new) pins the ordering hazard the server-side pre-registration guards.
+  `AppState` has no test constructor, so this is the DB-level check.
+- Real UI: `workspace-review.spec.ts` "worktree refresh cannot invent a
+  workspace start after the first commit" — **PASS webkit 1.3s / chromium
+  1.1s**. Against the pre-fix binary it FAILS with the option enabled,
+  i.e. perch offering an invented boundary. Both runs recorded.
+
+### D2 — a Hosted session's review packet was delivered to a CLI that did not exist
+
+`review.batch.send` routed to the native path on `native_ui::supported(&agent)`
+alone. That is true for claude and codex, so a **Hosted** session (no
+`cli_provider_id`) had its packet written to a native CLI it does not own; the
+acknowledgement never arrived and `git-review-delivery` sat on "Waiting for the
+agent to receive the review packet…" until the test timed out. Routing now keys
+on **ownership** — `session.cli_provider_id.is_some() && native_ui::supported()`
+— so Hosted sessions take the ordinary prompt path. The hosted branch's
+`unreachable!("review target validated")` became reachable as a result
+(`target_agent_id` is client-supplied and a Hosted session can name any provider
+the target check allows), so it is now a client error, not a panic.
+
+- `workspace-review.spec.ts` "sends two reviewed anchors as one packet to the
+  selected real agent" — **PASS chromium 9.5s, webkit 9.8s**, with a real
+  Claude turn on `claude-haiku-4-5` asserted from the model chip before the
+  first prompt. This test had **never** passed; §"Two of those e2e failures"
+  below recorded it as the real-provider delivery test that was never run.
+- Native (CLI-owned) delivery is unchanged: `native-review.config.ts -g
+  'claude:'` **2 passed (18.9s)**, chromium 8.6s / webkit 9.7s.
+- `paired-phone-flows.spec.ts` **PASS webkit 12.8s, chromium 11.0s**.
+
+### The e2e blocker was three separate problems, not one
+
+The spec's own premise had rotted:
+
+1. It clicked the tab-bar `+` and typed. That `+` now opens a launcher and
+   creates nothing, so the prompt went to whichever session was already
+   active — one in `/Users/hwiii/Github/perch`, not the fixture. Proven from
+   the hub DB: the turn's messages belong to a session whose `cwd` is the
+   perch checkout, and the fixture's own sessions had 0 messages, which is
+   also why `list_sessions`' visibility filter hid them from the dropdown.
+2. The launcher only creates **CLI-owned** sessions, and UI mode over one of
+   those renders `NativeCliChat` — no Hosted composer, no model chip. The
+   test now creates its session with `session.create` (`createHostedSession`,
+   shared with `openReview`'s session path).
+3. `toBeDisabled()`/`toBeEnabled()` are **vacuous** on this `<option>`:
+   Playwright 1.61.1 computes an `<option>`'s state as *enabled* whenever the
+   `<select>` sits inside a `<label>`, which the diff toolbar's does. Isolated
+   proof: same markup, `option.disabled` property `true`, `isDisabled()`
+   `false`; move the `<select>` out of the `<label>` and it reports `true`.
+   The pre-existing `toBeEnabled()` assertion in the sibling test had been
+   passing for free. Both now go through `expectWorkspaceStartOffered`, which
+   reads the DOM property and the user-visible label.
+
+### Checks
+
+```
+cargo test -p perch-core             276 passed (+2 new), protocol parity 2 passed
+cargo fmt --check                    clean
+cargo clippy --workspace --all-targets   exactly the 5 baseline warnings
+npm test -w @perch/web               223 passed
+npm run build                        PASS
+```
+
+`workspace-review.spec.ts` full file, both engines: **11/12**, the twelfth a
+WebKit `git-comment-composer` miss inside `addComment` that **passes in
+isolation (9.8s)** — the rotating slow-proxy pattern `AGENTS.md` documents.
+`paired-phone-flows.spec.ts` showed the same shape (chromium missed its receipt
+in the combined run, passed alone). Evidence:
+`e2e/screenshots-cli-rendering/workspace-start-2026-09-22/` (including the
+pre-fix failure) and `.../review-routing-2026-09-22/`.
+
+### Still open
+
+Unchanged by this slice: V-07's capture-ordering ceiling, rendered change
+summary and direct-host turn recording; V-10's per-device scope, pairing
+rotation, encrypted non-loopback transport and QR pairing; V-12 entirely.
+Codex-provider evidence is blocked until its quota resets (03:41 EDT
+2026-09-22); no codex prompt was issued here.
+
+## Cheap-model setup, restart and provider verification — 2026-09-22 UTC
+
+### Changes and regression
+
+`cheapModelEnv()` rebuilt its private home whenever the native UI test restarted
+its core. `symlinkSync()` then hit an existing entry, and the broad catch returned
+an empty environment. The restarted fixture inherited the user's config home
+instead of the intended cheap model pin. Existing matching links now survive
+restart, including dangling runtime links; wrong entries, missing config and
+unsupported providers stop setup. Original config files and extension directories
+remain untouched. An injectable user-home path lets the regression use synthetic
+config homes instead of credentials.
+
+`e2e/cheap-model.spec.ts` failed before the fix with a returned `{}` on the second
+Pi setup. It now passes for Pi, OMP and Codex restarts, unchanged originals and
+extension links, missing config, unknown providers, and Claude/OpenCode pins.
+No browser/provider runs are needed by this regression.
+
+Native review checks the exact model before any prompt; native UI checks every
+provider, including after core recovery and a fresh conversation. Hibernation
+checks the CLI model both before initial input and after wake. Its tmux cleanup
+now uses exact names. The default config discovers native-ui, native-review,
+paired-phone-flows and cheap-model; native specs retain their focused timeout
+budgets. `--list` reports 12 tests across those four specs.
+
+OpenCode's runtime override merges existing inline config while setting both
+`model` and `small_model` to `anthropic/claude-haiku-4-5`, following the
+[official config documentation](https://dev.opencode.ai/docs/config/). This has
+only a config regression check: `command -v opencode` finds no executable here.
+The current bridge obtains the model from transcript rows, leaving a fresh
+session unknown; the new guard blocks prompts in that state. Actual selected
+model observability and OpenCode end-to-end verification remain open.
+
+### Commands and results
+
+All commands below run from `e2e/`; browser runs were headless with the required
+process permissions. No global provider settings or extensions changed.
+
+```sh
+npx playwright test --config=provider-config.config.ts cheap-model.spec.ts --project=chromium
+npx playwright test --list native-ui.spec.ts native-review.spec.ts paired-phone-flows.spec.ts cheap-model.spec.ts
+npx playwright test --config=native-ui.config.ts native-ui.spec.ts -g 'pi:' --project=webkit
+npx playwright test --config=native-review.config.ts -g '(pi|omp|codex):' --project=webkit
+npx playwright test --config=cli-rendering.config.ts agent-hibernation.spec.ts --project=webkit
+npx playwright test --config=native-ui.config.ts native-ui.spec.ts -g '(omp|codex):' --project=webkit
+```
+
+| Check | Result |
+| --- | --- |
+| Synthetic config regression | 1 pass, 241ms suite; failed before fix |
+| Pi native UI / core crash | 1 pass, 18.4s suite (18.1s test) |
+| Pi / OMP / Codex native review | 3 passes, 28.5s suite (9.3s / 10.1s / 8.8s) |
+| OMP / Codex native UI / core crash | 2 passes, 1.1m suite (32.9s / 30.8s) |
+| Claude idle hibernation / same-session wake | 1 pass, 9.5s suite (9.1s test) |
+
+The seven real WebKit checks used Luna or Haiku 4.5, verified before prompts.
+They exercise review ownership/acknowledgement/idempotency, native view changes,
+core restart with the same provider PID and identity, phone control transfer,
+context recall, cancellation and stop. The hibernation case instead verifies the
+old PID exits and a new one resumes the same conversation and recalls its token.
+No Chromium interaction reruns or new full Rust/web suite runs in this test-only
+slice. Standalone e2e typechecking was attempted and stopped at TS2688: Node type
+definitions are not installed in that scope; no new dependency was added.
+
+### Hibernation guard failure and correction
+
+The first run failed before sending its recall prompt: the resumed native UI has
+no model chip. The fixture's retained `SessionStart.event` has `source: resume`
+and no `model`. This is missing telemetry, not evidence of an expensive model.
+The corrected guard checks the resumed CLI's actual `Haiku 4.5` label before
+switching to UI and submitting; it does not infer a model from old messages.
+The retry passed. The native UI still honestly omits the unknown chip after wake.
+
+Artifacts: `e2e/screenshots-cli-rendering/webkit/model-guards-2026-09-22/`.
+This contains screenshots, core logs, native snapshots, the first hibernation
+failure with selected hook fields, and the passed hibernation artifacts.
+Prior artifacts are in `/tmp/perch-model-guards-before-2026-09-22/`.
+Inspected the passed hibernation screenshot (same token recalled, Ready) and the
+Codex phone screenshot (Luna chip, same token, control active, no viewport spill).
+No claim of a full visual audit.
+
+### Still open
+
+The default suite has older cost assumptions: `cli-sync.spec.ts` explicitly sends
+a Sonnet prompt. It was not run. Audit that and other legacy hosted/CLI fixtures
+before the final full suite. OpenCode is unverified as above. V-07/V-10/V-12,
+remote coverage and measured resource budgets remain partial. No commit/push;
+all test handles completed and fixtures cleaned their recorded processes.
+
+
+## Claude native acknowledgement recheck — 2026-09-22 UTC
+
+Verified the newer handoff's acknowledgement fix against the current source
+and rebuilt assets. No production or test source changes in this slice.
+
+### Commands and results
+
+From the repository root:
+
+```sh
+cargo test -p perch-core a_prompt_the_cli_wrapped_in_paste_tags_still_counts_as_submitted
+cargo build -p perch-core
+npm run build
+```
+
+The focused Rust regression passes (1 test); both builds pass. The web build
+still reports its existing large-bundle warning. This is not a new full-suite
+run; previous 274-unit / 223-web totals remain historical evidence.
+
+From `e2e/`, headless with process permissions required for browser startup:
+
+```sh
+npx playwright test --config=native-review.config.ts -g 'claude:' --project=webkit --project=chromium
+npx playwright test --config=native-ui.config.ts native-ui.spec.ts -g 'claude:' --project=webkit --project=chromium
+```
+
+- Review: **2 passed, 21.5s** (Chromium 10.9s, WebKit 10.0s).
+- Native UI: **2 passed, 33.6s** (Chromium 15.1s, WebKit 17.9s).
+
+Both specs pin Claude to `claude-haiku-4-5` through the private fixture env and
+assert the actual selected model before prompting. They stop their own core
+and recorded tmux sessions. No global provider changes, other provider runs,
+commit or push. Initial sandbox launches failed at 0ms (Chromium Mach port
+permission failure; WebKit startup abort), before fixtures or prompts; approved
+escalated headless launches worked. An initial anchored grep `^claude:` matched
+no tests because Playwright matches the full test title; use `claude:` above.
+
+### Observed interactions
+
+Review tests verified two anchored comments, a phone's refused send while
+another viewer owns control, release/retry, the acknowledged delivery banner,
+the assistant's expected acceptance response, and repeated send without an
+extra user turn. Provider PID/session identity and fixture files stayed intact.
+
+Native UI tests verified a file-tool turn, CLI follow-up with the same context,
+UI draft retention and refusal to append to a CLI draft, core crash/restart
+and reload with the same provider PID/session and transcript, phone control
+transfer with desktop input disabled, a phone follow-up, cancellation of a
+running tool, and explicit CLI stop.
+
+Artifacts (screenshots, core logs and native snapshots) are preserved under:
+`e2e/screenshots-cli-rendering/{webkit,chromium}/claude-ack-recheck-2026-09-22/`.
+Prior fixed-name artifacts were copied before running to
+`/tmp/perch-claude-verification-before-2026-09-21/`.
+
+Inspected the WebKit wide/narrow native UI and review screenshots: Haiku model,
+Ready state, expected replies, anchored comments and acknowledged delivery are
+visible. Native UI phone controls fit the viewport; the existing assertion
+also checks document width. The mobile review capture clips long comment text
+inside its horizontally constrained diff area; this run does not prove V-11
+layout completeness. Claude's paste wrapper tags are visible in user messages.
+
+### Remaining scope
+
+These loopback phone contexts do not re-prove LAN pairing, encryption, device
+scopes or every provider. V-07, V-10 and V-12 remain PARTIAL. The default
+Playwright config currently omits native-ui, native-review and paired-phone
+specs (focused configs discover them). Before a final full-suite/provider
+sweep, register missing specs and close cheap-model guard gaps: native-review
+asserts Claude's model only, and native-ui exempts OpenCode. No such unguarded
+provider was run here.
+
+
+## Paired-phone flows and the native Claude acknowledgement — 2026-09-22
+
+### The defect
+
+`native_ui/claude.rs` accepted a prompt only when the `UserPromptSubmit` hook
+reported text byte-identical to what perch had sent:
+
+```rust
+event["prompt"] == payload["text"]
+```
+
+Claude Code **2.1.278** wraps every bracketed paste — which is how
+`prepare_input` submits — in `<pasted_content id="...">` tags with a random id.
+Captured from the installed CLI, for a prompt perch sent bare:
+
+```
+'\n\n<pasted_content id="cafd">\nReply with exactly PHONE_UI_tyrz2w. Do not use tools or modify files.\n</pasted_content id="cafd">\n'
+```
+
+So the match could never succeed and **no prompt perch sent to a native Claude
+session was ever acknowledged**. The 10s window in `native_ui.rs` expired and
+delivery settled `unconfirmed`, which the UI honestly renders as "Delivery
+could not be confirmed. Check the agent conversation before starting another
+review." — for a packet the agent had in fact received and answered.
+
+Acceptance now requires the reported prompt to *contain* the sent text, still
+pinned to the same pid, the same provider session, and a submission newer than
+the stamp taken before the write. The real invariant is that the CLI submitted
+our text; the CLI is free to decorate it, and containment survives the wrapper
+changing shape again. Regression
+`a_prompt_the_cli_wrapped_in_paste_tags_still_counts_as_submitted` uses the
+captured payload and fails against the old check.
+
+Claude-only by construction: Pi/OMP/OpenCode/codex return an explicit
+`NativeEvent::Ack` (`native_ui/mod.rs`), so none of them inferred acceptance
+from a hook payload. This is also why `native-review.spec.ts` recorded a claude
+PASS on 2026-09-15 and would fail now — the CLI changed under us, which no
+perch test would have caught without re-running it.
+
+### Observed
+
+`e2e/paired-phone-flows.spec.ts` (new) drives the two V-10 items
+`device-pairing.spec.ts` cannot: Chat/UI <-> CLI and the review-note packet,
+from a **paired** phone at the LAN origin. Neither is reachable with a
+`/bin/sh` fixture (native UI is a per-provider bridge;
+`server/session.rs::resolve_review_target` refuses a provider without native
+review controls), so it runs real Claude on `claude-haiku-4-5` via
+`cheapModel.ts`, asserting the model chip before either of its two turns.
+
+Observed in a real paired phone context: pairing through the gate; CLI -> Chat/
+UI for the same session with `data-native-pid` set and the cheap-model chip; a
+real UI turn answered; CLI <-> UI round-trip with the same terminal id and an
+unchanged pid; the Git pane; two anchored notes previewing as "2 anchored
+notes"; and, after the fix, the packet delivering:
+
+```json
+{"received":"review.batch.delivery","delivery":"unconfirmed"}   // pre-write settle
+{"received":"review.batch.delivery","delivery":"delivered"}     // acknowledged
+{"received":"review.batch.send.result","delivery":"delivered"}
+```
+
+`unconfirmed` before `delivered` is correct, not a flicker: the row is settled
+before the write and only advances once the CLI reports the submission back.
+
+The spec **passes on WebKit and Chromium** (12.1s / 11.7s) alongside both
+turnbot specs — 6 passed, 46.1s. The post-send conversation is asserted from
+the `agent.ui.snapshot` frames the phone is already subscribed to rather than
+from the DOM: the conversation is server state, and which pane the phone
+happens to be showing is not part of this gate. Screenshots inspected:
+`e2e/screenshots-cli-rendering/{webkit,chromium}/paired-phone-2026-09-22/`.
+Full sweep: 274 unit + 2 protocol tests, 223 web tests, fmt clean, clippy at
+its five baseline warnings, both builds pass.
+
+### Investigations that were wrong
+
+Two mechanisms were proposed for the `unconfirmed` banner and **both were
+falsified**; they are recorded so they are not repeated.
+
+1. *A tty discards writes past `MAX_INPUT`.* A 2.4 KB unchunked `write_all` to
+   a real pty master reached the child complete. A write-chunking change in
+   `terminal.rs` was written, approved and then **reverted** when its own
+   regression test passed with the fix removed.
+2. *The tmux client hop loses large writes.* A 3.5 KB single write through a
+   pty into `tmux attach` delivered 60/60 lines; only the 12 bracketed-paste
+   marker bytes were stripped, by tmux, as expected.
+
+Both rested on an unmeasured premise: the review packet is **~750 bytes**. It
+always reached Claude and always fired `UserPromptSubmit`; only the
+acknowledgement was broken. An intermediate claim in this session that "the
+packet never arrived" was mistaken — it came from reading the hook file
+mid-run, before the send had landed.
+
+### Still open
+
+V-10 stays **PARTIAL**. Closed here: the paired-phone Chat/UI <-> CLI and
+review-note flows, and the acknowledgement defect blocking them. Untouched:
+per-device scope and pairing versioning/rotation (a paired device has the same
+access as a local one), encrypted non-loopback transport (the token crosses a
+LAN in the clear), and QR pairing. V-07 and V-12 scope is unchanged.
+
 ## Honest last-turn review state — 2026-09-21
 
 Closed the V-07 slice the previous checkpoint traced: the review surface could
@@ -2070,7 +2617,7 @@ acceptance, remote compatibility, and the other SPEC gates remain open.
 | V-07 complete Git and agent change review | PARTIAL: the newest turn is now reported honestly (complete/running/unavailable) and stale client state is cleared — see the 2026-09-21 honest-review checkpoint. Implicit-workspace creation refs, the capture-ordering ceiling, the rendered change summary, prompt-acceptance semantics and remote coverage remain open. |
 | V-08 anchored comments and exactly-once review packet | PASS in Chromium for every built-in provider: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership and receipt-confirmed retry, plus **Codex delivery observed 2026-09-15**; WebKit re-confirmation is blocked by the browser-launch failure recorded above |
 | V-09 full host/client recovery | PASS: mixed project/worktree, session, exact pane set, same-PID shell, draft conflict and anchored comment recovery passes three times per engine in Chromium/WebKit; see mixed recovery correction above and provider-specific recovery evidence below. |
-| V-10 paired mobile interaction and reconnect | PARTIAL: live revocation, Origin checks, durable store mutation and paired input identity verified; full phone mode/review flows, pairing management/versioning and encrypted transport remain open. |
+| V-10 paired mobile interaction and reconnect | PARTIAL: live revocation, Origin checks, durable store mutation and paired input identity verified; the paired-phone Chat/UI <-> CLI and review-note flows are observed as of 2026-09-22, along with the native Claude acknowledgement defect that blocked them. Per-device scope, pairing versioning/rotation and encrypted transport remain open. |
 | V-11 populated desktop/mobile visual and interaction QA | PASS: Git, file, terminal and settings surfaces measured per pane at a narrow desktop pane, a wide desktop viewport and 390px — no clipped controls, no horizontal scroll, visible focus, readable status, and no desktop-only dead end (Settings was one; fixed). Screenshots inspected. Focus sampling and contrast limits recorded. |
 | V-12 safe hibernation and resume | PARTIAL: unsafe silence demotion removed; real Claude process release and conversation recall verified. Several-agent, working/blocked/draft/mobile and remote coverage remain open. |
 

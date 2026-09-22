@@ -18,7 +18,7 @@ import * as os from "os";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["cli-rendering.spec.ts", "workspace-terminals.spec.ts", "agent-terminal-ownership.spec.ts", "workspace-recovery.spec.ts", "workspace-review.spec.ts", "agent-turn-review.spec.ts", "agent-hibernation.spec.ts", "device-pairing.spec.ts"],
+  testMatch: ["cli-rendering.spec.ts", "workspace-terminals.spec.ts", "agent-terminal-ownership.spec.ts", "workspace-recovery.spec.ts", "workspace-review.spec.ts", "agent-turn-review.spec.ts", "agent-hibernation.spec.ts", "device-pairing.spec.ts", "paired-phone-flows.spec.ts"],
   outputDir: "artifacts-cli-rendering",
   timeout: 180000,
   workers: 1,

@@ -131,17 +131,14 @@ impl HistoryDb {
         }
     }
 
-    /// Persist the Git metadata for a workspace.  `start_snapshot` is a
-    /// creation boundary: once recorded it is never replaced by a later poll
-    /// or branch switch.  This lets a diff request use the same workspace
-    /// start even after several agent turns or reconnects.
+    /// Refresh live Git metadata, never the creation boundary. A missing
+    /// `start_snapshot` cannot be reconstructed from a later HEAD either.
     pub fn update_workspace_git_state(
         &self,
         workspace_id: &str,
         branch: Option<&str>,
         base_branch: Option<&str>,
         dirty: bool,
-        head: Option<&str>,
     ) -> anyhow::Result<WorkspaceRow> {
         let conn = self.conn.lock().unwrap();
         let changed = conn.execute(
@@ -149,18 +146,13 @@ impl HistoryDb {
              SET branch = COALESCE(?2, branch),
                  base_branch = COALESCE(?3, base_branch),
                  dirty = ?4,
-                 start_snapshot = CASE
-                     WHEN start_snapshot IS NULL THEN ?5
-                     ELSE start_snapshot
-                 END,
-                 updated_at = ?6
+                 updated_at = ?5
              WHERE id = ?1",
             params![
                 workspace_id,
                 branch,
                 base_branch,
                 dirty as i32,
-                head,
                 now_millis()
             ],
         )?;
@@ -225,19 +217,9 @@ impl HistoryDb {
                     "UPDATE workspaces
                      SET branch = COALESCE(?2, branch),
                          base_branch = COALESCE(?3, base_branch),
-                         start_snapshot = CASE
-                             WHEN start_snapshot IS NULL THEN ?4
-                             ELSE start_snapshot
-                         END,
-                         updated_at = ?5
+                         updated_at = ?4
                      WHERE id = ?1",
-                    params![
-                        workspace_id,
-                        branch,
-                        base_branch,
-                        start_snapshot,
-                        now_millis()
-                    ],
+                    params![workspace_id, branch, base_branch, now_millis()],
                 )?;
                 return get_workspace_locked(&conn, &workspace_id)?
                     .ok_or_else(|| anyhow::anyhow!("workspace disappeared"));

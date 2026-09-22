@@ -852,15 +852,6 @@ fn spawn_review_batch_send(
                 return;
             }
         };
-        if crate::native_ui::supported(&agent) {
-            native_ui::send_review(&state, request_id, row, &session_id, &agent).await;
-            return;
-        }
-        let agent = match agent.as_str() {
-            "claude" => AgentKind::Claude,
-            "codex" => AgentKind::Codex,
-            _ => unreachable!("review target validated"),
-        };
         let Some(session) = (match app.db.get_session(&session_id) {
             Ok(session) => session,
             Err(error) => {
@@ -882,6 +873,35 @@ fn spawn_review_batch_send(
                 false,
             );
             return;
+        };
+        // Route by what owns the session, not by what the provider *can* do.
+        // `native_ui::supported` is true for claude and codex, so keying on it
+        // alone sent a Hosted session's packet down the native path, where the
+        // write went to a CLI that does not exist and delivery never settled —
+        // the UI sat on "Waiting for the agent…" forever. A session with no
+        // `cli_provider_id` is Hosted and takes the ordinary prompt path.
+        if session.cli_provider_id.is_some() && crate::native_ui::supported(&agent) {
+            native_ui::send_review(&state, request_id, row, &session_id, &agent).await;
+            return;
+        }
+        let agent = match agent.as_str() {
+            "claude" => AgentKind::Claude,
+            "codex" => AgentKind::Codex,
+            // Reachable now that routing keys on ownership rather than on
+            // provider capability: `target_agent_id` comes from the client,
+            // and a Hosted session can name any provider the target check
+            // allows. Only claude and codex have a hosted runner, so this is
+            // a client error, never a panic.
+            other => {
+                fail(
+                    &out_tx,
+                    request_id,
+                    "review_target_invalid",
+                    format!("{other} has no hosted runner; start its CLI in this session to send review notes."),
+                    false,
+                );
+                return;
+            }
         };
         let payload_digest = prompt_payload_digest(
             &session_id,

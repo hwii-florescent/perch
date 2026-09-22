@@ -38,6 +38,9 @@ function agentScript(release: string): string {
     "while IFS= read -r line; do",
     "  printf 'AGENT_EDIT %s\\n' \"$line\" > src/main.txt",
     "  printf 'AGENT_NEW %s\\n' \"$line\" > agent_new.txt",
+    '  if [ "$line" = "bulk" ]; then',
+    '    n=0; while [ "$n" -lt 511 ]; do printf "bulk\\n" > "bulk-$n.txt"; n=$((n + 1)); done',
+    "  fi",
     `  if [ "$line" = "hang" ]; then`,
     `    while [ ! -f ${release} ]; do sleep 0.2; done`,
     `    rm -f ${release}`,
@@ -278,6 +281,75 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     await selector.selectOption("workingTree");
     await expect(diff).toContainText("HUMAN_AFTER_TURN", { timeout: 15000 });
 
+    if (provider === "turnbot") {
+      const sql = (statement: string) => execFileSync("sqlite3", ["-cmd", ".timeout 5000", path.join(home, "history.sqlite"), statement], { encoding: "utf8" }).trim();
+      const alphaSession = sql("SELECT session_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
+      const firstTerminalId = await terminal.getAttribute("data-terminal-id");
+      await page.getByTestId("tab-new").click();
+      await page.getByTestId("new-session-popover-agent-turnbot").click();
+      await page.getByTestId("project-option-0").click();
+      const secondTerminal = page.locator('[data-testid="persistent-agent-terminal"]:visible').last();
+      await expect(secondTerminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+      await expect(secondTerminal).not.toHaveAttribute("data-terminal-id", firstTerminalId!);
+      await expect(secondTerminal.locator(".xterm-rows")).toContainText("turnbot ready", { timeout: 30_000 });
+      await secondTerminal.locator(".xterm-helper-textarea").pressSequentially("beta");
+      await secondTerminal.locator(".xterm-helper-textarea").press("Enter");
+      await expect(secondTerminal.locator(".xterm-rows")).toContainText("turnbot_done beta");
+      await expect.poll(() => sql("SELECT count(*) FROM agent_change_snapshots WHERE completed = 1;")).toBe("2");
+      const betaSession = sql("SELECT session_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
+      expect(betaSession).not.toBe(alphaSession);
+      await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+      await page.getByTestId("git-refresh").click();
+      await selector.selectOption("lastAgentTurn");
+      await expect(diff).toContainText("AGENT_EDIT beta");
+
+      // Each session's recorded comparison remains reviewable after another
+      // session edits the same files. Switching must discard a path filter too.
+      await page.locator('[data-testid="git-diff-file"]').filter({ hasText: "src/main.txt" }).click();
+      const sessionSelector = page.getByTestId("git-turn-session");
+      const selectTurnFor = async (sessionId: string) => {
+        await sessionSelector.selectOption(sessionId);
+        // selectOption can dispatch for a disabled option. Wait for this
+        // session's status reply before choosing its newly available turn.
+        await expect(option).toHaveJSProperty("disabled", false);
+        await selector.selectOption("lastAgentTurn");
+        await expect(selector).toHaveValue("lastAgentTurn");
+      };
+      await selectTurnFor(alphaSession);
+      await expect(diff).toContainText(BASE_TEXT);
+      await expect(diff).toContainText("AGENT_NEW alpha");
+      await expect(diff).not.toContainText("AGENT_EDIT beta");
+      await page.getByTestId("git-refresh").click();
+      await expect(page.getByText("Reading Git status…", { exact: true })).toHaveCount(0);
+      await expect(diff).not.toContainText("AGENT_EDIT beta");
+      await page.screenshot({ path: testInfo.outputPath("turn-session-desktop.png"), fullPage: true });
+      // A review of alpha belongs to alpha even while beta is the active tab.
+      await page.getByTestId("git-comment-add").first().click();
+      await page.getByTestId("git-comment-body").fill("Review alpha's recorded turn.");
+      await page.getByRole("button", { name: "Add comment", exact: true }).click();
+      await expect.poll(() => sql("SELECT json_extract(comment_json, '$.sessionId') FROM review_comments LIMIT 1;")).toBe(alphaSession);
+
+      // Reload and select the durable session again, then use the same control
+      // on mobile to move between its older turn and the newer workspace turn.
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+      await selectTurnFor(alphaSession);
+      await expect(diff).toContainText(BASE_TEXT);
+      await expect(diff).not.toContainText("AGENT_EDIT beta");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId("mobile-switch").click();
+      await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+      await expect(sessionSelector).toHaveValue(alphaSession);
+      await selector.selectOption("lastAgentTurn");
+      await expect(diff).toContainText("AGENT_NEW alpha");
+      await page.screenshot({ path: testInfo.outputPath("turn-session-mobile.png"), fullPage: true });
+      await selectTurnFor(betaSession);
+      await expect(diff).toContainText("AGENT_EDIT beta");
+      await expect(diff).not.toContainText(BASE_TEXT);
+      await selectTurnFor("");
+      await expect(diff).toContainText("AGENT_EDIT beta");
+    }
+
     expect(errors).toEqual([]);
   } finally {
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
@@ -446,6 +518,33 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await expect(diff).toContainText("AGENT_EDIT beta", { timeout: 15000 });
     expect(sql(`SELECT completed FROM agent_change_snapshots WHERE snapshot_id = '${hangTurn}';`)).toBe("0");
     expect(sql(`SELECT after_head FROM agent_change_snapshots WHERE snapshot_id = '${hangTurn}';`)).toBe("");
+
+    // 5. A large turn keeps a bounded list, but reports its true size after
+    // reload. Legacy capped rows disclose a lower bound rather than 512 exact.
+    await prompt("bulk");
+    await expect(rows).toContainText("turnbot_done bulk", { timeout: 60_000 });
+    await settle("Last agent turn (turnbot)");
+    await selector.selectOption("lastAgentTurn");
+    const summary = page.getByTestId("git-turn-summary");
+    await expect(summary).toContainText("turnbot changed 513 paths");
+    const bulkTurn = sql("SELECT snapshot_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
+    expect(JSON.parse(sql(`SELECT changed_paths_json FROM agent_change_snapshots WHERE snapshot_id = '${bulkTurn}';`))).toHaveLength(512);
+    await expect(diff).toContainText("AGENT_NEW bulk", { timeout: 15_000 });
+    await page.screenshot({ path: testInfo.outputPath("turn-large-count-desktop.png"), fullPage: true });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+    await selector.selectOption("lastAgentTurn");
+    await expect(summary).toContainText("turnbot changed 513 paths");
+    sql(`UPDATE agent_change_snapshots SET after_status = '{}' WHERE snapshot_id = '${bulkTurn}';`);
+    await settle("Last agent turn (turnbot)");
+    await expect(summary).toContainText("turnbot changed at least 512 paths");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("mobile-switch").click();
+    await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+    await selector.selectOption("lastAgentTurn");
+    await expect(summary).toContainText("turnbot changed at least 512 paths");
+    await expect(diff).toContainText("AGENT_NEW bulk", { timeout: 15_000 });
+    await page.screenshot({ path: testInfo.outputPath("turn-large-count-mobile.png"), fullPage: true });
 
     expect(errors).toEqual([]);
   } finally {

@@ -1052,6 +1052,8 @@ export interface GitStatusMessage {
   type: "git.status";
   requestId: string;
   workspaceId: string;
+  /** Restrict lastAgentTurn to this session within the workspace. */
+  sessionId?: string;
   hostId?: string;
   includeIgnored?: boolean;
 }
@@ -1729,6 +1731,8 @@ export interface AgentTurnSummary {
   beforeRef: string;
   afterRef?: string;
   changedPaths: string[];
+  /** Exact total; absent when only the bounded list's lower bound is known. */
+  changedPathCount?: number;
   completedAt?: number;
   /** Absent from a peer predating this field; treat that as `"complete"`. */
   state?: AgentTurnState;
@@ -1740,7 +1744,8 @@ export interface GitStatusResultMessage {
   workspaceId: string;
   status: GitStatus;
   /**
-   * The newest recorded turn here. **Always present**, including as `null`:
+   * The newest recorded turn in the workspace, restricted to the requested
+   * session when supplied. **Always present**, including as `null`:
    * a client caches this between statuses, and only an explicit `null` can
    * tell it the server no longer has a turn to offer. Absent only from a peer
    * predating that guarantee, which must leave any cached summary alone.

@@ -42,7 +42,9 @@ export interface WorkspaceGitReviewState {
   actionState: "idle" | "loading" | "error";
   actionError?: string;
   batchDelivery: ReviewBatchDelivery | null;
-  /** Newest completed agent turn here, reported alongside every status. */
+  /** Session whose latest turn is reviewed; absent means latest across the workspace. */
+  agentSessionId?: string;
+  /** Newest turn in the selected scope, including running/unavailable captures. */
   lastAgentTurn: AgentTurnSummary | null;
 }
 
@@ -250,6 +252,10 @@ export const useWorkspaceGitReviewStore = create<GitReviewStoreState>((set, get)
 
   getWorkspaceActions: (workspaceId) => ({
     refreshStatus: () => get().refreshStatus(workspaceId),
+    selectAgentSession: (sessionId) => {
+      setWorkspace(workspaceId, { agentSessionId: sessionId, lastAgentTurn: null });
+      get().refreshStatus(workspaceId);
+    },
     loadDiff: (target, path, options) => {
       return get().loadDiff(workspaceId, target, path, options);
     },
@@ -276,7 +282,8 @@ export const useWorkspaceGitReviewStore = create<GitReviewStoreState>((set, get)
   refreshStatus: (workspaceId) => {
     const requestId = newRequestId();
     const hostId = hostForWorkspace(workspaceId);
-    const message = withHost({ type: "git.status" as const, requestId, workspaceId, includeIgnored: false }, hostId);
+    const sessionId = get().workspaces[workspaceId]?.agentSessionId;
+    const message = withHost({ type: "git.status" as const, requestId, workspaceId, ...(sessionId ? { sessionId } : {}), includeIgnored: false }, hostId);
     setWorkspace(workspaceId, { statusState: "loading", statusError: undefined });
     return begin(workspaceId, "status", message);
   },
@@ -393,9 +400,13 @@ function sourceRevisionFor(diff: GitDiffSnapshot | null | undefined, path: strin
 
 function sendCreateComment(workspaceId: string, input: { path: string; side: ReviewSide; start: number; end: number; body: string }): void {
   const requestId = newRequestId();
-  const sessionId = usePerchStore.getState().sessionId ?? undefined;
-  const diff = useWorkspaceGitReviewStore.getState().workspaces[workspaceId]?.diff;
+  const workspace = useWorkspaceGitReviewStore.getState().workspaces[workspaceId];
+  const diff = workspace?.diff;
   const base = diff?.target;
+  const turn = workspace?.lastAgentTurn;
+  const sessionId = turn && base?.kind === "compare" && base.base === turn.beforeRef && base.head === turn.afterRef
+    ? turn.sessionId
+    : usePerchStore.getState().sessionId ?? undefined;
   const baseRevision = sourceRevisionFor(diff, input.path, input.side);
   if (!base || !baseRevision) {
     setWorkspace(workspaceId, {
@@ -575,6 +586,12 @@ export function handleGitReviewMessage(message: ServerMessage): boolean {
 
   if (message.type === "git.status.result") {
     const result = message as GitStatusResultMessage;
+    const sessionId = useWorkspaceGitReviewStore.getState().workspaces[result.workspaceId]?.agentSessionId;
+    // Older peers may ignore the session filter. Never label another session
+    // as the selected one, even when that peer still returns a valid turn.
+    const lastAgentTurn = !sessionId || result.lastAgentTurn?.sessionId === sessionId
+      ? result.lastAgentTurn ?? null
+      : null;
     // Only a real `git.status.result` reports the turn, and the action reply
     // below rebuilds this message *without the key*, so an absent key still
     // keeps the last summary we were told about. An explicit `null` is the
@@ -584,7 +601,7 @@ export function handleGitReviewMessage(message: ServerMessage): boolean {
       status: updateStatusFromWire(result),
       statusState: "ready",
       statusError: undefined,
-      ...("lastAgentTurn" in result ? { lastAgentTurn: result.lastAgentTurn ?? null } : {}),
+      ...("lastAgentTurn" in result ? { lastAgentTurn } : {}),
     });
     return true;
   }

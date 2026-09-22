@@ -1,5 +1,100 @@
 # perch — Personal AI IDE / Agent App: Full Plan (Rust / Tauri)
 
+## Session-specific last-turn review and resize ownership — 2026-09-22 UTC
+
+Git status accepts an optional session filter, backed by the existing bounded
+history query. The shared Git pane can select a session's recorded turn after
+another session changes the same files; comments retain the reviewed session.
+The free two-session regression also exposed a blank terminal after remount:
+resize ownership changed without sending the current grid. The shared control
+acquisition now synchronizes dimensions after its lease arrives.
+
+278 core + 2 protocol tests, 223 web tests, builds, format and Clippy (five
+baseline warnings) pass. Both browser engines verify two sessions, reload,
+mobile selection and comment ownership; the running/unavailable/large-count
+checks also pass. Settled wide/narrow screenshots inspected. No paid prompts,
+commit or push. Earlier-turn selection within a session, capture policy,
+remote recording, V-10/V-12 and measured budgets remain open. See the newest
+verification and handoff entries for commands and precise run boundaries.
+
+
+## Large agent-turn summaries retain exact counts — 2026-09-22 UTC
+
+The 512-entry path-list bound no longer becomes a false total in the review
+summary. The core records the full count in existing JSON metadata and exposes
+an optional protocol field; the UI reports an exact total when known and a
+lower bound for old capped records. Real Git/SQLite coverage includes reopen
+and cumulative dirty state; the free shell fixture verifies 513-path summaries,
+reload and legacy fallback in WebKit/Chromium. Core 277 + protocol 2, web 223,
+builds, format and Clippy (five baseline warnings) pass. Settled wide/narrow
+screenshots inspected; no paid calls. V-07 and the full goal remain partial.
+See the verification record for commands, artifacts and limits.
+
+
+## Hosted review delivery and honest workspace starts — 2026-09-22 UTC
+
+Two product defects fixed. A worktree refresh back-filled a missing workspace
+creation ref with today's HEAD and offered it as "Workspace start", a boundary
+the user never had; a refresh now never writes one, and the primary checkout is
+registered with its own before a child can create it without one. `review.batch
+.send` routed by provider capability rather than session ownership, so a Hosted
+session's packet was written to a native CLI it does not own and the delivery
+banner waited forever; it now routes on `cli_provider_id`, and the hosted
+branch's newly-reachable `unreachable!` is a client error instead of a panic.
+
+Closed the longest-standing e2e blocker: "sends two reviewed anchors as one
+packet to the selected real agent" passes on both engines with a real
+`claude-haiku-4-5` turn, having never passed before. Two new DB tests, one
+verified failing against the restored defect; the real-UI regression verified
+failing against the pre-fix binary. Corrected two false `AGENTS.md` claims
+(the tab-bar `+`, and Hosted/CLI being global). Commands, numbers and the
+Playwright `<option>`/`<label>` trap are in `docs/ADE-REWORK-VERIFICATION.md`.
+No commit, no push. V-07/V-10/V-12 and the full goal remain open.
+
+
+## Test model pins survive restart — 2026-09-22 UTC
+
+The shared e2e config overlay silently dropped its cheap-model environment on
+core restart because existing symlinks threw and a catch returned `{}`. It now
+reuses matching links and stops on setup errors. One no-cost regression failed
+before the fix and passes after it. Native review/UI and hibernation enforce
+actual model checks; omitted native/paired-phone specs now appear in default
+Playwright discovery. Seven fresh WebKit interaction tests pass on Luna/Haiku,
+including Pi/OMP/Codex review and crash recovery plus Claude hibernation.
+OpenCode remains unverified; older full-suite model costs still need audit.
+No production source changed. Evidence and limitations are recorded in
+`docs/ADE-REWORK-VERIFICATION.md`. Full goal remains open.
+
+
+## Claude native acknowledgement verification — 2026-09-22 UTC
+
+Rebuilt the current worktree and verified the wrapped-prompt regression plus
+Claude native review and native UI in headless Chromium and WebKit: four
+browser checks pass. Observed acknowledged exactly-once review delivery,
+UI/CLI continuity, core-crash recovery retaining provider identity, phone
+control transfer and cancellation, with Haiku 4.5 checked before prompting.
+No production/test source changes. Artifacts, exact commands and limits are
+in `docs/ADE-REWORK-VERIFICATION.md`; the handoff now marks this recheck done.
+Full goal and V-07/V-10/V-12 remain open.
+
+
+## Paired-phone flows and the native Claude acknowledgement — 2026-09-22
+
+`native_ui/claude.rs` accepted a prompt only when the `UserPromptSubmit` hook
+reported text byte-identical to what perch sent. Claude Code 2.1.278 wraps
+every bracketed paste in `<pasted_content id="...">`, so that match could never
+succeed and **no prompt perch sent to a native Claude session was ever
+acknowledged** — a delivered review packet reported "delivery could not be
+confirmed". Acceptance now requires the reported prompt to contain the sent
+text, still pinned to the same process, provider session and a submission newer
+than the pre-write stamp. Claude-only: other providers return an explicit ack.
+New `e2e/paired-phone-flows.spec.ts` drives the two V-10 flows a fixture
+provider cannot reach — Chat/UI <-> CLI and the review packet — from a paired
+phone at the LAN origin on the cheapest model; it passes on WebKit and
+Chromium. Core: 274 unit + 2 protocol tests; web: 223; fmt, builds and Clippy
+(five baseline warnings) pass. V-10 remains PARTIAL. Details and falsified
+investigations: [handoff.md](handoff.md).
+
 ## Honest last-turn review state — 2026-09-21
 
 The Git surface reports the **newest** recorded turn plus an explicit state

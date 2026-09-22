@@ -21,7 +21,8 @@ export interface WorkspaceGitReviewProps {
   workspaceId: string;
   workspaceName?: string;
   startSnapshot?: string;
-  /** Newest completed agent turn, offered as a diff base. */
+  agentSessionId?: string;
+  /** Newest turn in the selected session or workspace, offered as a diff base. */
   lastAgentTurn?: AgentTurnSummary;
   status: GitStatusSnapshot | null;
   statusState: "idle" | "loading" | "ready" | "error";
@@ -223,6 +224,7 @@ export function WorkspaceGitReview({
   workspaceName,
   startSnapshot,
   lastAgentTurn,
+  agentSessionId,
   status,
   statusState,
   statusError,
@@ -682,6 +684,16 @@ export function WorkspaceGitReview({
                   <option value="compare">Another ref…</option>
                 </select>
               </label>
+              <label className="workspace-git__field">
+                <span>Turn session</span>
+                <select data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
+                  chooseTarget("workingTree");
+                  actions.selectAgentSession(event.target.value || undefined);
+                }}>
+                  <option value="">Latest in workspace</option>
+                  {sessions.map((session) => <option key={session.id} value={session.id}>{session.title} · {session.agent ?? "agent"}</option>)}
+                </select>
+              </label>
               {compareOpen && (
                 <>
                   <label className="workspace-git__field"><span>Base ref</span>
@@ -709,7 +721,8 @@ export function WorkspaceGitReview({
                 ? " · turn in progress, comparing against the working tree"
                 : <>
                     {" changed "}
-                    {lastAgentTurn.changedPaths.length} {lastAgentTurn.changedPaths.length === 1 ? "path" : "paths"}
+                    {lastAgentTurn.changedPathCount === undefined ? "at least " : ""}
+                    {lastAgentTurn.changedPathCount ?? lastAgentTurn.changedPaths.length} {(lastAgentTurn.changedPathCount ?? lastAgentTurn.changedPaths.length) === 1 ? "path" : "paths"}
                     {lastAgentTurn.completedAt ? ` · ${new Date(lastAgentTurn.completedAt).toLocaleTimeString()}` : ""}
                   </>}
             </p>

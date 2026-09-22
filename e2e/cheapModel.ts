@@ -51,7 +51,13 @@ function overlayHome(fixture: string, name: string, real: string, configName: st
     // rejects a symlinked `app-server-control` outright. A private empty
     // directory is what a fixture wants there anyway.
     if (ownDirs.includes(entry)) fs.mkdirSync(path.join(home, entry), { recursive: true, mode: 0o700 });
-    else fs.symlinkSync(path.join(real, entry), path.join(home, entry));
+    else {
+      const target = path.join(real, entry);
+      const link = path.join(home, entry);
+      // Core restart reuses this overlay, including dangling runtime links.
+      if (!fs.lstatSync(link, { throwIfNoEntry: false })) fs.symlinkSync(target, link);
+      else if (fs.readlinkSync(link) !== target) throw new Error(`Unexpected fixture config link: ${link}`);
+    }
   }
   fs.writeFileSync(path.join(home, configName), rewrite(fs.readFileSync(path.join(real, configName), "utf8"), home));
   return home;
@@ -59,44 +65,48 @@ function overlayHome(fixture: string, name: string, real: string, configName: st
 
 /**
  * Environment additions that pin `provider` to its cheapest model for one
- * fixture. Returns `{}` if the config home is missing; callers must verify
- * the actual model before sending any prompt.
+ * fixture. Setup errors stop the fixture; never inherit an expensive default.
+ * Callers must also verify the actual model before sending any prompt.
  */
-export function cheapModelEnv(provider: string, fixture: string): NodeJS.ProcessEnv {
+export function cheapModelEnv(provider: string, fixture: string, userHome = os.homedir()): NodeJS.ProcessEnv {
   if (provider === "claude") return { ANTHROPIC_MODEL: CHEAP_CLAUDE_MODEL };
-  try {
-    if (provider === "pi") {
-      const home = overlayHome(fixture, "pi-agent", path.join(os.homedir(), ".pi", "agent"), "settings.json", (config) =>
-        JSON.stringify({ ...JSON.parse(config), defaultProvider: "openai-codex", defaultModel: CHEAP_CODEX_MODEL, defaultThinkingLevel: "low" }),
-      );
-      return { PI_CODING_AGENT_DIR: home };
-    }
-    if (provider === "codex") {
-      const real = path.join(os.homedir(), ".codex");
-      const home = overlayHome(fixture, "codex-home", real, "config.toml", (config, overlay) =>
-        config
-          .replace(/^model = .*$/m, `model = "${CHEAP_CODEX_MODEL}"`)
-          .replace(/^model_reasoning_effort = .*$/m, 'model_reasoning_effort = "low"')
-          // `[hooks.state]` keys are absolute paths. Left pointing at the real
-          // home they no longer match this home's hooks.json, and codex opens
-          // a blocking "hooks are new or changed" prompt. Repointing them
-          // keeps the user's own hooks and their existing trust decision.
-          .split(`"${real}/hooks.json:`)
-          .join(`"${overlay}/hooks.json:`),
-        ["app-server-control"],
-      );
-      return { CODEX_HOME: home };
-    }
-    if (provider === "omp") {
-      // Every role, so a subagent cannot escape to an expensive model either.
-      const home = overlayHome(fixture, "omp-agent", path.join(os.homedir(), ".omp", "agent"), "config.yml", (config) =>
-        config.replace(/^(\s+\w+): \S+\/\S+$/gm, `$1: openai-codex/${CHEAP_CODEX_MODEL}:low`),
-      );
-      return { PI_CODING_AGENT_DIR: home };
-    }
-  } catch {
-    // No such config home on this machine — the fixture's own provider
-    // assertions still report what the CLI actually used.
+  if (provider === "opencode") {
+    // Runtime override merged by the CLI; user config and plugins stay intact.
+    // https://opencode.ai/docs/config/#inline-config
+    return { OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      ...JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}"),
+      model: `anthropic/${CHEAP_CLAUDE_MODEL}`,
+      small_model: `anthropic/${CHEAP_CLAUDE_MODEL}`,
+    }) };
   }
-  return {};
+  if (provider === "pi") {
+    const home = overlayHome(fixture, "pi-agent", path.join(userHome, ".pi", "agent"), "settings.json", (config) =>
+      JSON.stringify({ ...JSON.parse(config), defaultProvider: "openai-codex", defaultModel: CHEAP_CODEX_MODEL, defaultThinkingLevel: "low" }),
+    );
+    return { PI_CODING_AGENT_DIR: home };
+  }
+  if (provider === "codex") {
+    const real = path.join(userHome, ".codex");
+    const home = overlayHome(fixture, "codex-home", real, "config.toml", (config, overlay) =>
+      config
+        .replace(/^model = .*$/m, `model = "${CHEAP_CODEX_MODEL}"`)
+        .replace(/^model_reasoning_effort = .*$/m, 'model_reasoning_effort = "low"')
+        // `[hooks.state]` keys are absolute paths. Left pointing at the real
+        // home they no longer match this home's hooks.json, and codex opens
+        // a blocking "hooks are new or changed" prompt. Repointing them
+        // keeps the user's own hooks and their existing trust decision.
+        .split(`"${real}/hooks.json:`)
+        .join(`"${overlay}/hooks.json:`),
+      ["app-server-control"],
+    );
+    return { CODEX_HOME: home };
+  }
+  if (provider === "omp") {
+    // Every role, so a subagent cannot escape to an expensive model either.
+    const home = overlayHome(fixture, "omp-agent", path.join(userHome, ".omp", "agent"), "config.yml", (config) =>
+      config.replace(/^(\s+\w+): \S+\/\S+$/gm, `$1: openai-codex/${CHEAP_CODEX_MODEL}:low`),
+    );
+    return { PI_CODING_AGENT_DIR: home };
+  }
+  throw new Error(`No cheap-model pin configured for ${provider}`);
 }

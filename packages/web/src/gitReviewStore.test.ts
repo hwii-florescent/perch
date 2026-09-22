@@ -247,6 +247,30 @@ describe("Git/review request lifecycle", () => {
     // across a failed capture must not keep offering the stale comparison.
     expect(status(actions.refreshStatus()!, { lastAgentTurn: null })).toBe(true);
     expect(cached()).toBeNull();
+
+    // Changing session clears the old turn immediately, supersedes in-flight
+    // replies, and keeps the filter on later automatic/manual refreshes.
+    const oldRequest = actions.refreshStatus()!;
+    actions.selectAgentSession("session-other");
+    expect(request("git.status").sessionId).toBe("session-other");
+    status(oldRequest, { lastAgentTurn: turn });
+    expect(cached()).toBeNull();
+    // An older host can ignore the optional filter: don't misattribute its turn.
+    status(actions.refreshStatus()!, { lastAgentTurn: turn });
+    expect(cached()).toBeNull();
+    const otherTurn = { ...turn, sessionId: "session-other" };
+    status(actions.refreshStatus()!, { lastAgentTurn: otherTurn });
+    expect(cached()).toEqual(otherTurn);
+    expect(request("git.status").sessionId).toBe("session-other");
+    useWorkspaceGitReviewStore.setState((state) => ({ workspaces: {
+      ...state.workspaces,
+      "workspace-test": { ...state.workspaces["workspace-test"]!, diff: diffSnapshot({ kind: "compare", base: otherTurn.beforeRef, head: otherTurn.afterRef }, "turn-revision") },
+    } }));
+    actions.createComment({ path: "src/main.txt", side: "new", start: 1, end: 1, body: "For the reviewed turn." });
+    expect(request("review.create").sessionId).toBe("session-other");
+    actions.selectAgentSession();
+    expect(request("git.status").sessionId).toBeUndefined();
+    expect(cached()).toBeNull();
   });
 
   it("loads server-provided refs without clearing an existing action error", () => {

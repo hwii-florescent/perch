@@ -485,6 +485,10 @@ pub struct AgentTurnSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_ref: Option<String>,
     pub changed_paths: Vec<String>,
+    /// Exact total, independent of the bounded path list. Missing for older
+    /// capped records: the list length is only a lower bound in that case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_path_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
     /// Defaulted so a peer predating this field still parses as a finished
@@ -1124,6 +1128,9 @@ pub enum ClientMessage {
     GitStatus {
         request_id: String,
         workspace_id: String,
+        /// Restrict lastAgentTurn to this session within the workspace.
+        #[serde(default)]
+        session_id: Option<String>,
         #[serde(default)]
         host_id: Option<String>,
         #[serde(default)]
@@ -1769,7 +1776,8 @@ pub enum ServerMessage {
         request_id: String,
         workspace_id: String,
         status: GitStatus,
-        /// The newest recorded agent turn in this workspace, so the review
+        /// The newest recorded agent turn in this workspace (restricted to
+        /// the requested session when supplied), so the review
         /// surface can offer its boundary as a diff base without a second
         /// request family. **Always serialized**, including as `null`: a
         /// client caches this between statuses, and only an explicit `null`

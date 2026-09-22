@@ -13,6 +13,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { createHostedSession } from "./hostedSession";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -44,7 +45,7 @@ function git(args: string[]): void {
   });
 }
 
-function prepareFixture(): void {
+function prepareFixture(initialCommit = true): void {
   // A new repository needs a new durable workspace identity. Recreating one
   // path across tests leaves the previous test's immutable start ref behind.
   FIXTURE_ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `perch-e2e-review-${RUN_ID}-`)));
@@ -55,6 +56,7 @@ function prepareFixture(): void {
   git(["-c", "core.hooksPath=/dev/null", "init", "-q", "-b", "main"]);
   git(["-c", "core.hooksPath=/dev/null", "config", "user.name", "perch e2e"]);
   git(["-c", "core.hooksPath=/dev/null", "config", "user.email", "e2e@perch.test"]);
+  if (!initialCommit) return;
   git(["add", RELATIVE_FILE]);
   git(["commit", "-q", "-m", "initial"]);
 
@@ -75,6 +77,7 @@ async function dismissOnboarding(page: Page): Promise<void> {
   if (await dismiss.count()) await dismiss.click();
 }
 
+
 async function openReview(page: Page, creation: "project" | "session" = "project"): Promise<string> {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await dismissOnboarding(page);
@@ -84,24 +87,7 @@ async function openReview(page: Page, creation: "project" | "session" = "project
     // Exercise the session-create protocol without launching a paid CLI turn.
     // All comparison/comment/reload/mobile steps below still use the real UI.
     PROJECT_NAME = path.basename(FIXTURE_ROOT);
-    await page.evaluate(async (cwd) => {
-      const sessionId = await new Promise<string>((resolve, reject) => {
-        const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}/ws`);
-        const timer = setTimeout(() => { socket.close(); reject(new Error("session.create timed out")); }, 15000);
-        socket.onopen = () => socket.send(JSON.stringify({ type: "session.create", cwd }));
-        socket.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          if (message.type === "session.created" || message.type === "error") {
-            clearTimeout(timer);
-            socket.close();
-            if (message.type === "error") reject(new Error(message.message));
-            else resolve(message.sessionId);
-          }
-        };
-      });
-      localStorage.setItem("perch.sessionId", sessionId);
-    }, FIXTURE_ROOT);
-    await page.reload({ waitUntil: "networkidle" });
+    await createHostedSession(page, FIXTURE_ROOT);
   } else {
     const emptyAdd = page.getByTestId("workspace-empty-add");
     if (await emptyAdd.count()) await emptyAdd.click();
@@ -221,6 +207,21 @@ async function latestCreate(page: Page, body: string): Promise<WireMessage> {
   return result;
 }
 
+/**
+ * Assert whether the "Workspace start" target is offered.
+ *
+ * Playwright's disabled/enabled matchers are useless on this option: it
+ * computes an `<option>`'s state as *enabled* whenever the `<select>` sits
+ * inside a `<label>`, which this toolbar's does, so both matchers pass no
+ * matter what the page renders. Read the DOM property the browser actually
+ * holds, plus the label the user reads.
+ */
+async function expectWorkspaceStartOffered(page: Page, recorded: boolean): Promise<void> {
+  const option = page.getByTestId("git-diff-target").locator('option[value="workspaceStart"]');
+  await expect(option).toHaveJSProperty("disabled", !recorded);
+  await expect(option).toHaveText(recorded ? "Workspace start" : "Workspace start (not recorded)");
+}
+
 test.describe("Workspace Git/review UI", () => {
   test("sends two reviewed anchors as one packet to the selected real agent", async ({ page }, testInfo) => {
     test.setTimeout(180000);
@@ -230,18 +231,22 @@ test.describe("Workspace Git/review UI", () => {
       const workspaceId = await openReview(page);
       const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
       await project.locator(".workspace-entry__button").click();
-      await page.getByTestId("tab-new").click();
-      await expect(page.locator(".chat__input textarea")).toBeVisible();
+      // The session must be bound to *this* workspace, or the review dropdown
+      // below is rightly empty and the packet has nowhere to go.
+      const targetSessionId = await createHostedSession(page, FIXTURE_ROOT);
+      await expect(page.locator(".chat__input textarea")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("model-chip").click();
       await page.getByTestId("agent-option-claude").click();
       await page.getByTestId("model-option-claude-haiku-4-5").click();
+      // Standing rule: prove the cheap model is the selected one before any
+      // paid turn, rather than trusting the click that selected it.
+      await expect(page.getByTestId("model-chip")).toHaveText(/Claude · Haiku 4\.5/);
       const readyMarker = `REVIEW_READY_${RUN_ID}`;
       await page.locator(".chat__input textarea").fill(`Reply with exactly ${readyMarker}. Do not use tools or modify files.`);
       await page.locator(".chat__send").click();
       await expect(page.locator(".message--assistant").filter({ hasText: readyMarker })).toBeVisible({ timeout: 90000 });
       await expect(page.locator(".chat__stop")).toHaveCount(0, { timeout: 30000 });
-      const targetSessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-      expect(targetSessionId).toBeTruthy();
+      expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(targetSessionId);
 
       await project.getByTestId(`workspace-git-${workspaceId}`).click();
       await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT, { timeout: 15000 });
@@ -257,7 +262,11 @@ test.describe("Workspace Git/review UI", () => {
       await first.getByRole("button", { name: "Resolve", exact: true }).click();
       await first.getByRole("button", { name: "Reopen", exact: true }).click();
       await expect(first).toContainText("unresolved");
-      await page.getByLabel("Send to agent session").selectOption(targetSessionId!);
+      // Offered at all means the session really is bound to this workspace;
+      // selectOption alone reports only "did not find some options".
+      const sendTo = page.getByLabel("Send to agent session");
+      await expect(sendTo.locator(`option[value="${targetSessionId}"]`)).toHaveCount(1, { timeout: 15000 });
+      await sendTo.selectOption(targetSessionId);
       const receipt = `REVIEW_RECEIVED_${RUN_ID}`;
       await page.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If this packet includes both the worktree and index notes, reply with exactly ${receipt}.`);
       await page.getByTestId("git-review-preview").click();
@@ -388,6 +397,34 @@ test.describe("Workspace Git/review UI", () => {
     }
   });
 
+  test("worktree refresh cannot invent a workspace start after the first commit", async ({ page }, testInfo) => {
+    prepareFixture(false);
+    try {
+      const workspaceId = await openReview(page);
+      await expectWorkspaceStartOffered(page, false);
+      git(["add", RELATIVE_FILE]);
+      git(["commit", "-q", "-m", "first commit after registration"]);
+      fs.writeFileSync(REVIEW_FILE, `${WORKTREE_TEXT}\n`);
+      const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
+      await project.getByRole("button", { name: "Git worktrees", exact: true }).click();
+      const menu = page.getByRole("dialog", { name: "Git worktrees", exact: true });
+      await expect(menu.getByTestId(`worktree-entry-${FIXTURE_ROOT}`)).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await page.getByTestId("git-refresh").click();
+      await page.getByTestId("git-diff-target").selectOption("head");
+      await expect(page.getByTestId("git-diff")).toContainText(HEAD_TEXT);
+      await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT);
+      await expectWorkspaceStartOffered(page, false);
+      await page.reload({ waitUntil: "networkidle" });
+      await project.getByTestId(`workspace-git-${workspaceId}`).click();
+      await expectWorkspaceStartOffered(page, false);
+      await page.screenshot({ path: testInfo.outputPath("workspace-start-unavailable.png"), fullPage: true });
+    } finally {
+      removeFixture();
+    }
+  });
+
   for (const creation of ["project", "session"] as const) {
     test(`${creation} workspace start keeps its creation ref across commits, reload and mobile review`, async ({ page }, testInfo) => {
       prepareFixture();
@@ -398,7 +435,7 @@ test.describe("Workspace Git/review UI", () => {
         const workspaceId = await openReview(page, creation);
         const selector = page.getByTestId("git-diff-target");
         const diff = page.getByTestId("git-diff");
-        await expect(selector.locator('option[value="workspaceStart"]')).toBeEnabled();
+        await expectWorkspaceStartOffered(page, true);
         await selector.selectOption("workspaceStart");
         await expect(diff).toContainText(HEAD_TEXT);
         await expect(diff).toContainText(WORKTREE_TEXT);

@@ -78,6 +78,7 @@ export interface ReviewTargetSession {
 
 export interface WorkspaceGitReviewActions {
   refreshStatus: () => string | null;
+  selectAgentSession: (sessionId?: string) => void;
   loadDiff: (target: GitDiffTarget, path?: string, options?: { includeUntracked: boolean; ignoreWhitespace: boolean; contextLines: number }) => string | null;
   stage: (paths: string[]) => void;
   unstage: (paths: string[]) => void;

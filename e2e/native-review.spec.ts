@@ -4,9 +4,11 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { cheapModelEnv } from "./cheapModel";
+import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
+  test.setTimeout(180_000);
+  const expectedModel = provider === "claude" || provider === "opencode" ? CHEAP_CLAUDE_MODEL : CHEAP_CODEX_MODEL;
   const root = path.resolve(__dirname, "..");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-review-"));
   const fixture = path.join(scratch, "workspace"); fs.mkdirSync(fixture);
@@ -90,6 +92,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await toggle.click();
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
+    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
     const pid = await ui.getAttribute("data-native-pid");
     expect(nativeKey!.workspaceId).toBe(workspaceId);
     await ui.getByTestId("native-cli-composer").fill("Reply READY only. Do not use tools or modify files.");

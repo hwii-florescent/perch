@@ -78,6 +78,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
         setControlling(owned);
         updateInput();
       },
+      () => ({ cols: created.term.cols, rows: created.term.rows }),
     );
     binding.current = opened;
     opened.ready.then(async () => {

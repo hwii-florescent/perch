@@ -83,6 +83,7 @@ fn spawn_git_status(
     state: &Arc<ConnState>,
     request_id: String,
     workspace_id: String,
+    session_id: Option<String>,
     include_ignored: bool,
 ) {
     let app = state.app.clone();
@@ -98,7 +99,8 @@ fn spawn_git_status(
             .await
         {
             Ok(status) => {
-                let last_agent_turn = agent_history::last_agent_turn(&app, &workspace_id);
+                let last_agent_turn =
+                    agent_history::last_agent_turn(&app, &workspace_id, session_id.as_deref());
                 let _ = out_tx.send(ServerMessage::GitStatusResult {
                     request_id,
                     workspace_id,
@@ -581,13 +583,14 @@ pub(super) fn handle_git_status(
     raw_text: &str,
     request_id: String,
     workspace_id: String,
+    session_id: Option<String>,
     host_id: Option<String>,
     include_ignored: bool,
 ) {
     if route_git_review_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
     }
-    spawn_git_status(state, request_id, workspace_id, include_ignored);
+    spawn_git_status(state, request_id, workspace_id, session_id, include_ignored);
 }
 
 pub(super) fn handle_git_refs(

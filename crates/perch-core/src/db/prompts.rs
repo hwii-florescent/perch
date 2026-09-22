@@ -430,13 +430,18 @@ impl HistoryDb {
 
     /// Return completed and in-flight turn boundaries newest first.  The
     /// caller supplies a small limit; this method never exposes an unbounded
-    /// history slice to a UI reconnect.
+    /// history slice to a UI reconnect. Filter by session before applying the
+    /// limit, so other sessions cannot crowd out its newest turn.
     pub fn list_agent_change_snapshots(
         &self,
         workspace_id: &str,
+        session_id: Option<&str>,
         limit: usize,
     ) -> anyhow::Result<Vec<AgentChangeSnapshotRow>> {
         validate_agent_snapshot_identity(workspace_id, "workspace")?;
+        if let Some(session_id) = session_id {
+            validate_agent_snapshot_identity(session_id, "session")?;
+        }
         let limit = limit.min(MAX_AGENT_CHANGE_PATHS);
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -445,13 +450,13 @@ impl HistoryDb {
                     after_head, after_branch, after_status, after_paths_json,
                     changed_paths_json, completed, created_at, completed_at
              FROM agent_change_snapshots
-             WHERE workspace_id = ?1
+             WHERE workspace_id = ?1 AND (?2 IS NULL OR session_id = ?2)
              ORDER BY created_at DESC, snapshot_id DESC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
         let rows = stmt
             .query_map(
-                params![workspace_id, limit as i64],
+                params![workspace_id, session_id, limit as i64],
                 agent_change_snapshot_row_from_row,
             )?
             .collect::<Result<Vec<_>, _>>()?;

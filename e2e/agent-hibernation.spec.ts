@@ -104,6 +104,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     // One real (tiny) turn: `claude --resume` needs a conversation to resume,
     // and an agent that has never been prompted has none. This is also what
     // makes the resume claim meaningful — there is something to come back to.
+    await expect(cli.locator(".xterm-rows")).toContainText(/Haiku 4\.5/);
     const input = cli.locator(".xterm-helper-textarea");
     await input.pressSequentially("Reply with exactly: PERCH_READY", { delay: 10 });
     await input.press("Enter");
@@ -162,6 +163,9 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     if (await resumeButton.isVisible().catch(() => false)) await resumeButton.click();
     await expect(resumed).toHaveAttribute("data-terminal-id", /.+/, { timeout: 60_000 });
     await expect(resumed.locator(".xterm-rows")).toContainText(/Claude Code/, { timeout: 60_000 });
+    // Claude's resume SessionStart hook omits `model`; verify the live CLI's
+    // selected model before the recall prompt instead of trusting old history.
+    await expect(resumed.locator(".xterm-rows")).toContainText(/Haiku 4\.5/);
     const awake = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(awake.state, "a woken agent is not still sleeping").not.toBe("sleeping");
     expect(awake.providerSessionId, "wake resumed the same provider session").toBe(providerSessionId);
@@ -193,7 +197,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     }
     const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
     for (const name of ownedTmux) {
-      try { execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" }); } catch { /* already stopped */ }
+      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already stopped */ }
     }
     fs.rmSync(fixture, { recursive: true, force: true });
   }

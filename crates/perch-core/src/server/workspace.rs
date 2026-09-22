@@ -283,15 +283,14 @@ pub(super) fn effective_focus(
 /// Whether a stored workspace row already reflects `entry`, so registering it
 /// again would write nothing. Mirrors the SQL in `create_worktree_workspace`
 /// and `update_workspace_git_state`: `branch`/`base_branch` are `COALESCE`d
-/// (a `None` never clears a stored value), `start_snapshot` is first-write-
-/// wins, and `dirty` is a plain overwrite.
+/// (a `None` never clears a stored value) and `dirty` is a plain overwrite.
+/// Refreshing a checkout never changes its recorded or missing creation ref.
 fn workspace_matches_worktree(
     row: &crate::db::WorkspaceRow,
     entry: &crate::worktree::WorktreeInfo,
 ) -> bool {
     let branch_current = entry.branch.is_none() || entry.branch == row.branch;
-    let snapshot_current = row.start_snapshot.is_some() || entry.head.is_none();
-    branch_current && snapshot_current && row.dirty == entry.is_dirty
+    branch_current && row.dirty == entry.is_dirty
 }
 
 /// Register every checkout in `listing` as a workspace under the repo's
@@ -318,6 +317,13 @@ fn register_worktree_listing(
         .into_iter()
         .map(|row| (row.path.clone(), row))
         .collect();
+    // Record the primary checkout's boundary before a child can implicitly
+    // create it without a ref. Existing workspaces, including missing refs,
+    // stay untouched; listing order need not put the primary checkout first.
+    if !known.contains_key(&crate::db::canonical_path_for_host("local", &primary.path)) {
+        app.db
+            .create_project("local", &primary.path, None, primary.head.as_deref())?;
+    }
     let mut workspaces = Vec::new();
     for entry in &listing.worktrees {
         let path = crate::db::canonical_path_for_host("local", &entry.path);
@@ -328,6 +334,10 @@ fn register_worktree_listing(
             workspaces.push(workspace_to_wire(current.clone()));
             continue;
         }
+        // An entry absent from `known` is registered now, so its current
+        // head is the honest registration boundary — the same rule
+        // `project.create` follows. Only a row that already exists keeps
+        // whatever boundary it was given, including none.
         let workspace = app.db.create_worktree_workspace(
             "local",
             &primary.path,
@@ -341,7 +351,6 @@ fn register_worktree_listing(
             entry.branch.as_deref(),
             None,
             entry.is_dirty,
-            entry.head.as_deref(),
         )?;
         let project = app
             .db
@@ -976,9 +985,9 @@ mod worktree_registration_tests {
             &row(Some("feat"), true, Some("sha1")),
             &info(None, true, Some("sha1"))
         ));
-        // start_snapshot is first-write-wins: unset + a head still needs it,
-        // already set never changes again.
-        assert!(!workspace_matches_worktree(
+        // Missing and recorded creation refs are both immutable; a new HEAD
+        // alone must not turn this read path into a metadata write.
+        assert!(workspace_matches_worktree(
             &row(Some("feat"), true, None),
             &info(Some("feat"), true, Some("sha1"))
         ));

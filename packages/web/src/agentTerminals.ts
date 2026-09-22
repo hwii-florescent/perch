@@ -105,6 +105,7 @@ export function openAgentTerminal(
   onReady: (terminalId: string, status: AgentLifecycleStatus, replay: string) => void,
   onData: (data: string) => void,
   onStatus: (status: AgentLifecycleStatus, controlling: boolean) => void,
+  dimensions: () => { cols: number; rows: number } = () => ({ cols, rows }),
 ) {
   const viewId = newId();
   let terminalId: string | undefined;
@@ -154,7 +155,16 @@ export function openAgentTerminal(
   }, releaseRemote);
   return {
     ready, release,
-    takeControl: async () => { await control("input", true); await control("resize", true); },
+    takeControl: async () => {
+      await control("input", true);
+      await control("resize", true);
+      // The local fit may predate this lease, so it will not emit another
+      // resize just because control changed. Synchronize the current grid.
+      if (!released && terminalId) {
+        const size = dimensions();
+        resizeAgentTerminal(terminalId, size.cols, size.rows);
+      }
+    },
     releaseControl: async () => { await control("resize", false); await control("input", false); },
     stop: () => { if (terminalId && views.get(terminalId)?.leases.input) socket.send({ type: "terminal.kill", terminalId }); },
   };
