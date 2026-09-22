@@ -54,7 +54,7 @@
  *
  * All tests are headless. P2-P4 run real agent turns against corp's GenAI
  * proxy and are inherently slow — they use the suite's existing
- * running-dot wait idiom (`.session-item--active .session-status--running`
+ * composer wait idiom (`.chat__cancel`
  * visible then not-visible), never a fixed `waitForTimeout` sleep for
  * turn completion. P1 has no agent turn in its critical path so it stays
  * fast and reliable; the settling waits it does use are for popover
@@ -68,13 +68,15 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { createHostedSession } from "./hostedSession";
+import { CHEAP_CLAUDE_MODEL, CHEAP_CODEX_MODEL } from "./cheapModel";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as zlib from "zlib";
 
 const BASE_URL = "http://127.0.0.1:7799";
-const MODEL_HAIKU = "claude-haiku-4-5";
+const MODEL_HAIKU = CHEAP_CLAUDE_MODEL;
 
 // ---------------------------------------------------------------------------
 // Shared helpers (same conventions as chat-ui.spec.ts / sessions.spec.ts /
@@ -88,38 +90,15 @@ async function freshPage(page: Page): Promise<void> {
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }
 
-/** Opens a fresh "No project" session (blank, in-memory only until the first
- * message — see sessions.spec.ts S1/S2) and waits for the composer to be
- * ready. */
+/** Hosted sessions are created directly; the launcher creates CLI sessions. */
 async function seedNoProjectSession(page: Page): Promise<void> {
   await freshPage(page);
-  const newBtn = page.locator('[data-testid="new-session-local"]');
-  await expect(newBtn).toBeEnabled({ timeout: 10000 });
-  await newBtn.click();
-  const noneOpt = page.locator('[data-testid="project-option-none"]');
-  await expect(noneOpt).toBeVisible({ timeout: 5000 });
-  await noneOpt.click();
-  await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
-  await expect(page.locator(".chat__input textarea")).toBeEnabled({ timeout: 10000 });
+  await createHostedSession(page, os.tmpdir());
 }
 
-/** Opens a session rooted at `cwd` via the picker's "type a path" mode
- * (dir-browser-mode-toggle → project-path-input → dir-browser-use). The
- * server requires the directory to already exist (`SessionCreate` checks
- * `Path::is_dir()`), so callers must have created `cwd` first. */
 async function seedSessionAtPath(page: Page, cwd: string): Promise<void> {
   await freshPage(page);
-  const newBtn = page.locator('[data-testid="new-session-local"]');
-  await expect(newBtn).toBeEnabled({ timeout: 10000 });
-  await newBtn.click();
-  await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible({ timeout: 5000 });
-  await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-  const pathInput = page.locator('[data-testid="project-path-input"]');
-  await expect(pathInput).toBeVisible({ timeout: 5000 });
-  await pathInput.fill(cwd);
-  await page.locator('[data-testid="dir-browser-use"]').click();
-  await expect(pathInput).not.toBeVisible({ timeout: 5000 });
-  await expect(page.locator(".chat__input textarea")).toBeEnabled({ timeout: 10000 });
+  await createHostedSession(page, cwd);
 }
 
 /** Select agent + model via the ModelChip popover (same helper shape as
@@ -130,29 +109,17 @@ async function selectAgentModel(page: Page, agentId: string, modelId: string): P
   await chip.click();
   await page.locator(`[data-testid="agent-option-${agentId}"]`).click();
   await page.locator(`[data-testid="model-option-${modelId}"]`).click();
-}
-
-/** Select an agent and whatever its first (best/default) model option is,
- * without hardcoding a codex model id — the codex catalogue is read from
- * `~/.codex/model-catalog.json` at boot and this suite has no reason to
- * assume a specific slug is present on the machine running it. */
-async function selectAgentFirstModel(page: Page, agentId: string): Promise<void> {
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
   await chip.click();
-  await page.locator(`[data-testid="agent-option-${agentId}"]`).click();
-  const options = page.locator('[data-testid^="model-option-"]');
-  await expect(options.first()).toBeVisible({ timeout: 10000 });
-  await options.first().click();
+  await expect(page.getByTestId(`model-option-${modelId}`)).toHaveClass(/model-chip__model-btn--active/);
+  await page.keyboard.press("Escape");
 }
 
-/** Wait for a turn's running indicator to appear then clear — the suite's
- * standard "a real agent turn finished" idiom (chat-ui.spec.ts, sessions.spec.ts,
- * models.spec.ts all use this exact pattern instead of a fixed sleep). */
+/** Wait for a turn to start then finish: the composer shows Stop only while a
+ * message is streaming (the old sidebar running dot is retired). */
 async function waitForTurn(page: Page, runningTimeout = 20000, doneTimeout = 90000): Promise<void> {
-  const runningDot = page.locator(".session-item--active .session-status--running");
-  await expect(runningDot).toBeVisible({ timeout: runningTimeout });
-  await expect(runningDot).not.toBeVisible({ timeout: doneTimeout });
+  const stop = page.locator(".chat__cancel");
+  await expect(stop).toBeVisible({ timeout: runningTimeout });
+  await expect(stop).toHaveCount(0, { timeout: doneTimeout });
 }
 
 async function isCliAvailable(bin: "claude" | "codex"): Promise<boolean> {
@@ -451,7 +418,7 @@ test.describe("chat-power: slash autocomplete, plan mode, attachments, codex eff
     }
 
     await seedNoProjectSession(page);
-    await selectAgentFirstModel(page, "codex");
+    await selectAgentModel(page, "codex", CHEAP_CODEX_MODEL);
 
     const effortChip = page.locator('[data-testid="effort-chip"]');
     await expect(effortChip).toBeVisible({ timeout: 10000 });
@@ -469,7 +436,7 @@ test.describe("chat-power: slash autocomplete, plan mode, attachments, codex eff
     // Turn completed and the session status is back to idle: the running
     // dot's disappearance in waitForTurn already proves this, and there must
     // be no lingering running indicator anywhere for this session.
-    await expect(page.locator(".session-item--active .session-status--running")).toHaveCount(0);
+    await expect(page.locator(".chat__cancel")).toHaveCount(0);
 
     const lastBubble = page.locator(".message--assistant").last();
     await expect(lastBubble).toBeVisible({ timeout: 10000 });

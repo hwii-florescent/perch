@@ -6,8 +6,8 @@
  * -----
  * A3 "model selector follows session switch":
  *   Create two sessions. In session 1, run a hosted turn with claude-haiku-4-5.
- *   Switch to session 2, change the model chip to a different model, run
- *   nothing. Switch back to session 1 → assert the chip shows claude-haiku-4-5.
+ *   Switch to session 2 and run a Hosted turn with GPT-5.6 Luna. Switch back
+ *   to session 1 and assert the chip shows claude-haiku-4-5.
  *
  * A2 "dead CLI PTY respawns":
  *   In a session that has a completed claude turn (from A3), toggle into CLI
@@ -30,50 +30,22 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as os from "node:os";
+import { createHostedSession, sendAndWaitForReply } from "./hostedSession";
+import { CHEAP_CLAUDE_MODEL, CHEAP_CODEX_MODEL } from "./cheapModel";
 
 const BASE_URL = "http://127.0.0.1:7799";
-const MODEL_HAIKU = "claude-haiku-4-5";
-const MODEL_SONNET = "claude-sonnet-5";
+const MODEL_HAIKU = CHEAP_CLAUDE_MODEL;
+const MODEL_LUNA = CHEAP_CODEX_MODEL;
 
-// Chat mode (Hosted/CLI) moved from a per-chat footer toggle to a global,
-// server-persisted setting (~/.perch/settings.json, like `theme`) — see
-// SettingsModal.tsx's ChatModeSection. It is NOT scoped to the e2e-isolated
-// db/hosts paths, so a spec that flips it must restore "hosted" (the app
-// default) afterward or every later spec's chat pane breaks. Mirrors
-// theme.spec.ts's resetTheme() convention.
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
-
-function resetChatMode(): void {
-  try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    data.chatMode = "hosted";
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
-  } catch {
-    // Malformed file — leave it alone rather than destroy real settings.
-  }
-}
-
-/** Open Settings, flip the global Chat Mode toggle to `mode` (no-op if
- * already there), and close the modal. Replaces the old per-chat
- * `.mode-switch` footer toggle that lived directly in the chat pane. */
+/** Mode is per session; never rewrite the user's global settings for a test. */
 async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
-  await page.locator('[data-testid="settings-gear"]').click();
-  const modal = page.locator('[data-testid="settings-modal"]');
-  await expect(modal).toBeVisible({ timeout: 8000 });
-  const toggle = page.locator('[data-testid="settings-chat-mode"]');
-  await expect(toggle).toBeVisible({ timeout: 5000 });
+  const toggle = page.getByTestId("session-mode-toggle");
+  await expect(toggle).toBeEnabled({ timeout: 15_000 });
+  await page.getByTestId("session-mode-scope").selectOption("session");
   const wantChecked = mode === "cli" ? "true" : "false";
-  if ((await toggle.getAttribute("aria-checked")) !== wantChecked) {
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", wantChecked, { timeout: 3000 });
-  }
-  await page.keyboard.press("Escape");
-  await expect(modal).not.toBeVisible({ timeout: 5000 });
+  if (await toggle.getAttribute("aria-checked") !== wantChecked) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", wantChecked);
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +55,9 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
   test.describe.configure({ mode: "serial" });
 
   let claudeAvailable = false;
-  let multipleModels = false;
+  let codexAvailable = false;
 
   test.beforeAll(async () => {
-    resetChatMode();
     const { execSync } = await import("child_process");
     try {
       execSync("which claude", { encoding: "utf8" });
@@ -94,11 +65,10 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     } catch {
       claudeAvailable = false;
     }
-    multipleModels = MODEL_HAIKU !== MODEL_SONNET;
-  });
-
-  test.afterAll(() => {
-    resetChatMode();
+    try {
+      execSync("which codex", { encoding: "utf8" });
+      codexAvailable = true;
+    } catch { codexAvailable = false; }
   });
 
   // ---------------------------------------------------------------------------
@@ -110,6 +80,7 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await chip.click();
     await page.locator(`[data-testid="agent-option-${agentId}"]`).click();
     await page.locator(`[data-testid="model-option-${modelId}"]`).click();
+    await assertChipModel(page, modelId);
   }
 
   /** Assert that the model chip displays the given model id's label (or the id itself). */
@@ -130,25 +101,11 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
   // ---------------------------------------------------------------------------
   async function freshSession(page: Page): Promise<void> {
     await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
-    await page.reload({ waitUntil: "networkidle" });
-    await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-    // With lazy DB insert the sidebar may have zero session items on a fresh DB —
-    // do NOT wait for .session-item here.
-    await expect(page.locator('[data-testid="model-chip"]')).toBeVisible({ timeout: 15000 });
+    await createHostedSession(page, os.tmpdir());
   }
 
-  // ---------------------------------------------------------------------------
-  // Helper: create a session via picker (new-session-local → project-option-none)
-  // ---------------------------------------------------------------------------
-  async function createSessionViaPicker(page: Page): Promise<void> {
-    const newBtn = page.locator('[data-testid="new-session-local"]');
-    await expect(newBtn).toBeEnabled({ timeout: 10000 });
-    await newBtn.click();
-    const noneOpt = page.locator('[data-testid="project-option-none"]');
-    await expect(noneOpt).toBeVisible({ timeout: 5000 });
-    await noneOpt.click();
-    await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
+  async function createHostedTestSession(page: Page): Promise<string> {
+    return createHostedSession(page, os.tmpdir());
   }
 
   // ---------------------------------------------------------------------------
@@ -159,69 +116,37 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
       test.skip(true, "claude binary not found — skipping A3 (requires real claude turn)");
       return;
     }
-    if (!multipleModels) {
-      test.skip(true, "only one model available — cannot assert chip change");
+    if (!codexAvailable) {
+      test.skip(true, "codex binary not found — cannot verify the second cheap model");
       return;
     }
 
     await freshSession(page);
 
-    // --- Session 1: create via picker, select haiku, send a message to persist ---
-    await createSessionViaPicker(page);
+    // --- Session 1: create a Hosted session, select haiku, send a message to persist ---
+    const session1Id = await createHostedTestSession(page);
     await selectAgentModel(page, "claude", MODEL_HAIKU);
-
-    const textarea = page.locator(".chat__input textarea");
-    await expect(textarea).toBeEnabled({ timeout: 10000 });
-    await textarea.fill("A3-session1-" + Date.now());
-    await page.locator(".chat__send").click();
-
-    // Row appears after first message; wait for the running dot then idle.
-    const runningDot1 = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot1).toBeVisible({ timeout: 20000 });
-    await expect(runningDot1).not.toBeVisible({ timeout: 90000 });
+    const token1 = "A3-session1-" + Date.now();
+    await sendAndWaitForReply(page, "Reply with exactly: " + token1, token1);
 
     // Confirm chip still shows haiku after the turn.
     await assertChipModel(page, MODEL_HAIKU);
-
-    // Capture session 1 id.
-    const session1Item = page.locator(".session-item--active");
-    const session1Id = await session1Item.getAttribute("data-session-id");
-
     await page.screenshot({ path: "artifacts/A3-01-session1-done.png" });
 
-    // --- Session 2: create via picker, pick sonnet, send a message to persist ---
-    await createSessionViaPicker(page);
-    await selectAgentModel(page, "claude", MODEL_SONNET);
+    // --- Session 2: create a Hosted session, pick Luna, send a message to persist ---
+    await createHostedTestSession(page);
+    await selectAgentModel(page, "codex", MODEL_LUNA);
+    const token2 = "A3-session2-" + Date.now();
+    await sendAndWaitForReply(page, "Reply with exactly: " + token2, token2);
 
-    const textarea2 = page.locator(".chat__input textarea");
-    await expect(textarea2).toBeEnabled({ timeout: 10000 });
-    await textarea2.fill("A3-session2-" + Date.now());
-    await page.locator(".chat__send").click();
+    await assertChipModel(page, MODEL_LUNA);
+    await page.screenshot({ path: "artifacts/A3-02-session2-luna.png" });
 
-    // Wait for session 2 row and turn.
-    const runningDot2 = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot2).toBeVisible({ timeout: 20000 });
-    await expect(runningDot2).not.toBeVisible({ timeout: 90000 });
-
-    await assertChipModel(page, MODEL_SONNET);
-
-    await page.screenshot({ path: "artifacts/A3-02-session2-sonnet.png" });
-
-    // --- Switch back to session 1 ---
-    if (session1Id) {
-      await page.locator(`.session-item[data-session-id="${session1Id}"]`).click();
-    } else {
-      // Fallback: click the first non-active item.
-      const items = page.locator(".session-item");
-      const count = await items.count();
-      for (let i = 0; i < count; i++) {
-        const cls = (await items.nth(i).getAttribute("class")) ?? "";
-        if (!cls.includes("session-item--active")) {
-          await items.nth(i).click();
-          break;
-        }
-      }
-    }
+    // --- Switch back to session 1 in-app, via the Navigator ---
+    await page.locator(".chat__input textarea").blur();
+    await page.keyboard.press("Control+k");
+    await page.getByTestId(`navigator-row-${session1Id}`).click();
+    await expect(page.getByTestId("navigator")).not.toBeVisible({ timeout: 5000 });
 
     // Wait for session.history to restore haiku.
     await expect(async () => {
@@ -242,22 +167,15 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await freshSession(page);
 
-    // Create a fresh session via picker (blank — not in sidebar until first message).
-    await createSessionViaPicker(page);
+    // Create a fresh session as Hosted (blank — not in sidebar until first message).
+    await createHostedTestSession(page);
 
     // Run a hosted claude turn so there is a claude_session_id to resume in CLI.
     await selectAgentModel(page, "claude", MODEL_HAIKU);
 
-    const textarea = page.locator(".chat__input textarea");
-    await expect(textarea).toBeEnabled({ timeout: 10000 });
-    await textarea.fill("Reply with exactly: ready");
-    await page.locator(".chat__send").click();
+    await sendAndWaitForReply(page, "Reply with exactly: ready", /ready/i);
 
-    const runningDot = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot).toBeVisible({ timeout: 20000 });
-    await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-
-    // Toggle to CLI (global setting).
+    // Toggle this session to CLI.
     await setChatMode(page, "cli");
 
     // Wait for the terminal surface to appear.
@@ -283,6 +201,7 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     // Send /exit to quit the claude CLI.
     await xtermInput.click({ force: true });
+    await expect(termSurface).toContainText(/Haiku 4\.5/i);
     await page.keyboard.type("/exit");
     await page.keyboard.press("Enter");
 
@@ -302,9 +221,7 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
 
     await page.screenshot({ path: "artifacts/A2-03-fresh-pty.png" });
 
-    // Leave the suite in Hosted mode — chat mode is a GLOBAL setting now, so
-    // leaving it on CLI here would break every later test/file that assumes
-    // the Hosted default (model chip, input textarea) is visible on load.
+    // Restore only this session to Hosted mode.
     await setChatMode(page, "hosted");
   });
 
@@ -318,17 +235,10 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     }
 
     await freshSession(page);
-    await createSessionViaPicker(page);
+    await createHostedTestSession(page);
     await selectAgentModel(page, "claude", MODEL_HAIKU);
 
-    const textarea = page.locator(".chat__input textarea");
-    await expect(textarea).toBeEnabled({ timeout: 10000 });
-    await textarea.fill("Reply with exactly: ready");
-    await page.locator(".chat__send").click();
-
-    const runningDot = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot).toBeVisible({ timeout: 20000 });
-    await expect(runningDot).not.toBeVisible({ timeout: 90000 });
+    await sendAndWaitForReply(page, "Reply with exactly: ready", /ready/i);
 
     const termSurface = page.locator(".terminal__surface");
 

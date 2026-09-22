@@ -38,3 +38,18 @@ export async function createHostedSession(page: Page, cwd: string): Promise<stri
   return sessionId;
 }
 
+
+/**
+ * Send one Hosted prompt and wait for the turn to finish: the last assistant
+ * bubble contains `reply` and the composer is back to Send (Stop is shown only
+ * while a message is streaming). Replaces the retired sidebar running dot.
+ */
+export async function sendAndWaitForReply(page: Page, prompt: string, reply: string | RegExp, timeout = 90_000): Promise<void> {
+  const textarea = page.locator(".chat__input textarea");
+  await expect(textarea).toBeEnabled({ timeout: 10_000 });
+  await textarea.fill(prompt);
+  await page.locator(".chat__send").click();
+  await expect(page.locator(".message--assistant").last()).toContainText(reply, { timeout });
+  await expect(page.locator(".chat__cancel")).toHaveCount(0, { timeout });
+  await expect(page.locator(".chat__send")).toBeVisible();
+}
