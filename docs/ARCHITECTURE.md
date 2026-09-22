@@ -260,9 +260,11 @@ Luna.
    snapshot, adoption. Move local agent and workspace terminals onto it and
    delete `agent_tmux.rs`. *Done when:* killing the runtime leaves the shell
    running, and a new runtime reattaches with the scrollback intact.
-1b. **Remote perchd.** Cross-built binary, upload + `connect` transport, CLI
-   panes and Hosted turns on direct hosts; delete the tmux/`nohup` paths in
-   `detached.rs`.
+1b. **Remote perchd — BACKLOG (2026-09-22).** Cross-built binary, upload +
+   `connect` transport, CLI panes and Hosted turns on direct hosts; delete the
+   tmux/`nohup` paths in `detached.rs`. Parked: no test host is configured and
+   this Mac has no Linux build toolchain yet. Done so far: `perchd connect`
+   stdio transport, tested locally. Until then direct hosts keep tmux.
 2. **Status store + hooks.** Managed hook install for claude/codex, the
    `/hook` endpoint, OSC rules, WS fan-out, notifications. *Done when:* a
    fake agent script driving hooks and OSC produces working → blocked → done
