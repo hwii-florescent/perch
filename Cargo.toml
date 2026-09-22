@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/perch-core", "crates/perch-desktop"]
+members = ["crates/perch-core", "crates/perch-desktop", "crates/perchd"]
 # `cargo build`/`cargo run` without `-p` only touch perch-core: perch-desktop
 # depends on webkit2gtk (via tauri) which isn't installable on this devpod.
-default-members = ["crates/perch-core"]
+default-members = ["crates/perch-core", "crates/perchd"]
 
 [workspace.package]
 version = "0.0.1"
