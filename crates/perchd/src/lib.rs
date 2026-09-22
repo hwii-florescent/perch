@@ -83,7 +83,18 @@ fn bridge_stdio(dir: &Path, exe_prefix: Vec<String>) -> std::io::Result<()> {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut to_sock);
         let _ = to_sock.shutdown(std::net::Shutdown::Write);
     });
-    std::io::copy(&mut from_sock, &mut std::io::stdout().lock())?;
+    // Not io::copy: stdout is line-buffered and frames rarely end in '\n', so
+    // every chunk must be flushed or replies sit in the buffer.
+    let mut out = std::io::stdout().lock();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = std::io::Read::read(&mut from_sock, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        std::io::Write::write_all(&mut out, &buf[..n])?;
+        std::io::Write::flush(&mut out)?;
+    }
     drop(up);
     Ok(())
 }

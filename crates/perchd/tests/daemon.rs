@@ -155,3 +155,36 @@ fn a_restarted_daemon_keeps_scrollback_of_lost_sessions() {
     unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The remote transport: a client speaking only through `perchd connect`'s
+/// stdin/stdout — exactly the bytes `ssh host perchd connect` would carry.
+#[test]
+fn a_client_over_connect_stdio_drives_sessions() {
+    let dir = test_dir("stdio");
+    let mut bridge = std::process::Command::new(env!("CARGO_BIN_EXE_perchd"))
+        .args(["connect", "--dir"])
+        .arg(&dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let client =
+        Client::from_transport(bridge.stdout.take().unwrap(), bridge.stdin.take().unwrap());
+    sh(&client, "remote-1");
+    let (_, reader, _) = client.attach("remote-1", None).unwrap();
+    let rx = collector(reader);
+    client.input("remote-1", b"echo over-$((3*3))\n").unwrap();
+    let mut seen = Vec::new();
+    wait_for(&rx, &mut seen, "over-9");
+    assert!(client.snapshot("remote-1").unwrap().text.contains("over-9"));
+
+    // Losing the transport (ssh dropping) leaves the session running.
+    let pid = client.health().unwrap().pid;
+    drop(client);
+    let _ = bridge.kill();
+    let _ = bridge.wait();
+    let local = connect(&dir);
+    assert!(local.session("remote-1").unwrap().unwrap().alive);
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    let _ = std::fs::remove_dir_all(&dir);
+}
