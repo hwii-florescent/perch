@@ -21,10 +21,16 @@ cargo run -p perch-core -- --port 7788
 cargo test -p perch-core
 cargo test -p perch-core plan_write            # substring filter
 
-# Desktop shell (Mac only — needs webkit; NOT buildable on devpods)
+# Desktop shell (macOS, or Linux with webkit2gtk-4.1; not on headless devpods)
 cargo build -p perch-desktop
 cargo run -p perch-desktop          # boots core on a free localhost port, opens window
 PERCH_DESKTOP_TEST=1 ./target/debug/perch-desktop   # window hidden + unfocused (for automation)
+
+# Installers (same step CI runs; output in target/release/bundle/)
+npm run build && (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build)
+#   Releases: .github/workflows/release.yml — pushing a `v*` tag drafts a GitHub
+#   release with the macOS .dmg, Linux .deb/.rpm/.AppImage and static Linux
+#   perchd binaries (x86_64/aarch64 musl). Windows is not ported (backlog).
 
 # Web UI (output packages/web/dist is served by axum — rebuild after UI changes)
 npm install && npm run build        # builds @perch/shared then @perch/web

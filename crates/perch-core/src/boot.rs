@@ -215,13 +215,15 @@ pub fn adopt_login_shell_path() {}
 ///    points at the in-process axum server over `http://127.0.0.1:<port>/`
 ///    rather than the `tauri://` asset protocol, so Tauri's *embedded* copy of
 ///    `frontendDist` is never consulted — axum serves this directory from disk.
-/// 3. Exe-relative `../../packages/web/dist` — the dev tree, where the binary
+/// 3. Exe-relative `../lib/perch/web-dist` — the Linux `.deb`/`.rpm`/AppImage
+///    layout (`usr/bin/perch` next to `usr/lib/<productName>/`).
+/// 4. Exe-relative `../../packages/web/dist` — the dev tree, where the binary
 ///    lives in `target/debug/` or `target/release/`. (This was `../../../` and
 ///    therefore dead: from `<repo>/target/release` it resolved to
 ///    `<parent-of-repo>/packages/web/dist`. The dev tree only ever worked via
 ///    the CWD fallback below, which meant running the binary from anywhere
 ///    other than the repo root also served the placeholder.)
-/// 4. Fallback: `packages/web/dist` relative to the working directory.
+/// 5. Fallback: `packages/web/dist` relative to the working directory.
 ///
 /// A missing directory is not fatal: `server.rs` falls back to a placeholder
 /// page that only exposes the WS endpoint. That page returns HTTP 200, so
@@ -237,7 +239,7 @@ pub fn resolve_web_dist_dir() -> PathBuf {
         }
     }
 
-    // 2 & 3. Exe-relative candidates, first existing one wins.
+    // 2–4. Exe-relative candidates, first existing one wins.
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()));
@@ -245,20 +247,24 @@ pub fn resolve_web_dist_dir() -> PathBuf {
         return found;
     }
 
-    // 4. CWD-relative fallback.
+    // 5. CWD-relative fallback.
     PathBuf::from("packages/web/dist")
 }
 
 /// Exe-relative half of [`resolve_web_dist_dir`], split out so it can be tested
 /// against synthetic layouts without spawning a process at a chosen path.
 ///
-/// Order is load-bearing: the packaged `.app` layout is checked first so a
-/// bundle can never accidentally resolve to a developer's source tree.
+/// Order is load-bearing: the packaged layouts are checked first so a bundle
+/// can never accidentally resolve to a developer's source tree.
 fn web_dist_from_exe_dir(exe_dir: &Path) -> Option<PathBuf> {
-    ["../Resources/web-dist", "../../packages/web/dist"]
-        .iter()
-        .filter_map(|rel| exe_dir.join(rel).canonicalize().ok())
-        .find(|p| p.is_dir())
+    [
+        "../Resources/web-dist",
+        "../lib/perch/web-dist",
+        "../../packages/web/dist",
+    ]
+    .iter()
+    .filter_map(|rel| exe_dir.join(rel).canonicalize().ok())
+    .find(|p| p.is_dir())
 }
 
 /// Core boot sequence shared by the headless binary and the Tauri shell.
@@ -332,6 +338,22 @@ mod tests {
         std::fs::create_dir_all(&web).unwrap();
 
         let found = web_dist_from_exe_dir(&macos).expect("bundle web-dist should resolve");
+        assert_eq!(found, web.canonicalize().unwrap());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Linux packages put the exe in `usr/bin` and resources in
+    /// `usr/lib/<productName>` (Tauri's own `resource_dir` rule).
+    #[test]
+    fn linux_package_layout_resolves_the_lib_web_dist() {
+        let tmp = std::env::temp_dir().join(format!("perch-boot-linux-{}", std::process::id()));
+        let bin = tmp.join("usr/bin");
+        let web = tmp.join("usr/lib/perch/web-dist");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&web).unwrap();
+
+        let found = web_dist_from_exe_dir(&bin).expect("package web-dist should resolve");
         assert_eq!(found, web.canonicalize().unwrap());
 
         std::fs::remove_dir_all(&tmp).ok();

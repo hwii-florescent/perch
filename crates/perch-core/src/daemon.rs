@@ -54,9 +54,16 @@ pub fn client() -> anyhow::Result<Client> {
 #[cfg(not(test))]
 fn connect() -> anyhow::Result<Client> {
     let dir = dir();
-    let exe = std::env::current_exe()?.display().to_string();
     // The daemon is this very binary re-run with `__perchd` (see main.rs), so
-    // the desktop app needs no extra executable.
+    // the desktop app needs no extra executable. Inside an AppImage the exe
+    // lives on a FUSE mount that vanishes when the app quits, so re-run the
+    // AppImage itself: its runtime then keeps a mount alive for the daemon.
+    let exe = match std::env::var_os("APPIMAGE") {
+        Some(appimage) => PathBuf::from(appimage),
+        None => std::env::current_exe()?,
+    }
+    .display()
+    .to_string();
     Ok(Client::connect_or_spawn(&dir, || {
         perchd::spawn_command(&[exe, "__perchd".into()], &dir)
     })?)
