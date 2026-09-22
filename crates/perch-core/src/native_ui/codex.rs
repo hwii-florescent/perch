@@ -164,6 +164,17 @@ fn normalize(item: &Value) -> Vec<NativeUiMessage> {
     result
 }
 
+/// An active thread paused on an approval or a `request_user_input` answer
+/// (app-server `ThreadStatus::Active { activeFlags }`).
+fn waiting_on_human(status: &Value) -> bool {
+    status["type"] == "active"
+        && status["activeFlags"].as_array().is_some_and(|flags| {
+            flags
+                .iter()
+                .any(|flag| flag == "waitingOnApproval" || flag == "waitingOnUserInput")
+        })
+}
+
 struct View {
     snapshot: NativeUiSnapshot,
     message_bytes: usize,
@@ -222,6 +233,7 @@ impl View {
             "turn/started" => {
                 self.turn = params["turn"]["id"].as_str().map(str::to_string);
                 self.snapshot.running = true;
+                self.snapshot.blocked = false;
                 self.dirty = true;
             }
             "turn/completed" => {
@@ -229,11 +241,13 @@ impl View {
                 if self.turn.as_deref() == params["turn"]["id"].as_str() {
                     self.turn = None;
                     self.snapshot.running = false;
+                    self.snapshot.blocked = false;
                     self.dirty = true;
                 }
             }
             "thread/status/changed" => {
                 self.snapshot.running = params["status"]["type"] == "active";
+                self.snapshot.blocked = waiting_on_human(&params["status"]);
                 self.dirty = true;
             }
             "thread/settings/updated" => {
@@ -382,6 +396,7 @@ async fn connection(
             cwd: String::new(),
             model: None,
             running: false,
+            blocked: false,
             messages: vec![],
             truncated: false,
         },
@@ -456,6 +471,7 @@ async fn connection(
         view.snapshot.cwd = clip(thread["cwd"].as_str().unwrap_or_default(), 4096);
         view.snapshot.model = thread["model"].as_str().map(|model| clip(model, 256));
         view.snapshot.running = thread["status"]["type"] == "active";
+        view.snapshot.blocked = waiting_on_human(&thread["status"]);
         view.snapshot.messages.clear();
         view.message_bytes = 0;
         view.turn = None;
@@ -692,6 +708,7 @@ mod tests {
                 cwd: "/workspace".into(),
                 model: None,
                 running: true,
+                blocked: false,
                 messages: vec![],
                 truncated: false,
             },
@@ -706,8 +723,14 @@ mod tests {
             view.put(row);
         }
         assert!(view.snapshot.truncated && view.message_bytes <= 192 * 1024);
+        view.event(&json!({"method":"thread/status/changed","params":{"threadId":"native","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}));
+        assert!(view.snapshot.running && view.snapshot.blocked);
+        view.event(&json!({"method":"thread/status/changed","params":{"threadId":"native","status":{"type":"active","activeFlags":[]}}}));
+        assert!(view.snapshot.running && !view.snapshot.blocked);
+        view.event(&json!({"method":"thread/status/changed","params":{"threadId":"native","status":{"type":"active","activeFlags":["waitingOnUserInput"]}}}));
+        assert!(view.snapshot.blocked);
         view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"turn","status":"failed","error":{"message":"native failure"}}}}));
-        assert!(!view.snapshot.running);
+        assert!(!view.snapshot.running && !view.snapshot.blocked);
         assert_eq!(
             view.snapshot.messages.last().unwrap().error.as_deref(),
             Some("native failure")

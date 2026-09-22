@@ -15,6 +15,7 @@ const EVENTS: &[&str] = &[
     "UserPromptSubmit",
     "PreToolUse",
     "PostToolUse",
+    "PostToolUseFailure",
     "PermissionRequest",
     "Stop",
     "StopFailure",
@@ -295,6 +296,20 @@ fn submitted(event: &Value, payload: &Value) -> bool {
     !sent.is_empty() && reported.contains(sent)
 }
 
+/// `(running, blocked)` after one hook event, or `None` if it says nothing
+/// about the turn. Blocked means waiting on the human: a permission prompt,
+/// or AskUserQuestion, which Claude reports as a plain PreToolUse while it
+/// waits (Orca `claude-events.ts`). Any later tool event means it moved on.
+fn turn_state(event: &Value) -> Option<(bool, bool)> {
+    match event["hook_event_name"].as_str()? {
+        "PermissionRequest" => Some((true, true)),
+        "PreToolUse" => Some((true, event["tool_name"] == "AskUserQuestion")),
+        "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => Some((true, false)),
+        "SessionStart" | "Stop" | "StopFailure" | "SessionEnd" => Some((false, false)),
+        _ => None,
+    }
+}
+
 pub(super) async fn observe(
     key: &AgentKey,
     alive: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -338,20 +353,16 @@ pub(super) async fn observe(
                     else if history_key.split(':').next() != Some(session) { history = (vec![], false); }
                 }
                 if !changed && pending.is_empty() { continue; }
-                let mut running = false;
+                let (mut running, mut blocked) = (false, false);
                 let mut model = start["model"].as_str().map(|model| clip(model, 256));
                 let mut ordered: Vec<_> = events.values().filter(|(_, event_pid, event)| event_pid == pid && event["session_id"] == session).collect();
                 ordered.sort_by(|left, right| left.0.cmp(&right.0));
                 for (_, _, event) in ordered {
-                    match event["hook_event_name"].as_str().unwrap_or_default() {
-                        "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PermissionRequest" => running = true,
-                        "SessionStart" | "Stop" | "StopFailure" | "SessionEnd" => running = false,
-                        "PostModelSwitch" => model = event["to_model"].as_str().map(|model| clip(model, 256)),
-                        _ => {}
-                    }
+                    if event["hook_event_name"] == "PostModelSwitch" { model = event["to_model"].as_str().map(|model| clip(model, 256)); }
+                    else if let Some(state) = turn_state(event) { (running, blocked) = state; }
                 }
-                if history.0.last().is_some_and(|message| message.role == "user" && message.text.starts_with("[Request interrupted by user")) { running = false; }
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, messages: history.0.clone(), truncated: history.1 };
+                if history.0.last().is_some_and(|message| message.role == "user" && message.text.starts_with("[Request interrupted by user")) { (running, blocked) = (false, false); }
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, messages: history.0.clone(), truncated: history.1 };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;
@@ -406,6 +417,45 @@ mod tests {
             &serde_json::json!({ "prompt": sent }),
             &serde_json::json!({ "type": "cancel" })
         ));
+    }
+
+    #[test]
+    fn permission_prompts_and_questions_block_until_the_next_tool_event() {
+        let event = |name: &str, tool: &str| serde_json::json!({"hook_event_name": name, "tool_name": tool});
+        let replay = |names: &[(&str, &str)]| {
+            names
+                .iter()
+                .rev()
+                .find_map(|(n, t)| turn_state(&event(n, t)))
+        };
+        assert_eq!(
+            replay(&[
+                ("UserPromptSubmit", ""),
+                ("PreToolUse", "Bash"),
+                ("PermissionRequest", "Bash")
+            ]),
+            Some((true, true))
+        );
+        assert_eq!(
+            replay(&[("PermissionRequest", "Bash"), ("PostToolUse", "Bash")]),
+            Some((true, false))
+        );
+        assert_eq!(
+            replay(&[("PreToolUse", "AskUserQuestion")]),
+            Some((true, true))
+        );
+        assert_eq!(
+            replay(&[
+                ("PreToolUse", "AskUserQuestion"),
+                ("PostToolUseFailure", "AskUserQuestion")
+            ]),
+            Some((true, false))
+        );
+        assert_eq!(
+            replay(&[("PermissionRequest", "Bash"), ("Stop", "")]),
+            Some((false, false))
+        );
+        assert_eq!(replay(&[("PostModelSwitch", "")]), None);
     }
 
     #[test]

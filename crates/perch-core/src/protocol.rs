@@ -628,6 +628,10 @@ pub struct NativeUiSnapshot {
     pub cwd: String,
     pub model: Option<String>,
     pub running: bool,
+    /// The turn is paused on a human: a permission prompt or a question.
+    /// Implies `running`. Absent from older peers and bridges.
+    #[serde(default)]
+    pub blocked: bool,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
 }

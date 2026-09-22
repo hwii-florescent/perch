@@ -1270,6 +1270,18 @@ fn spawn_agent_turn_state_task(state: AppState) {
                     sessions.remove(&key.session_id)
                 }
             };
+            // Structured evidence owns "needs you" in both directions; the
+            // output-regex guess in `handle_socket` only fills in for agents
+            // without it.
+            let blocked_changed = {
+                let mut blocked = state.blocked_sessions.lock().unwrap();
+                if transition.to == AgentState::Blocked {
+                    blocked.insert(key.session_id.clone())
+                } else {
+                    blocked.remove(&key.session_id)
+                }
+            };
+            let changed = changed || blocked_changed;
             if changed {
                 if !running {
                     mark_unseen_if_unviewed(&state, &key.session_id);
@@ -1857,7 +1869,9 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     .lock()
                     .unwrap()
                     .contains(&session_id);
-                !already_blocked && blocked_patterns().iter().any(|re| re.is_match(tail))
+                !already_blocked
+                    && !on_data_app.agent_runtime.has_native_status(&session_id)
+                    && blocked_patterns().iter().any(|re| re.is_match(tail))
             };
             if newly_blocked {
                 on_data_app

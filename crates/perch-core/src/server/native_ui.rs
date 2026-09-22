@@ -36,7 +36,9 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                 tracing::error!(%error, "could not persist completed native turn");
             }
             let old = app.agent_runtime.snapshot(key).ok();
-            let state = if snapshot.running {
+            let state = if snapshot.blocked {
+                AgentState::Blocked
+            } else if snapshot.running {
                 AgentState::Working
             } else if snapshot.messages.is_empty() {
                 AgentState::Idle
@@ -72,6 +74,22 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                     .record_provider_session_id(key, snapshot.provider_session_id.clone());
             }
             if session_changed || old.as_ref().is_none_or(|old| old.state != state) {
+                // A prompt and its permission request can land in one poll.
+                // Blocked is a pause *inside* a turn, so start the turn first
+                // (Done → Blocked is not a legal edge, and the turn boundary
+                // hangs off entering Working).
+                if state == AgentState::Blocked
+                    && old.as_ref().is_some_and(|old| {
+                        !matches!(old.state, AgentState::Working | AgentState::Blocked)
+                    })
+                {
+                    let _ = app.agent_runtime.lifecycle().transition(
+                        key,
+                        AgentState::Working,
+                        "native CLI session event",
+                        now_millis(),
+                    );
+                }
                 let _ = app.agent_runtime.lifecycle().transition(
                     key,
                     state,

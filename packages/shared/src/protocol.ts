@@ -46,6 +46,8 @@ export interface NativeUiSnapshot {
   cwd: string;
   model: string | null;
   running: boolean;
+  /** The turn is paused on a human: a permission prompt or a question. Implies `running`. */
+  blocked?: boolean;
   messages: NativeUiMessage[];
   truncated: boolean;
 }

@@ -26,7 +26,7 @@ against the code before building on it.
 | Delete worktree + branch, preserved-branch review, archive, sleep, pin, rename, parent nesting | 🟡 archive/sleep exist | `main/runtime`, `main/persistence` |
 | External (`git worktree add`) worktrees: show/hide | ❌ | `main/runtime` |
 | Launch any supported CLI with autonomy flags; per-agent editable launch args + reset | 🟡 `agent_fleet.rs` manifests | `main/agent-launch`, `main/providers` |
-| Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | 🟡 `AgentState` exists; hook coverage partial | `main/agent-hooks` (+ `server/`) |
+| Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | 🟡 Claude hooks (PermissionRequest, AskUserQuestion) and Codex app-server `activeFlags` drive working/blocked/done; OSC titles and other providers pending | `main/agent-hooks` (+ `server/`) |
 | Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |
 | Agent-finished notification, unread state | 🟡 verify | `main/agent-hooks`, renderer |
 | Tabs, splits right/down, per-worktree layout that persists (`model/tabs-panes-splits`) | 🟡 dockview; per-worktree persistence to verify | renderer |
