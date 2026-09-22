@@ -30,7 +30,7 @@ against the code before building on it.
 | Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |
 | Agent-finished notification, unread state | 🟡 verify | `main/agent-hooks`, renderer |
 | Tabs, splits right/down, per-worktree layout that persists (`model/tabs-panes-splits`) | 🟡 dockview; per-worktree persistence to verify | renderer |
-| PTYs survive app quit; scrollback (incl. output while closed) restored; focused tab restored (`model/session-restore`) | 🟡 tmux persistence; scrollback restore to verify | `main/daemon`, `main/orcad` |
+| PTYs survive app quit; scrollback (incl. output while closed) restored; focused tab restored (`model/session-restore`) | 🟡 perchd owns agent + workspace shells locally (survive runtime crash, scrollback replayed); remote hosts and focused-tab restore pending | `main/daemon`, `main/orcad` |
 | Terminal: find in scrollback, link action popover, OSC 52, kitty keyboard, copy context | 🟡 search + OSC 52 exist; kitty, link popover, copy context missing | renderer, `main/pty` |
 | Quick Commands (global/project, run in new tab or insert) | ❌ | `main/runtime`, renderer |
 | Floating terminal | ❌ | renderer |
