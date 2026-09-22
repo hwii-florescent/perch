@@ -1,21 +1,14 @@
-# Orca parity — CLI mode
+# Orca parity: CLI mode
 
-Goal (user, 2026-09-22): make perch's **CLI mode** at least on par with
-[Orca](https://github.com/stablyai/orca) (MIT), porting Orca's app logic into
-perch's Rust core. Target: a fast, lightweight Rust Orca. The Hosted/UI chat
-surface stays as it is for now.
+Where perch stands against [Orca](https://github.com/stablyai/orca) on each
+feature. The design is in `ARCHITECTURE.md`. Orca's user-facing spec is
+`~/Github/orca/docs/site/content/docs/**/*.mdx`, and its logic is under
+`src/main/*`.
 
-Reference checkout: `~/Github/orca` (shallow clone of `564f1352`, 2026-09-22),
-outside this repo. The user-facing spec is `docs/site/content/docs/**/*.mdx`
-there; the logic lives in `src/main/*` (~850k lines of TS in the Electron main
-process). Port behaviour, not code shape: Orca's module boundaries follow
-Electron IPC, perch's follow `protocol.rs` ↔ `protocol.ts`.
+✅ exists · 🟡 partial · ❌ missing. This was built from a grep survey, so
+check a row against the code before building on it.
 
-Status: ✅ exists · 🟡 partial · ❌ missing. "Orca source" is where to read
-the logic before porting. First pass from a grep survey — verify a row
-against the code before building on it.
-
-## Tier 1 — the core Orca loop (worktree → agent → watch → restore)
+## Tier 1: the core loop (worktree → agent → watch → restore)
 
 | Feature (Orca doc) | perch | Orca source |
 |---|---|---|
@@ -28,7 +21,7 @@ against the code before building on it.
 | Launch any supported CLI with autonomy flags; per-agent editable launch args + reset | 🟡 `agent_fleet.rs` manifests | `main/agent-launch`, `main/providers` |
 | Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | 🟡 Claude hooks (PermissionRequest, AskUserQuestion) and Codex app-server `activeFlags` drive working/blocked/done; OSC titles and other providers pending | `main/agent-hooks` (+ `server/`) |
 | Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |
-| Agent-finished notification, unread state | 🟡 verify | `main/agent-hooks`, renderer |
+| Agent-finished notification, unread state | 🟡 done/blocked toasts + sound; native OS notifications in the desktop app; unread = `unseen`. No click-to-switch on desktop; no shared idle-decay policy | `main/agent-hooks`, renderer |
 | Tabs, splits right/down, per-worktree layout that persists (`model/tabs-panes-splits`) | 🟡 dockview; per-worktree persistence to verify | renderer |
 | PTYs survive app quit; scrollback (incl. output while closed) restored; focused tab restored (`model/session-restore`) | 🟡 perchd owns agent + workspace shells locally (survive runtime crash, scrollback replayed); remote hosts and focused-tab restore pending | `main/daemon`, `main/orcad` |
 | Terminal: find in scrollback, link action popover, OSC 52, kitty keyboard, copy context | 🟡 search + OSC 52 exist; kitty, link popover, copy context missing | renderer, `main/pty` |
@@ -39,7 +32,7 @@ against the code before building on it.
 | Agent dashboard kanban (Needs you / Working / Done / Idle) | ❌ | renderer, `main/agent-hooks` |
 | Themes: Ghostty import, iTerm profile, Warp import | 🟡 iTerm + Ghostty profile | `main/ghostty`, `main/warp-themes` |
 
-## Tier 2 — review and ship
+## Tier 2: review and ship
 
 | Feature | perch | Orca source |
 |---|---|---|
@@ -49,7 +42,7 @@ against the code before building on it.
 | Commit, push, open PR, wait on checks (`review/commit-push`) | 🟡 commit/push; no PR/checks | `main/github`, `main/source-control` |
 | File explorer, editor with autosave, Markdown/image/PDF viewers, drag files into prompt (`editing/*`) | 🟡 file buffers + fs | `main/runtime`, renderer |
 
-## Tier 3 — agent operations
+## Tier 3: agent operations
 
 | Feature | perch | Orca source |
 |---|---|---|
@@ -61,7 +54,7 @@ against the code before building on it.
 | CLI that agents drive: worktree create, terminal read/wait/send (`cli/overview`, `cli/reference`) | ❌ | `src/cli`, `main/cli` |
 | Orchestration, automations, worktree checkpoints, skills (`cli/*`) | ❌ | `main/automations`, `main/skills` |
 
-## Tier 4 — integrations and remote
+## Tier 4: integrations and remote
 
 | Feature | perch | Orca source |
 |---|---|---|
@@ -69,7 +62,7 @@ against the code before building on it.
 | Remote Orca server / paired clients (`remote-servers`) | 🟡 federation + pairing | `main/runtime`, `relay` |
 | GitHub PRs/issues, Linear, Jira, GitLab (`review/*`) | ❌ | `main/github`, `main/linear`, `main/jira`, `main/gitlab` |
 
-## Tier 5 — heavy surfaces (deferred until Tiers 1–4 are done — user, 2026-09-22)
+## Tier 5: heavy surfaces (deferred until Tiers 1–4 are done)
 
 | Feature | perch | Orca source |
 |---|---|---|
