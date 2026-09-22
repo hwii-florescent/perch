@@ -7,7 +7,6 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom},
     path::Path,
-    process::Command as Process,
     time::SystemTime,
 };
 
@@ -248,42 +247,31 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
             .any(|ch| ch.is_control() && ch != '\n' && ch != '\t'),
         "A CLI prompt cannot contain terminal control characters"
     );
-    let session = format!(
-        "={}:",
-        crate::agent_tmux::tmux_session_name(&terminal_key(key))
+    let terminal = terminal_key(key);
+    let client = crate::daemon::client().context("CLI prompt is unavailable")?;
+    let session = client
+        .session(&terminal)?
+        .filter(|s| s.alive)
+        .context("CLI prompt is unavailable")?;
+    let native_pid = read_event(&event_path(&paths(key)?.extension, "SessionStart"))?.0;
+    ensure!(
+        session.pid == Some(native_pid),
+        "The active terminal pane is not this Claude process"
     );
-    let panes = Process::new("tmux")
-        .args([
-            "list-panes",
-            "-t",
-            &session,
-            "-F",
-            "#{pane_id} #{cursor_y} #{pane_active} #{pane_pid}",
-        ])
-        .output()?;
-    ensure!(panes.status.success(), "CLI prompt is unavailable");
-    let native_pid = read_event(&event_path(&paths(key)?.extension, "SessionStart"))?
-        .0
-        .to_string();
-    let pane_text = String::from_utf8(panes.stdout)?;
-    let pane = pane_text
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields.len() == 4 && fields[2] == "1" && fields[3] == native_pid)
-        .context("The active terminal pane is not this Claude process")?;
-    let target = pane[0];
     let Some(prompt) = prompt else {
         return Ok(Some("\u{1b}".into()));
     };
-    let row = pane[1].parse::<u16>()?.to_string();
-    let screen = Process::new("tmux")
-        .args(["capture-pane", "-p", "-t", target, "-S", &row, "-E", &row])
-        .output()?;
+    let screen = client.snapshot(&terminal)?;
+    let row = screen
+        .text
+        .lines()
+        .nth(screen.cursor_row as usize)
+        .unwrap_or_default();
     // ponytail: this recognizes Claude's native empty prompt on the installed
     // TUI. Fail closed on other layouts; replace with a native editor API if
     // Claude exposes one. Never clear or append to an unsubmitted CLI draft.
     ensure!(
-        screen.status.success() && empty_prompt(&String::from_utf8_lossy(&screen.stdout)),
+        empty_prompt(row),
         "The CLI has a draft or dialog open. Finish it in CLI view before sending from UI."
     );
     Ok(Some(format!("\u{1b}[200~{prompt}\u{1b}[201~\r")))

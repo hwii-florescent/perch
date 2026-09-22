@@ -23,6 +23,7 @@ serde_json = "1"
 toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 portable-pty = "0.8"
+perchd = { path = "../perchd" }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 libc = "0.2"

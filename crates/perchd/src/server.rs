@@ -39,8 +39,21 @@ pub struct Config {
     pub idle_exit: Option<Duration>,
 }
 
+/// `<dir>/daemon-v<N>.sock`, unless that would overflow the ~104-byte unix
+/// socket path limit — then a short per-user, per-directory path under `/tmp`.
 pub fn socket_path(dir: &Path) -> PathBuf {
-    dir.join(format!("daemon-v{PROTOCOL_VERSION}.sock"))
+    use std::os::unix::ffi::OsStrExt;
+    let path = dir.join(format!("daemon-v{PROTOCOL_VERSION}.sock"));
+    if path.as_os_str().len() < 100 {
+        return path;
+    }
+    // FNV-1a: stable across builds, so every client finds the same socket.
+    let hash = dir.as_os_str().as_bytes().iter().fold(0xcbf29ce484222325u64, |h, &b| {
+        (h ^ b as u64).wrapping_mul(0x100000001b3)
+    });
+    // SAFETY: getuid cannot fail.
+    let uid = unsafe { libc::getuid() };
+    PathBuf::from(format!("/tmp/perchd-{uid}-{hash:016x}-v{PROTOCOL_VERSION}.sock"))
 }
 
 pub fn default_dir() -> PathBuf {
@@ -722,5 +735,21 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
     }
     if inner.alive {
         inner.subscribers.insert(conn, out.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_dir_gets_a_socket_path_that_fits() {
+        let short = socket_path(Path::new("/home/u/.perch/daemon"));
+        assert_eq!(short, Path::new("/home/u/.perch/daemon/daemon-v1.sock"));
+        let long_dir = PathBuf::from("/").join("x".repeat(150));
+        let long = socket_path(&long_dir);
+        assert!(long.as_os_str().len() < 100, "{long:?}");
+        assert_eq!(long, socket_path(&long_dir), "stable");
+        assert_ne!(long, socket_path(&long_dir.join("y")), "per directory");
     }
 }

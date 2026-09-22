@@ -76,7 +76,7 @@ fn open_agent_terminal(
         }
         anyhow::ensure!(
             state.app.agent_terminals.runtime_identity(session_id).is_none()
-                && !crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(session_id)),
+                && !crate::daemon::session_alive(session_id),
             "a previous CLI process is still open; close its existing view before opening this agent"
         );
         if live.is_none() {
@@ -151,9 +151,7 @@ fn open_agent_terminal(
         }
         if crate::native_ui::supported(provider_id) {
             let fresh = live.is_none()
-                && !crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(
-                    &crate::agent_runtime::terminal_key(&key),
-                ));
+                && !crate::daemon::session_alive(&crate::agent_runtime::terminal_key(&key));
             let paths = crate::native_ui::prepare(&key, provider_id, fresh)?;
             if !matches!(provider_id, "codex" | "opencode") {
                 extra.extend([

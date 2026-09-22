@@ -2341,6 +2341,7 @@ dependencies = [
  "axum",
  "futures",
  "libc",
+ "perchd",
  "portable-pty",
  "regex",
  "rusqlite",

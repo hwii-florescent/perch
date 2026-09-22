@@ -4,8 +4,13 @@ use perch_core::boot::{
 };
 use perch_core::server::CliArgs;
 
+fn main() -> anyhow::Result<()> {
+    perch_core::daemon::run_if_requested();
+    serve()
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn serve() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()

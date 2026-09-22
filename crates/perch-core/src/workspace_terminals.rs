@@ -40,7 +40,8 @@ pub struct WorkspaceTerminal {
     pub cwd: String,
     pub cols: u16,
     pub rows: u16,
-    /// tmux survives a core restart; process survives client detachment only.
+    /// daemon survives a core restart; process (in-process fallback) survives
+    /// client detachment only.
     pub backend: String,
     /// starting, running, exited, or lost (requires an explicit new shell).
     pub state: String,
@@ -180,10 +181,7 @@ impl WorkspaceTerminals {
         if identity.is_none() && !matches!(row.state.as_str(), "exited" | "lost") {
             // Once a launch may have happened, an absent process must never
             // be silently replaced by a fresh shell with an empty context.
-            let resumable = row.backend == "tmux"
-                && crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(
-                    &key,
-                ));
+            let resumable = row.backend == "daemon" && crate::daemon::session_alive(&key);
             if !created && !resumable {
                 row.state = "lost".to_string();
                 self.update(&row)?;
@@ -225,7 +223,7 @@ impl WorkspaceTerminals {
                     command.push("-l".to_string());
                 }
                 let attached = if resumable {
-                    self.runtime.attach_existing_tmux(
+                    self.runtime.attach_existing(
                         &key,
                         "host-runtime",
                         cols,
@@ -254,9 +252,9 @@ impl WorkspaceTerminals {
                 row.backend = if self
                     .runtime
                     .runtime_identity(&key)
-                    .is_some_and(|identity| identity.tmux_session.is_some())
+                    .is_some_and(|identity| identity.daemon_session.is_some())
                 {
-                    "tmux"
+                    "daemon"
                 } else {
                     "process"
                 }
@@ -379,14 +377,11 @@ impl WorkspaceTerminals {
             bail!("terminal does not belong to this session");
         }
         let key = format!("shell-{terminal_id}");
-        if self.runtime.runtime_identity(&key).is_some() {
-            self.runtime.kill(&key);
-        } else {
-            // A restarted core may not have an attached PTY for this record yet.
-            crate::agent_tmux::kill_tmux_session(&crate::agent_tmux::tmux_session_name(&format!(
-                "shell-{terminal_id}"
-            )));
-        }
+        // An in-process fallback shell has no daemon session; kill it here.
+        self.runtime.kill(&key);
+        // A daemon shell may not even be attached after a restart. Closing is
+        // final, so its history goes too.
+        std::thread::spawn(move || crate::daemon::discard(&key));
         self.db.with_connection(|conn| {
             conn.execute(
                 "DELETE FROM workspace_terminals WHERE id = ?1 AND session_id = ?2",
@@ -508,7 +503,7 @@ mod tests {
         let db = Arc::new(HistoryDb::open(":memory:").unwrap());
         db.create_session("lost-shell", "/tmp").unwrap();
         let manager = WorkspaceTerminals::new(db.clone()).unwrap();
-        for backend in ["process", "tmux", "pending"] {
+        for backend in ["process", "daemon", "tmux", "pending"] {
             let (mut row, _) = manager.reserve("lost-shell", backend, 80, 24).unwrap();
             row.backend = backend.into();
             row.state = "running".into();

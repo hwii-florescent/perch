@@ -144,14 +144,15 @@ impl std::fmt::Display for TerminalAuthorityError {
 
 impl std::error::Error for TerminalAuthorityError {}
 
-/// Identity of one actual PTY/tmux runtime. The terminal/session key alone
+/// Identity of one actual PTY runtime. The terminal/session key alone
 /// is insufficient for safe hibernation because a later process can reuse it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalRuntimeIdentity {
     pub session_id: String,
     pub terminal_id: String,
     pub process_id: Option<u32>,
-    pub tmux_session: Option<String>,
+    /// The daemon session key when the process lives in perchd.
+    pub daemon_session: Option<String>,
 }
 
 struct TerminalHandle {
@@ -251,9 +252,19 @@ fn read_pty_into_chunks(mut reader: impl Read, mut on_chunk: impl FnMut(String))
 /// probe for before choosing their palette. The UTF-8 locale hint matters for
 /// the same reason the Unicode 11 addon does — box-drawing and emoji width.
 fn apply_terminal_env(cmd: &mut CommandBuilder) {
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERM_PROGRAM", "perch");
+    for (key, value) in terminal_env_overrides() {
+        cmd.env(key, value);
+    }
+}
+
+/// The overrides [`apply_terminal_env`] applies, as pairs, so daemon-backed
+/// terminals (see `daemon.rs`) get exactly the same environment.
+pub(crate) fn terminal_env_overrides() -> Vec<(String, String)> {
+    let mut env = vec![
+        ("TERM".to_string(), "xterm-256color".to_string()),
+        ("COLORTERM".to_string(), "truecolor".to_string()),
+        ("TERM_PROGRAM".to_string(), "perch".to_string()),
+    ];
     // Only a hint: if the parent already has a sane UTF-8 locale, keep it
     // (it may carry a region the user cares about for date/number output).
     let has_utf8_locale = std::env::var("LC_ALL")
@@ -264,7 +275,71 @@ fn apply_terminal_env(cmd: &mut CommandBuilder) {
         })
         .unwrap_or(false);
     if !has_utf8_locale {
-        cmd.env("LANG", "en_US.UTF-8");
+        env.push(("LANG".to_string(), "en_US.UTF-8".to_string()));
+    }
+    env
+}
+
+/// Resizing, for both an in-process PTY and a daemon-owned one.
+trait PtyResize: Send {
+    /// `false` if the resize could not be applied.
+    fn resize(&self, cols: u16, rows: u16) -> bool;
+}
+
+impl PtyResize for Box<dyn MasterPty + Send> {
+    fn resize(&self, cols: u16, rows: u16) -> bool {
+        MasterPty::resize(
+            &**self,
+            PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .is_ok()
+    }
+}
+
+/// A daemon-owned terminal's handles. `kill()` on the killer only *detaches*
+/// this runtime — the process keeps running in the daemon for the next attach,
+/// which is what a viewer disconnect needs. An explicit kill goes through
+/// [`crate::daemon::terminate`] instead.
+#[derive(Debug, Clone)]
+struct DaemonTerminal {
+    key: String,
+}
+
+impl PtyResize for DaemonTerminal {
+    fn resize(&self, cols: u16, rows: u16) -> bool {
+        crate::daemon::client().is_ok_and(|c| c.resize(&self.key, cols, rows).is_ok())
+    }
+}
+
+impl ChildKiller for DaemonTerminal {
+    fn kill(&mut self) -> std::io::Result<()> {
+        crate::daemon::client()
+            .and_then(|c| Ok(c.detach(&self.key)?))
+            .map_err(std::io::Error::other)
+    }
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(self.clone())
+    }
+}
+
+struct DaemonWriter {
+    key: String,
+}
+
+impl Write for DaemonWriter {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        crate::daemon::client()
+            .and_then(|c| Ok(c.input(&self.key, data)?))
+            .map_err(std::io::Error::other)?;
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -282,6 +357,73 @@ struct SpawnedPty {
     reader: Box<dyn Read + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+/// What [`AgentTerminalRegistry`] needs from a terminal, whether perchd owns
+/// the process or (fallback only) this runtime does.
+struct Spawned {
+    id: String,
+    process_id: Option<u32>,
+    writer: Box<dyn Write + Send>,
+    resize: Box<dyn PtyResize>,
+    reader: Box<dyn Read + Send>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Blocks until the process exits (its code) or, for a daemon terminal,
+    /// until this attachment ends for another reason (-1).
+    wait: Box<dyn FnOnce() -> i32 + Send>,
+    daemon_session: Option<String>,
+}
+
+/// Attach to `key` in perchd, creating it first unless a live process with
+/// that key already exists (a restarted runtime finding its agent).
+fn attach_daemon(
+    client: &perchd::client::Client,
+    key: &str,
+    cols: u16,
+    rows: u16,
+    cwd: Option<String>,
+    command: Vec<String>,
+    existing_only: bool,
+) -> anyhow::Result<Spawned> {
+    let alive = client.session(key)?.is_some_and(|s| s.alive);
+    if existing_only && !alive {
+        anyhow::bail!("persisted terminal process is no longer available");
+    }
+    if alive {
+        let _ = client.resize(key, cols, rows);
+    } else {
+        anyhow::ensure!(!command.is_empty(), "no command to start");
+        let cwd = cwd.or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        });
+        match client.create(key, command, cwd, crate::daemon::terminal_env(), cols, rows) {
+            Ok(_) => {}
+            // Lost a race with another attach for the same key: share it.
+            Err(e) if e.is(perchd::proto::ERR_EXISTS) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let (attached, reader, waiter) = client.attach(key, None)?;
+    let terminal = DaemonTerminal {
+        key: key.to_string(),
+    };
+    Ok(Spawned {
+        id: Uuid::new_v4().to_string(),
+        process_id: attached.pid,
+        writer: Box::new(DaemonWriter {
+            key: key.to_string(),
+        }),
+        resize: Box::new(terminal.clone()),
+        reader: Box::new(reader),
+        killer: Box::new(terminal),
+        wait: Box::new(move || match waiter.wait() {
+            perchd::client::AttachEnd::Exited(code) => code,
+            _ => -1,
+        }),
+        daemon_session: Some(key.to_string()),
+    })
 }
 
 /// Argv for a plain (no explicit `command`) terminal pane's shell.
@@ -470,12 +612,7 @@ impl TerminalManager {
 
     pub fn resize(&self, terminal_id: &str, cols: u16, rows: u16) {
         if let Some(handle) = self.terminals.lock().unwrap().get(terminal_id) {
-            let _ = handle.master.resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+            let _ = PtyResize::resize(&handle.master, cols, rows);
         }
     }
 
@@ -526,7 +663,7 @@ struct AgentTerminalEntry {
     // whichever connection calls `resize`/`kill`) — `MasterPty` is `Send` but
     // not `Sync`, so `Arc<AgentTerminalEntry>` needs every field to be `Sync`
     // on its own, not just reachable through one shared outer lock.
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    master: Mutex<Box<dyn PtyResize>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     /// Keyed by viewer id (the WS connection's `conn_id`). Input and resize
     /// authority are tracked separately in `writer`; the legacy `input()` and
@@ -536,14 +673,11 @@ struct AgentTerminalEntry {
     /// Last time PTY output was observed, for Task 2's quiet-period → idle
     /// transition. Updated by the reader thread on every chunk.
     last_activity: Mutex<std::time::Instant>,
-    /// `Some(name)` when this entry's pty child is a `tmux attach-session`
-    /// client rather than the CLI itself (see `agent_tmux.rs`) — the local
-    /// persistence trick that lets the real `claude`/`codex` process outlive
-    /// perch restarts and dropped connections. `None` on a machine without
-    /// tmux (the mandatory fallback), in which case the pty child *is* the
-    /// CLI, exactly as before this module existed, and `kill()` only ever
-    /// needs to signal the child directly.
-    tmux_session: Option<String>,
+    /// `Some(key)` when the process lives in perchd (see `daemon.rs`), so it
+    /// outlives this runtime and a later attach finds it by key. `None` only
+    /// when the daemon was unreachable and the process was spawned in-process
+    /// as a fallback — then it dies with this runtime, as before perchd.
+    daemon_session: Option<String>,
 }
 
 /// Registry of agent-attached (`agentAttach`) terminals, one PTY per **session
@@ -636,10 +770,10 @@ impl AgentTerminalRegistry {
         )
     }
 
-    /// Reattach only to an existing tmux process. Recovery must never start
+    /// Reattach only to an existing daemon process. Recovery must never start
     /// a replacement command when a persisted process has disappeared.
     #[allow(clippy::too_many_arguments)]
-    pub fn attach_existing_tmux(
+    pub fn attach_existing(
         &self,
         session_id: &str,
         viewer_id: &str,
@@ -685,61 +819,45 @@ impl AgentTerminalRegistry {
             return Ok(AttachOutcome::Reused(entry.terminal_id.clone()));
         }
 
-        // Local tmux-backed persistence (see `agent_tmux.rs`): when tmux is
-        // present, the pty's child becomes a `tmux attach-session` client
-        // against a session that runs `command`, rather than `command`
-        // itself — so killing this pty (a viewer detaching, a dropped
-        // connection, or perch itself exiting) only loses the attach client;
-        // the real CLI keeps running in tmux and a later attach reattaches
-        // to it. `use_tmux` is resolved once here (cached probe) so the
-        // mandatory no-tmux fallback is a plain, argv-unchanged passthrough.
-        let use_tmux = crate::agent_tmux::tmux_available();
-        // tmux being *installed* is not the same as tmux *working*: the server
-        // can fail to start (socket-dir permissions, resource limits, a version
-        // skew). Persistence is a bonus feature — losing it must never cost the
-        // user CLI mode itself, which worked before this existed. So a failure
-        // here degrades to the exact pre-tmux behavior (spawn the CLI directly)
-        // instead of propagating and leaving the user with a dead pane.
-        let direct_argv = command.clone();
-        let (spawn_argv, tmux_session) = if existing_only {
-            let name = crate::agent_tmux::tmux_session_name(session_id);
-            if !crate::agent_tmux::tmux_session_exists(&name) {
-                anyhow::bail!("persisted terminal process is no longer available");
+        // The process lives in perchd under `session_id`, so it outlives this
+        // runtime: a viewer disconnect, a crash or a restart only loses the
+        // attachment, and the next attach finds the same process by key.
+        // An unreachable daemon degrades to an in-process spawn (persistence is
+        // a bonus; CLI mode itself must keep working) — except for recovery,
+        // which must never start a replacement for a process it can't see.
+        let spawned = match crate::daemon::client() {
+            Ok(client) => {
+                attach_daemon(&client, session_id, cols, rows, cwd, command, existing_only)?
             }
-            (crate::agent_tmux::tmux_attach_argv(&name), Some(name))
-        } else {
-            match crate::agent_tmux::resolve_agent_spawn(
-                use_tmux,
-                session_id,
-                cols,
-                rows,
-                cwd.as_deref(),
-                command,
-            ) {
-                Ok(resolved) => resolved,
-                Err(err) => {
-                    tracing::warn!(
-                        session_id,
-                        error = %err,
-                        "tmux-backed CLI spawn failed; falling back to a direct \
-                         (non-persistent) spawn"
-                    );
-                    (direct_argv, None)
+            Err(err) if !existing_only => {
+                tracing::warn!(session_id, error = %err, "perchd unavailable; spawning a non-persistent terminal");
+                let pty = spawn_pty(cols, rows, cwd, Some(command), false)?;
+                let mut child = pty.child;
+                Spawned {
+                    id: pty.id,
+                    process_id: pty.process_id,
+                    writer: pty.writer,
+                    resize: Box::new(pty.master),
+                    reader: pty.reader,
+                    killer: pty.killer,
+                    wait: Box::new(move || {
+                        child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1)
+                    }),
+                    daemon_session: None,
                 }
             }
+            Err(err) => return Err(err.context("persisted terminal process is not reachable")),
         };
-
-        // The `false` below: an agent-attach pane spawns the CLI (or its tmux
-        // client) directly — there is no shell in this pty for `-l` to apply to.
-        let SpawnedPty {
+        let Spawned {
             id,
             process_id,
-            master,
             writer,
+            resize,
             reader,
             killer,
-            mut child,
-        } = spawn_pty(cols, rows, cwd, Some(spawn_argv), false)?;
+            wait,
+            daemon_session,
+        } = spawned;
 
         let mut viewers = HashMap::new();
         viewers.insert(viewer_id.to_string(), AgentViewer { on_data, on_exit });
@@ -748,18 +866,18 @@ impl AgentTerminalRegistry {
             terminal_id: id.clone(),
             process_id,
             writer: Mutex::new(AgentWriter::new(writer)),
-            master: Mutex::new(master),
+            master: Mutex::new(resize),
             killer: Mutex::new(killer),
             viewers: Mutex::new(viewers),
             last_activity: Mutex::new(std::time::Instant::now()),
-            tmux_session,
+            daemon_session,
         });
         entries.insert(session_id.to_string(), entry.clone());
         drop(entries);
 
-        // Reader thread: pump pty output to *every* registered viewer, not
-        // just the one that happened to create it — the fan-out this whole
-        // registry exists for. Same partial-UTF-8-carry handling as
+        // Reader thread: pump output to *every* registered viewer, not just
+        // the one that happened to create it — the fan-out this whole registry
+        // exists for. Same partial-UTF-8-carry handling as
         // `TerminalManager::create`; see that function's comment for why.
         let reader_id = id.clone();
         let reader_entry = entry.clone();
@@ -776,22 +894,20 @@ impl AgentTerminalRegistry {
             });
         });
 
-        // Waiter thread: pty exit -> fan out terminal.exit to every viewer
-        // still registered, then remove the entry. This is the *only* place
-        // an entry is ever removed from `entries` — `detach()` and `kill()`
-        // both only ever signal the child; removal always happens here, so
-        // there is a single writer for "is this session's terminal still
-        // alive" and no double-remove race between a disconnecting viewer
-        // and an explicit kill.
+        // Waiter thread: exit (or, for a daemon terminal, the end of this
+        // attachment) -> fan out terminal.exit to every viewer still
+        // registered, then remove the entry. This is the *only* place an entry
+        // is ever removed from `entries` — `detach()` and `kill()` both only
+        // ever signal; removal always happens here, so there is a single
+        // writer for "is this session's terminal still attached" and no
+        // double-remove race between a disconnecting viewer and an explicit
+        // kill.
         let exit_id = id.clone();
         let entries_map = self.entries.clone();
         let session_id_for_exit = session_id.to_string();
         let exit_entry = entry.clone();
         std::thread::spawn(move || {
-            let code = match child.wait() {
-                Ok(status) => status.exit_code() as i32,
-                Err(_) => -1,
-            };
+            let code = wait();
             exit_entry
                 .exited
                 .store(true, std::sync::atomic::Ordering::Release);
@@ -822,13 +938,13 @@ impl AgentTerminalRegistry {
     /// (`blocked_sessions` in `server.rs`) that must be cleared by *someone*
     /// regardless of which connection is disconnecting.
     ///
-    /// For a tmux-backed entry (see `agent_tmux.rs`) this "kill" only ever
-    /// reaches the attach client (`entry.killer`), never the tmux session —
+    /// For a daemon-owned entry (see `daemon.rs`) this "kill" only ever
+    /// detaches this runtime (`entry.killer`), never the daemon process —
     /// that composes automatically with zero special-casing here, because
     /// the pty's child *is* the attach client, not the CLI. Losing it is
-    /// exactly equivalent to a tmux detach: the real process keeps running
+    /// exactly a detach: the real process keeps running
     /// for the next attach to find. Only `kill()` (explicit user action)
-    /// reaches further, into `kill_tmux_session`.
+    /// reaches further, into `daemon::terminate`.
     pub fn detach(&self, session_id: &str, viewer_id: &str) {
         let entry = self.entries.lock().unwrap().get(session_id).cloned();
         let Some(entry) = entry else { return };
@@ -957,12 +1073,7 @@ impl AgentTerminalRegistry {
     /// implemented here; flagged as a known simplification.
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) {
         if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
-            let _ = entry.master.lock().unwrap().resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+            let _ = entry.master.lock().unwrap().resize(cols, rows);
         }
     }
 
@@ -1043,18 +1154,11 @@ impl AgentTerminalRegistry {
             }
             return Err(TerminalAuthorityError::NotOwned);
         }
-        let result = entry
-            .master
-            .lock()
-            .unwrap()
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|_| TerminalAuthorityError::ResizeFailed);
-        result
+        if entry.master.lock().unwrap().resize(cols, rows) {
+            Ok(())
+        } else {
+            Err(TerminalAuthorityError::ResizeFailed)
+        }
     }
 
     /// Force-terminate `session_id`'s terminal regardless of how many viewers
@@ -1062,22 +1166,26 @@ impl AgentTerminalRegistry {
     /// session delete) where "kill it" must mean kill it for everyone, not
     /// just detach the caller. No-op if there is no live entry.
     ///
-    /// For a tmux-backed entry this is the one place that must reach past
-    /// the attach client to the tmux session itself (`kill_tmux_session`) —
-    /// killing only the attach client (what `detach()` does) would just
-    /// disconnect it and leave the real CLI running, which is correct for a
-    /// viewer disconnect but wrong here: an explicit kill must not leave an
-    /// orphan for the next attach to silently reattach to.
+    /// For a daemon-owned entry this is the one place that must reach past
+    /// the attachment to the process itself — detaching (what `detach()`
+    /// does) would leave the real CLI running, which is correct for a viewer
+    /// disconnect but wrong here: an explicit kill must not leave an orphan
+    /// for the next attach to silently reattach to. The daemon's exit event
+    /// then ends the attachment, which fans out `terminal.exit` as usual.
     pub fn kill(&self, session_id: &str) {
         if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
-            if let Some(name) = &entry.tmux_session {
-                crate::agent_tmux::kill_tmux_session(name);
+            match entry.daemon_session.clone() {
+                Some(key) => {
+                    std::thread::spawn(move || crate::daemon::terminate(&key));
+                }
+                None => {
+                    let _ = entry.killer.lock().unwrap().kill();
+                }
             }
-            let _ = entry.killer.lock().unwrap().kill();
         }
     }
 
-    /// Return the concrete PTY/tmux identity currently backing a session.
+    /// Return the concrete PTY identity currently backing a session.
     /// Callers retain this value and pass it back to [`Self::runtime_alive`]
     /// or [`Self::terminate_for_hibernation`] to avoid acting on a later
     /// runtime that reused the same logical session id.
@@ -1090,16 +1198,18 @@ impl AgentTerminalRegistry {
                 session_id: session_id.to_string(),
                 terminal_id: entry.terminal_id.clone(),
                 process_id: entry.process_id,
-                tmux_session: entry.tmux_session.clone(),
+                daemon_session: entry.daemon_session.clone(),
             })
     }
 
-    /// Check whether the exact runtime identity is still live. For tmux this
-    /// checks the persistent server directly, so a dropped attach PTY does
-    /// not look like a dead provider process.
+    /// Check whether the exact runtime identity is still live. For a daemon
+    /// process this asks the daemon directly (same key, same pid), so a
+    /// dropped attachment does not look like a dead provider process.
     pub fn runtime_alive(&self, identity: &TerminalRuntimeIdentity) -> bool {
-        if let Some(name) = identity.tmux_session.as_deref() {
-            return crate::agent_tmux::tmux_session_exists(name);
+        if let Some(key) = identity.daemon_session.as_deref() {
+            return crate::daemon::client()
+                .and_then(|c| Ok(c.session(key)?))
+                .is_ok_and(|s| s.is_some_and(|s| s.alive && s.pid == identity.process_id));
         }
         self.entries
             .lock()
@@ -1113,8 +1223,8 @@ impl AgentTerminalRegistry {
     /// Stop the exact runtime represented by `identity` before a lifecycle
     /// record is allowed to enter `Sleeping`. The entry is removed after the
     /// termination signal, preventing a subsequent attach from confusing the
-    /// old process with a newly-created one. A tmux session is checked after
-    /// the kill request; a still-present session is an error, so callers never
+    /// old process with a newly-created one. A daemon process is checked after
+    /// the kill request; a still-running process is an error, so callers never
     /// mark an agent sleeping while its provider is demonstrably alive.
     pub fn terminate_for_hibernation(
         &self,
@@ -1136,22 +1246,20 @@ impl AgentTerminalRegistry {
             }
         }
 
-        if let Some(name) = identity.tmux_session.as_deref() {
-            crate::agent_tmux::kill_tmux_session(name);
-            if crate::agent_tmux::tmux_session_exists(name) {
+        if let Some(key) = identity.daemon_session.as_deref() {
+            if !crate::daemon::terminate(key) {
                 return Err(anyhow::anyhow!(
-                    "tmux runtime {} is still alive after termination",
-                    name
+                    "daemon runtime {} is still alive after termination",
+                    key
                 ));
             }
         }
 
         if let Some(entry) = entry {
-            // The tmux session is the provider process; this additional kill
-            // only tears down the local attach client. For direct PTYs it is
-            // the provider process itself.
+            // The daemon process is the provider; this additional kill only
+            // detaches. For an in-process PTY it is the provider itself.
             let _ = entry.killer.lock().unwrap().kill();
-            if identity.tmux_session.is_none() {
+            if identity.daemon_session.is_none() {
                 // For a direct PTY, the kill signal is asynchronous. Leave
                 // the registry entry in place until the waiter observes the
                 // child exit; `runtime_alive` therefore remains true while
@@ -1193,7 +1301,7 @@ impl AgentTerminalRegistry {
     /// `server.rs` uses this to decide whether `TerminalInput`/`TerminalResize`/
     /// `TerminalKill` (which only carry a `terminal_id`, not a session id) must
     /// route into this registry rather than the per-connection
-    /// `TerminalManager` — a plain shell or a direct-mode (ssh/tmux) terminal
+    /// `TerminalManager` — a plain shell or a direct-mode (ssh) terminal
     /// isn't in here at all, so this correctly returns `None` for those. A
     /// linear scan is fine: the number of concurrently live agent terminals is
     /// always tiny (one per actively-CLI-attached session).
@@ -1363,23 +1471,15 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// The pid of the process running in `name`'s (single) pane, if the
-    /// session is alive. Used to prove that a reattach found the *same*
-    /// running agent rather than a freshly recreated one.
-    fn tmux_pane_pid(name: &str) -> Option<String> {
-        let out = std::process::Command::new("tmux")
-            .args(["list-panes", "-t", name, "-F", "#{pane_pid}"])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if pid.is_empty() {
-            None
-        } else {
-            Some(pid)
-        }
+    /// The pid of `key`'s live daemon process. Used to prove that a
+    /// reattach found the *same* running agent rather than a recreated one.
+    fn daemon_pid(key: &str) -> Option<u32> {
+        crate::daemon::client()
+            .ok()?
+            .session(key)
+            .ok()?
+            .filter(|s| s.alive)
+            .and_then(|s| s.pid)
     }
 
     fn noop_listeners() -> (TerminalDataListener, TerminalExitListener) {
@@ -1498,33 +1598,19 @@ mod tests {
             registry.terminal_id_for("session-two-viewers").is_none(),
             "terminal must die once its last viewer disconnects"
         );
-        // Belt-and-braces cleanup: if this machine has tmux, the last
-        // detach above only killed the attach client (see
-        // `AgentTerminalRegistry::detach`'s doc comment) — the `sleep 5`
-        // inside tmux self-terminates shortly on its own, but an explicit
-        // kill here means the test never depends on that timing.
-        crate::agent_tmux::kill_tmux_session(&crate::agent_tmux::tmux_session_name(
-            "session-two-viewers",
-        ));
+        // The last detach above only detached; end the process explicitly so
+        // the test never depends on `sleep`'s timing.
+        crate::daemon::terminate("session-two-viewers");
     }
 
-    /// The tmux-persistence feature's core promise, exercised through the
-    /// *real* `AgentTerminalRegistry::attach`/`detach`/`kill` path (not just
-    /// `agent_tmux.rs`'s direct tmux-command tests): a spawned tmux-backed
-    /// terminal's underlying process survives its last viewer detaching —
-    /// only an explicit `kill()` may take it down. Gated on tmux being
-    /// installed; skips cleanly (not a failure) otherwise, per the phase
-    /// brief.
+    /// The persistence promise, through the *real*
+    /// `AgentTerminalRegistry::attach`/`detach`/`kill` path: a daemon-owned
+    /// terminal's process survives its last viewer detaching and a brand-new
+    /// registry (a restarted runtime) reattaches to the same pid — only an
+    /// explicit `kill()` takes it down.
     #[test]
-    fn a_tmux_backed_terminal_survives_its_last_viewer_detaching() {
-        if !crate::agent_tmux::tmux_available() {
-            eprintln!("skipping: tmux not installed");
-            return;
-        }
-        let session_id = "session-tmux-persistence";
-        let tmux_name = crate::agent_tmux::tmux_session_name(session_id);
-        crate::agent_tmux::kill_tmux_session(&tmux_name); // in case a previous failed run left it
-
+    fn a_daemon_terminal_survives_its_last_viewer_and_a_restart() {
+        let session_id = "session-daemon-persistence";
         let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
         let (on_data, on_exit) = noop_listeners();
         let command = vec![
@@ -1532,7 +1618,6 @@ mod tests {
             "-c".to_string(),
             "sleep 30".to_string(),
         ];
-
         registry
             .attach(
                 session_id,
@@ -1544,81 +1629,60 @@ mod tests {
                 on_data,
                 on_exit,
             )
-            .expect("attach spawns a tmux-backed terminal");
+            .expect("attach spawns a daemon terminal");
+        let pid_before = daemon_pid(session_id).expect("the daemon runs it");
 
-        // The real CLI (the `sleep 30`) is running inside tmux, not as this
-        // pty's direct child — confirm the tmux session actually exists
-        // before asserting anything about it surviving.
-        assert!(
-            crate::agent_tmux::tmux_session_exists(&tmux_name),
-            "attach() must have created the tmux session"
-        );
-
-        // The only viewer disconnects — this must kill the attach client,
-        // not the tmux session underneath it.
         registry.detach(session_id, "viewer-only");
-        std::thread::sleep(Duration::from_millis(300));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while registry.terminal_id_for(session_id).is_some() && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(
             registry.terminal_id_for(session_id).is_none(),
-            "the registry entry (attach client) must be gone"
+            "the registry entry (the attachment) must be gone"
         );
-        assert!(
-            crate::agent_tmux::tmux_session_exists(&tmux_name),
-            "the tmux session — the real agent process — must survive a viewer detach"
+        assert_eq!(
+            daemon_pid(session_id),
+            Some(pid_before),
+            "the real process must survive a viewer detach"
         );
 
-        // A fresh attach for the same session must reattach to the SAME
-        // tmux session (this is the perch-restart recovery path in
-        // miniature: a brand-new registry, exactly what exists right after
-        // a restart, finding a tmux session that already exists).
-        //
-        // Record the pane's pid first. Asserting only that *a* session with
-        // this name exists afterwards would pass even if it had been torn
-        // down and recreated — which is precisely the regression that would
-        // silently destroy the user's running agent. The pid is what proves
-        // continuity.
-        let pane_pid_before = tmux_pane_pid(&tmux_name);
-        assert!(
-            pane_pid_before.is_some(),
-            "expected a live pane pid before the simulated restart"
-        );
-        let recovering_registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        // A fresh registry is exactly what exists right after a restart.
+        let recovering = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
         let (on_data2, on_exit2) = noop_listeners();
-        recovering_registry
-            .attach(
+        recovering
+            .attach_existing(
                 session_id,
                 "viewer-after-restart",
                 80,
                 24,
                 None,
-                vec![
-                    "/bin/sh".to_string(),
-                    "-c".to_string(),
-                    "echo should-not-run-again".to_string(),
-                ],
                 on_data2,
                 on_exit2,
             )
-            .expect("reattach after 'restart' finds the live tmux session");
-        assert!(
-            crate::agent_tmux::tmux_session_exists(&tmux_name),
-            "reattach must still find the same tmux session, not a fresh one"
-        );
+            .expect("reattach after 'restart' finds the live process");
         assert_eq!(
-            tmux_pane_pid(&tmux_name),
-            pane_pid_before,
-            "reattach must find the SAME running process — a changed pane pid \
-             means the agent was killed and relaunched, losing the user's session"
+            daemon_pid(session_id),
+            Some(pid_before),
+            "reattach must find the SAME process — a new pid means the agent \
+             was killed and relaunched, losing the user's session"
         );
+        let identity = recovering.runtime_identity(session_id).unwrap();
+        assert!(recovering.runtime_alive(&identity));
 
-        // Explicit kill (Restart CLI / session delete semantics): THIS must
-        // take the tmux session down, unlike the plain detach above.
-        recovering_registry.kill(session_id);
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            !crate::agent_tmux::tmux_session_exists(&tmux_name),
-            "an explicit kill must remove the tmux session, not just detach"
+        // Explicit kill (Restart CLI / session delete): this one ends it.
+        recovering.kill(session_id);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while daemon_pid(session_id).is_some() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            daemon_pid(session_id),
+            None,
+            "an explicit kill must end the process"
         );
+        assert!(!recovering.runtime_alive(&identity));
     }
 
     /// Pure debounce logic (Task 2): under the threshold stays "working",

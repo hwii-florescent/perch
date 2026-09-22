@@ -501,9 +501,7 @@ impl AgentRuntimeAdapter {
         if snapshot.state == AgentState::Reconnecting
             && provider_session_id.is_none()
             && self.runtime(&key).is_none()
-            && !crate::agent_tmux::tmux_session_exists(&crate::agent_tmux::tmux_session_name(
-                &terminal_key(&key),
-            ))
+            && !crate::daemon::session_alive(&terminal_key(&key))
         {
             return Err(RuntimeAdapterError::FreshSessionRefused(key));
         }
@@ -678,7 +676,7 @@ impl AgentRuntimeAdapter {
                             session_id: terminal_key(&event_key),
                             terminal_id: terminal_id.clone(),
                             process_id: None,
-                            tmux_session: None,
+                            daemon_session: None,
                         })
                 }) {
                     active.remove(&event_key);

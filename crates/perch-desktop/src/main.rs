@@ -12,6 +12,8 @@ use perch_core::boot::{
 use perch_core::server::CliArgs;
 
 fn main() {
+    // `<exe> __perchd …` is the terminal daemon, not the app (see daemon.rs).
+    perch_core::daemon::run_if_requested();
     // Initialise tracing before anything else so early errors are visible.
     tracing_subscriber::fmt()
         .with_env_filter(
