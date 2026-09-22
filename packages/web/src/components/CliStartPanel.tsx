@@ -17,7 +17,7 @@
  *
  * Bug 1 fix: this panel is also the *only* place CLI mode lets the user pick
  * which agent CLI to launch — Hosted mode's provider/model chrome
- * (ModelChip/EffortChip) deliberately never renders in CLI mode (CLAUDE.md's
+ * (ModelChip/EffortChip) deliberately never renders in CLI mode (AGENTS.md's
  * "zero model chrome in CLI mode"), so without a choice here CLI mode always
  * launched whatever the global `agent` field happened to be (in practice,
  * always Claude — nothing in CLI mode could ever change it). The toggle below

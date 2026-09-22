@@ -729,11 +729,31 @@ pub(super) fn mark_unseen_if_unviewed(app: &AppState, session_id: &str) {
 /// every connection until someone subscribes — at which point the ring-buffer
 /// replay (`SessionRegistry::replay`, see `ClientMessage::SessionSubscribe`)
 /// catches the new viewer up on anything already recorded.
+///
+/// `observes(session_id, agent_id)` reports whether this connection is watching
+/// that agent, and it is what lets a *second* native chat pane keep updating.
+/// A connection has exactly one active session (`set_active_session` removes it
+/// from the previous one), so viewer membership alone would freeze every native
+/// pane but the focused one — which is precisely the "several agents working in
+/// parallel" the product is for. Only `agent.ui.snapshot` gets this widening:
+/// the chat stream stays strictly session-scoped, and failing *open* instead
+/// would send a paired phone the transcripts of sessions it never opened.
 pub(super) fn should_forward_to_viewer(
     msg: &ServerMessage,
     conn_id: &str,
     viewers: &HashMap<String, HashSet<String>>,
+    observes: impl Fn(&str, &str) -> bool,
 ) -> bool {
+    if let ServerMessage::AgentUiSnapshot {
+        session_id,
+        provider_id,
+        ..
+    } = msg
+    {
+        if observes(session_id, provider_id) {
+            return true;
+        }
+    }
     let session_id = match msg {
         ServerMessage::ChatChunk { session_id, .. }
         | ServerMessage::ChatThinking { session_id, .. }

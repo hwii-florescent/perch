@@ -15,7 +15,7 @@ round-trips, `ssh.rs`'s pure helpers (e.g. control-path length). Run with
 `cargo test -p perch-core` or `cargo test -p perch-core <substring>` for one
 test. Fast, no network, no subprocess spawning (a few tests do spawn `ssh`
 against a mux socket path and are documented as flaky under HOME mutation —
-see CLAUDE.md).
+see AGENTS.md).
 
 Several modules have **zero** unit tests today (`registry.rs`, `hub.rs`,
 `protocol.rs` itself, `settings.rs`, `hosts.rs`, `status.rs`, `terminal.rs`)

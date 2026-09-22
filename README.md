@@ -29,4 +29,4 @@ Add SSH hosts in Settings. The local perch becomes a hub: it health-checks each 
 
 ---
 
-See `PLAN.md` for the phase-by-phase history, and `AGENTS.md`/`CLAUDE.md` for contributor and agent guidance.
+See `PLAN.md` for the phase-by-phase history, and `AGENTS.md` for contributor and agent guidance.

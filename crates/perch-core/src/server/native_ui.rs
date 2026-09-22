@@ -21,12 +21,19 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             let app = &event_app;
             let key = &event_key;
             let _operation = app.agent_operation_lock.lock().unwrap();
-            if !app.db.session_exists(&key.session_id).unwrap_or(false) {
+            // A deleted session has nothing left to publish. A *failed* read is
+            // not a deletion: treating it as one would silently drop the live
+            // transcript of a session that still exists.
+            if matches!(app.db.session_exists(&key.session_id), Ok(false)) {
                 return;
             }
+            // Turn history, provider identity and lifecycle state are
+            // bookkeeping *about* this snapshot. None of them may suppress the
+            // snapshot itself: the web view renders only what it receives, so
+            // one swallowed frame leaves the transcript frozen mid-stream on
+            // "Working" while the CLI has already answered.
             if let Err(error) = app.agent_runtime.observe_native_turn(key, snapshot.running) {
                 tracing::error!(%error, "could not persist completed native turn");
-                return;
             }
             let old = app.agent_runtime.snapshot(key).ok();
             let state = if snapshot.running {

@@ -575,14 +575,16 @@ export function handleGitReviewMessage(message: ServerMessage): boolean {
 
   if (message.type === "git.status.result") {
     const result = message as GitStatusResultMessage;
-    // A status that carries no turn keeps the last one we were told about:
-    // only `git.status.result` reports it, and an action reply (below)
-    // rebuilds this message without it.
+    // Only a real `git.status.result` reports the turn, and the action reply
+    // below rebuilds this message *without the key*, so an absent key still
+    // keeps the last summary we were told about. An explicit `null` is the
+    // server saying it has none — that must clear a cached one, or a browser
+    // left open across a failed capture keeps offering a stale comparison.
     setWorkspace(result.workspaceId, {
       status: updateStatusFromWire(result),
       statusState: "ready",
       statusError: undefined,
-      ...(result.lastAgentTurn ? { lastAgentTurn: result.lastAgentTurn } : {}),
+      ...("lastAgentTurn" in result ? { lastAgentTurn: result.lastAgentTurn ?? null } : {}),
     });
     return true;
   }

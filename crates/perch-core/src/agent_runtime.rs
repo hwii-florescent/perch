@@ -232,11 +232,15 @@ impl AgentRuntimeAdapter {
             .unwrap()
             .get(key)
             .is_some_and(|runtime| runtime.native_running && !running);
-        if completed {
-            self.record_turn_boundary(key, false)?;
-        }
+        // Record the observed edge before the capture can fail. A runtime that
+        // still believes a finished turn is running would let the *next* turn's
+        // completion close this turn's open boundary, reporting one summary
+        // that spans both turns' changes.
         if let Some(runtime) = self.active.lock().unwrap().get_mut(key) {
             runtime.native_running = running;
+        }
+        if completed {
+            self.record_turn_boundary(key, false)?;
         }
         Ok(())
     }
@@ -1592,6 +1596,55 @@ mod tests {
         assert!(adapter.runtime_alive(&key));
         adapter.terminals.kill(&terminal_key(&key));
         let _ = data;
+    }
+
+    /// A boundary capture can fail for reasons that have nothing to do with
+    /// the turn (a busy database, a Git hiccup). The failure must not leave the
+    /// runtime believing the finished turn is still running, or the *next*
+    /// turn's completion closes this turn's open boundary and the review view
+    /// reports one summary spanning both turns' changes.
+    #[test]
+    fn a_failed_boundary_capture_still_records_the_completed_native_turn() {
+        let adapter = adapter();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        adapter
+            .attach_cli(
+                AgentRegistration {
+                    key: key.clone(),
+                    provider_id: "fixture".to_string(),
+                    provider_session_id: Some("provider-session".to_string()),
+                    resumable: true,
+                    now_ms: 1,
+                },
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let captures = Arc::new(AtomicU64::new(0));
+        let seen = captures.clone();
+        adapter
+            .set_turn_boundary_listener(Arc::new(move |_, _| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("capture failed")
+            }))
+            .unwrap();
+        // A turn starting has no boundary to close.
+        adapter.observe_native_turn(&key, true).unwrap();
+        assert_eq!(captures.load(Ordering::SeqCst), 0);
+        // Completion captures, and the caller still learns it failed.
+        assert!(adapter.observe_native_turn(&key, false).is_err());
+        assert_eq!(captures.load(Ordering::SeqCst), 1);
+        // The running→ready edge is spent: later ready snapshots capture nothing.
+        adapter.observe_native_turn(&key, false).unwrap();
+        assert_eq!(captures.load(Ordering::SeqCst), 1);
     }
 
     #[test]

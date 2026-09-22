@@ -7,7 +7,7 @@
 //! SessionListRow from server/session.rs.
 //!
 //! SESSION_LIST_ROW_SELECT + session_list_row_from_row are shared by
-//! list_sessions and get_session_row **on purpose** (see CLAUDE.md) —
+//! list_sessions and get_session_row **on purpose** (see AGENTS.md) —
 //! kept together here, still both private, still only used by those two
 //! methods, both of which live in this file.
 

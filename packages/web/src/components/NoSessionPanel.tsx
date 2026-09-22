@@ -8,7 +8,7 @@
  * and nothing is pending; it was a dead end with no way out.
  *
  * Two distinct situations reach here and must not share a message (per
- * CLAUDE.md's `connected` boolean already existing precisely to distinguish
+ * AGENTS.md's `connected` boolean already existing precisely to distinguish
  * them):
  *  - genuinely disconnected — the composer *was* right to say something like
  *    "Connecting...", just not this unconditionally;

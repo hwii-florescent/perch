@@ -599,6 +599,22 @@ impl GitService {
                     self.config.max_file_bytes,
                     options.context_lines,
                 )? {
+                    // A base that is a content commit already carries this
+                    // path, and because it is untracked *now* Git reports it
+                    // as deleted — a file sitting on disk, claimed removed,
+                    // and listed twice. The working tree is the authority on
+                    // what is there, so its entry replaces that phantom.
+                    // ponytail: the survivor reads "added" rather than
+                    // "modified" against the base's copy. Diffing an untracked
+                    // path against an arbitrary commit needs a temporary index;
+                    // build one if reviewers need that content comparison.
+                    files.retain(|existing| {
+                        existing
+                            .new_path
+                            .as_deref()
+                            .or(existing.old_path.as_deref())
+                            != Some(entry.path.as_str())
+                    });
                     files.push(file);
                 }
             }
@@ -2565,6 +2581,56 @@ mod tests {
             .iter()
             .any(|file| file.new_path.as_deref() == Some("untracked.txt")));
         assert!(diff.hunk_count >= 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A content snapshot carries untracked work, so comparing one against the
+    /// working tree makes Git call a file that is sitting right there deleted,
+    /// while the untracked pass adds it again. One path, one entry, and never
+    /// a deletion the user can disprove by looking at the disk.
+    #[tokio::test]
+    async fn an_untracked_path_is_never_also_reported_deleted_against_a_snapshot() {
+        let root = temp_repo("snapshot-untracked");
+        fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        git(&root, &["add", "tracked.txt"]);
+        git(&root, &["commit", "-qm", "base"]);
+        fs::write(root.join("loose.txt"), "first\n").unwrap();
+        let service = GitService::default();
+        let target = target(&root);
+        // The snapshot commits the untracked file; it stays untracked on disk.
+        let snapshot = service.content_snapshot(&target).await.unwrap();
+        fs::write(root.join("loose.txt"), "second\n").unwrap();
+
+        let diff = service
+            .diff(
+                &target,
+                DiffOptions {
+                    target: DiffTarget::Compare {
+                        base: snapshot,
+                        head: None,
+                    },
+                    ..DiffOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+        let loose: Vec<_> = diff
+            .files
+            .iter()
+            .filter(|file| {
+                file.new_path.as_deref().or(file.old_path.as_deref()) == Some("loose.txt")
+            })
+            .collect();
+        assert_eq!(loose.len(), 1, "one entry per path: {:?}", diff.files);
+        assert_ne!(loose[0].status, DiffFileStatus::Deleted);
+        assert!(
+            loose[0].hunks.iter().any(|hunk| hunk
+                .lines
+                .iter()
+                .any(|line| line.content.contains("second"))),
+            "the working tree's content, not the snapshot's: {:?}",
+            loose[0]
+        );
         let _ = fs::remove_dir_all(root);
     }
 

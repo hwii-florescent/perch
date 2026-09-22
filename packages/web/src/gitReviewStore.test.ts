@@ -214,6 +214,41 @@ describe("Git/review request lifecycle", () => {
     expect(state?.actionError).toBe("keep this action error");
   });
 
+  it("clears a cached agent turn on an explicit null but keeps it when the key is absent", () => {
+    seedReviewState(diffSnapshot({ kind: "workingTree" }, "rev-working-tree"));
+    const actions = useWorkspaceGitReviewStore.getState().getWorkspaceActions("workspace-test");
+    const turn = {
+      snapshotId: "snapshot-1",
+      sessionId: "session-test",
+      agent: "turnbot",
+      beforeRef: "ref-before",
+      afterRef: "ref-after",
+      changedPaths: ["src/main.txt"],
+      state: "complete" as const,
+    };
+    const status = (requestId: string, extra: Record<string, unknown>) => handleGitReviewMessage({
+      type: "git.status.result",
+      requestId,
+      workspaceId: "workspace-test",
+      status: statusSnapshot(),
+      ...extra,
+    } as never);
+    const cached = () => useWorkspaceGitReviewStore.getState().workspaces["workspace-test"]?.lastAgentTurn;
+
+    expect(status(actions.refreshStatus()!, { lastAgentTurn: turn })).toBe(true);
+    expect(cached()).toEqual(turn);
+
+    // An action reply rebuilds a status message without the key at all; that
+    // is not the server reporting "no turn", so the summary must survive.
+    expect(status(actions.refreshStatus()!, {})).toBe(true);
+    expect(cached()).toEqual(turn);
+
+    // An explicit null is the server saying it has none. A browser left open
+    // across a failed capture must not keep offering the stale comparison.
+    expect(status(actions.refreshStatus()!, { lastAgentTurn: null })).toBe(true);
+    expect(cached()).toBeNull();
+  });
+
   it("loads server-provided refs without clearing an existing action error", () => {
     seedReviewState();
     useWorkspaceGitReviewStore.setState((state) => ({

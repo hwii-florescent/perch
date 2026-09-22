@@ -1,5 +1,585 @@
 # ADE rework verification
 
+## Honest last-turn review state — 2026-09-21
+
+Closed the V-07 slice the previous checkpoint traced: the review surface could
+present an **older** turn under the label "Last agent turn", and a client could
+keep offering a comparison the server no longer had. Both defects are fixed at
+their shared source, with a third found while verifying.
+
+### What changed
+
+1. `server/agent_history.rs` — `last_completed_turn` scanned 16 rows for the
+   first *completed* one, so a newer failed or open row was skipped and an
+   older success was returned under that label. It is now `last_agent_turn`
+   and reports the **newest** row plus an explicit state. `completed = false`
+   cannot say *why* a row is open, so the live runtime decides: the lifecycle
+   registry for managed CLI turns (it owns them; `observe_session` returns
+   early for those, so `running_sessions` is not their truth), otherwise
+   `running_sessions`. Working/Blocked/Reconnecting is a turn in flight;
+   anything else means the capture will never close. No row is rewritten,
+   invented or deleted. The decision is split into `summarize_turn(row,
+   in_flight)` so it is testable without an `AppState`.
+2. Protocol parity — new `AgentTurnState` (`complete` / `running` /
+   `unavailable`) on `AgentTurnSummary` in **both** `protocol.rs` and
+   `protocol.ts`, `#[serde(default)]` so a peer predating it still parses as a
+   finished turn. `GitStatusResult::last_agent_turn` **lost its
+   `skip_serializing_if`**: it is now always on the wire, including as `null`,
+   because only an explicit `null` can tell a client the server has no turn.
+   No existing required field changed type, so older peers keep parsing.
+3. `packages/web/src/gitReviewStore.ts` — the merge was
+   `...(result.lastAgentTurn ? … : {})`, so an absent summary never cleared a
+   cached one. It now applies whenever the **key is present**, `null`
+   included. The synthetic status rebuilt from `git.action.result` omits the
+   key entirely, so that path still preserves the summary — which is why the
+   distinction is "key present", not "value truthy".
+4. `packages/web/src/components/WorkspaceGitReview.tsx` — one derived
+   `turnBase` gates the selector option, the preset and the diff target.
+   Labels are distinct facts: `(none recorded)`, `(agent · running)`,
+   `(agent · not captured)`. An effect keeps the preset pointed at whichever
+   turn is current and falls back to the working tree when the turn stops
+   being reviewable, so an already-loaded diff cannot outlive its summary.
+   `unavailable` renders an explicit note instead of an offer.
+5. `source_control.rs` (found while verifying the running state) — comparing a
+   content snapshot against the working tree made Git report an untracked file
+   that the snapshot carries as **deleted**, while the untracked pass added it
+   again: one path, two entries, one of them a deletion the user can disprove
+   by looking at the disk. The working-tree entry now replaces the phantom.
+   The existing guard beside it already named this hazard for the two-endpoint
+   targets; this extends it to the base-only compare the turn presets use.
+   Marked `ponytail:` — the survivor reads "added" rather than "modified"
+   against the base's copy, which needs a temporary index to do properly.
+
+### Runnable checks (each verified failing before its fix)
+
+- `agent_history::tests::an_uncaptured_newest_turn_is_reported_instead_of_an_older_success`
+  — real Git/SQLite fixtures: a finished turn, a running one, that same row
+  stranded by an injected completion failure, and the next turn restoring
+  review. Against the old selection it reports `Complete` where `Running` is
+  correct. The stranded row stays incomplete throughout.
+- `gitReviewStore.test.ts` "clears a cached agent turn on an explicit null but
+  keeps it when the key is absent". Against the old merge it keeps the stale
+  summary.
+- `source_control::tests::an_untracked_path_is_never_also_reported_deleted_against_a_snapshot`
+  — against the old code the diff carries `loose.txt` twice, once `Deleted`.
+
+### Verification
+
+- `cargo test -p perch-core`: **273 unit + 2 protocol tests passed**.
+- `cargo build -p perch-core`, `cargo fmt --check`: passed.
+- `cargo clippy --workspace --all-targets`: five baseline warnings, unchanged.
+- `npm test -w @perch/web`: **223 passed**; `npm run build` passed.
+- `cd e2e && npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'turnbot' --project=webkit --project=chromium`:
+  **4 passed (21.2s)**, fixture provider only — **no paid model request**.
+  The new spec drives one finished turn, a genuinely running turn (the fixture
+  agent gained a `hang` prompt that withholds its completion marker), that row
+  losing its end, a reload, and the next turn restoring review.
+- `cd e2e && npx playwright test --config=cli-rendering.config.ts workspace-review.spec.ts -g "distinct Git sources|workspace start keeps|mobile Git pane" --project=chromium`:
+  **4 passed** — the neighbouring Git/review surfaces the shared diff fix touches.
+- Screenshots inspected, both engines:
+  `e2e/screenshots-cli-rendering/{webkit,chromium}/turn-state-2026-09-21/`.
+  `turn-running.png` shows the selector reading `Last agent turn (turnbot ·
+  running)`, the summary "turn in progress, comparing against the working
+  tree", and two diff entries with no phantom deletion. `turn-unavailable.png`
+  shows Compare fallen back to `Working tree`, the "not captured" note, and no
+  turn summary — the stale comparison is gone rather than silently wrong.
+
+### Stated honestly
+
+- The `unavailable` browser state is produced by writing the durable shape a
+  failed capture leaves into the test's **own** fixture database. The
+  production failure path itself is covered by the Rust regressions, which
+  inject real capture failures. No browser fault-injection harness exists.
+- `running` is distinguished from `unavailable` by live runtime state, not by
+  the database. A core restart that loses an in-flight turn therefore reports
+  `unavailable` once nothing is running, which is the honest answer, but it is
+  not a claim that the turn *failed* rather than being interrupted.
+- An `AgentTurnSummary` carries an empty `beforeRef` in the one case where a
+  row exists but its before side was never recorded. `state` gates comparing,
+  not `beforeRef`; a client predating `state` would offer a broken base in
+  that already-degraded case.
+
+### Remaining V-07 scope
+
+V-07 stays **PARTIAL**. Closed here: honest selection of the newest turn, the
+explicit failure state, and stale client state. Still open, unchanged:
+
+- an implicit session-created workspace still has no recorded creation ref;
+- turn boundaries only exist for local workspaces — a direct-host session's
+  turns are not recorded, because Git for that workspace is not reachable from
+  this process;
+- the capture-ordering ceiling (a turn beginning before the spawned boundary
+  capture finishes would attribute its first milliseconds to the before side);
+- the full change summary the gate names (counts/narrative across a turn) is
+  stored but is not rendered beyond the diff and the one-line summary;
+- accepted/queued/rejected prompt semantics and legacy observer ordering;
+- capture cost/retention measurement.
+
+V-10 and V-12 remain PARTIAL and the complete SPEC scope remains active.
+No commit or push was performed; no test process remains running.
+
+## Failed completion cannot contaminate the next turn — 2026-09-21
+
+Fixed a remaining V-07 attribution defect in `server/agent_history.rs`.
+The previous native-runtime fix recorded the completed lifecycle edge before
+capture could fail, but the history recorder still retained its open snapshot
+ID on error. A later completion could fill that row with newer files, or the
+next prompt could reuse the old before boundary and combine two turns.
+
+The shared recorder now consumes the pending snapshot ID before session/workspace
+reads, Git capture/comparison, or final database persistence. If those operations
+fail, the durable row stays incomplete and subsequent notifications cannot
+recapture a later endpoint for it. A subsequent prompt creates a new baseline.
+No existing snapshot data is deleted or fabricated. This applies to all callers
+of the shared recorder, not just native UI snapshots.
+
+One runnable regression in the same module uses disposable Git/SQLite fixtures:
+`failed_completion_never_reuses_the_previous_turn_boundary`. It injects both a
+session-read failure and a completion-write failure, exercises a repeated Ready
+and a new prompt immediately after failure, and verifies exactly one of two
+rows completes, with only `second.txt` attributed to the second turn. The test
+failed before the fix and passes after it.
+
+Verification:
+
+- `cargo test -p perch-core`: **271 unit + 2 protocol tests passed**.
+- `cargo build -p perch-core`, `cargo fmt --check`: passed.
+- `cargo clippy --workspace --all-targets`: passed with five baseline warnings.
+- `cd e2e && npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts -g 'turnbot:' --project=webkit --project=chromium`:
+  **2 passed (11.4s)**. These local shell fixtures use no paid model requests.
+  They verify the normal rendered agent-turn diff, exclusion of human edits,
+  rename/delete and staged-empty comparisons, reload and snapshot survival
+  through Git GC. The injected failure is covered by the Rust regression,
+  not by a browser fault-injection scenario.
+- Artifacts: `e2e/screenshots-cli-rendering/{webkit,chromium}/failed-boundary-2026-09-21/`.
+  Logs: `/tmp/perch-failed-boundary-{tests,clippy}-2026-09-21.log`.
+  The WebKit agent-turn diff screenshot was inspected.
+
+Only the history recorder and its test changed in production sources for this
+slice. No commit/push or paid model turn was performed; no test remains running.
+V-07 remains PARTIAL: incomplete-row crash recovery/explicit failure presentation,
+accepted/queued/rejected prompt semantics, legacy observer ordering, capture
+cost/retention and remote coverage remain. In particular, the selector can
+still offer an older completed turn when newer rows are incomplete; this slice
+does not add a user-facing failure state. V-10/V-12 and the complete SPEC scope
+remain active as described below.
+
+## Two native panes and explicit cheap-model checks — 2026-09-21
+
+The previous goal remains active; no completion or commit/push is claimed.
+Read the September 16 checkpoint below for the production fixes already in
+this worktree. This continuation added their missing two-pane browser coverage.
+
+- Extended the existing `e2e/native-providers.spec.ts`, registered it in the
+  main config and `native-ui.config.ts`, and retained its CLI draft/reload,
+  separate-process and shell checks. OMP and Pi now switch to native UI in one
+  tab, each submit a real turn, and both show their own complete reply and Ready
+  state. The test verifies an unsolicited Pi snapshot reaches the secondary
+  session while the connection remains subscribed to OMP and its composer has
+  focus; native PIDs remain distinct and unchanged. This exercises the existing
+  observer-routing fix through the browser. No production implementation changed.
+- Reaffirmed the user's cheapest-model requirement in `goals.md`: verify the
+  actual model before any prompt and stop if it is unknown/unexpected. Both
+  native panes asserted `gpt-5.6-luna` before this test sent either prompt.
+- `cheapModel.ts` now creates a private Pi settings overlay that explicitly pins
+  Luna/openai-codex/low reasoning, instead of relying on the user's current
+  default. The combined OMP/Pi fixture uses a private Pi launcher to select that
+  overlay because both CLIs use `PI_CODING_AGENT_DIR` with incompatible config
+  formats. Global provider settings and user extensions were not changed.
+- Cleanup uses only tmux names recorded by this fixture's core, and the core log
+  and two-pane screenshot are saved as test artifacts.
+
+Verification: `cargo build -p perch-core` passed (production code unchanged).
+`cd e2e && npx playwright test --config=native-ui.config.ts native-providers.spec.ts --project=webkit`
+passed **1 test (15.1s; test 14.7s)**. Its desktop screenshot shows both native
+panes, Luna model chips, distinct replies and Ready states. Evidence:
+`e2e/screenshots-cli-rendering/webkit/native-split-2026-09-21/`.
+
+Earlier attempts: sandboxed WebKit aborted before fixture startup; the same
+headless test ran with approved broader execution access. Its first model check
+then stopped on Pi's `unknown` model before sending any prompts, exposing the
+shared config-home problem. After separate overlays, a test assumption that
+Dockview focus changes the tab's session subscription failed; current code
+keeps the top-level subscription, so the assertion now checks that behavior
+and verifies the secondary session's unsolicited update. Earlier evidence is
+under `e2e/screenshots-cli-rendering/webkit/native-split-first-2026-09-21/`.
+No test process remains running. Chromium was not rerun for this new slice.
+
+Next: retain the full V-07/V-10/V-12 and resource-budget scope below. The
+September 16 two-pane browser-test gap is now covered for this OMP/Pi WebKit
+flow; it does not prove the complete multi-agent safety, remote or paired-phone
+contract. Do not rerun unrelated real-agent suites without cheap-model checks.
+
+## Provider environment delivery and native snapshot transport — 2026-09-16
+
+Three defects, each found from the unresolved Pi freeze and the five-provider
+sweep it blocked. All three are in shared paths, so the fixes are one change
+each rather than one per caller.
+
+**A failed turn-history capture silently swallowed the live transcript.**
+`server/native_ui.rs`'s snapshot callback returned early when
+`observe_native_turn` failed, before the `AgentUiSnapshot` broadcast, so any
+transient database or Git error on a running→ready edge left the web view
+frozen on its last mid-stream snapshot and still showing "Working" while the
+CLI had already answered. Bookkeeping now logs and the snapshot always
+publishes; a *failed* `session_exists` read is no longer treated as deletion.
+This is the exact symptom class of the earlier unexplained Pi WebKit run; it
+is **not proven** to have been that run's trigger, whose evidence no longer
+exists.
+
+**A failed capture also left the runtime believing the turn was still running.**
+`observe_native_turn` set `native_running` only after `record_turn_boundary`
+could fail, so the next turn's completion would close the previous turn's open
+boundary and report one summary spanning both turns' changes. The edge is now
+recorded first. Regression test:
+`agent_runtime::tests::a_failed_boundary_capture_still_records_the_completed_native_turn`
+(verified failing before the fix, passing after).
+
+**The provider environment never reached a CLI when a tmux server already
+existed.** `provider_environment::prepare` short-circuited the default policy
+and let the child inherit — but the child is started by `tmux new-session`,
+which hands over the *tmux server's* environment. Observed directly:
+
+`PERCH_ENV_PROBE=hello tmux new-session -d -s probe -- sh -c 'printenv PERCH_ENV_PROBE'` → exit 1 (unset)
+
+So the login-shell PATH `boot.rs` works to adopt, and anything the user
+exported for their CLI (an API key, `ANTHROPIC_MODEL`, `CODEX_HOME`), silently
+never arrived unless perch happened to start the tmux server itself. The
+default policy now uses the same private bootstrap the restrictive policies
+use, *without* `env -i`, so this core's environment is added on top of the
+session's and tmux's own `TMUX`/`TMUX_PANE` survive. Names no shell can export
+(bash's `BASH_FUNC_x%%`) are dropped instead of failing the launch. Test:
+`provider_environment::tests::the_default_policy_adds_this_environment_without_discarding_tmux_own`.
+This is why the Claude fixtures' `ANTHROPIC_MODEL=claude-haiku-4-5` had no
+effect, and it is a user-facing bug, not only a test one.
+
+**Every native codex launch exited at startup.** codex-cli 0.154.0 (updated
+from the 0.146.0 CLAUDE.md was written against) refuses to bind an app-server
+socket whose path contains a symlinked directory, and macOS `/tmp` is a link to
+`/private/tmp`, so perch's `/tmp/perch-native-<uid>/<key>.sock` was rejected and
+the pane showed `[exited]`. Probed directly:
+
+- `unix:///tmp/...` → `Error: socket directory path exists and is not a directory: /tmp`
+- `unix:///private/tmp/codex-probe.sock` → `Error: Operation not permitted` (that directory is world-writable)
+- `unix:///private/tmp/<0700 dir>/p.sock` → socket bound, server alive
+
+`native_ui::paths()` now canonicalizes its root *after* the existing
+not-a-symlink/0700 ownership check, so the parent chain is resolved without
+ever following a symlinked root. Both spellings name the same inode, so a
+session started before this still reconnects.
+
+### Cheapest-model pinning for the real-turn suites
+
+The sweep runs real turns against the user's own quota and a previous run died
+on a provider usage limit, so `e2e/cheapModel.ts` now pins every fixture to the
+cheapest model: `ANTHROPIC_MODEL` for claude, and for codex/omp a private
+config home (`CODEX_HOME` / `PI_CODING_AGENT_DIR`) whose entries are symlinks
+to the real one with only the config file rewritten — no global provider
+setting is changed and no user extension or plugin is disabled. The UI now
+asserts the model chip *before* the first turn, so a pin that fails to take
+costs nothing; that assertion caught the omp pin failing, which is how the
+tmux environment defect above was found.
+
+### Observed runs (WebKit, `--config=native-ui.config.ts --project=webkit`)
+
+| Provider | Result |
+| --- | --- |
+| pi | **PASS** 22.3s — first WebKit pass of this spec; the two earlier runs failed |
+| omp | **PASS** 23.2s — on `gpt-5.6-luna` via the pinned config home |
+| claude | **PASS** 17.0s — `haiku` chip now genuinely reflects `ANTHROPIC_MODEL` |
+| codex | **PASS** 34.5s — after the socket-path fix below; on `gpt-5.6-luna` |
+| opencode | **BLOCKED** — not installed on this machine (`~/.opencode` absent) |
+
+Each passing run exercised, in one native process: UI prompt with a file tool,
+CLI follow-up in the same conversation, extension reload, recovery across a
+core SIGKILL, phone control transfer and reply, cancellation of a running turn,
+and explicit Stop CLI. Screenshots (desktop + phone) are preserved under
+`e2e/screenshots-cli-rendering/webkit/native-ui-{pi,omp,claude,codex}-*-2026-09-16/`;
+the codex phone shot was inspected at 390px — tabs, model chip, three turns and
+composer all legible with no horizontal overflow.
+
+One WebKit-only page error was investigated and is **not** a product defect:
+WebKit reports a *caught* fetch rejection as a page error, and `App.tsx` probes
+`/pair` on every socket drop while these tests kill the host on purpose
+(`isPaired` already treats an unreachable host as still paired — confirmed in
+the shipped bundle). The specs now exempt that one message by name and nothing
+else. A standalone load+kill probe did not reproduce it, so it is timing
+dependent.
+
+### Native review, and a fourth fix: snapshots for more than one agent
+
+`native-review.config.ts --project=webkit` then passed for every installed
+provider — pi 12.0s, omp 17.7s, claude 10.3s, codex 11.6s — covering the phone
+review packet reaching the native CLI exactly once while control is respected.
+
+Chasing that suite surfaced one more defect, now fixed. `AgentUiSnapshot` was
+session-scoped in `should_forward_to_viewer`, and a connection has exactly one
+active session (`set_active_session` removes it from the previous session's
+viewer set). Two native chat panes for *different* sessions in one browser tab
+therefore left the unfocused one frozen on whatever its `agent.ui.get` reply
+had returned — directly against "observe several coding agents working in
+parallel from one project". The filter now also forwards a snapshot to a
+connection that *observes* that agent (`AgentLifecycleRegistry::observes`,
+an in-place scan of the bounded map, no `list()` allocation per broadcast).
+Failing open was rejected deliberately: it would hand a paired phone the
+transcripts of sessions it never opened. The chat stream stays strictly
+session-scoped, which the regression test asserts alongside the widening:
+`session_viewer_filter_tests::a_native_snapshot_reaches_a_connection_observing_that_agent_elsewhere`.
+
+The two-pane case itself has **no browser test yet** — the fix is covered by
+the unit test above plus a full re-run of the pi native UI spec in WebKit to
+prove the single-pane path did not regress.
+
+### Local checks
+
+`cargo test -p perch-core`: **270 unit + 2 protocol tests pass** (267 before
+this slice, plus the three regression tests above).
+`cargo fmt --check`: clean. `cargo clippy --workspace --all-targets`: the same
+five baseline warnings, none added. `cargo build -p perch-core` and
+`cargo build -p perch-desktop`: both pass.
+
+### Still open
+
+V-07, V-10 and V-12 remain **PARTIAL**, unchanged by this slice: accepted/
+queued/rejected turn semantics, crash recovery of open boundaries, measured
+capture cost and retention, legacy/direct-host coverage, encrypted non-loopback
+transport and the full paired-phone contract, and several-agent resource
+evidence. The native *review* suite has not been rerun since these fixes.
+One further finding is recorded in the handoff and not addressed: 158
+`perch-cli-agent-*` tmux sessions from earlier fixture runs are still alive
+here, holding about 11 GB RSS across ~106 processes. They were deliberately
+not killed — `goals.md` confines fixture cleanup to a run's own recorded
+processes — but they make any resource-budget measurement dishonest until
+the user clears them.
+
+## Implicit workspace creation boundary — 2026-09-15
+
+Local `session.create` now reads HEAD before creating the project/workspace and
+before announcing the session. It reuses the existing Git resolver and the
+idempotent project transaction; existing workspaces retain their original ref
+(or their honest missing baseline). Unknown-session recovery follows the same
+creation path. This replaces the old missing-baseline behavior for newly
+created local session workspaces; legacy/direct-host gaps remain.
+
+Changed `server/session.rs` and parameterized the workspace-start browser check
+in `e2e/workspace-review.spec.ts`. The session case creates through the real
+WebSocket protocol without launching a CLI, then performs comparison, inline
+comment, reload and mobile review through the rendered app. It also creates a
+second session after HEAD advances and verifies the workspace ID and baseline
+remain unchanged.
+
+Verification: **267 core unit tests passed**; core build and format passed;
+workspace Clippy retained five baseline warnings. The two Chromium workspace
+start flows passed (11.8s): explicit registration and implicit session creation.
+Mobile screenshots inspected: Workspace start is selected, original HEAD and
+current worktree lines are visible, and the saved unresolved comment remains.
+Evidence: `e2e/screenshots-cli-rendering/chromium/implicit-workspace-2026-09-15/`.
+Logs: `/tmp/perch-implicit-workspace-{tests,build,clippy}.log`.
+
+
+### WebKit recheck and regression coverage
+
+The previous browser setup hang did not reproduce: a stage-logged standalone
+WebKit launch/context/page/click/close probe passed (log:
+`/tmp/perch-webkit-stage-probe.log`). The two workspace-start flows then passed
+in WebKit (7.7s), using:
+
+`cd e2e && npx playwright test --config=cli-rendering.config.ts workspace-review.spec.ts -g 'workspace start keeps' --project=webkit --timeout=90000`
+
+The WebKit mobile comparison screenshot was inspected. Evidence is preserved in
+`e2e/screenshots-cli-rendering/webkit/implicit-workspace-2026-09-15/`.
+The existing cross-engine config now includes workspace review, agent-turn
+review, hibernation and device pairing, making these checks reproducible.
+
+The initial Chromium regression run passed both agent reviews and hibernation,
+but pairing failed its old assertion that an implicit workspace has no baseline.
+Updated that assertion to select Workspace start and verify both the original
+committed line and the phone-visible edit. This reflects the implemented
+creation boundary; revocation and quiet-working checks remain intact.
+The failed iteration is preserved under
+`e2e/screenshots-cli-rendering/chromium/implicit-workspace-regression-first-2026-09-15/`.
+
+Final regression command:
+
+`cd e2e && npx playwright test --config=cli-rendering.config.ts agent-turn-review.spec.ts agent-hibernation.spec.ts device-pairing.spec.ts --timeout=240000`
+
+**8 passed (1.8m): four each in WebKit and Chromium.** Both engines exercised
+real Claude turn review and hibernation/resume, the configured-provider review,
+and phone pairing/input/reload/creation-baseline/files/host-restart/revocation.
+Keepers: `e2e/screenshots-cli-rendering/{webkit,chromium}/implicit-workspace-regression-final-2026-09-15/`.
+Desktop build also passed (`/tmp/perch-implicit-workspace-desktop-build.log`).
+
+V-07 remains PARTIAL: accepted/rejected/queued turn semantics, crash recovery,
+capture cost/retention, legacy/direct-host behavior and broader provider/remote
+verification still need work. V-10/V-12 gaps remain open. WebKit now works
+for the focused flows above; broader native-provider/remote checks remain. The full goal is active; nothing was committed/pushed.
+
+## Turn-history audit follow-up — 2026-09-15
+
+This checkpoint supersedes the turn-history failure and next-step list in the
+older audit below. **V-07, V-10 and V-12 remain PARTIAL; the full goal is active.**
+No commit or push was made.
+
+### Changes completed
+
+- Configured output markers now drive completion/blocked status across split
+  PTY reads; native status remains authoritative. Empty markers are rejected.
+  Submitted prompts have a distinct lifecycle signal, and an ordered event
+  stream preserves rapid Working/Blocked/Done transitions without treating
+  startup or repaint as a new turn.
+- Managed CLI input and native structured prompts capture their before boundary
+  before dispatch. Native running-to-ready, configured completion and actual
+  process exit capture the after boundary. Replayed/startup Ready cannot close
+  a native turn. Managed sessions skip the legacy asynchronous status observer.
+- Content snapshots now have internal Git refs, so garbage collection retains
+  recorded comparisons. These capture working-tree content using a scratch
+  index without changing the real index, branch or worktree.
+- Changed-path summaries compare the actual before/after trees instead of
+  unioning dirty paths. Database completion persists that exact path list.
+- The browser review test now covers both a configured provider and real Claude:
+  two agent-edited paths, pre/post-turn human edits excluded, rename/delete and
+  empty staged comparisons, reload, and Git garbage collection. Fixture trust
+  prompts are explicitly accepted only for its temporary test repository.
+
+Primary implementation: `agent_fleet.rs`, `agent_runtime.rs`,
+`server/{mod,agent_history,native_ui}.rs`, `source_control.rs`, `db/prompts.rs`.
+Browser coverage: `e2e/agent-turn-review.spec.ts` plus the prior pairing and
+hibernation regressions.
+
+### Verification observed
+
+- `cargo test -p perch-core`: **267 unit + 2 protocol tests passed**.
+  The Git timeout fixture now allows two seconds for its child to start under
+  build load; it still verifies timeout and descendant process-group cleanup.
+- `cargo fmt --check`, `cargo build -p perch-core`, and
+  `cargo build -p perch-desktop`: passed.
+- `cargo clippy --workspace --all-targets`: passed with the same five baseline
+  warnings. No frontend source/protocol shape changed in this slice.
+- `cd e2e && npx playwright test agent-turn-review.spec.ts agent-hibernation.spec.ts device-pairing.spec.ts --project=chromium --timeout=240000`:
+  **4 passed (1.1m)**. Real Claude review screenshot inspected: Last agent turn
+  (claude), exactly two changed paths, added file contents and tracked-file
+  diff visible. This proves the tested local paths, not all V-07 requirements.
+- Evidence copied to
+  `e2e/screenshots-cli-rendering/chromium/turn-history-2026-09-15/`.
+  Local check logs: `/tmp/perch-turn-history-tests-final.log` and
+  `/tmp/perch-turn-history-clippy-final.log`.
+- WebKit remains unverified; the previous standalone setup hang is unresolved.
+
+### Remaining work and caveats
+
+1. V-07: record implicit-workspace baselines at actual creation; support
+   crash recovery of open boundaries and correct accepted/queued/rejected
+   prompt semantics. Raw CR/LF is still an imperfect submission signal.
+   Native enqueue failures can leave a provisional baseline/unconfirmed
+   operation. Legacy hosted capture remains asynchronous and uses process-global
+   state. Bounded lifecycle overflow is logged, not recovered.
+2. Snapshot capture still rehashes a repository using `read-tree HEAD` plus
+   `add -A`; measure populated cost before optimizing. The global capture lock,
+   cancellation cleanup, storage limits and retained-ref pruning need work.
+   Path lists cap at 512 without a visible truncation indicator. Do not claim
+   bounded capture cost or complete exact counts for larger changes.
+3. V-10: encrypted non-loopback transport, pairing scope/version semantics,
+   rename/revoke confirmation and the full native UI/CLI/review/approval phone
+   flows remain. V-12 needs several agents/worktrees, working/blocked/draft/
+   mobile safety, remote coverage and resume/fallback evidence.
+4. Isolate WebKit setup, run remaining provider/remote flows and populated
+   resource-budget checks, and address the broader suite's known failures.
+
+## Audit and corrective slice — 2026-09-15
+
+This supersedes the previous claim of **“12 PASS in Chromium.”** `SPEC.md`
+still defines the complete scope; no local-only exception was approved.
+**V-07, V-10 and V-12 remain PARTIAL. The goal is active.** No commit or push
+was made in this audit.
+
+### Fixed and checked
+
+- Removed the 20-second Working → Idle demotion and managed-runtime quiet
+  sweep. PTY silence cannot establish completion or authorize hibernation.
+  Native status now suppresses repaint-driven running changes, including
+  reattachment to an already-recorded provider identity.
+- Paired sockets retain their authenticated device identity. Revocation
+  notifies live connections, closes them, stops further outbound data and
+  rejects reconnects; input ownership carries the paired device ID.
+- Device claims/revocations persist under the store mutex before publishing
+  their new state. Timestamp writes share that serialization and are throttled
+  to once per minute per device, preventing stale writes from restoring a
+  revoked token within this server. Failed writes preserve the prior pairing
+  state. This does not implement coordination between separate core processes
+  sharing one devices file.
+- Browser data-plane and pairing requests validate Origin against Host.
+  Loopback exemption requires a local Host and no forwarding headers, guarding
+  against cross-origin WebSockets and DNS rebinding. Pairing cookies are now
+  HttpOnly and SameSite=Strict. Non-loopback encryption remains unfinished.
+- Removed the delayed implicit-workspace HEAD backfill: a ref read up to five
+  minutes later is not a creation boundary and its stale dirty flag write was
+  unsafe. Such workspaces now honestly show “Workspace start (not recorded).”
+  Explicit registration retains its existing captured baseline. Existing
+  recorded rows were preserved; refs created by the earlier backfill cannot
+  retrospectively be proven to be creation refs.
+- Last-completed-turn selection requires both before and after refs, so a
+  failed after-capture cannot silently compare the turn against today's files.
+- Strengthened the hibernation browser test: assistant-only response, Ready
+  status, actual tmux name and native PID release, different resumed PID,
+  same conversation identity, and a second assistant response recalling the
+  earlier token. Tests clean up their own fixture tmux sessions.
+
+### Verification observed
+
+- `cargo test -p perch-core`: final run **266 unit tests + 2 protocol tests
+  passed**. An earlier concurrent run failed the existing Git process-timeout
+  test before its fixture wrote its PID; isolated retry and final full run
+  passed. Keep the intermittent result visible.
+- `cargo fmt --check`: passed. `cargo clippy --workspace --all-targets`:
+  passed with the same five baseline warnings. `cargo build -p perch-core`
+  and `cargo build -p perch-desktop`: passed. No frontend source/protocol shape
+  changed; web tests/build were not rerun for this backend slice.
+- `cd e2e && npx playwright test device-pairing.spec.ts agent-hibernation.spec.ts --project=chromium --timeout=240000`:
+  **2 passed (43.8s)**. Phone flow includes actual paired ownership, a real
+  prompt/reply, 22 seconds of quiet while still Working, reload, files/Git,
+  host restart, and immediate revocation without reloading the phone. Claude
+  completed a real turn, hibernated, released its process and resumed with
+  conversation recall. This covers one finished agent, not all of V-12.
+  Earlier repeats exposed an immediate-PID-exit assertion race and Playwright's
+  disabled-option matcher limitation; assertions now poll process disappearance
+  and inspect the actual disabled attribute.
+- `cd e2e && RUST_LOG=info npx playwright test agent-turn-review.spec.ts --project=chromium`:
+  **FAILED (30.9s)**, expected `Last agent turn (turnbot)`, observed
+  `Last agent turn (none recorded)`. Its persistent shell uses ExitStatus but
+  never exits; its previous passing result depended on the removed quiet
+  heuristic. The test remains enabled and its failure is not waived. Its
+  leaked fixture runtime was explicitly cleaned up after this audit run.
+- Standalone WebKit launch/page probe hung for over three minutes; terminated
+  only its diagnostic processes. The precise browser/page setup stage remains
+  unisolated. WebKit is **unverified**, not evidence of a Perch pass or failure.
+- Preserved screenshots/logs, including the failed turn-review case, under
+  `e2e/screenshots-cli-rendering/chromium/audit-2026-09-15/`. Inspected the
+  resumed Claude transcript and phone terminal screenshots. Desktop build is
+  not a substitute for WebKit interaction verification.
+
+### Next work (keep the full goal)
+
+1. **V-07:** wire authoritative completion for configured providers, then
+   establish ordered before-input/after-completion capture barriers. Runtime
+   `StatusDetection::OutputPatterns` is currently only configuration metadata;
+   generic terminal output alone cannot determine completion. Fix the shared
+   lifecycle/history path and update the fixture to supply a real completion
+   event, rather than restoring silence as proof. Capture tasks currently race;
+   commits are dangling and can be garbage-collected; changed-path summaries
+   union dirty status instead of comparing boundaries; crash recovery of open
+   captures and bounded scanning/retention remain incomplete. Implement actual
+   creation-boundary recording for implicit workspaces before enabling it.
+2. **V-10:** finish encrypted non-loopback transport, pairing versioning/scope
+   semantics and device management (including rename/confirmation), plus native
+   UI/CLI, review-note and other required phone flows. Pairing a shell fixture
+   alone does not establish the full mobile contract.
+3. **V-12:** several finished agents/worktrees, working/blocked/draft/mobile
+   safety, remote coverage and resume/fallback behavior still require evidence.
+4. Recover/isolate WebKit setup; verify remaining desktop/mobile states,
+   populated resource budgets and the broader suite's known failures. Do not
+   discard or weaken failing tests to declare completion.
+
+
 ## V-04 Codex check — PASS, 2026-09-15 07:50 EDT
 
 The Codex account's usage limit had reset, so the check that was blocked
@@ -1487,12 +2067,12 @@ acceptance, remote compatibility, and the other SPEC gates remain open.
 | V-04 same-session Chat/CLI switching and recovery | PASS in Chromium for every built-in provider: real Claude/Pi/OMP/OpenCode/**Codex** native UI/CLI turns and same-PID core recovery, plus OpenCode's shell-mode refusal and native home/new-session flow. WebKit re-confirmation is UNVERIFIED-blocked: the browser itself will not launch on this machine (recorded 2026-09-15, not a perch defect) |
 | V-05 tree, sentinel edit, save, disk/status verification | PASS (headless Chromium observed): one run spans nested tree expansion, open, edit, save, on-disk bytes, Git status/diff of the save, reload, external-conflict compare/keep/discard, and the phone-width file surface; see the combined file workflow checkpoint above. |
 | V-06 visible external-edit conflict recovery | PASS (headless UI observed) |
-| V-07 complete Git and agent change review | PASS (local workspaces): working-tree/staged/HEAD sources, workspace-start (explicit **and** implicit) and last-agent-turn bases, rename, delete, line numbers, empty state and the last-agent-change summary all observed in real browser runs against real repositories; direct-host turns are out of scope and the capture-ordering ceiling is recorded |
+| V-07 complete Git and agent change review | PARTIAL: the newest turn is now reported honestly (complete/running/unavailable) and stale client state is cleared — see the 2026-09-21 honest-review checkpoint. Implicit-workspace creation refs, the capture-ordering ceiling, the rendered change summary, prompt-acceptance semantics and remote coverage remain open. |
 | V-08 anchored comments and exactly-once review packet | PASS in Chromium for every built-in provider: native Claude/Pi/OMP/OpenCode two-note phone delivery, ownership and receipt-confirmed retry, plus **Codex delivery observed 2026-09-15**; WebKit re-confirmation is blocked by the browser-launch failure recorded above |
 | V-09 full host/client recovery | PASS: mixed project/worktree, session, exact pane set, same-PID shell, draft conflict and anchored comment recovery passes three times per engine in Chromium/WebKit; see mixed recovery correction above and provider-specific recovery evidence below. |
-| V-10 paired mobile interaction and reconnect | PASS (two real origins observed): a phone-sized client on this machine's LAN address pairs with a code issued by the host, drives a CLI agent, reads scrollback after reload, opens files and Git, reconnects across a host restart on its stored token, and loses access when revoked; no QR, no per-device scope, no TLS — see the pairing checkpoint above |
+| V-10 paired mobile interaction and reconnect | PARTIAL: live revocation, Origin checks, durable store mutation and paired input identity verified; full phone mode/review flows, pairing management/versioning and encrypted transport remain open. |
 | V-11 populated desktop/mobile visual and interaction QA | PASS: Git, file, terminal and settings surfaces measured per pane at a narrow desktop pane, a wide desktop viewport and 390px — no clipped controls, no horizontal scroll, visible focus, readable status, and no desktop-only dead end (Settings was one; fixed). Screenshots inspected. Focus sampling and contrast limits recorded. |
-| V-12 safe hibernation and resume | PASS (local CLI agents, real Claude observed): an unwatched idle agent sleeps, its process is released, and returning resumes the same provider session; remote/direct-host agents are out of scope — see the hibernation checkpoint above |
+| V-12 safe hibernation and resume | PARTIAL: unsafe silence demotion removed; real Claude process release and conversation recall verified. Several-agent, working/blocked/draft/mobile and remote coverage remain open. |
 
 Full Git/review, provider lifecycle and mode scope, worktree orchestration,
 secure pairing, remote/mobile workflows, populated performance budgets, and

@@ -1,5 +1,121 @@
 # perch — Personal AI IDE / Agent App: Full Plan (Rust / Tauri)
 
+## Honest last-turn review state — 2026-09-21
+
+The Git surface reports the **newest** recorded turn plus an explicit state
+(`complete` / `running` / `unavailable`) instead of scanning past it for an
+older completed one, which used to present the wrong work under the label
+"Last agent turn". `git.status.result` now always serializes `lastAgentTurn`,
+so an explicit `null` clears a summary a browser cached before a capture
+failed, and the review surface re-points or drops a stale diff rather than
+letting the summary and the diff describe two different turns. A shared
+`source_control` fix drops the phantom "deleted" entry Git reports for an
+untracked path that the base content snapshot carries. Three regressions fail
+before their fixes. Core: 273 unit + 2 protocol tests; web: 223; format,
+builds and Clippy (five baseline warnings) pass. Real browser verification in
+WebKit and Chromium with the free fixture provider; no paid model calls.
+V-07 remains PARTIAL. Details and open scope: [handoff.md](handoff.md).
+
+## Failed turn capture isolation — 2026-09-21
+
+The shared history recorder consumes a pending boundary before fallible
+completion work. A failed capture cannot reuse newer files or merge the next
+turn into its old snapshot. The new regression fails before the fix and covers
+both read and write failures with real Git/SQLite fixtures. Core: 271 unit +
+2 protocol tests, format, build and Clippy (five baseline warnings) pass.
+Local-provider review passes in Chromium and WebKit (11.4s); no paid model calls.
+V-07 remains PARTIAL. Details and open scope: [handoff.md](handoff.md).
+
+## Two native panes — 2026-09-21
+
+Extended the existing OMP/Pi split-pane fixture to exercise native UI replies
+in both mounted sessions, including unsolicited updates to the secondary
+session while the primary retains subscription and focus. WebKit passes
+(15.1s). Both panes verify GPT-5.6 Luna before prompting; Pi now uses an
+explicit private model overlay, and the mixed-provider fixture separates the
+CLIs' otherwise conflicting config homes. No production implementation changed.
+Full evidence and remaining requirements are in [handoff.md](handoff.md).
+
+## Native transport, provider environment and codex socket — 2026-09-16
+
+Four shared-path defects found by chasing the unresolved Pi freeze and the
+five-provider sweep it blocked. A failed turn-history capture no longer
+swallows the live `AgentUiSnapshot`, which is what leaves a web transcript
+frozen mid-stream on "Working" while the CLI has already answered; a failed
+capture also no longer leaves the runtime believing the turn is still running,
+which made the next turn close the previous turn's boundary. `tmux
+new-session` hands a CLI the *tmux server's* environment, so the default
+provider policy now goes through the same private bootstrap the restrictive
+ones use (without `env -i`, so tmux's own variables survive) — until now the
+login-shell PATH and anything the user exported for their CLI never arrived.
+`native_ui::paths()` canonicalizes its socket root because codex-cli 0.154.0
+refuses a socket path containing a symlinked directory, and macOS `/tmp` is
+one; without it every native codex launch exits at startup.
+
+A fifth fix followed: `AgentUiSnapshot` reached only a connection's single
+active session, so a second native chat pane for another session froze; it now
+also reaches a connection observing that agent, while the chat stream stays
+session-scoped so a paired phone cannot receive sessions it never opened.
+
+**WebKit, all four installed providers PASS both suites** — native UI (pi 22.3s,
+omp 23.2s, claude 17.0s, codex 34.5s) and native review (12.0s / 17.7s / 10.3s
+/ 11.6s). These are the first WebKit passes of the native UI spec. opencode is
+BLOCKED: not installed on this machine. `e2e/cheapModel.ts` pins each fixture
+to the cheapest model through a private config home, so the sweep stops
+consuming the quota the rest of it needs.
+
+Core: 270 unit + 2 protocol tests, format, and Clippy with the same five
+baseline warnings. V-07, V-10 and V-12 remain PARTIAL. See the newest
+checkpoint in [handoff.md](handoff.md) and
+[the verification record](docs/ADE-REWORK-VERIFICATION.md).
+
+## Implicit workspace creation boundary — 2026-09-15
+
+Local session creation now captures HEAD before publishing its workspace/session
+identity, reusing existing Git/project helpers. Stale-session recovery follows
+the same path; later sessions cannot replace an existing baseline. Two Chromium
+flows verify explicit and implicit creation through commits, repeat creation,
+review comments, reload and mobile UI. Core: 267 unit tests, build, format and
+Clippy (five baseline warnings) pass; desktop build also passes. The old WebKit
+setup hang no longer reproduces: both workspace-start flows pass in WebKit,
+and eight agent/pairing regressions pass across Chromium and WebKit. The phone
+check now verifies the newly available creation comparison. V-07 remains
+PARTIAL; see the current
+[handoff](handoff.md) and [verification](docs/ADE-REWORK-VERIFICATION.md).
+
+## Turn-history audit follow-up — 2026-09-15
+
+Wired configured completion markers and ordered provider transitions; managed
+turns now capture before dispatch and after completion. Snapshot refs survive
+Git GC and changed paths come from the before/after tree comparison. Real
+Claude and configured-provider review flows pass alongside hibernation/resume
+and pairing/revocation: four Chromium tests. Core checks: 267 unit + 2 protocol
+tests, format, core/desktop builds, Clippy with five baseline warnings.
+
+V-07/V-10/V-12 remain PARTIAL. Open-boundary recovery, accepted-prompt semantics,
+implicit creation baselines, capture cost/retention, secure/full mobile flows,
+multiple-agent hibernation and WebKit remain open. See the newest checkpoint in
+[handoff.md](handoff.md) and [verification](docs/ADE-REWORK-VERIFICATION.md).
+
+## Audit corrective checkpoint — 2026-09-15
+
+Audited Claude's latest slices and corrected the acceptance record: V-07,
+V-10 and V-12 are PARTIAL; the overall goal remains active. Fixed unsafe
+silence-based lifecycle demotion, native repaint authority, live device
+revocation, serialized device persistence, browser Origin/Host validation and
+paired input identity. Removed inaccurate delayed creation-ref backfill and
+required both refs for completed-turn comparisons. Hardened real Claude
+hibernation/resume and phone security regressions.
+
+Final evidence: 266 core + 2 protocol tests, format, Clippy (five baseline
+warnings), core/desktop builds and two focused Chromium flows pass. The old
+agent-turn review fixture now fails because it relied on silence as completion;
+this is an open V-07 blocker, not a waived check. WebKit setup remains
+unverified. Full audit findings, exact commands, artifacts and next work are in
+[handoff.md](handoff.md) and
+[the verification report](docs/ADE-REWORK-VERIFICATION.md).
+
+
 ## Workspace-start comparison checkpoint — 2026-09-14
 
 New explicit project registration records its Git HEAD before acknowledgement;

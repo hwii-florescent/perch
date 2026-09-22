@@ -59,6 +59,14 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
                 && metadata.permissions().mode() & 0o077 == 0,
             "native UI directory must be owned by this user with mode 0700"
         );
+        // Resolve the *parent* chain only — the check above already refused a
+        // symlinked root, so this cannot follow one into somebody else's
+        // directory. codex 0.154.0 refuses to bind an app-server socket whose
+        // path contains a symlinked component, and on macOS `/tmp` is exactly
+        // that (a link to `/private/tmp`), so the literal path would fail
+        // every native codex launch. Both spellings name the same inode, so a
+        // session started before this still reconnects.
+        let root = std::fs::canonicalize(&root)?;
         let hash = terminal_key(key);
         let name = &hash[6..38];
         Ok(NativePaths {

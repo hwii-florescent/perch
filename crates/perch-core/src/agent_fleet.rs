@@ -1561,6 +1561,22 @@ impl AgentLifecycleRegistry {
         Ok(())
     }
 
+    /// Whether `client_id` is watching `session_id`'s `agent_id` right now.
+    /// The native-snapshot fan-out asks this once per connection per broadcast,
+    /// so it scans the bounded map in place instead of building a `list()`.
+    pub fn observes(&self, session_id: &str, agent_id: &str, client_id: &str) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .agents
+            .iter()
+            .any(|(key, record)| {
+                key.session_id == session_id
+                    && key.agent_id == agent_id
+                    && record.observers.contains(client_id)
+            })
+    }
+
     pub fn list(&self) -> Vec<AgentSnapshot> {
         let inner = self.inner.lock().unwrap();
         let mut records: Vec<_> = inner.agents.values().map(AgentRecord::snapshot).collect();

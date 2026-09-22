@@ -1702,10 +1702,25 @@ export interface WorkspaceGitMessage {
 }
 
 /**
- * The newest completed agent turn for a workspace. `beforeRef` / `afterRef`
- * are server-recorded content commits (they include uncommitted and untracked
- * work, so they are not necessarily branch HEADs); use them as a `compare`
- * diff target and do not interpret them otherwise.
+ * How much of a recorded turn is actually reviewable. A turn's boundary is two
+ * separate writes, so the newest row is often not a finished comparison.
+ *
+ * - `"complete"` — `beforeRef`..`afterRef` is the turn.
+ * - `"running"` — the agent is still working; `afterRef` is absent on purpose,
+ *   so compare `beforeRef` against the working tree.
+ * - `"unavailable"` — the after side will never arrive (a failed capture, or a
+ *   core restart mid-turn). There is no comparison here; say so rather than
+ *   offering an older turn under this turn's name.
+ */
+export type AgentTurnState = "complete" | "running" | "unavailable";
+
+/**
+ * The newest recorded agent turn for a workspace — not necessarily a finished
+ * one, see `state`. `beforeRef` / `afterRef` are server-recorded content
+ * commits (they include uncommitted and untracked work, so they are not
+ * necessarily branch HEADs); use them as a `compare` diff target and do not
+ * interpret them otherwise. `beforeRef` is empty exactly when `state` is
+ * `"unavailable"` and even the before side was never recorded.
  */
 export interface AgentTurnSummary {
   snapshotId: string;
@@ -1715,6 +1730,8 @@ export interface AgentTurnSummary {
   afterRef?: string;
   changedPaths: string[];
   completedAt?: number;
+  /** Absent from a peer predating this field; treat that as `"complete"`. */
+  state?: AgentTurnState;
 }
 
 export interface GitStatusResultMessage {
@@ -1722,8 +1739,13 @@ export interface GitStatusResultMessage {
   requestId: string;
   workspaceId: string;
   status: GitStatus;
-  /** Newest completed turn here; absent until one has finished. */
-  lastAgentTurn?: AgentTurnSummary;
+  /**
+   * The newest recorded turn here. **Always present**, including as `null`:
+   * a client caches this between statuses, and only an explicit `null` can
+   * tell it the server no longer has a turn to offer. Absent only from a peer
+   * predating that guarantee, which must leave any cached summary alone.
+   */
+  lastAgentTurn?: AgentTurnSummary | null;
 }
 
 export interface GitRefsResultMessage {

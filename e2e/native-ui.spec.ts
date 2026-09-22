@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -28,6 +29,12 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const snapshots: Array<{ pid: number; revision: number; providerSessionId: string; cwd: string }> = [];
   const actions: Array<{ type: string; operationId?: string; text?: string }> = [];
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
+  // WebKit reports a *caught* fetch rejection as a page error too. The app
+  // probes `/pair` whenever the socket drops (App.tsx -> isPaired), this test
+  // kills the host on purpose, and `isPaired` already treats an unreachable
+  // host as "still paired" — so that one message is the expected shape of a
+  // deliberate outage, not an unhandled error. Nothing else is exempt.
+  const unexpectedErrors = () => errors.filter((text) => !/Fetch API cannot load \S*\/pair\b/.test(text));
   page.on("websocket", (socket) => {
     socket.on("framereceived", ({ payload }) => {
       const message = JSON.parse(String(payload));
@@ -44,7 +51,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const shots = path.join(root, ".impeccable/review");
   fs.mkdirSync(shots, { recursive: true });
   async function start() {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv(provider, fixture) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
   }
   async function stop() {
@@ -77,7 +84,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await toggle.click();
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
-    if (provider === "claude") await expect(ui.locator(".native-cli-chat__model")).toContainText("haiku");
+    // Fail here, before any real turn, if the cheap-model pin did not take.
+    if (provider !== "opencode") await expect(ui.locator(".native-cli-chat__model")).toContainText(provider === "claude" ? "haiku" : CHEAP_CODEX_MODEL);
     const pid = await ui.getAttribute("data-native-pid");
     let nativeId = await ui.getAttribute("data-native-session");
     if (provider === "opencode") expect(nativeId).toBe("");
@@ -156,7 +164,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     expect(new Set([...keys.values()].map((key) => JSON.stringify(key))).size).toBe(1); // The PTY attachment is recreated; the native process and logical identity survive.
     expect(actions).toHaveLength(provider === "opencode" ? 3 : provider === "claude" ? 2 : 1); // Rejected draft/shell attempts remain unsent; the CLI turn bypasses the composer.
     expect(new Set(snapshots.map((value) => value.pid)).size).toBe(1);
-    expect(errors).toEqual([]);
+    expect(unexpectedErrors()).toEqual([]);
     phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
     await phoneContext.addInitScript((sessionId) => {
       if (location.protocol !== "http:" || window !== window.top) return;
@@ -197,7 +205,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await mobile.getByRole("button", { name: "Release control", exact: true }).click();
     await expect(ui).not.toContainText("Another viewer has control");
     await ui.getByRole("button", { name: "Take control", exact: true }).click();
-    expect(errors).toEqual([]);
+    expect(unexpectedErrors()).toEqual([]);
     await phoneContext.close(); phoneContext = undefined;
     await toggle.click();
     if (provider === "codex" || provider === "opencode") {

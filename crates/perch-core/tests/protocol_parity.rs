@@ -1,6 +1,6 @@
 //! Cross-checks `crates/perch-core/src/protocol.rs` against
 //! `packages/shared/src/protocol.ts` — the two hand-maintained mirrors of
-//! perch's WS wire protocol (CLAUDE.md calls this the repo's #1 invariant).
+//! perch's WS wire protocol (AGENTS.md calls this the repo's #1 invariant).
 //!
 //! WHY THIS EXISTS: `ServerMessage` derives `Deserialize` *specifically* so
 //! the hub (`hub.rs`) can parse another perch instance's WS replies as the

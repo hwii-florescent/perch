@@ -28,9 +28,18 @@ pub(crate) struct PreparedCommand {
     pub bootstrap: Option<BootstrapFile>,
 }
 
-/// Native/default policies retain the established launch path. Restrictive
-/// policies take a bounded snapshot; values never enter the wrapper's argv.
+/// Every policy takes a bounded snapshot of this process's environment;
+/// values never enter the wrapper's argv.
+///
+/// Even the default "inherit everything" policy needs the bootstrap, because
+/// the CLI is launched with `tmux new-session`: a tmux **server** that
+/// predates this core hands the new session *its own* environment, so the
+/// login-shell PATH `boot.rs` works to adopt, and anything the user exported
+/// for their CLI (an API key, `ANTHROPIC_MODEL`, `CODEX_HOME`), silently never
+/// arrives. Inheriting worked only when perch happened to start the server.
 pub(crate) fn prepare(argv: Vec<String>, policy: &EnvironmentPolicy) -> Result<PreparedCommand> {
+    // Elsewhere there is no tmux and no bootstrap: the child inherits directly.
+    #[cfg(not(unix))]
     if *policy == EnvironmentPolicy::default() {
         return Ok(PreparedCommand {
             argv,
@@ -69,10 +78,14 @@ fn prepare_with_parent(
     parent: BTreeMap<String, String>,
 ) -> Result<PreparedCommand> {
     anyhow::ensure!(!argv.is_empty(), "provider command is empty");
+    // A name this shell cannot export (bash's exported functions arrive as
+    // `BASH_FUNC_x%%`) is dropped rather than failing the launch; an invalid
+    // name in the manifest's own `set` rules is still an error below.
     let mut environment: BTreeMap<_, _> = parent
         .into_iter()
         .filter(|(name, _)| {
-            (policy.inherit && policy.allow.is_empty()) || policy.allow.contains(name)
+            valid_name(name)
+                && ((policy.inherit && policy.allow.is_empty()) || policy.allow.contains(name))
         })
         .collect();
     // Describe the actual xterm-backed terminal even with a cleared parent
@@ -113,11 +126,15 @@ fn prepare_with_parent(
         );
     }
     script.push('\n');
-    write_bootstrap(script.as_bytes())
+    // A restrictive policy means what it says, so it starts from an empty
+    // environment. The default policy only *adds* this core's environment on
+    // top of whatever tmux gave the session, keeping tmux's own `TMUX`/
+    // `TMUX_PANE` (which a CLI reads to detect its terminal) intact.
+    write_bootstrap(script.as_bytes(), *policy != EnvironmentPolicy::default())
 }
 
 #[cfg(unix)]
-fn write_bootstrap(script: &[u8]) -> Result<PreparedCommand> {
+fn write_bootstrap(script: &[u8], clear_environment: bool) -> Result<PreparedCommand> {
     use std::os::unix::fs::OpenOptionsExt;
     let path = std::env::temp_dir().join(format!("perch-provider-{}.sh", uuid::Uuid::new_v4()));
     let mut file = OpenOptions::new()
@@ -131,19 +148,19 @@ fn write_bootstrap(script: &[u8]) -> Result<PreparedCommand> {
         .context("cannot write private provider bootstrap")?;
     file.sync_all()?;
     drop(file);
+    let mut argv: Vec<String> = Vec::new();
+    if clear_environment {
+        argv.extend(["/usr/bin/env".to_string(), "-i".to_string()]);
+    }
+    argv.extend(["/bin/sh".to_string(), path.to_string_lossy().into_owned()]);
     Ok(PreparedCommand {
-        argv: vec![
-            "/usr/bin/env".into(),
-            "-i".into(),
-            "/bin/sh".into(),
-            path.to_string_lossy().into_owned(),
-        ],
+        argv,
         bootstrap: Some(bootstrap),
     })
 }
 
 #[cfg(not(unix))]
-fn write_bootstrap(_: &[u8]) -> Result<PreparedCommand> {
+fn write_bootstrap(_: &[u8], _: bool) -> Result<PreparedCommand> {
     anyhow::bail!("custom provider environment policies require a Unix host")
 }
 
@@ -199,6 +216,47 @@ mod tests {
         assert!(
             !path.exists(),
             "bootstrap should unlink itself before provider exec"
+        );
+    }
+
+    /// The default policy is what every built-in CLI launches with, and its
+    /// child is started by `tmux new-session` — which hands over the *tmux
+    /// server's* environment, not this core's. So the bootstrap has to carry
+    /// this process's variables in, while leaving the ones tmux itself sets
+    /// on the session (`TMUX`, `TMUX_PANE`) alone.
+    #[test]
+    fn the_default_policy_adds_this_environment_without_discarding_tmux_own() {
+        let parent = [
+            (
+                "ANTHROPIC_MODEL".to_string(),
+                "claude-haiku-4-5".to_string(),
+            ),
+            // bash exports functions under a name no shell can `export`.
+            ("BASH_FUNC_helper%%".to_string(), "() { :; }".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let prepared = prepare_with_parent(
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s|%s' \"$ANTHROPIC_MODEL\" \"${TMUX-unset}\"".into(),
+            ],
+            &EnvironmentPolicy::default(),
+            parent,
+        )
+        .unwrap();
+        assert_eq!(prepared.argv[0], "/bin/sh", "must not clear the child env");
+        let result = Command::new(&prepared.argv[0])
+            .args(&prepared.argv[1..])
+            .env("TMUX", "/tmp/tmux-501/default,123,4")
+            .env("ANTHROPIC_MODEL", "a-stale-tmux-server-value")
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            String::from_utf8(result.stdout).unwrap(),
+            "claude-haiku-4-5|/tmp/tmux-501/default,123,4"
         );
     }
 

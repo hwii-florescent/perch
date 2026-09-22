@@ -243,7 +243,7 @@ export interface PerchState {
   /** Per-session CLI provider choice (Bug 1 fix): which agent binary
    * CLI mode launches for a given session, recorded when
    * the user picks one in `CliStartPanel`. This is *provider* selection only
-   * — which CLI to spawn — not model/effort chrome; CLAUDE.md's "zero model
+   * — which CLI to spawn — not model/effort chrome; AGENTS.md's "zero model
    * chrome in CLI mode" product decision stands, and providers/model pickers
    * still never render in CLI mode. Keyed by sessionId, same shape as
    * `cliStartedSessions`/`cliTerminalIds`/`effortBySession`. A session with no

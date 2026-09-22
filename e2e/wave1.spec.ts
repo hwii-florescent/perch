@@ -333,7 +333,7 @@ test.describe("Wave 1 functionality gaps", () => {
 
       await page.screenshot({ path: "artifacts/wave1-f3f4-settings.png" });
     } finally {
-      // Restore what was actually there, on the failure path too — CLAUDE.md
+      // Restore what was actually there, on the failure path too — AGENTS.md
       // requires it, and without it one failed run leaves the developer's real
       // settings flipped. Best-effort: a restore that itself fails must not
       // mask the original assertion failure.

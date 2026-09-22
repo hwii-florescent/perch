@@ -680,7 +680,7 @@ Behavioral inspiration used for this contract:
 
 Repository authorities:
 
-- [`CLAUDE.md`](CLAUDE.md) — current architecture, invariants, commands, and
+- [`AGENTS.md`](AGENTS.md) — current architecture, invariants, commands, and
   repository safety rules.
 - [`PLAN.md`](PLAN.md) — phase record and current Perch baseline.
 - [`docs/TESTING.md`](docs/TESTING.md) — existing test strategy.

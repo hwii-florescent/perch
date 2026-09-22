@@ -26,7 +26,7 @@
  * would corrupt far more streams than it fixes. `**`/`__` runs are
  * unambiguous enough to be worth auto-closing; single-char emphasis isn't.
  *
- * The repo has no web unit-test runner (see CLAUDE.md), so test cases are
+ * The repo has no web unit-test runner (see AGENTS.md), so test cases are
  * documented here instead of in a `.test.ts` file:
  *
  *   repairMarkdown("hello")

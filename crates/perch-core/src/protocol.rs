@@ -450,10 +450,31 @@ pub struct DeviceSummary {
     pub last_seen_at: i64,
 }
 
-/// The newest completed agent turn for a workspace. `beforeRef` / `afterRef`
-/// are server-recorded content commits (they include uncommitted and
-/// untracked work, so they are not necessarily branch HEADs); a client uses
-/// them as a `compare` diff target and must not interpret them otherwise.
+/// How much of a recorded turn is actually reviewable. A turn's boundary is
+/// two separate writes, so the newest row is often not a finished comparison.
+/// `completed = false` alone cannot say why, so the server resolves this
+/// against the live runtime before reporting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentTurnState {
+    /// Both endpoints recorded: `beforeRef`..`afterRef` is the turn.
+    #[default]
+    Complete,
+    /// The agent is still working. `afterRef` is absent on purpose — compare
+    /// `beforeRef` against the working tree to watch the turn as it lands.
+    Running,
+    /// The after side will never arrive (a failed capture, or a core restart
+    /// mid-turn). There is no comparison here; clients must say so rather
+    /// than offer an older turn under this turn's name.
+    Unavailable,
+}
+
+/// The newest recorded agent turn for a workspace — not necessarily a
+/// finished one, see `state`. `beforeRef` / `afterRef` are server-recorded
+/// content commits (they include uncommitted and untracked work, so they are
+/// not necessarily branch HEADs); a client uses them as a `compare` diff
+/// target and must not interpret them otherwise. `beforeRef` is empty exactly
+/// when `state` is `unavailable` and even the before side was never recorded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTurnSummary {
@@ -466,6 +487,10 @@ pub struct AgentTurnSummary {
     pub changed_paths: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
+    /// Defaulted so a peer predating this field still parses as a finished
+    /// turn, which is the only kind it could have sent.
+    #[serde(default)]
+    pub state: AgentTurnState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1744,10 +1769,11 @@ pub enum ServerMessage {
         request_id: String,
         workspace_id: String,
         status: GitStatus,
-        /// The newest completed agent turn in this workspace, so the review
+        /// The newest recorded agent turn in this workspace, so the review
         /// surface can offer its boundary as a diff base without a second
-        /// request family. Absent until one turn has finished here.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        /// request family. **Always serialized**, including as `null`: a
+        /// client caches this between statuses, and only an explicit `null`
+        /// can tell it the server no longer has a turn to offer.
         last_agent_turn: Option<AgentTurnSummary>,
     },
 

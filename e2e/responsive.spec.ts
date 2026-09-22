@@ -151,7 +151,7 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
   // `.chat__input textarea`). Every "New session" launcher now creates a
   // CLI-owned session, and `views/Chat.tsx` renders `NativeCliChat` for any
   // session that has started a CLI *even in Hosted mode* (the native binding
-  // decision in CLAUDE.md: UI mode is a web view of the CLI-owned session, not
+  // decision in AGENTS.md: UI mode is a web view of the CLI-owned session, not
   // a second harness). So the composer this test needs is unreachable by
   // design, in any chat mode. Porting it to `native-cli-composer` is the fix;
   // until then it fails fast with this reason instead of burning four minutes

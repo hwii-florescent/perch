@@ -2052,7 +2052,12 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     // `should_forward_to_viewer`'s doc comment).
                     let forward = {
                         let viewers = hub_app.session_viewers.lock().unwrap();
-                        should_forward_to_viewer(&msg, &hub_conn_id, &viewers)
+                        should_forward_to_viewer(&msg, &hub_conn_id, &viewers, |session, agent| {
+                            hub_app
+                                .agent_runtime
+                                .lifecycle()
+                                .observes(session, agent, &hub_conn_id)
+                        })
                     };
                     if !forward {
                         continue;
@@ -2678,6 +2683,12 @@ mod blocked_pattern_tests {
 mod session_viewer_filter_tests {
     use super::*;
 
+    /// A connection that observes no agent at all — the default for the
+    /// session-scoped variants, which never consult it.
+    fn none(_session: &str, _agent: &str) -> bool {
+        false
+    }
+
     fn viewers_of(session_id: &str, conn_ids: &[&str]) -> HashMap<String, HashSet<String>> {
         let mut map = HashMap::new();
         map.insert(
@@ -2694,9 +2705,55 @@ mod session_viewer_filter_tests {
             "snapshot": { "version": 1, "revision": 1, "pid": 123, "providerSessionId": "/native.jsonl", "cwd": "/workspace", "model": null, "running": false, "messages": [], "truncated": false }
         })).unwrap();
         let viewers = viewers_of("s1", &["conn-a"]);
-        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers));
-        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers));
-        assert!(!should_forward_to_viewer(&msg, "conn-a", &HashMap::new()));
+        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers, none));
+        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers, none));
+        assert!(!should_forward_to_viewer(
+            &msg,
+            "conn-a",
+            &HashMap::new(),
+            none
+        ));
+    }
+
+    /// A browser tab can show two native chats at once, but a connection has
+    /// only one active session, so viewer membership alone leaves the
+    /// unfocused pane frozen. Observing that agent is enough.
+    #[test]
+    fn a_native_snapshot_reaches_a_connection_observing_that_agent_elsewhere() {
+        let msg: ServerMessage = serde_json::from_value(serde_json::json!({
+            "type": "agent.ui.snapshot", "sessionId": "s2", "providerId": "pi",
+            "snapshot": { "version": 1, "revision": 1, "pid": 123, "providerSessionId": "/native.jsonl", "cwd": "/workspace", "model": null, "running": false, "messages": [], "truncated": false }
+        })).unwrap();
+        // conn-a is viewing a *different* session, s1.
+        let viewers = viewers_of("s1", &["conn-a"]);
+        let observes_s2_pi = |session: &str, agent: &str| session == "s2" && agent == "pi";
+        assert!(should_forward_to_viewer(
+            &msg,
+            "conn-a",
+            &viewers,
+            observes_s2_pi
+        ));
+        // Observing a different provider in that session is not enough, and a
+        // connection observing nothing still gets nothing.
+        let observes_s2_codex = |session: &str, agent: &str| session == "s2" && agent == "codex";
+        assert!(!should_forward_to_viewer(
+            &msg,
+            "conn-a",
+            &viewers,
+            observes_s2_codex
+        ));
+        assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers, none));
+        // The chat stream stays strictly session-scoped even for an observer.
+        let chunk = ServerMessage::ChatChunk {
+            session_id: "s2".to_string(),
+            text: "hi".to_string(),
+        };
+        assert!(!should_forward_to_viewer(
+            &chunk,
+            "conn-a",
+            &viewers,
+            observes_s2_pi
+        ));
     }
 
     #[test]
@@ -2706,7 +2763,7 @@ mod session_viewer_filter_tests {
             text: "hi".to_string(),
         };
         let viewers = viewers_of("s1", &["conn-a", "conn-b"]);
-        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers));
+        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers, none));
     }
 
     #[test]
@@ -2716,7 +2773,7 @@ mod session_viewer_filter_tests {
             text: "hi".to_string(),
         };
         let viewers = viewers_of("s1", &["conn-a"]);
-        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers));
+        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers, none));
     }
 
     #[test]
@@ -2726,7 +2783,7 @@ mod session_viewer_filter_tests {
             usage: None,
         };
         let viewers: HashMap<String, HashSet<String>> = HashMap::new();
-        assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers));
+        assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers, none));
     }
 
     #[test]
@@ -2750,10 +2807,19 @@ mod session_viewer_filter_tests {
             session_id: "s2".to_string(),
             content: "plan".to_string(),
         };
-        assert!(should_forward_to_viewer(&thinking, "conn-a", &viewers));
-        assert!(!should_forward_to_viewer(&tool_use, "conn-a", &viewers));
-        assert!(!should_forward_to_viewer(&tool_result, "conn-a", &viewers));
-        assert!(!should_forward_to_viewer(&plan, "conn-a", &viewers));
+        assert!(should_forward_to_viewer(
+            &thinking, "conn-a", &viewers, none
+        ));
+        assert!(!should_forward_to_viewer(
+            &tool_use, "conn-a", &viewers, none
+        ));
+        assert!(!should_forward_to_viewer(
+            &tool_result,
+            "conn-a",
+            &viewers,
+            none
+        ));
+        assert!(!should_forward_to_viewer(&plan, "conn-a", &viewers, none));
     }
 
     #[test]
@@ -2805,11 +2871,27 @@ mod session_viewer_filter_tests {
         assert!(should_forward_to_viewer(
             &session_updated,
             "conn-a",
-            &viewers
+            &viewers,
+            none
         ));
-        assert!(should_forward_to_viewer(&workspace_git, "conn-a", &viewers));
-        assert!(should_forward_to_viewer(&host_state, "conn-a", &viewers));
-        assert!(should_forward_to_viewer(&bare_error, "conn-a", &viewers));
+        assert!(should_forward_to_viewer(
+            &workspace_git,
+            "conn-a",
+            &viewers,
+            none
+        ));
+        assert!(should_forward_to_viewer(
+            &host_state,
+            "conn-a",
+            &viewers,
+            none
+        ));
+        assert!(should_forward_to_viewer(
+            &bare_error,
+            "conn-a",
+            &viewers,
+            none
+        ));
     }
 }
 

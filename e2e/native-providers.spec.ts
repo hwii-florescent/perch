@@ -1,10 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 
 test("installed OMP and Pi run in separate persistent panes", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -27,6 +27,22 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   const second = await secondContext.newPage();
   const keys = new Map<string, { workspaceId: string; sessionId: string; agentId: string }>();
   const shellIds = new Set<string>();
+  let activeSession: string | undefined;
+  const backgroundReplies = new Set<string>();
+  const replyTokens = { omp: `omp_split_${Date.now()}`, pi: `pi_split_${Date.now()}` };
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload));
+      if (message.type === "session.subscribe") activeSession = message.sessionId;
+    });
+    socket.on("framereceived", ({ payload }) => {
+      const message = JSON.parse(String(payload));
+      if (message.type === "agent.ui.snapshot" && !message.requestId && message.sessionId !== activeSession) {
+        const token = replyTokens[message.providerId as keyof typeof replyTokens];
+        if (token && message.snapshot.messages.some((entry: { role: string; text: string }) => entry.role === "assistant" && entry.text.includes(token))) backgroundReplies.add(message.providerId);
+      }
+    });
+  });
   const errors: string[] = [];
   for (const current of [page, second]) {
     current.on("pageerror", (error) => errors.push(error.stack ?? error.message));
@@ -55,8 +71,17 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     }
   }
   try {
+    // Pi and OMP share the config-home variable but use different formats.
+    // Give this fixture's Pi executable its own cheap-model overlay.
+    const piEnv = cheapModelEnv("pi", fixture);
+    expect(piEnv.PI_CODING_AGENT_DIR).toBeTruthy();
+    const realPi = execFileSync("which", ["pi"], { encoding: "utf8" }).trim();
+    const bin = path.join(fixture, "bin");
+    fs.mkdirSync(bin);
+    const quote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
+    fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piEnv.PI_CODING_AGENT_DIR!)}\nexec ${quote(realPi)} "$@"\n`, { mode: 0o700 });
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--providers-path", providers], {
-      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", log, log],
+      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv("omp", fixture), PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {
       if (core?.exitCode !== null) throw new Error("Fixture core exited before readiness");
@@ -102,6 +127,44 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(omp.locator(".xterm-rows")).toContainText("perch_omp_draft");
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft_split");
     expect(keys.size).toBe(2);
+
+    // Keep both native sessions mounted in one browser tab. A snapshot must
+    // reach an observed pane even when another session owns the active view.
+    for (const terminal of [omp, pi]) {
+      await terminal.locator(".xterm-helper-textarea").press("Control+u");
+      const group = page.locator(".dv-groupview").filter({ has: terminal });
+      await group.getByTestId("session-mode-scope").selectOption("session");
+      await group.getByTestId("session-mode-toggle").click();
+    }
+    const ompUi = page.locator('[data-testid="native-cli-chat"][data-provider="omp"]');
+    const piUi = page.locator('[data-testid="native-cli-chat"][data-provider="pi"]');
+    for (const ui of [ompUi, piUi]) {
+      await expect(ui).toBeVisible();
+      await expect(ui.locator(".native-cli-chat__model")).toContainText(CHEAP_CODEX_MODEL);
+      await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
+    }
+    const pids = [await ompUi.getAttribute("data-native-pid"), await piUi.getAttribute("data-native-pid")];
+    expect(pids[0]).not.toBe(pids[1]);
+    await ompUi.getByTestId("native-cli-composer").fill(`Reply only ${replyTokens.omp}.`);
+    await ompUi.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(ompUi.getByRole("status")).toHaveText("Working");
+    await piUi.getByTestId("native-cli-composer").fill(`Use your bash tool to run sleep 3, then reply only ${replyTokens.pi}.`);
+    await piUi.getByRole("button", { name: "Send", exact: true }).click();
+    await ompUi.getByTestId("native-cli-composer").click();
+    // Dockview focus does not change the tab's single session subscription.
+    await expect.poll(() => activeSession).toBe(ompKey[1].sessionId);
+    for (const [ui, provider] of [[ompUi, "omp"], [piUi, "pi"]] as const) {
+      await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(replyTokens[provider], { timeout: 90_000 });
+      await expect(ui.getByRole("status")).toHaveText("Ready");
+      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
+    }
+    expect(backgroundReplies.has("pi"), "unrequested reply reached the secondary Pi session").toBe(true);
+    await expect(ompUi.getByTestId("native-cli-composer")).toBeFocused();
+    await expect(ompUi).toHaveAttribute("data-native-pid", pids[0]!);
+    await expect(piUi).toHaveAttribute("data-native-pid", pids[1]!);
+    await page.screenshot({ path: testInfo.outputPath("native-ui-two-panes.png"), fullPage: true });
+    for (const ui of [ompUi, piUi]) await page.locator(".dv-groupview").filter({ has: ui }).getByTestId("session-mode-toggle").click();
+
     await page.keyboard.press("ControlOrMeta+k");
     await expect(page.getByTestId("navigator-command-omp")).toBeVisible();
     await expect(page.getByTestId("navigator-command-pi")).toBeVisible();
@@ -128,19 +191,14 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
     }
-    for (const key of keys.values()) {
-      const hash = createHash("sha256");
-      for (const value of [key.workspaceId, key.sessionId, key.agentId]) {
-        const bytes = Buffer.from(value);
-        const length = Buffer.alloc(8);
-        length.writeBigUInt64LE(BigInt(bytes.length));
-        hash.update(length); hash.update(bytes);
-      }
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-agent-${hash.digest("hex")}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
+    const ownedTmux = new Set([...fs.readFileSync(path.join(fixture, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
+    for (const name of ownedTmux) {
+      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }
     for (const id of shellIds) {
       try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-shell-${id}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }
+    fs.copyFileSync(path.join(fixture, "core.log"), testInfo.outputPath("core.log"));
     fs.closeSync(log);
     await testInfo.attach("fixture-core.log", { body: fs.readFileSync(path.join(fixture, "core.log")), contentType: "text/plain" });
     fs.rmSync(fixture, { recursive: true, force: true });

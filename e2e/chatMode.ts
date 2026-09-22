@@ -2,7 +2,7 @@
  * Shared Hosted/CLI chat-mode handling for the suite.
  *
  * Chat mode is a single global setting in `~/.perch/settings.json`, and per
- * CLAUDE.md there is **no `--settings-path`**: every instance, including the
+ * AGENTS.md there is **no `--settings-path`**: every instance, including the
  * developer's own app, reads that one file. Several specs used to force it
  * back to a hardcoded `"hosted"` in `afterAll`, which silently overwrote a
  * real CLI-mode preference — and specs that *need* Hosted chrome

@@ -632,7 +632,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
   // global `agent` (Hosted mode's field) for a session with no recorded
   // choice, which is exactly how every pre-existing session already behaved.
   // This is *provider* selection only (which CLI binary launches), not
-  // model/effort chrome — CLAUDE.md's "zero model chrome in CLI mode" stands;
+  // model/effort chrome — AGENTS.md's "zero model chrome in CLI mode" stands;
   // see CliStartPanel.tsx's header comment for the full rationale.
   const persistedCliProvider = usePerchStore((state) => state.sessions.find((session) => session.id === sessionId)?.cliProviderId);
   const cliAgent = sessionId ? (cliAgentBySession[sessionId] ?? persistedCliProvider ?? agent) : agent;

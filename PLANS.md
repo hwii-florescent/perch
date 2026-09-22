@@ -4,7 +4,7 @@ Snapshot: 2026-08-04, branch `main`, HEAD `6d102c5`. This file tracks work that 
 deliberately stopped mid-stream or deferred; `PLAN.md` remains the phase-by-phase
 record of completed work.
 
-**Read the sanitization note at the top of `CLAUDE.md` before touching anything.** The repo
+**Read the sanitization note at the top of `AGENTS.md` before touching anything.** The repo
 is public and its history was scrubbed and recreated on 2026-08-04; internal-looking names in
 these docs are placeholders, and real ssh targets live in `~/.perch/hosts.json`.
 

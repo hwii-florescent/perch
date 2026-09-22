@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { cheapModelEnv } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -30,6 +31,12 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const sends: Array<{ requestId: string; packetId: string; sendOperationId: string }> = [];
   const receipts: Array<{ requestId: string; delivery: string }> = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  // WebKit reports a *caught* fetch rejection as a page error too. The app
+  // probes `/pair` whenever the socket drops (App.tsx -> isPaired), this test
+  // kills the host on purpose, and `isPaired` already treats an unreachable
+  // host as "still paired" — so that one message is the expected shape of a
+  // deliberate outage, not an unhandled error. Nothing else is exempt.
+  const unexpectedErrors = () => errors.filter((text) => !/Fetch API cannot load \S*\/pair\b/.test(text));
   page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => { const message = JSON.parse(String(payload)); if (message.type === "agent.terminal.opened") nativeKey = message.status.key; }));
   await context.addInitScript((directory) => { if (location.protocol !== "http:" || window !== window.top) return; localStorage.setItem("perch.onboarding.seen", "1"); localStorage.setItem("perch.dirBrowser.lastPath.local", directory); }, fixture);
   async function addComment(current: Page, line: string, body: string) {
@@ -39,7 +46,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(current.locator(".workspace-git__comment").filter({ hasText: body })).toBeVisible();
   }
   try {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...(provider === "claude" ? { ANTHROPIC_MODEL: "claude-haiku-4-5" } : {}) }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv(provider, scratch) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("workspace-add-project").click();
@@ -146,7 +153,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await page.screenshot({ path: path.join(shots, `native-review-${provider}-desktop-${testInfo.project.name}.png`) });
     await ui.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
-    expect(errors).toEqual([]);
+    expect(unexpectedErrors()).toEqual([]);
     completed = true;
   } finally {
     if (!completed) {

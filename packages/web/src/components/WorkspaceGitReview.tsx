@@ -311,6 +311,41 @@ export function WorkspaceGitReview({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [confirmAction]);
 
+  // A turn without a base ref is not a comparison, whatever else it says.
+  const turnBase = lastAgentTurn && lastAgentTurn.state !== "unavailable" && lastAgentTurn.beforeRef
+    ? { kind: "compare" as const, base: lastAgentTurn.beforeRef, ...(lastAgentTurn.afterRef ? { head: lastAgentTurn.afterRef } : {}) }
+    : null;
+
+  // Each state gets its own words. "(none recorded)" and "(not captured)" are
+  // different facts and a reviewer acts differently on them.
+  const turnLabel = !lastAgentTurn
+    ? "Last agent turn (none recorded)"
+    : lastAgentTurn.state === "unavailable" || !lastAgentTurn.beforeRef
+      ? `Last agent turn (${lastAgentTurn.agent} · not captured)`
+      : lastAgentTurn.state === "running"
+        ? `Last agent turn (${lastAgentTurn.agent} · running)`
+        : `Last agent turn (${lastAgentTurn.agent})`;
+
+  // The preset names *whichever* turn is current, so when that turn changes or
+  // stops being reviewable the loaded diff is stale. Re-point it, or fall back
+  // to the working tree — otherwise the summary line and the diff below it
+  // describe two different turns, which is the failure this preset must not have.
+  useEffect(() => {
+    if (preset !== "lastAgentTurn") return;
+    if (!turnBase) {
+      setPreset(null);
+      setTarget({ kind: "workingTree" });
+      setActiveFile(undefined);
+      setSelection(null);
+      return;
+    }
+    setTarget((previous) => (
+      previous.kind === "compare" && previous.base === turnBase.base && previous.head === turnBase.head
+        ? previous
+        : turnBase
+    ));
+  }, [preset, turnBase?.base, turnBase?.head]);
+
   useEffect(() => {
     actions.loadDiff(compareOpen && compareBase.trim() ? compareTarget : target, activeFile, {
       includeUntracked,
@@ -364,12 +399,12 @@ export function WorkspaceGitReview({
       setPreset("workspaceStart");
       setTarget({ kind: "compare", base: startSnapshot });
     } else if (value === "lastAgentTurn") {
-      if (!lastAgentTurn) return;
+      if (!turnBase) return;
       setPreset("lastAgentTurn");
-      // The recorded after side pins the turn's own end. Without one (an
-      // interrupted turn) the working tree stands in, which still shows the
-      // agent's work rather than nothing.
-      setTarget({ kind: "compare", base: lastAgentTurn.beforeRef, ...(lastAgentTurn.afterRef ? { head: lastAgentTurn.afterRef } : {}) });
+      // The recorded after side pins the turn's own end. A turn still running
+      // has none, so the working tree stands in and the diff grows as the
+      // agent works. A turn whose after side will never arrive is not offered.
+      setTarget(turnBase);
     } else {
       setPreset(null);
       setTarget({ kind: value as "workingTree" | "staged" | "head" });
@@ -643,7 +678,7 @@ export function WorkspaceGitReview({
                   <option value="staged">Staged</option>
                   <option value="head">HEAD</option>
                   <option value="workspaceStart" disabled={!startSnapshot}>{startSnapshot ? "Workspace start" : "Workspace start (not recorded)"}</option>
-                  <option value="lastAgentTurn" disabled={!lastAgentTurn}>{lastAgentTurn ? `Last agent turn (${lastAgentTurn.agent})` : "Last agent turn (none recorded)"}</option>
+                  <option value="lastAgentTurn" disabled={!turnBase}>{turnLabel}</option>
                   <option value="compare">Another ref…</option>
                 </select>
               </label>
@@ -670,10 +705,20 @@ export function WorkspaceGitReview({
                is and how much it touched — a diff alone does not answer that. */
             <p className="workspace-git__turn-summary" data-testid="git-turn-summary">
               <strong>{lastAgentTurn.agent}</strong>
-              {" changed "}
-              {lastAgentTurn.changedPaths.length} {lastAgentTurn.changedPaths.length === 1 ? "path" : "paths"}
-              {lastAgentTurn.completedAt ? ` · ${new Date(lastAgentTurn.completedAt).toLocaleTimeString()}` : ""}
-              {lastAgentTurn.afterRef ? "" : " · still open, comparing against the working tree"}
+              {lastAgentTurn.state === "running"
+                ? " · turn in progress, comparing against the working tree"
+                : <>
+                    {" changed "}
+                    {lastAgentTurn.changedPaths.length} {lastAgentTurn.changedPaths.length === 1 ? "path" : "paths"}
+                    {lastAgentTurn.completedAt ? ` · ${new Date(lastAgentTurn.completedAt).toLocaleTimeString()}` : ""}
+                  </>}
+            </p>
+          )}
+          {lastAgentTurn?.state === "unavailable" && (
+            /* Never silently substitute an older turn for this one: the newest
+               turn is the one the label promises, and it was not captured. */
+            <p className="workspace-git__status-note" data-testid="git-turn-unavailable">
+              This agent turn was not captured, so it cannot be compared. The next turn records a fresh baseline.
             </p>
           )}
 
