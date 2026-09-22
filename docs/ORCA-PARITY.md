@@ -19,9 +19,9 @@ check a row against the code before building on it.
 | Delete worktree + branch, preserved-branch review, archive, sleep, pin, rename, parent nesting | 🟡 archive/sleep exist | `main/runtime`, `main/persistence` |
 | External (`git worktree add`) worktrees: show/hide | ❌ | `main/runtime` |
 | Launch any supported CLI with autonomy flags; per-agent editable launch args + reset | 🟡 `agent_fleet.rs` manifests | `main/agent-launch`, `main/providers` |
-| Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | 🟡 Claude hooks (PermissionRequest, AskUserQuestion) and Codex app-server `activeFlags` drive working/blocked/done; OSC titles and other providers pending | `main/agent-hooks` (+ `server/`) |
+| Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | ✅ Native bridges for Claude, Codex, Pi/OMP (ask tool, OMP approvals) and OpenCode (permission/question, incl. subagents); OSC title rules (`agent_title.rs`) for every other CLI. No "unverifiable" glyph | `main/agent-hooks` (+ `server/`), `shared/agent-title-status.ts` |
 | Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |
-| Agent-finished notification, unread state | 🟡 done/blocked toasts + sound; native OS notifications in the desktop app; unread = `unseen`. No click-to-switch on desktop; no shared idle-decay policy | `main/agent-hooks`, renderer |
+| Agent-finished notification, unread state | 🟡 done/blocked toasts + sound; native OS notifications in the desktop app; one reader policy (`server/session.rs`): unread = `unseen`, 30-minute decay = `stale`. No click-to-switch on desktop | `main/agent-hooks`, renderer `attention/` |
 | Tabs, splits right/down, per-worktree layout that persists (`model/tabs-panes-splits`) | 🟡 dockview; per-worktree persistence to verify | renderer |
 | PTYs survive app quit; scrollback (incl. output while closed) restored; focused tab restored (`model/session-restore`) | 🟡 perchd owns agent + workspace shells locally (survive runtime crash, scrollback replayed); remote hosts and focused-tab restore pending | `main/daemon`, `main/orcad` |
 | Terminal: find in scrollback, link action popover, OSC 52, kitty keyboard, copy context | 🟡 search + OSC 52 exist; kitty, link popover, copy context missing | renderer, `main/pty` |

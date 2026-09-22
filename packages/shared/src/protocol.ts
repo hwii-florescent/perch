@@ -359,11 +359,14 @@ export interface SessionSummary {
   cliStarted?: boolean;
   /** Last explicitly selected CLI provider, independent of the Chat runner. */
   cliProviderId?: string;
-  /** Whether the session's agent is blocked on an approval prompt, detected
-   * by scanning recent CLI-attached terminal output for known approval-
-   * prompt patterns. Only meaningful for sessions with a live CLI-attached
-   * terminal; otherwise always false. Defaults to false when absent. */
+  /** Whether the session's agent is waiting on the human (a permission
+   * prompt or a question), from native CLI events, the OSC title, or as a
+   * last resort an output pattern. Defaults to false when absent. */
   blocked?: boolean;
+  /** Running or blocked, but with no status evidence for 30 minutes: read it
+   * as idle. Display only; the turn is not over, so a later completion still
+   * notifies. Defaults to false when absent. */
+  stale?: boolean;
   /** Stable durable project association, absent for old remote peers. */
   projectId?: string;
   /** Stable durable workspace association, absent for old remote peers. */

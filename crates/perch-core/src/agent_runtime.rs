@@ -71,6 +71,9 @@ struct ActiveRuntime {
     /// `Sleeping`.
     suppress_exit_signal: Arc<AtomicBool>,
     native_status: Arc<AtomicBool>,
+    /// The PTY's OSC title has classified at least once, so the title owns
+    /// status (below native, above output heuristics); see `agent_title`.
+    title_status: Arc<AtomicBool>,
     native_running: bool,
     replay: Arc<Mutex<TerminalReplay>>,
     _bootstrap: Option<crate::provider_environment::BootstrapFile>,
@@ -287,6 +290,13 @@ impl AgentRuntimeAdapter {
     pub fn has_native_status(&self, session_id: &str) -> bool {
         self.active.lock().unwrap().iter().any(|(key, runtime)| {
             key.session_id == session_id && runtime.native_status.load(Ordering::Acquire)
+        })
+    }
+
+    /// The session's status comes from its OSC title (`agent_title`).
+    pub fn has_title_status(&self, session_id: &str) -> bool {
+        self.active.lock().unwrap().iter().any(|(key, runtime)| {
+            key.session_id == session_id && runtime.title_status.load(Ordering::Acquire)
         })
     }
 
@@ -598,6 +608,9 @@ impl AgentRuntimeAdapter {
         let data_suppress = suppress_exit_signal.clone();
         let native_status = Arc::new(AtomicBool::new(false));
         let data_native_status = native_status.clone();
+        let title_status = Arc::new(AtomicBool::new(false));
+        let data_title_status = title_status.clone();
+        let title = Mutex::new(crate::agent_title::TitleTracker::default());
         let replay = Arc::new(Mutex::new(TerminalReplay::default()));
         let replay_for_output = replay.clone();
         let status_detection = manifest.status_detection.clone();
@@ -607,9 +620,7 @@ impl AgentRuntimeAdapter {
             replay_for_output.lock().unwrap().push(&text);
             if !data_suppress.load(Ordering::Acquire) && !data_native_status.load(Ordering::Acquire)
             {
-                if let Some(signal) =
-                    output_status_signal(&status_detection, &mut status_tail.lock().unwrap(), &text)
-                {
+                let emit = |signal: ProviderSignal| {
                     if matches!(signal, ProviderSignal::Completed { .. }) {
                         if let Some(record) = turn_boundary.get() {
                             if let Err(error) = record(&event_key, false) {
@@ -619,6 +630,35 @@ impl AgentRuntimeAdapter {
                         }
                     }
                     let _ = lifecycle.signal(&event_key, signal, now_millis());
+                };
+                // Configured markers, then the OSC title, then "any output
+                // means working". The title parser sees every chunk either way.
+                let marker = output_status_signal(
+                    &status_detection,
+                    &mut status_tail.lock().unwrap(),
+                    &text,
+                );
+                let title_change = title.lock().unwrap().feed(&text);
+                if let Some(signal) = marker {
+                    emit(signal);
+                } else if let Some((previous, next)) = title_change {
+                    data_title_status.store(true, Ordering::Release);
+                    if previous.is_none() && next == crate::agent_title::TitleStatus::Idle {
+                        let _ = lifecycle.transition(
+                            &event_key,
+                            AgentState::Idle,
+                            "terminal title reports idle",
+                            now_millis(),
+                        );
+                    }
+                    crate::agent_title::signals(previous, next)
+                        .into_iter()
+                        .for_each(emit);
+                } else if data_title_status.load(Ordering::Acquire) {
+                    // Repaints are not a new turn once the title owns status.
+                    if !text.trim().is_empty() {
+                        let _ = lifecycle.record_activity(&event_key, now_millis());
+                    }
                 } else if !text.trim().is_empty() {
                     let _ = lifecycle.signal(
                         &event_key,
@@ -751,6 +791,7 @@ impl AgentRuntimeAdapter {
                     cwd,
                     suppress_exit_signal,
                     native_status,
+                    title_status,
                     native_running: false,
                     replay: replay.clone(),
                     _bootstrap: prepared.bootstrap,
@@ -962,7 +1003,9 @@ impl AgentRuntimeAdapter {
         {
             self.record_turn_boundary(key, true)
                 .map_err(RuntimeAdapterError::Process)?;
-            if !native_ready {
+            // A title-owned turn starts when the title says so: an Enter
+            // that dismisses a menu must not leave the session running.
+            if !native_ready && !self.has_title_status(&key.session_id) {
                 self.lifecycle
                     .signal(key, ProviderSignal::TurnStarted, at_ms)?;
             }
@@ -1824,5 +1867,88 @@ mod tests {
         assert_eq!(codex.executable, PathBuf::from("codex"));
         assert_eq!(codex.args, ["--dangerously-bypass-approvals-and-sandbox"]);
         assert!(codex.stdin.is_none());
+    }
+
+    #[test]
+    fn osc_titles_drive_turns_for_agents_without_native_status() {
+        let providers = Arc::new(ProviderRegistry::empty());
+        let mut manifest = fixture_manifest();
+        manifest.launch.mode_overrides.get_mut(&AgentMode::Cli).unwrap().prefix_args = vec![
+            "-c".to_string(),
+            r#"t() { printf '\033]0;%s\007' "$1"; }; t 'aider ready'; while IFS= read -r line; do case $line in go) t '⠋ aider';; ask) t 'aider - action required';; end) t 'aider ready';; esac; printf 'ack_%s\n' "$line"; done"#.to_string(),
+        ];
+        providers.register(manifest).unwrap();
+        let adapter = AgentRuntimeAdapter::new(
+            providers,
+            Arc::new(AgentLifecycleRegistry::new()),
+            Arc::new(AgentTerminalRegistry::new(Arc::new(|_| {}))),
+        );
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        adapter
+            .attach_cli(
+                AgentRegistration {
+                    key: key.clone(),
+                    provider_id: "fixture".into(),
+                    provider_session_id: Some("provider-title".into()),
+                    resumable: true,
+                    now_ms: now_millis(),
+                },
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let lease = adapter
+            .acquire_control(&key, ControlChannel::Input, client("desktop"), now_millis())
+            .unwrap();
+        let wait_for = |state: AgentState| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while adapter.snapshot(&key).unwrap().state != state
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(adapter.snapshot(&key).unwrap().state, state);
+        };
+        let send = |line: &str| {
+            adapter
+                .input(
+                    &key,
+                    &lease,
+                    &format!("{line}\r"),
+                    now_millis(),
+                    Duration::ZERO,
+                )
+                .unwrap()
+        };
+        // The startup title settles the launch; an Enter alone is no turn.
+        wait_for(AgentState::Idle);
+        assert!(adapter.has_title_status(&key.session_id));
+        send("noop");
+        let replay = adapter.active.lock().unwrap()[&key].replay.clone();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !replay.lock().unwrap().text().contains("ack_noop")
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(adapter.snapshot(&key).unwrap().state, AgentState::Idle);
+        send("go");
+        wait_for(AgentState::Working);
+        send("ask");
+        wait_for(AgentState::Blocked);
+        send("go");
+        wait_for(AgentState::Working);
+        send("end");
+        wait_for(AgentState::Done);
+        send("ask");
+        wait_for(AgentState::Blocked);
     }
 }

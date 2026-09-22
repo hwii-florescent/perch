@@ -35,3 +35,5 @@ tokio-tungstenite = "0.24"
 # Used only for CLI-attached terminal blocked-state (approval-prompt)
 # detection in server.rs — see `blocked_patterns`/`strip_ansi`.
 regex = "1"
+# OSC title tracking for agent status (`agent_title.rs`); already built for perchd.
+vt100 = "0.15"

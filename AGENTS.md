@@ -53,6 +53,8 @@ there, not here.
   - `agent_runtime.rs`: launches CLI panes.
   - `agent_persistence.rs`.
   - `agent.rs`: Hosted-mode `claude -p` / `codex exec` runners.
+  - `agent_title.rs`: status from the OSC title, for CLIs with no native
+    bridge (Orca's title rules).
   - `native_ui/`: observes each CLI's own events. Claude through per-launch
     `--settings` hooks written as files; Codex through its app-server; pi/omp
     through a socket; OpenCode.

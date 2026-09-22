@@ -22,6 +22,16 @@ export default function (pi: any) {
   let stopped = false;
   const clients = new Set<net.Socket>();
   const receipts = new Map<string, string>();
+  // Needs-you evidence (Orca pi-family-events.ts): an ask tool is running, or
+  // OMP's policy engine parked a tool on the human. Pi 0.84 has no generic
+  // dialog event, so an extension's own ctx.ui prompt is not seen here.
+  const asking = new Set<string>();
+  let approvals = 0;
+  function isAsk(name: unknown): boolean {
+    if (PROVIDER === "omp") return name === "ask";
+    const normalized = String(name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    return normalized === "askuserquestion" || normalized === "requestuserinput";
+  }
 
   function clip(value: unknown, limit = 16 * 1024): string {
     const text = typeof value === "string" ? value : "";
@@ -92,11 +102,13 @@ export default function (pi: any) {
       bytes += size;
       recent.unshift(messages[index]);
     }
+    const running = !ctx.isIdle() || ctx.hasPendingMessages();
     return {
       type: "snapshot", version: 1, revision: ++revision, pid: process.pid,
       providerSessionId: ctx.sessionManager.getSessionFile() ?? ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd, model: ctx.model?.id ?? null,
-      running: !ctx.isIdle() || ctx.hasPendingMessages(),
+      running,
+      blocked: running && (asking.size > 0 || approvals > 0),
       messages: recent, truncated: historyTruncated || messages.length > recent.length,
     };
   }
@@ -164,6 +176,8 @@ export default function (pi: any) {
     currentMessage = undefined;
     historyDirty = true;
     receipts.clear();
+    asking.clear();
+    approvals = 0;
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === RECEIPT_TYPE && typeof entry.data?.id === "string") {
         receipts.set(entry.data.id, entry.data.state);
@@ -196,7 +210,25 @@ export default function (pi: any) {
   });
   pi.on("session_shutdown", stop);
   for (const name of ["agent_start", "agent_end", "session_tree", "session_branch", "session_compact"]) {
-    pi.on(name, (_event: any, context: any) => { ctx = context; if (name !== "agent_start") historyDirty = true; schedule(); });
+    pi.on(name, (_event: any, context: any) => {
+      ctx = context;
+      if (name !== "agent_start") historyDirty = true;
+      if (name === "agent_end") { asking.clear(); approvals = 0; }
+      schedule();
+    });
+  }
+  pi.on("tool_execution_start", (event: any, context: any) => {
+    ctx = context;
+    if (isAsk(event.toolName)) { asking.add(String(event.toolCallId)); schedule(0); }
+  });
+  pi.on("tool_execution_end", (event: any, context: any) => {
+    ctx = context;
+    if (asking.delete(String(event.toolCallId))) schedule(0);
+  });
+  if (PROVIDER === "omp") {
+    // OMP only emits its approval lifecycle when an extension listens for it.
+    pi.on("tool_approval_requested", (_event: any, context: any) => { ctx = context ?? ctx; approvals++; schedule(0); });
+    pi.on("tool_approval_resolved", (_event: any, context: any) => { ctx = context ?? ctx; approvals = Math.max(0, approvals - 1); schedule(0); });
   }
   if (PROVIDER === "pi") pi.on("agent_settled", (_event: any, context: any) => { ctx = context; schedule(0); });
   for (const name of ["message_start", "message_update", "message_end"]) {

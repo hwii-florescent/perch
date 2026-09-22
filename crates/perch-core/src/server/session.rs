@@ -642,8 +642,9 @@ pub(super) fn local_sessions_snapshot(app: &AppState) -> Vec<SessionSummary> {
     let running = app.running_sessions.lock().unwrap();
     let unseen = app.unseen_sessions.lock().unwrap();
     let blocked = app.blocked_sessions.lock().unwrap();
+    let stale = app.stale_sessions.lock().unwrap();
     rows.into_iter()
-        .map(|row| build_session_summary(row, &running, &unseen, &blocked))
+        .map(|row| build_session_summary(row, &running, &unseen, &blocked, &stale))
         .collect()
 }
 
@@ -656,6 +657,7 @@ pub(super) fn build_session_summary(
     running: &std::collections::HashSet<String>,
     unseen: &std::collections::HashSet<String>,
     blocked: &std::collections::HashSet<String>,
+    stale: &std::collections::HashSet<String>,
 ) -> SessionSummary {
     let status = if running.contains(&row.id) {
         SessionStatus::Running
@@ -685,9 +687,51 @@ pub(super) fn build_session_summary(
         archived: row.archived,
         unseen: unseen.contains(&row.id),
         blocked: blocked.contains(&row.id),
+        stale: stale.contains(&row.id),
         project_id: row.project_id,
         workspace_id: row.workspace_id,
     }
+}
+
+// The attention (reader) policy, in one place, after Orca's
+// `agent-attention-policy.ts` and `agent-status-freshness.ts`:
+// - Unread (`unseen`): a turn settles (done, idle, exit, error) while no
+//   connection views the session (`mark_unseen_if_unviewed`). Any connection
+//   viewing it clears it (`set_active_session`). Blocked is not unread: it
+//   stays lit until answered.
+// - Decay (`stale`): running or blocked with no status evidence for 30
+//   minutes reads as idle. Evidence is lifecycle activity or a transition:
+//   native snapshots, title changes, provider output. Display only, never a
+//   completion, so no unread and no notification, and a later real
+//   completion still fires. Orca splits the decayed state into idle and
+//   "unverifiable" (PTY still alive); perch shows both as idle.
+pub(super) const STATUS_STALE_AFTER_MS: u64 = 30 * 60 * 1000;
+
+/// Sessions shown running or blocked whose every busy agent has been silent
+/// for [`STATUS_STALE_AFTER_MS`].
+pub(super) fn stale_sessions(
+    snapshots: &[crate::agent_fleet::AgentSnapshot],
+    shown_busy: impl Fn(&str) -> bool,
+    now_ms: u64,
+) -> std::collections::HashSet<String> {
+    use crate::agent_fleet::AgentState;
+    let (mut stale, mut fresh) = (
+        std::collections::HashSet::new(),
+        std::collections::HashSet::new(),
+    );
+    for snapshot in snapshots
+        .iter()
+        .filter(|snapshot| matches!(snapshot.state, AgentState::Working | AgentState::Blocked))
+    {
+        let evidence = snapshot.last_activity_ms.max(snapshot.last_transition_ms);
+        if now_ms.saturating_sub(evidence) >= STATUS_STALE_AFTER_MS {
+            stale.insert(snapshot.key.session_id.clone());
+        } else {
+            fresh.insert(snapshot.key.session_id.clone());
+        }
+    }
+    stale.retain(|id| !fresh.contains(id) && shown_busy(id));
+    stale
 }
 
 /// Called when a turn finishes (`chat.done` or a terminal error) and
@@ -1836,5 +1880,63 @@ mod native_review_target_tests {
             "codex"
         );
         assert!(review_provider_choice(None, None, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod stale_status_tests {
+    use super::{stale_sessions, STATUS_STALE_AFTER_MS};
+    use crate::agent_fleet::{AgentKey, AgentLifecycleRegistry, AgentRegistration, ProviderSignal};
+
+    #[test]
+    fn busy_sessions_decay_after_thirty_silent_minutes_unless_an_agent_is_fresh() {
+        let lifecycle = AgentLifecycleRegistry::new();
+        let key = |session: &str, agent: &str| AgentKey::new("w", session, agent).unwrap();
+        for (session, agent, state_at) in [
+            ("silent", "claude", 0),
+            ("fresh", "claude", 0),
+            ("mixed", "claude", 0),
+            ("mixed", "codex", STATUS_STALE_AFTER_MS),
+            ("unshown", "claude", 0),
+            ("done", "claude", 0),
+        ] {
+            lifecycle
+                .register(AgentRegistration {
+                    key: key(session, agent),
+                    provider_id: agent.into(),
+                    provider_session_id: None,
+                    resumable: false,
+                    now_ms: 0,
+                })
+                .unwrap();
+            lifecycle
+                .signal(&key(session, agent), ProviderSignal::TurnStarted, state_at)
+                .unwrap();
+        }
+        lifecycle
+            .signal(
+                &key("silent", "claude"),
+                ProviderSignal::InputRequested {
+                    reason: "ask".into(),
+                },
+                1,
+            )
+            .unwrap();
+        lifecycle
+            .record_activity(&key("fresh", "claude"), STATUS_STALE_AFTER_MS)
+            .unwrap();
+        lifecycle
+            .signal(
+                &key("done", "claude"),
+                ProviderSignal::Completed {
+                    reason: "done".into(),
+                },
+                2,
+            )
+            .unwrap();
+        let now = STATUS_STALE_AFTER_MS + 1;
+        let stale = stale_sessions(&lifecycle.list(), |id| id != "unshown", now);
+        assert_eq!(stale, ["silent".to_string()].into_iter().collect());
+        assert!(stale_sessions(&lifecycle.list(), |_| true, STATUS_STALE_AFTER_MS - 1).is_empty());
     }
 }

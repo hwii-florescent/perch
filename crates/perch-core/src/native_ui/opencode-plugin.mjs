@@ -53,6 +53,22 @@ export default {
     let pending;
     const clients = new Set();
     const receipts = new Map();
+    // Subagents run in child sessions; their prompts still need the human.
+    const parents = new Map();
+    const rememberParent = info => {
+      if (!info?.id || !info.parentID) return;
+      parents.set(info.id, info.parentID);
+      if (parents.size > 256) parents.delete(parents.keys().next().value);
+    };
+    const descends = (child, root) => {
+      for (let id = child, hops = 0; id && hops < 8; id = parents.get(id), hops++) if (id === root) return true;
+      return false;
+    };
+    // A pending permission or question in this session or a subagent's
+    // (Orca status-plugin-lifecycle-source.ts). Optional: older 1.18 TUIs
+    // lack these accessors.
+    const asksHuman = id => (api.state.session.permission?.(id)?.length ?? 0) + (api.state.session.question?.(id)?.length ?? 0) > 0;
+    const waiting = id => !!id && (asksHuman(id) || [...parents.keys()].some(child => descends(child, id) && asksHuman(child)));
     const sessionID = () => api.route.current.name === "session" ? api.route.current.params?.sessionID : undefined;
 
     // Render OpenCode's own prompt unchanged and retain its public ref. This
@@ -101,11 +117,12 @@ export default {
         rows.unshift(...normalized);
       }
       const status = id ? api.state.session.status(id)?.type : undefined;
+      const blocked = waiting(id);
       const session = id ? api.state.session.get(id) : undefined;
       return { type: "snapshot", version: 1, revision: ++revision, pid: process.pid,
         providerSessionId: id ?? "", cwd: clip(session?.directory ?? api.state.path.directory, 4096),
         model: rows.findLast(row => row.model)?.model ?? null,
-        running: !!status && status !== "idle", messages: rows, truncated };
+        running: (!!status && status !== "idle") || blocked, blocked, messages: rows, truncated };
     }
     function publish() {
       timer = undefined;
@@ -168,10 +185,12 @@ export default {
         else send(client, receipt(requestId, false, error.message));
       }
     }
-    for (const type of ["message.updated", "message.part.updated", "message.part.delta", "message.part.removed", "message.removed", "session.status", "session.updated", "session.error", "permission.asked", "permission.replied"]) {
+    for (const type of ["message.updated", "message.part.updated", "message.part.delta", "message.part.removed", "message.removed", "session.status", "session.error", "permission.asked", "permission.replied", "question.asked", "question.replied", "question.rejected"]) {
       api.event.on(type, () => schedule());
     }
+    api.event.on("session.updated", event => { rememberParent(event?.properties?.info); schedule(); });
     api.event.on("session.created", event => {
+      rememberParent(event.properties.info);
       if (pending && !pending.id && pending.created.size < 16) pending.created.add(event.properties.info.id);
       schedule();
     });

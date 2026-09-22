@@ -71,32 +71,52 @@ the existing ControlMaster. CLI panes and Hosted turns on direct hosts then
 become daemon sessions, and the tmux/`nohup`/`tail -F` code in `detached.rs`
 is deleted. Blocked on having a test host.
 
-## Status (phase 2, partly built)
+## Status (phase 2)
 
 - **Store:** `agent_fleet::AgentLifecycleRegistry` (states `working`,
   `blocked`, `done`, `idle`, `sleeping`, `exited`, `error`, `reconnecting`),
   persisted by `agent_persistence.rs`. There is no parallel store.
-- **Producers:**
-  - `native_ui/*` snapshots `{running, blocked}`:
-    - Claude: per-launch hooks, `PermissionRequest` or
-      `PreToolUse(AskUserQuestion)` → blocked.
-    - Codex: app-server `activeFlags` `waitingOnApproval` /
-      `waitingOnUserInput` → blocked.
-  - Configured output markers.
-  - Process exit.
-  - A regex over the terminal output is the fallback, used only for agents
-    with no native status.
+- **Producers**, strongest first; each one silences the ones below it:
+  1. `native_ui/*` snapshots `{running, blocked}`:
+     - Claude: per-launch hooks, `PermissionRequest` or
+       `PreToolUse(AskUserQuestion)` → blocked.
+     - Codex: app-server `activeFlags` `waitingOnApproval` /
+       `waitingOnUserInput` → blocked.
+     - Pi/OMP (`pi-extension.ts`): an ask tool in flight
+       (`AskUserQuestion`/`request_user_input` for Pi, `ask` for OMP), or
+       OMP's `tool_approval_requested` until `…_resolved` → blocked; the
+       turn's `agent_end` clears both. Pi 0.84 has no event for an
+       extension's own `ctx.ui` dialog, so those are not seen.
+     - OpenCode (`opencode-plugin.mjs`): the TUI's pending
+       `session.permission`/`session.question` for the session or any
+       subagent session below it → blocked.
+  2. Configured output markers (`StatusDetection::OutputPatterns`).
+  3. The OSC title (`agent_title.rs`, Orca's `agent-title-status.ts` rules):
+     working / permission / idle. The first classified title makes the
+     title own status: repaints only count as activity, and an Enter no
+     longer starts a turn (the title's working edge does). vt100 tracks the
+     title in the runtime's own output path, so it works with or without
+     perchd and with no view attached.
+  4. Any output = working (the old fallback), plus the approval-prompt
+     regex in `server/mod.rs::handle_socket` while a view is attached.
+  5. Process exit.
 - **Projection:** `server/mod.rs::spawn_agent_turn_state_task` turns
   lifecycle transitions into the sidebar's `running_sessions` and
   `blocked_sessions`. The UI (`statusDot.ts`) then draws glyphs and fires
   notifications on the running→idle and →blocked edges. In the desktop app
   those are native OS notifications via `tauri-plugin-notification`.
-- **Still to do:**
-  - Blocked detection for pi, omp and opencode.
-  - OSC title rules (perchd already tracks the title; Orca's rules are in
-    `server-claude-status-rules.ts`).
-  - One shared reader policy for unread and the 30-minute idle decay.
-  - An HTTP `/hook` endpoint isn't needed while the file-based hooks work.
+- **Reader policy** (`server/session.rs`, after Orca's
+  `agent-attention-policy.ts` and `agent-status-freshness.ts`), one place:
+  - Unread (`unseen`): a turn settles while no connection views the
+    session; viewing it clears it. Blocked is not unread.
+  - Decay (`stale`): running or blocked with no status evidence (lifecycle
+    activity or transition: native snapshots, title changes, output) for 30
+    minutes reads as idle. Display only: no unread, no notification, and a
+    later real completion still notifies. Orca splits this into idle and
+    "unverifiable" (PTY alive); perch shows idle for both.
+- **Not built:** an HTTP `/hook` endpoint (the file-based hooks work);
+  Orca's title normaliser and per-agent tracker quirks (Gemini/Grok display
+  titles, the 3-second stale-working-title clear).
 
 ## Runtime domains
 

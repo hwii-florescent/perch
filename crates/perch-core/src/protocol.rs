@@ -270,14 +270,18 @@ pub struct SessionSummary {
     /// older remotes.
     #[serde(default)]
     pub cli_started: bool,
-    /// Whether the session's agent is blocked on an approval prompt, detected
-    /// by scanning recent CLI-attached terminal output for known approval-
-    /// prompt patterns (see `blocked_patterns` in `server.rs`). Only
-    /// meaningful for sessions with a live CLI-attached terminal; otherwise
-    /// always `false`. Defaulted for backward federation-compat with older
-    /// remotes.
+    /// Whether the session's agent is waiting on the human (a permission
+    /// prompt or a question), from native CLI events, the OSC title, or as a
+    /// last resort an output pattern (see `blocked_patterns` in `server.rs`).
+    /// Defaulted for backward federation-compat with older remotes.
     #[serde(default)]
     pub blocked: bool,
+    /// Running or blocked, but with no status evidence for 30 minutes: read
+    /// it as idle. Display only; the turn is not over, so a later completion
+    /// still notifies (see `stale_sessions` in `server/session.rs`).
+    /// Defaulted for older remotes.
+    #[serde(default)]
+    pub stale: bool,
     /// Stable project metadata association, populated after the database
     /// migration. Optional so old remote peers and pre-migration rows remain
     /// readable during rolling upgrades.
