@@ -48,12 +48,18 @@ pub fn socket_path(dir: &Path) -> PathBuf {
         return path;
     }
     // FNV-1a: stable across builds, so every client finds the same socket.
-    let hash = dir.as_os_str().as_bytes().iter().fold(0xcbf29ce484222325u64, |h, &b| {
-        (h ^ b as u64).wrapping_mul(0x100000001b3)
-    });
+    let hash = dir
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |h, &b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        });
     // SAFETY: getuid cannot fail.
     let uid = unsafe { libc::getuid() };
-    PathBuf::from(format!("/tmp/perchd-{uid}-{hash:016x}-v{PROTOCOL_VERSION}.sock"))
+    PathBuf::from(format!(
+        "/tmp/perchd-{uid}-{hash:016x}-v{PROTOCOL_VERSION}.sock"
+    ))
 }
 
 pub fn default_dir() -> PathBuf {
