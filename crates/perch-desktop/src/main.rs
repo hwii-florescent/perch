@@ -88,6 +88,9 @@ fn main() {
         tauri::WebviewUrl::External(url_str.parse().expect("invalid server URL"));
 
     tauri::Builder::default()
+        // Replaces the web view's `window.Notification` with native OS
+        // notifications; the UI's existing toast code needs no change.
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let mut builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("perch")

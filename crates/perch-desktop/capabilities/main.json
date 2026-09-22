@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The UI is served by the in-process core over loopback, so IPC is granted to that origin. Notifications only: the plugin replaces window.Notification, which WKWebView does not deliver on its own.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
+  "permissions": ["notification:default"]
+}
