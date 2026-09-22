@@ -69,7 +69,7 @@ against the code before building on it.
 | Remote Orca server / paired clients (`remote-servers`) | 🟡 federation + pairing | `main/runtime`, `relay` |
 | GitHub PRs/issues, Linear, Jira, GitLab (`review/*`) | ❌ | `main/github`, `main/linear`, `main/jira`, `main/gitlab` |
 
-## Tier 5 — heavy surfaces
+## Tier 5 — heavy surfaces (deferred until Tiers 1–4 are done — user, 2026-09-22)
 
 | Feature | perch | Orca source |
 |---|---|---|
