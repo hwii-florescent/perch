@@ -1508,15 +1508,9 @@ impl Drop for DirectoryGuard {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn stat_modified_at_ms(stat: &libc::stat) -> Option<i64> {
-    let seconds = i128::from(stat.st_mtim.tv_sec);
-    let nanos = i128::from(stat.st_mtim.tv_nsec);
-    let millis = seconds.checked_mul(1_000)?.checked_add(nanos / 1_000_000)?;
-    i64::try_from(millis).ok()
-}
-
 #[cfg(any(
+    target_os = "linux",
+    target_os = "android",
     target_os = "macos",
     target_os = "ios",
     target_os = "freebsd",
