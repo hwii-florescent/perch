@@ -12,12 +12,12 @@ check a row against the code before building on it.
 
 | Feature (Orca doc) | perch | Orca source |
 |---|---|---|
-| Worktree create: background with progress row, cancel, retry (`model/worktrees`) | 🟡 `worktree.rs` creates; no background progress/cancel | `main/git`, `main/runtime` |
-| Start-from picker: base ref / local branch / SHA / remote branch | ❌ | `main/git` |
-| Branch name derived from task name, explicit override | 🟡 verify | `main/git` |
-| Shared paths, `.worktreeinclude` copies, shared dirs (APFS clone / symlink) | ❌ | `main/git`, `main/runtime` |
-| Delete worktree + branch, preserved-branch review, archive, sleep, pin, rename, parent nesting | 🟡 archive/sleep exist | `main/runtime`, `main/persistence` |
-| External (`git worktree add`) worktrees: show/hide | ❌ | `main/runtime` |
+| Worktree create: background with progress row, cancel, retry (`model/worktrees`) | ✅ `server/worktree_jobs.rs` (`worktree.job.*`): phase row, cancel undoes only what the job made, retry/dismiss. Local host only; remote hosts keep the synchronous `worktree.create` | `main/git`, `main/runtime` |
+| Start-from picker: base ref / local branch / SHA / remote branch | ✅ `worktree.startFrom`: default `origin/HEAD`, remote refs fetched first, new branches `--no-track` | `main/git` |
+| Branch name derived from task name, explicit override | ✅ Orca's slug, `-2`… past local/remote branches and taken paths. No branch-prefix setting | `main/git` |
+| Shared paths, `.worktreeinclude` copies, shared dirs (APFS clone / symlink) | 🟡 `.worktreeinclude` (literal, gitignored paths) copied with clonefile; `orca.yaml` `worktree.sharedDirectories` symlinked and excluded. No per-user shared-paths setting | `main/git`, `main/runtime` |
+| Delete worktree + branch, preserved-branch review, archive, sleep, pin, rename, parent nesting | ✅ `worktree.delete`: `branch -d`, unmerged commits reviewed before a guarded force delete; `workspace.pin`/`workspace.nest`, inline rename. No squash-merge detection, no live-agent check before delete, nesting only chosen at create in the UI | `main/runtime`, `main/persistence` |
+| External (`git worktree add`) worktrees: show/hide | ✅ `workspace.visibility`: found on the git poll (`.git/worktrees` fingerprint), start hidden behind a Show card, CLI removal archives the row. No per-source visibility settings | `main/runtime` |
 | Launch any supported CLI with autonomy flags; per-agent editable launch args + reset | 🟡 `agent_fleet.rs` manifests | `main/agent-launch`, `main/providers` |
 | Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | ✅ Native bridges for Claude, Codex, Pi/OMP (ask tool, OMP approvals) and OpenCode (permission/question, incl. subagents); OSC title rules (`agent_title.rs`) for every other CLI. No "unverifiable" glyph | `main/agent-hooks` (+ `server/`), `shared/agent-title-status.ts` |
 | Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |

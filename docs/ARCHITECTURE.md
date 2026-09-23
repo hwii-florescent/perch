@@ -179,7 +179,8 @@ checkpoint commit.
    scrollback.
    - 1b. Remote perchd. Backlog: no test host.
 2. 🟡 **Status**: see above.
-3. **Worktree lifecycle.**
+3. ✅ **Worktree lifecycle** (`e2e/worktree-lifecycle.config.ts`). Gaps
+   are in the parity matrix's Tier 1.
 4. **Layout and restore**, quick commands, floating terminal, terminal
    extras (link popover, copy context, kitty keyboard).
 5. **Navigation**: Cmd-J, Cmd-P, dashboard.
