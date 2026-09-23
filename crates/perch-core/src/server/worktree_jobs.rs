@@ -22,6 +22,8 @@ pub(super) struct JobEntry {
     /// The request as first prepared, with a derived branch pinned so a retry
     /// reuses (or recreates) the same name instead of moving on to `-2`.
     params: CreateRequest,
+    /// Nest the finished workspace under this one.
+    parent: Option<String>,
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -56,7 +58,12 @@ fn remove(app: &AppState, job_id: &str) {
     publish(app);
 }
 
-pub(super) fn handle_start(state: &Arc<ConnState>, request_id: String, mut params: CreateRequest) {
+pub(super) fn handle_start(
+    state: &Arc<ConnState>,
+    request_id: String,
+    mut params: CreateRequest,
+    parent: Option<String>,
+) {
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
@@ -109,6 +116,7 @@ pub(super) fn handle_start(state: &Arc<ConnState>, request_id: String, mut param
                 JobEntry {
                     job: job.clone(),
                     params,
+                    parent,
                     cancel: None,
                 },
             );
@@ -173,13 +181,13 @@ async fn prepare(params: &CreateRequest) -> Result<CreatePlan, String> {
 /// the failed attempt, so it is prepared again.
 fn spawn_run(app: AppState, job_id: String, plan: Option<CreatePlan>) {
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-    let params = {
+    let (params, parent) = {
         let mut jobs = app.worktree_jobs.lock().unwrap();
         let Some(entry) = jobs.get_mut(&job_id) else {
             return;
         };
         entry.cancel = Some(cancel_tx);
-        entry.params.clone()
+        (entry.params.clone(), entry.parent.clone())
     };
     tokio::spawn(async move {
         let fail = |message: String| {
@@ -249,20 +257,14 @@ fn spawn_run(app: AppState, job_id: String, plan: Option<CreatePlan>) {
             entry.cancel = None;
             entry.job.phase = "Registering".to_string();
         });
-        match register_created_checkout(&app, &plan).await {
-            Ok(()) => remove(&app, &job_id),
+        match workspace::register_created(&app, &plan.primary, &plan.target, parent.as_deref())
+            .await
+        {
+            Ok(_) => remove(&app, &job_id),
             // The checkout is kept: a retry reuses it (`CreatePlan::reuse`).
             Err(error) => fail(error.to_string()),
         }
     });
-}
-
-async fn register_created_checkout(app: &AppState, plan: &CreatePlan) -> anyhow::Result<()> {
-    let listing = worktree::list(&plan.primary)
-        .await
-        .map_err(anyhow::Error::msg)?;
-    workspace::register_worktree_listing(app, &listing)?;
-    Ok(())
 }
 
 fn now_ms() -> i64 {

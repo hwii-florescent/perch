@@ -50,6 +50,7 @@ fn workspace_to_wire(row: crate::db::WorkspaceRow) -> WorkspaceSummary {
         dirty: row.dirty,
         start_snapshot: row.start_snapshot,
         parent_workspace_id: row.parent_workspace_id,
+        pinned: row.pinned,
         state: match row.state.as_str() {
             "sleeping" => WorkspaceState::Sleeping,
             "archived" => WorkspaceState::Archived,
@@ -434,13 +435,57 @@ pub(super) fn handle_worktree_list(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Register a freshly created checkout as a workspace of its repo's project
+/// and, when asked, nest it under `parent` (`workspace.nest` rules).
+pub(super) async fn register_created(
+    app: &AppState,
+    repo_path: &str,
+    created: &str,
+    parent: Option<&str>,
+) -> anyhow::Result<WorkspaceSummary> {
+    let listing = crate::worktree::list(repo_path)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let workspaces = register_worktree_listing(app, &listing)?;
+    let canonical = crate::db::canonical_path_for_host("local", created);
+    let workspace = workspaces
+        .into_iter()
+        .find(|workspace| workspace.path == canonical)
+        .ok_or_else(|| anyhow::anyhow!("created checkout is missing from the workspace list"))?;
+    let Some(parent) = parent.filter(|p| !p.is_empty()) else {
+        return Ok(workspace);
+    };
+    let _guard = app.foundation_lock.lock().unwrap();
+    let nested = workspace_to_wire(app.db.set_workspace_parent(&workspace.id, Some(parent))?);
+    publish_workspace_locked(app, None, nested.clone());
+    Ok(nested)
+}
+
+/// Broadcast one changed workspace row. Caller holds `foundation_lock`.
+fn publish_workspace_locked(
+    app: &AppState,
+    request_id: Option<String>,
+    workspace: WorkspaceSummary,
+) {
+    let revision = next_snapshot_revision_locked(app);
+    broadcast_foundation(
+        app,
+        ServerMessage::WorkspaceUpdated {
+            request_id,
+            workspace,
+            snapshot_epoch: app.snapshot_epoch.clone(),
+            snapshot_revision: revision,
+        },
+    );
+}
+
 pub(super) fn handle_worktree_create(
     state: &Arc<ConnState>,
     raw_text: &str,
     request_id: String,
     host_id: Option<String>,
     req: crate::worktree::CreateRequest,
+    parent: Option<String>,
 ) {
     if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
@@ -452,18 +497,9 @@ pub(super) fn handle_worktree_create(
             let created = crate::worktree::create(&req)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.message))?;
-            let listing = crate::worktree::list(&req.repo_path)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            let workspaces = register_worktree_listing(&app, &listing)?;
-            let canonical = crate::db::canonical_path_for_host("local", &created);
-            let workspace = workspaces
-                .into_iter()
-                .find(|workspace| workspace.path == canonical)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("created checkout is missing from the workspace list")
-                })?;
-            anyhow::Ok((canonical, workspace))
+            let workspace =
+                register_created(&app, &req.repo_path, &created, parent.as_deref()).await?;
+            anyhow::Ok((workspace.path.clone(), workspace))
         }
         .await;
         let _ = out_tx.send(match result {
@@ -473,6 +509,7 @@ pub(super) fn handle_worktree_create(
                 action: "create".to_string(),
                 path: created,
                 workspace: Some(workspace),
+                preserved_branch: None,
             },
             Err(err) => ServerMessage::WorktreeError {
                 request_id,
@@ -484,6 +521,10 @@ pub(super) fn handle_worktree_create(
     });
 }
 
+/// `worktree.remove`: the checkout (and with `delete_branch`, its merged
+/// branch) goes, and its workspace row is archived — history, comments and
+/// buffers stay inspectable, but the sidebar no longer lists it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_worktree_remove(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -492,20 +533,42 @@ pub(super) fn handle_worktree_remove(
     repo_path: String,
     path: String,
     force: bool,
+    delete_branch: bool,
 ) {
     if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
     }
     let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
     tokio::spawn(async move {
-        let result = crate::worktree::remove(&repo_path, &path, force).await;
+        let result = if delete_branch {
+            crate::worktree::delete(&repo_path, &path, force).await
+        } else {
+            crate::worktree::remove(&repo_path, &path, force)
+                .await
+                .map(|()| None)
+        };
+        if result.is_ok() {
+            let _guard = app.foundation_lock.lock().unwrap();
+            match app.db.archive_workspace_for_path("local", &path) {
+                Ok(Some(row)) => publish_workspace_locked(&app, None, workspace_to_wire(row)),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%path, %error, "could not archive removed worktree"),
+            }
+        }
         let _ = out_tx.send(match result {
-            Ok(()) => ServerMessage::WorktreeDone {
+            Ok(preserved) => ServerMessage::WorktreeDone {
                 request_id,
                 host_id: "local".to_string(),
                 action: "remove".to_string(),
                 path,
                 workspace: None,
+                preserved_branch: preserved.map(|b| crate::protocol::WorktreePreservedBranch {
+                    name: b.name,
+                    head: b.head,
+                    commits: b.commits,
+                    unmerged: b.unmerged,
+                }),
             },
             Err(err) => ServerMessage::WorktreeError {
                 request_id,
@@ -515,6 +578,66 @@ pub(super) fn handle_worktree_remove(
             },
         });
     });
+}
+
+pub(super) fn handle_worktree_branch_delete(
+    state: &Arc<ConnState>,
+    raw_text: &str,
+    request_id: String,
+    host_id: Option<String>,
+    repo_path: String,
+    branch: String,
+    expected_head: String,
+) {
+    if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
+        return;
+    }
+    let out_tx = state.out_tx.clone();
+    tokio::spawn(async move {
+        let result = crate::worktree::delete_branch(&repo_path, &branch, &expected_head).await;
+        let _ = out_tx.send(match result {
+            Ok(()) => ServerMessage::WorktreeDone {
+                request_id,
+                host_id: "local".to_string(),
+                action: "branchDelete".to_string(),
+                path: branch,
+                workspace: None,
+                preserved_branch: None,
+            },
+            Err(err) => ServerMessage::WorktreeError {
+                request_id,
+                host_id: "local".to_string(),
+                message: err.message,
+                dirty: false,
+            },
+        });
+    });
+}
+
+/// `workspace.pin` / `workspace.nest`: one row mutation, broadcast as
+/// `workspace.updated` (which also answers the request), or an `error`.
+pub(super) fn handle_workspace_mutation(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    code: &str,
+    mutate: impl FnOnce(&crate::db::HistoryDb, &str) -> anyhow::Result<crate::db::WorkspaceRow>,
+) {
+    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+    let Some(workspace) = local_workspace(&state.app, &workspace_id) else {
+        fail(
+            &state.out_tx,
+            request_id,
+            "workspace_not_found",
+            "workspace is not present on the local host",
+            false,
+        );
+        return;
+    };
+    match mutate(&state.app.db, &workspace.id) {
+        Ok(row) => publish_workspace_locked(&state.app, Some(request_id), workspace_to_wire(row)),
+        Err(err) => fail(&state.out_tx, request_id, code, err.to_string(), false),
+    }
 }
 
 pub(super) fn handle_project_list(
@@ -944,6 +1067,7 @@ mod worktree_registration_tests {
             state: "active".into(),
             created_at: 1,
             updated_at: 1,
+            pinned: false,
         }
     }
 

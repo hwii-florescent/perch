@@ -650,6 +650,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             path,
             name,
             start_from,
+            parent_workspace_id,
         } => workspace::handle_worktree_create(
             state,
             raw_text,
@@ -663,6 +664,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
                 path,
                 start_from,
             },
+            parent_workspace_id,
         ),
         ClientMessage::WorktreeRemove {
             request_id,
@@ -670,8 +672,31 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             repo_path,
             path,
             force,
+            delete_branch,
         } => workspace::handle_worktree_remove(
-            state, raw_text, request_id, host_id, repo_path, path, force,
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            repo_path,
+            path,
+            force,
+            delete_branch,
+        ),
+        ClientMessage::WorktreeBranchDelete {
+            request_id,
+            host_id,
+            repo_path,
+            branch,
+            expected_head,
+        } => workspace::handle_worktree_branch_delete(
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            repo_path,
+            branch,
+            expected_head,
         ),
         ClientMessage::WorktreeJobStart {
             request_id,
@@ -681,6 +706,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             path,
             name,
             start_from,
+            parent_workspace_id,
         } => worktree_jobs::handle_start(
             state,
             request_id,
@@ -692,6 +718,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
                 path,
                 start_from,
             },
+            parent_workspace_id,
         ),
         ClientMessage::WorktreeJobCancel { job_id } => {
             worktree_jobs::handle_cancel(&state.app, &job_id)
@@ -754,6 +781,28 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             name,
         } => workspace::handle_workspace_rename(state, request_id, workspace_id, name),
+        ClientMessage::WorkspacePin {
+            request_id,
+            workspace_id,
+            pinned,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_pin_failed",
+            |db, id| db.set_workspace_pinned(id, pinned),
+        ),
+        ClientMessage::WorkspaceNest {
+            request_id,
+            workspace_id,
+            parent_workspace_id,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_nest_failed",
+            |db, id| db.set_workspace_parent(id, parent_workspace_id.as_deref()),
+        ),
         ClientMessage::WorkspaceRestore {
             request_id,
             workspace_id,

@@ -48,6 +48,8 @@ pub struct WorkspaceRow {
     pub state: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Kept at the top of its project in the sidebar (Orca's pin).
+    pub pinned: bool,
 }
 
 /// Coherent project/workspace metadata and focus returned by one snapshot.
@@ -376,7 +378,7 @@ impl HistoryDb {
         if let Some(project_id) = project_id {
             let mut stmt = conn.prepare(
                 "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                        start_snapshot, parent_workspace_id, state, created_at, updated_at
+                        start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
                  FROM workspaces WHERE host_id = ?1 AND project_id = ?2
                  ORDER BY created_at ASC, id ASC",
             )?;
@@ -389,7 +391,7 @@ impl HistoryDb {
         } else {
             let mut stmt = conn.prepare(
                 "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                        start_snapshot, parent_workspace_id, state, created_at, updated_at
+                        start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
                  FROM workspaces WHERE host_id = ?1
                  ORDER BY created_at ASC, id ASC",
             )?;
@@ -405,6 +407,77 @@ impl HistoryDb {
     pub fn get_workspace(&self, id: &str) -> anyhow::Result<Option<WorkspaceRow>> {
         let conn = self.conn.lock().unwrap();
         get_workspace_locked(&conn, id)
+    }
+
+    pub fn set_workspace_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<WorkspaceRow> {
+        let conn = self.conn.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE workspaces SET pinned = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, pinned as i32, now_millis()],
+        )?;
+        if changed == 0 {
+            return Err(anyhow::anyhow!("workspace not found: {id}"));
+        }
+        get_workspace_locked(&conn, id)?.ok_or_else(|| anyhow::anyhow!("workspace disappeared"))
+    }
+
+    /// Nest a linked worktree under another workspace of the same project
+    /// (Orca's parent workspace: sidebar grouping only, git is untouched).
+    /// `None` returns it to the top level, i.e. under the project's primary
+    /// workspace. Refuses the primary itself, other projects, archived
+    /// parents and cycles.
+    pub fn set_workspace_parent(
+        &self,
+        id: &str,
+        parent_id: Option<&str>,
+    ) -> anyhow::Result<WorkspaceRow> {
+        let conn = self.conn.lock().unwrap();
+        let workspace = get_workspace_locked(&conn, id)?
+            .ok_or_else(|| anyhow::anyhow!("workspace not found: {id}"))?;
+        if workspace.parent_workspace_id.is_none() {
+            return Err(anyhow::anyhow!(
+                "a project's primary workspace cannot be nested"
+            ));
+        }
+        let parent_id = match parent_id {
+            Some(parent_id) => {
+                let mut cursor = get_workspace_locked(&conn, parent_id)?
+                    .ok_or_else(|| anyhow::anyhow!("parent workspace not found"))?;
+                if cursor.project_id != workspace.project_id {
+                    return Err(anyhow::anyhow!(
+                        "the parent must belong to the same project"
+                    ));
+                }
+                if cursor.state == "archived" {
+                    return Err(anyhow::anyhow!("an archived workspace cannot be a parent"));
+                }
+                // Walk up from the new parent; meeting `id` means a cycle.
+                for _ in 0..1000 {
+                    if cursor.id == id {
+                        return Err(anyhow::anyhow!(
+                            "that would nest the workspace inside itself"
+                        ));
+                    }
+                    let Some(up) = cursor.parent_workspace_id.as_deref() else {
+                        break;
+                    };
+                    cursor = get_workspace_locked(&conn, up)?
+                        .ok_or_else(|| anyhow::anyhow!("broken workspace lineage"))?;
+                }
+                parent_id.to_string()
+            }
+            None => conn.query_row(
+                "SELECT id FROM workspaces WHERE project_id = ?1 AND parent_workspace_id IS NULL
+                 ORDER BY created_at ASC, id ASC LIMIT 1",
+                params![workspace.project_id],
+                |row| row.get::<_, String>(0),
+            )?,
+        };
+        conn.execute(
+            "UPDATE workspaces SET parent_workspace_id = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, parent_id, now_millis()],
+        )?;
+        get_workspace_locked(&conn, id)?.ok_or_else(|| anyhow::anyhow!("workspace disappeared"))
     }
 
     pub fn rename_workspace(&self, id: &str, name: &str) -> anyhow::Result<WorkspaceRow> {
@@ -598,6 +671,7 @@ fn workspace_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<WorkspaceRow>
         state: row.get(10)?,
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
+        pinned: row.get::<_, i32>(13).unwrap_or(0) != 0,
     })
 }
 
@@ -618,7 +692,7 @@ fn get_project_locked(conn: &Connection, id: &str) -> anyhow::Result<Option<Proj
 fn get_workspace_locked(conn: &Connection, id: &str) -> anyhow::Result<Option<WorkspaceRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                start_snapshot, parent_workspace_id, state, created_at, updated_at
+                start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
          FROM workspaces WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
@@ -651,7 +725,7 @@ fn list_workspaces_locked(
     if let Some(project_id) = project_id {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                    start_snapshot, parent_workspace_id, state, created_at, updated_at
+                    start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
              FROM workspaces WHERE host_id = ?1 AND project_id = ?2
              ORDER BY created_at ASC, id ASC",
         )?;
@@ -661,7 +735,7 @@ fn list_workspaces_locked(
     } else {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                    start_snapshot, parent_workspace_id, state, created_at, updated_at
+                    start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
              FROM workspaces WHERE host_id = ?1
              ORDER BY created_at ASC, id ASC",
         )?;
@@ -678,7 +752,7 @@ fn get_default_workspace_locked(
 ) -> anyhow::Result<Option<WorkspaceRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, project_id, host_id, path, name, branch, base_branch, dirty,
-                start_snapshot, parent_workspace_id, state, created_at, updated_at
+                start_snapshot, parent_workspace_id, state, created_at, updated_at, pinned
          FROM workspaces WHERE project_id = ?1 ORDER BY created_at ASC, id ASC LIMIT 1",
     )?;
     let mut rows = stmt.query(params![project_id])?;

@@ -36,11 +36,11 @@
  * The primary checkout is never offered a Remove button (git refuses to
  * remove a main working tree anyway).
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
 import { ConfirmDialog } from "./ConfirmDialog";
-import type { WorktreeEntry } from "@perch/shared";
+import type { WorktreeEntry, WorktreePreservedBranch } from "@perch/shared";
 
 /** Mirror of `branch_to_path_slug` in `crates/perch-core/src/worktree.rs`
  * (kept in sync by hand — it exists here only to *preview* the default
@@ -104,11 +104,24 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   );
   // Task name + start-from picker (`worktree.startFrom`); older hosts keep
   // the branch + "new branch" form.
-  const startFromSupported = usePerchStore((s) =>
-    (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])
-      ?.includes("worktree.startFrom") === true,
+  const hostCaps = usePerchStore((s) =>
+    hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId],
   );
+  const startFromSupported = hostCaps?.includes("worktree.startFrom") === true;
+  // Delete = checkout + branch, with a review for unmerged work (Orca).
+  const deleteSupported = hostCaps?.includes("worktree.delete") === true;
+  // Parent workspace choices: this repo's active linked worktrees.
+  const projects = usePerchStore((s) => s.workspaceProjects);
+  const workspaces = usePerchStore((s) => s.workspaces);
+  const parentChoices = useMemo(() => {
+    if (!hostCaps?.includes("workspace.nest")) return [];
+    const project = projects.find((p) => p.hostId === hostId && p.repoPath === cwd && !p.archived);
+    return project
+      ? workspaces.filter((w) => w.projectId === project.id && w.parentWorkspaceId && w.state !== "archived")
+      : [];
+  }, [hostCaps, projects, workspaces, hostId, cwd]);
   const removeWorktree = usePerchStore((s) => s.removeWorktree);
+  const deleteWorktreeBranch = usePerchStore((s) => s.deleteWorktreeBranch);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const menuRequest = usePerchStore((s) => s.worktreeMenuRequest);
   const clearWorktreeMenuRequest = usePerchStore((s) => s.clearWorktreeMenuRequest);
@@ -122,14 +135,18 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const [branch, setBranch] = useState("");
   const [taskName, setTaskName] = useState("");
   const [startFrom, setStartFrom] = useState("");
+  const [parentId, setParentId] = useState("");
   const [newBranch, setNewBranch] = useState(true);
   const [customPath, setCustomPath] = useState("");
   const [pathTouched, setPathTouched] = useState(false);
   /** Pending removal: the target, plus whether the dirty guard already
    * tripped (→ show the force-flavored confirmation). */
   const [pendingRemove, setPendingRemove] = useState<
-    { path: string; force: boolean; guardMessage?: string } | null
+    { path: string; branch?: string; force: boolean; guardMessage?: string } | null
   >(null);
+  /** A branch the delete kept because it has unmerged work: reviewed here
+   * before an explicit force delete. */
+  const [branchReview, setBranchReview] = useState<WorktreePreservedBranch | null>(null);
 
   const btnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -176,7 +193,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   // Dismiss on outside click / Escape (same contract as SessionMenu). Skipped
   // while a ConfirmDialog is up so its own backdrop owns those interactions.
   useEffect(() => {
-    if (!open || pendingRemove) return;
+    if (!open || pendingRemove || branchReview) return;
     function handleClick(e: MouseEvent) {
       const target = e.target as Node;
       if (btnRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
@@ -191,7 +208,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, pendingRemove]);
+  }, [open, pendingRemove, branchReview]);
 
   useEffect(() => {
     if (showCreateForm) (startFromSupported ? nameInputRef : branchInputRef).current?.focus();
@@ -226,7 +243,11 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     setCreating(true);
     setError(null);
     const extra = startFromSupported
-      ? { name: taskName.trim() || undefined, startFrom: startFrom.trim() || undefined }
+      ? {
+          name: taskName.trim() || undefined,
+          startFrom: startFrom.trim() || undefined,
+          parentWorkspaceId: parentId || undefined,
+        }
       : undefined;
     // A path the user never touched is left to the server, which knows the
     // final (possibly suffixed) branch name.
@@ -243,6 +264,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     setBranch("");
     setTaskName("");
     setStartFrom("");
+    setParentId("");
     setPathTouched(false);
     if (reply.type === "worktree.job.started") {
       setOpen(false);
@@ -253,20 +275,30 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
 
   async function submitRemove() {
     if (!pendingRemove) return;
-    const { path, force } = pendingRemove;
+    const { path, branch, force } = pendingRemove;
     setPendingRemove(null);
     setError(null);
-    const reply = await removeWorktree(hostId, cwd, path, force);
+    const reply = await removeWorktree(hostId, cwd, path, force, deleteSupported);
     if (reply.type === "worktree.error") {
       if (reply.dirty && !force) {
         // herdr's force_confirmation escalation — re-open the confirmation in
         // its force flavor, carrying git's own guard message.
-        setPendingRemove({ path, force: true, guardMessage: reply.message });
+        setPendingRemove({ path, branch, force: true, guardMessage: reply.message });
         return;
       }
       setError(reply.message);
       return;
     }
+    if (reply.type === "worktree.done" && reply.preservedBranch) setBranchReview(reply.preservedBranch);
+    refresh();
+  }
+
+  async function forceDeleteBranch() {
+    if (!branchReview) return;
+    const { name, head } = branchReview;
+    setBranchReview(null);
+    const reply = await deleteWorktreeBranch(hostId, cwd, name, head);
+    if (reply.type === "worktree.error") setError(reply.message);
     refresh();
   }
 
@@ -339,10 +371,10 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                         type="button"
                         className="worktree-menu__action worktree-menu__action--danger"
                         data-testid={`worktree-remove-${entry.path}`}
-                        onClick={() => setPendingRemove({ path: entry.path, force: false })}
-                        title="Remove this worktree"
+                        onClick={() => setPendingRemove({ path: entry.path, branch: entry.branch, force: false })}
+                        title={deleteSupported ? "Delete this worktree and its branch" : "Remove this worktree"}
                       >
-                        Remove
+                        {deleteSupported ? "Delete" : "Remove"}
                       </button>
                     )}
                   </div>
@@ -413,6 +445,20 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   if (e.key === "Enter") void submitCreate();
                 }}
               />
+              {parentChoices.length > 0 && (
+                <select
+                  className="worktree-menu__input"
+                  data-testid="worktree-parent-select"
+                  aria-label="Parent workspace"
+                  value={parentId}
+                  onChange={(e) => setParentId(e.target.value)}
+                >
+                  <option value="">no parent workspace</option>
+                  {parentChoices.map((w) => (
+                    <option key={w.id} value={w.id}>nest under {w.name || basename(w.path)}</option>
+                  ))}
+                </select>
+              )}
               {!startFromSupported && (
                 <label className="worktree-menu__checkbox">
                   <input
@@ -499,11 +545,22 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
           message={
             pendingRemove.force
               ? `${pendingRemove.guardMessage ?? "This worktree has uncommitted changes."}\n\nForce remove ${pendingRemove.path}?`
-              : `Remove the worktree at ${pendingRemove.path}? The branch itself is kept.`
+              : deleteSupported && pendingRemove.branch
+                ? `Delete the worktree at ${pendingRemove.path} and its branch ${pendingRemove.branch}?\n\nA branch with unmerged commits is kept for you to review.`
+                : `Remove the worktree at ${pendingRemove.path}? The branch itself is kept.`
           }
-          confirmLabel={pendingRemove.force ? "Force remove" : "Remove"}
+          confirmLabel={pendingRemove.force ? "Force remove" : deleteSupported ? "Delete" : "Remove"}
           onConfirm={() => void submitRemove()}
           onCancel={() => setPendingRemove(null)}
+        />
+      )}
+      {branchReview && (
+        <ConfirmDialog
+          message={`The worktree is gone, but branch ${branchReview.name} was kept: ${branchReview.unmerged} commit${branchReview.unmerged === 1 ? " is" : "s are"} on no other branch or remote.\n\n${branchReview.commits.join("\n")}${branchReview.unmerged > branchReview.commits.length ? "\n…" : ""}\n\nDelete the branch anyway? Those commits would be lost.`}
+          confirmLabel="Delete branch"
+          cancelLabel="Keep branch"
+          onConfirm={() => void forceDeleteBranch()}
+          onCancel={() => setBranchReview(null)}
         />
       )}
     </>

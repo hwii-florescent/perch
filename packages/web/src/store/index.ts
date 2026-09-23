@@ -1,7 +1,7 @@
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorkspaceSummary } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
@@ -399,6 +399,9 @@ export interface PerchState {
   renameWorkspaceProject: (projectId: string, name: string) => void;
   archiveWorkspaceProject: (projectId: string, archived: boolean) => void;
   renameWorkspace: (workspaceId: string, name: string) => void;
+  pinWorkspace: (workspaceId: string, pinned: boolean) => void;
+  /** Nest under `parentWorkspaceId`, or back to the top level when absent. */
+  nestWorkspace: (workspaceId: string, parentWorkspaceId?: string) => void;
   restoreWorkspace: (workspaceId: string) => void;
   /** Workspace-relative file surface currently shown over the dock. The
    * filesystem store owns tree/buffer wire state; this id only coordinates
@@ -569,6 +572,15 @@ export interface PerchState {
     repoPath: string,
     path: string,
     force: boolean,
+    deleteBranch?: boolean,
+  ) => Promise<WorktreeReply>;
+  /** Force-delete a branch a delete preserved, after review; refused if the
+   * branch moved off `expectedHead`. */
+  deleteWorktreeBranch: (
+    hostId: string,
+    repoPath: string,
+    branch: string,
+    expectedHead: string,
   ) => Promise<WorktreeReply>;
   /** Start a background create on the local host (capability
    * `worktree.job`). Resolves with `worktree.job.started` or `worktree.error`;
@@ -698,6 +710,8 @@ const pendingBrowses = new Map<string, (msg: FsBrowseResultMessage) => void>();
 export interface WorktreeCreateExtra {
   name?: string;
   startFrom?: string;
+  /** Capability `workspace.nest`: nest the new workspace under this one. */
+  parentWorkspaceId?: string;
 }
 
 /** Any of the three replies a `worktree.*` request can produce. */
@@ -896,6 +910,8 @@ const WORKSPACE_CAPABILITIES = {
   workspaceFocus: "workspace.focus",
   workspaceRename: "workspace.rename",
   workspaceRestore: "workspace.restore",
+  workspacePin: "workspace.pin",
+  workspaceNest: "workspace.nest",
 } as const;
 
 const AGENT_RUNTIME_CAPABILITIES = {
@@ -1005,7 +1021,7 @@ function resolveWorktreeRequest(requestId: string, msg: WorktreeReply): void {
  * dropped from the wire message (absent == local, same convention as
  * `browseDirectory`) so a local request never hits the hub-routing branch. */
 function sendWorktreeRequest(
-  msg: (WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage) & { hostId: string },
+  msg: (WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage | WorktreeBranchDeleteMessage) & { hostId: string },
 ): Promise<WorktreeReply> {
   return new Promise<WorktreeReply>((resolve) => {
     const requestId = newId();
@@ -1015,7 +1031,7 @@ function sendWorktreeRequest(
       ...rest,
       requestId,
       ...(hostId && hostId !== "local" ? { hostId } : {}),
-    } as WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage);
+    } as WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage | WorktreeBranchDeleteMessage);
   });
 }
 
@@ -1673,6 +1689,28 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     );
   },
 
+  pinWorkspace: (workspaceId, pinned) => {
+    const state = get();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!workspace || !state.connected || !hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspacePin)) return;
+    sendWorkspaceMessage(
+      { type: "workspace.pin", requestId: newId(), workspaceId, pinned },
+      workspace.hostId,
+      WORKSPACE_CAPABILITIES.workspacePin,
+    );
+  },
+
+  nestWorkspace: (workspaceId, parentWorkspaceId) => {
+    const state = get();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!workspace || !state.connected || !hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceNest)) return;
+    sendWorkspaceMessage(
+      { type: "workspace.nest", requestId: newId(), workspaceId, ...(parentWorkspaceId ? { parentWorkspaceId } : {}) },
+      workspace.hostId,
+      WORKSPACE_CAPABILITIES.workspaceNest,
+    );
+  },
+
   restoreWorkspace: (workspaceId) => {
     const state = get();
     const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
@@ -1846,10 +1884,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       ...(path ? { path } : {}),
       ...(extra?.name ? { name: extra.name } : {}),
       ...(extra?.startFrom ? { startFrom: extra.startFrom } : {}),
+      ...(extra?.parentWorkspaceId ? { parentWorkspaceId: extra.parentWorkspaceId } : {}),
     });
   },
 
-  removeWorktree: (hostId, repoPath, path, force) => {
+  removeWorktree: (hostId, repoPath, path, force, deleteBranch) => {
     return sendWorktreeRequest({
       type: "worktree.remove",
       requestId: "",
@@ -1857,6 +1896,18 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       repoPath,
       path,
       force,
+      ...(deleteBranch ? { deleteBranch } : {}),
+    });
+  },
+
+  deleteWorktreeBranch: (hostId, repoPath, branch, expectedHead) => {
+    return sendWorktreeRequest({
+      type: "worktree.branch.delete",
+      requestId: "",
+      hostId,
+      repoPath,
+      branch,
+      expectedHead,
     });
   },
 
@@ -1871,6 +1922,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       ...(path ? { path } : {}),
       ...(extra?.name ? { name: extra.name } : {}),
       ...(extra?.startFrom ? { startFrom: extra.startFrom } : {}),
+      ...(extra?.parentWorkspaceId ? { parentWorkspaceId: extra.parentWorkspaceId } : {}),
     });
   },
   cancelWorktreeJob: (jobId) => socket.send({ type: "worktree.job.cancel", jobId }),

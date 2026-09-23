@@ -2233,6 +2233,9 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.restore",
         "worktree.job",
         "worktree.startFrom",
+        "worktree.delete",
+        "workspace.pin",
+        "workspace.nest",
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",
@@ -2978,6 +2981,7 @@ mod foundation_focus_tests {
             state: state.to_string(),
             created_at: 0,
             updated_at: 0,
+            pinned: false,
         }
     }
 

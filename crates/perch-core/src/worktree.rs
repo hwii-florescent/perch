@@ -1207,6 +1207,160 @@ pub async fn remove(repo_path: &str, path: &str, force: bool) -> Result<(), Work
     }
 }
 
+/// A branch `delete` kept because git would not prove it merged: the review
+/// Orca offers before a force delete ("Preserved branches").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedBranch {
+    pub name: String,
+    /// The commit reviewed; a force delete only succeeds while the branch
+    /// still points here.
+    pub head: String,
+    /// Up to 20 `"<short sha> <subject>"` lines on no other branch or remote.
+    pub commits: Vec<String>,
+    /// How many such commits there are in total.
+    pub unmerged: u32,
+}
+
+/// Remove a linked worktree *and* its branch (Orca's delete). The checkout
+/// goes through `remove` (same dirty guard); the branch is then deleted with
+/// `git branch -d`, which refuses unmerged work. A refused branch is kept and
+/// returned for review — deleting a worktree never silently drops commits.
+// ponytail: no squash-merge detection (Orca compares trees); a squash-merged
+// branch is offered for review instead of being deleted outright.
+pub async fn delete(
+    repo_path: &str,
+    path: &str,
+    force: bool,
+) -> Result<Option<PreservedBranch>, WorktreeOpError> {
+    let primary = primary_worktree(&expand_tilde(repo_path))
+        .await
+        .map_err(WorktreeOpError::plain)?;
+    let listing = list(&primary).await.map_err(WorktreeOpError::plain)?;
+    let wanted = canonical_or_original(Path::new(&expand_tilde(path)));
+    let entry = listing
+        .worktrees
+        .iter()
+        .find(|w| canonical_or_original(Path::new(&w.path)) == wanted);
+    if entry.is_some_and(|w| w.is_primary) {
+        return Err(WorktreeOpError::plain(
+            "the primary checkout cannot be deleted",
+        ));
+    }
+    let branch = entry.and_then(|w| w.branch.clone());
+    remove(&primary, path, force).await?;
+    let Some(branch) = branch else {
+        return Ok(None);
+    };
+    let delete = |flagged: &'static str| {
+        let (primary, branch) = (primary.clone(), branch.clone());
+        async move {
+            run_git(
+                &["-C", &primary, "branch", flagged, "--", &branch],
+                GIT_QUICK_TIMEOUT,
+            )
+            .await
+        }
+    };
+    let mut result = delete("-d").await;
+    if result.as_ref().is_err_and(|e| e.contains("checked out")) {
+        // A stale admin entry can still claim the branch (Orca prunes first).
+        let _ = run_git(&["-C", &primary, "worktree", "prune"], GIT_QUICK_TIMEOUT).await;
+        result = delete("-d").await;
+    }
+    if result.is_ok() || !local_branch_exists(&primary, &branch).await {
+        return Ok(None);
+    }
+    let head = run_git(
+        &["-C", &primary, "rev-parse", &format!("refs/heads/{branch}")],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .map_err(WorktreeOpError::plain)?
+    .trim()
+    .to_string();
+    let exclude = format!("--exclude={branch}");
+    let range = ["--not", &exclude, "--branches", "--remotes"];
+    let mut log = vec!["-C", &primary, "log", "--format=%h %s", "-n", "20", &head];
+    log.extend(range);
+    let mut count = vec!["-C", &primary, "rev-list", "--count", &head];
+    count.extend(range);
+    let commits = run_git(&log, GIT_QUICK_TIMEOUT)
+        .await
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let unmerged = run_git(&count, GIT_QUICK_TIMEOUT)
+        .await
+        .ok()
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(0);
+    Ok(Some(PreservedBranch {
+        name: branch,
+        head,
+        commits,
+        unmerged,
+    }))
+}
+
+/// Force-delete a preserved branch after review, but only while it still
+/// points at `expected_head` (Orca's `forceDeleteLocalBranch`: `update-ref -d`
+/// with the old value, so a branch that moved since the review survives) and
+/// is not checked out anywhere.
+pub async fn delete_branch(
+    repo_path: &str,
+    branch: &str,
+    expected_head: &str,
+) -> Result<(), WorktreeOpError> {
+    let primary = primary_worktree(&expand_tilde(repo_path))
+        .await
+        .map_err(WorktreeOpError::plain)?;
+    if branch.is_empty() || expected_head.is_empty() {
+        return Err(WorktreeOpError::plain(
+            "branch and expected head are required",
+        ));
+    }
+    let listing = list(&primary).await.map_err(WorktreeOpError::plain)?;
+    if listing
+        .worktrees
+        .iter()
+        .any(|w| w.branch.as_deref() == Some(branch))
+    {
+        return Err(WorktreeOpError::plain(format!(
+            "branch '{branch}' is checked out in another worktree"
+        )));
+    }
+    run_git(
+        &[
+            "-C",
+            &primary,
+            "update-ref",
+            "-d",
+            &format!("refs/heads/{branch}"),
+            expected_head,
+        ],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .map_err(|_| {
+        WorktreeOpError::plain(format!(
+            "branch '{branch}' changed since it was reviewed; review it again"
+        ))
+    })?;
+    let _ = run_git(
+        &[
+            "-C",
+            &primary,
+            "config",
+            "--remove-section",
+            &format!("branch.{branch}"),
+        ],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await;
+    Ok(())
+}
+
 /// Port of herdr's `run_worktree_remove_command_with_recovery`: a forced
 /// remove that fails with "is not a working tree" can mean the admin entry is
 /// already gone but the directory survived. Delete the leftover directory —
@@ -1709,6 +1863,41 @@ prunable stale
             repo.join("node_modules/pkg/index.js").exists(),
             "remove must not follow the link"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_drops_merged_branches_and_preserves_unmerged_work() {
+        let (root, repo) = repo("delete");
+        let merged = root.join("merged");
+        create(&req(&repo, "merged", true, &merged)).await.unwrap();
+        assert_eq!(delete(s(&repo), s(&merged), false).await.unwrap(), None);
+        assert!(!merged.exists() && !branch_exists(&repo, "merged"));
+
+        let work = root.join("work");
+        create(&req(&repo, "work", true, &work)).await.unwrap();
+        git(&work, &["commit", "-q", "--allow-empty", "-m", "precious"]);
+        let kept = delete(s(&repo), s(&work), false)
+            .await
+            .unwrap()
+            .expect("preserved");
+        assert!(!work.exists(), "the checkout goes either way");
+        assert_eq!((kept.name.as_str(), kept.unmerged), ("work", 1));
+        assert!(kept.commits[0].ends_with(" precious"), "{:?}", kept.commits);
+        assert!(branch_exists(&repo, "work"));
+
+        // A branch that moved after the review is not force-deleted.
+        git(&repo, &["branch", "-f", "work", "main"]);
+        let err = delete_branch(s(&repo), "work", &kept.head)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("changed since"), "{}", err.message);
+        git(&repo, &["branch", "-f", "work", &kept.head]);
+        delete_branch(s(&repo), "work", &kept.head).await.unwrap();
+        assert!(!branch_exists(&repo, "work"));
+
+        let err = delete(s(&repo), s(&repo), true).await.unwrap_err();
+        assert!(err.message.contains("primary"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

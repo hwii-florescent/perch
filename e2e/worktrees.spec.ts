@@ -284,11 +284,16 @@ test.describe("Git worktrees", () => {
     await entry.locator('[data-testid^="worktree-remove-"]').click();
     const dialog = page.locator('[data-testid="confirm-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Remove");
+    // `worktree.delete` hosts delete the checkout and its (merged) branch.
+    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Delete");
     await page.locator('[data-testid="confirm-accept"]').click();
 
     await expect(entry).toHaveCount(0, { timeout: 30000 });
     expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).not.toContain("wt-feature");
+    // Its workspace row is archived out of the sidebar too.
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "wt-feature" })).toHaveCount(0, { timeout: 10000 });
 
     await page.screenshot({ path: "artifacts/worktrees-wt4-removed.png" });
   });
@@ -316,7 +321,7 @@ test.describe("Git worktrees", () => {
     // confirmation in its force flavor carrying the guard message.
     await entry.locator('[data-testid^="worktree-remove-"]').click();
     const accept = page.locator('[data-testid="confirm-accept"]');
-    await expect(accept).toHaveText("Remove", { timeout: 5000 });
+    await expect(accept).toHaveText("Delete", { timeout: 5000 });
     await accept.click();
 
     await expect(accept).toHaveText("Force remove", { timeout: 20000 });
@@ -501,5 +506,67 @@ test.describe("Git worktrees", () => {
     expect(git("branch --show-current")).toBe("stack-on-base-2");
     expect(git("rev-parse HEAD")).toBe(baseHead);
     expect(git("config branch.stack-on-base-2.base")).toBe("refs/heads/wt-base");
+  });
+
+  // -------------------------------------------------------------------------
+  // WT9 — deleting a worktree whose branch has unmerged work keeps the
+  // branch and reviews its commits before a force delete.
+  // -------------------------------------------------------------------------
+  test("WT9. Delete reviews a branch with unmerged commits", async ({ page }) => {
+    await freshPage(page);
+    const popover = await openWorktreeMenu(page);
+    const wt = await createWorktree(popover, "wt-precious");
+    sh('git commit -q --allow-empty -m "precious work"', wt);
+
+    const menu = await openWorktreeMenu(page);
+    await entryForBranch(menu, "wt-precious").locator('[data-testid^="worktree-remove-"]').click();
+    await page.locator('[data-testid="confirm-accept"]').click();
+
+    const review = page.locator(".confirm-dialog__message");
+    await expect(review).toContainText("branch wt-precious was kept", { timeout: 20000 });
+    await expect(review).toContainText("precious work");
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).toContain("wt-precious");
+    await page.screenshot({ path: "artifacts/worktrees-wt9-review.png" });
+    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Delete branch");
+    await page.locator('[data-testid="confirm-accept"]').click();
+    await expect.poll(() => execSync("git branch", { cwd: FIXTURE, input: "" }).toString(), { timeout: 10000 })
+      .not.toContain("wt-precious");
+  });
+
+  // -------------------------------------------------------------------------
+  // WT10 — pin, rename and parent nesting in the sidebar.
+  // -------------------------------------------------------------------------
+  test("WT10. Pin, rename and nest worktree workspaces", async ({ page }) => {
+    await freshPage(page);
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    const row = (text: string) => projectCard.locator(".workspace-entry").filter({ hasText: text });
+    await createWorktree(await openWorktreeMenu(page), "wt-parent");
+    await expect(row("wt-parent")).toHaveCount(1, { timeout: 20000 });
+    const parentId = ((await row("wt-parent").first().getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
+
+    // Create a child nested under wt-parent from the create form.
+    const menu = await openWorktreeMenu(page);
+    await menu.locator('[data-testid="worktree-new"]').click();
+    await menu.locator('[data-testid="worktree-branch-input"]').fill("wt-child");
+    await menu.locator('[data-testid="worktree-parent-select"]').selectOption(parentId);
+    await menu.locator('[data-testid="worktree-create-submit"]').click();
+    const nested = page.getByTestId(`workspace-children-${parentId}`);
+    await expect(nested.locator(".workspace-entry").filter({ hasText: "wt-child" })).toHaveCount(1, { timeout: 20000 });
+
+    // Pin moves wt-parent to the top of the project.
+    await row("wt-parent").first().hover();
+    await page.getByTestId(`workspace-pin-${parentId}`).click();
+    const first = projectCard.locator(".workspace-project__workspaces > .workspace-entry").first();
+    await expect(first).toContainText("pinned", { timeout: 10000 });
+    await expect(first).toContainText("wt-parent");
+
+    // Double-click renames the display name (the branch is untouched).
+    await page.getByTestId(`workspace-entry-${parentId}`).locator("strong").first().dblclick();
+    const input = page.getByTestId(`workspace-rename-${parentId}`);
+    await input.fill("Parent task");
+    await input.press("Enter");
+    await expect(page.getByTestId(`workspace-entry-${parentId}`).locator("strong").first()).toHaveText("Parent task", { timeout: 10000 });
+    await page.screenshot({ path: "artifacts/worktrees-wt10-nesting.png" });
   });
 });

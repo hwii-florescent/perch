@@ -1477,6 +1477,7 @@ impl HubManager {
                 ref request_id,
                 action,
                 path,
+                preserved_branch,
                 ..
             } => {
                 let rid = request_id.clone();
@@ -1488,6 +1489,7 @@ impl HubManager {
                         action,
                         path,
                         workspace: None,
+                        preserved_branch,
                     },
                 );
             }

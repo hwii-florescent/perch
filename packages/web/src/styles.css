@@ -687,7 +687,8 @@ body {
 
 .workspace-entry__files {
   padding: 0.14rem 0.28rem;
-  background: transparent;
+  /* Opaque: on hover the actions sit over the name and state columns. */
+  background: var(--surface-1);
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--subtext-0);
@@ -706,6 +707,22 @@ body {
 .workspace-entry__files:focus-visible {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.workspace-entry__children {
+  margin-left: 0.9rem;
+}
+
+.workspace-entry__rename {
+  width: calc(100% - 0.6rem);
+  margin: 0.25rem 0.3rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--surface-0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
 }
 
 .worktree-job__row {
@@ -4645,6 +4662,7 @@ body {
 
 .confirm-dialog__message {
   margin: 0 0 1rem;
+  white-space: pre-wrap;
   color: var(--text);
   font-size: 0.88rem;
   line-height: 1.4;

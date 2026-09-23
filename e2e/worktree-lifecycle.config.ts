@@ -26,7 +26,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `cargo run -p perch-core -- --port ${PORT} --headless`,
+    // Only runs when no core is listening yet, so a fresh boot also gets a
+    // fresh DB (rows from earlier runs would satisfy sidebar assertions).
+    command: `rm -rf '${STATE}' && cargo run -p perch-core -- --port ${PORT} --headless`,
     cwd: path.resolve(__dirname, ".."),
     url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: true,

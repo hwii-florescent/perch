@@ -405,6 +405,9 @@ pub struct WorkspaceSummary {
     pub state: WorkspaceState,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Kept at the top of its project (`workspace.pin`).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// One git worktree of a repo, as reported by `worktree.list.result`.
@@ -423,6 +426,20 @@ pub struct WorktreeEntry {
     pub is_primary: bool,
     /// Has uncommitted or untracked files (drives the remove guard).
     pub is_dirty: bool,
+}
+
+/// A branch kept by a `worktree.remove { deleteBranch }` because git would
+/// not prove it merged. The client reviews `commits` and may force-delete it
+/// with `worktree.branch.delete`, which only succeeds while it is at `head`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePreservedBranch {
+    pub name: String,
+    pub head: String,
+    /// Up to 20 `"<short sha> <subject>"` lines on no other branch or remote.
+    pub commits: Vec<String>,
+    /// Total number of such commits.
+    pub unmerged: u32,
 }
 
 /// One background worktree create (`worktree.job.start`), as broadcast in
@@ -1395,6 +1412,9 @@ pub enum ClientMessage {
         name: Option<String>,
         #[serde(default)]
         start_from: Option<String>,
+        /// Nest the new workspace under this one (capability `workspace.nest`).
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
     },
 
     /// Remove the worktree checked out at `path`. Refused with
@@ -1410,6 +1430,23 @@ pub enum ClientMessage {
         path: String,
         #[serde(default)]
         force: bool,
+        /// Also delete the checkout's branch (capability `worktree.delete`).
+        /// Unmerged work is kept and reported as `preservedBranch`.
+        #[serde(default)]
+        delete_branch: bool,
+    },
+
+    /// Force-delete a branch a delete preserved, after review. Refused when
+    /// the branch no longer points at `expectedHead` or is checked out.
+    /// Replies `worktree.done { action: "branchDelete", path: branch }`.
+    #[serde(rename = "worktree.branch.delete", rename_all = "camelCase")]
+    WorktreeBranchDelete {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        repo_path: String,
+        branch: String,
+        expected_head: String,
     },
 
     /// Start a background create (capability `worktree.job`, local host
@@ -1430,6 +1467,8 @@ pub enum ClientMessage {
         name: Option<String>,
         #[serde(default)]
         start_from: Option<String>,
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
     },
 
     /// Cancel a running job: git is killed and anything the job created (the
@@ -1510,6 +1549,24 @@ pub enum ClientMessage {
         request_id: String,
         workspace_id: String,
         name: String,
+    },
+
+    /// Pin a workspace to the top of its project, or unpin it.
+    #[serde(rename = "workspace.pin", rename_all = "camelCase")]
+    WorkspacePin {
+        request_id: String,
+        workspace_id: String,
+        pinned: bool,
+    },
+
+    /// Nest a linked worktree's workspace under another of the same project
+    /// (sidebar grouping only); absent `parentWorkspaceId` = top level.
+    #[serde(rename = "workspace.nest", rename_all = "camelCase")]
+    WorkspaceNest {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
     },
 
     /// Restore a sleeping workspace's metadata state. This first slice does
@@ -2134,6 +2191,9 @@ pub enum ServerMessage {
         /// form.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<WorkspaceSummary>,
+        /// Remove with `deleteBranch`: the branch git would not delete.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preserved_branch: Option<WorktreePreservedBranch>,
     },
 
     /// Failure reply to any `worktree.*` request. `dirty` is true only when
