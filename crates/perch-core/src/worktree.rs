@@ -560,7 +560,9 @@ pub async fn prepare_create(req: &CreateRequest) -> Result<CreatePlan, WorktreeO
         });
     }
     let branch_existed = local_branch_exists(&primary, &branch).await;
-    if !branch_existed && !req.new_branch {
+    // A derived name is new by construction; only an explicit branch can be
+    // "check out an existing one" (`new_branch: false`).
+    if !branch_existed && !req.new_branch && !explicit.is_empty() {
         return Err(WorktreeOpError::plain(format!(
             "branch '{branch}' does not exist — tick \"new branch\" to create it"
         )));
@@ -856,12 +858,307 @@ pub async fn discard_create(plan: &CreatePlan) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `.worktreeinclude` copies and shared directories (Orca's
+// `worktree-include-file.ts` and `worktree-shared-directories.ts`)
+// ---------------------------------------------------------------------------
+
+/// Repo-root list of gitignored files/directories to *copy* into each new
+/// worktree (`.env`, `.vscode/settings.json`, …).
+const INCLUDE_FILE: &str = ".worktreeinclude";
+const INCLUDE_MAX_BYTES: u64 = 256 * 1024;
+const INCLUDE_MAX_ENTRIES: usize = 1000;
+
+/// What a new checkout gets from the primary one: `links` are symlinked
+/// (shared, e.g. `node_modules`), `copies` are copied (owned per worktree).
+/// Both hold repo-relative paths that exist in the primary and are gitignored.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Materialize {
+    pub links: Vec<String>,
+    pub copies: Vec<String>,
+}
+
+impl Materialize {
+    pub fn is_empty(&self) -> bool {
+        self.links.is_empty() && self.copies.is_empty()
+    }
+}
+
+/// Orca's `parseWorktreeIncludeFile`: one literal path per line; blank lines
+/// and `#` comments skipped; `\` → `/`; a leading `./` and trailing `/`
+/// dropped; duplicates removed. Entries are anchored at the repo root.
+pub fn parse_worktree_include(content: &str) -> Vec<String> {
+    let mut entries: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let normalized = line.replace('\\', "/");
+        let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
+        let normalized = normalized.trim_end_matches('/');
+        if !normalized.is_empty() && !entries.iter().any(|e| e == normalized) {
+            entries.push(normalized.to_string());
+        }
+    }
+    entries
+}
+
+/// `worktree.sharedDirectories` from `orca.yaml`, as a block list
+/// (`- node_modules`) or a flow list (`[node_modules, .cache]`).
+// ponytail: a line scanner for exactly that documented shape, not a YAML
+// parser (anchors, multi-line strings and other keys are ignored). Swap in a
+// YAML crate if more of orca.yaml gets ported.
+pub fn parse_shared_directories(yaml: &str) -> Vec<String> {
+    let unquote = |s: &str| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let mut out = Vec::new();
+    let mut in_worktree = false;
+    let mut list_indent: Option<usize> = None;
+    for line in yaml.lines() {
+        let body = line.split(" #").next().unwrap_or("").trim_end();
+        if body.trim().is_empty() || body.trim_start().starts_with('#') {
+            continue;
+        }
+        if indent(body) == 0 {
+            in_worktree = body.trim() == "worktree:";
+            list_indent = None;
+            continue;
+        }
+        if !in_worktree {
+            continue;
+        }
+        let trimmed = body.trim();
+        if let Some(level) = list_indent {
+            if let Some(item) = trimmed.strip_prefix("- ").filter(|_| indent(body) >= level) {
+                out.push(unquote(item));
+                continue;
+            }
+            list_indent = None;
+        }
+        if let Some(rest) = trimmed.strip_prefix("sharedDirectories:") {
+            let rest = rest.trim();
+            if let Some(flow) = rest.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+                out.extend(flow.split(',').map(unquote).filter(|s| !s.is_empty()));
+            } else {
+                list_indent = Some(indent(body));
+            }
+        }
+    }
+    out.into_iter()
+        .map(|p| p.trim_end_matches('/').to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Repo-relative, inside the repo, and not under `.git`.
+fn is_safe_relative(path: &str) -> bool {
+    !path.is_empty()
+        && !Path::new(path).is_absolute()
+        && path.split('/').all(|s| !s.is_empty() && s != "..")
+        && path.split('/').next() != Some(".git")
+}
+
+/// The subset of `paths` that git ignores in `repo`. Tracked paths are never
+/// reported (no `--no-index`). Any git failure means "none", so a broken
+/// probe never copies or links a tracked file.
+async fn ignored_subset(repo: &str, paths: &[String]) -> Vec<String> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let mut args = vec!["-C", repo, "check-ignore", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = run_git(&args, GIT_QUICK_TIMEOUT).await.unwrap_or_default();
+    let ignored: std::collections::HashSet<&str> = out.lines().collect();
+    paths
+        .iter()
+        .filter(|p| ignored.contains(p.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Resolve what a new worktree of `primary` should link and copy. Never
+/// fails: an unreadable or malformed config means nothing is materialized.
+/// A path both shared and listed in `.worktreeinclude` is only linked.
+pub async fn resolve_materialize(primary: &str) -> Materialize {
+    let root = Path::new(primary);
+    let safe = |entries: Vec<String>, what: &str| -> Vec<String> {
+        entries
+            .into_iter()
+            .filter(|e| {
+                let ok = is_safe_relative(e);
+                if !ok {
+                    tracing::warn!(entry = %e, "skipping unsafe {what} entry");
+                }
+                ok
+            })
+            .collect()
+    };
+    let shared = std::fs::read_to_string(root.join("orca.yaml"))
+        .map(|yaml| parse_shared_directories(&yaml))
+        .unwrap_or_default();
+    let shared: Vec<String> = safe(shared, "sharedDirectories")
+        .into_iter()
+        .filter(|p| root.join(p).is_dir())
+        .collect();
+    let include = match std::fs::symlink_metadata(root.join(INCLUDE_FILE)) {
+        Ok(meta) if meta.is_file() && meta.len() <= INCLUDE_MAX_BYTES => {
+            std::fs::read_to_string(root.join(INCLUDE_FILE))
+                .map(|c| parse_worktree_include(&c))
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    let include: Vec<String> = include
+        .into_iter()
+        .filter(|e| {
+            let pattern = e.starts_with('!') || e.contains('*') || e.contains('?');
+            if pattern {
+                tracing::warn!(entry = %e, "{INCLUDE_FILE}: globs and negation are not supported");
+            }
+            !pattern
+        })
+        .take(INCLUDE_MAX_ENTRIES)
+        .collect();
+    let include: Vec<String> = safe(include, INCLUDE_FILE)
+        .into_iter()
+        .filter(|p| std::fs::symlink_metadata(root.join(p)).is_ok())
+        .filter(|p| !shared.contains(p))
+        .collect();
+    let mut links = ignored_subset(primary, &shared).await;
+    let mut copies = ignored_subset(primary, &include).await;
+    links.sort();
+    copies.sort();
+    Materialize { links, copies }
+}
+
+/// Symlink `links` and copy `copies` from `primary` into the new checkout
+/// `target`, skipping anything already there. Checks `stop` between entries
+/// so a cancel can wait for it and then discard the checkout. Copies go
+/// through `std::fs::copy`, which clones on APFS.
+///
+/// Each link is also written as `/<path>` to the repo's shared
+/// `info/exclude`: `.gitignore`'s `node_modules/` matches only directories,
+/// so without it git reports the symlink as untracked — the checkout would
+/// read dirty and `git worktree remove` would refuse it.
+pub fn materialize(
+    primary: &str,
+    target: &str,
+    plan: &Materialize,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    let (from, to) = (Path::new(primary), Path::new(target));
+    if !plan.links.is_empty() {
+        exclude_links(primary, &plan.links)?;
+    }
+    for rel in &plan.links {
+        if stop.load(Ordering::SeqCst) {
+            return Err("cancelled".into());
+        }
+        let dest = to.join(rel);
+        if std::fs::symlink_metadata(&dest).is_ok() {
+            continue;
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
+        }
+        std::os::unix::fs::symlink(from.join(rel), &dest)
+            .map_err(|e| format!("link {rel}: {e}"))?;
+    }
+    for rel in &plan.copies {
+        copy_tree(&from.join(rel), &to.join(rel), stop).map_err(|e| format!("copy {rel}: {e}"))?;
+    }
+    Ok(())
+}
+
+fn copy_tree(from: &Path, to: &Path, stop: &std::sync::atomic::AtomicBool) -> std::io::Result<()> {
+    if stop.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(std::io::Error::other("cancelled"));
+    }
+    if std::fs::symlink_metadata(to).is_ok() {
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let meta = std::fs::symlink_metadata(from)?;
+    if meta.file_type().is_symlink() {
+        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)
+    } else if meta.is_dir() {
+        std::fs::create_dir(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            copy_tree(&entry.path(), &to.join(entry.file_name()), stop)?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// Append `/<path>` for each link to `<common-dir>/info/exclude` unless an
+/// identical line is already there.
+fn exclude_links(primary: &str, links: &[String]) -> Result<(), String> {
+    let out = std::process::Command::new("git")
+        .args([
+            "-C",
+            primary,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || common.is_empty() {
+        return Err("could not find the repository's git dir".into());
+    }
+    let exclude = Path::new(&common).join("info").join("exclude");
+    let current = std::fs::read_to_string(&exclude).unwrap_or_default();
+    let missing: Vec<String> = links
+        .iter()
+        .map(|l| format!("/{l}"))
+        .filter(|line| !current.lines().any(|l| l.trim() == line))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut text = current;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str("# perch: shared worktree directories (symlinks)\n");
+    for line in missing {
+        text.push_str(&line);
+        text.push('\n');
+    }
+    std::fs::create_dir_all(exclude.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&exclude, text).map_err(|e| e.to_string())
+}
+
 /// Create a linked worktree and return its absolute path (the synchronous
 /// `worktree.create` path; background jobs call the three steps themselves).
 pub async fn create(req: &CreateRequest) -> Result<String, WorktreeOpError> {
     let plan = prepare_create(req).await?;
     fetch_start_ref(&plan).await;
-    execute_create(&plan).await
+    let target = execute_create(&plan).await?;
+    let extras = resolve_materialize(&plan.primary).await;
+    if !extras.is_empty() && !plan.reuse {
+        let (primary, dest) = (plan.primary.clone(), target.clone());
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let copied =
+            tokio::task::spawn_blocking(move || materialize(&primary, &dest, &extras, &stop))
+                .await
+                .map_err(|e| WorktreeOpError::plain(e.to_string()))
+                .and_then(|r| r.map_err(WorktreeOpError::plain));
+        if let Err(error) = copied {
+            discard_create(&plan).await;
+            return Err(error);
+        }
+    }
+    Ok(target)
 }
 
 /// Remove a linked worktree.
@@ -1231,7 +1528,7 @@ prunable stale
         let plan = prepare_create(&CreateRequest {
             repo_path: s(&repo).to_string(),
             name: Some("Fix login".to_string()),
-            new_branch: true,
+            new_branch: false, // irrelevant for a derived name
             path: Some(s(&root.join("wt")).to_string()),
             ..Default::default()
         })
@@ -1326,6 +1623,92 @@ prunable stale
         let plan = create_from(&clone, &root, "from base", "").await;
         assert_eq!(plan.start_ref.as_deref(), Some("refs/remotes/origin/main"));
         assert_eq!(head(Path::new(&plan.target)), head(&upstream));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn worktreeinclude_parses_like_orca() {
+        let parsed = parse_worktree_include(
+            "# secrets\n.env\n\n./.env\n.vscode\\settings.json\nconfig/local/\n  .env.local  \n",
+        );
+        assert_eq!(
+            parsed,
+            [
+                ".env",
+                ".vscode/settings.json",
+                "config/local",
+                ".env.local"
+            ]
+        );
+        assert!(!is_safe_relative("../evil") && !is_safe_relative(".git/config"));
+        assert!(!is_safe_relative("/etc/passwd") && is_safe_relative("a/b"));
+    }
+
+    #[test]
+    fn orca_yaml_shared_directories() {
+        let block = "name: x\nworktree:\n  other: 1\n  sharedDirectories:\n    - node_modules\n    - \".cache/\"  # rebuildable\n  after: 2\nscripts:\n  - nope\n";
+        assert_eq!(parse_shared_directories(block), ["node_modules", ".cache"]);
+        let flow = "worktree:\n  sharedDirectories: [node_modules, 'dist']\n";
+        assert_eq!(parse_shared_directories(flow), ["node_modules", "dist"]);
+        assert!(parse_shared_directories("sharedDirectories:\n  - x\n").is_empty());
+    }
+
+    #[tokio::test]
+    async fn new_worktrees_link_shared_dirs_and_copy_includes() {
+        let (root, repo) = repo("materialize");
+        let w = |rel: &str, body: &str| {
+            let p = repo.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        w(".gitignore", "node_modules/\n.env\nsecret/\n*.log\n");
+        w(
+            "orca.yaml",
+            "worktree:\n  sharedDirectories:\n    - node_modules\n    - missing\n    - README\n",
+        );
+        w(
+            ".worktreeinclude",
+            ".env\nsecret\nnotes.txt\nREADME\n*.log\n../evil\nnode_modules\n",
+        );
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "config"]);
+        w("node_modules/pkg/index.js", "module\n");
+        w(".env", "TOKEN=1\n");
+        w("secret/key", "k\n");
+        w("notes.txt", "untracked, not ignored\n");
+        w("a.log", "log\n");
+
+        let wanted = resolve_materialize(s(&repo)).await;
+        assert_eq!(wanted.links, ["node_modules"]);
+        assert_eq!(wanted.copies, [".env", "secret"]);
+
+        let target = root.join("wt");
+        let mut request = req(&repo, "mat", true, &target);
+        request.start_from = Some("main".into());
+        create(&request).await.unwrap();
+        let link = std::fs::symlink_metadata(target.join("node_modules")).unwrap();
+        assert!(link.file_type().is_symlink());
+        assert!(target.join("node_modules/pkg/index.js").exists());
+        assert!(!std::fs::symlink_metadata(target.join(".env"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(target.join("secret/key")).unwrap(),
+            "k\n"
+        );
+        assert!(!target.join("notes.txt").exists() && !target.join("a.log").exists());
+        assert!(
+            !is_dirty(s(&target)).await,
+            "the shared symlink must not read as untracked"
+        );
+
+        remove(s(&repo), s(&target), false).await.unwrap();
+        assert!(!target.exists());
+        assert!(
+            repo.join("node_modules/pkg/index.js").exists(),
+            "remove must not follow the link"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -75,6 +75,7 @@ pub(super) fn handle_start(state: &Arc<ConnState>, request_id: String, mut param
             }
         };
         params.branch = plan.branch.clone();
+        params.new_branch |= !plan.branch_existed;
         params.path = Some(plan.target.clone());
         let job = WorktreeJob {
             job_id: Uuid::new_v4().to_string(),
@@ -204,14 +205,35 @@ fn spawn_run(app: AppState, job_id: String, plan: Option<CreatePlan>) {
                 entry.job.phase = "Fetching".to_string()
             });
         }
+        // The blocking copy cannot be dropped mid-file: a cancel raises
+        // `stop`, then waits on `copying` until the copy has returned.
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let copying = Arc::new(tokio::sync::Mutex::new(()));
         let created = tokio::select! {
             created = async {
                 worktree::fetch_start_ref(&plan).await;
                 update(&app, &job_id, |entry| entry.job.phase = "Checking out".to_string());
-                worktree::execute_create(&plan).await
+                worktree::execute_create(&plan).await?;
+                let extras = worktree::resolve_materialize(&plan.primary).await;
+                if extras.is_empty() || plan.reuse {
+                    return Ok(());
+                }
+                update(&app, &job_id, |entry| entry.job.phase = "Copying files".to_string());
+                let (primary, target) = (plan.primary.clone(), plan.target.clone());
+                let (stop, copying) = (stop.clone(), copying.clone());
+                tokio::task::spawn_blocking(move || {
+                    let _busy = copying.blocking_lock();
+                    worktree::materialize(&primary, &target, &extras, &stop)
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|copied| copied)
+                .map_err(|message| worktree::WorktreeOpError { message, dirty: false })
             } => created,
             _ = &mut cancel_rx => {
                 // Dropping the create future killed git; undo what it made.
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                let _ = copying.lock().await;
                 worktree::discard_create(&plan).await;
                 return remove(&app, &job_id);
             }

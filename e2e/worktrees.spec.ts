@@ -493,6 +493,8 @@ test.describe("Git worktrees", () => {
     await popover.locator('[data-testid="worktree-create-submit"]').click();
 
     const created = path.join(WORKTREES_ROOT, "stack-on-base-2");
+    await expect.poll(() => fs.existsSync(path.join(created, ".git")), { timeout: 20000 }).toBe(true);
+    await expect(page.locator('[data-testid^="worktree-job-"]')).toHaveCount(0, { timeout: 20000 });
     const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
     await expect(projectCard.locator(".workspace-entry").filter({ hasText: "stack-on-base-2" })).toHaveCount(1, { timeout: 20000 });
     const git = (args: string) => execSync(`git ${args}`, { cwd: created, input: "" }).toString().trim();
