@@ -400,6 +400,7 @@ export interface PerchState {
   archiveWorkspaceProject: (projectId: string, archived: boolean) => void;
   renameWorkspace: (workspaceId: string, name: string) => void;
   pinWorkspace: (workspaceId: string, pinned: boolean) => void;
+  setWorkspaceHidden: (workspaceId: string, hidden: boolean) => void;
   /** Nest under `parentWorkspaceId`, or back to the top level when absent. */
   nestWorkspace: (workspaceId: string, parentWorkspaceId?: string) => void;
   restoreWorkspace: (workspaceId: string) => void;
@@ -912,6 +913,7 @@ const WORKSPACE_CAPABILITIES = {
   workspaceRestore: "workspace.restore",
   workspacePin: "workspace.pin",
   workspaceNest: "workspace.nest",
+  workspaceVisibility: "workspace.visibility",
 } as const;
 
 const AGENT_RUNTIME_CAPABILITIES = {
@@ -1697,6 +1699,17 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       { type: "workspace.pin", requestId: newId(), workspaceId, pinned },
       workspace.hostId,
       WORKSPACE_CAPABILITIES.workspacePin,
+    );
+  },
+
+  setWorkspaceHidden: (workspaceId, hidden) => {
+    const state = get();
+    const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!workspace || !state.connected || !hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceVisibility)) return;
+    sendWorkspaceMessage(
+      { type: "workspace.visibility", requestId: newId(), workspaceId, hidden },
+      workspace.hostId,
+      WORKSPACE_CAPABILITIES.workspaceVisibility,
     );
   },
 

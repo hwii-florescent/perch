@@ -792,6 +792,17 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             "workspace_pin_failed",
             |db, id| db.set_workspace_pinned(id, pinned),
         ),
+        ClientMessage::WorkspaceVisibility {
+            request_id,
+            workspace_id,
+            hidden,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_visibility_failed",
+            |db, id| db.set_workspace_hidden(id, hidden),
+        ),
         ClientMessage::WorkspaceNest {
             request_id,
             workspace_id,

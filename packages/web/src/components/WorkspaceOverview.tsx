@@ -40,6 +40,43 @@ function sessionsForWorkspace(
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Orca's hidden-worktrees card: worktrees perch discovered but did not
+ * create (or that were hidden) stay out of the tree until shown here. */
+function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecord[]; projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const setWorkspaceHidden = usePerchStore((state) => state.setWorkspaceHidden);
+  const count = workspaces.length;
+  return (
+    <div className="workspace-hidden">
+      <button
+        type="button"
+        className="workspace-hidden__toggle"
+        aria-expanded={open}
+        data-testid={`workspace-hidden-${projectId}`}
+        onClick={() => setOpen(!open)}
+      >
+        {count} hidden worktree{count === 1 ? "" : "s"}
+      </button>
+      {open && workspaces.map((workspace) => (
+        <div className="workspace-hidden__row" key={workspace.id} title={workspace.path}>
+          <span className="workspace-entry__body">
+            <strong>{workspace.branch || basename(workspace.path)}</strong>
+            <span>{workspace.path}</span>
+          </span>
+          <button
+            type="button"
+            className="worktree-job__action"
+            data-testid={`workspace-show-${workspace.id}`}
+            onClick={() => setWorkspaceHidden(workspace.id, false)}
+          >
+            Show
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Background worktree creates for one project (`server/worktree_jobs.rs`):
  * Orca's sidebar progress row, with Cancel while running and Retry / Dismiss
  * once a create failed. */
@@ -117,6 +154,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const restoreWorkspace = usePerchStore((state) => state.restoreWorkspace);
   const renameWorkspace = usePerchStore((state) => state.renameWorkspace);
   const pinWorkspace = usePerchStore((state) => state.pinWorkspace);
+  const setWorkspaceHidden = usePerchStore((state) => state.setWorkspaceHidden);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const openWorkspaceFiles = usePerchStore((state) => state.openWorkspaceFiles);
   const openWorkspaceGitReview = usePerchStore((state) => state.openWorkspaceGitReview);
@@ -274,7 +312,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       ) : (
         <div className="workspace-overview__list" data-testid="project-list">
           {visibleProjects.map((project) => {
-            const projectWorkspaces = workspacesForProject(workspaces, project.id);
+            const allWorkspaces = workspacesForProject(workspaces, project.id);
+            const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
+            const hiddenWorkspaces = allWorkspaces.filter((w) => w.hidden);
             const projectJobs = project.hostId === "local"
               ? worktreeJobs.filter((job) => job.repoPath === project.repoPath || job.repoPath === project.path)
               : [];
@@ -302,7 +342,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 </button>
                 {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
                 </div>
-                {(projectWorkspaces.length > 0 || projectJobs.length > 0) && (
+                {(allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
@@ -381,6 +421,20 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             {workspace.pinned ? "Unpin" : "Pin"}
                           </button>
+                          {workspace.parentWorkspaceId && (
+                            <button
+                              type="button"
+                              className="workspace-entry__files"
+                              data-testid={`workspace-hide-${workspace.id}`}
+                              title="Hide from the sidebar (the checkout stays)"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setWorkspaceHidden(workspace.id, true);
+                              }}
+                            >
+                              Hide
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="workspace-entry__files"
@@ -450,6 +504,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       return roots.map((workspace) => renderWorkspace(workspace, 0));
                     })()}
                     <WorktreeJobRows jobs={projectJobs} />
+                    {hiddenWorkspaces.length > 0 && (
+                      <HiddenWorktrees workspaces={hiddenWorkspaces} projectId={project.id} />
+                    )}
                   </div>
                 )}
               </div>

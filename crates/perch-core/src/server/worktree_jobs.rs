@@ -41,6 +41,12 @@ pub(super) fn jobs_message(app: &AppState) -> ServerMessage {
     ServerMessage::WorktreeJobs { jobs }
 }
 
+/// Checkouts running jobs are creating; worktree discovery leaves them alone.
+pub(super) fn busy_paths(app: &AppState) -> HashSet<String> {
+    let jobs = app.worktree_jobs.lock().unwrap();
+    jobs.values().map(|entry| entry.job.path.clone()).collect()
+}
+
 fn publish(app: &AppState) {
     let _ = app.hub.hub_events_tx.send(Arc::new(jobs_message(app)));
 }

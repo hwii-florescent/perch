@@ -692,7 +692,9 @@ body {
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--subtext-0);
-  font: 0.58rem/1.1 inherit;
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -711,6 +713,30 @@ body {
 
 .workspace-entry__children {
   margin-left: 0.9rem;
+}
+
+.workspace-hidden__toggle {
+  width: 100%;
+  padding: 0.25rem 0.45rem 0.25rem 1.45rem;
+  background: transparent;
+  border: 0;
+  color: var(--overlay-1);
+  font-family: inherit;
+  font-size: 0.62rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-hidden__toggle:hover,
+.workspace-hidden__toggle:focus-visible {
+  color: var(--accent);
+}
+
+.workspace-hidden__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem 0.2rem 1.45rem;
 }
 
 .workspace-entry__rename {

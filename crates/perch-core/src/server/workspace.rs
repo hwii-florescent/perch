@@ -51,6 +51,7 @@ fn workspace_to_wire(row: crate::db::WorkspaceRow) -> WorkspaceSummary {
         start_snapshot: row.start_snapshot,
         parent_workspace_id: row.parent_workspace_id,
         pinned: row.pinned,
+        hidden: row.hidden,
         state: match row.state.as_str() {
             "sleeping" => WorkspaceState::Sleeping,
             "archived" => WorkspaceState::Archived,
@@ -302,10 +303,17 @@ fn workspace_matches_worktree(
 /// the local workspaces establishes what is already registered; an entry whose
 /// stored row already matches is returned from that read untouched, so an
 /// unchanged listing does no writes and broadcasts nothing.
+/// A checkout seen here for the first time is external (made with `git
+/// worktree add` outside perch) and starts hidden, after Orca; `created`
+/// names the one perch itself just made, which starts shown, as does one
+/// that perch sessions already ran in. Rows that already exist keep their
+/// visibility.
 pub(super) fn register_worktree_listing(
     app: &AppState,
     listing: &crate::worktree::WorktreeListing,
+    created: Option<&str>,
 ) -> anyhow::Result<Vec<WorkspaceSummary>> {
+    let created = created.map(|path| crate::db::canonical_path_for_host("local", path));
     let primary = listing
         .worktrees
         .iter()
@@ -325,6 +333,7 @@ pub(super) fn register_worktree_listing(
         app.db
             .create_project("local", &primary.path, None, primary.head.as_deref())?;
     }
+    let mut session_cwds: Option<HashSet<String>> = None;
     let mut workspaces = Vec::new();
     for entry in &listing.worktrees {
         let path = crate::db::canonical_path_for_host("local", &entry.path);
@@ -347,12 +356,24 @@ pub(super) fn register_worktree_listing(
             None,
             entry.head.as_deref(),
         )?;
-        let workspace = app.db.update_workspace_git_state(
+        let mut workspace = app.db.update_workspace_git_state(
             &workspace.id,
             entry.branch.as_deref(),
             None,
             entry.is_dirty,
         )?;
+        if !known.contains_key(&path) && !entry.is_primary && created.as_ref() != Some(&path) {
+            let cwds = session_cwds.get_or_insert_with(|| {
+                let sessions = app.db.list_sessions().unwrap_or_default();
+                sessions
+                    .into_iter()
+                    .map(|row| crate::db::canonical_path_for_host("local", &row.cwd))
+                    .collect()
+            });
+            if !cwds.contains(&path) {
+                workspace = app.db.set_workspace_hidden(&workspace.id, true)?;
+            }
+        }
         let project = app
             .db
             .get_project(&workspace.project_id)?
@@ -382,6 +403,82 @@ pub(super) fn register_worktree_listing(
     Ok(workspaces)
 }
 
+/// Find worktrees added or removed outside perch without the worktree menu
+/// open (docs/reference/worktree-scan-fingerprint.md in Orca): each local
+/// project's `.git/worktrees` entry names are the fingerprint, and only a
+/// changed fingerprint pays for `git worktree list`. `seen` is the caller's
+/// memory between passes. A linked worktree row whose checkout git no longer
+/// lists (`git worktree remove` in a shell) is archived, like perch's own
+/// delete. Checkouts a create job is still making are left to the job.
+/// ponytail: names only, so `git worktree move` and a checkout switching
+/// branch are not noticed here (the menu and git poll still catch them); a
+/// project whose own path is a linked worktree (`.git` is a file) is skipped.
+pub(super) async fn discover_worktrees(app: &AppState, seen: &mut HashMap<String, Vec<String>>) {
+    let projects = app.db.list_projects("local", false).unwrap_or_default();
+    for project in projects {
+        let admin = std::path::Path::new(&project.path).join(".git/worktrees");
+        let mut names: Vec<String> = std::fs::read_dir(&admin)
+            .map(|dir| {
+                dir.flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        if seen
+            .get(&project.path)
+            .map_or(names.is_empty(), |old| *old == names)
+        {
+            continue;
+        }
+        seen.insert(project.path.clone(), names);
+        let mut listing = match crate::worktree::list(&project.path).await {
+            Ok(listing) => listing,
+            Err(error) => {
+                tracing::debug!(path = %project.path, %error, "worktree discovery skipped");
+                continue;
+            }
+        };
+        let busy = worktree_jobs::busy_paths(app);
+        listing
+            .worktrees
+            .retain(|entry| !busy.contains(&entry.path));
+        if let Err(error) = register_worktree_listing(app, &listing, None) {
+            tracing::warn!(path = %project.path, %error, "could not register discovered worktrees");
+            continue;
+        }
+        let listed: HashSet<String> = listing
+            .worktrees
+            .iter()
+            .map(|entry| crate::db::canonical_path_for_host("local", &entry.path))
+            .chain(
+                busy.iter()
+                    .map(|path| crate::db::canonical_path_for_host("local", path)),
+            )
+            .collect();
+        let _guard = app.foundation_lock.lock().unwrap();
+        let rows = app
+            .db
+            .list_workspaces("local", Some(&project.id))
+            .unwrap_or_default();
+        for row in rows {
+            if row.parent_workspace_id.is_none()
+                || row.state == "archived"
+                || listed.contains(&row.path)
+            {
+                continue;
+            }
+            match app.db.archive_workspace_for_path("local", &row.path) {
+                Ok(Some(row)) => publish_workspace_locked(app, None, workspace_to_wire(row)),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(path = %row.path, %error, "could not archive a removed worktree")
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn handle_worktree_list(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -400,7 +497,7 @@ pub(super) fn handle_worktree_list(
                 // Registration is a side effect of a read. Git already told us
                 // what the checkouts are, so a DB failure here must not blank
                 // the worktree menu — log it and still answer the listing.
-                if let Err(error) = register_worktree_listing(&app, &listing) {
+                if let Err(error) = register_worktree_listing(&app, &listing, None) {
                     tracing::warn!(%repo_path, %error, "could not register worktree checkouts");
                 }
                 let _ = out_tx.send(ServerMessage::WorktreeListResult {
@@ -446,12 +543,19 @@ pub(super) async fn register_created(
     let listing = crate::worktree::list(repo_path)
         .await
         .map_err(anyhow::Error::msg)?;
-    let workspaces = register_worktree_listing(app, &listing)?;
+    let workspaces = register_worktree_listing(app, &listing, Some(created))?;
     let canonical = crate::db::canonical_path_for_host("local", created);
-    let workspace = workspaces
+    let mut workspace = workspaces
         .into_iter()
         .find(|workspace| workspace.path == canonical)
         .ok_or_else(|| anyhow::anyhow!("created checkout is missing from the workspace list"))?;
+    // A discovery pass may have seen the checkout between `git worktree add`
+    // and now and registered it as external.
+    if workspace.hidden {
+        let _guard = app.foundation_lock.lock().unwrap();
+        workspace = workspace_to_wire(app.db.set_workspace_hidden(&workspace.id, false)?);
+        publish_workspace_locked(app, None, workspace.clone());
+    }
     let Some(parent) = parent.filter(|p| !p.is_empty()) else {
         return Ok(workspace);
     };
@@ -1068,6 +1172,7 @@ mod worktree_registration_tests {
             created_at: 1,
             updated_at: 1,
             pinned: false,
+            hidden: false,
         }
     }
 

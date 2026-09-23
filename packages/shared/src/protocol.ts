@@ -1366,6 +1366,9 @@ export interface WorkspaceSummary {
   updatedAt: number;
   /** Kept at the top of its project (`workspace.pin`). */
   pinned?: boolean;
+  /** A worktree perch discovered but did not create, left out of the
+   * sidebar until shown (`workspace.visibility`). */
+  hidden?: boolean;
 }
 
 export interface ProjectListMessage {
@@ -1429,6 +1432,14 @@ export interface WorkspacePinMessage {
   requestId: string;
   workspaceId: string;
   pinned: boolean;
+}
+
+/** Show or hide a linked worktree's workspace in the sidebar. */
+export interface WorkspaceVisibilityMessage {
+  type: "workspace.visibility";
+  requestId: string;
+  workspaceId: string;
+  hidden: boolean;
 }
 
 /** Nest a linked worktree's workspace under another of the same project
@@ -1519,6 +1530,7 @@ export type ClientMessage =
   | WorktreeJobStartMessage
   | WorktreeBranchDeleteMessage
   | WorkspacePinMessage
+  | WorkspaceVisibilityMessage
   | WorkspaceNestMessage
   | WorktreeJobCancelMessage
   | WorktreeJobRetryMessage

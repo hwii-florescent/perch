@@ -200,6 +200,12 @@ impl HistoryDb {
                 [],
             )?;
         }
+        if !workspace_columns.contains("hidden") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         if !file_buffer_columns.contains("base_content") {
             conn.execute(
                 "ALTER TABLE file_buffers ADD COLUMN base_content TEXT NOT NULL DEFAULT ''",
@@ -1285,6 +1291,9 @@ mod tests {
         let primary = a.parent_workspace_id.clone().unwrap();
 
         assert!(db.set_workspace_pinned(&a.id, true).unwrap().pinned);
+        assert!(db.set_workspace_hidden(&a.id, true).unwrap().hidden);
+        assert!(!db.set_workspace_hidden(&a.id, false).unwrap().hidden);
+        assert!(db.set_workspace_hidden(&primary, true).is_err());
         let nested = db.set_workspace_parent(&b.id, Some(&a.id)).unwrap();
         assert_eq!(nested.parent_workspace_id.as_deref(), Some(a.id.as_str()));
         let cycle = db.set_workspace_parent(&a.id, Some(&b.id)).unwrap_err();

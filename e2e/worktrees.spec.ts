@@ -569,4 +569,40 @@ test.describe("Git worktrees", () => {
     await expect(page.getByTestId(`workspace-entry-${parentId}`).locator("strong").first()).toHaveText("Parent task", { timeout: 10000 });
     await page.screenshot({ path: "artifacts/worktrees-wt10-nesting.png" });
   });
+
+  // -------------------------------------------------------------------------
+  // WT11 — a worktree made with plain `git worktree add` is discovered without
+  // the menu open, starts hidden, can be shown and hidden again, and is
+  // archived once `git worktree remove` drops it.
+  // -------------------------------------------------------------------------
+  test("WT11. External worktrees start hidden, show, hide and clean up", async ({ page }) => {
+    await freshPage(page);
+    const external = `${FIXTURE}-external`;
+    fs.rmSync(external, { recursive: true, force: true });
+    sh(`git worktree add -b wt-external '${external}'`, FIXTURE);
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    const row = projectCard.locator(".workspace-entry").filter({ hasText: "wt-external" });
+    const card = projectCard.locator('[data-testid^="workspace-hidden-"]');
+
+    await expect(card).toHaveText("1 hidden worktree", { timeout: 20000 });
+    await expect(row).toHaveCount(0);
+    await card.click();
+    await page.screenshot({ path: "artifacts/worktrees-wt11-hidden.png" });
+    await projectCard.locator('[data-testid^="workspace-show-"]').click();
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+    await expect(card).toHaveCount(0);
+
+    const id = ((await row.getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
+    await row.hover();
+    await page.getByTestId(`workspace-hide-${id}`).click();
+    await expect(row).toHaveCount(0, { timeout: 10000 });
+    await expect(card).toHaveText("1 hidden worktree");
+    await card.click();
+    await page.getByTestId(`workspace-show-${id}`).click();
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+
+    sh(`git worktree remove '${external}'`, FIXTURE);
+    await expect(row).toHaveCount(0, { timeout: 20000 });
+    await expect(card).toHaveCount(0);
+  });
 });

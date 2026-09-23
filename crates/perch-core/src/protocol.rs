@@ -408,6 +408,10 @@ pub struct WorkspaceSummary {
     /// Kept at the top of its project (`workspace.pin`).
     #[serde(default)]
     pub pinned: bool,
+    /// A worktree perch discovered but did not create, left out of the
+    /// sidebar until shown (`workspace.visibility`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// One git worktree of a repo, as reported by `worktree.list.result`.
@@ -1557,6 +1561,14 @@ pub enum ClientMessage {
         request_id: String,
         workspace_id: String,
         pinned: bool,
+    },
+
+    /// Show or hide a linked worktree's workspace in the sidebar.
+    #[serde(rename = "workspace.visibility", rename_all = "camelCase")]
+    WorkspaceVisibility {
+        request_id: String,
+        workspace_id: String,
+        hidden: bool,
     },
 
     /// Nest a linked worktree's workspace under another of the same project

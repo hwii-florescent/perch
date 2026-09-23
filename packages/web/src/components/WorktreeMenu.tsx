@@ -117,7 +117,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     if (!hostCaps?.includes("workspace.nest")) return [];
     const project = projects.find((p) => p.hostId === hostId && p.repoPath === cwd && !p.archived);
     return project
-      ? workspaces.filter((w) => w.projectId === project.id && w.parentWorkspaceId && w.state !== "archived")
+      ? workspaces.filter((w) => w.projectId === project.id && w.parentWorkspaceId && w.state !== "archived" && !w.hidden)
       : [];
   }, [hostCaps, projects, workspaces, hostId, cwd]);
   const removeWorktree = usePerchStore((s) => s.removeWorktree);

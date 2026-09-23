@@ -1116,6 +1116,7 @@ fn spawn_git_poll_task(state: AppState) {
         // the cache cold. This is what keeps the "warm by first connect"
         // property regardless of the zero-client gating below.
         run_git_poll_pass(&state).await;
+        let mut worktree_dirs = HashMap::new();
 
         loop {
             tokio::select! {
@@ -1131,6 +1132,7 @@ fn spawn_git_poll_task(state: AppState) {
                 continue;
             }
             run_git_poll_pass(&state).await;
+            workspace::discover_worktrees(&state, &mut worktree_dirs).await;
         }
     });
 }
@@ -2236,6 +2238,7 @@ fn foundation_capabilities() -> Vec<String> {
         "worktree.delete",
         "workspace.pin",
         "workspace.nest",
+        "workspace.visibility",
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",
@@ -2982,6 +2985,7 @@ mod foundation_focus_tests {
             created_at: 0,
             updated_at: 0,
             pinned: false,
+            hidden: false,
         }
     }
 
