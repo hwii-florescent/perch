@@ -482,6 +482,23 @@ export interface WorktreeEntry {
   isDirty: boolean;
 }
 
+/** One background worktree create (`worktree.job.start`), as broadcast in
+ * `worktree.jobs`. Mirrors `WorktreeJob` in `protocol.rs`. A job leaves the
+ * list when it succeeds or once a cancel has cleaned up; a failed job stays,
+ * with `error`, until retried or dismissed. */
+export interface WorktreeJob {
+  jobId: string;
+  repoPath: string;
+  branch: string;
+  /** Where the checkout is being created. */
+  path: string;
+  status: "running" | "cancelling" | "failed";
+  /** Human-readable step, e.g. "Checking out". */
+  phase: string;
+  error?: string;
+  startedAt: number;
+}
+
 /** Git status state for one server-authorized workspace path. */
 export type GitFileState =
   | "unmodified"
@@ -1244,6 +1261,37 @@ export interface WorktreeRemoveMessage {
   force?: boolean;
 }
 
+/** Start a background create (capability `worktree.job`, local host only).
+ * Same inputs as `worktree.create`; replies at once with
+ * `worktree.job.started` or `worktree.error`, then progress arrives as
+ * `worktree.jobs` broadcasts. */
+export interface WorktreeJobStartMessage {
+  type: "worktree.job.start";
+  requestId: string;
+  repoPath: string;
+  branch: string;
+  newBranch?: boolean;
+  path?: string;
+}
+
+/** Cancel a running job: git is killed and anything the job created is removed. */
+export interface WorktreeJobCancelMessage {
+  type: "worktree.job.cancel";
+  jobId: string;
+}
+
+/** Re-run a failed job with the same inputs. */
+export interface WorktreeJobRetryMessage {
+  type: "worktree.job.retry";
+  jobId: string;
+}
+
+/** Drop a failed job from the list. */
+export interface WorktreeJobDismissMessage {
+  type: "worktree.job.dismiss";
+  jobId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Project/workspace foundation
 // ---------------------------------------------------------------------------
@@ -1412,6 +1460,10 @@ export type ClientMessage =
   | WorktreeListMessage
   | WorktreeCreateMessage
   | WorktreeRemoveMessage
+  | WorktreeJobStartMessage
+  | WorktreeJobCancelMessage
+  | WorktreeJobRetryMessage
+  | WorktreeJobDismissMessage
   | ProjectListMessage
   | ProjectCreateMessage
   | ProjectRenameMessage
@@ -1990,6 +2042,20 @@ export interface WorktreeErrorMessage {
   dirty?: boolean;
 }
 
+/** Reply to `worktree.job.start`: the job was accepted. */
+export interface WorktreeJobStartedMessage {
+  type: "worktree.job.started";
+  requestId: string;
+  job: WorktreeJob;
+}
+
+/** Every background worktree job on this host. Sent on connect and after
+ * every change; the list replaces the previous one. */
+export interface WorktreeJobsMessage {
+  type: "worktree.jobs";
+  jobs: WorktreeJob[];
+}
+
 export interface ProjectListResponseMessage {
   type: "project.list";
   requestId: string;
@@ -2109,6 +2175,8 @@ export type ServerMessage =
   | WorktreeListResultMessage
   | WorktreeDoneMessage
   | WorktreeErrorMessage
+  | WorktreeJobStartedMessage
+  | WorktreeJobsMessage
   | ProjectListResponseMessage
   | ProjectUpdatedMessage
   | ProjectDeletedMessage

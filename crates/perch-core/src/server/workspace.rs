@@ -301,7 +301,7 @@ fn workspace_matches_worktree(
 /// the local workspaces establishes what is already registered; an entry whose
 /// stored row already matches is returned from that read untouched, so an
 /// unchanged listing does no writes and broadcasts nothing.
-fn register_worktree_listing(
+pub(super) fn register_worktree_listing(
     app: &AppState,
     listing: &crate::worktree::WorktreeListing,
 ) -> anyhow::Result<Vec<WorkspaceSummary>> {

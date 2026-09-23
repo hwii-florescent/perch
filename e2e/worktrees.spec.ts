@@ -31,7 +31,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-const BASE_URL = "http://127.0.0.1:7799";
+const BASE_URL = process.env.PERCH_E2E_BASE ?? "http://127.0.0.1:7799";
 
 const FIXTURE_NAME = "perch-e2e-worktree-fixture";
 /** Resolved (symlink-free) fixture path — assigned in `beforeAll`. macOS's
@@ -161,7 +161,8 @@ async function pathOfEntry(entry: Locator): Promise<string> {
 }
 
 /** Fill the "New worktree…" form and submit; resolves once the new branch is
- * listed. */
+ * listed. On a host with background creates (`worktree.job`) the popover
+ * closes on submit, so it is reopened to read the listing. */
 async function createWorktree(popover: Locator, branch: string): Promise<string> {
   await popover.locator('[data-testid="worktree-new"]').click();
   const branchInput = popover.locator('[data-testid="worktree-branch-input"]');
@@ -175,8 +176,12 @@ async function createWorktree(popover: Locator, branch: string): Promise<string>
   );
   await popover.locator('[data-testid="worktree-create-submit"]').click();
 
+  const page = popover.page();
   const entry = entryForBranch(popover, branch);
-  await expect(entry).toBeVisible({ timeout: 30000 });
+  await expect(async () => {
+    if (!(await popover.isVisible())) await openWorktreeMenu(page);
+    await expect(entry).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 30000 });
   return pathOfEntry(entry);
 }
 
@@ -413,5 +418,53 @@ test.describe("Git worktrees", () => {
     ).toHaveCount(0);
 
     await page.screenshot({ path: "artifacts/worktrees-wt6-two-worktrees.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // WT7 — Orca's background create: the form closes at once, the project
+  // shows a progress row with Cancel, and a failed create offers Retry.
+  // -------------------------------------------------------------------------
+  test("WT7. Background create shows progress, cancels cleanly, retries a failure", async ({ page }) => {
+    await freshPage(page);
+    const hook = path.join(FIXTURE, ".git", "hooks", "post-checkout");
+    fs.writeFileSync(hook, "#!/bin/sh\nsleep 8\n", { mode: 0o755 });
+    try {
+      const popover = await openWorktreeMenu(page);
+      await popover.locator('[data-testid="worktree-new"]').click();
+      await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-slow");
+      await popover.locator('[data-testid="worktree-create-submit"]').click();
+      await expect(popover).not.toBeVisible({ timeout: 5000 });
+
+      const row = page.getByTestId("worktree-job-wt-slow");
+      await expect(row).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId("worktree-job-phase-wt-slow")).toHaveText("Checking out…");
+      await page.screenshot({ path: "artifacts/worktrees-wt7-progress.png" });
+      await page.getByTestId("worktree-job-cancel-wt-slow").click();
+      await expect(row).toHaveCount(0, { timeout: 5000 });
+      expect(fs.existsSync(path.join(WORKTREES_ROOT, "wt-slow"))).toBe(false);
+      expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).not.toContain("wt-slow");
+    } finally {
+      fs.rmSync(hook, { force: true });
+    }
+
+    // A non-empty directory at the target makes git refuse: the row fails,
+    // keeps the user's file, and Retry succeeds once the path is free.
+    const blocked = path.join(WORKTREES_ROOT, "wt-retry");
+    fs.mkdirSync(blocked, { recursive: true });
+    fs.writeFileSync(path.join(blocked, "mine.txt"), "x");
+    const popover = await openWorktreeMenu(page);
+    await popover.locator('[data-testid="worktree-new"]').click();
+    await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-retry");
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+    await expect(page.getByTestId("worktree-job-retry-wt-retry")).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId("worktree-job-error-wt-retry")).toContainText("already exists");
+    expect(fs.existsSync(path.join(blocked, "mine.txt"))).toBe(true);
+    await page.screenshot({ path: "artifacts/worktrees-wt7-failed.png" });
+    fs.rmSync(path.join(blocked, "mine.txt"));
+    await page.getByTestId("worktree-job-retry-wt-retry").click();
+    await expect(page.getByTestId("worktree-job-wt-retry")).toHaveCount(0, { timeout: 20000 });
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "wt-retry" })).toHaveCount(1, { timeout: 20000 });
+    expect(fs.existsSync(path.join(blocked, "README.md"))).toBe(true);
   });
 });

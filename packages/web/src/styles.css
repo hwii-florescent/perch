@@ -708,6 +708,45 @@ body {
   color: var(--accent);
 }
 
+.worktree-job__row {
+  cursor: default;
+}
+
+.worktree-job--failed .workspace-entry__dot,
+.worktree-job--failed .workspace-entry__body span {
+  color: var(--red);
+}
+
+.worktree-job__error {
+  display: -webkit-box;
+  margin: 0 0.3rem 0.3rem 1.45rem;
+  overflow: hidden;
+  color: var(--red);
+  font-size: 0.6rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.worktree-job__action {
+  flex-shrink: 0;
+  padding: 0.14rem 0.3rem;
+  background: transparent;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.worktree-job__action:hover,
+.worktree-job__action:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .workspace-entry__sessions {
   padding: 0 0.3rem 0.25rem 1.45rem;
 }

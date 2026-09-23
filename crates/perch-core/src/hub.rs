@@ -1511,7 +1511,10 @@ impl HubManager {
             // Pairing is per host: a remote perch's paired devices are its own
             // business, and this instance's gate only ever consults its own
             // store.
-            ServerMessage::DevicePairCode { .. }
+            // Background worktree jobs are local-host only (`worktree_jobs.rs`).
+            ServerMessage::WorktreeJobStarted { .. }
+            | ServerMessage::WorktreeJobs { .. }
+            | ServerMessage::DevicePairCode { .. }
             | ServerMessage::DeviceListResult { .. }
             | ServerMessage::SettingsCurrent { .. }
             | ServerMessage::HostsList { .. }

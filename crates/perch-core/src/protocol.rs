@@ -425,6 +425,27 @@ pub struct WorktreeEntry {
     pub is_dirty: bool,
 }
 
+/// One background worktree create (`worktree.job.start`), as broadcast in
+/// `worktree.jobs`. A job leaves the list when it succeeds (its workspace
+/// arrives as `workspace.updated`) or once a cancel has cleaned up; a failed
+/// job stays, with `error`, until it is retried or dismissed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeJob {
+    pub job_id: String,
+    pub repo_path: String,
+    pub branch: String,
+    /// Where the checkout is being created.
+    pub path: String,
+    /// `"running"` | `"cancelling"` | `"failed"`.
+    pub status: String,
+    /// Human-readable step, e.g. `"Checking out"`.
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub started_at: i64,
+}
+
 /// A request-scoped, persisted approval receipt for a destructive Git action.
 /// The opaque id is bound by the server to the workspace, operation, canonical
 /// paths, current content fingerprint, and expiry; clients must not synthesize
@@ -1381,6 +1402,34 @@ pub enum ClientMessage {
         force: bool,
     },
 
+    /// Start a background create (capability `worktree.job`, local host
+    /// only). Same inputs as `worktree.create`; replies at once with
+    /// `worktree.job.started` or `worktree.error`, then progress arrives as
+    /// `worktree.jobs` broadcasts.
+    #[serde(rename = "worktree.job.start", rename_all = "camelCase")]
+    WorktreeJobStart {
+        request_id: String,
+        repo_path: String,
+        branch: String,
+        #[serde(default)]
+        new_branch: bool,
+        #[serde(default)]
+        path: Option<String>,
+    },
+
+    /// Cancel a running job: git is killed and anything the job created (the
+    /// checkout, its admin entry, a new branch) is removed.
+    #[serde(rename = "worktree.job.cancel", rename_all = "camelCase")]
+    WorktreeJobCancel { job_id: String },
+
+    /// Re-run a failed job with the same inputs.
+    #[serde(rename = "worktree.job.retry", rename_all = "camelCase")]
+    WorktreeJobRetry { job_id: String },
+
+    /// Drop a failed job from the list.
+    #[serde(rename = "worktree.job.dismiss", rename_all = "camelCase")]
+    WorktreeJobDismiss { job_id: String },
+
     /// List durable projects on one host.  The request id is echoed by the
     /// response so concurrent sidebar refreshes cannot race each other.
     #[serde(rename = "project.list", rename_all = "camelCase")]
@@ -2076,6 +2125,18 @@ pub enum ServerMessage {
         #[serde(default)]
         dirty: bool,
     },
+
+    /// Reply to `worktree.job.start`: the job was accepted.
+    #[serde(rename = "worktree.job.started", rename_all = "camelCase")]
+    WorktreeJobStarted {
+        request_id: String,
+        job: WorktreeJob,
+    },
+
+    /// Every background worktree job on this host. Sent on connect and after
+    /// every change; the list replaces the previous one.
+    #[serde(rename = "worktree.jobs", rename_all = "camelCase")]
+    WorktreeJobs { jobs: Vec<WorktreeJob> },
 
     #[serde(rename = "project.list", rename_all = "camelCase")]
     ProjectList {

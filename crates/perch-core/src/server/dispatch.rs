@@ -660,6 +660,22 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         } => workspace::handle_worktree_remove(
             state, raw_text, request_id, host_id, repo_path, path, force,
         ),
+        ClientMessage::WorktreeJobStart {
+            request_id,
+            repo_path,
+            branch,
+            new_branch,
+            path,
+        } => worktree_jobs::handle_start(state, request_id, repo_path, branch, new_branch, path),
+        ClientMessage::WorktreeJobCancel { job_id } => {
+            worktree_jobs::handle_cancel(&state.app, &job_id)
+        }
+        ClientMessage::WorktreeJobRetry { job_id } => {
+            worktree_jobs::handle_retry(&state.app, &job_id)
+        }
+        ClientMessage::WorktreeJobDismiss { job_id } => {
+            worktree_jobs::handle_dismiss(&state.app, &job_id)
+        }
 
         // -------------------------------------------------------------------
         // Durable project/workspace foundation. This first slice is local

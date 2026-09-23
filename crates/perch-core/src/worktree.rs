@@ -215,6 +215,11 @@ async fn run_git(args: &[&str], timeout: Duration) -> Result<String, String> {
         return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    // Drop progress chatter ("Preparing worktree …") ahead of git's verdict.
+    let stderr = match stderr.find("fatal:").or_else(|| stderr.find("error:")) {
+        Some(at) => stderr[at..].to_string(),
+        None => stderr,
+    };
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Err(if !stderr.is_empty() {
         stderr
@@ -389,19 +394,36 @@ pub async fn list(repo_path: &str) -> Result<WorktreeListing, String> {
     })
 }
 
-/// Create a linked worktree and return its absolute path.
+/// Everything `execute_create` needs, resolved up front so a failed or
+/// cancelled create can be undone precisely (`discard_create`): only what did
+/// not exist before the job started is ever removed.
+#[derive(Debug, Clone)]
+pub struct CreatePlan {
+    pub primary: String,
+    pub target: String,
+    pub branch: String,
+    /// The branch existed before this create: check it out, never delete it.
+    pub branch_existed: bool,
+    /// Something already sat at `target`: never delete it on cleanup.
+    pub target_existed: bool,
+    /// A previous attempt already produced exactly this checkout (lost reply,
+    /// failed registration): `execute_create` is a no-op.
+    pub reuse: bool,
+}
+
+/// Validate the request and resolve the checkout path and branch mode. Does
+/// not touch the repository.
 ///
 /// `new_branch` is a *hint*, not a hard mode: when the branch already exists
 /// locally the existing-branch form is used regardless, exactly as herdr's
-/// `run_worktree_add_command` does (it calls `local_branch_exists` first and
-/// picks the command shape from that). Requesting an existing branch with
+/// `run_worktree_add_command` does. Requesting an existing branch with
 /// `new_branch: false` when it does not exist is a plain error.
-pub async fn create(
+pub async fn prepare_create(
     repo_path: &str,
     branch: &str,
     new_branch: bool,
     path: Option<&str>,
-) -> Result<String, WorktreeOpError> {
+) -> Result<CreatePlan, WorktreeOpError> {
     let repo_path = expand_tilde(repo_path);
     let branch = branch.trim();
     if branch.is_empty() {
@@ -430,35 +452,44 @@ pub async fn create(
         }
         None => default_checkout_path(&repo_name, branch),
     };
-
-    if let Some(parent) = target.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|err| {
-            WorktreeOpError::plain(format!(
-                "failed to create {}: {err}",
-                parent.to_string_lossy()
-            ))
-        })?;
-    }
-
-    let target_str = target.to_string_lossy().to_string();
+    let target_existed = target.exists();
     // A lost success reply or a failed metadata write must be retryable without
     // creating a second checkout. Reuse only Git's matching path AND branch.
-    if target.exists() {
+    let mut reuse = false;
+    if target_existed {
         let listing = list(&primary).await.map_err(WorktreeOpError::plain)?;
-        if listing.worktrees.iter().any(|entry| {
+        reuse = listing.worktrees.iter().any(|entry| {
             !entry.is_primary
                 && canonical_or_original(Path::new(&entry.path)) == canonical_or_original(&target)
                 && entry.branch.as_deref() == Some(branch)
-        }) {
-            return Ok(canonical_or_original(&target)
-                .to_string_lossy()
-                .into_owned());
-        }
+        });
     }
-    let branch_exists = run_git(
+    let branch_existed = local_branch_exists(&primary, branch).await;
+    if !branch_existed && !new_branch {
+        return Err(WorktreeOpError::plain(format!(
+            "branch '{branch}' does not exist — tick \"new branch\" to create it"
+        )));
+    }
+    let target = if reuse {
+        canonical_or_original(&target)
+    } else {
+        target
+    };
+    Ok(CreatePlan {
+        primary,
+        target: target.to_string_lossy().into_owned(),
+        branch: branch.to_string(),
+        branch_existed,
+        target_existed,
+        reuse,
+    })
+}
+
+async fn local_branch_exists(repo: &str, branch: &str) -> bool {
+    run_git(
         &[
             "-C",
-            &primary,
+            repo,
             "show-ref",
             "--verify",
             "--quiet",
@@ -467,35 +498,106 @@ pub async fn create(
         GIT_QUICK_TIMEOUT,
     )
     .await
-    .is_ok();
+    .is_ok()
+}
 
-    if !branch_exists && !new_branch {
-        return Err(WorktreeOpError::plain(format!(
-            "branch '{branch}' does not exist — tick \"new branch\" to create it"
-        )));
+/// Run `git worktree add` for a prepared plan and return the checkout path.
+/// Dropping this future kills git (`kill_on_drop`); follow a cancel or an
+/// error with `discard_create`.
+pub async fn execute_create(plan: &CreatePlan) -> Result<String, WorktreeOpError> {
+    if plan.reuse {
+        return Ok(plan.target.clone());
     }
-
-    let args: Vec<&str> = if branch_exists {
+    if let Some(parent) = Path::new(&plan.target).parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(|err| {
+            WorktreeOpError::plain(format!(
+                "failed to create {}: {err}",
+                parent.to_string_lossy()
+            ))
+        })?;
+    }
+    let (primary, target, branch) = (&plan.primary, &plan.target, &plan.branch);
+    let args: Vec<&str> = if plan.branch_existed {
         // herdr: build_worktree_add_existing_branch_command
-        vec!["-C", &primary, "worktree", "add", &target_str, branch]
+        vec!["-C", primary, "worktree", "add", target, branch]
     } else {
         // herdr: build_worktree_add_new_branch_command (base = HEAD)
         vec![
-            "-C",
-            &primary,
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            &target_str,
-            "HEAD",
+            "-C", primary, "worktree", "add", "-b", branch, target, "HEAD",
         ]
     };
-
     run_git(&args, GIT_TIMEOUT)
         .await
         .map_err(WorktreeOpError::plain)?;
-    Ok(target_str)
+    Ok(plan.target.clone())
+}
+
+/// Undo whatever a failed or cancelled `execute_create` left behind: the
+/// checkout (registered or not), a half-written admin entry, and the branch —
+/// each only when this create made it. Best effort; errors are logged.
+pub async fn discard_create(plan: &CreatePlan) {
+    if plan.reuse {
+        return;
+    }
+    let target = Path::new(&plan.target);
+    let registered = match list(&plan.primary).await {
+        Ok(listing) => listing
+            .worktrees
+            .iter()
+            .any(|w| canonical_or_original(Path::new(&w.path)) == canonical_or_original(target)),
+        Err(_) => false,
+    };
+    if registered {
+        // `-f -f` also removes a checkout git left locked mid-add.
+        if let Err(err) = run_git(
+            &[
+                "-C",
+                &plan.primary,
+                "worktree",
+                "remove",
+                "--force",
+                "--force",
+                &plan.target,
+            ],
+            GIT_TIMEOUT,
+        )
+        .await
+        {
+            tracing::warn!(target = %plan.target, %err, "discard: worktree remove failed");
+        }
+    }
+    if !plan.target_existed && target.exists() {
+        if let Err(err) = tokio::fs::remove_dir_all(target).await {
+            tracing::warn!(target = %plan.target, %err, "discard: could not delete checkout");
+        }
+    }
+    let _ = run_git(
+        &["-C", &plan.primary, "worktree", "prune"],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await;
+    if !plan.branch_existed && local_branch_exists(&plan.primary, &plan.branch).await {
+        if let Err(err) = run_git(
+            &["-C", &plan.primary, "branch", "-D", "--", &plan.branch],
+            GIT_QUICK_TIMEOUT,
+        )
+        .await
+        {
+            tracing::warn!(branch = %plan.branch, %err, "discard: could not delete new branch");
+        }
+    }
+}
+
+/// Create a linked worktree and return its absolute path (the synchronous
+/// `worktree.create` path; background jobs call the three steps themselves).
+pub async fn create(
+    repo_path: &str,
+    branch: &str,
+    new_branch: bool,
+    path: Option<&str>,
+) -> Result<String, WorktreeOpError> {
+    let plan = prepare_create(repo_path, branch, new_branch, path).await?;
+    execute_create(&plan).await
 }
 
 /// Remove a linked worktree.
@@ -687,5 +789,126 @@ prunable stale
         assert!(is_not_working_tree_error(
             "fatal: '/w/x' is not a working tree"
         ));
+    }
+
+    // -- throwaway repos (never this repo) --------------------------------
+
+    fn scratch(name: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("perch-wt-{name}-{stamp}"));
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::canonicalize(&path).unwrap()
+    }
+
+    fn git(cwd: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A repo with one commit on `main`, inside its own scratch dir.
+    fn repo(name: &str) -> (PathBuf, PathBuf) {
+        let root = scratch(name);
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "perch@example.invalid"]);
+        git(&repo, &["config", "user.name", "Perch Test"]);
+        std::fs::write(repo.join("README"), "hi\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        (root, repo)
+    }
+
+    fn branch_exists(repo: &Path, branch: &str) -> bool {
+        std::process::Command::new("git")
+            .current_dir(repo)
+            .args([
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    fn s(path: &Path) -> &str {
+        path.to_str().unwrap()
+    }
+
+    #[tokio::test]
+    async fn discard_undoes_a_finished_create() {
+        let (root, repo) = repo("discard");
+        let target = root.join("wt");
+        let plan = prepare_create(s(&repo), "feat", true, Some(s(&target)))
+            .await
+            .unwrap();
+        assert!(!plan.branch_existed && !plan.target_existed && !plan.reuse);
+        execute_create(&plan).await.unwrap();
+        assert!(target.join("README").exists());
+        discard_create(&plan).await;
+        assert!(!target.exists());
+        assert!(!branch_exists(&repo, "feat"));
+        assert_eq!(list(s(&repo)).await.unwrap().worktrees.len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_mid_add_leaves_nothing_behind() {
+        let (root, repo) = repo("cancel");
+        // A slow post-checkout hook holds `git worktree add` open.
+        let hook = repo.join(".git/hooks/post-checkout");
+        std::fs::write(&hook, "#!/bin/sh\nsleep 5\n").unwrap();
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let target = root.join("wt");
+        let plan = prepare_create(s(&repo), "slow", true, Some(s(&target)))
+            .await
+            .unwrap();
+        let started = std::time::Instant::now();
+        let timed_out =
+            tokio::time::timeout(Duration::from_millis(700), execute_create(&plan)).await;
+        assert!(timed_out.is_err(), "the hook should keep git busy");
+        assert!(target.exists(), "git had started writing the checkout");
+        discard_create(&plan).await;
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!target.exists());
+        assert!(!branch_exists(&repo, "slow"));
+        assert!(!git(&repo, &["worktree", "list", "--porcelain"]).contains(s(&target)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn discard_keeps_what_existed_before() {
+        let (root, repo) = repo("keep");
+        git(&repo, &["branch", "old"]);
+        let target = root.join("occupied");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("mine"), "x").unwrap();
+        let plan = prepare_create(s(&repo), "old", false, Some(s(&target)))
+            .await
+            .unwrap();
+        assert!(plan.branch_existed && plan.target_existed);
+        assert!(
+            execute_create(&plan).await.is_err(),
+            "git refuses a non-empty dir"
+        );
+        discard_create(&plan).await;
+        assert!(target.join("mine").exists());
+        assert!(branch_exists(&repo, "old"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -1,7 +1,7 @@
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorkspaceSummary } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionModeScope, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
@@ -437,6 +437,9 @@ export interface PerchState {
    * matching `WorktreeMenu` instance self-opens against its own button rect;
    * cleared by that instance once consumed. */
   worktreeMenuRequest: { projectKey: string; nonce: number } | null;
+  /** Background worktree creates on the local host, replaced wholesale by
+   * each `worktree.jobs` broadcast (see `server/worktree_jobs.rs`). */
+  worktreeJobs: WorktreeJob[];
   /** "Session finished" toasts (Phase 6), derived client-side from
    * `session.updated` running→idle transitions on non-active sessions.
    * Rendered by `components/Toast.tsx`; dismissed on click or timeout. */
@@ -566,6 +569,18 @@ export interface PerchState {
     path: string,
     force: boolean,
   ) => Promise<WorktreeReply>;
+  /** Start a background create on the local host (capability
+   * `worktree.job`). Resolves with `worktree.job.started` or `worktree.error`;
+   * progress then arrives in `worktreeJobs`. */
+  startWorktreeJob: (
+    repoPath: string,
+    branch: string,
+    newBranch: boolean,
+    path?: string,
+  ) => Promise<WorktreeReply>;
+  cancelWorktreeJob: (jobId: string) => void;
+  retryWorktreeJob: (jobId: string) => void;
+  dismissWorktreeJob: (jobId: string) => void;
   /** Ask the `WorktreeMenu` for `${hostId}:${cwd}` to open itself (leader,W). */
   requestWorktreeMenu: (projectKey: string) => void;
   /** Clear a consumed `worktreeMenuRequest`. */
@@ -680,7 +695,8 @@ const pendingBrowses = new Map<string, (msg: FsBrowseResultMessage) => void>();
 export type WorktreeReply =
   | WorktreeListResultMessage
   | WorktreeDoneMessage
-  | WorktreeErrorMessage;
+  | WorktreeErrorMessage
+  | WorktreeJobStartedMessage;
 
 /** Resolvers for in-flight `worktree.*` requests, keyed by requestId — the
  * exact same single-shot request/response discipline as `pendingBrowses`
@@ -980,7 +996,7 @@ function resolveWorktreeRequest(requestId: string, msg: WorktreeReply): void {
  * dropped from the wire message (absent == local, same convention as
  * `browseDirectory`) so a local request never hits the hub-routing branch. */
 function sendWorktreeRequest(
-  msg: (WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage) & { hostId: string },
+  msg: (WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage) & { hostId: string },
 ): Promise<WorktreeReply> {
   return new Promise<WorktreeReply>((resolve) => {
     const requestId = newId();
@@ -990,7 +1006,7 @@ function sendWorktreeRequest(
       ...rest,
       requestId,
       ...(hostId && hostId !== "local" ? { hostId } : {}),
-    } as WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage);
+    } as WorktreeListMessage | WorktreeCreateMessage | WorktreeRemoveMessage | WorktreeJobStartMessage);
   });
 }
 
@@ -1059,6 +1075,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   activeWorkspaceId: readStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY),
   worktrees: {},
   worktreeMenuRequest: null,
+  worktreeJobs: [],
   toasts: [],
   sessionCommands: {},
   effortBySession: {},
@@ -1831,6 +1848,21 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       force,
     });
   },
+
+  startWorktreeJob: (repoPath, branch, newBranch, path) => {
+    return sendWorktreeRequest({
+      type: "worktree.job.start",
+      requestId: "",
+      hostId: "local",
+      repoPath,
+      branch,
+      newBranch,
+      ...(path ? { path } : {}),
+    });
+  },
+  cancelWorktreeJob: (jobId) => socket.send({ type: "worktree.job.cancel", jobId }),
+  retryWorktreeJob: (jobId) => socket.send({ type: "worktree.job.retry", jobId }),
+  dismissWorktreeJob: (jobId) => socket.send({ type: "worktree.job.dismiss", jobId }),
 
   requestWorktreeMenu: (projectKey) => {
     set((state) => ({
@@ -3349,8 +3381,13 @@ export function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "worktree.done":
-    case "worktree.error": {
+    case "worktree.error":
+    case "worktree.job.started": {
       resolveWorktreeRequest(msg.requestId, msg);
+      break;
+    }
+    case "worktree.jobs": {
+      usePerchStore.setState({ worktreeJobs: msg.jobs });
       break;
     }
   }

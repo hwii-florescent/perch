@@ -80,6 +80,7 @@ use reviews::settle_review_packet_from_db;
 mod fs;
 use fs::{filesystem_operation_lock, workspace_file_service};
 mod workspace;
+mod worktree_jobs;
 #[cfg(test)]
 use workspace::effective_focus;
 mod agent_history;
@@ -337,6 +338,8 @@ struct AppState {
     /// here because the SQLite mutex alone cannot keep a list/snapshot from
     /// observing a mutation between its DB reads and its revision number.
     foundation_lock: Arc<Mutex<()>>,
+    /// Background worktree creates — see `worktree_jobs.rs`.
+    worktree_jobs: worktree_jobs::JobTable,
     /// One retained-descriptor service per durable workspace. The service
     /// contains only bounded limits and an open root handle; it never caches
     /// file contents. Keeping it in `AppState` prevents a root pathname swap
@@ -635,6 +638,7 @@ pub async fn run(
         snapshot_epoch: Uuid::new_v4().to_string(),
         snapshot_revision: Arc::new(AtomicU64::new(0)),
         foundation_lock: Arc::new(Mutex::new(())),
+        worktree_jobs: Arc::new(Mutex::new(HashMap::new())),
         filesystem_services: Arc::new(Mutex::new(HashMap::new())),
         filesystem_operation_locks: Arc::new(Mutex::new(HashMap::new())),
         filesystem_operation_overflow: Arc::new(Mutex::new(())),
@@ -1976,6 +1980,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             .snapshot_revision
             .load(std::sync::atomic::Ordering::SeqCst),
     });
+    let _ = state.out_tx.send(worktree_jobs::jobs_message(&state.app));
 
     // Send the current hosts list so the sidebar can render remote sections
     // without waiting for the Settings modal to call fetchHosts().
@@ -2226,6 +2231,7 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.focus",
         "workspace.rename",
         "workspace.restore",
+        "worktree.job",
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",

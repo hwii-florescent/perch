@@ -79,6 +79,12 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const cached = usePerchStore((s) => s.worktrees[projectKey]);
   const listWorktrees = usePerchStore((s) => s.listWorktrees);
   const createWorktree = usePerchStore((s) => s.createWorktree);
+  const startWorktreeJob = usePerchStore((s) => s.startWorktreeJob);
+  // Local hosts that run creates in the background (`worktree.job`): the
+  // form closes at once and progress shows as a sidebar row.
+  const background = usePerchStore(
+    (s) => hostId === "local" && s.serverInfo?.capabilities?.includes("worktree.job") === true,
+  );
   const removeWorktree = usePerchStore((s) => s.removeWorktree);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const menuRequest = usePerchStore((s) => s.worktreeMenuRequest);
@@ -190,13 +196,9 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     if (!trimmed || creating) return;
     setCreating(true);
     setError(null);
-    const reply = await createWorktree(
-      hostId,
-      cwd,
-      trimmed,
-      newBranch,
-      customPath.trim() || undefined,
-    );
+    const reply = background
+      ? await startWorktreeJob(cwd, trimmed, newBranch, customPath.trim() || undefined)
+      : await createWorktree(hostId, cwd, trimmed, newBranch, customPath.trim() || undefined);
     setCreating(false);
     if (reply.type === "worktree.error") {
       setError(reply.message);
@@ -205,6 +207,10 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     setShowCreateForm(false);
     setBranch("");
     setPathTouched(false);
+    if (reply.type === "worktree.job.started") {
+      setOpen(false);
+      return;
+    }
     refresh();
   }
 
