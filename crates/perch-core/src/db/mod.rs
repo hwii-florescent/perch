@@ -1294,6 +1294,19 @@ mod tests {
         assert!(db.set_workspace_hidden(&a.id, true).unwrap().hidden);
         assert!(!db.set_workspace_hidden(&a.id, false).unwrap().hidden);
         assert!(db.set_workspace_hidden(&primary, true).is_err());
+        // A move repoints the row; a folder-derived name follows, a chosen one stays.
+        let moved = db
+            .set_workspace_path(&b.id, &format!("{}-moved", b.path))
+            .unwrap();
+        assert_eq!(
+            (moved.id.as_str(), moved.name.as_str()),
+            (b.id.as_str(), "b-moved")
+        );
+        db.rename_workspace(&a.id, "Task A").unwrap();
+        assert_eq!(
+            db.set_workspace_path(&a.id, "/elsewhere/a2").unwrap().name,
+            "Task A"
+        );
         let nested = db.set_workspace_parent(&b.id, Some(&a.id)).unwrap();
         assert_eq!(nested.parent_workspace_id.as_deref(), Some(a.id.as_str()));
         let cycle = db.set_workspace_parent(&a.id, Some(&b.id)).unwrap_err();

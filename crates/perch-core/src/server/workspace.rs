@@ -292,7 +292,8 @@ fn workspace_matches_worktree(
     entry: &crate::worktree::WorktreeInfo,
 ) -> bool {
     let branch_current = entry.branch.is_none() || entry.branch == row.branch;
-    branch_current && row.dirty == entry.is_dirty
+    // Only a removed checkout is archived, so one git lists again was re-created.
+    branch_current && row.dirty == entry.is_dirty && row.state != "archived"
 }
 
 /// Register every checkout in `listing` as a workspace under the repo's
@@ -307,7 +308,8 @@ fn workspace_matches_worktree(
 /// worktree add` outside perch) and starts hidden, after Orca; `created`
 /// names the one perch itself just made, which starts shown, as does one
 /// that perch sessions already ran in. Rows that already exist keep their
-/// visibility.
+/// visibility. A checkout moved with `git worktree move` is its old row
+/// (same project and branch, old path no longer listed) at a new path.
 pub(super) fn register_worktree_listing(
     app: &AppState,
     listing: &crate::worktree::WorktreeListing,
@@ -334,6 +336,14 @@ pub(super) fn register_worktree_listing(
             .create_project("local", &primary.path, None, primary.head.as_deref())?;
     }
     let mut session_cwds: Option<HashSet<String>> = None;
+    let listed: HashSet<String> = listing
+        .worktrees
+        .iter()
+        .map(|entry| crate::db::canonical_path_for_host("local", &entry.path))
+        .collect();
+    let project_id = known
+        .get(&crate::db::canonical_path_for_host("local", &primary.path))
+        .map(|row| row.project_id.clone());
     let mut workspaces = Vec::new();
     for entry in &listing.worktrees {
         let path = crate::db::canonical_path_for_host("local", &entry.path);
@@ -348,21 +358,40 @@ pub(super) fn register_worktree_listing(
         // head is the honest registration boundary — the same rule
         // `project.create` follows. Only a row that already exists keeps
         // whatever boundary it was given, including none.
-        let workspace = app.db.create_worktree_workspace(
-            "local",
-            &primary.path,
-            &entry.path,
-            entry.branch.as_deref(),
-            None,
-            entry.head.as_deref(),
-        )?;
+        let moved = known.values().find(|row| {
+            !known.contains_key(&path)
+                && entry.branch.is_some()
+                && row.branch == entry.branch
+                && row.parent_workspace_id.is_some()
+                && row.state != "archived"
+                && Some(&row.project_id) == project_id.as_ref()
+                && !listed.contains(&row.path)
+        });
+        let workspace = match moved {
+            Some(row) => app.db.set_workspace_path(&row.id, &path)?,
+            None => app.db.create_worktree_workspace(
+                "local",
+                &primary.path,
+                &entry.path,
+                entry.branch.as_deref(),
+                None,
+                entry.head.as_deref(),
+            )?,
+        };
         let mut workspace = app.db.update_workspace_git_state(
             &workspace.id,
             entry.branch.as_deref(),
             None,
             entry.is_dirty,
         )?;
-        if !known.contains_key(&path) && !entry.is_primary && created.as_ref() != Some(&path) {
+        if workspace.state == "archived" {
+            workspace = app.db.restore_workspace(&workspace.id)?;
+        }
+        if moved.is_none()
+            && !known.contains_key(&path)
+            && !entry.is_primary
+            && created.as_ref() != Some(&path)
+        {
             let cwds = session_cwds.get_or_insert_with(|| {
                 let sessions = app.db.list_sessions().unwrap_or_default();
                 sessions
@@ -405,22 +434,30 @@ pub(super) fn register_worktree_listing(
 
 /// Find worktrees added or removed outside perch without the worktree menu
 /// open (docs/reference/worktree-scan-fingerprint.md in Orca): each local
-/// project's `.git/worktrees` entry names are the fingerprint, and only a
+/// project's `.git/worktrees` entries and their `gitdir` paths are the
+/// fingerprint, and only a
 /// changed fingerprint pays for `git worktree list`. `seen` is the caller's
 /// memory between passes. A linked worktree row whose checkout git no longer
 /// lists (`git worktree remove` in a shell) is archived, like perch's own
 /// delete. Checkouts a create job is still making are left to the job.
-/// ponytail: names only, so `git worktree move` and a checkout switching
-/// branch are not noticed here (the menu and git poll still catch them); a
-/// project whose own path is a linked worktree (`.git` is a file) is skipped.
+/// ponytail: a project whose own path is a linked worktree (`.git` is a
+/// file) is skipped.
 pub(super) async fn discover_worktrees(app: &AppState, seen: &mut HashMap<String, Vec<String>>) {
     let projects = app.db.list_projects("local", false).unwrap_or_default();
     for project in projects {
         let admin = std::path::Path::new(&project.path).join(".git/worktrees");
+        // Each admin dir's `gitdir` names its checkout, so a move shows too.
         let mut names: Vec<String> = std::fs::read_dir(&admin)
             .map(|dir| {
                 dir.flatten()
-                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .map(|entry| {
+                        let gitdir = std::fs::read_to_string(entry.path().join("gitdir"));
+                        format!(
+                            "{:?} {}",
+                            entry.file_name(),
+                            gitdir.unwrap_or_default().trim()
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();

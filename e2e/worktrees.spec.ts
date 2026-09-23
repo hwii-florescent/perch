@@ -572,12 +572,14 @@ test.describe("Git worktrees", () => {
 
   // -------------------------------------------------------------------------
   // WT11 — a worktree made with plain `git worktree add` is discovered without
-  // the menu open, starts hidden, can be shown and hidden again, and is
-  // archived once `git worktree remove` drops it.
+  // the menu open, starts hidden, can be shown and hidden again, keeps its row
+  // across `git worktree move`, and is archived once `git worktree remove`
+  // drops it.
   // -------------------------------------------------------------------------
   test("WT11. External worktrees start hidden, show, hide and clean up", async ({ page }) => {
     await freshPage(page);
-    const external = `${FIXTURE}-external`;
+    // Unique per run: a reused DB remembers a path it saw before (and its visibility).
+    const external = `${FIXTURE}-external-${Date.now().toString(36)}`;
     fs.rmSync(external, { recursive: true, force: true });
     sh(`git worktree add -b wt-external '${external}'`, FIXTURE);
     const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
@@ -601,7 +603,15 @@ test.describe("Git worktrees", () => {
     await page.getByTestId(`workspace-show-${id}`).click();
     await expect(row).toHaveCount(1, { timeout: 10000 });
 
-    sh(`git worktree remove '${external}'`, FIXTURE);
+    // `git worktree move` keeps the same row, now at the new path.
+    const moved = `${external}-moved`;
+    fs.rmSync(moved, { recursive: true, force: true });
+    sh(`git worktree move '${external}' '${moved}'`, FIXTURE);
+    await expect(row.locator("button").first()).toHaveAttribute("title", moved, { timeout: 20000 });
+    await expect(row).toHaveCount(1);
+    await expect(card).toHaveCount(0);
+
+    sh(`git worktree remove '${moved}'`, FIXTURE);
     await expect(row).toHaveCount(0, { timeout: 20000 });
     await expect(card).toHaveCount(0);
   });

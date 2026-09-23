@@ -424,6 +424,25 @@ impl HistoryDb {
         get_workspace_locked(&conn, id)?.ok_or_else(|| anyhow::anyhow!("workspace disappeared"))
     }
 
+    /// Point a linked worktree's row at the checkout's new path after a
+    /// `git worktree move`. A name that was just the old folder name follows.
+    pub fn set_workspace_path(&self, id: &str, path: &str) -> anyhow::Result<WorkspaceRow> {
+        let conn = self.conn.lock().unwrap();
+        let old = get_workspace_locked(&conn, id)?
+            .ok_or_else(|| anyhow::anyhow!("workspace not found: {id}"))?;
+        let name = if old.name == project_name_for_path(&old.path) {
+            project_name_for_path(path)
+        } else {
+            old.name
+        };
+        conn.execute(
+            "UPDATE workspaces SET path = ?2, name = ?3, updated_at = ?4
+             WHERE id = ?1 AND parent_workspace_id IS NOT NULL",
+            params![id, path, name, now_millis()],
+        )?;
+        get_workspace_locked(&conn, id)?.ok_or_else(|| anyhow::anyhow!("workspace disappeared"))
+    }
+
     /// Show or hide a linked worktree. The primary checkout is always shown.
     pub fn set_workspace_hidden(&self, id: &str, hidden: bool) -> anyhow::Result<WorkspaceRow> {
         let conn = self.conn.lock().unwrap();
