@@ -1235,7 +1235,11 @@ export interface WorktreeListMessage {
   repoPath: string;
 }
 
-/** Create a linked worktree for `branch`. `newBranch` is a hint: when the
+/** Create a linked worktree for `branch`. Capability `worktree.startFrom`
+ * adds: an empty `branch` derived from `name` (the task name, suffixed `-2`…
+ * on conflict), and `startFrom`, the new branch's start point (local branch,
+ * `remote/branch` — fetched first — or commit; absent = the repo's base ref).
+ * `newBranch` is a hint: when the
  * branch already exists locally the existing-branch form is used anyway.
  * `path` overrides the default `~/.perch/worktrees/<repo-name>/<branch-slug>`
  * location. Replies with `worktree.done` or `worktree.error`. */
@@ -1244,9 +1248,11 @@ export interface WorktreeCreateMessage {
   requestId: string;
   hostId?: string;
   repoPath: string;
-  branch: string;
+  branch?: string;
   newBranch?: boolean;
   path?: string;
+  name?: string;
+  startFrom?: string;
 }
 
 /** Remove the worktree checked out at `path`. Refused with
@@ -1269,9 +1275,11 @@ export interface WorktreeJobStartMessage {
   type: "worktree.job.start";
   requestId: string;
   repoPath: string;
-  branch: string;
+  branch?: string;
   newBranch?: boolean;
   path?: string;
+  name?: string;
+  startFrom?: string;
 }
 
 /** Cancel a running job: git is killed and anything the job created is removed. */
@@ -2016,6 +2024,10 @@ export interface WorktreeListResultMessage {
   repoPath: string;
   defaultRoot: string;
   worktrees: WorktreeEntry[];
+  /** The repo's base ref (`origin/main`) when `origin/HEAD` is set. */
+  baseRef?: string;
+  /** Local and remote branch names for the start-from picker. */
+  refs?: string[];
 }
 
 /** Success reply to `worktree.create` / `worktree.remove`. `path` is the

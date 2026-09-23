@@ -62,6 +62,23 @@ function branchToPathSlug(branch: string): string {
   return trimmed || "worktree";
 }
 
+/** Mirror of `slugify_task_name` in `worktree.rs` (Orca's
+ * `slugifyForWorkspaceName`), used only to preview the derived branch; the
+ * server derives the real one and may add a `-2` suffix on conflict. */
+export function slugifyTaskName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/([\p{L}\p{N}])'(?=[\p{L}\p{N}])/gu, "$1")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 48)
+    .replace(/[-._]+$/g, "");
+}
+
 function basename(p: string): string {
   const parts = p.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || p;
@@ -85,6 +102,12 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const background = usePerchStore(
     (s) => hostId === "local" && s.serverInfo?.capabilities?.includes("worktree.job") === true,
   );
+  // Task name + start-from picker (`worktree.startFrom`); older hosts keep
+  // the branch + "new branch" form.
+  const startFromSupported = usePerchStore((s) =>
+    (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])
+      ?.includes("worktree.startFrom") === true,
+  );
   const removeWorktree = usePerchStore((s) => s.removeWorktree);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const menuRequest = usePerchStore((s) => s.worktreeMenuRequest);
@@ -97,6 +120,8 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [branch, setBranch] = useState("");
+  const [taskName, setTaskName] = useState("");
+  const [startFrom, setStartFrom] = useState("");
   const [newBranch, setNewBranch] = useState(true);
   const [customPath, setCustomPath] = useState("");
   const [pathTouched, setPathTouched] = useState(false);
@@ -109,6 +134,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const branchInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const defaultRoot = cached?.defaultRoot ?? "";
   const entries: WorktreeEntry[] = cached?.worktrees ?? [];
@@ -168,14 +194,17 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   }, [open, pendingRemove]);
 
   useEffect(() => {
-    if (showCreateForm) branchInputRef.current?.focus();
-  }, [showCreateForm]);
+    if (showCreateForm) (startFromSupported ? nameInputRef : branchInputRef).current?.focus();
+  }, [showCreateForm, startFromSupported]);
+
+  /** The branch the server will use: the override, else the task-name slug. */
+  const effectiveBranch = branch.trim() || (startFromSupported ? slugifyTaskName(taskName) : "");
 
   // Keep the path preview in sync with the branch until the user edits it.
   useEffect(() => {
     if (pathTouched || !defaultRoot) return;
-    setCustomPath(branch.trim() ? `${defaultRoot}/${branchToPathSlug(branch.trim())}` : "");
-  }, [branch, defaultRoot, pathTouched]);
+    setCustomPath(effectiveBranch ? `${defaultRoot}/${branchToPathSlug(effectiveBranch)}` : "");
+  }, [effectiveBranch, defaultRoot, pathTouched]);
 
   function handleBtnClick(e: React.MouseEvent) {
     e.stopPropagation();
@@ -193,12 +222,18 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
 
   async function submitCreate() {
     const trimmed = branch.trim();
-    if (!trimmed || creating) return;
+    if (!effectiveBranch || creating) return;
     setCreating(true);
     setError(null);
+    const extra = startFromSupported
+      ? { name: taskName.trim() || undefined, startFrom: startFrom.trim() || undefined }
+      : undefined;
+    // A path the user never touched is left to the server, which knows the
+    // final (possibly suffixed) branch name.
+    const path = pathTouched ? customPath.trim() || undefined : undefined;
     const reply = background
-      ? await startWorktreeJob(cwd, trimmed, newBranch, customPath.trim() || undefined)
-      : await createWorktree(hostId, cwd, trimmed, newBranch, customPath.trim() || undefined);
+      ? await startWorktreeJob(cwd, trimmed, newBranch, path, extra)
+      : await createWorktree(hostId, cwd, trimmed, newBranch, path, extra);
     setCreating(false);
     if (reply.type === "worktree.error") {
       setError(reply.message);
@@ -206,6 +241,8 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     }
     setShowCreateForm(false);
     setBranch("");
+    setTaskName("");
+    setStartFrom("");
     setPathTouched(false);
     if (reply.type === "worktree.job.started") {
       setOpen(false);
@@ -324,13 +361,51 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
 
           {showCreateForm ? (
             <div className="worktree-menu__form">
+              {startFromSupported && (
+                <>
+                  <input
+                    type="text"
+                    ref={nameInputRef}
+                    className="worktree-menu__input"
+                    data-testid="worktree-name-input"
+                    placeholder="task name"
+                    aria-label="Task name"
+                    value={taskName}
+                    onChange={(e) => setTaskName(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") void submitCreate();
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="worktree-menu__input"
+                    data-testid="worktree-start-input"
+                    list={`worktree-refs-${projectKey}`}
+                    placeholder={`start from ${cached?.baseRef ?? "HEAD"} (base ref)`}
+                    aria-label="Start from: branch, remote branch or commit"
+                    title="A local branch, a remote branch (fetched first) or a commit SHA. Empty = the repo's base ref."
+                    value={startFrom}
+                    onChange={(e) => setStartFrom(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") void submitCreate();
+                    }}
+                  />
+                  <datalist id={`worktree-refs-${projectKey}`}>
+                    {(cached?.refs ?? []).map((ref) => <option key={ref} value={ref} />)}
+                  </datalist>
+                </>
+              )}
               <input
                 type="text"
                 ref={branchInputRef}
                 className="worktree-menu__input"
                 data-testid="worktree-branch-input"
-                placeholder="branch name"
-                aria-label="Branch name"
+                placeholder={startFromSupported
+                  ? `branch: ${slugifyTaskName(taskName) || "derived from the task name"}`
+                  : "branch name"}
+                aria-label={startFromSupported ? "Branch name override" : "Branch name"}
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 onKeyDown={(e) => {
@@ -338,15 +413,17 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   if (e.key === "Enter") void submitCreate();
                 }}
               />
-              <label className="worktree-menu__checkbox">
-                <input
-                  type="checkbox"
-                  data-testid="worktree-new-branch"
-                  checked={newBranch}
-                  onChange={(e) => setNewBranch(e.target.checked)}
-                />
-                new branch
-              </label>
+              {!startFromSupported && (
+                <label className="worktree-menu__checkbox">
+                  <input
+                    type="checkbox"
+                    data-testid="worktree-new-branch"
+                    checked={newBranch}
+                    onChange={(e) => setNewBranch(e.target.checked)}
+                  />
+                  new branch
+                </label>
+              )}
               <input
                 type="text"
                 className="worktree-menu__input"
@@ -377,7 +454,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   type="button"
                   className="worktree-menu__submit"
                   data-testid="worktree-create-submit"
-                  disabled={!branch.trim() || creating}
+                  disabled={!effectiveBranch || creating}
                   onClick={() => void submitCreate()}
                 >
                   {creating ? "Creating…" : "Create"}

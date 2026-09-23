@@ -1455,6 +1455,8 @@ impl HubManager {
                 repo_path,
                 default_root,
                 worktrees,
+                base_ref,
+                refs,
                 ..
             } => {
                 let rid = request_id.clone();
@@ -1466,6 +1468,8 @@ impl HubManager {
                         repo_path,
                         default_root,
                         worktrees,
+                        base_ref,
+                        refs,
                     },
                 );
             }

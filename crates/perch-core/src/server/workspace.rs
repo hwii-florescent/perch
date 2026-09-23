@@ -407,6 +407,8 @@ pub(super) fn handle_worktree_list(
                     host_id: "local".to_string(),
                     repo_path,
                     default_root: listing.default_root,
+                    base_ref: listing.base_ref,
+                    refs: listing.refs,
                     worktrees: listing
                         .worktrees
                         .into_iter()
@@ -438,10 +440,7 @@ pub(super) fn handle_worktree_create(
     raw_text: &str,
     request_id: String,
     host_id: Option<String>,
-    repo_path: String,
-    branch: String,
-    new_branch: bool,
-    path: Option<String>,
+    req: crate::worktree::CreateRequest,
 ) {
     if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
@@ -450,10 +449,10 @@ pub(super) fn handle_worktree_create(
     let app = state.app.clone();
     tokio::spawn(async move {
         let result = async {
-            let created = crate::worktree::create(&repo_path, &branch, new_branch, path.as_deref())
+            let created = crate::worktree::create(&req)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.message))?;
-            let listing = crate::worktree::list(&repo_path)
+            let listing = crate::worktree::list(&req.repo_path)
                 .await
                 .map_err(anyhow::Error::msg)?;
             let workspaces = register_worktree_listing(&app, &listing)?;

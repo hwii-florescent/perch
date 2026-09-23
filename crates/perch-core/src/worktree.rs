@@ -72,6 +72,10 @@ pub struct WorktreeListing {
     /// `~/.perch/worktrees/<repo-name>` — the directory new checkouts land in
     /// by default, so the client can prefill the optional custom-path field.
     pub default_root: String,
+    /// See `base_ref`.
+    pub base_ref: Option<String>,
+    /// Local branches and `remote/branch` names, for the start-from picker.
+    pub refs: Vec<String>,
 }
 
 /// A remove failure, distinguishing the dirty-checkout guard (recoverable by
@@ -385,12 +389,36 @@ pub async fn list(repo_path: &str) -> Result<WorktreeListing, String> {
         });
     }
 
+    let primary = primary.unwrap_or(repo_path);
+    let refs = run_git(
+        &[
+            "-C",
+            &primary,
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .unwrap_or_default()
+    .lines()
+    .filter(|r| !r.ends_with("/HEAD"))
+    .filter_map(|r| {
+        r.strip_prefix("refs/heads/")
+            .or_else(|| r.strip_prefix("refs/remotes/"))
+    })
+    .map(str::to_string)
+    .collect();
     Ok(WorktreeListing {
         worktrees,
         default_root: worktrees_root()
             .join(&repo_name)
             .to_string_lossy()
             .to_string(),
+        base_ref: base_ref(&primary).await,
+        refs,
     })
 }
 
@@ -409,38 +437,78 @@ pub struct CreatePlan {
     /// A previous attempt already produced exactly this checkout (lost reply,
     /// failed registration): `execute_create` is a no-op.
     pub reuse: bool,
+    /// Fully qualified start point of a new branch (`refs/heads/x`,
+    /// `refs/remotes/origin/x`, a commit id, or `HEAD`). `None` when an
+    /// existing branch is checked out.
+    pub start_ref: Option<String>,
+    /// `(remote, branch)` to fetch before checking out a remote start ref.
+    pub fetch: Option<(String, String)>,
 }
 
-/// Validate the request and resolve the checkout path and branch mode. Does
-/// not touch the repository.
-///
-/// `new_branch` is a *hint*, not a hard mode: when the branch already exists
-/// locally the existing-branch form is used regardless, exactly as herdr's
-/// `run_worktree_add_command` does. Requesting an existing branch with
-/// `new_branch: false` when it does not exist is a plain error.
-pub async fn prepare_create(
-    repo_path: &str,
-    branch: &str,
-    new_branch: bool,
-    path: Option<&str>,
-) -> Result<CreatePlan, WorktreeOpError> {
-    let repo_path = expand_tilde(repo_path);
-    let branch = branch.trim();
-    if branch.is_empty() {
-        return Err(WorktreeOpError::plain("branch is required"));
-    }
-    run_git(&["check-ref-format", "--branch", branch], GIT_QUICK_TIMEOUT)
-        .await
-        .map_err(WorktreeOpError::plain)?;
+/// What the caller asked for. `branch` is an explicit override; when it is
+/// empty the branch is derived from `name` (Orca's task name), with a `-2`,
+/// `-3`… suffix until neither a local or remote branch nor the default
+/// checkout path is taken.
+#[derive(Debug, Clone, Default)]
+pub struct CreateRequest {
+    pub repo_path: String,
+    pub branch: String,
+    pub name: Option<String>,
+    pub new_branch: bool,
+    pub path: Option<String>,
+    /// Start-from ref for a new branch: a local branch, `remote/branch`, a
+    /// commit, or empty for the repo's base ref (`origin/HEAD`, else `HEAD`).
+    pub start_from: Option<String>,
+}
 
+/// Upper bound on derived-name suffixes (Orca's `WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS`
+/// plays the same role).
+const MAX_NAME_SUFFIX: usize = 100;
+
+/// Orca's `slugifyForWorkspaceName`: a task name as a branch-safe slug —
+/// lowercase `a-z0-9._-`, runs of anything else collapsed to one `-`, no `..`
+/// (git rejects it), no leading/trailing `.`/`-`, at most 48 characters.
+/// Intra-word apostrophes vanish so "don't" becomes `dont`, not `don-t`.
+pub fn slugify_task_name(name: &str) -> String {
+    let lower = name
+        .trim()
+        .to_lowercase()
+        .replace(['\u{2018}', '\u{2019}'], "'");
+    let chars: Vec<char> = lower.chars().collect();
+    let mut slug = String::new();
+    for (i, &ch) in chars.iter().enumerate() {
+        let word = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric());
+        if ch == '\'' && i > 0 && word(chars.get(i - 1)) && word(chars.get(i + 1)) {
+            continue;
+        }
+        let keep = ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '_' | '-');
+        let next = if keep { ch } else { '-' };
+        let last = slug.chars().last();
+        if (next == '-' && last == Some('-')) || (next == '.' && last == Some('.')) {
+            continue;
+        }
+        slug.push(next);
+    }
+    let slug = slug.trim_matches(|c| c == '.' || c == '-');
+    let slug: String = slug.chars().take(48).collect();
+    slug.trim_end_matches(['-', '.', '_']).to_string()
+}
+
+/// Validate the request and resolve the branch, checkout path and start
+/// point. Reads the repository but never changes it.
+///
+/// An explicit `branch` that already exists locally is checked out as is,
+/// exactly as herdr's `run_worktree_add_command` does (`new_branch` is only a
+/// hint); requesting a missing branch with `new_branch: false` is an error.
+pub async fn prepare_create(req: &CreateRequest) -> Result<CreatePlan, WorktreeOpError> {
+    let repo_path = expand_tilde(&req.repo_path);
     // Normalize to the parent checkout so the default location is named after
     // the repo, not after whichever linked worktree the user started from.
     let primary = primary_worktree(&repo_path)
         .await
         .map_err(WorktreeOpError::plain)?;
     let repo_name = basename_of(&primary);
-
-    let target = match path.map(str::trim).filter(|p| !p.is_empty()) {
+    let custom_path = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => {
             let expanded = expand_tilde(p);
             if !Path::new(&expanded).is_absolute() {
@@ -448,10 +516,37 @@ pub async fn prepare_create(
                     "worktree path must be absolute: {expanded}"
                 )));
             }
-            PathBuf::from(expanded)
+            Some(PathBuf::from(expanded))
         }
-        None => default_checkout_path(&repo_name, branch),
+        None => None,
     };
+
+    let explicit = req.branch.trim();
+    let branch = if !explicit.is_empty() {
+        explicit.to_string()
+    } else {
+        let name = req.name.as_deref().unwrap_or("");
+        let seed = slugify_task_name(name);
+        if seed.is_empty() {
+            return Err(WorktreeOpError::plain(if name.trim().is_empty() {
+                "a task name or branch is required".to_string()
+            } else {
+                format!(
+                    "'{}' has no characters usable in a branch name",
+                    name.trim()
+                )
+            }));
+        }
+        derive_free_branch(&primary, &repo_name, &seed, custom_path.is_some()).await?
+    };
+    run_git(
+        &["check-ref-format", "--branch", &branch],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .map_err(WorktreeOpError::plain)?;
+
+    let target = custom_path.unwrap_or_else(|| default_checkout_path(&repo_name, &branch));
     let target_existed = target.exists();
     // A lost success reply or a failed metadata write must be retryable without
     // creating a second checkout. Reuse only Git's matching path AND branch.
@@ -461,15 +556,26 @@ pub async fn prepare_create(
         reuse = listing.worktrees.iter().any(|entry| {
             !entry.is_primary
                 && canonical_or_original(Path::new(&entry.path)) == canonical_or_original(&target)
-                && entry.branch.as_deref() == Some(branch)
+                && entry.branch.as_deref() == Some(branch.as_str())
         });
     }
-    let branch_existed = local_branch_exists(&primary, branch).await;
-    if !branch_existed && !new_branch {
+    let branch_existed = local_branch_exists(&primary, &branch).await;
+    if !branch_existed && !req.new_branch {
         return Err(WorktreeOpError::plain(format!(
             "branch '{branch}' does not exist — tick \"new branch\" to create it"
         )));
     }
+    let (start_ref, fetch) = if branch_existed {
+        (None, None)
+    } else {
+        let start = resolve_start_ref(&primary, req.start_from.as_deref().unwrap_or("")).await?;
+        let fetch = start
+            .strip_prefix("refs/remotes/")
+            .and_then(|rest| rest.split_once('/'))
+            .filter(|(_, branch)| *branch != "HEAD")
+            .map(|(remote, branch)| (remote.to_string(), branch.to_string()));
+        (Some(start), fetch)
+    };
     let target = if reuse {
         canonical_or_original(&target)
     } else {
@@ -478,11 +584,131 @@ pub async fn prepare_create(
     Ok(CreatePlan {
         primary,
         target: target.to_string_lossy().into_owned(),
-        branch: branch.to_string(),
+        branch,
         branch_existed,
         target_existed,
         reuse,
+        start_ref,
+        fetch,
     })
+}
+
+/// First of `seed`, `seed-2`, `seed-3`… that is free as a local branch, as a
+/// branch on any remote, and (unless a custom path was given) as a default
+/// checkout directory — Orca's derived-name collision rule.
+async fn derive_free_branch(
+    primary: &str,
+    repo_name: &str,
+    seed: &str,
+    custom_path: bool,
+) -> Result<String, WorktreeOpError> {
+    let taken = run_git(
+        &[
+            "-C",
+            primary,
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .map_err(WorktreeOpError::plain)?;
+    let taken: std::collections::HashSet<&str> = taken
+        .lines()
+        .filter_map(|r| {
+            r.strip_prefix("refs/heads/").or_else(|| {
+                r.strip_prefix("refs/remotes/")
+                    .and_then(|r| r.split_once('/'))
+                    .map(|(_, b)| b)
+            })
+        })
+        .collect();
+    for n in 1..=MAX_NAME_SUFFIX {
+        let candidate = if n == 1 {
+            seed.to_string()
+        } else {
+            format!("{seed}-{n}")
+        };
+        if taken.contains(candidate.as_str()) {
+            continue;
+        }
+        if !custom_path && default_checkout_path(repo_name, &candidate).exists() {
+            continue;
+        }
+        return Ok(candidate);
+    }
+    Err(WorktreeOpError::plain(format!(
+        "no free branch name for '{seed}'; pick a different task name"
+    )))
+}
+
+/// Orca's `resolveWorktreeAddBaseRef`, plus the base-ref default. A bare name
+/// is a local branch; `a/b` prefers the remote-tracking `refs/remotes/a/b`,
+/// then a local branch literally named `a/b`; anything else must be a commit
+/// (SHA, tag, `HEAD~2`…). Empty means the repo's base ref.
+async fn resolve_start_ref(primary: &str, start_from: &str) -> Result<String, WorktreeOpError> {
+    let start_from = start_from.trim();
+    let is_ref = |r: String| async move {
+        run_git(
+            &["-C", primary, "show-ref", "--verify", "--quiet", &r],
+            GIT_QUICK_TIMEOUT,
+        )
+        .await
+        .is_ok()
+        .then_some(r)
+    };
+    if start_from.is_empty() {
+        return Ok(base_ref(primary).await.map_or_else(
+            || "HEAD".to_string(),
+            |short| format!("refs/remotes/{short}"),
+        ));
+    }
+    if start_from.starts_with("refs/") {
+        if let Some(r) = is_ref(start_from.to_string()).await {
+            return Ok(r);
+        }
+    } else {
+        if start_from.contains('/') {
+            if let Some(r) = is_ref(format!("refs/remotes/{start_from}")).await {
+                return Ok(r);
+            }
+        }
+        if let Some(r) = is_ref(format!("refs/heads/{start_from}")).await {
+            return Ok(r);
+        }
+    }
+    let commit = format!("{start_from}^{{commit}}");
+    run_git(
+        &["-C", primary, "rev-parse", "--verify", "--quiet", &commit],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .map(|oid| oid.trim().to_string())
+    .map_err(|_| {
+        WorktreeOpError::plain(format!(
+            "start-from '{start_from}' is not a branch or commit"
+        ))
+    })
+}
+
+/// The repo's base ref as a short remote name (`origin/main`), from
+/// `origin/HEAD`. `None` when the repo has no such remote default.
+pub async fn base_ref(repo: &str) -> Option<String> {
+    run_git(
+        &[
+            "-C",
+            repo,
+            "symbolic-ref",
+            "--quiet",
+            "refs/remotes/origin/HEAD",
+        ],
+        GIT_QUICK_TIMEOUT,
+    )
+    .await
+    .ok()
+    .and_then(|r| r.trim().strip_prefix("refs/remotes/").map(str::to_string))
 }
 
 async fn local_branch_exists(repo: &str, branch: &str) -> bool {
@@ -501,9 +727,29 @@ async fn local_branch_exists(repo: &str, branch: &str) -> bool {
     .is_ok()
 }
 
+/// Refresh a remote start ref (`git fetch <remote> <branch>`) before checkout.
+/// Best effort: offline, the already-known remote-tracking ref is used.
+pub async fn fetch_start_ref(plan: &CreatePlan) {
+    if let Some((remote, branch)) = &plan.fetch {
+        let refspec = format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}");
+        if let Err(err) = run_git(
+            &["-C", &plan.primary, "fetch", "--no-tags", remote, &refspec],
+            GIT_TIMEOUT,
+        )
+        .await
+        {
+            tracing::warn!(%remote, %branch, %err, "fetch before worktree create failed; using the local ref");
+        }
+    }
+}
+
 /// Run `git worktree add` for a prepared plan and return the checkout path.
 /// Dropping this future kills git (`kill_on_drop`); follow a cancel or an
 /// error with `discard_create`.
+///
+/// A new branch is created `--no-track` (Orca: no inherited upstream, so
+/// `git status` does not report "behind" before the first push) and records
+/// its start point as `branch.<name>.base`, which the delete review uses.
 pub async fn execute_create(plan: &CreatePlan) -> Result<String, WorktreeOpError> {
     if plan.reuse {
         return Ok(plan.target.clone());
@@ -517,18 +763,40 @@ pub async fn execute_create(plan: &CreatePlan) -> Result<String, WorktreeOpError
         })?;
     }
     let (primary, target, branch) = (&plan.primary, &plan.target, &plan.branch);
-    let args: Vec<&str> = if plan.branch_existed {
+    let args: Vec<&str> = match &plan.start_ref {
         // herdr: build_worktree_add_existing_branch_command
-        vec!["-C", primary, "worktree", "add", target, branch]
-    } else {
-        // herdr: build_worktree_add_new_branch_command (base = HEAD)
-        vec![
-            "-C", primary, "worktree", "add", "-b", branch, target, "HEAD",
-        ]
+        None => vec!["-C", primary, "worktree", "add", target, branch],
+        Some(start) => vec![
+            "-C",
+            primary,
+            "worktree",
+            "add",
+            "--no-track",
+            "-b",
+            branch,
+            target,
+            start,
+        ],
     };
     run_git(&args, GIT_TIMEOUT)
         .await
         .map_err(WorktreeOpError::plain)?;
+    if let Some(start) = &plan.start_ref {
+        let key = format!("branch.{branch}.base");
+        let _ = run_git(
+            &[
+                "-C",
+                target,
+                "config",
+                "--local",
+                "--replace-all",
+                &key,
+                start,
+            ],
+            GIT_QUICK_TIMEOUT,
+        )
+        .await;
+    }
     Ok(plan.target.clone())
 }
 
@@ -590,13 +858,9 @@ pub async fn discard_create(plan: &CreatePlan) {
 
 /// Create a linked worktree and return its absolute path (the synchronous
 /// `worktree.create` path; background jobs call the three steps themselves).
-pub async fn create(
-    repo_path: &str,
-    branch: &str,
-    new_branch: bool,
-    path: Option<&str>,
-) -> Result<String, WorktreeOpError> {
-    let plan = prepare_create(repo_path, branch, new_branch, path).await?;
+pub async fn create(req: &CreateRequest) -> Result<String, WorktreeOpError> {
+    let plan = prepare_create(req).await?;
+    fetch_start_ref(&plan).await;
     execute_create(&plan).await
 }
 
@@ -849,11 +1113,21 @@ prunable stale
         path.to_str().unwrap()
     }
 
+    fn req(repo: &Path, branch: &str, new_branch: bool, target: &Path) -> CreateRequest {
+        CreateRequest {
+            repo_path: s(repo).to_string(),
+            branch: branch.to_string(),
+            new_branch,
+            path: Some(s(target).to_string()),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn discard_undoes_a_finished_create() {
         let (root, repo) = repo("discard");
         let target = root.join("wt");
-        let plan = prepare_create(s(&repo), "feat", true, Some(s(&target)))
+        let plan = prepare_create(&req(&repo, "feat", true, &target))
             .await
             .unwrap();
         assert!(!plan.branch_existed && !plan.target_existed && !plan.reuse);
@@ -875,7 +1149,7 @@ prunable stale
         std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         let target = root.join("wt");
-        let plan = prepare_create(s(&repo), "slow", true, Some(s(&target)))
+        let plan = prepare_create(&req(&repo, "slow", true, &target))
             .await
             .unwrap();
         let started = std::time::Instant::now();
@@ -898,7 +1172,7 @@ prunable stale
         let target = root.join("occupied");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("mine"), "x").unwrap();
-        let plan = prepare_create(s(&repo), "old", false, Some(s(&target)))
+        let plan = prepare_create(&req(&repo, "old", false, &target))
             .await
             .unwrap();
         assert!(plan.branch_existed && plan.target_existed);
@@ -909,6 +1183,149 @@ prunable stale
         discard_create(&plan).await;
         assert!(target.join("mine").exists());
         assert!(branch_exists(&repo, "old"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_names_slugify_like_orca() {
+        assert_eq!(slugify_task_name("Fix login bug!"), "fix-login-bug");
+        assert_eq!(slugify_task_name("Don't panic"), "dont-panic");
+        assert_eq!(slugify_task_name("../../etc"), "etc");
+        assert_eq!(
+            slugify_task_name("feature/Login Page"),
+            "feature-login-page"
+        );
+        assert_eq!(slugify_task_name("v1.2..3"), "v1.2.3");
+        assert_eq!(slugify_task_name("🚀"), "");
+        assert_eq!(slugify_task_name(&"a".repeat(60)).len(), 48);
+    }
+
+    fn head(dir: &Path) -> String {
+        git(dir, &["rev-parse", "HEAD"])
+    }
+
+    async fn create_from(repo: &Path, root: &Path, name: &str, start: &str) -> CreatePlan {
+        let plan = prepare_create(&CreateRequest {
+            repo_path: s(repo).to_string(),
+            name: Some(name.to_string()),
+            new_branch: true,
+            path: Some(s(&root.join(slugify_task_name(name))).to_string()),
+            start_from: Some(start.to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        fetch_start_ref(&plan).await;
+        execute_create(&plan).await.unwrap();
+        plan
+    }
+
+    #[tokio::test]
+    async fn derived_branch_skips_local_and_remote_names() {
+        let (root, repo) = repo("derive");
+        git(&repo, &["branch", "fix-login"]);
+        git(
+            &repo,
+            &["update-ref", "refs/remotes/origin/fix-login-2", "HEAD"],
+        );
+        let plan = prepare_create(&CreateRequest {
+            repo_path: s(&repo).to_string(),
+            name: Some("Fix login".to_string()),
+            new_branch: true,
+            path: Some(s(&root.join("wt")).to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(plan.branch, "fix-login-3");
+        assert!(!plan.branch_existed);
+        // An explicit branch that exists is checked out, not suffixed.
+        let explicit = prepare_create(&req(&repo, "fix-login", true, &root.join("wt2")))
+            .await
+            .unwrap();
+        assert_eq!(explicit.branch, "fix-login");
+        assert!(explicit.branch_existed && explicit.start_ref.is_none());
+        let err = prepare_create(&CreateRequest {
+            repo_path: s(&repo).to_string(),
+            name: Some("🚀".to_string()),
+            new_branch: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            err.message.contains("no characters usable"),
+            "{}",
+            err.message
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_from_local_branch_and_commit() {
+        let (root, repo) = repo("startfrom");
+        let first = head(&repo);
+        git(&repo, &["checkout", "-qb", "stack"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "stacked"]);
+        let stacked = head(&repo);
+        git(&repo, &["checkout", "-q", "main"]);
+
+        let plan = create_from(&repo, &root, "on stack", "stack").await;
+        let wt = Path::new(&plan.target);
+        assert_eq!(head(wt), stacked);
+        assert_eq!(
+            git(wt, &["config", "branch.on-stack.base"]),
+            "refs/heads/stack"
+        );
+        assert!(git(
+            wt,
+            &[
+                "for-each-ref",
+                "--format=%(upstream)",
+                "refs/heads/on-stack"
+            ]
+        )
+        .is_empty());
+
+        let plan = create_from(&repo, &root, "at sha", &first[..10]).await;
+        assert_eq!(head(Path::new(&plan.target)), first);
+
+        let err = prepare_create(&CreateRequest {
+            repo_path: s(&repo).to_string(),
+            name: Some("x".into()),
+            new_branch: true,
+            start_from: Some("nope".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("not a branch or commit"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn remote_start_refs_are_fetched_and_base_ref_is_the_default() {
+        let (root, upstream) = repo("remote");
+        let clone = root.join("clone");
+        git(&root, &["clone", "-q", s(&upstream), s(&clone)]);
+        git(
+            &upstream,
+            &["commit", "-q", "--allow-empty", "-m", "moved on"],
+        );
+        let moved = head(&upstream);
+        assert_ne!(head(&clone), moved, "the clone has not fetched yet");
+        assert_eq!(base_ref(s(&clone)).await.as_deref(), Some("origin/main"));
+
+        // Explicit remote branch: fetched, then branched from.
+        let plan = create_from(&clone, &root, "from remote", "origin/main").await;
+        assert_eq!(plan.fetch, Some(("origin".to_string(), "main".to_string())));
+        assert_eq!(head(Path::new(&plan.target)), moved);
+
+        // No start-from: the base ref (origin/main), not the clone's HEAD.
+        git(&upstream, &["commit", "-q", "--allow-empty", "-m", "again"]);
+        let plan = create_from(&clone, &root, "from base", "").await;
+        assert_eq!(plan.start_ref.as_deref(), Some("refs/remotes/origin/main"));
+        assert_eq!(head(Path::new(&plan.target)), head(&upstream));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

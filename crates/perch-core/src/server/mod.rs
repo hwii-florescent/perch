@@ -2232,6 +2232,7 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.rename",
         "workspace.restore",
         "worktree.job",
+        "worktree.startFrom",
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",

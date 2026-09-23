@@ -15,20 +15,14 @@
 
 use super::*;
 use crate::protocol::WorktreeJob;
-use crate::worktree::{self, CreatePlan};
+use crate::worktree::{self, CreatePlan, CreateRequest};
 
 pub(super) struct JobEntry {
     job: WorktreeJob,
-    params: JobParams,
+    /// The request as first prepared, with a derived branch pinned so a retry
+    /// reuses (or recreates) the same name instead of moving on to `-2`.
+    params: CreateRequest,
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
-}
-
-#[derive(Clone)]
-struct JobParams {
-    repo_path: String,
-    branch: String,
-    new_branch: bool,
-    path: Option<String>,
 }
 
 pub(super) type JobTable = Arc<Mutex<HashMap<String, JobEntry>>>;
@@ -62,23 +56,10 @@ fn remove(app: &AppState, job_id: &str) {
     publish(app);
 }
 
-pub(super) fn handle_start(
-    state: &Arc<ConnState>,
-    request_id: String,
-    repo_path: String,
-    branch: String,
-    new_branch: bool,
-    path: Option<String>,
-) {
+pub(super) fn handle_start(state: &Arc<ConnState>, request_id: String, mut params: CreateRequest) {
     let app = state.app.clone();
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
-        let params = JobParams {
-            repo_path,
-            branch,
-            new_branch,
-            path,
-        };
         // Validation errors (bad branch name, missing branch) answer the form
         // directly instead of becoming a failed row.
         let plan = match prepare(&params).await {
@@ -93,13 +74,20 @@ pub(super) fn handle_start(
                 return;
             }
         };
+        params.branch = plan.branch.clone();
+        params.path = Some(plan.target.clone());
         let job = WorktreeJob {
             job_id: Uuid::new_v4().to_string(),
             repo_path: params.repo_path.clone(),
             branch: plan.branch.clone(),
             path: plan.target.clone(),
             status: "running".to_string(),
-            phase: "Checking out".to_string(),
+            phase: if plan.fetch.is_some() {
+                "Fetching"
+            } else {
+                "Checking out"
+            }
+            .to_string(),
             error: None,
             started_at: now_ms(),
         };
@@ -174,15 +162,10 @@ pub(super) fn handle_dismiss(app: &AppState, job_id: &str) {
     }
 }
 
-async fn prepare(params: &JobParams) -> Result<CreatePlan, String> {
-    worktree::prepare_create(
-        &params.repo_path,
-        &params.branch,
-        params.new_branch,
-        params.path.as_deref(),
-    )
-    .await
-    .map_err(|error| error.message)
+async fn prepare(params: &CreateRequest) -> Result<CreatePlan, String> {
+    worktree::prepare_create(params)
+        .await
+        .map_err(|error| error.message)
 }
 
 /// Run one attempt. `plan` is `None` on retry: the repo may have changed since
@@ -216,13 +199,17 @@ fn spawn_run(app: AppState, job_id: String, plan: Option<CreatePlan>) {
                 _ = &mut cancel_rx => return remove(&app, &job_id),
             },
         };
-        update(&app, &job_id, |entry| {
-            entry.job.phase = "Checking out".to_string();
-            entry.job.branch = plan.branch.clone();
-            entry.job.path = plan.target.clone();
-        });
+        if plan.fetch.is_some() {
+            update(&app, &job_id, |entry| {
+                entry.job.phase = "Fetching".to_string()
+            });
+        }
         let created = tokio::select! {
-            created = worktree::execute_create(&plan) => created,
+            created = async {
+                worktree::fetch_start_ref(&plan).await;
+                update(&app, &job_id, |entry| entry.job.phase = "Checking out".to_string());
+                worktree::execute_create(&plan).await
+            } => created,
             _ = &mut cancel_rx => {
                 // Dropping the create future killed git; undo what it made.
                 worktree::discard_create(&plan).await;

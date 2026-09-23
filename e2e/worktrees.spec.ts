@@ -168,8 +168,10 @@ async function createWorktree(popover: Locator, branch: string): Promise<string>
   const branchInput = popover.locator('[data-testid="worktree-branch-input"]');
   await expect(branchInput).toBeVisible({ timeout: 5000 });
   await branchInput.fill(branch);
-  // "new branch" is checked by default — assert rather than set it.
-  await expect(popover.locator('[data-testid="worktree-new-branch"]')).toBeChecked();
+  // Hosts with the start-from picker drop the "new branch" checkbox (an
+  // existing branch is checked out anyway); older hosts default it on.
+  const newBranch = popover.locator('[data-testid="worktree-new-branch"]');
+  if (await newBranch.count()) await expect(newBranch).toBeChecked();
   // The custom-path field mirrors the default location for the typed branch.
   await expect(popover.locator('[data-testid="worktree-path-input"]')).toHaveValue(
     path.join(WORKTREES_ROOT, branch),
@@ -466,5 +468,36 @@ test.describe("Git worktrees", () => {
     const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
     await expect(projectCard.locator(".workspace-entry").filter({ hasText: "wt-retry" })).toHaveCount(1, { timeout: 20000 });
     expect(fs.existsSync(path.join(blocked, "README.md"))).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // WT8 — task name → derived branch, start-from a local branch, and the
+  // `-2` suffix when the derived name is taken.
+  // -------------------------------------------------------------------------
+  test("WT8. Task name derives the branch; start-from picks the base", async ({ page }) => {
+    sh("git checkout -q -b wt-base", FIXTURE);
+    sh('git commit -q --allow-empty -m "base work"', FIXTURE);
+    const baseHead = execSync("git rev-parse HEAD", { cwd: FIXTURE, input: "" }).toString().trim();
+    sh("git checkout -q main", FIXTURE);
+    sh("git branch stack-on-base", FIXTURE); // taken → the derived name gets -2
+
+    await freshPage(page);
+    const popover = await openWorktreeMenu(page);
+    await popover.locator('[data-testid="worktree-new"]').click();
+    await popover.locator('[data-testid="worktree-name-input"]').fill("Stack on base!");
+    await expect(popover.locator('[data-testid="worktree-branch-input"]')).toHaveAttribute(
+      "placeholder", "branch: stack-on-base");
+    await expect(popover.locator('datalist option[value="wt-base"]')).toHaveCount(1);
+    await popover.locator('[data-testid="worktree-start-input"]').fill("wt-base");
+    await page.screenshot({ path: "artifacts/worktrees-wt8-form.png" });
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+
+    const created = path.join(WORKTREES_ROOT, "stack-on-base-2");
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "stack-on-base-2" })).toHaveCount(1, { timeout: 20000 });
+    const git = (args: string) => execSync(`git ${args}`, { cwd: created, input: "" }).toString().trim();
+    expect(git("branch --show-current")).toBe("stack-on-base-2");
+    expect(git("rev-parse HEAD")).toBe(baseHead);
+    expect(git("config branch.stack-on-base-2.base")).toBe("refs/heads/wt-base");
   });
 });

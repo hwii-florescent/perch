@@ -648,8 +648,21 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             branch,
             new_branch,
             path,
+            name,
+            start_from,
         } => workspace::handle_worktree_create(
-            state, raw_text, request_id, host_id, repo_path, branch, new_branch, path,
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            crate::worktree::CreateRequest {
+                repo_path,
+                branch,
+                name,
+                new_branch,
+                path,
+                start_from,
+            },
         ),
         ClientMessage::WorktreeRemove {
             request_id,
@@ -666,7 +679,20 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             branch,
             new_branch,
             path,
-        } => worktree_jobs::handle_start(state, request_id, repo_path, branch, new_branch, path),
+            name,
+            start_from,
+        } => worktree_jobs::handle_start(
+            state,
+            request_id,
+            crate::worktree::CreateRequest {
+                repo_path,
+                branch,
+                name,
+                new_branch,
+                path,
+                start_from,
+            },
+        ),
         ClientMessage::WorktreeJobCancel { job_id } => {
             worktree_jobs::handle_cancel(&state.app, &job_id)
         }

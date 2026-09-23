@@ -1374,17 +1374,27 @@ pub enum ClientMessage {
     /// (herdr's `run_worktree_add_command` behavior). `path` overrides the
     /// default `~/.perch/worktrees/<repo-name>/<branch-slug>` location.
     /// Replies with `worktree.done` or `worktree.error`.
+    ///
+    /// Capability `worktree.startFrom` adds: an empty `branch` derived from
+    /// `name` (the task name, suffixed `-2`… on conflict), and `startFrom`,
+    /// the new branch's start point (local branch, `remote/branch` — fetched
+    /// first — or commit; absent = the repo's base ref).
     #[serde(rename = "worktree.create", rename_all = "camelCase")]
     WorktreeCreate {
         request_id: String,
         #[serde(default)]
         host_id: Option<String>,
         repo_path: String,
+        #[serde(default)]
         branch: String,
         #[serde(default)]
         new_branch: bool,
         #[serde(default)]
         path: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        start_from: Option<String>,
     },
 
     /// Remove the worktree checked out at `path`. Refused with
@@ -1410,11 +1420,16 @@ pub enum ClientMessage {
     WorktreeJobStart {
         request_id: String,
         repo_path: String,
+        #[serde(default)]
         branch: String,
         #[serde(default)]
         new_branch: bool,
         #[serde(default)]
         path: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        start_from: Option<String>,
     },
 
     /// Cancel a running job: git is killed and anything the job created (the
@@ -2095,6 +2110,14 @@ pub enum ServerMessage {
         repo_path: String,
         default_root: String,
         worktrees: Vec<WorktreeEntry>,
+        /// The repo's base ref (`origin/main`), when `origin/HEAD` is set —
+        /// the start-from picker's default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_ref: Option<String>,
+        /// Local and remote branch names (`main`, `origin/feature`) for the
+        /// start-from picker.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refs: Vec<String>,
     },
 
     /// Success reply to `worktree.create` / `worktree.remove`. `path` is the

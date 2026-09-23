@@ -430,7 +430,7 @@ export interface PerchState {
    * (request-correlated like `fs.browse`); the sidebar's `WorktreeMenu`
    * renders straight from this cache so a create/remove round-trip followed
    * by a re-list refreshes every open menu for that repo. */
-  worktrees: Record<string, { worktrees: WorktreeEntry[]; defaultRoot: string }>;
+  worktrees: Record<string, { worktrees: WorktreeEntry[]; defaultRoot: string; baseRef?: string; refs?: string[] }>;
   /** Which project's worktree popover an external trigger (the leader,W
    * keybind) wants opened, as `${hostId}:${cwd}` plus a monotonically
    * increasing nonce so pressing the same binding twice re-opens it. The
@@ -559,6 +559,7 @@ export interface PerchState {
     branch: string,
     newBranch: boolean,
     path?: string,
+    extra?: WorktreeCreateExtra,
   ) => Promise<WorktreeReply>;
   /** Remove a worktree. Without `force`, a dirty checkout comes back as
    * `worktree.error { dirty: true }` — the caller escalates that into a
@@ -577,6 +578,7 @@ export interface PerchState {
     branch: string,
     newBranch: boolean,
     path?: string,
+    extra?: WorktreeCreateExtra,
   ) => Promise<WorktreeReply>;
   cancelWorktreeJob: (jobId: string) => void;
   retryWorktreeJob: (jobId: string) => void;
@@ -690,6 +692,13 @@ const initialLaunchModes = new Map<string, SessionMode>();
  * matching reply arrives (mirrors the hub's `PendingKey::Browse` semantics
  * on the server side). */
 const pendingBrowses = new Map<string, (msg: FsBrowseResultMessage) => void>();
+
+/** Capability `worktree.startFrom`: a task name to derive the branch from
+ * (when `branch` is empty) and the new branch's start point. */
+export interface WorktreeCreateExtra {
+  name?: string;
+  startFrom?: string;
+}
 
 /** Any of the three replies a `worktree.*` request can produce. */
 export type WorktreeReply =
@@ -1826,7 +1835,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     return sendWorktreeRequest({ type: "worktree.list", requestId: "", hostId, repoPath });
   },
 
-  createWorktree: (hostId, repoPath, branch, newBranch, path) => {
+  createWorktree: (hostId, repoPath, branch, newBranch, path, extra) => {
     return sendWorktreeRequest({
       type: "worktree.create",
       requestId: "",
@@ -1835,6 +1844,8 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       branch,
       newBranch,
       ...(path ? { path } : {}),
+      ...(extra?.name ? { name: extra.name } : {}),
+      ...(extra?.startFrom ? { startFrom: extra.startFrom } : {}),
     });
   },
 
@@ -1849,7 +1860,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     });
   },
 
-  startWorktreeJob: (repoPath, branch, newBranch, path) => {
+  startWorktreeJob: (repoPath, branch, newBranch, path, extra) => {
     return sendWorktreeRequest({
       type: "worktree.job.start",
       requestId: "",
@@ -1858,6 +1869,8 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       branch,
       newBranch,
       ...(path ? { path } : {}),
+      ...(extra?.name ? { name: extra.name } : {}),
+      ...(extra?.startFrom ? { startFrom: extra.startFrom } : {}),
     });
   },
   cancelWorktreeJob: (jobId) => socket.send({ type: "worktree.job.cancel", jobId }),
@@ -3374,7 +3387,7 @@ export function handleServerMessage(msg: ServerMessage): void {
       usePerchStore.setState((state) => ({
         worktrees: {
           ...state.worktrees,
-          [key]: { worktrees: msg.worktrees, defaultRoot: msg.defaultRoot },
+          [key]: { worktrees: msg.worktrees, defaultRoot: msg.defaultRoot, baseRef: msg.baseRef, refs: msg.refs },
         },
       }));
       resolveWorktreeRequest(msg.requestId, msg);
