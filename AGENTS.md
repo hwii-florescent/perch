@@ -21,7 +21,7 @@ mode first**. The Hosted/UI chat surface is frozen: don't extend it.
 ## Commands
 
 ```sh
-cargo test -p perch-core            # ~270 tests, a few seconds; add a substring to filter
+cargo test -p perch-core            # ~290 tests, a few seconds; add a substring to filter
 cargo test -p perchd                # daemon unit + integration tests
 npm install && npm run build        # builds packages/shared then packages/web → packages/web/dist (served by axum)
 npm test                            # web unit tests (vitest)
@@ -30,6 +30,7 @@ cargo run -p perch-core -- --port 7788     # flags/env: --db-path PERCH_DB, --ho
 cargo run -p perch-desktop                 # macOS / Linux+webkit2gtk; PERCH_DESKTOP_TEST=1 = hidden, unfocused window
 npm run build && (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build)   # installers
 cd e2e && npx playwright test <spec> [-g name]   # boots :7799 + :7800 itself; real agent turns
+cd e2e && npx playwright test -c worktree-lifecycle.config.ts   # phase 3, own core on :7796
 ```
 
 Releases: `.github/workflows/release.yml`. A `v*` tag drafts a GitHub release
@@ -45,7 +46,8 @@ there, not here.
 - **Server:** `server/mod.rs` (AppState, WS connection handling, background
   tasks; the transition bridge in `spawn_agent_turn_state_task` owns the
   sidebar's running/blocked sets). `server/dispatch.rs` routes every client
-  message. `server/{session,terminal,agents,native_ui,workspace,git,fs,reviews,config}.rs`.
+  message. `server/{session,terminal,agents,native_ui,workspace,git,fs,reviews,config}.rs`;
+  `server/worktree_jobs.rs` runs background worktree creates (`worktree.job.*`).
 - **Protocol:** `protocol.rs` ⇄ `packages/shared/src/protocol.ts`.
 - **Agents:**
   - `agent_fleet.rs`: provider manifests and the `AgentLifecycleRegistry`

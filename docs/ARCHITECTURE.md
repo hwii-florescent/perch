@@ -138,8 +138,8 @@ The pattern: a domain module with no protocol dependency, plus a thin
 State lives in `~/.perch/history.sqlite` and `settings.json`; Orca's JSON
 store isn't copied. **Protocol:** a new field is optional. A new message
 family is gated behind a capability in `server.info`, because older peers drop
-unknown messages silently. The planned message families are `worktree.*`,
-`layout.*`, `pane.*` and `quickCommand.*`.
+unknown messages silently. `worktree.*` is built; the planned
+message families are `layout.*`, `pane.*` and `quickCommand.*`.
 
 ## Agent CLI (phase 6)
 
@@ -152,9 +152,9 @@ Orca's `cli/reference.mdx`.
 
 Keep React, dockview and xterm (`createPerchTerminal` rules in AGENTS.md).
 Build order:
-1. Sidebar: projects → worktrees, with status glyphs.
+1. ✅ Sidebar: projects → worktrees, with status glyphs.
 2. A per-worktree tab strip with splits that persist.
-3. Worktree create dialog with a start-from picker and progress.
+3. ✅ Worktree create dialog with a start-from picker and progress.
 4. Cmd-J.
 5. Cmd-P.
 6. Quick commands.
