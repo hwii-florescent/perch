@@ -185,6 +185,27 @@ impl HistoryDb {
                 file_buffer_columns.insert(name);
             }
         }
+        let mut workspace_columns = std::collections::HashSet::new();
+        {
+            let mut stmt = conn.prepare("PRAGMA table_info(workspaces)")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(1)?;
+                workspace_columns.insert(name);
+            }
+        }
+        if !workspace_columns.contains("pinned") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        if !workspace_columns.contains("hidden") {
+            conn.execute(
+                "ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         if !file_buffer_columns.contains("base_content") {
             conn.execute(
                 "ALTER TABLE file_buffers ADD COLUMN base_content TEXT NOT NULL DEFAULT ''",
@@ -1248,6 +1269,60 @@ mod tests {
         for dir in [project_dir, child_dir, other_dir, other_child] {
             std::fs::remove_dir_all(dir).unwrap();
         }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn worktree_workspaces_pin_and_nest_without_cycles() {
+        let path = temp_db_path("worktree-nesting");
+        let root = std::env::temp_dir().join(format!("perch-nest-{}", Uuid::new_v4()));
+        let dir = |name: &str| {
+            let d = root.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            d.to_string_lossy().into_owned()
+        };
+        let (project, a, b) = (dir("repo"), dir("a"), dir("b"));
+        let db = HistoryDb::open(&path).unwrap();
+        let add = |p: &str| {
+            db.create_worktree_workspace("local", &project, p, None, None, None)
+                .unwrap()
+        };
+        let (a, b) = (add(&a), add(&b));
+        let primary = a.parent_workspace_id.clone().unwrap();
+
+        assert!(db.set_workspace_pinned(&a.id, true).unwrap().pinned);
+        assert!(db.set_workspace_hidden(&a.id, true).unwrap().hidden);
+        assert!(!db.set_workspace_hidden(&a.id, false).unwrap().hidden);
+        assert!(db.set_workspace_hidden(&primary, true).is_err());
+        // A move repoints the row; a folder-derived name follows, a chosen one stays.
+        let moved = db
+            .set_workspace_path(&b.id, &format!("{}-moved", b.path))
+            .unwrap();
+        assert_eq!(
+            (moved.id.as_str(), moved.name.as_str()),
+            (b.id.as_str(), "b-moved")
+        );
+        db.rename_workspace(&a.id, "Task A").unwrap();
+        assert_eq!(
+            db.set_workspace_path(&a.id, "/elsewhere/a2").unwrap().name,
+            "Task A"
+        );
+        let nested = db.set_workspace_parent(&b.id, Some(&a.id)).unwrap();
+        assert_eq!(nested.parent_workspace_id.as_deref(), Some(a.id.as_str()));
+        let cycle = db.set_workspace_parent(&a.id, Some(&b.id)).unwrap_err();
+        assert!(cycle.to_string().contains("inside itself"));
+        assert!(db.set_workspace_parent(&a.id, Some(&a.id)).is_err());
+        assert!(db.set_workspace_parent(&primary, Some(&a.id)).is_err());
+        let top = db.set_workspace_parent(&b.id, None).unwrap();
+        assert_eq!(top.parent_workspace_id.as_deref(), Some(primary.as_str()));
+
+        let other = dir("other");
+        let foreign = db
+            .create_worktree_workspace("local", &other, &dir("o1"), None, None, None)
+            .unwrap();
+        assert!(db.set_workspace_parent(&b.id, Some(&foreign.id)).is_err());
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
         std::fs::remove_file(path).unwrap();
     }
 

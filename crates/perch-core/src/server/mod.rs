@@ -80,6 +80,7 @@ use reviews::settle_review_packet_from_db;
 mod fs;
 use fs::{filesystem_operation_lock, workspace_file_service};
 mod workspace;
+mod worktree_jobs;
 #[cfg(test)]
 use workspace::effective_focus;
 mod agent_history;
@@ -248,6 +249,9 @@ struct AppState {
     /// an approval-prompt pattern (see `blocked_patterns`). Cleared on the
     /// next `terminal.input` to that terminal, or when the terminal exits.
     blocked_sessions: Arc<Mutex<HashSet<String>>>,
+    /// Running/blocked sessions silent for 30 minutes (`stale_sessions`).
+    /// Recomputed every second by `spawn_agent_lifecycle_task`.
+    stale_sessions: Arc<Mutex<HashSet<String>>>,
     /// Local session ids already `mark_cli_activity`'d in the DB this process
     /// lifetime — dedupes the DB write + `notify_session_updated` so a
     /// CLI-attached terminal's `terminal.input` (fires on every keystroke)
@@ -334,6 +338,8 @@ struct AppState {
     /// here because the SQLite mutex alone cannot keep a list/snapshot from
     /// observing a mutation between its DB reads and its revision number.
     foundation_lock: Arc<Mutex<()>>,
+    /// Background worktree creates — see `worktree_jobs.rs`.
+    worktree_jobs: worktree_jobs::JobTable,
     /// One retained-descriptor service per durable workspace. The service
     /// contains only bounded limits and an open root handle; it never caches
     /// file contents. Keeping it in `AppState` prevents a root pathname swap
@@ -605,6 +611,7 @@ pub async fn run(
         session_viewers: Arc::new(Mutex::new(HashMap::new())),
         unseen_sessions: Arc::new(Mutex::new(HashSet::new())),
         blocked_sessions: Arc::new(Mutex::new(HashSet::new())),
+        stale_sessions: Arc::new(Mutex::new(HashSet::new())),
         cli_active_sessions: Arc::new(Mutex::new(HashSet::new())),
         cli_title_buffers: Arc::new(Mutex::new(HashMap::new())),
         workspace_git: Arc::new(Mutex::new(HashMap::new())),
@@ -631,6 +638,7 @@ pub async fn run(
         snapshot_epoch: Uuid::new_v4().to_string(),
         snapshot_revision: Arc::new(AtomicU64::new(0)),
         foundation_lock: Arc::new(Mutex::new(())),
+        worktree_jobs: Arc::new(Mutex::new(HashMap::new())),
         filesystem_services: Arc::new(Mutex::new(HashMap::new())),
         filesystem_operation_locks: Arc::new(Mutex::new(HashMap::new())),
         filesystem_operation_overflow: Arc::new(Mutex::new(())),
@@ -1108,6 +1116,7 @@ fn spawn_git_poll_task(state: AppState) {
         // the cache cold. This is what keeps the "warm by first connect"
         // property regardless of the zero-client gating below.
         run_git_poll_pass(&state).await;
+        let mut worktree_dirs = HashMap::new();
 
         loop {
             tokio::select! {
@@ -1123,6 +1132,7 @@ fn spawn_git_poll_task(state: AppState) {
                 continue;
             }
             run_git_poll_pass(&state).await;
+            workspace::discover_worktrees(&state, &mut worktree_dirs).await;
         }
     });
 }
@@ -1195,6 +1205,7 @@ fn spawn_agent_lifecycle_task(state: AppState) {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             let _operation = state.agent_operation_lock.lock().unwrap();
             let snapshots = state.agent_runtime.lifecycle().list();
+            refresh_stale_sessions(&state, &snapshots);
             seen.retain(|key, _| snapshots.iter().any(|snapshot| &snapshot.key == key));
             for snapshot in snapshots {
                 if !state
@@ -1230,6 +1241,23 @@ fn spawn_agent_lifecycle_task(state: AppState) {
             }
         }
     });
+}
+
+/// Apply the decay half of the reader policy and repaint what crossed it.
+fn refresh_stale_sessions(state: &AppState, snapshots: &[crate::agent_fleet::AgentSnapshot]) {
+    let next = {
+        let running = state.running_sessions.lock().unwrap();
+        let blocked = state.blocked_sessions.lock().unwrap();
+        session::stale_sessions(
+            snapshots,
+            |id| running.contains(id) || blocked.contains(id),
+            now_millis(),
+        )
+    };
+    let previous = std::mem::replace(&mut *state.stale_sessions.lock().unwrap(), next.clone());
+    for session_id in previous.symmetric_difference(&next) {
+        notify_session_updated(state, session_id);
+    }
 }
 
 /// Consume provider transitions in order, including a whole turn that fits
@@ -1871,6 +1899,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     .contains(&session_id);
                 !already_blocked
                     && !on_data_app.agent_runtime.has_native_status(&session_id)
+                    && !on_data_app.agent_runtime.has_title_status(&session_id)
                     && blocked_patterns().iter().any(|re| re.is_match(tail))
             };
             if newly_blocked {
@@ -1953,6 +1982,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             .snapshot_revision
             .load(std::sync::atomic::Ordering::SeqCst),
     });
+    let _ = state.out_tx.send(worktree_jobs::jobs_message(&state.app));
 
     // Send the current hosts list so the sidebar can render remote sections
     // without waiting for the Settings modal to call fetchHosts().
@@ -1982,6 +2012,9 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     for msg in state.app.hub.snapshot_host_states() {
         let _ = state.out_tx.send(msg);
     }
+    for msg in state.app.hub.snapshot_remote_git() {
+        let _ = state.out_tx.send(msg);
+    }
 
     // Send the currently-known git branch/ahead-behind for every local cwd
     // already polled by `spawn_git_poll_task`, so a newly-connected client
@@ -2008,6 +2041,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let event_running = app.running_sessions.clone();
     let event_unseen = app.unseen_sessions.clone();
     let event_blocked = app.blocked_sessions.clone();
+    let event_stale = app.stale_sessions.clone();
     tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
@@ -2025,10 +2059,12 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     let running = event_running.lock().unwrap();
                     let unseen = event_unseen.lock().unwrap();
                     let blocked = event_blocked.lock().unwrap();
-                    let summary = build_session_summary(row, &running, &unseen, &blocked);
+                    let stale = event_stale.lock().unwrap();
+                    let summary = build_session_summary(row, &running, &unseen, &blocked, &stale);
                     drop(running);
                     drop(unseen);
                     drop(blocked);
+                    drop(stale);
                     if event_out_tx
                         .send(ServerMessage::SessionUpdated { session: summary })
                         .is_err()
@@ -2200,6 +2236,12 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.focus",
         "workspace.rename",
         "workspace.restore",
+        "worktree.job",
+        "worktree.startFrom",
+        "worktree.delete",
+        "workspace.pin",
+        "workspace.nest",
+        "workspace.visibility",
         "session.mode.get",
         "session.mode.set",
         "agent.manifest.list",
@@ -2854,6 +2896,7 @@ mod session_viewer_filter_tests {
                 archived: false,
                 unseen: false,
                 blocked: false,
+                stale: false,
                 project_id: None,
                 workspace_id: None,
             },
@@ -2875,6 +2918,7 @@ mod session_viewer_filter_tests {
             is_ssh: None,
             claude_models: None,
             codex_models: None,
+            capabilities: None,
         };
         let bare_error = ServerMessage::Error {
             message: "boom".to_string(),
@@ -2944,6 +2988,8 @@ mod foundation_focus_tests {
             state: state.to_string(),
             created_at: 0,
             updated_at: 0,
+            pinned: false,
+            hidden: false,
         }
     }
 

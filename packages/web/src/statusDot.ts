@@ -12,8 +12,9 @@ import type { SessionSummary } from "@perch/shared";
 export type AgentDotState = "blocked" | "working" | "done" | "idle" | "unknown";
 
 export function sessionDotState(s: SessionSummary): AgentDotState {
-  if (s.blocked) return "blocked";
-  if (s.status === "running") return "working";
+  // `stale`: busy but silent for 30 minutes reads as idle (server/session.rs).
+  if (s.blocked && !s.stale) return "blocked";
+  if (s.status === "running" && !s.stale) return "working";
   if (s.unseen) return "done";
   return "idle"; // seen + idle
 }

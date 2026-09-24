@@ -221,6 +221,8 @@ export interface HostInfoMessage {
   isSsh?: boolean;
   claudeModels?: ModelEntry[];
   codexModels?: ModelEntry[];
+  /** The remote's capabilities that the hub relays (`hub::RELAYED_CAPABILITIES`). */
+  capabilities?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -359,11 +361,14 @@ export interface SessionSummary {
   cliStarted?: boolean;
   /** Last explicitly selected CLI provider, independent of the Chat runner. */
   cliProviderId?: string;
-  /** Whether the session's agent is blocked on an approval prompt, detected
-   * by scanning recent CLI-attached terminal output for known approval-
-   * prompt patterns. Only meaningful for sessions with a live CLI-attached
-   * terminal; otherwise always false. Defaults to false when absent. */
+  /** Whether the session's agent is waiting on the human (a permission
+   * prompt or a question), from native CLI events, the OSC title, or as a
+   * last resort an output pattern. Defaults to false when absent. */
   blocked?: boolean;
+  /** Running or blocked, but with no status evidence for 30 minutes: read it
+   * as idle. Display only; the turn is not over, so a later completion still
+   * notifies. Defaults to false when absent. */
+  stale?: boolean;
   /** Stable durable project association, absent for old remote peers. */
   projectId?: string;
   /** Stable durable workspace association, absent for old remote peers. */
@@ -477,6 +482,35 @@ export interface WorktreeEntry {
   isPrimary: boolean;
   /** Has uncommitted or untracked files (drives the remove guard). */
   isDirty: boolean;
+}
+
+/** A branch kept by `worktree.remove { deleteBranch }` because git would not
+ * prove it merged. Review `commits`, then `worktree.branch.delete` succeeds
+ * only while the branch is still at `head`. */
+export interface WorktreePreservedBranch {
+  name: string;
+  head: string;
+  /** Up to 20 "<short sha> <subject>" lines on no other branch or remote. */
+  commits: string[];
+  /** Total number of such commits. */
+  unmerged: number;
+}
+
+/** One background worktree create (`worktree.job.start`), as broadcast in
+ * `worktree.jobs`. Mirrors `WorktreeJob` in `protocol.rs`. A job leaves the
+ * list when it succeeds or once a cancel has cleaned up; a failed job stays,
+ * with `error`, until retried or dismissed. */
+export interface WorktreeJob {
+  jobId: string;
+  repoPath: string;
+  branch: string;
+  /** Where the checkout is being created. */
+  path: string;
+  status: "running" | "cancelling" | "failed";
+  /** Human-readable step, e.g. "Checking out". */
+  phase: string;
+  error?: string;
+  startedAt: number;
 }
 
 /** Git status state for one server-authorized workspace path. */
@@ -1215,7 +1249,11 @@ export interface WorktreeListMessage {
   repoPath: string;
 }
 
-/** Create a linked worktree for `branch`. `newBranch` is a hint: when the
+/** Create a linked worktree for `branch`. Capability `worktree.startFrom`
+ * adds: an empty `branch` derived from `name` (the task name, suffixed `-2`…
+ * on conflict), and `startFrom`, the new branch's start point (local branch,
+ * `remote/branch` — fetched first — or commit; absent = the repo's base ref).
+ * `newBranch` is a hint: when the
  * branch already exists locally the existing-branch form is used anyway.
  * `path` overrides the default `~/.perch/worktrees/<repo-name>/<branch-slug>`
  * location. Replies with `worktree.done` or `worktree.error`. */
@@ -1224,9 +1262,13 @@ export interface WorktreeCreateMessage {
   requestId: string;
   hostId?: string;
   repoPath: string;
-  branch: string;
+  branch?: string;
   newBranch?: boolean;
   path?: string;
+  name?: string;
+  startFrom?: string;
+  /** Nest the new workspace under this one (capability `workspace.nest`). */
+  parentWorkspaceId?: string;
 }
 
 /** Remove the worktree checked out at `path`. Refused with
@@ -1239,6 +1281,54 @@ export interface WorktreeRemoveMessage {
   repoPath: string;
   path: string;
   force?: boolean;
+  /** Also delete the checkout's branch (capability `worktree.delete`);
+   * unmerged work comes back as `preservedBranch`. */
+  deleteBranch?: boolean;
+}
+
+/** Force-delete a branch a delete preserved, after review. Refused when the
+ * branch moved off `expectedHead` or is checked out. */
+export interface WorktreeBranchDeleteMessage {
+  type: "worktree.branch.delete";
+  requestId: string;
+  hostId?: string;
+  repoPath: string;
+  branch: string;
+  expectedHead: string;
+}
+
+/** Start a background create (capability `worktree.job`, local host only).
+ * Same inputs as `worktree.create`; replies at once with
+ * `worktree.job.started` or `worktree.error`, then progress arrives as
+ * `worktree.jobs` broadcasts. */
+export interface WorktreeJobStartMessage {
+  type: "worktree.job.start";
+  requestId: string;
+  repoPath: string;
+  branch?: string;
+  newBranch?: boolean;
+  path?: string;
+  name?: string;
+  startFrom?: string;
+  parentWorkspaceId?: string;
+}
+
+/** Cancel a running job: git is killed and anything the job created is removed. */
+export interface WorktreeJobCancelMessage {
+  type: "worktree.job.cancel";
+  jobId: string;
+}
+
+/** Re-run a failed job with the same inputs. */
+export interface WorktreeJobRetryMessage {
+  type: "worktree.job.retry";
+  jobId: string;
+}
+
+/** Drop a failed job from the list. */
+export interface WorktreeJobDismissMessage {
+  type: "worktree.job.dismiss";
+  jobId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,6 +1366,11 @@ export interface WorkspaceSummary {
   state: "active" | "sleeping" | "archived";
   createdAt: number;
   updatedAt: number;
+  /** Kept at the top of its project (`workspace.pin`). */
+  pinned?: boolean;
+  /** A worktree perch discovered but did not create, left out of the
+   * sidebar until shown (`workspace.visibility`). */
+  hidden?: boolean;
 }
 
 export interface ProjectListMessage {
@@ -1331,6 +1426,31 @@ export interface WorkspaceRenameMessage {
   requestId: string;
   workspaceId: string;
   name: string;
+}
+
+/** Pin a workspace to the top of its project, or unpin it. */
+export interface WorkspacePinMessage {
+  type: "workspace.pin";
+  requestId: string;
+  workspaceId: string;
+  pinned: boolean;
+}
+
+/** Show or hide a linked worktree's workspace in the sidebar. */
+export interface WorkspaceVisibilityMessage {
+  type: "workspace.visibility";
+  requestId: string;
+  workspaceId: string;
+  hidden: boolean;
+}
+
+/** Nest a linked worktree's workspace under another of the same project
+ * (sidebar grouping only); absent `parentWorkspaceId` = top level. */
+export interface WorkspaceNestMessage {
+  type: "workspace.nest";
+  requestId: string;
+  workspaceId: string;
+  parentWorkspaceId?: string;
 }
 
 export interface WorkspaceRestoreMessage {
@@ -1409,6 +1529,14 @@ export type ClientMessage =
   | WorktreeListMessage
   | WorktreeCreateMessage
   | WorktreeRemoveMessage
+  | WorktreeJobStartMessage
+  | WorktreeBranchDeleteMessage
+  | WorkspacePinMessage
+  | WorkspaceVisibilityMessage
+  | WorkspaceNestMessage
+  | WorktreeJobCancelMessage
+  | WorktreeJobRetryMessage
+  | WorktreeJobDismissMessage
   | ProjectListMessage
   | ProjectCreateMessage
   | ProjectRenameMessage
@@ -1961,6 +2089,10 @@ export interface WorktreeListResultMessage {
   repoPath: string;
   defaultRoot: string;
   worktrees: WorktreeEntry[];
+  /** The repo's base ref (`origin/main`) when `origin/HEAD` is set. */
+  baseRef?: string;
+  /** Local and remote branch names for the start-from picker. */
+  refs?: string[];
 }
 
 /** Success reply to `worktree.create` / `worktree.remove`. `path` is the
@@ -1969,10 +2101,12 @@ export interface WorktreeDoneMessage {
   type: "worktree.done";
   requestId: string;
   hostId: string;
-  action: "create" | "remove";
+  action: "create" | "remove" | "branchDelete";
   path: string;
   /** Durable workspace created for a linked checkout, when available. */
   workspace?: WorkspaceSummary;
+  /** Remove with `deleteBranch`: the branch git would not delete. */
+  preservedBranch?: WorktreePreservedBranch;
 }
 
 /** Failure reply to any `worktree.*` request. `dirty` is true only when the
@@ -1985,6 +2119,20 @@ export interface WorktreeErrorMessage {
   hostId: string;
   message: string;
   dirty?: boolean;
+}
+
+/** Reply to `worktree.job.start`: the job was accepted. */
+export interface WorktreeJobStartedMessage {
+  type: "worktree.job.started";
+  requestId: string;
+  job: WorktreeJob;
+}
+
+/** Every background worktree job on this host. Sent on connect and after
+ * every change; the list replaces the previous one. */
+export interface WorktreeJobsMessage {
+  type: "worktree.jobs";
+  jobs: WorktreeJob[];
 }
 
 export interface ProjectListResponseMessage {
@@ -2106,6 +2254,8 @@ export type ServerMessage =
   | WorktreeListResultMessage
   | WorktreeDoneMessage
   | WorktreeErrorMessage
+  | WorktreeJobStartedMessage
+  | WorktreeJobsMessage
   | ProjectListResponseMessage
   | ProjectUpdatedMessage
   | ProjectDeletedMessage

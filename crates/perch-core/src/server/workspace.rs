@@ -50,6 +50,8 @@ fn workspace_to_wire(row: crate::db::WorkspaceRow) -> WorkspaceSummary {
         dirty: row.dirty,
         start_snapshot: row.start_snapshot,
         parent_workspace_id: row.parent_workspace_id,
+        pinned: row.pinned,
+        hidden: row.hidden,
         state: match row.state.as_str() {
             "sleeping" => WorkspaceState::Sleeping,
             "archived" => WorkspaceState::Archived,
@@ -290,7 +292,8 @@ fn workspace_matches_worktree(
     entry: &crate::worktree::WorktreeInfo,
 ) -> bool {
     let branch_current = entry.branch.is_none() || entry.branch == row.branch;
-    branch_current && row.dirty == entry.is_dirty
+    // Only a removed checkout is archived, so one git lists again was re-created.
+    branch_current && row.dirty == entry.is_dirty && row.state != "archived"
 }
 
 /// Register every checkout in `listing` as a workspace under the repo's
@@ -301,10 +304,18 @@ fn workspace_matches_worktree(
 /// the local workspaces establishes what is already registered; an entry whose
 /// stored row already matches is returned from that read untouched, so an
 /// unchanged listing does no writes and broadcasts nothing.
-fn register_worktree_listing(
+/// A checkout seen here for the first time is external (made with `git
+/// worktree add` outside perch) and starts hidden, after Orca; `created`
+/// names the one perch itself just made, which starts shown, as does one
+/// that perch sessions already ran in. Rows that already exist keep their
+/// visibility. A checkout moved with `git worktree move` is its old row
+/// (same project and branch, old path no longer listed) at a new path.
+pub(super) fn register_worktree_listing(
     app: &AppState,
     listing: &crate::worktree::WorktreeListing,
+    created: Option<&str>,
 ) -> anyhow::Result<Vec<WorkspaceSummary>> {
+    let created = created.map(|path| crate::db::canonical_path_for_host("local", path));
     let primary = listing
         .worktrees
         .iter()
@@ -324,6 +335,15 @@ fn register_worktree_listing(
         app.db
             .create_project("local", &primary.path, None, primary.head.as_deref())?;
     }
+    let mut session_cwds: Option<HashSet<String>> = None;
+    let listed: HashSet<String> = listing
+        .worktrees
+        .iter()
+        .map(|entry| crate::db::canonical_path_for_host("local", &entry.path))
+        .collect();
+    let project_id = known
+        .get(&crate::db::canonical_path_for_host("local", &primary.path))
+        .map(|row| row.project_id.clone());
     let mut workspaces = Vec::new();
     for entry in &listing.worktrees {
         let path = crate::db::canonical_path_for_host("local", &entry.path);
@@ -338,20 +358,51 @@ fn register_worktree_listing(
         // head is the honest registration boundary — the same rule
         // `project.create` follows. Only a row that already exists keeps
         // whatever boundary it was given, including none.
-        let workspace = app.db.create_worktree_workspace(
-            "local",
-            &primary.path,
-            &entry.path,
-            entry.branch.as_deref(),
-            None,
-            entry.head.as_deref(),
-        )?;
-        let workspace = app.db.update_workspace_git_state(
+        let moved = known.values().find(|row| {
+            !known.contains_key(&path)
+                && entry.branch.is_some()
+                && row.branch == entry.branch
+                && row.parent_workspace_id.is_some()
+                && row.state != "archived"
+                && Some(&row.project_id) == project_id.as_ref()
+                && !listed.contains(&row.path)
+        });
+        let workspace = match moved {
+            Some(row) => app.db.set_workspace_path(&row.id, &path)?,
+            None => app.db.create_worktree_workspace(
+                "local",
+                &primary.path,
+                &entry.path,
+                entry.branch.as_deref(),
+                None,
+                entry.head.as_deref(),
+            )?,
+        };
+        let mut workspace = app.db.update_workspace_git_state(
             &workspace.id,
             entry.branch.as_deref(),
             None,
             entry.is_dirty,
         )?;
+        if workspace.state == "archived" {
+            workspace = app.db.restore_workspace(&workspace.id)?;
+        }
+        if moved.is_none()
+            && !known.contains_key(&path)
+            && !entry.is_primary
+            && created.as_ref() != Some(&path)
+        {
+            let cwds = session_cwds.get_or_insert_with(|| {
+                let sessions = app.db.list_sessions().unwrap_or_default();
+                sessions
+                    .into_iter()
+                    .map(|row| crate::db::canonical_path_for_host("local", &row.cwd))
+                    .collect()
+            });
+            if !cwds.contains(&path) {
+                workspace = app.db.set_workspace_hidden(&workspace.id, true)?;
+            }
+        }
         let project = app
             .db
             .get_project(&workspace.project_id)?
@@ -381,6 +432,90 @@ fn register_worktree_listing(
     Ok(workspaces)
 }
 
+/// Find worktrees added or removed outside perch without the worktree menu
+/// open (docs/reference/worktree-scan-fingerprint.md in Orca): each local
+/// project's `.git/worktrees` entries and their `gitdir` paths are the
+/// fingerprint, and only a
+/// changed fingerprint pays for `git worktree list`. `seen` is the caller's
+/// memory between passes. A linked worktree row whose checkout git no longer
+/// lists (`git worktree remove` in a shell) is archived, like perch's own
+/// delete. Checkouts a create job is still making are left to the job.
+/// ponytail: a project whose own path is a linked worktree (`.git` is a
+/// file) is skipped.
+pub(super) async fn discover_worktrees(app: &AppState, seen: &mut HashMap<String, Vec<String>>) {
+    let projects = app.db.list_projects("local", false).unwrap_or_default();
+    for project in projects {
+        let admin = std::path::Path::new(&project.path).join(".git/worktrees");
+        // Each admin dir's `gitdir` names its checkout, so a move shows too.
+        let mut names: Vec<String> = std::fs::read_dir(&admin)
+            .map(|dir| {
+                dir.flatten()
+                    .map(|entry| {
+                        let gitdir = std::fs::read_to_string(entry.path().join("gitdir"));
+                        format!(
+                            "{:?} {}",
+                            entry.file_name(),
+                            gitdir.unwrap_or_default().trim()
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        if seen
+            .get(&project.path)
+            .map_or(names.is_empty(), |old| *old == names)
+        {
+            continue;
+        }
+        seen.insert(project.path.clone(), names);
+        let mut listing = match crate::worktree::list(&project.path).await {
+            Ok(listing) => listing,
+            Err(error) => {
+                tracing::debug!(path = %project.path, %error, "worktree discovery skipped");
+                continue;
+            }
+        };
+        let busy = worktree_jobs::busy_paths(app);
+        listing
+            .worktrees
+            .retain(|entry| !busy.contains(&entry.path));
+        if let Err(error) = register_worktree_listing(app, &listing, None) {
+            tracing::warn!(path = %project.path, %error, "could not register discovered worktrees");
+            continue;
+        }
+        let listed: HashSet<String> = listing
+            .worktrees
+            .iter()
+            .map(|entry| crate::db::canonical_path_for_host("local", &entry.path))
+            .chain(
+                busy.iter()
+                    .map(|path| crate::db::canonical_path_for_host("local", path)),
+            )
+            .collect();
+        let _guard = app.foundation_lock.lock().unwrap();
+        let rows = app
+            .db
+            .list_workspaces("local", Some(&project.id))
+            .unwrap_or_default();
+        for row in rows {
+            if row.parent_workspace_id.is_none()
+                || row.state == "archived"
+                || listed.contains(&row.path)
+            {
+                continue;
+            }
+            match app.db.archive_workspace_for_path("local", &row.path) {
+                Ok(Some(row)) => publish_workspace_locked(app, None, workspace_to_wire(row)),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(path = %row.path, %error, "could not archive a removed worktree")
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn handle_worktree_list(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -396,10 +531,11 @@ pub(super) fn handle_worktree_list(
     tokio::spawn(async move {
         match crate::worktree::list(&repo_path).await {
             Ok(listing) => {
+                let (base_ref, refs) = crate::worktree::picker_refs(&repo_path).await;
                 // Registration is a side effect of a read. Git already told us
                 // what the checkouts are, so a DB failure here must not blank
                 // the worktree menu — log it and still answer the listing.
-                if let Err(error) = register_worktree_listing(&app, &listing) {
+                if let Err(error) = register_worktree_listing(&app, &listing, None) {
                     tracing::warn!(%repo_path, %error, "could not register worktree checkouts");
                 }
                 let _ = out_tx.send(ServerMessage::WorktreeListResult {
@@ -407,6 +543,8 @@ pub(super) fn handle_worktree_list(
                     host_id: "local".to_string(),
                     repo_path,
                     default_root: listing.default_root,
+                    base_ref,
+                    refs,
                     worktrees: listing
                         .worktrees
                         .into_iter()
@@ -432,16 +570,64 @@ pub(super) fn handle_worktree_list(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Register a freshly created checkout as a workspace of its repo's project
+/// and, when asked, nest it under `parent` (`workspace.nest` rules).
+pub(super) async fn register_created(
+    app: &AppState,
+    repo_path: &str,
+    created: &str,
+    parent: Option<&str>,
+) -> anyhow::Result<WorkspaceSummary> {
+    let listing = crate::worktree::list(repo_path)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let workspaces = register_worktree_listing(app, &listing, Some(created))?;
+    let canonical = crate::db::canonical_path_for_host("local", created);
+    let mut workspace = workspaces
+        .into_iter()
+        .find(|workspace| workspace.path == canonical)
+        .ok_or_else(|| anyhow::anyhow!("created checkout is missing from the workspace list"))?;
+    // A discovery pass may have seen the checkout between `git worktree add`
+    // and now and registered it as external.
+    if workspace.hidden {
+        let _guard = app.foundation_lock.lock().unwrap();
+        workspace = workspace_to_wire(app.db.set_workspace_hidden(&workspace.id, false)?);
+        publish_workspace_locked(app, None, workspace.clone());
+    }
+    let Some(parent) = parent.filter(|p| !p.is_empty()) else {
+        return Ok(workspace);
+    };
+    let _guard = app.foundation_lock.lock().unwrap();
+    let nested = workspace_to_wire(app.db.set_workspace_parent(&workspace.id, Some(parent))?);
+    publish_workspace_locked(app, None, nested.clone());
+    Ok(nested)
+}
+
+/// Broadcast one changed workspace row. Caller holds `foundation_lock`.
+fn publish_workspace_locked(
+    app: &AppState,
+    request_id: Option<String>,
+    workspace: WorkspaceSummary,
+) {
+    let revision = next_snapshot_revision_locked(app);
+    broadcast_foundation(
+        app,
+        ServerMessage::WorkspaceUpdated {
+            request_id,
+            workspace,
+            snapshot_epoch: app.snapshot_epoch.clone(),
+            snapshot_revision: revision,
+        },
+    );
+}
+
 pub(super) fn handle_worktree_create(
     state: &Arc<ConnState>,
     raw_text: &str,
     request_id: String,
     host_id: Option<String>,
-    repo_path: String,
-    branch: String,
-    new_branch: bool,
-    path: Option<String>,
+    req: crate::worktree::CreateRequest,
+    parent: Option<String>,
 ) {
     if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
@@ -450,21 +636,12 @@ pub(super) fn handle_worktree_create(
     let app = state.app.clone();
     tokio::spawn(async move {
         let result = async {
-            let created = crate::worktree::create(&repo_path, &branch, new_branch, path.as_deref())
+            let created = crate::worktree::create(&req)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.message))?;
-            let listing = crate::worktree::list(&repo_path)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            let workspaces = register_worktree_listing(&app, &listing)?;
-            let canonical = crate::db::canonical_path_for_host("local", &created);
-            let workspace = workspaces
-                .into_iter()
-                .find(|workspace| workspace.path == canonical)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("created checkout is missing from the workspace list")
-                })?;
-            anyhow::Ok((canonical, workspace))
+            let workspace =
+                register_created(&app, &req.repo_path, &created, parent.as_deref()).await?;
+            anyhow::Ok((workspace.path.clone(), workspace))
         }
         .await;
         let _ = out_tx.send(match result {
@@ -474,6 +651,7 @@ pub(super) fn handle_worktree_create(
                 action: "create".to_string(),
                 path: created,
                 workspace: Some(workspace),
+                preserved_branch: None,
             },
             Err(err) => ServerMessage::WorktreeError {
                 request_id,
@@ -485,6 +663,10 @@ pub(super) fn handle_worktree_create(
     });
 }
 
+/// `worktree.remove`: the checkout (and with `delete_branch`, its merged
+/// branch) goes, and its workspace row is archived — history, comments and
+/// buffers stay inspectable, but the sidebar no longer lists it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_worktree_remove(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -493,20 +675,42 @@ pub(super) fn handle_worktree_remove(
     repo_path: String,
     path: String,
     force: bool,
+    delete_branch: bool,
 ) {
     if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
         return;
     }
     let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
     tokio::spawn(async move {
-        let result = crate::worktree::remove(&repo_path, &path, force).await;
+        let result = if delete_branch {
+            crate::worktree::delete(&repo_path, &path, force).await
+        } else {
+            crate::worktree::remove(&repo_path, &path, force)
+                .await
+                .map(|()| None)
+        };
+        if result.is_ok() {
+            let _guard = app.foundation_lock.lock().unwrap();
+            match app.db.archive_workspace_for_path("local", &path) {
+                Ok(Some(row)) => publish_workspace_locked(&app, None, workspace_to_wire(row)),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%path, %error, "could not archive removed worktree"),
+            }
+        }
         let _ = out_tx.send(match result {
-            Ok(()) => ServerMessage::WorktreeDone {
+            Ok(preserved) => ServerMessage::WorktreeDone {
                 request_id,
                 host_id: "local".to_string(),
                 action: "remove".to_string(),
                 path,
                 workspace: None,
+                preserved_branch: preserved.map(|b| crate::protocol::WorktreePreservedBranch {
+                    name: b.name,
+                    head: b.head,
+                    commits: b.commits,
+                    unmerged: b.unmerged,
+                }),
             },
             Err(err) => ServerMessage::WorktreeError {
                 request_id,
@@ -516,6 +720,66 @@ pub(super) fn handle_worktree_remove(
             },
         });
     });
+}
+
+pub(super) fn handle_worktree_branch_delete(
+    state: &Arc<ConnState>,
+    raw_text: &str,
+    request_id: String,
+    host_id: Option<String>,
+    repo_path: String,
+    branch: String,
+    expected_head: String,
+) {
+    if route_worktree_request(state, host_id.as_deref(), &request_id, raw_text) {
+        return;
+    }
+    let out_tx = state.out_tx.clone();
+    tokio::spawn(async move {
+        let result = crate::worktree::delete_branch(&repo_path, &branch, &expected_head).await;
+        let _ = out_tx.send(match result {
+            Ok(()) => ServerMessage::WorktreeDone {
+                request_id,
+                host_id: "local".to_string(),
+                action: "branchDelete".to_string(),
+                path: branch,
+                workspace: None,
+                preserved_branch: None,
+            },
+            Err(err) => ServerMessage::WorktreeError {
+                request_id,
+                host_id: "local".to_string(),
+                message: err.message,
+                dirty: false,
+            },
+        });
+    });
+}
+
+/// `workspace.pin` / `workspace.nest`: one row mutation, broadcast as
+/// `workspace.updated` (which also answers the request), or an `error`.
+pub(super) fn handle_workspace_mutation(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    code: &str,
+    mutate: impl FnOnce(&crate::db::HistoryDb, &str) -> anyhow::Result<crate::db::WorkspaceRow>,
+) {
+    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+    let Some(workspace) = local_workspace(&state.app, &workspace_id) else {
+        fail(
+            &state.out_tx,
+            request_id,
+            "workspace_not_found",
+            "workspace is not present on the local host",
+            false,
+        );
+        return;
+    };
+    match mutate(&state.app.db, &workspace.id) {
+        Ok(row) => publish_workspace_locked(&state.app, Some(request_id), workspace_to_wire(row)),
+        Err(err) => fail(&state.out_tx, request_id, code, err.to_string(), false),
+    }
 }
 
 pub(super) fn handle_project_list(
@@ -945,6 +1209,8 @@ mod worktree_registration_tests {
             state: "active".into(),
             created_at: 1,
             updated_at: 1,
+            pinned: false,
+            hidden: false,
         }
     }
 

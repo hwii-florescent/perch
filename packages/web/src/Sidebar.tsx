@@ -443,6 +443,33 @@ function aggregateDotState(sessions: SessionSummary[]): AgentDotState {
   return best;
 }
 
+/** Git & review for a project known only through its sessions: a remote
+ * host's checkout has no local workspace row, but its sessions carry the
+ * owning host's workspace id, and `git.*` requests route by that id. */
+function ProjectGitReviewButton({ hostId, sessions }: { hostId: string; sessions: SessionSummary[] }) {
+  const supported = usePerchStore((s) =>
+    (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("git.status") === true,
+  );
+  const openWorkspaceGitReview = usePerchStore((s) => s.openWorkspaceGitReview);
+  const workspaceId = sessions.find((session) => session.workspaceId)?.workspaceId;
+  if (!supported || !workspaceId) return null;
+  return (
+    <button
+      type="button"
+      className="worktree-menu__btn"
+      data-testid={`project-git-review-${hostId}`}
+      title="Git & review"
+      aria-label="Open Git and review"
+      onClick={(event) => {
+        event.stopPropagation();
+        openWorkspaceGitReview(workspaceId);
+      }}
+    >
+      ±
+    </button>
+  );
+}
+
 function ProjectRow({
   group,
   hostId,
@@ -503,6 +530,7 @@ function ProjectRow({
           <span className="sidebar__project-count">{sessionCount}</span>
         </button>
         <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
+        <ProjectGitReviewButton hostId={hostId} sessions={group.sessions} />
         <button
           type="button"
           className="sidebar__project-close-all"

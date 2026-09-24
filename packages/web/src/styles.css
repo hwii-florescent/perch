@@ -687,11 +687,14 @@ body {
 
 .workspace-entry__files {
   padding: 0.14rem 0.28rem;
-  background: transparent;
+  /* Opaque: on hover the actions sit over the name and state columns. */
+  background: var(--surface-1);
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--subtext-0);
-  font: 0.58rem/1.1 inherit;
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -704,6 +707,85 @@ body {
 
 .workspace-entry__files:hover,
 .workspace-entry__files:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workspace-entry__children {
+  margin-left: 0.9rem;
+}
+
+.workspace-hidden__toggle {
+  width: 100%;
+  padding: 0.25rem 0.45rem 0.25rem 1.45rem;
+  background: transparent;
+  border: 0;
+  color: var(--overlay-1);
+  font-family: inherit;
+  font-size: 0.62rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-hidden__toggle:hover,
+.workspace-hidden__toggle:focus-visible {
+  color: var(--accent);
+}
+
+.workspace-hidden__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem 0.2rem 1.45rem;
+}
+
+.workspace-entry__rename {
+  width: calc(100% - 0.6rem);
+  margin: 0.25rem 0.3rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--surface-0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.worktree-job__row {
+  cursor: default;
+}
+
+.worktree-job--failed .workspace-entry__dot,
+.worktree-job--failed .workspace-entry__body span {
+  color: var(--red);
+}
+
+.worktree-job__error {
+  display: -webkit-box;
+  margin: 0 0.3rem 0.3rem 1.45rem;
+  overflow: hidden;
+  color: var(--red);
+  font-size: 0.6rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.worktree-job__action {
+  flex-shrink: 0;
+  padding: 0.14rem 0.3rem;
+  background: transparent;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.worktree-job__action:hover,
+.worktree-job__action:focus-visible {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -4606,6 +4688,7 @@ body {
 
 .confirm-dialog__message {
   margin: 0 0 1rem;
+  white-space: pre-wrap;
   color: var(--text);
   font-size: 0.88rem;
   line-height: 1.4;

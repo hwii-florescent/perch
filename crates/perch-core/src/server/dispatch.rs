@@ -648,8 +648,23 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             branch,
             new_branch,
             path,
+            name,
+            start_from,
+            parent_workspace_id,
         } => workspace::handle_worktree_create(
-            state, raw_text, request_id, host_id, repo_path, branch, new_branch, path,
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            crate::worktree::CreateRequest {
+                repo_path,
+                branch,
+                name,
+                new_branch,
+                path,
+                start_from,
+            },
+            parent_workspace_id,
         ),
         ClientMessage::WorktreeRemove {
             request_id,
@@ -657,9 +672,63 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             repo_path,
             path,
             force,
+            delete_branch,
         } => workspace::handle_worktree_remove(
-            state, raw_text, request_id, host_id, repo_path, path, force,
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            repo_path,
+            path,
+            force,
+            delete_branch,
         ),
+        ClientMessage::WorktreeBranchDelete {
+            request_id,
+            host_id,
+            repo_path,
+            branch,
+            expected_head,
+        } => workspace::handle_worktree_branch_delete(
+            state,
+            raw_text,
+            request_id,
+            host_id,
+            repo_path,
+            branch,
+            expected_head,
+        ),
+        ClientMessage::WorktreeJobStart {
+            request_id,
+            repo_path,
+            branch,
+            new_branch,
+            path,
+            name,
+            start_from,
+            parent_workspace_id,
+        } => worktree_jobs::handle_start(
+            state,
+            request_id,
+            crate::worktree::CreateRequest {
+                repo_path,
+                branch,
+                name,
+                new_branch,
+                path,
+                start_from,
+            },
+            parent_workspace_id,
+        ),
+        ClientMessage::WorktreeJobCancel { job_id } => {
+            worktree_jobs::handle_cancel(&state.app, &job_id)
+        }
+        ClientMessage::WorktreeJobRetry { job_id } => {
+            worktree_jobs::handle_retry(&state.app, &job_id)
+        }
+        ClientMessage::WorktreeJobDismiss { job_id } => {
+            worktree_jobs::handle_dismiss(&state.app, &job_id)
+        }
 
         // -------------------------------------------------------------------
         // Durable project/workspace foundation. This first slice is local
@@ -712,6 +781,39 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             name,
         } => workspace::handle_workspace_rename(state, request_id, workspace_id, name),
+        ClientMessage::WorkspacePin {
+            request_id,
+            workspace_id,
+            pinned,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_pin_failed",
+            |db, id| db.set_workspace_pinned(id, pinned),
+        ),
+        ClientMessage::WorkspaceVisibility {
+            request_id,
+            workspace_id,
+            hidden,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_visibility_failed",
+            |db, id| db.set_workspace_hidden(id, hidden),
+        ),
+        ClientMessage::WorkspaceNest {
+            request_id,
+            workspace_id,
+            parent_workspace_id,
+        } => workspace::handle_workspace_mutation(
+            state,
+            request_id,
+            workspace_id,
+            "workspace_nest_failed",
+            |db, id| db.set_workspace_parent(id, parent_workspace_id.as_deref()),
+        ),
         ClientMessage::WorkspaceRestore {
             request_id,
             workspace_id,

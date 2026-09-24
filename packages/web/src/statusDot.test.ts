@@ -51,4 +51,10 @@ describe("sessionDotState", () => {
       sessionDotState(summary({ blocked: true, status: "running", unseen: true })),
     ).toBe("blocked");
   });
+
+  it("a stale busy session reads as idle, or done if unseen", () => {
+    expect(sessionDotState(summary({ status: "running", stale: true }))).toBe("idle");
+    expect(sessionDotState(summary({ blocked: true, status: "running", stale: true }))).toBe("idle");
+    expect(sessionDotState(summary({ status: "running", stale: true, unseen: true }))).toBe("done");
+  });
 });

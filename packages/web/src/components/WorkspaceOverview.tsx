@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useState } from "react";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { WorktreeMenu } from "./WorktreeMenu";
-import type { SessionSummary } from "@perch/shared";
+import type { SessionSummary, WorktreeJob } from "@perch/shared";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -21,6 +21,7 @@ function workspacesForProject(
   return workspaces
     .filter((workspace) => workspace.projectId === projectId && workspace.state !== "archived")
     .sort((a, b) => {
+      if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
       if (a.state !== b.state) return a.state === "active" ? -1 : 1;
       return b.updatedAt - a.updatedAt;
     });
@@ -39,6 +40,95 @@ function sessionsForWorkspace(
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Orca's hidden-worktrees card: worktrees perch discovered but did not
+ * create (or that were hidden) stay out of the tree until shown here. */
+function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecord[]; projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const setWorkspaceHidden = usePerchStore((state) => state.setWorkspaceHidden);
+  const count = workspaces.length;
+  return (
+    <div className="workspace-hidden">
+      <button
+        type="button"
+        className="workspace-hidden__toggle"
+        aria-expanded={open}
+        data-testid={`workspace-hidden-${projectId}`}
+        onClick={() => setOpen(!open)}
+      >
+        {count} hidden worktree{count === 1 ? "" : "s"}
+      </button>
+      {open && workspaces.map((workspace) => (
+        <div className="workspace-hidden__row" key={workspace.id} title={workspace.path}>
+          <span className="workspace-entry__body">
+            <strong>{workspace.branch || basename(workspace.path)}</strong>
+            <span>{workspace.path}</span>
+          </span>
+          <button
+            type="button"
+            className="worktree-job__action"
+            data-testid={`workspace-show-${workspace.id}`}
+            onClick={() => setWorkspaceHidden(workspace.id, false)}
+          >
+            Show
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Background worktree creates for one project (`server/worktree_jobs.rs`):
+ * Orca's sidebar progress row, with Cancel while running and Retry / Dismiss
+ * once a create failed. */
+function WorktreeJobRows({ jobs }: { jobs: WorktreeJob[] }) {
+  const cancel = usePerchStore((state) => state.cancelWorktreeJob);
+  const retry = usePerchStore((state) => state.retryWorktreeJob);
+  const dismiss = usePerchStore((state) => state.dismissWorktreeJob);
+  return (
+    <>
+      {jobs.map((job) => {
+        const failed = job.status === "failed";
+        return (
+          <div
+            className={"workspace-entry worktree-job" + (failed ? " worktree-job--failed" : "")}
+            key={job.jobId}
+            data-testid={`worktree-job-${job.branch}`}
+            role="status"
+          >
+            <div className="workspace-entry__button worktree-job__row" title={job.path}>
+              <span className="workspace-entry__dot" aria-hidden="true">{failed ? "✕" : "◌"}</span>
+              <span className="workspace-entry__body">
+                <strong>{job.branch}</strong>
+                <span data-testid={`worktree-job-phase-${job.branch}`}>{failed ? "Create failed" : `${job.phase}…`}</span>
+              </span>
+              {job.status === "running" && (
+                <button type="button" className="worktree-job__action" data-testid={`worktree-job-cancel-${job.branch}`} onClick={() => cancel(job.jobId)}>
+                  Cancel
+                </button>
+              )}
+              {failed && (
+                <>
+                  <button type="button" className="worktree-job__action" data-testid={`worktree-job-retry-${job.branch}`} onClick={() => retry(job.jobId)}>
+                    Retry
+                  </button>
+                  <button type="button" className="worktree-job__action" data-testid={`worktree-job-dismiss-${job.branch}`} onClick={() => dismiss(job.jobId)}>
+                    Dismiss
+                  </button>
+                </>
+              )}
+            </div>
+            {failed && (
+              <div className="worktree-job__error" data-testid={`worktree-job-error-${job.branch}`} title={job.error}>
+                {job.error}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export interface WorkspaceOverviewProps {
   /** Compact mode is used inside the mobile switcher where the containing
    * panel already owns the title and close affordance. */
@@ -53,6 +143,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const projects = usePerchStore((state) => state.workspaceProjects);
   const workspaces = usePerchStore((state) => state.workspaces);
   const sessions = usePerchStore((state) => state.sessions);
+  const worktreeJobs = usePerchStore((state) => state.worktreeJobs);
   const activeProjectId = usePerchStore((state) => state.activeProjectId);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
   const snapshot = usePerchStore((state) => state.workspaceSnapshotByHost[activeHostId]);
@@ -61,6 +152,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const focusWorkspaceProject = usePerchStore((state) => state.focusWorkspaceProject);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
   const restoreWorkspace = usePerchStore((state) => state.restoreWorkspace);
+  const renameWorkspace = usePerchStore((state) => state.renameWorkspace);
+  const pinWorkspace = usePerchStore((state) => state.pinWorkspace);
+  const setWorkspaceHidden = usePerchStore((state) => state.setWorkspaceHidden);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const openWorkspaceFiles = usePerchStore((state) => state.openWorkspaceFiles);
   const openWorkspaceGitReview = usePerchStore((state) => state.openWorkspaceGitReview);
   const switchSession = usePerchStore((state) => state.switchSession);
@@ -217,7 +312,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       ) : (
         <div className="workspace-overview__list" data-testid="project-list">
           {visibleProjects.map((project) => {
-            const projectWorkspaces = workspacesForProject(workspaces, project.id);
+            const allWorkspaces = workspacesForProject(workspaces, project.id);
+            const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
+            const hiddenWorkspaces = allWorkspaces.filter((w) => w.hidden);
+            const projectJobs = project.hostId === "local"
+              ? worktreeJobs.filter((job) => job.repoPath === project.repoPath || job.repoPath === project.path)
+              : [];
             const projectActive = project.id === activeProjectId;
             return (
               <div
@@ -242,13 +342,45 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 </button>
                 {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
                 </div>
-                {projectWorkspaces.length > 0 && (
+                {(allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces">
-                    {projectWorkspaces.map((workspace) => {
+                    {(() => {
+                      // Orca's parent nesting: a worktree whose parent is another
+                      // linked worktree renders under it; children of the primary
+                      // workspace stay top level.
+                      const byId = new Map(projectWorkspaces.map((w) => [w.id, w]));
+                      const children = new Map<string, WorkspaceRecord[]>();
+                      const roots: WorkspaceRecord[] = [];
+                      for (const w of projectWorkspaces) {
+                        const parent = w.parentWorkspaceId ? byId.get(w.parentWorkspaceId) : undefined;
+                        if (parent?.parentWorkspaceId) children.set(parent.id, [...(children.get(parent.id) ?? []), w]);
+                        else roots.push(w);
+                      }
+                      const renderWorkspace = (workspace: WorkspaceRecord, depth: number): ReactElement => {
                       const workspaceActive = workspace.id === activeWorkspaceId;
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
                       return (
-                        <div className="workspace-entry" key={workspace.id} data-testid={`workspace-entry-${workspace.id}`}>
+                        <Fragment key={workspace.id}>
+                        <div className="workspace-entry" data-testid={`workspace-entry-${workspace.id}`}>
+                          {renamingId === workspace.id ? (
+                            <input
+                              className="workspace-entry__rename"
+                              data-testid={`workspace-rename-${workspace.id}`}
+                              aria-label="Workspace name"
+                              autoFocus
+                              defaultValue={workspace.name || basename(workspace.path)}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                                if (event.key === "Enter") {
+                                  renameWorkspace(workspace.id, event.currentTarget.value);
+                                  setRenamingId(null);
+                                } else if (event.key === "Escape") {
+                                  setRenamingId(null);
+                                }
+                              }}
+                              onBlur={() => setRenamingId(null)}
+                            />
+                          ) : (
                           <button
                             type="button"
                             className={"workspace-entry__button" + (workspaceActive ? " workspace-entry__button--active" : "")}
@@ -258,14 +390,51 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             <span className="workspace-entry__dot" aria-hidden="true">{workspace.dirty ? "●" : "○"}</span>
                             <span className="workspace-entry__body">
-                              <strong>{workspace.name || basename(workspace.path)}</strong>
+                              <strong
+                                title="Double-click to rename"
+                                onDoubleClick={(event) => {
+                                  event.stopPropagation();
+                                  setRenamingId(workspace.id);
+                                }}
+                              >
+                                {workspace.name || basename(workspace.path)}
+                              </strong>
                               <span>{workspace.branch || workspace.path}</span>
                             </span>
                             <span className="workspace-entry__state">
+                              {workspace.pinned ? "pinned · " : ""}
                               {workspace.state === "sleeping" ? "sleeping" : workspace.dirty ? "dirty" : "ready"}
                             </span>
                           </button>
+                          )}
                           <div className="workspace-entry__actions">
+                          <button
+                            type="button"
+                            className="workspace-entry__files"
+                            data-testid={`workspace-pin-${workspace.id}`}
+                            aria-pressed={workspace.pinned === true}
+                            title={workspace.pinned ? "Unpin" : "Pin to the top of the project"}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              pinWorkspace(workspace.id, !workspace.pinned);
+                            }}
+                          >
+                            {workspace.pinned ? "Unpin" : "Pin"}
+                          </button>
+                          {workspace.parentWorkspaceId && (
+                            <button
+                              type="button"
+                              className="workspace-entry__files"
+                              data-testid={`workspace-hide-${workspace.id}`}
+                              title="Hide from the sidebar (the checkout stays)"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setWorkspaceHidden(workspace.id, true);
+                              }}
+                            >
+                              Hide
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="workspace-entry__files"
@@ -324,8 +493,20 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             </div>
                           )}
                         </div>
+                        {(children.get(workspace.id) ?? []).length > 0 && depth < 8 && (
+                          <div className="workspace-entry__children" data-testid={`workspace-children-${workspace.id}`}>
+                            {(children.get(workspace.id) ?? []).map((child) => renderWorkspace(child, depth + 1))}
+                          </div>
+                        )}
+                        </Fragment>
                       );
-                    })}
+                      };
+                      return roots.map((workspace) => renderWorkspace(workspace, 0));
+                    })()}
+                    <WorktreeJobRows jobs={projectJobs} />
+                    {hiddenWorkspaces.length > 0 && (
+                      <HiddenWorktrees workspaces={hiddenWorkspaces} projectId={project.id} />
+                    )}
                   </div>
                 )}
               </div>

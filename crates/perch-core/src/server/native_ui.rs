@@ -98,6 +98,11 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                 );
                 let _ = persist_agent_runtime(app, key);
             }
+            // Every snapshot is fresh status evidence (see `stale_sessions`).
+            let _ = app
+                .agent_runtime
+                .lifecycle()
+                .record_activity(key, now_millis());
             let _ = app
                 .hub
                 .hub_events_tx

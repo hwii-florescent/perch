@@ -26,6 +26,8 @@ const plugin = (await import(pathToFileURL(module))).default;
 const rows = [];
 const parts = new Map();
 const events = new Map();
+const permissions = new Map();
+const questions = new Map();
 let dispose;
 let submits = 0;
 let creates = 0;
@@ -37,7 +39,8 @@ let slots;
 const route = { current: { name: "session", params: { sessionID: "ses_current" } }, navigate(name, params) { this.current = { name, params }; } };
 const api = {
   route, state: { ready: true, path: { directory: dir }, part: id => parts.get(id) ?? [],
-    session: { get: id => ({ id, directory: dir }), messages: () => rows, status: () => ({ type: "idle" }) } },
+    session: { get: id => ({ id, directory: dir }), messages: () => rows, status: () => ({ type: "idle" }),
+      permission: id => permissions.get(id) ?? [], question: id => questions.get(id) ?? [] } },
   ui: { dialog: { open: false }, Slot() {}, Prompt(props) {
     promptRef = { current: { input: "", parts: [] }, set(value) { this.current = value; }, reset() { this.current = { input: "", parts: [] }; }, submit() {
       if (rejectSubmit) return;
@@ -83,6 +86,23 @@ try {
   await until(() => received.some(value => value.type === "snapshot"));
   assert.equal(received.at(-1).providerSessionId, "ses_current");
   assert.equal(creates, 0); // Persisted sessions never become an implicit selection.
+  assert.equal(received.at(-1).blocked, false);
+  // Needs-you: a pending permission here, or a question in a subagent's session.
+  permissions.set("ses_current", [{ id: "per_1" }]);
+  events.get("permission.asked")();
+  await until(() => received.at(-1).blocked === true);
+  assert.equal(received.at(-1).running, true);
+  permissions.clear();
+  events.get("permission.replied")();
+  await until(() => received.at(-1).blocked === false);
+  events.get("session.created")({ properties: { info: { id: "ses_child", parentID: "ses_current" } } });
+  events.get("session.updated")({ properties: { info: { id: "ses_grandchild", parentID: "ses_child" } } });
+  questions.set("ses_grandchild", [{ id: "que_1" }]);
+  events.get("question.asked")();
+  await until(() => received.at(-1).blocked === true);
+  questions.clear();
+  events.get("question.replied")();
+  await until(() => received.at(-1).blocked === false && received.at(-1).running === false);
   await delay(400);
   const idleCount = received.length;
   await delay(600);
@@ -134,7 +154,7 @@ try {
   await until(() => received.at(-1).truncated === true);
   assert.ok(Buffer.byteLength(JSON.stringify(received.at(-1).messages)) <= 192 * 1024);
   assert.ok(received.at(-1).messages.length <= 128);
-  console.log("OpenCode plugin: bounds, exact route, home view, shell-mode guard, draft safety, native receipts, retry, rejected-submit cleanup, and cancellation passed");
+  console.log("OpenCode plugin: needs-you (own and subagent), bounds, exact route, home view, shell-mode guard, draft safety, native receipts, retry, rejected-submit cleanup, and cancellation passed");
 } finally {
   peer?.destroy(); dispose?.(); fs.rmSync(dir, { recursive: true, force: true });
 }

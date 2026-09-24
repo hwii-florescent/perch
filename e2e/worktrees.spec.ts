@@ -31,7 +31,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-const BASE_URL = "http://127.0.0.1:7799";
+const BASE_URL = process.env.PERCH_E2E_BASE ?? "http://127.0.0.1:7799";
 
 const FIXTURE_NAME = "perch-e2e-worktree-fixture";
 /** Resolved (symlink-free) fixture path — assigned in `beforeAll`. macOS's
@@ -161,22 +161,29 @@ async function pathOfEntry(entry: Locator): Promise<string> {
 }
 
 /** Fill the "New worktree…" form and submit; resolves once the new branch is
- * listed. */
+ * listed. On a host with background creates (`worktree.job`) the popover
+ * closes on submit, so it is reopened to read the listing. */
 async function createWorktree(popover: Locator, branch: string): Promise<string> {
   await popover.locator('[data-testid="worktree-new"]').click();
   const branchInput = popover.locator('[data-testid="worktree-branch-input"]');
   await expect(branchInput).toBeVisible({ timeout: 5000 });
   await branchInput.fill(branch);
-  // "new branch" is checked by default — assert rather than set it.
-  await expect(popover.locator('[data-testid="worktree-new-branch"]')).toBeChecked();
+  // Hosts with the start-from picker drop the "new branch" checkbox (an
+  // existing branch is checked out anyway); older hosts default it on.
+  const newBranch = popover.locator('[data-testid="worktree-new-branch"]');
+  if (await newBranch.count()) await expect(newBranch).toBeChecked();
   // The custom-path field mirrors the default location for the typed branch.
   await expect(popover.locator('[data-testid="worktree-path-input"]')).toHaveValue(
     path.join(WORKTREES_ROOT, branch),
   );
   await popover.locator('[data-testid="worktree-create-submit"]').click();
 
+  const page = popover.page();
   const entry = entryForBranch(popover, branch);
-  await expect(entry).toBeVisible({ timeout: 30000 });
+  await expect(async () => {
+    if (!(await popover.isVisible())) await openWorktreeMenu(page);
+    await expect(entry).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 30000 });
   return pathOfEntry(entry);
 }
 
@@ -277,11 +284,16 @@ test.describe("Git worktrees", () => {
     await entry.locator('[data-testid^="worktree-remove-"]').click();
     const dialog = page.locator('[data-testid="confirm-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Remove");
+    // `worktree.delete` hosts delete the checkout and its (merged) branch.
+    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Delete");
     await page.locator('[data-testid="confirm-accept"]').click();
 
     await expect(entry).toHaveCount(0, { timeout: 30000 });
     expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).not.toContain("wt-feature");
+    // Its workspace row is archived out of the sidebar too.
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "wt-feature" })).toHaveCount(0, { timeout: 10000 });
 
     await page.screenshot({ path: "artifacts/worktrees-wt4-removed.png" });
   });
@@ -309,7 +321,7 @@ test.describe("Git worktrees", () => {
     // confirmation in its force flavor carrying the guard message.
     await entry.locator('[data-testid^="worktree-remove-"]').click();
     const accept = page.locator('[data-testid="confirm-accept"]');
-    await expect(accept).toHaveText("Remove", { timeout: 5000 });
+    await expect(accept).toHaveText("Delete", { timeout: 5000 });
     await accept.click();
 
     await expect(accept).toHaveText("Force remove", { timeout: 20000 });
@@ -413,5 +425,194 @@ test.describe("Git worktrees", () => {
     ).toHaveCount(0);
 
     await page.screenshot({ path: "artifacts/worktrees-wt6-two-worktrees.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // WT7 — Orca's background create: the form closes at once, the project
+  // shows a progress row with Cancel, and a failed create offers Retry.
+  // -------------------------------------------------------------------------
+  test("WT7. Background create shows progress, cancels cleanly, retries a failure", async ({ page }) => {
+    await freshPage(page);
+    const hook = path.join(FIXTURE, ".git", "hooks", "post-checkout");
+    fs.writeFileSync(hook, "#!/bin/sh\nsleep 8\n", { mode: 0o755 });
+    try {
+      const popover = await openWorktreeMenu(page);
+      await popover.locator('[data-testid="worktree-new"]').click();
+      await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-slow");
+      await popover.locator('[data-testid="worktree-create-submit"]').click();
+      await expect(popover).not.toBeVisible({ timeout: 5000 });
+
+      const row = page.getByTestId("worktree-job-wt-slow");
+      await expect(row).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId("worktree-job-phase-wt-slow")).toHaveText("Checking out…");
+      await page.screenshot({ path: "artifacts/worktrees-wt7-progress.png" });
+      await page.getByTestId("worktree-job-cancel-wt-slow").click();
+      await expect(row).toHaveCount(0, { timeout: 5000 });
+      expect(fs.existsSync(path.join(WORKTREES_ROOT, "wt-slow"))).toBe(false);
+      expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).not.toContain("wt-slow");
+    } finally {
+      fs.rmSync(hook, { force: true });
+    }
+
+    // A non-empty directory at the target makes git refuse: the row fails,
+    // keeps the user's file, and Retry succeeds once the path is free.
+    const blocked = path.join(WORKTREES_ROOT, "wt-retry");
+    fs.mkdirSync(blocked, { recursive: true });
+    fs.writeFileSync(path.join(blocked, "mine.txt"), "x");
+    const popover = await openWorktreeMenu(page);
+    await popover.locator('[data-testid="worktree-new"]').click();
+    await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-retry");
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+    await expect(page.getByTestId("worktree-job-retry-wt-retry")).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId("worktree-job-error-wt-retry")).toContainText("already exists");
+    expect(fs.existsSync(path.join(blocked, "mine.txt"))).toBe(true);
+    await page.screenshot({ path: "artifacts/worktrees-wt7-failed.png" });
+    fs.rmSync(path.join(blocked, "mine.txt"));
+    await page.getByTestId("worktree-job-retry-wt-retry").click();
+    await expect(page.getByTestId("worktree-job-wt-retry")).toHaveCount(0, { timeout: 20000 });
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "wt-retry" })).toHaveCount(1, { timeout: 20000 });
+    expect(fs.existsSync(path.join(blocked, "README.md"))).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // WT8 — task name → derived branch, start-from a local branch, and the
+  // `-2` suffix when the derived name is taken.
+  // -------------------------------------------------------------------------
+  test("WT8. Task name derives the branch; start-from picks the base", async ({ page }) => {
+    sh("git checkout -q -b wt-base", FIXTURE);
+    sh('git commit -q --allow-empty -m "base work"', FIXTURE);
+    const baseHead = execSync("git rev-parse HEAD", { cwd: FIXTURE, input: "" }).toString().trim();
+    sh("git checkout -q main", FIXTURE);
+    sh("git branch stack-on-base", FIXTURE); // taken → the derived name gets -2
+
+    await freshPage(page);
+    const popover = await openWorktreeMenu(page);
+    await popover.locator('[data-testid="worktree-new"]').click();
+    await popover.locator('[data-testid="worktree-name-input"]').fill("Stack on base!");
+    await expect(popover.locator('[data-testid="worktree-branch-input"]')).toHaveAttribute(
+      "placeholder", "branch: stack-on-base");
+    await expect(popover.locator('datalist option[value="wt-base"]')).toHaveCount(1);
+    await popover.locator('[data-testid="worktree-start-input"]').fill("wt-base");
+    await page.screenshot({ path: "artifacts/worktrees-wt8-form.png" });
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+
+    const created = path.join(WORKTREES_ROOT, "stack-on-base-2");
+    await expect.poll(() => fs.existsSync(path.join(created, ".git")), { timeout: 20000 }).toBe(true);
+    await expect(page.locator('[data-testid^="worktree-job-"]')).toHaveCount(0, { timeout: 20000 });
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    await expect(projectCard.locator(".workspace-entry").filter({ hasText: "stack-on-base-2" })).toHaveCount(1, { timeout: 20000 });
+    const git = (args: string) => execSync(`git ${args}`, { cwd: created, input: "" }).toString().trim();
+    expect(git("branch --show-current")).toBe("stack-on-base-2");
+    expect(git("rev-parse HEAD")).toBe(baseHead);
+    expect(git("config branch.stack-on-base-2.base")).toBe("refs/heads/wt-base");
+  });
+
+  // -------------------------------------------------------------------------
+  // WT9 — deleting a worktree whose branch has unmerged work keeps the
+  // branch and reviews its commits before a force delete.
+  // -------------------------------------------------------------------------
+  test("WT9. Delete reviews a branch with unmerged commits", async ({ page }) => {
+    await freshPage(page);
+    const popover = await openWorktreeMenu(page);
+    const wt = await createWorktree(popover, "wt-precious");
+    sh('git commit -q --allow-empty -m "precious work"', wt);
+
+    const menu = await openWorktreeMenu(page);
+    await entryForBranch(menu, "wt-precious").locator('[data-testid^="worktree-remove-"]').click();
+    await page.locator('[data-testid="confirm-accept"]').click();
+
+    const review = page.locator(".confirm-dialog__message");
+    await expect(review).toContainText("branch wt-precious was kept", { timeout: 20000 });
+    await expect(review).toContainText("precious work");
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).toContain("wt-precious");
+    await page.screenshot({ path: "artifacts/worktrees-wt9-review.png" });
+    await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Delete branch");
+    await page.locator('[data-testid="confirm-accept"]').click();
+    await expect.poll(() => execSync("git branch", { cwd: FIXTURE, input: "" }).toString(), { timeout: 10000 })
+      .not.toContain("wt-precious");
+  });
+
+  // -------------------------------------------------------------------------
+  // WT10 — pin, rename and parent nesting in the sidebar.
+  // -------------------------------------------------------------------------
+  test("WT10. Pin, rename and nest worktree workspaces", async ({ page }) => {
+    await freshPage(page);
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    const row = (text: string) => projectCard.locator(".workspace-entry").filter({ hasText: text });
+    await createWorktree(await openWorktreeMenu(page), "wt-parent");
+    await expect(row("wt-parent")).toHaveCount(1, { timeout: 20000 });
+    const parentId = ((await row("wt-parent").first().getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
+
+    // Create a child nested under wt-parent from the create form.
+    const menu = await openWorktreeMenu(page);
+    await menu.locator('[data-testid="worktree-new"]').click();
+    await menu.locator('[data-testid="worktree-branch-input"]').fill("wt-child");
+    await menu.locator('[data-testid="worktree-parent-select"]').selectOption(parentId);
+    await menu.locator('[data-testid="worktree-create-submit"]').click();
+    const nested = page.getByTestId(`workspace-children-${parentId}`);
+    await expect(nested.locator(".workspace-entry").filter({ hasText: "wt-child" })).toHaveCount(1, { timeout: 20000 });
+
+    // Pin moves wt-parent to the top of the project.
+    await row("wt-parent").first().hover();
+    await page.getByTestId(`workspace-pin-${parentId}`).click();
+    const first = projectCard.locator(".workspace-project__workspaces > .workspace-entry").first();
+    await expect(first).toContainText("pinned", { timeout: 10000 });
+    await expect(first).toContainText("wt-parent");
+
+    // Double-click renames the display name (the branch is untouched).
+    await page.getByTestId(`workspace-entry-${parentId}`).locator("strong").first().dblclick();
+    const input = page.getByTestId(`workspace-rename-${parentId}`);
+    await input.fill("Parent task");
+    await input.press("Enter");
+    await expect(page.getByTestId(`workspace-entry-${parentId}`).locator("strong").first()).toHaveText("Parent task", { timeout: 10000 });
+    await page.screenshot({ path: "artifacts/worktrees-wt10-nesting.png" });
+  });
+
+  // -------------------------------------------------------------------------
+  // WT11 — a worktree made with plain `git worktree add` is discovered without
+  // the menu open, starts hidden, can be shown and hidden again, keeps its row
+  // across `git worktree move`, and is archived once `git worktree remove`
+  // drops it.
+  // -------------------------------------------------------------------------
+  test("WT11. External worktrees start hidden, show, hide and clean up", async ({ page }) => {
+    await freshPage(page);
+    // Unique per run: a reused DB remembers a path it saw before (and its visibility).
+    const external = `${FIXTURE}-external-${Date.now().toString(36)}`;
+    fs.rmSync(external, { recursive: true, force: true });
+    sh(`git worktree add -b wt-external '${external}'`, FIXTURE);
+    const projectCard = page.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
+    const row = projectCard.locator(".workspace-entry").filter({ hasText: "wt-external" });
+    const card = projectCard.locator('[data-testid^="workspace-hidden-"]');
+
+    await expect(card).toHaveText("1 hidden worktree", { timeout: 20000 });
+    await expect(row).toHaveCount(0);
+    await card.click();
+    await page.screenshot({ path: "artifacts/worktrees-wt11-hidden.png" });
+    await projectCard.locator('[data-testid^="workspace-show-"]').click();
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+    await expect(card).toHaveCount(0);
+
+    const id = ((await row.getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
+    await row.hover();
+    await page.getByTestId(`workspace-hide-${id}`).click();
+    await expect(row).toHaveCount(0, { timeout: 10000 });
+    await expect(card).toHaveText("1 hidden worktree");
+    await card.click();
+    await page.getByTestId(`workspace-show-${id}`).click();
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+
+    // `git worktree move` keeps the same row, now at the new path.
+    const moved = `${external}-moved`;
+    fs.rmSync(moved, { recursive: true, force: true });
+    sh(`git worktree move '${external}' '${moved}'`, FIXTURE);
+    await expect(row.locator("button").first()).toHaveAttribute("title", moved, { timeout: 20000 });
+    await expect(row).toHaveCount(1);
+    await expect(card).toHaveCount(0);
+
+    sh(`git worktree remove '${moved}'`, FIXTURE);
+    await expect(row).toHaveCount(0, { timeout: 20000 });
+    await expect(card).toHaveCount(0);
   });
 });

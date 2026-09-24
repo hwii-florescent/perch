@@ -270,14 +270,18 @@ pub struct SessionSummary {
     /// older remotes.
     #[serde(default)]
     pub cli_started: bool,
-    /// Whether the session's agent is blocked on an approval prompt, detected
-    /// by scanning recent CLI-attached terminal output for known approval-
-    /// prompt patterns (see `blocked_patterns` in `server.rs`). Only
-    /// meaningful for sessions with a live CLI-attached terminal; otherwise
-    /// always `false`. Defaulted for backward federation-compat with older
-    /// remotes.
+    /// Whether the session's agent is waiting on the human (a permission
+    /// prompt or a question), from native CLI events, the OSC title, or as a
+    /// last resort an output pattern (see `blocked_patterns` in `server.rs`).
+    /// Defaulted for backward federation-compat with older remotes.
     #[serde(default)]
     pub blocked: bool,
+    /// Running or blocked, but with no status evidence for 30 minutes: read
+    /// it as idle. Display only; the turn is not over, so a later completion
+    /// still notifies (see `stale_sessions` in `server/session.rs`).
+    /// Defaulted for older remotes.
+    #[serde(default)]
+    pub stale: bool,
     /// Stable project metadata association, populated after the database
     /// migration. Optional so old remote peers and pre-migration rows remain
     /// readable during rolling upgrades.
@@ -401,6 +405,13 @@ pub struct WorkspaceSummary {
     pub state: WorkspaceState,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Kept at the top of its project (`workspace.pin`).
+    #[serde(default)]
+    pub pinned: bool,
+    /// A worktree perch discovered but did not create, left out of the
+    /// sidebar until shown (`workspace.visibility`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// One git worktree of a repo, as reported by `worktree.list.result`.
@@ -419,6 +430,41 @@ pub struct WorktreeEntry {
     pub is_primary: bool,
     /// Has uncommitted or untracked files (drives the remove guard).
     pub is_dirty: bool,
+}
+
+/// A branch kept by a `worktree.remove { deleteBranch }` because git would
+/// not prove it merged. The client reviews `commits` and may force-delete it
+/// with `worktree.branch.delete`, which only succeeds while it is at `head`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePreservedBranch {
+    pub name: String,
+    pub head: String,
+    /// Up to 20 `"<short sha> <subject>"` lines on no other branch or remote.
+    pub commits: Vec<String>,
+    /// Total number of such commits.
+    pub unmerged: u32,
+}
+
+/// One background worktree create (`worktree.job.start`), as broadcast in
+/// `worktree.jobs`. A job leaves the list when it succeeds (its workspace
+/// arrives as `workspace.updated`) or once a cancel has cleaned up; a failed
+/// job stays, with `error`, until it is retried or dismissed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeJob {
+    pub job_id: String,
+    pub repo_path: String,
+    pub branch: String,
+    /// Where the checkout is being created.
+    pub path: String,
+    /// `"running"` | `"cancelling"` | `"failed"`.
+    pub status: String,
+    /// Human-readable step, e.g. `"Checking out"`.
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub started_at: i64,
 }
 
 /// A request-scoped, persisted approval receipt for a destructive Git action.
@@ -1349,17 +1395,30 @@ pub enum ClientMessage {
     /// (herdr's `run_worktree_add_command` behavior). `path` overrides the
     /// default `~/.perch/worktrees/<repo-name>/<branch-slug>` location.
     /// Replies with `worktree.done` or `worktree.error`.
+    ///
+    /// Capability `worktree.startFrom` adds: an empty `branch` derived from
+    /// `name` (the task name, suffixed `-2`… on conflict), and `startFrom`,
+    /// the new branch's start point (local branch, `remote/branch` — fetched
+    /// first — or commit; absent = the repo's base ref).
     #[serde(rename = "worktree.create", rename_all = "camelCase")]
     WorktreeCreate {
         request_id: String,
         #[serde(default)]
         host_id: Option<String>,
         repo_path: String,
+        #[serde(default)]
         branch: String,
         #[serde(default)]
         new_branch: bool,
         #[serde(default)]
         path: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        start_from: Option<String>,
+        /// Nest the new workspace under this one (capability `workspace.nest`).
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
     },
 
     /// Remove the worktree checked out at `path`. Refused with
@@ -1375,7 +1434,59 @@ pub enum ClientMessage {
         path: String,
         #[serde(default)]
         force: bool,
+        /// Also delete the checkout's branch (capability `worktree.delete`).
+        /// Unmerged work is kept and reported as `preservedBranch`.
+        #[serde(default)]
+        delete_branch: bool,
     },
+
+    /// Force-delete a branch a delete preserved, after review. Refused when
+    /// the branch no longer points at `expectedHead` or is checked out.
+    /// Replies `worktree.done { action: "branchDelete", path: branch }`.
+    #[serde(rename = "worktree.branch.delete", rename_all = "camelCase")]
+    WorktreeBranchDelete {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        repo_path: String,
+        branch: String,
+        expected_head: String,
+    },
+
+    /// Start a background create (capability `worktree.job`, local host
+    /// only). Same inputs as `worktree.create`; replies at once with
+    /// `worktree.job.started` or `worktree.error`, then progress arrives as
+    /// `worktree.jobs` broadcasts.
+    #[serde(rename = "worktree.job.start", rename_all = "camelCase")]
+    WorktreeJobStart {
+        request_id: String,
+        repo_path: String,
+        #[serde(default)]
+        branch: String,
+        #[serde(default)]
+        new_branch: bool,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        start_from: Option<String>,
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
+    },
+
+    /// Cancel a running job: git is killed and anything the job created (the
+    /// checkout, its admin entry, a new branch) is removed.
+    #[serde(rename = "worktree.job.cancel", rename_all = "camelCase")]
+    WorktreeJobCancel { job_id: String },
+
+    /// Re-run a failed job with the same inputs.
+    #[serde(rename = "worktree.job.retry", rename_all = "camelCase")]
+    WorktreeJobRetry { job_id: String },
+
+    /// Drop a failed job from the list.
+    #[serde(rename = "worktree.job.dismiss", rename_all = "camelCase")]
+    WorktreeJobDismiss { job_id: String },
 
     /// List durable projects on one host.  The request id is echoed by the
     /// response so concurrent sidebar refreshes cannot race each other.
@@ -1442,6 +1553,32 @@ pub enum ClientMessage {
         request_id: String,
         workspace_id: String,
         name: String,
+    },
+
+    /// Pin a workspace to the top of its project, or unpin it.
+    #[serde(rename = "workspace.pin", rename_all = "camelCase")]
+    WorkspacePin {
+        request_id: String,
+        workspace_id: String,
+        pinned: bool,
+    },
+
+    /// Show or hide a linked worktree's workspace in the sidebar.
+    #[serde(rename = "workspace.visibility", rename_all = "camelCase")]
+    WorkspaceVisibility {
+        request_id: String,
+        workspace_id: String,
+        hidden: bool,
+    },
+
+    /// Nest a linked worktree's workspace under another of the same project
+    /// (sidebar grouping only); absent `parentWorkspaceId` = top level.
+    #[serde(rename = "workspace.nest", rename_all = "camelCase")]
+    WorkspaceNest {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        parent_workspace_id: Option<String>,
     },
 
     /// Restore a sleeping workspace's metadata state. This first slice does
@@ -1727,6 +1864,10 @@ pub enum ServerMessage {
         claude_models: Option<Vec<ModelEntry>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         codex_models: Option<Vec<ModelEntry>>,
+        /// The remote's `server.info` capabilities that the hub relays
+        /// (`hub::RELAYED_CAPABILITIES`). Absent from older hubs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capabilities: Option<Vec<String>>,
     },
 
     /// Reply to `session.layout.get` (and echoed to the requester when
@@ -2042,6 +2183,14 @@ pub enum ServerMessage {
         repo_path: String,
         default_root: String,
         worktrees: Vec<WorktreeEntry>,
+        /// The repo's base ref (`origin/main`), when `origin/HEAD` is set —
+        /// the start-from picker's default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_ref: Option<String>,
+        /// Local and remote branch names (`main`, `origin/feature`) for the
+        /// start-from picker.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refs: Vec<String>,
     },
 
     /// Success reply to `worktree.create` / `worktree.remove`. `path` is the
@@ -2058,6 +2207,9 @@ pub enum ServerMessage {
         /// form.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<WorkspaceSummary>,
+        /// Remove with `deleteBranch`: the branch git would not delete.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preserved_branch: Option<WorktreePreservedBranch>,
     },
 
     /// Failure reply to any `worktree.*` request. `dirty` is true only when
@@ -2072,6 +2224,18 @@ pub enum ServerMessage {
         #[serde(default)]
         dirty: bool,
     },
+
+    /// Reply to `worktree.job.start`: the job was accepted.
+    #[serde(rename = "worktree.job.started", rename_all = "camelCase")]
+    WorktreeJobStarted {
+        request_id: String,
+        job: WorktreeJob,
+    },
+
+    /// Every background worktree job on this host. Sent on connect and after
+    /// every change; the list replaces the previous one.
+    #[serde(rename = "worktree.jobs", rename_all = "camelCase")]
+    WorktreeJobs { jobs: Vec<WorktreeJob> },
 
     #[serde(rename = "project.list", rename_all = "camelCase")]
     ProjectList {
