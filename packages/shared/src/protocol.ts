@@ -221,6 +221,8 @@ export interface HostInfoMessage {
   isSsh?: boolean;
   claudeModels?: ModelEntry[];
   codexModels?: ModelEntry[];
+  /** The remote's capabilities that the hub relays (`hub::RELAYED_CAPABILITIES`). */
+  capabilities?: string[];
 }
 
 // ---------------------------------------------------------------------------

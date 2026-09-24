@@ -96,8 +96,11 @@ function workspaceStateFor(state: GitReviewStoreState, workspaceId: string): Wor
 }
 
 function hostForWorkspace(workspaceId: string): string {
-  const workspace = usePerchStore.getState().workspaces.find((candidate) => candidate.id === workspaceId);
-  return workspace?.hostId ?? usePerchStore.getState().activeHostId;
+  const perch = usePerchStore.getState();
+  const workspace = perch.workspaces.find((candidate) => candidate.id === workspaceId);
+  // A remote host's workspace has no local row; its sessions name the owner.
+  const session = workspace ? undefined : perch.sessions.find((candidate) => candidate.workspaceId === workspaceId);
+  return workspace?.hostId ?? session?.hostId ?? perch.activeHostId;
 }
 
 function gitCapabilityForWorkspace(workspaceId: string): boolean {

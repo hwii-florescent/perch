@@ -63,6 +63,33 @@ struct RemoteInfo {
     is_ssh: bool,
     claude_models: Vec<ModelEntry>,
     codex_models: Vec<ModelEntry>,
+    /// The subset of the remote's capabilities the hub relays.
+    capabilities: Vec<String>,
+}
+
+/// Capability families a browser may use on a remote perch through this hub:
+/// their requests carry `hostId` and their replies are relayed by request id
+/// (worktree create/list/remove/branch delete, `git.*`, `review.*`). The rest
+/// stay off for remote hosts: project/workspace metadata and workspace fs are
+/// dropped below, background worktree jobs are local only, and the agent
+/// runtime families have no remote path tested yet.
+/// ponytail: an allow-list; widen it as each family is verified remotely.
+const RELAYED_CAPABILITIES: &[&str] = &["worktree.startFrom", "worktree.delete", "git.", "review."];
+
+fn relayed_capabilities(capabilities: &[String]) -> Vec<String> {
+    capabilities
+        .iter()
+        .filter(|cap| {
+            RELAYED_CAPABILITIES.iter().any(|allowed| {
+                if allowed.ends_with('.') {
+                    cap.starts_with(allowed)
+                } else {
+                    cap == allowed
+                }
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 /// What the hub knows about a single remote host at any instant.
@@ -165,6 +192,10 @@ pub struct HubManager {
     host_states: Mutex<HashMap<String, HostState>>,
     /// Cached display names for hosts.
     host_names: Mutex<HashMap<String, String>>,
+    /// Latest `workspace.git` per (host_id, cwd) from remotes, replayed to
+    /// each new browser connection like the local cache: a remote only sends
+    /// it when it changes.
+    remote_git: Mutex<HashMap<(String, String), ServerMessage>>,
     /// Shutdown-flag channels per host (watch<bool> where `true` = shut down).
     shutdown_flags: Mutex<HashMap<String, watch::Sender<bool>>>,
     /// The `SshHost` config each currently-running connection task was last
@@ -191,6 +222,7 @@ impl HubManager {
             hub_events_tx,
             host_states: Mutex::new(HashMap::new()),
             host_names: Mutex::new(HashMap::new()),
+            remote_git: Mutex::new(HashMap::new()),
             shutdown_flags: Mutex::new(HashMap::new()),
             running_hosts: Mutex::new(HashMap::new()),
             own_port,
@@ -213,6 +245,11 @@ impl HubManager {
                 build_host_info(id, names.get(id).map(|s| s.as_str()).unwrap_or(""), state)
             })
             .collect()
+    }
+
+    /// The last `workspace.git` of every remote cwd, for a new connection.
+    pub fn snapshot_remote_git(&self) -> Vec<ServerMessage> {
+        self.remote_git.lock().unwrap().values().cloned().collect()
     }
 
     /// Called when `hosts.upsert` / `hosts.delete` is received. Diffs the new
@@ -330,6 +367,10 @@ impl HubManager {
         }
         // Remove the active WS sender so forward() fails cleanly.
         self.connections.lock().unwrap().remove(host_id);
+        self.remote_git
+            .lock()
+            .unwrap()
+            .retain(|(host, _), _| host != host_id);
         // Forget the config it was running so a later re-upsert with the
         // same config (after the host was fully removed) is treated as a
         // fresh start rather than a stale no-op comparison.
@@ -655,6 +696,8 @@ impl HubManager {
                                 Vec::new()
                             },
                             codex_models,
+                            // No perch runs there, so no perch capabilities.
+                            capabilities: Vec::new(),
                         };
                         tracing::info!(
                             "[hub] {host_id}: direct host ready (claude={:?} codex={:?} tmux={:?})",
@@ -1069,6 +1112,7 @@ impl HubManager {
                 platform,
                 claude_models,
                 codex_models,
+                ref capabilities,
                 // A remote's terminal profile is deliberately ignored: the
                 // xterm rendering its output runs in the *local* client, so
                 // the local machine's terminal appearance is the one to match.
@@ -1080,6 +1124,7 @@ impl HubManager {
                     is_ssh,
                     claude_models: claude_models.clone(),
                     codex_models: codex_models.clone(),
+                    capabilities: relayed_capabilities(capabilities),
                 };
                 self.set_host_state(host_id, host_name, HostState::Connected(info));
             }
@@ -1391,11 +1436,15 @@ impl HubManager {
             } => {
                 let tagged = ServerMessage::WorkspaceGit {
                     host_id: host_id.to_string(),
-                    cwd,
+                    cwd: cwd.clone(),
                     branch,
                     ahead,
                     behind,
                 };
+                self.remote_git
+                    .lock()
+                    .unwrap()
+                    .insert((host_id.to_string(), cwd), tagged.clone());
                 let _ = self.hub_events_tx.send(Arc::new(tagged));
             }
 
@@ -1824,6 +1873,7 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             is_ssh: None,
             claude_models: None,
             codex_models: None,
+            capabilities: None,
         },
         HostState::Connected(info) => ServerMessage::HostInfo {
             host_id: host_id.to_string(),
@@ -1835,6 +1885,7 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             is_ssh: Some(info.is_ssh),
             claude_models: Some(info.claude_models.clone()),
             codex_models: Some(info.codex_models.clone()),
+            capabilities: Some(info.capabilities.clone()),
         },
         HostState::Error(err) => ServerMessage::HostInfo {
             host_id: host_id.to_string(),
@@ -1846,6 +1897,7 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             is_ssh: None,
             claude_models: None,
             codex_models: None,
+            capabilities: None,
         },
         HostState::Disabled => ServerMessage::HostInfo {
             host_id: host_id.to_string(),
@@ -1857,6 +1909,7 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             is_ssh: None,
             claude_models: None,
             codex_models: None,
+            capabilities: None,
         },
     }
 }
@@ -1880,5 +1933,38 @@ fn is_self_url(url: &str, own_port: u16) -> bool {
         port == own_port
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relayed_capabilities;
+
+    #[test]
+    fn only_relayed_capability_families_reach_browsers() {
+        let remote: Vec<String> = [
+            "workspace.snapshot",
+            "worktree.job",
+            "worktree.startFrom",
+            "worktree.delete",
+            "git.status",
+            "git.commit",
+            "review.batch.send",
+            "session.mode.get",
+            "fs.tree",
+            "gitx.fake",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            relayed_capabilities(&remote),
+            [
+                "worktree.startFrom",
+                "worktree.delete",
+                "git.status",
+                "git.commit",
+                "review.batch.send"
+            ]
+        );
     }
 }

@@ -1864,6 +1864,10 @@ pub enum ServerMessage {
         claude_models: Option<Vec<ModelEntry>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         codex_models: Option<Vec<ModelEntry>>,
+        /// The remote's `server.info` capabilities that the hub relays
+        /// (`hub::RELAYED_CAPABILITIES`). Absent from older hubs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capabilities: Option<Vec<String>>,
     },
 
     /// Reply to `session.layout.get` (and echoed to the requester when

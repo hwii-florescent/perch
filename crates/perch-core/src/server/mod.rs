@@ -2012,6 +2012,9 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     for msg in state.app.hub.snapshot_host_states() {
         let _ = state.out_tx.send(msg);
     }
+    for msg in state.app.hub.snapshot_remote_git() {
+        let _ = state.out_tx.send(msg);
+    }
 
     // Send the currently-known git branch/ahead-behind for every local cwd
     // already polled by `spawn_git_poll_task`, so a newly-connected client
@@ -2915,6 +2918,7 @@ mod session_viewer_filter_tests {
             is_ssh: None,
             claude_models: None,
             codex_models: None,
+            capabilities: None,
         };
         let bare_error = ServerMessage::Error {
             message: "boom".to_string(),

@@ -16,12 +16,16 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
   const workspace = usePerchStore((current) => current.workspaces.find((candidate) => candidate.id === workspaceId));
   const sessions = usePerchStore((current) => current.sessions);
   const workspaceSessions = useMemo(
-    () => workspace
-      ? sessions
-        .filter((session) => !session.archived && (session.workspaceId === workspace.id || ((session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path)))
-        .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId ?? session.lastAgent }))
-      : [],
-    [sessions, workspace],
+    () => sessions
+      .filter((session) => !session.archived && (session.workspaceId === workspaceId || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path)))
+      .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId ?? session.lastAgent })),
+    [sessions, workspace, workspaceId],
+  );
+
+  // A remote host's workspace has no local row; name it after its sessions' folder.
+  const remoteName = useMemo(
+    () => sessions.find((session) => session.workspaceId === workspaceId)?.cwd.replace(/\/+$/, "").split("/").pop(),
+    [sessions, workspaceId],
   );
 
   useEffect(() => {
@@ -31,7 +35,7 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
   return (
     <WorkspaceGitReview
       workspaceId={workspaceId}
-      workspaceName={workspace?.name}
+      workspaceName={workspace?.name ?? remoteName}
       startSnapshot={workspace?.startSnapshot}
       lastAgentTurn={state.lastAgentTurn ?? undefined}
       agentSessionId={state.agentSessionId}
