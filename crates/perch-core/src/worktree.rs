@@ -72,10 +72,6 @@ pub struct WorktreeListing {
     /// `~/.perch/worktrees/<repo-name>` — the directory new checkouts land in
     /// by default, so the client can prefill the optional custom-path field.
     pub default_root: String,
-    /// See `base_ref`.
-    pub base_ref: Option<String>,
-    /// Local branches and `remote/branch` names, for the start-from picker.
-    pub refs: Vec<String>,
 }
 
 /// A remove failure, distinguishing the dirty-checkout guard (recoverable by
@@ -389,37 +385,45 @@ pub async fn list(repo_path: &str) -> Result<WorktreeListing, String> {
         });
     }
 
-    let primary = primary.unwrap_or(repo_path);
-    let refs = run_git(
-        &[
-            "-C",
-            &primary,
-            "for-each-ref",
-            "--format=%(refname)",
-            "refs/heads",
-            "refs/remotes",
-        ],
-        GIT_QUICK_TIMEOUT,
-    )
-    .await
-    .unwrap_or_default()
-    .lines()
-    .filter(|r| !r.ends_with("/HEAD"))
-    .filter_map(|r| {
-        r.strip_prefix("refs/heads/")
-            .or_else(|| r.strip_prefix("refs/remotes/"))
-    })
-    .map(str::to_string)
-    .collect();
     Ok(WorktreeListing {
         worktrees,
         default_root: worktrees_root()
             .join(&repo_name)
             .to_string_lossy()
             .to_string(),
-        base_ref: base_ref(&primary).await,
-        refs,
     })
+}
+
+/// The start-from picker's data for the repo containing `repo_path`: its
+/// `base_ref` and every local branch and `remote/branch` name. Refs are shared
+/// by all worktrees, so any checkout of the repo answers. Kept out of `list`,
+/// whose other callers only need the entries.
+pub async fn picker_refs(repo_path: &str) -> (Option<String>, Vec<String>) {
+    let repo = expand_tilde(repo_path);
+    let refs = async {
+        run_git(
+            &[
+                "-C",
+                &repo,
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ],
+            GIT_QUICK_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default()
+        .lines()
+        .filter(|r| !r.ends_with("/HEAD"))
+        .filter_map(|r| {
+            r.strip_prefix("refs/heads/")
+                .or_else(|| r.strip_prefix("refs/remotes/"))
+        })
+        .map(str::to_string)
+        .collect()
+    };
+    tokio::join!(base_ref(&repo), refs)
 }
 
 /// Everything `execute_create` needs, resolved up front so a failed or
@@ -977,11 +981,10 @@ async fn ignored_subset(repo: &str, paths: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Resolve what a new worktree of `primary` should link and copy. Never
-/// fails: an unreadable or malformed config means nothing is materialized.
-/// A path both shared and listed in `.worktreeinclude` is only linked.
-pub async fn resolve_materialize(primary: &str) -> Materialize {
-    let root = Path::new(primary);
+/// The config-file half of `resolve_materialize`: safe, existing `shared`
+/// directories and `.worktreeinclude` entries, before the ignore check.
+/// Blocking fs I/O, so it runs on the blocking pool.
+fn materialize_candidates(root: &Path) -> (Vec<String>, Vec<String>) {
     let safe = |entries: Vec<String>, what: &str| -> Vec<String> {
         entries
             .into_iter()
@@ -1025,6 +1028,17 @@ pub async fn resolve_materialize(primary: &str) -> Materialize {
         .filter(|p| std::fs::symlink_metadata(root.join(p)).is_ok())
         .filter(|p| !shared.contains(p))
         .collect();
+    (shared, include)
+}
+
+/// Resolve what a new worktree of `primary` should link and copy. Never
+/// fails: an unreadable or malformed config means nothing is materialized.
+/// A path both shared and listed in `.worktreeinclude` is only linked.
+pub async fn resolve_materialize(primary: &str) -> Materialize {
+    let root = std::path::PathBuf::from(primary);
+    let (shared, include) = tokio::task::spawn_blocking(move || materialize_candidates(&root))
+        .await
+        .unwrap_or_default();
     let mut links = ignored_subset(primary, &shared).await;
     let mut copies = ignored_subset(primary, &include).await;
     links.sort();
@@ -1584,6 +1598,9 @@ prunable stale
         assert!(!plan.branch_existed && !plan.target_existed && !plan.reuse);
         execute_create(&plan).await.unwrap();
         assert!(target.join("README").exists());
+        // Refs are shared, so the linked checkout answers for the whole repo.
+        let (_, refs) = picker_refs(s(&target)).await;
+        assert!(refs.iter().any(|r| r == "feat"), "{refs:?}");
         discard_create(&plan).await;
         assert!(!target.exists());
         assert!(!branch_exists(&repo, "feat"));

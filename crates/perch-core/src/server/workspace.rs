@@ -531,6 +531,7 @@ pub(super) fn handle_worktree_list(
     tokio::spawn(async move {
         match crate::worktree::list(&repo_path).await {
             Ok(listing) => {
+                let (base_ref, refs) = crate::worktree::picker_refs(&repo_path).await;
                 // Registration is a side effect of a read. Git already told us
                 // what the checkouts are, so a DB failure here must not blank
                 // the worktree menu — log it and still answer the listing.
@@ -542,8 +543,8 @@ pub(super) fn handle_worktree_list(
                     host_id: "local".to_string(),
                     repo_path,
                     default_root: listing.default_root,
-                    base_ref: listing.base_ref,
-                    refs: listing.refs,
+                    base_ref,
+                    refs,
                     worktrees: listing
                         .worktrees
                         .into_iter()
