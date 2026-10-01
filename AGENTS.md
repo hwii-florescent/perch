@@ -112,6 +112,27 @@ there, not here.
   - It shows no provider/model/effort UI; that chrome is Hosted-only.
   - The tab-bar `+` opens a picker and creates nothing until something is
     chosen.
+- **Workspace UX (decided with the user 2026-10-01, Orca-style; don't
+  revert):**
+  - Naming: Projects are folders; Workspaces are a project's checkout and
+    its worktrees; sessions live under a workspace.
+  - Files and Git live only in the ›_ drawer (`WorkspaceTools.tsx`). It is
+    app-level, not part of a session's layout, and follows the clicked
+    workspace. Don't put them back as per-chat dockview panels; the
+    `files`/`gitReview` panel kinds remain only so old saved layouts restore.
+  - A tab is a terminal. Every CLI agent runs under
+    `agent_runtime::in_shell`, so an exited agent leaves a login shell in
+    the same pane. `Terminal` is a provider (`ProviderManifest::terminal`),
+    listed last in the `+` picker so it is never the default.
+  - An agent with no UI surface (Terminal, or a CLI with no native bridge)
+    always launches as CLI and shows no UI/CLI switch (`cliOnly` in
+    `createSessionOnHost` and `Chat.tsx`).
+  - The session header holds only the UI/CLI switch, which writes this
+    session's mode. Workspace/device defaults live in Settings → Chat Mode.
+    There is no Release control / Stop CLI bar: taking control takes the
+    lease ("last actor drives"), and Stop agent is in the pane ⋯ menu.
+  - Tab and session-row × archive the session (restorable from Settings).
+    Project × archives the project; re-registering the folder restores it.
 - **Store:** anything that reads or replaces `messages` calls
   `flushChunkBuffer()` first (see its doc comment). A late flush silently
   drops text.
@@ -161,6 +182,17 @@ there, not here.
     its own before calling it a regression.
   - `ssh::tests::mux_control_path_…` is flaky in the full suite and passes
     on its own.
+  - `playwright.config.ts` points `PERCHD_DIR` at `/tmp/perch-e2e-perchd`
+    for every core it starts. Never let tests use `~/.perch/daemon`: that
+    is the installed app's daemon, and leaked test PTYs exhaust its fds
+    ("dup of fd … failed") for the user's real app.
+  - Known failures, not regressions (as of 2026-10-01): Hosted-composer
+    specs that use `model-chip`/`.chat__send` (W1, P3, nav N1, sidebar 2,
+    workspace-git GB1; UI mode is NativeCliChat since 2e9c4b7);
+    agent-terminal-ownership, workspace-recovery, workspace-review:226;
+    native-providers (expects a sidebar-popover pi session in CLI, but new
+    sessions follow the device default, which is UI); every opencode spec
+    (opencode is deliberately not installed on this Mac; don't install it).
 - **UI builds:** after `npm run build`, open tabs update themselves within
   about a minute (a PWA service worker); no restart is needed.
 - **Desktop notifications:** the web view doesn't deliver
