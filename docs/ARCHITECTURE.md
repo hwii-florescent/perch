@@ -152,8 +152,8 @@ Orca's `cli/reference.mdx`.
 
 Keep React, dockview and xterm (`createPerchTerminal` rules in AGENTS.md).
 Build order:
-1. ✅ Sidebar: projects → worktrees, with status glyphs.
-2. A per-worktree tab strip with splits that persist.
+1. ✅ Sidebar: projects → workspaces (checkout + worktrees), with status glyphs.
+2. 🟡 A per-workspace tab strip (built) with splits that persist (to verify).
 3. ✅ Worktree create dialog with a start-from picker and progress.
 4. Cmd-J.
 5. Cmd-P.
