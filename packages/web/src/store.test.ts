@@ -1034,3 +1034,23 @@ it("a CLI launch preserves an inherited CLI mode and only overrides Hosted", () 
     }
   }
 });
+
+describe("archiveSession (tab close)", () => {
+  it("closing the active tab lands on a sibling in the same project, not the newest session elsewhere", () => {
+    usePerchStore.setState({
+      sessionId: "A",
+      activeHostId: "local",
+      activeProject: { hostId: "local", cwd: "/p" },
+      sessions: [
+        session({ id: "A", cwd: "/p", createdAt: 1 }),
+        session({ id: "B", cwd: "/p", createdAt: 2 }),
+        session({ id: "C", cwd: "/q", createdAt: 3 }),
+      ],
+    });
+    FakeWebSocket.sent.length = 0;
+    usePerchStore.getState().archiveSession("A", true);
+    const sent = FakeWebSocket.sent.map((frame) => JSON.parse(frame) as { type: string; sessionId?: string });
+    expect(sent[0]).toMatchObject({ type: "session.archive", sessionId: "A" });
+    expect(sent.at(-1)).toMatchObject({ sessionId: "B" });
+  });
+});

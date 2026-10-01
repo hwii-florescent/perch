@@ -187,7 +187,8 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   useEffect(() => {
     if (!menuRequest || menuRequest.projectKey !== projectKey) return;
     clearWorktreeMenuRequest();
-    openMenu();
+    if (menuRequest.remove) setPendingRemove({ ...menuRequest.remove, force: false });
+    else openMenu();
   }, [menuRequest, projectKey, clearWorktreeMenuRequest, openMenu]);
 
   // Dismiss on outside click / Escape (same contract as SessionMenu). Skipped

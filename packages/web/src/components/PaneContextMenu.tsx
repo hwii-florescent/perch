@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DockviewController } from "../dockview/dockviewController";
+import { canStopAgent, stopAgent } from "../agentTerminals";
 
 export interface PaneContextMenuProps {
   panelId: string;
@@ -22,10 +23,12 @@ export interface PaneContextMenuProps {
   x: number;
   y: number;
   controller: DockviewController;
+  /** The session a chat pane shows; enables "Stop agent". */
+  sessionId?: string;
   onClose: () => void;
 }
 
-export function PaneContextMenu({ panelId, title, x, y, controller, onClose }: PaneContextMenuProps) {
+export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, onClose }: PaneContextMenuProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(title);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -146,6 +149,20 @@ export function PaneContextMenu({ panelId, title, x, y, controller, onClose }: P
             Rename
           </button>
           <div className="pane-context-menu__divider" />
+          {sessionId && canStopAgent(sessionId) && (
+            <button
+              type="button"
+              className="pane-context-menu__item pane-context-menu__item--danger"
+              data-testid="pane-menu-stop-agent"
+              title="Kill the agent process. Restart resumes the conversation."
+              onClick={() => {
+                stopAgent(sessionId);
+                onClose();
+              }}
+            >
+              Stop agent
+            </button>
+          )}
           <button
             type="button"
             className="pane-context-menu__item pane-context-menu__item--danger"

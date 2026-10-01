@@ -2,6 +2,7 @@ import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useState } 
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { WorktreeMenu } from "./WorktreeMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
 
 function basename(path: string): string {
@@ -162,6 +163,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const sessionId = usePerchStore((state) => state.sessionId);
   const createRequest = usePerchStore((state) => state.workspaceProjectCreate);
   const clearCreateRequest = usePerchStore((state) => state.clearWorkspaceProjectCreate);
+  const archiveSession = usePerchStore((state) => state.archiveSession);
+  const archiveWorkspaceProject = usePerchStore((state) => state.archiveWorkspaceProject);
+  const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
+  const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [path, setPath] = useState("");
@@ -341,6 +346,16 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   <span className="workspace-project__chevron" aria-hidden="true">›</span>
                 </button>
                 {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
+                <button
+                  type="button"
+                  className="workspace-project__remove"
+                  data-testid={`workspace-project-remove-${project.id}`}
+                  title="Remove project from perch (files on disk are kept)"
+                  aria-label={`Remove ${project.name || basename(project.path)}`}
+                  onClick={() => setRemovingProject(project)}
+                >
+                  ×
+                </button>
                 </div>
                 {(allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces">
@@ -421,6 +436,20 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             {workspace.pinned ? "Unpin" : "Pin"}
                           </button>
+                          {workspace.parentWorkspaceId && project.repoPath && (
+                            <button
+                              type="button"
+                              className="workspace-entry__files"
+                              data-testid={`workspace-delete-${workspace.id}`}
+                              title="Delete this worktree and its branch"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined });
+                              }}
+                            >
+                              Delete
+                            </button>
+                          )}
                           {workspace.parentWorkspaceId && (
                             <button
                               type="button"
@@ -476,19 +505,30 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {workspaceSessions.length > 0 && (
                             <div className="workspace-entry__sessions">
                               {workspaceSessions.map((session) => (
-                                <button
-                                  type="button"
-                                  className="workspace-entry__session"
-                                  key={session.id}
-                                  data-testid={`workspace-session-${session.id}`}
-                                  onClick={() => {
-                                    switchSession(session.id);
-                                    onNavigate?.();
-                                  }}
-                                >
-                                  <StatusDot session={session} />
-                                  <span>{session.title || "New session"}</span>
-                                </button>
+                                <div className="workspace-entry__session-row" key={session.id}>
+                                  <button
+                                    type="button"
+                                    className={"workspace-entry__session" + (session.id === sessionId ? " workspace-entry__session--active" : "")}
+                                    data-testid={`workspace-session-${session.id}`}
+                                    onClick={() => {
+                                      switchSession(session.id);
+                                      onNavigate?.();
+                                    }}
+                                  >
+                                    <StatusDot session={session} />
+                                    <span>{session.title || "New session"}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="workspace-entry__session-close"
+                                    data-testid={`workspace-session-close-${session.id}`}
+                                    title="Close session (restore it from Settings → Archived sessions)"
+                                    aria-label={`Close ${session.title || "session"}`}
+                                    onClick={() => archiveSession(session.id, true)}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
                               ))}
                             </div>
                           )}
@@ -513,6 +553,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             );
           })}
         </div>
+      )}
+      {removingProject && (
+        <ConfirmDialog
+          message={`Remove "${removingProject.name || basename(removingProject.path)}" from perch? Its sessions are archived; the folder on disk is untouched. Add the folder again to bring it back.`}
+          confirmLabel="Remove"
+          onConfirm={() => {
+            for (const session of sessionsForProject(removingProject.id)) archiveSession(session.id, true);
+            archiveWorkspaceProject(removingProject.id, true);
+            setRemovingProject(null);
+          }}
+          onCancel={() => setRemovingProject(null)}
+        />
       )}
     </section>
   );

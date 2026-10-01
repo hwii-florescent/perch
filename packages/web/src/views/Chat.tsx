@@ -638,6 +638,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
   const cliAgent = sessionId ? (cliAgentBySession[sessionId] ?? persistedCliProvider ?? agent) : agent;
   const cliError = usePerchStore((s) => s.cliError);
   const updateSettings = usePerchStore((s) => s.updateSettings);
+  const archiveSession = usePerchStore((s) => s.archiveSession);
   const sessionSummary = usePerchStore((s) =>
     sessionId ? s.sessions.find((candidate) => candidate.id === sessionId) : undefined,
   );
@@ -697,21 +698,12 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
     }
   }
 
-  function clearMode(scope: SessionModeOverrideScope) {
-    if (!sessionId || !runtimeModeAvailable) return;
-    setSessionMode(sessionId, scope, undefined, workspaceId, true);
-  }
-
   const modeControl = sessionId && runtimeModeAvailable ? (
     <SessionModeControl
       mode={mode}
-      scope={sessionModeState?.scope ?? "default"}
       state={sessionModeState?.state ?? (modePending ? "loading" : "idle")}
       error={sessionModeState?.error}
-      hasWorkspace={Boolean(workspaceId)}
-      canPersist={runtimeModeAvailable}
-      onChange={applyMode}
-      onClear={clearMode}
+      onChange={(next) => applyMode(next)}
     />
   ) : null;
 
@@ -958,7 +950,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
           sessionId={sessionId}
           agent={cliAgent}
           cliError={cliError}
-          onExitCli={() => applyMode("hosted", sessionModeState?.scope === "workspace" ? "workspace" : "session")}
+          onClose={() => archiveSession(sessionId, true)}
         />
       ) : mode === "cli" ? (
         <CliStartPanel agent={cliAgent} />

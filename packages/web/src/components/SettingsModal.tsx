@@ -117,7 +117,7 @@ function RuntimeChatModeSection({ sessionId }: { sessionId: string }) {
   const modeState = usePerchStore((s) => s.sessionModes[sessionId]);
   const fetchSessionMode = usePerchStore((s) => s.fetchSessionMode);
   const setSessionMode = usePerchStore((s) => s.setSessionMode);
-  const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? activeWorkspaceId ?? undefined;
+  const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? modeState?.workspaceId ?? activeWorkspaceId ?? undefined;
   const [scope, setScope] = useState<SessionModeOverrideScope>(
     modeState?.scope === "workspace" || modeState?.scope === "device" || modeState?.scope === "session"
       ? modeState.scope
@@ -153,7 +153,7 @@ function RuntimeChatModeSection({ sessionId }: { sessionId: string }) {
     <section className="settings-modal__section">
       <h3 className="settings-modal__section-title">Chat Mode</h3>
       <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">Hosted / CLI</span>
+        <span className="settings-modal__field-label">UI / CLI</span>
         <ModeSwitch mode={mode} onChange={changeMode} testId="settings-chat-mode" disabled={disabled} />
         <select
           className="settings-modal__select"
@@ -163,14 +163,14 @@ function RuntimeChatModeSection({ sessionId }: { sessionId: string }) {
           disabled={disabled}
           onChange={(event) => setScope(event.target.value as SessionModeOverrideScope)}
         >
-          <option value="device">Device default</option>
-          <option value="workspace" disabled={!hasWorkspace}>Workspace</option>
-          <option value="session">Session</option>
+          <option value="device">Every session on this device</option>
+          <option value="workspace" disabled={!hasWorkspace}>Every session in this workspace</option>
+          <option value="session">This session only</option>
         </select>
       </div>
       <p className="settings-modal__muted">
-        Applies to this {scope === "device" ? "device" : scope} and is shared by every connected view of the session.
-        {modeState?.scope && modeState.scope !== "default" ? ` Effective source: ${modeState.scope}.` : ""}
+        The session header's switch changes one session. Set a default here: a session setting beats a workspace one, which beats the device one.
+        {modeState?.scope && modeState.scope !== "default" ? ` This session's mode comes from its ${modeState.scope} setting.` : ""}
       </p>
       {modeState?.state === "error" && (
         <p className="settings-modal__muted settings-modal__muted--error" role="alert">
@@ -185,7 +185,7 @@ function RuntimeChatModeSection({ sessionId }: { sessionId: string }) {
           disabled={disabled}
           onClick={clearOverride}
         >
-          Use inherited mode
+          Reset {modeState.scope} setting
         </button>
       )}
     </section>
@@ -216,7 +216,7 @@ function LegacyChatModeSection() {
     <section className="settings-modal__section">
       <h3 className="settings-modal__section-title">Chat Mode</h3>
       <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">Hosted / CLI</span>
+        <span className="settings-modal__field-label">UI / CLI</span>
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </div>
       <p className="settings-modal__muted">

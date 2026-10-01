@@ -23,7 +23,6 @@ function manifest(id: string, name: string, executable = "/bin/sh") {
 async function cliMode(page: Page) {
   const mode = page.getByTestId("session-mode-toggle");
   await expect(mode).toBeEnabled();
-  await page.getByTestId("session-mode-scope").selectOption("device");
   if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
   await expect(page.getByTestId("cli-start-panel")).toBeVisible();
 }
@@ -136,8 +135,8 @@ test("configured providers retain identity and isolation across desktop and mobi
     await page.reload({ waitUntil: "networkidle" });
     await expect(desktopTerminal).toHaveAttribute("data-terminal-id", alphaId);
     await expect(desktopTerminal.locator(".xterm-rows")).toContainText(`ready_fixture-alpha_pid_${alphaPid}_home_unset`);
-    await expect(desktopTerminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-    await expect(mobileTerminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(desktopTerminal).toHaveAttribute("data-controlling", "true");
+    await expect(mobileTerminal).toHaveAttribute("data-controlling", "true");
     await desktopTerminal.locator(".xterm-helper-textarea").pressSequentially("alpha_message");
     await desktopTerminal.locator(".xterm-helper-textarea").press("Enter");
     await mobileTerminal.locator(".xterm-helper-textarea").pressSequentially("beta_message");
@@ -157,10 +156,6 @@ test("configured providers retain identity and isolation across desktop and mobi
     expect(errors).toEqual([]);
     await phone.screenshot({ path: path.join(shots, `provider-terminal-mobile-${testInfo.project.name}.png`) });
     await page.screenshot({ path: path.join(shots, `provider-terminal-desktop-${testInfo.project.name}.png`) });
-    for (const terminal of [desktopTerminal, mobileTerminal]) {
-      await terminal.getByRole("button", { name: "Stop CLI", exact: true }).click();
-      await expect(terminal.getByTestId("cli-exited")).toBeVisible();
-    }
   } finally {
     await phoneContext.close();
     if (core && core.exitCode === null && core.signalCode === null) {

@@ -1796,14 +1796,13 @@ impl AgentLifecycleRegistry {
                 ControlChannel::Input => record.input_owner.as_ref(),
                 ControlChannel::Resize => record.resize_owner.as_ref(),
             };
+            // Acquiring from another viewer takes the lease over (the last
+            // view to act drives, as in Orca). The new generation makes the
+            // old owner's lease stale, so its input is rejected from here on.
             if let Some(current) = current {
                 if current.client == client {
                     return Ok(current.clone());
                 }
-                return Err(OwnershipError::AlreadyOwned {
-                    channel,
-                    owner: current.client.clone(),
-                });
             }
         }
         inner.next_generation = inner.next_generation.wrapping_add(1).max(1);
@@ -2621,16 +2620,8 @@ impl std::error::Error for LifecycleError {}
 pub enum OwnershipError {
     Lifecycle(LifecycleError),
     NotFound(AgentKey),
-    AlreadyOwned {
-        channel: ControlChannel,
-        owner: ClientIdentity,
-    },
-    NotOwned {
-        channel: ControlChannel,
-    },
-    StaleLease {
-        channel: ControlChannel,
-    },
+    NotOwned { channel: ControlChannel },
+    StaleLease { channel: ControlChannel },
 }
 
 impl fmt::Display for OwnershipError {
@@ -2638,9 +2629,6 @@ impl fmt::Display for OwnershipError {
         match self {
             Self::Lifecycle(error) => error.fmt(f),
             Self::NotFound(key) => write!(f, "agent not found: {key:?}"),
-            Self::AlreadyOwned { channel, owner } => {
-                write!(f, "{channel:?} is owned by client `{}`", owner.id)
-            }
             Self::NotOwned { channel } => write!(f, "{channel:?} has no owner"),
             Self::StaleLease { channel } => write!(f, "stale {channel:?} ownership lease"),
         }
@@ -3001,10 +2989,13 @@ mod tests {
         let lease = registry
             .acquire_control(&key, ControlChannel::Input, desktop.clone(), 200)
             .unwrap();
-        assert!(matches!(
-            registry.acquire_control(&key, ControlChannel::Input, mobile.clone(), 201),
-            Err(OwnershipError::AlreadyOwned { .. })
-        ));
+        let taken = registry
+            .acquire_control(&key, ControlChannel::Input, mobile.clone(), 201)
+            .unwrap();
+        assert!(taken.generation > lease.generation);
+        let lease = registry
+            .acquire_control(&key, ControlChannel::Input, desktop.clone(), 201)
+            .unwrap();
         assert!(matches!(
             registry.record_control_activity(
                 &key,

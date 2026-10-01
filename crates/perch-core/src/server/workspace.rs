@@ -872,12 +872,24 @@ pub(super) async fn handle_project_create(
         Err(_) => None,
     };
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
-    match state.app.db.create_project(
-        "local",
-        &canonical,
-        name.as_deref(),
-        start_snapshot.as_deref(),
-    ) {
+    // Registering a removed (archived) folder again brings it back.
+    match state
+        .app
+        .db
+        .create_project(
+            "local",
+            &canonical,
+            name.as_deref(),
+            start_snapshot.as_deref(),
+        )
+        .and_then(|(project, workspace)| {
+            let project = if project.archived {
+                state.app.db.set_project_archived(&project.id, false)?
+            } else {
+                project
+            };
+            Ok((project, workspace))
+        }) {
         Ok((project, workspace)) => {
             let revision = next_snapshot_revision_locked(&state.app);
             let project = project_to_wire(project);

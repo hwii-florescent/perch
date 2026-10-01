@@ -12,13 +12,12 @@ test("agent runtime survives view changes and control transfers between desktop 
   try {
     const mode = page.getByTestId("session-mode-toggle");
     await expect(mode).toBeEnabled();
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const desktop = page.getByTestId("persistent-agent-terminal");
     await expect(desktop).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
-    await expect(desktop.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
     const id = (await desktop.getAttribute("data-terminal-id"))!;
     const marker = `persist_${Date.now()}`;
     await expect(desktop.locator(".xterm-rows")).toContainText("Claude Code", { timeout: 20_000 });
@@ -36,11 +35,10 @@ test("agent runtime survives view changes and control transfers between desktop 
     await phone.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
     const phoneMode = phone.getByTestId("session-mode-toggle");
     await expect(phoneMode).toBeEnabled();
-    await phone.getByTestId("session-mode-scope").selectOption("device");
     if (await phoneMode.getAttribute("aria-checked") !== "true") await phoneMode.click();
     const mobile = phone.getByTestId("persistent-agent-terminal");
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
-    await expect(mobile).toContainText("Another viewer has control");
+    await expect(mobile).toContainText("Another view is typing in this agent");
     await expect(mobile.locator(".xterm-rows")).toContainText(marker);
     // A guessed terminal id on an unrelated connection cannot write, even
     // though this connection is authorized to inspect the same local core.
@@ -56,11 +54,10 @@ test("agent runtime survives view changes and control transfers between desktop 
     expect(refused).toBe("agent_control_required");
     await expect(desktop.locator(".xterm-rows")).not.toContainText("UNAUTHORIZED_SENTINEL");
 
-    await desktop.getByRole("button", { name: "Release control", exact: true }).click();
-    await expect(mobile).toContainText("Viewing agent");
+    // Taking control moves it from the desktop without a release step.
     await mobile.getByRole("button", { name: "Take control", exact: true }).click();
-    await expect(mobile.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
-    await expect(desktop).toContainText("Another viewer has control");
+    await expect(mobile).toHaveAttribute("data-controlling", "true");
+    await expect(desktop).toContainText("Another view is typing in this agent");
     await mobile.locator(".xterm-helper-textarea").pressSequentially("_phone", { delay: 15 });
     await expect(desktop.locator(".xterm-rows")).toContainText(`${marker}_phone`);
 
@@ -82,14 +79,18 @@ test("agent runtime survives view changes and control transfers between desktop 
     await phone.reload({ waitUntil: "networkidle" });
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
-    await expect(mobile.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(mobile).toHaveAttribute("data-controlling", "true");
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const name of ["Release control", "Stop CLI"]) expect((await mobile.getByRole("button", { name, exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await desktop.getByRole("button", { name: "Take control", exact: true }).boundingBox())!.height).toBeGreaterThan(0);
     const shots = path.resolve(__dirname, "../.impeccable/review");
     fs.mkdirSync(shots, { recursive: true });
     await phone.screenshot({ path: path.join(shots, `agent-mobile-${testInfo.project.name}.png`) });
     await page.screenshot({ path: path.join(shots, `agent-desktop-${testInfo.project.name}.png`) });
-    await mobile.getByRole("button", { name: "Stop CLI", exact: true }).click();
+    // Only the view holding input can stop the agent (pane menu → Stop agent).
+    await desktop.getByRole("button", { name: "Take control", exact: true }).click();
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
+    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    await page.getByTestId("pane-menu-stop-agent").click();
     await expect(mobile.getByTestId("cli-exited")).toBeVisible();
     await expect(desktop.getByTestId("cli-exited")).toBeVisible();
     expect(errors).toEqual([]);

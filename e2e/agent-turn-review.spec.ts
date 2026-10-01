@@ -190,7 +190,6 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     // 2. A real CLI agent process in that repository.
     const mode = page.getByTestId("session-mode-toggle");
     await expect(mode).toBeEnabled({ timeout: 15000 });
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
@@ -428,7 +427,6 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
 
     const mode = page.getByTestId("session-mode-toggle");
     await expect(mode).toBeEnabled({ timeout: 15000 });
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId("cli-start-agent-turnbot").click();
     await page.getByTestId("cli-start-browse").click();

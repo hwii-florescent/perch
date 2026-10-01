@@ -8,8 +8,8 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 
-export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli }: {
-  sessionId: string; agent: string; cliError?: string | null; onExitCli?: () => void;
+export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }: {
+  sessionId: string; agent: string; cliError?: string | null; onClose?: () => void;
 }) {
   const connected = usePerchStore((state) => state.connected);
   const container = useRef<HTMLDivElement>(null);
@@ -118,13 +118,12 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
     };
   }, [connected, sessionId, agent, restart]);
 
-  async function changeControl() {
+  async function takeControl() {
     if (!binding.current || pending) return;
     setPending(true);
     setError(null);
     try {
-      if (controlling) await binding.current.releaseControl();
-      else await binding.current.takeControl();
+      await binding.current.takeControl();
       emulator.current?.fit();
     } catch (reason) { setError((reason as Error).message); }
     finally { setPending(false); }
@@ -133,16 +132,17 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
   // exit — but its conversation is kept and reattaching resumes it. Saying
   // "exited (code 0)" for that would read as lost work.
   const sleeping = status?.state === "sleeping";
-  const label = !connected ? "Reconnecting…" : sleeping ? "Agent sleeping" : exitCode !== null ? "Agent exited" : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? "You control this agent" : status.inputOwner ? "Another viewer has control" : "Viewing agent";
-  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined}>
-    <div className="terminal__toolbar">
+  // Only a view that can't type gets a bar: driving the agent is the normal
+  // case and needs no chrome. Taking control moves it from any other view.
+  const label = !connected ? "Reconnecting…" : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
+  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined}>
+    {label && <div className="terminal__toolbar terminal__toolbar--overlay">
       <span role="status">{label}</span>
       {!terminalId && error && connected && <button type="button" disabled={pending} onClick={() => setRestart((value) => value + 1)}>Retry CLI</button>}
-      {exitCode === null && <button type="button" disabled={!terminalId || pending || !connected} onClick={() => void changeControl()}>
-        {pending ? "Updating control…" : controlling ? "Release control" : "Take control"}
+      {terminalId && status && !controlling && <button type="button" disabled={pending || !connected} onClick={() => void takeControl()}>
+        {pending ? "Taking control…" : "Take control"}
       </button>}
-      {exitCode === null && controlling && <button type="button" disabled={pending || !connected} onClick={() => binding.current?.stop()}>Stop CLI</button>}
-    </div>
+    </div>}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
@@ -150,7 +150,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onExitCli 
       <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>
       <span className="terminal__exited-actions">
         <button type="button" className="terminal__exited-btn terminal__exited-btn--primary" data-testid={sleeping ? "cli-resume" : "cli-restart"} onClick={() => setRestart((value) => value + 1)}>{sleeping ? "Resume agent" : "Restart CLI"}</button>
-        {onExitCli && <button type="button" className="terminal__exited-btn" onClick={onExitCli}>Back to Hosted</button>}
+        {onClose && <button type="button" className="terminal__exited-btn" data-testid="cli-close-session" onClick={onClose}>Close session</button>}
       </span>
     </div>}
   </div>;

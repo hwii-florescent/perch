@@ -64,7 +64,6 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await current.goto(url, { waitUntil: "networkidle" });
     const toggle = current.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled();
-    await current.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     for (const provider of ["claude", "codex", "omp", "pi"]) {
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeVisible();
@@ -101,7 +100,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       await current.getByRole("button", { name: "Use this folder", exact: true }).click();
       const terminal = current.getByTestId("persistent-agent-terminal");
       await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
-      await expect(terminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+      await expect(terminal).toHaveAttribute("data-controlling", "true");
       await expect(terminal.locator(".xterm-rows")).toContainText(provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
       await terminal.locator(".xterm-helper-textarea").pressSequentially(`perch_${provider}_draft`, { delay: 20 });
       await expect(terminal.locator(".xterm-rows")).toContainText(`perch_${provider}_draft`);
@@ -119,7 +118,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(pi).toBeVisible();
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft");
     await expect(omp.locator(".xterm-rows")).not.toContainText("perch_pi_draft");
-    await expect(pi.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(pi).toHaveAttribute("data-controlling", "true");
     await pi.locator(".xterm-helper-textarea").pressSequentially("_split", { delay: 20 });
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft_split");
     await expect(omp.locator(".xterm-rows")).not.toContainText("_split");
@@ -133,7 +132,6 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     for (const terminal of [omp, pi]) {
       await terminal.locator(".xterm-helper-textarea").press("Control+u");
       const group = page.locator(".dv-groupview").filter({ has: terminal });
-      await group.getByTestId("session-mode-scope").selectOption("session");
       await group.getByTestId("session-mode-toggle").click();
     }
     const ompUi = page.locator('[data-testid="native-cli-chat"][data-provider="omp"]');
@@ -178,10 +176,6 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });
-    for (const terminal of [omp, pi]) {
-      await terminal.getByRole("button", { name: "Stop CLI", exact: true }).click();
-      await expect(terminal.getByTestId("cli-exited")).toBeVisible();
-    }
   } finally {
     if (testInfo.status !== testInfo.expectedStatus) {
       await page.screenshot({ path: path.join(shots, `native-provider-failure-${testInfo.project.name}.png`) }).catch(() => {});

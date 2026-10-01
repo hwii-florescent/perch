@@ -4,13 +4,37 @@ import * as path from "node:path";
 
 const BASE_URL = "http://127.0.0.1:7799";
 
+// The header switch only writes the session; workspace and device defaults
+// (and resets) live in Settings → Chat Mode. `scope` is the effective
+// source, read from Settings' note ("" = no override).
 async function expectMode(page: Page, mode: "hosted" | "cli", scope: string) {
   const toggle = page.getByTestId("session-mode-toggle");
   await expect(toggle).toBeEnabled();
   await expect(toggle).toHaveAttribute("aria-checked", mode === "cli" ? "true" : "false");
-  await expect(page.getByTestId("session-mode-effective-scope")).toHaveText(scope);
   if (mode === "cli") await expect(page.getByTestId("cli-start-panel")).toBeVisible();
   else await expect(page.locator(".chat__input textarea")).toBeVisible();
+  await page.getByTestId("settings-gear").click();
+  const note = page.locator(".settings-modal__section").filter({ hasText: "Chat Mode" }).locator(".settings-modal__muted").first();
+  if (scope === "Inherited") await expect(note).not.toContainText("comes from its");
+  else await expect(note).toContainText(`comes from its ${scope.toLowerCase()} setting`);
+  await page.getByRole("button", { name: "Close settings" }).click();
+}
+
+async function setInSettings(page: Page, scope: "device" | "workspace", mode: "hosted" | "cli") {
+  await page.getByTestId("settings-gear").click();
+  await page.getByTestId("settings-mode-scope").selectOption(scope);
+  const toggle = page.getByTestId("settings-chat-mode");
+  // Writing the current mode at a new scope still records the override.
+  if ((await toggle.getAttribute("aria-checked")) === (mode === "cli" ? "true" : "false")) await toggle.click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", mode === "cli" ? "true" : "false");
+  await page.getByRole("button", { name: "Close settings" }).click();
+}
+
+async function resetInSettings(page: Page) {
+  await page.getByTestId("settings-gear").click();
+  await page.getByTestId("settings-mode-clear").click();
+  await page.getByRole("button", { name: "Close settings" }).click();
 }
 
 test("mode overrides persist and synchronize two views without starting a blank agent", async ({ page, context, browser }) => {
@@ -48,20 +72,17 @@ test("mode overrides persist and synchronize two views without starting a blank 
   await expectMode(other, "hosted", "Inherited");
   expect(await other.evaluate(() => localStorage.getItem("perch.sessionId"))).not.toBe(sessionId);
 
-  await page.getByTestId("session-mode-scope").selectOption("device");
-  await page.getByTestId("session-mode-toggle").click();
+  await setInSettings(page, "device", "cli");
   await expectMode(page, "cli", "Device");
   await expectMode(phone, "cli", "Device");
   await expectMode(other, "hosted", "Inherited");
 
-  await page.getByTestId("session-mode-scope").selectOption("workspace");
-  await page.getByTestId("session-mode-toggle").click();
+  await setInSettings(page, "workspace", "hosted");
   await expectMode(page, "hosted", "Workspace");
   await expectMode(phone, "hosted", "Workspace");
   await expectMode(other, "hosted", "Workspace");
 
   // Session wins over workspace, which wins over the device default.
-  await phone.getByTestId("session-mode-scope").selectOption("session");
   await phone.getByTestId("session-mode-toggle").click();
   await expectMode(phone, "cli", "Session");
   await expectMode(page, "cli", "Session");
@@ -70,10 +91,10 @@ test("mode overrides persist and synchronize two views without starting a blank 
   await expectMode(page, "cli", "Session");
   expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(sessionId);
 
-  await page.getByTestId("session-mode-clear").click();
+  await resetInSettings(page);
   await expectMode(page, "hosted", "Workspace");
   await expectMode(phone, "hosted", "Workspace");
-  await page.getByTestId("session-mode-clear").click();
+  await resetInSettings(page);
   await expectMode(page, "cli", "Device");
   await expectMode(phone, "cli", "Device");
   await expectMode(other, "hosted", "Inherited");
@@ -84,7 +105,7 @@ test("mode overrides persist and synchronize two views without starting a blank 
   expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(terminalCreates).toEqual([]);
   expect(pageErrors).toEqual([]);
-  for (const id of ["session-mode-toggle", "session-mode-scope", "session-mode-clear", "mobile-pane-chat", "mobile-switch"]) {
+  for (const id of ["session-mode-toggle", "mobile-pane-chat", "mobile-switch"]) {
     expect((await phone.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(44);
   }
 
@@ -93,7 +114,7 @@ test("mode overrides persist and synchronize two views without starting a blank 
   await page.screenshot({ path: path.join(shots, "mode-policy-desktop.png") });
   await phone.screenshot({ path: path.join(shots, "mode-policy-mobile.png") });
 
-  await phone.getByTestId("session-mode-clear").click();
+  await resetInSettings(phone);
   await expectMode(phone, "hosted", "Inherited");
   await expectMode(page, "hosted", "Inherited");
   await phone.close();

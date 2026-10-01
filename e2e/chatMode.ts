@@ -96,9 +96,6 @@ export async function useHostedMode(page: Page): Promise<void> {
  * a per-session override").
  */
 export async function useHostedSession(page: Page): Promise<void> {
-  const scope = page.getByTestId("session-mode-scope");
-  await expect(scope).toBeEnabled({ timeout: 20000 });
-  await scope.selectOption("session");
   const toggle = page.getByTestId("session-mode-toggle");
   await expect(toggle).toBeEnabled({ timeout: 10000 });
   // aria-checked=true is CLI; Hosted is the unchecked side.

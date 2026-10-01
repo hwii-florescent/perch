@@ -289,8 +289,9 @@ pub(super) fn control(
 }
 
 /// A review is one explicit user-input operation. Git views may have no
-/// terminal view (especially on mobile), so borrow input only when unowned.
-/// Existing owners are preserved; another client's lease is never displaced.
+/// terminal view (especially on mobile), so the sender borrows input for the
+/// send — taking it over from another view, like any explicit action — and
+/// releases it afterwards unless it already held it.
 pub(super) async fn send_review(
     state: &Arc<ConnState>,
     request_id: String,
@@ -311,9 +312,8 @@ pub(super) async fn send_review(
         let client = connection_client_identity(state).map_err(anyhow::Error::msg)?;
         let before = state.app.agent_runtime.snapshot(&key)?;
         let had_observer = before.observers.contains(&client.id);
-        let borrowed = before.input_owner.is_none();
-        let lease = state.app.agent_runtime.acquire_control(&key, ControlChannel::Input, client.clone(), now_millis())
-            .map_err(|error| anyhow::anyhow!("Release this agent's control in the other view before sending review notes: {error}"))?;
+        let borrowed = before.input_owner.as_ref().is_none_or(|owner| owner.client != client);
+        let lease = state.app.agent_runtime.acquire_control(&key, ControlChannel::Input, client.clone(), now_millis())?;
         let result = state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
             let operation = &packet.packet.send_operation_id;
             let text = &packet.packet.markdown;

@@ -14,12 +14,12 @@ function LegacyAgentCliTerminal({
   sessionId,
   agent,
   cliError,
-  onExitCli,
+  onClose,
 }: {
   sessionId: string;
   agent: AgentKind;
   cliError?: string | null;
-  onExitCli?: () => void;
+  onClose?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -169,14 +169,14 @@ function LegacyAgentCliTerminal({
             >
               Restart CLI
             </button>
-            {onExitCli && (
+            {onClose && (
               <button
                 type="button"
                 className="terminal__exited-btn"
-                data-testid="cli-back-to-hosted"
-                onClick={onExitCli}
+                data-testid="cli-close-session"
+                onClick={onClose}
               >
-                Back to Hosted
+                Close session
               </button>
             )}
           </span>
@@ -186,7 +186,7 @@ function LegacyAgentCliTerminal({
   );
 }
 
-export function AgentCliTerminal(props: { sessionId: string; agent: string; cliError?: string | null; onExitCli?: () => void }) {
+export function AgentCliTerminal(props: { sessionId: string; agent: string; cliError?: string | null; onClose?: () => void }) {
   const persistent = usePerchStore((state) => {
     const hostId = state.sessions.find((session) => session.id === props.sessionId)?.hostId ?? state.activeHostId;
     return hostId === "local" && state.serverInfo?.capabilities?.includes("agent.terminal.open") === true;

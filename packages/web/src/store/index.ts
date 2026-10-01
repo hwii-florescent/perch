@@ -439,8 +439,9 @@ export interface PerchState {
    * keybind) wants opened, as `${hostId}:${cwd}` plus a monotonically
    * increasing nonce so pressing the same binding twice re-opens it. The
    * matching `WorktreeMenu` instance self-opens against its own button rect;
-   * cleared by that instance once consumed. */
-  worktreeMenuRequest: { projectKey: string; nonce: number } | null;
+   * cleared by that instance once consumed. With `remove`, the menu skips
+   * its popover and asks to delete that checkout instead. */
+  worktreeMenuRequest: { projectKey: string; nonce: number; remove?: { path: string; branch?: string } } | null;
   /** Background worktree creates on the local host, replaced wholesale by
    * each `worktree.jobs` broadcast (see `server/worktree_jobs.rs`). */
   worktreeJobs: WorktreeJob[];
@@ -597,7 +598,7 @@ export interface PerchState {
   retryWorktreeJob: (jobId: string) => void;
   dismissWorktreeJob: (jobId: string) => void;
   /** Ask the `WorktreeMenu` for `${hostId}:${cwd}` to open itself (leader,W). */
-  requestWorktreeMenu: (projectKey: string) => void;
+  requestWorktreeMenu: (projectKey: string, remove?: { path: string; branch?: string }) => void;
   /** Clear a consumed `worktreeMenuRequest`. */
   clearWorktreeMenuRequest: () => void;
   /** Request the persisted dockview layout blob for a session. Reply lands
@@ -1858,6 +1859,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   archiveSession: (sessionId, archived) => {
     socket.send({ type: "session.archive", sessionId, archived });
+    const state = get();
+    if (!archived || state.sessionId !== sessionId) return;
+    // Closing the active tab lands on a neighbouring tab, like a browser.
+    const open = (list: SessionSummary[]) => list.filter((s) => s.id !== sessionId && !s.archived);
+    const siblings = open(activeProjectSessions(state));
+    switchAwayFromActiveSession(siblings.length ? siblings : open(state.sessions), state.activeHostId);
   },
 
   deleteSession: (sessionId) => {
@@ -1942,11 +1949,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   retryWorktreeJob: (jobId) => socket.send({ type: "worktree.job.retry", jobId }),
   dismissWorktreeJob: (jobId) => socket.send({ type: "worktree.job.dismiss", jobId }),
 
-  requestWorktreeMenu: (projectKey) => {
+  requestWorktreeMenu: (projectKey, remove) => {
     set((state) => ({
       worktreeMenuRequest: {
         projectKey,
         nonce: (state.worktreeMenuRequest?.nonce ?? 0) + 1,
+        ...(remove ? { remove } : {}),
       },
     }));
   },

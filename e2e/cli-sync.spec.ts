@@ -42,7 +42,6 @@ const MODEL_LUNA = CHEAP_CODEX_MODEL;
 async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
   const toggle = page.getByTestId("session-mode-toggle");
   await expect(toggle).toBeEnabled({ timeout: 15_000 });
-  await page.getByTestId("session-mode-scope").selectOption("session");
   const wantChecked = mode === "cli" ? "true" : "false";
   if (await toggle.getAttribute("aria-checked") !== wantChecked) await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", wantChecked);

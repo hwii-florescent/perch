@@ -42,6 +42,7 @@ export function TabBar() {
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
+  const archiveSession = usePerchStore((s) => s.archiveSession);
 
   const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -133,8 +134,8 @@ export function TabBar() {
             }}
           />
         ) : (
+          <span key={s.id} className="tab-bar__tab-wrap">
           <button
-            key={s.id}
             type="button"
             className={[
               "tab-bar__tab",
@@ -159,6 +160,19 @@ export function TabBar() {
           >
             {tabLabel(s)}
           </button>
+          {/* Archive, not delete: Settings → Archived sessions restores it,
+           * and an idle archived agent hibernates on its own. */}
+          <button
+            type="button"
+            className={"tab-bar__close" + (s.id === sessionId ? " tab-bar__close--active" : "")}
+            data-testid={`tab-close-${s.id}`}
+            title="Close session (restore it from Settings → Archived sessions)"
+            aria-label={`Close ${tabLabel(s)}`}
+            onClick={() => archiveSession(s.id, true)}
+          >
+            ×
+          </button>
+          </span>
         )
       )}
 

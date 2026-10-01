@@ -194,7 +194,6 @@ test("a phone pairs over the network, drives the session, and loses access when 
     // 4. The phone drives a real agent: start it, prompt it, read the reply.
     const toggle = phone.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled({ timeout: 20_000 });
-    await phone.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await phone.getByTestId("cli-start-agent-phonebot").click();
     await phone.getByTestId("cli-start-browse").click();

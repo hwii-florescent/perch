@@ -504,17 +504,7 @@ pub(super) fn handle_agent_control_acquire(
                 &state.out_tx,
                 request_id,
                 "agent_control_acquire_failed",
-                if matches!(
-                    error,
-                    crate::agent_runtime::RuntimeAdapterError::Ownership(
-                        crate::agent_fleet::OwnershipError::AlreadyOwned { .. }
-                    )
-                ) {
-                    "Another viewer has control. Release it there, then take control here."
-                        .to_string()
-                } else {
-                    error.to_string()
-                },
+                error.to_string(),
                 true,
             );
         }

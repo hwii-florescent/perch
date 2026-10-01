@@ -69,20 +69,18 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await start();
     await page.goto(url, { waitUntil: "networkidle" });
     await expect(toggle).toBeEnabled();
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
-    await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(cli).toHaveAttribute("data-controlling", "true");
     await expect(cli.locator(".xterm-rows")).toContainText(provider === "opencode" ? /OpenCode|opencode|Ask anything/i : provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
     if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
     if (provider === "codex") {
       await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
       if ((await cli.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await cli.locator(".xterm-helper-textarea").press("Enter");
     }
-    await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
@@ -106,7 +104,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await toggle.click();
     await expect(cli).toHaveAttribute("data-terminal-id", terminalId!);
     await expect(cli.locator(".xterm-rows")).toContainText(token);
-    await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(cli).toHaveAttribute("data-controlling", "true");
     const beforeReload = snapshots.length;
     const beforeRevision = snapshots.at(-1)!.revision;
     if (provider === "opencode") {
@@ -118,7 +116,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(ui.getByRole("alert")).toContainText("normal prompt mode");
       expect(fs.existsSync(path.join(fixture, "should-not-exist"))).toBe(false);
       await toggle.click();
-      await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+      await expect(cli).toHaveAttribute("data-controlling", "true");
       await cli.locator(".xterm-helper-textarea").press("Escape");
       await expect(cli.locator(".xterm-rows")).not.toContainText(/\bShell\b/);
     }
@@ -179,9 +177,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const mobile = phone.getByTestId("native-cli-chat");
     await expect(mobile).toHaveAttribute("data-native-pid", pid!);
     await expect(mobile.getByTestId("native-cli-composer")).toBeDisabled();
-    await expect(mobile).toContainText("Another viewer has control");
-    await ui.getByRole("button", { name: "Release control", exact: true }).click();
-    await expect(mobile).not.toContainText("Another viewer has control");
+    await expect(mobile).toContainText("Another view is typing in this agent");
     await mobile.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(mobile.getByTestId("native-cli-composer")).toBeEnabled();
     await expect(ui.getByTestId("native-cli-composer")).toBeDisabled();
@@ -205,14 +201,13 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     expect(Date.now() - cancelStarted).toBeLessThan(15_000);
     await expect(mobile.locator(".message__markdown")).not.toContainText(["slow_turn_finished"]);
     await expect(ui.getByRole("status")).toHaveText("Ready");
-    await mobile.getByRole("button", { name: "Release control", exact: true }).click();
-    await expect(ui).not.toContainText("Another viewer has control");
     await ui.getByRole("button", { name: "Take control", exact: true }).click();
+    await expect(mobile).toContainText("Another view is typing in this agent");
     expect(unexpectedErrors()).toEqual([]);
     await phoneContext.close(); phoneContext = undefined;
     await toggle.click();
     if (provider === "codex" || provider === "opencode") {
-      await expect(cli.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+      await expect(cli).toHaveAttribute("data-controlling", "true");
       await cli.locator(".xterm-helper-textarea").pressSequentially("/new", { delay: 20 });
       await expect(cli.locator(".xterm-rows")).toContainText("/new");
       await cli.locator(".xterm-helper-textarea").press("Enter");
@@ -231,8 +226,9 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       if (provider === "opencode") { expect(await ui.getAttribute("data-native-session")).toMatch(/^ses/); expect(await ui.getAttribute("data-native-session")).not.toBe(nativeId); }
       await toggle.click();
     }
-    await expect(cli.getByRole("button", { name: "Stop CLI", exact: true })).toBeEnabled();
-    await cli.getByRole("button", { name: "Stop CLI", exact: true }).click();
+    await expect(cli).toHaveAttribute("data-controlling", "true");
+    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    await page.getByTestId("pane-menu-stop-agent").click();
     await expect(cli.getByTestId("cli-exited")).toBeVisible();
     if (provider === "codex" || provider === "opencode") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
     completed = true;

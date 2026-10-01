@@ -61,13 +61,12 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
     const toggle = page.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled();
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
-    await expect(terminal.getByRole("button", { name: "Release control", exact: true })).toBeEnabled();
+    await expect(terminal).toHaveAttribute("data-controlling", "true");
     if (provider === "codex") {
       await expect(terminal.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
       if ((await terminal.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await terminal.locator(".xterm-helper-textarea").press("Enter");
@@ -88,7 +87,6 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(terminal.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
       await expect(terminal.locator(".xterm-rows")).toContainText(/Haiku 4.5/i);
     }
-    await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
@@ -131,11 +129,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await phone.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If both First note and Second note are present, reply exactly ACCEPTED_${token}.`);
     await phone.getByTestId("git-review-preview").click();
     await expect(phone.getByTestId("git-review-packet")).toContainText("2 anchored notes");
-    await phone.getByTestId("git-review-send").click();
-    await expect(phone.getByRole("alert")).toContainText("Release this agent's control", { timeout: 15_000 });
-    await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
-    await ui.getByRole("button", { name: "Release control", exact: true }).click();
-    await expect(ui.getByRole("button", { name: "Take control", exact: true })).toBeEnabled();
+    // Sending takes control over from the desktop view for the delivery.
     await phone.getByTestId("git-review-send").click();
     await expect(phone.getByTestId("git-review-delivery")).toHaveText("Agent received the review packet.", { timeout: 20_000 });
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(`ACCEPTED_${token}`, { timeout: 90_000 });
@@ -143,9 +137,9 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2);
     await phone.getByTestId("git-review-send").click();
     await expect(phone.getByTestId("git-review-delivery")).toHaveText("Agent received the review packet.");
-    await expect.poll(() => receipts.filter((receipt) => receipt.delivery === "delivered").map((receipt) => receipt.requestId)).toEqual(sends.slice(1).map((send) => send.requestId));
+    await expect.poll(() => receipts.filter((receipt) => receipt.delivery === "delivered").map((receipt) => receipt.requestId)).toEqual(sends.map((send) => send.requestId));
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2);
-    expect(sends).toHaveLength(3);
+    expect(sends).toHaveLength(2);
     expect(new Set(sends.map((send) => send.sendOperationId)).size).toBe(1);
     expect(new Set(sends.map((send) => send.packetId)).size).toBe(1);
     await expect(ui).toHaveAttribute("data-native-pid", pid!);

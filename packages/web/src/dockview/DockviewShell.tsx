@@ -536,6 +536,7 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
               x={contextMenu.x}
               y={contextMenu.y}
               controller={controller}
+              sessionId={apiRef.current ? referencePanelSessionId(apiRef.current, contextMenu.panelId, sessionId) : undefined}
               onClose={() => setContextMenu(null)}
             />
           );

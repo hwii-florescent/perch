@@ -205,7 +205,6 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
     // 2. The phone starts a real Claude CLI in the repository.
     await expect(toggle).toBeEnabled({ timeout: 20_000 });
-    await phone.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await phone.getByTestId("cli-start-agent-claude").click();
     await phone.getByTestId("cli-start-browse").click();
@@ -216,7 +215,6 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await clearTrustPrompt(cli);
 
     // 3. CLI → Chat/UI on the phone, for the *same* session.
-    await phone.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 40_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled({ timeout: 20_000 });

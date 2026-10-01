@@ -71,10 +71,10 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     drafts.set(draftKey, { text: value, operationId: newId() });
     if (drafts.size > 128) drafts.delete(drafts.keys().next().value!);
   }
-  async function changeControl() {
+  async function takeControl() {
     if (!binding.current || pending) return;
     setPending(true); setError(null);
-    try { await (controlling ? binding.current.releaseControl() : binding.current.takeControl()); }
+    try { await binding.current.takeControl(); }
     catch (reason) { setError((reason as Error).message); }
     finally { setPending(false); }
   }
@@ -97,7 +97,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     <div className="terminal__toolbar native-cli-chat__toolbar">
       <span role="status">{label}</span>
       {snapshot?.model && <span className="native-cli-chat__model" title={snapshot.model}>{snapshot.model}</span>}
-      <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void changeControl()}>{controlling ? "Release control" : "Take control"}</button>
+      {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
     <div className="chat__list-container">
       <div className="chat__list" ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
@@ -111,7 +111,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     <form className="chat__input native-cli-chat__input" onSubmit={(event) => { event.preventDefault(); void send(); }}>
       <textarea aria-label="Message CLI" data-testid="native-cli-composer" value={text} disabled={!connected || !controlling || !snapshot} placeholder={controlling ? "Message this CLI…" : "Take control to send a message"} rows={3} onChange={(event) => updateDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
       <div className="native-cli-chat__actions">
-        <span className="native-cli-chat__hint">{controlling ? "You control this agent" : status?.inputOwner ? "Another viewer has control" : "Viewing agent"}</span>
+        <span className="native-cli-chat__hint">{controlling ? "" : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
         {snapshot?.running && <button type="button" disabled={!controlling || !connected || pending} onClick={() => void send(true)}>Cancel turn</button>}
         <button type="submit" disabled={!controlling || !connected || !snapshot || !text.trim() || pending}>{pending ? "Sending…" : snapshot?.running ? "Queue message" : "Send"}</button>
       </div>

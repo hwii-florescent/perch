@@ -121,7 +121,6 @@ async function openCliSession(page: Page): Promise<void> {
   // Each Playwright context owns a fresh device id; no shared settings change.
   const mode = page.getByTestId("session-mode-toggle");
   await expect(mode).toBeEnabled();
-  await page.getByTestId("session-mode-scope").selectOption("device");
   if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
   await expect(mode).toHaveAttribute("aria-checked", "true");
   await expect(page.locator('[data-testid="cli-start-panel"]')).toBeVisible({ timeout: 15000 });
@@ -158,8 +157,10 @@ test.describe("CLI-mode terminal rendering", () => {
     if (!terminals?.created.size) return;
     // Stop through the owning visible viewer. Another raw WS connection is
     // deliberately unable to kill an agent whose input belongs to this one.
-    const stop = page.getByRole("button", { name: "Stop CLI", exact: true });
+    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    const stop = page.getByTestId("pane-menu-stop-agent");
     if (await stop.isVisible()) await stop.click();
+    else await page.keyboard.press("Escape");
     await expect.poll(() => [...terminals.created].every((id) => terminals.exited.has(id))).toBe(true);
   });
 

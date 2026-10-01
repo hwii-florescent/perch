@@ -1003,13 +1003,9 @@ impl AgentTerminalRegistry {
             .get(session_id)
             .cloned()
             .ok_or(TerminalAuthorityError::NoTerminal)?;
-        let mut writer = entry.writer.lock().unwrap();
-        if let (Some(current), Some(next)) = (writer.input_owner.as_ref(), owner.as_ref()) {
-            if current != next {
-                return Err(TerminalAuthorityError::StaleLease);
-            }
-        }
-        writer.input_owner = owner;
+        // The lifecycle registry already decided this lease under the
+        // runtime's authority lock; a new one takes over from the old owner.
+        entry.writer.lock().unwrap().input_owner = owner;
         Ok(())
     }
 
@@ -1090,13 +1086,9 @@ impl AgentTerminalRegistry {
             .get(session_id)
             .cloned()
             .ok_or(TerminalAuthorityError::NoTerminal)?;
-        let mut writer = entry.writer.lock().unwrap();
-        if let (Some(current), Some(next)) = (writer.resize_owner.as_ref(), owner.as_ref()) {
-            if current != next {
-                return Err(TerminalAuthorityError::StaleLease);
-            }
-        }
-        writer.resize_owner = owner;
+        // The lifecycle registry already decided this lease under the
+        // runtime's authority lock; a new one takes over from the old owner.
+        entry.writer.lock().unwrap().resize_owner = owner;
         Ok(())
     }
 

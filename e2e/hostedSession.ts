@@ -32,7 +32,6 @@ export async function createHostedSession(page: Page, cwd: string): Promise<stri
   if (await dismiss.count()) await dismiss.click();
   const mode = page.getByTestId("session-mode-toggle");
   await expect(mode).toBeEnabled({ timeout: 15_000 });
-  await page.getByTestId("session-mode-scope").selectOption("session");
   if (await mode.getAttribute("aria-checked") === "true") await mode.click();
   await expect(page.getByTestId("model-chip")).toBeVisible({ timeout: 15_000 });
   return sessionId;

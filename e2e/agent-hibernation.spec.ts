@@ -93,7 +93,6 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     await page.goto(url, { waitUntil: "networkidle" });
     const toggle = page.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled({ timeout: 15000 });
-    await page.getByTestId("session-mode-scope").selectOption("device");
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId("cli-start-agent-claude").click();
     await page.getByTestId("cli-start-browse").click();
@@ -108,7 +107,6 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const input = cli.locator(".xterm-helper-textarea");
     await input.pressSequentially("Reply with exactly: PERCH_READY", { delay: 10 });
     await input.press("Enter");
-    await page.getByTestId("session-mode-scope").selectOption("session");
     await toggle.click();
     const ui = page.getByTestId("native-cli-chat");
     // An assistant-only row and Ready status cannot match the echoed prompt.

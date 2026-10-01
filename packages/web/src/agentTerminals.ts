@@ -100,6 +100,21 @@ export function resizeAgentTerminal(terminalId: string, cols: number, rows: numb
   return true;
 }
 
+/** Kill the agent this client drives in `sessionId`. Only the view holding
+ * input may stop it (the server checks the lease too). */
+export function stopAgent(sessionId: string): boolean {
+  for (const [terminalId, view] of views) {
+    if (view.status.key.sessionId !== sessionId || !view.leases.input) continue;
+    socket.send({ type: "terminal.kill", terminalId });
+    return true;
+  }
+  return false;
+}
+
+export function canStopAgent(sessionId: string): boolean {
+  return [...views.values()].some((view) => view.status.key.sessionId === sessionId && !!view.leases.input);
+}
+
 export function openAgentTerminal(
   sessionId: string, providerId: string, cols: number, rows: number,
   onReady: (terminalId: string, status: AgentLifecycleStatus, replay: string) => void,
@@ -122,14 +137,12 @@ export function openAgentTerminal(
       if (!view?.listeners.size) views.delete(terminalId);
     }
   };
-  async function control(channel: AgentControlChannel, acquire: boolean) {
+  async function acquire(channel: AgentControlChannel) {
     if (released || !terminalId) return;
     const view = views.get(terminalId);
     if (!view) return;
-    const lease = view.leases[channel];
-    if (!acquire && !lease) return;
     await request({
-      ...(acquire ? { type: "agent.control.acquire" as const } : { type: "agent.control.release" as const, generation: lease!.generation }),
+      type: "agent.control.acquire",
       requestId: newId(), sessionId, agentId: providerId, workspaceId: view.status.key.workspaceId, channel,
     }, (reply) => {
       if (reply.type !== "agent.control" || reply.sessionId !== sessionId || reply.agentId !== providerId || reply.channel !== channel) throw new Error("Unexpected agent control response");
@@ -156,8 +169,8 @@ export function openAgentTerminal(
   return {
     ready, release,
     takeControl: async () => {
-      await control("input", true);
-      await control("resize", true);
+      await acquire("input");
+      await acquire("resize");
       // The local fit may predate this lease, so it will not emit another
       // resize just because control changed. Synchronize the current grid.
       if (!released && terminalId) {
@@ -165,7 +178,5 @@ export function openAgentTerminal(
         resizeAgentTerminal(terminalId, size.cols, size.rows);
       }
     },
-    releaseControl: async () => { await control("resize", false); await control("input", false); },
-    stop: () => { if (terminalId && views.get(terminalId)?.leases.input) socket.send({ type: "terminal.kill", terminalId }); },
   };
 }
