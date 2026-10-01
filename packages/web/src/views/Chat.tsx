@@ -698,7 +698,10 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
     }
   }
 
-  const modeControl = sessionId && runtimeModeAvailable ? (
+  // An agent with no UI surface (a terminal, a CLI with no native bridge)
+  // gets no UI/CLI switch.
+  const cliOnly = mode === "cli" && cliAgent !== "claude" && cliAgent !== "codex" && !nativeUiAvailable;
+  const modeControl = sessionId && runtimeModeAvailable && !cliOnly ? (
     <SessionModeControl
       mode={mode}
       state={sessionModeState?.state ?? (modePending ? "loading" : "idle")}

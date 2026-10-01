@@ -1829,7 +1829,11 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // CLI start (`CliStartPanel`) passes an explicit mode — the ordinary
     // "New session" launchers used to hardcode "cli", which made the device
     // default dead on arrival for every session a user creates.
-    pendingModeForNewSession = mode ?? null;
+    // An agent with no UI surface (a terminal, a CLI with no native bridge)
+    // is always a CLI pane, whatever the device default says.
+    const manifest = get().agentManifestsByHost[hostId]?.manifests.find((entry) => entry.id === agentChoice);
+    const cliOnly = Boolean(agentChoice) && agentChoice !== "claude" && agentChoice !== "codex" && !manifest?.nativeUi;
+    pendingModeForNewSession = mode ?? (cliOnly ? "cli" : null);
     if (cwd && cwd.startsWith("/")) {
       writeActiveProjectStored({ hostId, cwd });
       set({ messages: [], streamingMessageId: null, activeHostId: hostId, activeProject: { hostId, cwd } });

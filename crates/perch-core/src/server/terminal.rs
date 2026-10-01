@@ -198,6 +198,10 @@ fn open_agent_terminal(
             }
         }
         state.app.db.set_cli_provider(session_id, provider_id)?;
+        // A terminal tab is named "Terminal", not after its first command.
+        if provider_id == crate::agent_fleet::TERMINAL_PROVIDER {
+            state.app.db.set_cli_title(session_id, "Terminal")?;
+        }
         persist_agent_runtime(&state.app, &key)?;
         (registration, row.cwd, extra, resume)
     };

@@ -566,6 +566,11 @@ test.describe("Stage F3: federation e2e", () => {
     await xtermInput.click({ force: true });
     await page.keyboard.type("/exit");
     await page.keyboard.press("Enter");
+    // The agent runs inside a shell: /exit leaves a shell prompt in the
+    // pane, and exiting that shell ends the terminal.
+    await page.waitForTimeout(3000); // the login shell starting
+    await page.keyboard.type("exit");
+    await page.keyboard.press("Enter");
 
     // Exited banner must appear — proves terminal.exit relay.
     const exitedBanner = page.locator(".terminal__exited");

@@ -78,7 +78,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(cli.locator(".xterm-rows")).toContainText(provider === "opencode" ? /OpenCode|opencode|Ask anything/i : provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
     if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
     if (provider === "codex") {
-      await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
+      await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/i, { timeout: 30_000 });
       if ((await cli.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await cli.locator(".xterm-helper-textarea").press("Enter");
     }
     await toggle.click();

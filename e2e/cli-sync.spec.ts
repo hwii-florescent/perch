@@ -203,6 +203,11 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await expect(termSurface).toContainText(/Haiku 4\.5/i);
     await page.keyboard.type("/exit");
     await page.keyboard.press("Enter");
+    // The agent runs inside a shell: /exit leaves a shell prompt in the
+    // pane, and exiting that shell ends the terminal.
+    await page.waitForTimeout(3000); // the login shell starting
+    await page.keyboard.type("exit");
+    await page.keyboard.press("Enter");
 
     const exitedBanner = page.locator(".terminal__exited");
     await expect(exitedBanner).toBeVisible({ timeout: 30000 });

@@ -553,6 +553,31 @@ impl ProviderManifest {
         Self::interactive_cli("opencode", "OpenCode", "--session")
     }
 
+    /// A plain login shell as a session kind, so a terminal tab is created,
+    /// listed and closed exactly like an agent tab (Orca's unified tabs).
+    pub fn terminal() -> Self {
+        Self {
+            id: TERMINAL_PROVIDER.into(),
+            display_name: "Terminal".into(),
+            launch: LaunchSpec {
+                executable: "/bin/sh".into(),
+                prefix_args: vec!["-c".into(), "exec \"${SHELL:-/bin/sh}\" -l".into()],
+                prompt: PromptTransport::Stdin,
+                suffix_args: Vec::new(),
+                resume_prefix_args: Vec::new(),
+                resume: ResumePlacement::Unsupported,
+                mode_overrides: BTreeMap::new(),
+            },
+            supported_modes: [AgentMode::Cli].into_iter().collect(),
+            resumability: Resumability::PersistentProcess,
+            capabilities: [ProviderCapability::InteractiveTerminal]
+                .into_iter()
+                .collect(),
+            status_detection: StatusDetection::ExitStatus,
+            environment: EnvironmentPolicy::default(),
+        }
+    }
+
     fn interactive_cli(id: &str, display_name: &str, resume_flag: &str) -> Self {
         Self {
             id: id.into(),
@@ -694,6 +719,9 @@ impl ProviderAvailability {
 
 /// Registry of immutable provider manifests.  It is thread-safe because the
 /// eventual server adapter can share one instance across connection tasks.
+/// The built-in shell "provider" (see [`ProviderManifest::terminal`]).
+pub const TERMINAL_PROVIDER: &str = "terminal";
+
 pub struct ProviderRegistry {
     manifests: RwLock<HashMap<String, ProviderManifest>>,
 }
@@ -705,6 +733,7 @@ impl ProviderRegistry {
     /// of an `expect` panic after the listener has already been created.
     pub fn native() -> Result<Self, RegistryError> {
         let registry = Self::empty();
+        registry.register(ProviderManifest::terminal())?;
         for entry in crate::agent_catalog::entries()? {
             registry.register(entry.manifest())?;
         }
@@ -2829,7 +2858,12 @@ mod tests {
                 .unwrap();
             assert_eq!(resumed.args, [resume_flag, "exact-session"]);
         }
-        assert_eq!(registry.list().len(), 36);
+        // The 36 catalog CLIs plus the built-in Terminal, listed after them
+        // so it is never the picker's implicit default.
+        let list = registry.list();
+        assert_eq!(list.len(), 37);
+        assert_eq!(list[0].id, "claude");
+        assert_eq!(list[36].id, TERMINAL_PROVIDER);
     }
 
     #[test]

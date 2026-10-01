@@ -57,6 +57,14 @@ pub(super) fn settings(config: &Path, fresh: bool) -> anyhow::Result<String> {
     )?)
 }
 
+fn parent_pid(pid: u32) -> Option<u32> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
 fn read_event(path: &Path) -> anyhow::Result<(u32, Value)> {
     let mut bytes = Vec::new();
     let file = fs::File::open(path)?;
@@ -255,8 +263,12 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
         .filter(|s| s.alive)
         .context("CLI prompt is unavailable")?;
     let native_pid = read_event(&event_path(&paths(key)?.extension, "SessionStart"))?.0;
+    // The pane's process is the shell Claude runs under
+    // (`agent_runtime::in_shell`), so Claude is that process's child.
     ensure!(
-        session.pid == Some(native_pid),
+        session
+            .pid
+            .is_some_and(|pane| pane == native_pid || parent_pid(native_pid) == Some(pane)),
         "The active terminal pane is not this Claude process"
     );
     let Some(prompt) = prompt else {
@@ -383,6 +395,16 @@ pub(super) async fn observe(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parent_pid_reads_this_process_parent() {
+        let child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        assert_eq!(super::parent_pid(child.id()), Some(std::process::id()));
+        let _ = { child }.kill();
+    }
+
     use super::*;
     /// The exact payload Claude Code wrote for a prompt perch had sent as a
     /// bracketed paste, captured from `UserPromptSubmit` on the installed CLI.

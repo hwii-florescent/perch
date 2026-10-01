@@ -32,6 +32,24 @@ use crate::terminal::{
 
 const RUNTIME_VIEWER: &str = "__perch_runtime__";
 
+/// Run an agent CLI inside a shell, like an Orca tab: when the agent exits,
+/// the pane drops to a login shell in the same folder instead of a dead
+/// terminal. The pty, and so the "exited" overlay, ends only with the shell.
+/// The no-op INT trap keeps Ctrl+C aimed at the agent from also ending the
+/// wrapper; caught (not ignored) signals reset to default in the child.
+fn in_shell(argv: Vec<String>) -> Vec<String> {
+    [
+        "/bin/sh",
+        "-c",
+        "trap : INT; \"$@\"; exec \"${SHELL:-/bin/sh}\" -l",
+        "perch-agent",
+    ]
+    .into_iter()
+    .map(String::from)
+    .chain(argv)
+    .collect()
+}
+
 pub type TurnBoundaryListener = Arc<dyn Fn(&AgentKey, bool) -> anyhow::Result<()> + Send + Sync>;
 
 /// All logical scopes participate in process identity. Length prefixes prevent
@@ -584,6 +602,11 @@ impl AgentRuntimeAdapter {
                     crate::native_ui::opencode::launch(&key, command)?
                 }
                 _ => command,
+            };
+            let command = if provider_id == crate::agent_fleet::TERMINAL_PROVIDER {
+                command
+            } else {
+                in_shell(command)
             };
             crate::provider_environment::prepare(command, &manifest.environment)
         })() {
@@ -1223,6 +1246,22 @@ fn output_status_signal(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn in_shell_keeps_argv_and_falls_back_to_the_login_shell() {
+        let argv = super::in_shell(vec![
+            "printf".into(),
+            "%s|".into(),
+            "a b".into(),
+            "c".into(),
+        ]);
+        let output = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("SHELL", "/bin/echo")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "a b|c|-l\n");
+    }
+
     use super::*;
     use crate::agent_fleet::{
         AgentKey, ClientKind, EnvironmentPolicy, LaunchSpec, ModeLaunchSpec, PromptTransport,
