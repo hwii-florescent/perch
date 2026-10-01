@@ -14,13 +14,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore, archivedSessions } from "../store";
-import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, SessionMode, DeviceSummary } from "@perch/shared";
+import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
 import { socket } from "../ws";
 import { AgentCatalog } from "./AgentCatalog";
-import type { SessionModeOverrideScope } from "./SessionModeControl";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
 // `createPerchTerminal` actually clamps to cannot drift apart.
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
@@ -89,110 +88,10 @@ function ThemeSection() {
 }
 
 // ---------------------------------------------------------------------------
-// ChatModeSection — runtime-aware mode policy with a legacy fallback.
+// ChatModeSection — the one global UI/CLI setting.
 // ---------------------------------------------------------------------------
 
 function ChatModeSection() {
-  const activeSessionId = usePerchStore((s) => s.sessionId);
-  const activeHostId = usePerchStore((s) => s.activeHostId);
-  const activeSession = usePerchStore((s) =>
-    activeSessionId ? s.sessions.find((session) => session.id === activeSessionId) : undefined,
-  );
-  const serverInfo = usePerchStore((s) => s.serverInfo);
-  const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
-  const hostId = activeSession?.hostId ?? activeHostId;
-  const capabilities = hostId === "local"
-    ? serverInfo?.capabilities ?? []
-    : workspaceCapabilitiesByHost[hostId] ?? [];
-  const runtimeAvailable = capabilities.includes("session.mode.get") && capabilities.includes("session.mode.set");
-
-  if (runtimeAvailable && activeSessionId) return <RuntimeChatModeSection sessionId={activeSessionId} />;
-  return <LegacyChatModeSection />;
-}
-
-function RuntimeChatModeSection({ sessionId }: { sessionId: string }) {
-  const settings = usePerchStore((s) => s.settings);
-  const sessions = usePerchStore((s) => s.sessions);
-  const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
-  const modeState = usePerchStore((s) => s.sessionModes[sessionId]);
-  const fetchSessionMode = usePerchStore((s) => s.fetchSessionMode);
-  const setSessionMode = usePerchStore((s) => s.setSessionMode);
-  const workspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId ?? modeState?.workspaceId ?? activeWorkspaceId ?? undefined;
-  const [scope, setScope] = useState<SessionModeOverrideScope>(
-    modeState?.scope === "workspace" || modeState?.scope === "device" || modeState?.scope === "session"
-      ? modeState.scope
-      : "device",
-  );
-
-  useEffect(() => {
-    fetchSessionMode(sessionId, workspaceId);
-  }, [fetchSessionMode, sessionId, workspaceId]);
-
-  useEffect(() => {
-    if (modeState?.scope && modeState.scope !== "default") setScope(modeState.scope);
-  }, [modeState?.scope]);
-
-  const mode: SessionMode = modeState?.mode ?? settings?.chatMode ?? "hosted";
-  const disabled = modeState?.state === "loading";
-  const hasWorkspace = Boolean(workspaceId);
-
-  const changeMode = (next: SessionMode) => {
-    if (scope === "workspace" && !hasWorkspace) return;
-    setSessionMode(sessionId, scope, next, workspaceId);
-  };
-
-  const clearOverride = () => {
-    if (modeState?.scope === "default") return;
-    const effectiveScope = modeState?.scope;
-    if (effectiveScope === "session" || effectiveScope === "workspace" || effectiveScope === "device") {
-      setSessionMode(sessionId, effectiveScope, undefined, workspaceId, true);
-    }
-  };
-
-  return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Chat Mode</h3>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">UI / CLI</span>
-        <ModeSwitch mode={mode} onChange={changeMode} testId="settings-chat-mode" disabled={disabled} />
-        <select
-          className="settings-modal__select"
-          data-testid="settings-mode-scope"
-          aria-label="Mode override scope"
-          value={scope}
-          disabled={disabled}
-          onChange={(event) => setScope(event.target.value as SessionModeOverrideScope)}
-        >
-          <option value="device">Every session on this device</option>
-          <option value="workspace" disabled={!hasWorkspace}>Every session in this workspace</option>
-          <option value="session">This session only</option>
-        </select>
-      </div>
-      <p className="settings-modal__muted">
-        The session header's switch changes one session. Set a default here: a session setting beats a workspace one, which beats the device one.
-        {modeState?.scope && modeState.scope !== "default" ? ` This session's mode comes from its ${modeState.scope} setting.` : ""}
-      </p>
-      {modeState?.state === "error" && (
-        <p className="settings-modal__muted settings-modal__muted--error" role="alert">
-          {modeState.error || "Mode could not be saved."}
-        </p>
-      )}
-      {modeState?.scope && modeState.scope !== "default" && (
-        <button
-          type="button"
-          className="settings-modal__btn"
-          data-testid="settings-mode-clear"
-          disabled={disabled}
-          onClick={clearOverride}
-        >
-          Reset {modeState.scope} setting
-        </button>
-      )}
-    </section>
-  );
-}
-
-function LegacyChatModeSection() {
   const settings = usePerchStore((s) => s.settings);
   const updateSettings = usePerchStore((s) => s.updateSettings);
 
@@ -200,11 +99,11 @@ function LegacyChatModeSection() {
   // control instantly on click rather than waiting on the settings.update
   // round-trip. The store's settings.current handler re-applies the
   // authoritative value (and drives every open chat pane) once it lands.
-  const [chatMode, setChatMode] = useState<"hosted" | "cli">(settings?.chatMode ?? "hosted");
+  const [chatMode, setChatMode] = useState<"hosted" | "cli">(settings?.chatMode ?? "cli");
 
   useEffect(() => {
     if (!settings) return;
-    setChatMode(settings.chatMode ?? "hosted");
+    setChatMode(settings.chatMode ?? "cli");
   }, [settings?.chatMode]);
 
   const handleChange = (mode: "hosted" | "cli") => {
@@ -219,10 +118,7 @@ function LegacyChatModeSection() {
         <span className="settings-modal__field-label">UI / CLI</span>
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </div>
-      <p className="settings-modal__muted">
-        Hosted shows the structured chat UI; CLI attaches every chat pane to the real
-        interactive CLI in a terminal. Applies globally to all open chats.
-      </p>
+      <p className="settings-modal__muted">UI or CLI for every session.</p>
     </section>
   );
 }

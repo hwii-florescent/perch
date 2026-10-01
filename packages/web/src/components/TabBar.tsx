@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { usePerchStore, activeProjectSessions, effectiveActiveProject } from "../store";
+import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { applyStoredTabOrder, saveTabOrder } from "../tabOrder";
 import type { SessionSummary } from "@perch/shared";
@@ -15,30 +15,29 @@ function tabLabel(session: SessionSummary): string {
 }
 
 /**
- * Tab strip for the sessions of the *active project* — the `(hostId, cwd)`
- * pair the sidebar's project list is scoped to (see `effectiveActiveProject`
- * in `store.ts`), the closest existing analog to herdr's Workspace/Tab
- * hierarchy. Clicking a project in the sidebar re-points this strip at that
- * project's sessions; the active project also follows whichever session is
- * opened, so the strip always contains the current session's siblings.
+ * Tab strip for the sessions of the *current workspace*: a project checkout
+ * or one of its git worktrees (`effectiveWorkspace` in `store/selectors.ts`),
+ * the same scope the Files/Git drawer follows. Where the host has no
+ * workspace records it falls back to the project, the `(hostId, cwd)` pair
+ * the sidebar is scoped to (`effectiveActiveProject`). The strip always
+ * contains the current session's siblings.
  *
  * Clicking a tab reuses the existing `switchSession` action (same as the
  * sidebar); double-clicking a tab renames it (Wave 1 item 2, inline input).
  * Dragging a tab reorders it within the strip (Wave 2 item 10) — purely
- * presentational, persisted client-side *per project* via `tabOrder.ts` (no
- * protocol field for tab order exists or is added). The trailing "+" is the
- * zero-click "new session in *this* project" fast path: it creates a session
- * in the active project's cwd on the active host immediately, no popover. The
- * dir-browser flow (`NewSessionPopover`) is only used as a fallback when there
- * is no active project at all (blank state — nothing to infer a cwd from);
- * the sidebar's "+ New session" button keeps the popover unconditionally, so
- * picking a *different* folder is still one click away there.
+ * presentational, persisted client-side *per workspace* via `tabOrder.ts` (no
+ * protocol field for tab order exists or is added). The trailing "+" opens
+ * the CLI picker (`NewSessionPopover`) for this workspace's path on its host;
+ * with no workspace it uses the active project's cwd, and the sidebar's
+ * "+ New session" button keeps picking a *different* folder one click away.
  */
 export function TabBar() {
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const activeProject = usePerchStore((s) => s.activeProject);
+  const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
+  const workspaces = usePerchStore((s) => s.workspaces);
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
@@ -55,16 +54,17 @@ export function TabBar() {
   // state change — including this one — is enough to reflect a fresh order.
   const [, setOrderVersion] = useState(0);
 
-  const navState = { sessions, sessionId, activeHostId, activeProject };
+  const navState = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces };
+  const ws = effectiveWorkspace(navState);
   const project = effectiveActiveProject(navState);
-  const hostId = project?.hostId ?? activeHostId;
-  const cwd = project?.cwd ?? null;
-  const projectKey = cwd ? `${hostId}:${cwd}` : null;
+  const hostId = ws?.hostId ?? project?.hostId ?? activeHostId;
+  const cwd = ws?.path ?? project?.cwd ?? null;
+  const projectKey = ws ? `${ws.hostId}:ws:${ws.id}` : cwd ? `${hostId}:${cwd}` : null;
 
-  // `activeProjectSessions` already scopes + orders (createdAt ascending) and
+  // `activeWorkspaceSessions` already scopes + orders (createdAt ascending) and
   // drops archived sessions — the same list `keybinds.ts` cycles through, so
   // leader,n/p and the visible strip can never disagree.
-  const tabs = activeProjectSessions(navState);
+  const tabs = activeWorkspaceSessions(navState);
   const orderedTabs = projectKey ? applyStoredTabOrder(projectKey, tabs) : tabs;
 
   useEffect(() => {
@@ -180,8 +180,8 @@ export function TabBar() {
         type="button"
         className="tab-bar__new"
         data-testid="tab-new"
-        title="New session in this project"
-        aria-label="New session in this project"
+        title="New session in this workspace"
+        aria-label="New session in this workspace"
         onClick={handleNewClick}
       >
         {"+"}

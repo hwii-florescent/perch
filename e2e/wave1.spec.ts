@@ -26,7 +26,7 @@ import * as path from "path";
 // ---------------------------------------------------------------------------
 
 const BASE_URL = "http://127.0.0.1:7799";
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -355,8 +355,9 @@ test.describe("Wave 1 functionality gaps", () => {
   test("F5. Ctrl/Cmd+F opens the in-terminal find bar; Escape closes it", async ({ page }) => {
     await freshPage(page);
 
-    const openBtn = page.getByTestId("workspace-tools-toggle");
-    await openBtn.click();
+    // A terminal split from the pane menu (the drawer has no terminal).
+    await page.getByTestId("pane-group-menu").click();
+    await page.getByTestId("pane-menu-split-down").click();
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 
     // Focus the terminal pane, then fire the find shortcut. Our handler
@@ -374,9 +375,6 @@ test.describe("Wave 1 functionality gaps", () => {
     await expect(searchBar).not.toBeVisible({ timeout: 3000 });
 
     await page.screenshot({ path: "artifacts/wave1-f5-terminal-search.png" });
-
-    await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
   });
 
   test("F6b. deleting a session via the trash icon is immediate — no confirmation", async ({ page }) => {

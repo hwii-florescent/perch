@@ -3,38 +3,8 @@
  * it). Pure move from store.ts — see the refactor plan's Phase 6. No logic
  * changed.
  */
-import type { AgentKind, SessionMode, SessionSummary } from "@perch/shared";
-import type { ActiveProject, PerchState, SessionModeState } from "./index";
-
-export interface SessionModeViewResolution {
-  mode: SessionMode;
-  /** Keep the pane neutral until a modern peer returns an authoritative mode. */
-  pending: boolean;
-}
-
-/** Resolve the mode a Chat pane may safely mount from the handshake state.
- *
- * Before `server.info`/`host.info` arrives, the legacy global setting is not
- * safe to use: a persisted `cli` value could mount an agent terminal before
- * the server tells us that this is a modern peer and before its session mode
- * is read. Modern peers likewise remain neutral until their first mode reply.
- * Once a mode reply has established the value, keep it while a refetch is in
- * flight so invalidation never flashes Hosted or mounts a second CLI.
- */
-export function resolveSessionModeForView(
-  capabilityKnown: boolean,
-  runtimeModeAvailable: boolean,
-  modeState: SessionModeState | undefined,
-  legacyMode: SessionMode,
-): SessionModeViewResolution {
-  const authoritative = Boolean(
-    modeState?.authoritative ?? modeState?.state === "ready",
-  );
-  if (!capabilityKnown) return { mode: "hosted", pending: true };
-  if (!runtimeModeAvailable) return { mode: legacyMode, pending: false };
-  if (!authoritative || !modeState) return { mode: "hosted", pending: true };
-  return { mode: modeState.mode, pending: false };
-}
+import type { AgentKind, SessionSummary } from "@perch/shared";
+import type { ActiveProject, PerchState, WorkspaceRecord } from "./index";
 
 /** A project = every session sharing one `(hostId, cwd)`. The sidebar has
  * always grouped this way; the nav redesign just promotes the grouping to a
@@ -54,7 +24,11 @@ export interface ProjectGroup {
 export type ProjectNavState = Pick<
   PerchState,
   "sessions" | "sessionId" | "activeHostId" | "activeProject"
->;
+> & {
+  /** Optional so project-only callers keep working; the full store state has both. */
+  activeWorkspaceId?: string | null;
+  workspaces?: WorkspaceRecord[];
+};
 
 /**
  * Projects belonging to `hostId`, newest-first. Archived sessions are always
@@ -108,11 +82,36 @@ export function effectiveActiveProject(state: ProjectNavState): ActiveProject | 
   return first ? { hostId, cwd: first.cwd } : null;
 }
 
-/** Sessions of the effective active project, sorted oldest-first — the
- * ordering `TabBar` renders (before any stored drag order) and the one
- * `keybinds.ts` (leader,n/p/1-9) cycles through, so both always agree.
+/** The workspace the tab strip is scoped to: `activeWorkspaceId`, else the
+ * active session's `workspaceId`, resolved against `state.workspaces`. `null`
+ * when nothing resolves (hosts without workspace support). */
+export function effectiveWorkspace(state: ProjectNavState): WorkspaceRecord | null {
+  const id =
+    state.activeWorkspaceId ??
+    state.sessions.find((s) => s.id === state.sessionId)?.workspaceId ??
+    null;
+  return (id && state.workspaces?.find((w) => w.id === id)) || null;
+}
+
+/** Sessions of the effective workspace (a project checkout or one of its git
+ * worktrees), sorted oldest-first — the ordering `TabBar` renders (before any
+ * stored drag order) and the one `keybinds.ts` (leader,n/p/1-9) cycles
+ * through, so both always agree. A session with no `workspaceId` belongs to
+ * the workspace whose `(hostId, path)` matches its `(hostId, cwd)`. With no
+ * effective workspace it falls back to the whole project `(hostId, cwd)`.
  * Archived sessions are always omitted. */
-export function activeProjectSessions(state: ProjectNavState): SessionSummary[] {
+export function activeWorkspaceSessions(state: ProjectNavState): SessionSummary[] {
+  const ws = effectiveWorkspace(state);
+  if (ws) {
+    return state.sessions
+      .filter(
+        (s) =>
+          s.workspaceId === ws.id ||
+          (!s.workspaceId && (s.hostId ?? "local") === ws.hostId && s.cwd === ws.path),
+      )
+      .filter((s) => !s.archived)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
   const project = effectiveActiveProject(state);
   if (!project) {
     const current = state.sessions.find((s) => s.id === state.sessionId);

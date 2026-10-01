@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
 import { DockviewShell } from "./dockview/DockviewShell";
@@ -18,10 +18,30 @@ import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShe
 import { PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
 import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
+import { ResizeHandle } from "./components/ResizeHandle";
 
 const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 // The Tauri app on macOS draws its traffic lights over the web view's top row.
 const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
+const toolsDefault = () => Math.min(760, Math.round(window.innerWidth * 0.46));
+
+// Per-viewer column widths (px), set by dragging the dividers.
+const SIDEBAR_KEY = "perch.layout.sidebarWidth";
+const TOOLS_KEY = "perch.layout.toolsWidth";
+const SIDEBAR_DEFAULT = 240;
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 480;
+const TOOLS_MIN = 280;
+const MAIN_MIN = 320;
+function readWidth(key: string): number | null {
+  try {
+    const n = Number(localStorage.getItem(key));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+function writeWidth(key: string, px: number) {
+  try { localStorage.setItem(key, String(px)); } catch { /* per-viewer convenience */ }
+}
 
 export default function App() {
   const [navigatorOpen, setNavigatorOpen] = useState(false);
@@ -42,18 +62,27 @@ export default function App() {
   const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
   const closeWorkspaceGitReview = usePerchStore((state) => state.closeWorkspaceGitReview);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
-  // The ›_ drawer (Terminal | Files | Git for the active workspace). App
-  // state, not part of a session's layout, so it stays put across chats.
+  // The right drawer (Files | Git for the active workspace). App state, not
+  // part of a session's layout, so it stays put across chats. An old stored
+  // "terminal" tab maps to Files.
   const [tools, setTools] = useState<WorkspaceToolsTab | null>(() => {
-    try { return localStorage.getItem(TOOLS_STORAGE_KEY) as WorkspaceToolsTab | null; } catch { return null; }
+    try {
+      const stored = localStorage.getItem(TOOLS_STORAGE_KEY);
+      if (!stored) return null;
+      return stored === "gitReview" ? "gitReview" : "files";
+    } catch { return null; }
   });
+  const sidebarCollapsed = usePerchStore((state) => state.sidebarCollapsed);
+  const toggleSidebar = usePerchStore((state) => state.toggleSidebar);
+  const [sidebarWidthRaw, setSidebarWidth] = useState(() => readWidth(SIDEBAR_KEY) ?? SIDEBAR_DEFAULT);
+  const [toolsWidthRaw, setToolsWidth] = useState(() => readWidth(TOOLS_KEY) ?? toolsDefault());
   useEffect(() => {
     try { if (tools) localStorage.setItem(TOOLS_STORAGE_KEY, tools); else localStorage.removeItem(TOOLS_STORAGE_KEY); } catch { /* per-viewer convenience */ }
   }, [tools]);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
 
   // The toggle reopens the drawer on whichever tab was last shown.
-  const lastTools = useRef<WorkspaceToolsTab>(tools ?? "terminal");
+  const lastTools = useRef<WorkspaceToolsTab>(tools ?? "files");
   if (tools) lastTools.current = tools;
   const toggleTerminal = useCallback(() => {
     if (isMobile) setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
@@ -118,8 +147,13 @@ export default function App() {
   }, [connected]);
   if (unpaired) return <PairingGate onPaired={() => window.location.reload()} />;
 
-  // Desktop: the drawer holds Terminal, Files and Git, so its toggle is a
-  // right-panel glyph. The phone's button still opens just the terminal.
+  const showSidebar = !isMobile && !sidebarCollapsed;
+  const sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthRaw));
+  const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - MAIN_MIN);
+  const toolsWidth = Math.min(toolsMax, Math.max(TOOLS_MIN, toolsWidthRaw));
+
+  // Desktop: the drawer holds Files and Git, so its toggle is a right-panel
+  // glyph. The phone's button still opens just the terminal.
   const terminalButton = isMobile ? (
     <button
       type="button"
@@ -135,8 +169,8 @@ export default function App() {
     <button
       type="button"
       className="toolbar__button toolbar__button--icon"
-      title="Workspace tools: terminal, files, Git"
-      aria-label="Workspace tools"
+      title="Files and Git for this workspace"
+      aria-label="Files and Git"
       data-testid="workspace-tools-toggle"
       aria-pressed={tools !== null}
       onClick={toggleTerminal}
@@ -148,25 +182,63 @@ export default function App() {
     </button>
   );
 
+  const sidebarToggle = (
+    <button
+      type="button"
+      className="toolbar__button toolbar__button--icon"
+      title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      data-testid="sidebar-collapse-toggle"
+      aria-pressed={!sidebarCollapsed}
+      onClick={toggleSidebar}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+        <path d="M6 2.5v11" />
+      </svg>
+    </button>
+  );
+
   return (
-    <div className={"app" + (isMobile ? " app--mobile" : "") + (MAC_DESKTOP ? " app--mac-desktop" : "")}>
+    <div
+      className={"app" + (isMobile ? " app--mobile" : "") + (MAC_DESKTOP ? " app--mac-desktop" : "")}
+      style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as CSSProperties}
+    >
       {isMobile ? (
         <>
           <div className="toolbar">{terminalButton}</div>
           <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
         </>
       ) : (
-        // One row for tabs and ›_ (Orca). In the macOS app it is also the
-        // title bar: the traffic lights sit in its left padding and empty
+        // One row (Orca): brand + sidebar toggle above the sidebar, tabs, then
+        // the drawer toggle. In the macOS app it is also the title bar: the
+        // traffic lights sit in the brand section's left padding and empty
         // space drags the window (crates/perch-desktop/src/main.rs).
         <div className="toolbar toolbar--tabs" data-tauri-drag-region>
+          <div className={"toolbar__brand" + (sidebarCollapsed ? " toolbar__brand--collapsed" : "")} data-tauri-drag-region>
+            <span className="toolbar__app-name" data-tauri-drag-region>perch</span>
+            {sidebarToggle}
+          </div>
           <TabBar />
           {terminalButton}
         </div>
       )}
 
       <div className="app__body">
-        {!isMobile && <Sidebar />}
+        {showSidebar && <Sidebar />}
+        {showSidebar && (
+          <ResizeHandle
+            edge="left"
+            testId="resize-sidebar"
+            label="Resize sidebar"
+            value={sidebarWidth}
+            min={SIDEBAR_MIN}
+            max={SIDEBAR_MAX}
+            defaultValue={SIDEBAR_DEFAULT}
+            onChange={setSidebarWidth}
+            onCommit={(px) => writeWidth(SIDEBAR_KEY, px)}
+          />
+        )}
         <main className="dock-area">
           {isMobile ? (
             <MobilePaneShell
@@ -180,6 +252,19 @@ export default function App() {
             />
           ) : <DockviewShell />}
         </main>
+        {!isMobile && tools && (
+          <ResizeHandle
+            edge="right"
+            testId="resize-tools"
+            label="Resize files and Git"
+            value={toolsWidth}
+            min={TOOLS_MIN}
+            max={toolsMax}
+            defaultValue={toolsDefault()}
+            onChange={setToolsWidth}
+            onCommit={(px) => writeWidth(TOOLS_KEY, px)}
+          />
+        )}
         {!isMobile && tools && <WorkspaceTools tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
       </div>
 

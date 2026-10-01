@@ -38,7 +38,7 @@ const BASE_URL = "http://127.0.0.1:7799";
 // not isolated per e2e server — must reset so later specs see Hosted default)
 // ---------------------------------------------------------------------------
 
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 function resetChatMode(): void {
   try {

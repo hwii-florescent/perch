@@ -118,8 +118,7 @@ export interface SettingsData {
   /** `null` means no default set (use process cwd). */
   defaultCwd: string | null;
   /** Selected theme name (key into the client's `THEMES` table).
-   * Defaults to `"catppuccin"` — herdr's own default theme. `"perch"`
-   * (perch's original hardcoded look) remains a selectable theme. */
+   * Defaults to `"perch"`, perch's monotone look. */
   theme: string;
   /** Play a short WebAudio-generated tone when a session finishes a turn
    * unseen (done) or becomes blocked on an approval prompt (request).

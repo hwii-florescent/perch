@@ -26,7 +26,7 @@
  * (NUL) and the chord's follow-up letter to the PTY.
  */
 import { useEffect, useRef } from "react";
-import { usePerchStore, activeProjectSessions, effectiveActiveProject } from "./store";
+import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject } from "./store";
 import { getDockviewController } from "./dockview/dockviewController";
 
 const LEADER_TIMEOUT_MS = 1500;
@@ -55,9 +55,9 @@ export const KEYBINDS: KeybindEntry[] = [
   { keys: "Ctrl+Space, W", description: "Open the worktree menu for the current project", group: "navigation" },
   { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "navigation" },
   { keys: "Ctrl+Space, c", description: "New session in the current project", group: "sessions" },
-  { keys: "Ctrl+Space, n", description: "Next session in the current project", group: "sessions" },
-  { keys: "Ctrl+Space, p", description: "Previous session in the current project", group: "sessions" },
-  { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current project", group: "sessions" },
+  { keys: "Ctrl+Space, n", description: "Next session in the current workspace", group: "sessions" },
+  { keys: "Ctrl+Space, p", description: "Previous session in the current workspace", group: "sessions" },
+  { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current workspace", group: "sessions" },
   { keys: "Ctrl+Space, x", description: "Close the current terminal pane", group: "panes" },
   { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "panes" },
   { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "panes" },
@@ -114,11 +114,11 @@ export function terminalKeyHandler(term: { input(data: string): void }, e: Keybo
 // component of its own, so there's nothing to subscribe/re-render)
 // ---------------------------------------------------------------------------
 
-/** Jump to the Nth (1-indexed) session within the active project's session
+/** Jump to the Nth (1-indexed) session within the active workspace's session
  * list (same ordering as `TabBar`: created-at ascending). No-op out of range. */
-function jumpToNthProjectSession(n: number): void {
+function jumpToNthWorkspaceSession(n: number): void {
   const state = usePerchStore.getState();
-  const target = activeProjectSessions(state)[n - 1];
+  const target = activeWorkspaceSessions(state)[n - 1];
   if (target && target.id !== state.sessionId) state.switchSession(target.id);
 }
 
@@ -237,7 +237,7 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   L: () => getDockviewController()?.swapPaneDirection("right"),
 };
 for (let i = 1; i <= 9; i++) {
-  CHORD_ACTIONS[String(i)] = () => jumpToNthProjectSession(i);
+  CHORD_ACTIONS[String(i)] = () => jumpToNthWorkspaceSession(i);
 }
 
 // ---------------------------------------------------------------------------

@@ -21,9 +21,6 @@ function manifest(id: string, name: string, executable = "/bin/sh") {
 }
 
 async function cliMode(page: Page) {
-  const mode = page.getByTestId("session-mode-toggle");
-  await expect(mode).toBeEnabled();
-  if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
   await expect(page.getByTestId("cli-start-panel")).toBeVisible();
 }
 

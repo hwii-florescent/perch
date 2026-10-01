@@ -30,9 +30,15 @@ pub(super) fn handle_settings_update(
     };
     match state.app.settings.update(store_patch) {
         Ok(updated) => {
-            let _ = state.out_tx.send(ServerMessage::SettingsCurrent {
-                settings: settings_to_wire(&updated),
-            });
+            // Settings are global (one chat mode for every client), so every
+            // connection hears the change, the requester included.
+            let _ = state
+                .app
+                .hub
+                .hub_events_tx
+                .send(Arc::new(ServerMessage::SettingsCurrent {
+                    settings: settings_to_wire(&updated),
+                }));
         }
         Err(e) => {
             let _ = state.out_tx.send(ServerMessage::Error {

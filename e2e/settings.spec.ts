@@ -33,7 +33,7 @@ import * as path from "path";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const HOSTS_FILE = path.join(os.homedir(), ".perch", "hosts.json");
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 // ---------------------------------------------------------------------------
 // Filesystem helpers — conservative: only touch test-* entries

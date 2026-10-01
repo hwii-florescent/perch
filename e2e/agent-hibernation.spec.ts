@@ -18,6 +18,7 @@
  */
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
+import { restoreChatMode, setChatMode } from "./chatMode";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -91,9 +92,6 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
 
     // 1. Start a real CLI agent and complete a conversation turn.
     await page.goto(url, { waitUntil: "networkidle" });
-    const toggle = page.getByTestId("session-mode-toggle");
-    await expect(toggle).toBeEnabled({ timeout: 15000 });
-    if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId("cli-start-agent-claude").click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
@@ -107,7 +105,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const input = cli.locator(".xterm-helper-textarea");
     await input.pressSequentially("Reply with exactly: PERCH_READY", { delay: 10 });
     await input.press("Enter");
-    await toggle.click();
+    await setChatMode(page, "hosted");
     const ui = page.getByTestId("native-cli-chat");
     // An assistant-only row and Ready status cannot match the echoed prompt.
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("PERCH_READY", { timeout: 90_000 });
@@ -118,7 +116,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     expect(tmuxNames, "one concrete runtime was launched").toHaveLength(1);
     const tmuxName = tmuxNames[0];
     execFileSync("tmux", ["has-session", "-t", `=${tmuxName}`], { stdio: "ignore" });
-    await toggle.click();
+    await setChatMode(page, "cli");
 
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     expect(sessionId).toBeTruthy();
@@ -167,7 +165,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const awake = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(awake.state, "a woken agent is not still sleeping").not.toBe("sleeping");
     expect(awake.providerSessionId, "wake resumed the same provider session").toBe(providerSessionId);
-    await toggle.click();
+    await setChatMode(page, "hosted");
     await expect(ui).toHaveAttribute("data-native-session", providerSessionId, { timeout: 30_000 });
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/);
     expect(await ui.getAttribute("data-native-pid")).not.toBe(originalPid);
@@ -197,6 +195,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     for (const name of ownedTmux) {
       try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already stopped */ }
     }
+    restoreChatMode(); // the fixture core shares the suite's settings file; the test ends in UI mode
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

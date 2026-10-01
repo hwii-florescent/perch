@@ -70,7 +70,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
       ...(connected && sessionId && current?.cwd ? [{ id: "terminal", label: "New Terminal", detail: current.cwd, run: () => getDockviewController()?.addTerminalPanel("right") }] : []),
       ...(connected && cwd ? (catalog?.manifests ?? [])
         .filter((entry) => entry.available && entry.enabled !== false && entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"))
-        .map((entry) => ({ id: entry.id, label: entry.displayName, detail: cwd, run: () => createSession(hostId, cwd, entry.id, "cli") })) : []),
+        .map((entry) => ({ id: entry.id, label: entry.displayName, detail: cwd, run: () => createSession(hostId, cwd, entry.id) })) : []),
       { id: "agents", label: "Manage agents", detail: "Installed and available to install", run: manageAgents },
     ];
     const search = query.trim().toLowerCase();

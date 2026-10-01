@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { setChatMode } from "./chatMode";
 
 /**
  * Create a session in `cwd` over the wire and make it this page's active one.
@@ -30,9 +31,7 @@ export async function createHostedSession(page: Page, cwd: string): Promise<stri
   await page.reload({ waitUntil: "networkidle" });
   const dismiss = page.getByTestId("onboarding-dismiss");
   if (await dismiss.count()) await dismiss.click();
-  const mode = page.getByTestId("session-mode-toggle");
-  await expect(mode).toBeEnabled({ timeout: 15_000 });
-  if (await mode.getAttribute("aria-checked") === "true") await mode.click();
+  await setChatMode(page, "hosted");
   await expect(page.getByTestId("model-chip")).toBeVisible({ timeout: 15_000 });
   return sessionId;
 }

@@ -29,6 +29,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
+import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv } from "./cheapModel";
 
 const RUN_ID = Math.random().toString(36).slice(2, 8);
@@ -170,7 +171,6 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
   const ui = phone.getByTestId("native-cli-chat");
   const cli = phone.getByTestId("persistent-agent-terminal");
-  const toggle = phone.getByTestId("session-mode-toggle");
 
   try {
     await boot();
@@ -204,8 +204,6 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await page.keyboard.press("Escape");
 
     // 2. The phone starts a real Claude CLI in the repository.
-    await expect(toggle).toBeEnabled({ timeout: 20_000 });
-    if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await phone.getByTestId("cli-start-agent-claude").click();
     await phone.getByTestId("cli-start-browse").click();
     await phone.getByRole("button", { name: "Use this folder", exact: true }).click();
@@ -214,8 +212,8 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await expect(cli.locator(".xterm-rows")).toContainText("Claude Code", { timeout: 40_000 });
     await clearTrustPrompt(cli);
 
-    // 3. CLI → Chat/UI on the phone, for the *same* session.
-    await toggle.click();
+    // 3. CLI → Chat/UI (the global setting, flipped from the host page), for the *same* session.
+    await setChatMode(page, "hosted");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 40_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled({ timeout: 20_000 });
     // Stop here, before any real turn, if the cheap-model pin did not take.
@@ -232,10 +230,10 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 30_000 });
 
     // 5. Back to CLI: same terminal, same conversation, no second process.
-    await toggle.click();
+    await setChatMode(page, "cli");
     await expect(cli).toHaveAttribute("data-terminal-id", terminalId!);
     await expect(cli.locator(".xterm-rows")).toContainText(token, { timeout: 30_000 });
-    await toggle.click();
+    await setChatMode(page, "hosted");
     await expect(ui).toHaveAttribute("data-native-pid", nativePid!, { timeout: 30_000 });
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
     const sessionId = await phone.evaluate(() => localStorage.getItem("perch.sessionId"));
@@ -305,6 +303,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await phone.screenshot({ path: testInfo.outputPath("phone-final.png"), fullPage: true }).catch(() => {});
     await phoneContext.close();
     await stop();
+    restoreChatMode(); // the test ends in UI mode; the settings file is shared
     const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
     for (const name of ownedTmux) {
       try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already exited */ }

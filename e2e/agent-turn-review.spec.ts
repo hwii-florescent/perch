@@ -187,9 +187,6 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     const workspaceId = await firstWorkspaceId(project);
 
     // 2. A real CLI agent process in that repository.
-    const mode = page.getByTestId("session-mode-toggle");
-    await expect(mode).toBeEnabled({ timeout: 15000 });
-    if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
@@ -422,9 +419,6 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     const workspaceId = await firstWorkspaceId(project);
 
-    const mode = page.getByTestId("session-mode-toggle");
-    await expect(mode).toBeEnabled({ timeout: 15000 });
-    if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId("cli-start-agent-turnbot").click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();

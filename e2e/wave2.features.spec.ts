@@ -56,7 +56,7 @@ import { execFileSync, execSync } from "child_process";
 // ---------------------------------------------------------------------------
 
 const BASE_URL = "http://127.0.0.1:7799";
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 // Matches playwright.config.ts's webServer command for instance A (the hub).
 const HUB_DB_PATH = "/tmp/perch-e2e-hub.sqlite";
 // Mirrors xtermSetup.ts's MIN_SCROLLBACK / MAX_SCROLLBACK.

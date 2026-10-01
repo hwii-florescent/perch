@@ -1,28 +1,26 @@
 :root {
   color-scheme: dark;
-  /* --- herdr-parity semantic tokens (16) ------------------------------------
-   * Default look is now herdr's own default theme, Catppuccin Mocha — see
-   * `reference/herdr/src/app/state.rs::Palette::catppuccin()` (the values
-   * below are that palette, RGB -> hex, identical to `THEMES.catppuccin` in
-   * `themes.ts`). "perch" (the old hardcoded look) is kept as a selectable
-   * theme in Settings, just no longer the default — see `themes.ts`,
-   * `store.ts`, and the Rust `default_theme()` in protocol.rs/settings.rs. */
-  --accent: #89b4fa;
-  --panel-bg: #181825;
-  --surface-0: #313244;
-  --surface-1: #45475a;
-  --surface-dim: #1e1e2e;
-  --overlay-0: #6c7086;
-  --overlay-1: #7f849c;
-  --text: #cdd6f4;
-  --subtext-0: #a6adc8;
-  --mauve: #cba6f7;
-  --green: #a6e3a1;
-  --yellow: #f9e2af;
-  --red: #f38ba8;
-  --blue: #89b4fa;
-  --teal: #94e2d5;
-  --peach: #fab387;
+  /* --- semantic tokens (16) -----------------------------------------------
+   * The default look is perch's own monotone palette (`PERCH_DEFAULT` in
+   * `themes.ts`, identical values): neutral greys like a plain terminal
+   * emulator, with color reserved for status. Other themes are selectable in
+   * Settings; the Rust `default_theme()` in protocol.rs/settings.rs agrees. */
+  --accent: #c8c8c8;
+  --panel-bg: #161616;
+  --surface-0: #262626;
+  --surface-1: #333333;
+  --surface-dim: #1c1c1c;
+  --overlay-0: #3a3a3a;
+  --overlay-1: #7a7a7a;
+  --text: #d8d8d8;
+  --subtext-0: #9a9a9a;
+  --mauve: #a993c9;
+  --green: #7fb685;
+  --yellow: #d3b46a;
+  --red: #d77a7a;
+  --blue: #7aa2d7;
+  --teal: #7fb8b8;
+  --peach: #d39a6a;
   /* --- deprecated aliases: kept so existing component CSS keeps working --- */
   --bg: var(--panel-bg);
   --surface: var(--surface-0);
@@ -37,6 +35,8 @@
    * bubbles and inline code/pre blocks intentionally keep their own (larger)
    * radius since they're chat content, not TUI chrome. */
   --radius: 3px;
+  /* Native checkboxes/radios follow the theme, not the browser's blue. */
+  accent-color: var(--accent);
   /* herdr is a terminal app — the whole UI reads as a TUI, so the base font
    * is a monospace stack rather than the system sans-serif perch used
    * before. Falls through to the platform's default monospace if none of
@@ -114,8 +114,34 @@ body {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* Left section of the top row: app name + sidebar toggle. Expanded, it is as
+ * wide as the sidebar so the tabs start above the main column. */
+.toolbar__brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: var(--sidebar-width, 240px);
+  padding: 0 0.5rem 0 0.75rem;
+  border-right: 1px solid var(--overlay-0);
+  margin-right: -0.5rem; /* cancel the row gap: tabs start above the main column */
+}
+.toolbar__brand--collapsed {
+  width: auto;
+  border-right: 0;
+  margin-right: 0;
+}
+.toolbar__app-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--subtext-0);
+  user-select: none;
+}
 /* The macOS app's traffic lights sit in this padding (perch-desktop main.rs). */
-.app--mac-desktop .toolbar--tabs {
+.app--mac-desktop .toolbar__brand {
   padding-left: 78px;
 }
 
@@ -215,15 +241,14 @@ body {
 }
 
 .tab-bar__tab--active {
-  background: var(--accent);
-  color: var(--panel-bg);
-  border-color: var(--accent);
-  font-weight: 600;
+  background: var(--surface-1);
+  color: var(--text);
+  border-color: var(--overlay-1);
 }
 
 .tab-bar__tab--active:hover {
-  border-color: var(--accent);
-  color: var(--panel-bg);
+  border-color: var(--overlay-1);
+  color: var(--text);
 }
 
 /* Wave 2 item 10: drag-to-reorder visual states. Dragged tab dims slightly;
@@ -289,9 +314,34 @@ body {
 
 /* --- Workspace tools drawer (›_) ----------------------------------------- */
 
-/* ponytail: fixed width, no drag handle; add one if people want to resize. */
+/* Draggable column divider (ResizeHandle.tsx). The negative margin overlaps
+ * the neighbours' borders so the grab area is wider than the layout gap. */
+.resize-handle {
+  flex: 0 0 5px;
+  margin: 0 -2px;
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+  outline: none;
+}
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: transparent;
+}
+.resize-handle:hover::after,
+.resize-handle:active::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
 .workspace-tools {
-  width: min(46vw, 760px);
+  width: var(--tools-width, min(46vw, 760px));
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -369,7 +419,7 @@ body {
 /* --- Sidebar -------------------------------------------------------------- */
 
 .sidebar {
-  width: 240px;
+  width: var(--sidebar-width, 240px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2323,7 +2373,7 @@ body {
 }
 
 .dockview-theme-perch .dv-groupview.dv-active-group {
-  border-color: var(--accent);
+  border-color: var(--overlay-1);
 }
 
 /* The pane header's action buttons (the `⋯` pane menu and the split-session
@@ -2431,30 +2481,6 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.chat__mode-pending {
-  align-items: flex-start;
-  background: var(--surface-1);
-  border: 1px solid var(--overlay-0);
-  border-radius: var(--radius);
-  color: var(--subtext-0);
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin: auto;
-  max-width: 30rem;
-  padding: 1rem 1.1rem;
-}
-
-.chat__mode-pending strong {
-  color: var(--text);
-  font-size: 0.9rem;
-}
-
-.chat__mode-pending span {
-  font-size: 0.8rem;
-  line-height: 1.45;
 }
 
 .chat__list {
@@ -3450,38 +3476,6 @@ body {
 .mode-switch[aria-checked="true"] .mode-switch__thumb {
   transform: translateX(1.1rem);
   background: var(--accent);
-}
-
-/* The session header's UI/CLI switch (scope controls live in Settings). */
-.session-mode-control {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.35rem 0.65rem;
-  border-bottom: 1px solid var(--overlay-0);
-  background: var(--surface-0);
-  color: var(--subtext-0);
-  font-size: 0.75rem;
-}
-
-.session-mode-control__main {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.session-mode-control .mode-switch {
-  margin-left: 0;
-}
-
-.session-mode-control__status--error {
-  color: var(--red, #f38ba8);
-}
-
-.session-mode-control .mode-switch:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .settings-modal__muted--error {
@@ -4526,7 +4520,9 @@ body {
  * a long history of distinct cwds can't push the DirectoryBrowser (and its
  * "Use this folder" button) below the fold. */
 .new-session-popover__projects {
-  flex-shrink: 0;
+  /* Yields height to the DirectoryBrowser on short viewports. */
+  flex-shrink: 1;
+  min-height: 0;
   overflow-y: auto;
   max-height: 190px;
 }
@@ -4627,7 +4623,8 @@ body {
    * footer rows stay put. `min-height: 0` is required for the child
    * `flex: 1` list to be allowed to shrink below its content size. */
   flex: 1;
-  min-height: 0;
+  /* Header, breadcrumb, filter, footer and a few rows always fit. */
+  min-height: 13rem;
 }
 
 .dir-browser__header {
@@ -4886,47 +4883,6 @@ body {
 
 .confirm-dialog__btn--accept:hover {
   filter: brightness(1.1);
-}
-
-/* --- Sidebar collapse (Phase 4: Keybindings + Navigator, leader,b) ------- */
-
-.sidebar--collapsed {
-  width: 48px;
-}
-
-/* Hide everything text-heavy in the collapsed rail — keep the DOM structure
- * and all existing data-testids intact (other e2e specs query them), just
- * visually hide via display:none so sidebar.spec.ts's non-collapsed
- * assertions are unaffected. */
-.sidebar--collapsed .sidebar__env,
-.sidebar--collapsed .sidebar__local-actions,
-.sidebar--collapsed .sidebar__list,
-.sidebar--collapsed .workspace-overview,
-.sidebar--collapsed .sidebar__host-switcher-caret {
-  display: none;
-}
-
-.sidebar--collapsed .sidebar__footer {
-  justify-content: center;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.sidebar__collapse-toggle {
-  background: none;
-  border: none;
-  color: var(--subtext-0);
-  font-size: 0.9rem;
-  padding: 0.25rem;
-  border-radius: var(--radius);
-  cursor: pointer;
-  line-height: 1;
-  transition: color 0.12s ease, background 0.12s ease;
-}
-
-.sidebar__collapse-toggle:hover {
-  color: var(--text);
-  background: var(--surface-1);
 }
 
 /* --- Navigator (Phase 4: Keybindings + Navigator) ------------------------ */
@@ -5472,7 +5428,6 @@ body {
   font-weight: 700;
 }
 
-.app--mobile .session-mode-control .mode-switch,
 .app--mobile .cli-start__agent-btn,
 .app--mobile .cli-start__secondary,
 .app--mobile .toolbar__button {

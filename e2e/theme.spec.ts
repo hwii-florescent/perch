@@ -1,10 +1,10 @@
 /**
  * theme.spec.ts — Phase 1 (herdr-parity) e2e tests for the theme system.
  *
- * T1 "default theme is catppuccin on first load":
- *   Fresh session, no theme override in ~/.perch/settings.json — assert
+ * T1 "default theme is perch on first load":
+ *   Fresh session, no theme override in the settings file — assert
  *   `getComputedStyle(document.documentElement).getPropertyValue("--accent")`
- *   matches herdr's default theme's accent (catppuccin, #89b4fa).
+ *   matches the default theme's accent (perch, #c8c8c8).
  *
  * T2 "switching theme in Settings persists across reload":
  *   Open Settings, click the "dracula" theme option, assert the ✓ marker and
@@ -15,9 +15,9 @@
  *   For catppuccin, dracula, one-light: select the theme, assert `--accent`
  *   matches that theme's value, and assert no new console errors appeared.
  *
- * Resets `theme` back to "catppuccin" (the app's default — see
+ * Resets `theme` back to "perch" (the app's default — see
  * `default_theme()` in crates/perch-core/src/{protocol,settings}.rs and
- * `applyTheme("catppuccin")` in store.ts) in ~/.perch/settings.json at start
+ * `applyTheme("perch")` in store.ts) in the suite's settings file at start
  * and end so this spec — and any spec that runs after it — sees the app's
  * default look, matching settings.spec.ts's cleanup convention for other
  * fields.
@@ -25,20 +25,18 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { SETTINGS_FILE } from "./chatMode";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const BASE_URL = "http://127.0.0.1:7799";
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
 
 // Known accent values for the themes this spec exercises, transcribed from
 // packages/web/src/themes.ts (must stay in sync with that table).
 const ACCENT = {
-  perch: "#58e6a8",
+  perch: "#c8c8c8",
   catppuccin: "#89b4fa",
   dracula: "#bd93f9",
   "one-light": "#4078f2",
@@ -48,15 +46,15 @@ const ACCENT = {
 // Filesystem helpers
 // ---------------------------------------------------------------------------
 
-/** Force `theme` back to "catppuccin" (the app's default) in
- * ~/.perch/settings.json, leaving every other field untouched. Safe to call
+/** Force `theme` back to "perch" (the app's default) in
+ * the settings file, leaving every other field untouched. Safe to call
  * even if the file doesn't exist yet. */
 function resetTheme(): void {
   try {
     if (!fs.existsSync(SETTINGS_FILE)) return;
     const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
     const data = JSON.parse(raw) as Record<string, unknown>;
-    data.theme = "catppuccin";
+    data.theme = "perch";
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
   } catch {
     // Malformed file — leave it alone rather than destroy real settings.
@@ -73,7 +71,7 @@ async function freshSession(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-  await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-testid="settings-gear"]')).toBeVisible({ timeout: 15000 });
 }
 
 /** Open the settings modal via the gear button and wait for it to appear. */
@@ -111,15 +109,15 @@ test.describe("Phase 1: theme system", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T1 — default theme is "catppuccin" on first load
+  // T1 — default theme is "perch" on first load
   // ---------------------------------------------------------------------------
-  test("T1. default theme is catppuccin on first load", async ({ page }) => {
+  test("T1. default theme is perch on first load", async ({ page }) => {
     await freshSession(page);
 
     const accent = await getAccent(page);
-    expect(accent.toLowerCase()).toBe(ACCENT.catppuccin);
+    expect(accent.toLowerCase()).toBe(ACCENT.perch);
 
-    await page.screenshot({ path: "artifacts/T1-default-theme-catppuccin.png" });
+    await page.screenshot({ path: "artifacts/T1-default-theme-perch.png" });
   });
 
   // ---------------------------------------------------------------------------
@@ -161,12 +159,12 @@ test.describe("Phase 1: theme system", () => {
 
     await page.screenshot({ path: "artifacts/T2-theme-persisted-after-reload.png" });
 
-    // Restore to catppuccin (the app's default) for subsequent tests/specs.
-    const catppuccinOption = modal.locator('[data-testid="theme-option-catppuccin"]');
-    await catppuccinOption.click();
+    // Restore to perch (the app's default) for subsequent tests/specs.
+    const perchOption = modal.locator('[data-testid="theme-option-perch"]');
+    await perchOption.click();
     await expect
       .poll(async () => (await getAccent(page)).toLowerCase(), { timeout: 5000 })
-      .toBe(ACCENT.catppuccin);
+      .toBe(ACCENT.perch);
     await closeSettingsEsc(page);
   });
 
@@ -200,13 +198,13 @@ test.describe("Phase 1: theme system", () => {
     expect(consoleErrors, `console errors while spot-checking themes: ${consoleErrors.join("; ")}`)
       .toHaveLength(0);
 
-    // Restore to catppuccin (the app's default) so this spec leaves no
+    // Restore to perch (the app's default) so this spec leaves no
     // visible side effect.
-    const catppuccinOption = modal.locator('[data-testid="theme-option-catppuccin"]');
-    await catppuccinOption.click();
+    const perchOption = modal.locator('[data-testid="theme-option-perch"]');
+    await perchOption.click();
     await expect
       .poll(async () => (await getAccent(page)).toLowerCase(), { timeout: 5000 })
-      .toBe(ACCENT.catppuccin);
+      .toBe(ACCENT.perch);
     await closeSettingsEsc(page);
   });
 });

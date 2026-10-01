@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 
 test("installed OMP and Pi run in separate persistent panes", async ({ page, context, browser }, testInfo) => {
@@ -62,9 +63,6 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   fs.mkdirSync(shots, { recursive: true });
   async function prepare(current: Page) {
     await current.goto(url, { waitUntil: "networkidle" });
-    const toggle = current.getByTestId("session-mode-toggle");
-    await expect(toggle).toBeEnabled();
-    if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     for (const provider of ["claude", "codex", "omp", "pi"]) {
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeVisible();
     }
@@ -131,9 +129,8 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     // reach an observed pane even when another session owns the active view.
     for (const terminal of [omp, pi]) {
       await terminal.locator(".xterm-helper-textarea").press("Control+u");
-      const group = page.locator(".dv-groupview").filter({ has: terminal });
-      await group.getByTestId("session-mode-toggle").click();
     }
+    await setChatMode(page, "hosted");
     const ompUi = page.locator('[data-testid="native-cli-chat"][data-provider="omp"]');
     const piUi = page.locator('[data-testid="native-cli-chat"][data-provider="pi"]');
     for (const ui of [ompUi, piUi]) {
@@ -161,7 +158,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(ompUi).toHaveAttribute("data-native-pid", pids[0]!);
     await expect(piUi).toHaveAttribute("data-native-pid", pids[1]!);
     await page.screenshot({ path: testInfo.outputPath("native-ui-two-panes.png"), fullPage: true });
-    for (const ui of [ompUi, piUi]) await page.locator(".dv-groupview").filter({ has: ui }).getByTestId("session-mode-toggle").click();
+    await setChatMode(page, "cli");
 
     await page.keyboard.press("ControlOrMeta+k");
     await expect(page.getByTestId("navigator-command-omp")).toBeVisible();
@@ -185,6 +182,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
     }
+    restoreChatMode(); // a failed run may leave the shared settings file in UI mode
     const ownedTmux = new Set([...fs.readFileSync(path.join(fixture, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
     for (const name of ownedTmux) {
       try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }

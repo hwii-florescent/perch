@@ -39,6 +39,7 @@ export default defineConfig({
       PERCH_DB: path.join(STATE, "history.sqlite"),
       PERCH_HOSTS: path.join(STATE, "hosts.json"),
       PERCHD_DIR: path.join(STATE, "perchd"),
+      PERCH_SETTINGS: path.join(STATE, "settings.json"),
       ANTHROPIC_MODEL: "claude-haiku-4-5",
     },
   },

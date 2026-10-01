@@ -45,7 +45,7 @@ const MODEL_HAIKU = "claude-haiku-4-5";
 // Global chat mode lives in ~/.perch/settings.json — NOT isolated per e2e
 // server (unlike --db-path/--hosts-path) — so it must be reset before/after
 // this suite or later specs (which assume Hosted-mode UI by default) break.
-const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 function resetChatMode(): void {
   try {

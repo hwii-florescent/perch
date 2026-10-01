@@ -31,21 +31,13 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import * as os from "node:os";
+import { setChatMode } from "./chatMode";
 import { createHostedSession, sendAndWaitForReply } from "./hostedSession";
 import { CHEAP_CLAUDE_MODEL, CHEAP_CODEX_MODEL } from "./cheapModel";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const MODEL_HAIKU = CHEAP_CLAUDE_MODEL;
 const MODEL_LUNA = CHEAP_CODEX_MODEL;
-
-/** Mode is per session; never rewrite the user's global settings for a test. */
-async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
-  const toggle = page.getByTestId("session-mode-toggle");
-  await expect(toggle).toBeEnabled({ timeout: 15_000 });
-  const wantChecked = mode === "cli" ? "true" : "false";
-  if (await toggle.getAttribute("aria-checked") !== wantChecked) await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", wantChecked);
-}
 
 // ---------------------------------------------------------------------------
 // Serial block
@@ -68,6 +60,11 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
       execSync("which codex", { encoding: "utf8" });
       codexAvailable = true;
     } catch { codexAvailable = false; }
+  });
+
+  // Chat mode is one global setting; leave it at the suite default (CLI).
+  test.afterEach(async ({ page }) => {
+    await setChatMode(page, "cli").catch(() => {});
   });
 
   // ---------------------------------------------------------------------------
@@ -205,6 +202,7 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await page.keyboard.press("Enter");
     // The agent runs inside a shell: /exit leaves a shell prompt in the
     // pane, and exiting that shell ends the terminal.
+    await expect(termSurface).toContainText(/Resume this session with/, { timeout: 30000 });
     await page.waitForTimeout(3000); // the login shell starting
     await page.keyboard.type("exit");
     await page.keyboard.press("Enter");

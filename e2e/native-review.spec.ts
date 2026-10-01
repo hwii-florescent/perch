@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
@@ -59,9 +60,6 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const project = page.locator(".workspace-project").filter({ hasText: token });
     await expect(project).toBeVisible();
     const workspaceId = await firstWorkspaceId(project);
-    const toggle = page.getByTestId("session-mode-toggle");
-    await expect(toggle).toBeEnabled();
-    if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
@@ -87,7 +85,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(terminal.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
       await expect(terminal.locator(".xterm-rows")).toContainText(/Haiku 4.5/i);
     }
-    await toggle.click();
+    await setChatMode(page, "hosted");
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
@@ -164,6 +162,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     }
     await phoneContext?.close().catch(() => {});
     if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
+    restoreChatMode(); // the test ends in UI mode; the settings file is shared
     for (const name of ownedTmux()) {
       try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }

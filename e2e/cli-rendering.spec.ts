@@ -117,12 +117,7 @@ async function openCliSession(page: Page): Promise<void> {
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 20000 });
 
-  // Exercise the current device-scoped policy through the visible control.
-  // Each Playwright context owns a fresh device id; no shared settings change.
-  const mode = page.getByTestId("session-mode-toggle");
-  await expect(mode).toBeEnabled();
-  if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
-  await expect(mode).toHaveAttribute("aria-checked", "true");
+  // CLI is the suite default (isolated settings file).
   await expect(page.locator('[data-testid="cli-start-panel"]')).toBeVisible({ timeout: 15000 });
   await page.locator('[data-testid="cli-start-browse"]').click();
   const useFolder = page.locator('button:has-text("Use this folder")');

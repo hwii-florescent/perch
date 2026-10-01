@@ -6,14 +6,9 @@
  * surface_dim, overlay0, overlay1, text, subtext0, mauve, green, yellow,
  * red, blue, teal, peach`). `THEMES` holds all 18 herdr built-in themes,
  * transcribed verbatim (RGB -> hex) from that report's palette table, plus
- * perch's own original look (`"perch"`) as a 19th, non-default entry.
- *
- * The default theme is `"catppuccin"` (Catppuccin Mocha) — herdr's own
- * default, see `reference/herdr/src/app/state.rs::Palette::catppuccin()`
- * and `AppState`'s default `theme_name` — so perch matches herdr's look out
- * of the box. See `default_theme()` in `crates/perch-core/src/{protocol,
- * settings}.rs` for the Rust side of this default, and `applyTheme()`'s
- * fallback below for the client-side one.
+ * perch's own monotone look (`"perch"`), the default. See `default_theme()`
+ * in `crates/perch-core/src/{protocol,settings}.rs` for the Rust side of this
+ * default, and `applyTheme()`'s fallback below for the client-side one.
  *
  * `applyTheme(name)` sets each token as a CSS custom property on
  * `document.documentElement.style`, which is all `styles.css` needs since
@@ -39,33 +34,32 @@ export interface Palette {
   peach: string;
 }
 
-/** perch's own original look — the app's default before herdr-parity
- * restyling (see module doc above); kept as a selectable, non-default
- * theme. Matches the original hardcoded `:root` values in `styles.css`
- * before the token system existed. */
+/** perch's default look: monotone neutral greys, like a plain terminal
+ * emulator (or Orca's default), with muted colors kept for status only.
+ * `styles.css`'s `:root` tokens hold the same values. */
 export const PERCH_DEFAULT: Palette = {
-  accent: "#58e6a8",
-  panelBg: "#0b0d10",
-  surface0: "#14171c",
-  surface1: "#1b1f26",
-  surfaceDim: "#101317",
-  overlay0: "#262b33",
-  overlay1: "#3a4150",
-  text: "#e6e6e6",
-  subtext0: "#8a93a1",
-  mauve: "#b58ee6",
-  green: "#58e6a8",
-  yellow: "#e6c458",
-  red: "#e65858",
-  blue: "#5898e6",
-  teal: "#58c8e6",
-  peach: "#e69858",
+  accent: "#c8c8c8",
+  panelBg: "#161616",
+  surface0: "#262626",
+  surface1: "#333333",
+  surfaceDim: "#1c1c1c",
+  overlay0: "#3a3a3a",
+  overlay1: "#7a7a7a",
+  text: "#d8d8d8",
+  subtext0: "#9a9a9a",
+  mauve: "#a993c9",
+  green: "#7fb685",
+  yellow: "#d3b46a",
+  red: "#d77a7a",
+  blue: "#7aa2d7",
+  teal: "#7fb8b8",
+  peach: "#d39a6a",
 };
 
 /**
  * All 18 herdr built-in themes, transcribed verbatim (RGB -> hex) from
  * `herdr-analysis-report.md` §5.15's palette table, plus `"perch"` as a
- * 19th, non-default entry (perch's own original look).
+ * 19th entry (perch's own monotone look, the default).
  *
  * Note on `terminal`: herdr's 16-color "terminal" theme is defined via named
  * ANSI colors (`Blue`, `Reset`, `DarkGray`, `Gray`, `White`, `LightRed`, …)
@@ -76,12 +70,7 @@ export const PERCH_DEFAULT: Palette = {
  * and maps `Reset` to a plain black background / light gray foreground —
  * the closest sane approximation of "whatever the terminal's default is".
  */
-/** Catppuccin Mocha — herdr's own default theme (see module doc above),
- * and perch's default too. Kept as a standalone typed constant (rather than
- * read back out of `THEMES.catppuccin`) so `applyTheme`
- * below has a `Palette`-typed fallback: `Record<string, Palette>` indexing
- * (including `THEMES.catppuccin`) is always `Palette | undefined` under
- * `noUncheckedIndexedAccess`, which a `??` fallback can't itself resolve. */
+/** Catppuccin Mocha — herdr's own default theme. */
 export const CATPPUCCIN_DEFAULT: Palette = {
   accent: "#89b4fa", panelBg: "#181825", surface0: "#313244", surface1: "#45475a",
   surfaceDim: "#1e1e2e", overlay0: "#6c7086", overlay1: "#7f849c", text: "#cdd6f4",
@@ -196,11 +185,8 @@ export const THEMES: Record<string, Palette> = {
   },
 };
 
-/** Ordered list of theme names for the Settings UI. `"perch"` is listed
- * first (it's declared first in `THEMES` above) even though it's no longer
- * the default theme — reordering the list is cosmetic and out of scope for
- * the herdr-parity restyle; the default is controlled by `default_theme()`
- * in Rust and `applyTheme()`'s fallback below, not by list position. */
+/** Ordered list of theme names for the Settings UI; `"perch"` (the default)
+ * is first. */
 export const THEME_NAMES: string[] = Object.keys(THEMES);
 
 const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
@@ -223,11 +209,11 @@ const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
 };
 
 /** Set every semantic token as a CSS custom property on `<html>`. Falls
- * back to the default theme (catppuccin) for an unknown/unset theme name so
+ * back to the default theme (perch) for an unknown/unset theme name so
  * a stale or corrupted `settings.theme` value never leaves the app
  * unstyled. */
 export function applyTheme(name: string): void {
-  const palette = THEMES[name] ?? CATPPUCCIN_DEFAULT;
+  const palette = THEMES[name] ?? PERCH_DEFAULT;
   const root = document.documentElement.style;
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
     root.setProperty(TOKEN_CSS_VARS[key], palette[key]);

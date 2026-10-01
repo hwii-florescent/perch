@@ -14,7 +14,7 @@
 //!     "codex":  []
 //!   },
 //!   "defaultCwd": "/home/user/projects",
-//!   "theme": "catppuccin"
+//!   "theme": "perch"
 //! }
 //! ```
 
@@ -42,9 +42,7 @@ pub struct Settings {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the web client's `THEMES` table).
-    /// Defaults to `"catppuccin"` — herdr's own default theme — so a fresh
-    /// install (and any settings file predating this field) matches herdr's
-    /// look out of the box. `"perch"` remains a selectable theme.
+    /// Defaults to `"perch"`, perch's monotone look.
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Play a short WebAudio-generated tone on session done/blocked
@@ -57,7 +55,7 @@ pub struct Settings {
     /// Global chat rendering mode: `"hosted"` | `"cli"`. Used to be per-chat
     /// client state (a footer toggle in the chat pane); now a single global
     /// setting so every open chat pane renders the same way, controlled from
-    /// Settings. Defaults to `"hosted"`.
+    /// Settings. Defaults to `"cli"`; the one mode for every session.
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
     /// Lines of scrollback each terminal pane retains. Defaults to the 10000
@@ -85,7 +83,7 @@ impl Default for Settings {
 }
 
 fn default_theme() -> String {
-    "catppuccin".to_string()
+    "perch".to_string()
 }
 
 fn default_terminal_scrollback() -> u32 {
@@ -97,7 +95,7 @@ fn default_toast_delivery() -> String {
 }
 
 fn default_chat_mode() -> String {
-    "hosted".to_string()
+    "cli".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -171,9 +169,13 @@ impl SettingsStore {
         }
     }
 
-    /// Open using the canonical `~/.perch/settings.json` path.
+    /// Open `$PERCH_SETTINGS` (tests isolate with it), else the canonical
+    /// `~/.perch/settings.json`.
     pub fn load_default() -> Self {
-        let path = default_settings_path().unwrap_or_else(|| PathBuf::from(".perch/settings.json"));
+        let path = std::env::var_os("PERCH_SETTINGS")
+            .map(PathBuf::from)
+            .or_else(default_settings_path)
+            .unwrap_or_else(|| PathBuf::from(".perch/settings.json"));
         Self::load(path)
     }
 

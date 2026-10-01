@@ -196,7 +196,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
                   data-testid={`cli-start-project-${i}`}
                   title={cwd}
                   disabled={!selectedAvailable}
-                  onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent, "cli")}
+                  onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent)}
                 >
                   {basename(cwd)}
                   <span className="cli-start__cwd">{cwd}</span>
@@ -212,7 +212,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
             <DirectoryBrowser
               hostId={activeHostId}
               onUseFolder={(path) => {
-                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent, "cli");
+                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent);
               }}
             />
           </div>

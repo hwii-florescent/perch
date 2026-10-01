@@ -26,7 +26,7 @@ cargo test -p perchd                # daemon unit + integration tests
 npm install && npm run build        # builds packages/shared then packages/web → packages/web/dist (served by axum)
 npm test                            # web unit tests (vitest)
 cargo fmt --check && cargo clippy --workspace --all-targets   # expect exactly 5 existing warnings; add none
-cargo run -p perch-core -- --port 7788     # flags/env: --db-path PERCH_DB, --hosts-path PERCH_HOSTS, PERCHD_DIR, --headless, --base-path
+cargo run -p perch-core -- --port 7788     # flags/env: --db-path PERCH_DB, --hosts-path PERCH_HOSTS, PERCHD_DIR, PERCH_SETTINGS, --headless, --base-path
 cargo run -p perch-desktop                 # macOS / Linux+webkit2gtk; PERCH_DESKTOP_TEST=1 = hidden, unfocused window
 npm run build && (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build)   # installers
 cd e2e && npx playwright test <spec> [-g name]   # boots :7799 + :7800 itself; real agent turns
@@ -88,8 +88,8 @@ there, not here.
   - `xtermSetup.ts`: builds every terminal.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
-  - `components/WorkspaceTools.tsx`: the ›_ drawer (Terminal / Files / Git
-    for the active workspace).
+  - `components/WorkspaceTools.tsx`: the right drawer (Files / Git for the
+    active workspace).
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
     over a CLI session.
   - `statusDot.ts`: status glyphs.
@@ -116,27 +116,43 @@ there, not here.
   revert):**
   - Naming: Projects are folders; Workspaces are a project's checkout and
     its worktrees; sessions live under a workspace.
-  - Files and Git live only in the ›_ drawer (`WorkspaceTools.tsx`). It is
-    app-level, not part of a session's layout, and follows the clicked
-    workspace. Don't put them back as per-chat dockview panels; the
-    `files`/`gitReview` panel kinds remain only so old saved layouts restore.
+  - Files and Git live only in the right drawer (`WorkspaceTools.tsx`):
+    Files + Git, no Terminal (terminals are tabs), and Git only for a git
+    workspace. It is app-level, not part of a session's layout, and follows
+    the clicked workspace. Don't put them back as per-chat dockview panels;
+    the `files`/`gitReview` panel kinds remain only so old saved layouts
+    restore.
   - A tab is a terminal. Every CLI agent runs under
     `agent_runtime::in_shell`, so an exited agent leaves a login shell in
     the same pane. `Terminal` is a provider (`ProviderManifest::terminal`),
     listed last in the `+` picker so it is never the default.
-  - An agent with no UI surface (Terminal, or a CLI with no native bridge)
-    always launches as CLI and shows no UI/CLI switch (`cliOnly` in
-    `createSessionOnHost` and `Chat.tsx`).
-  - The session header holds only the UI/CLI switch, which writes this
-    session's mode. Workspace/device defaults live in Settings → Chat Mode.
-    There is no Release control / Stop CLI bar: taking control takes the
+  - UI/CLI is one global setting (`settings.chatMode`, default `"cli"`),
+    changed only in Settings → Chat Mode and pushed to every connected
+    client. There is no per-session, per-workspace or per-device mode and no
+    switch in the session header (the server's per-session mode policy
+    remains but the client doesn't use it). An agent with no UI surface
+    (Terminal, or a CLI with no native bridge) is always CLI (`noUiSurface`
+    in `Chat.tsx`). Switching to CLI resumes a session with Hosted history.
+  - There is no Release control / Stop CLI bar: taking control takes the
     lease ("last actor drives"), and Stop agent is in the pane ⋯ menu.
+  - The tab bar shows only the active workspace's sessions
+    (`activeWorkspaceSessions` in `store/selectors.ts`), and `+` creates in
+    that workspace's path.
+  - The default theme is `"perch"`: monotone neutral greys, color only for
+    status. `styles.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
+    `default_theme()` must agree. The active tab and pane are marked in grey,
+    not with an accent fill.
   - Tab and session-row × archive the session (restorable from Settings).
     Removing a project archives it; re-registering the folder restores it.
-  - One top row: tabs, then the workspace-tools toggle (a right-panel icon,
-    not ›_, since the drawer is more than a terminal). In the macOS app that
-    row is also the title bar (overlay title bar, traffic lights in its
-    78px left padding, `data-tauri-drag-region`).
+  - One top row, three sections: brand ("perch" + the sidebar toggle, as
+    wide as the sidebar so the tabs start above the main column), the tabs,
+    then the drawer toggle (a right-panel icon). In the macOS app that row
+    is also the title bar (overlay title bar, traffic lights in the brand
+    section's 78px left padding, `data-tauri-drag-region`).
+  - The sidebar collapses to nothing (not rendered; toggle in the top row,
+    no footer button). The sidebar and drawer widths are user-resizable by
+    dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
+    `perch.layout.*`).
   - Sidebar rows stay quiet: a project header is its name plus ⌄ (collapse,
     per viewer) ⋯ (Rename, Copy path, Archive chats, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,
@@ -179,12 +195,13 @@ there, not here.
     proxy).
 - **Headless testing:**
   - Test headless only: no `--headed`, no focused windows.
-  - Isolate state with `PERCH_DB`, `PERCH_HOSTS` and `PERCHD_DIR` pointed
-    at a scratch dir.
+  - Isolate state with `PERCH_DB`, `PERCH_HOSTS`, `PERCHD_DIR` and
+    `PERCH_SETTINGS` pointed at a scratch dir.
   - Kill the probe's core and its `__perchd serve --dir <scratch>` daemon
     afterwards.
-  - All instances share `~/.perch/settings.json`. A test that changes it
-    must restore it, even on failure.
+  - Without `PERCH_SETTINGS`, instances share `~/.perch/settings.json`; the
+    e2e configs set it, but a test that changes settings still restores
+    them, even on failure.
 - **Claude specifics:**
   - The user's Claude runs in bypass-permissions mode, so no permission
     prompts appear. Use `AskUserQuestion` to exercise "needs you".
@@ -205,8 +222,9 @@ there, not here.
     specs that use `model-chip`/`.chat__send` (W1, P3, nav N1, sidebar 2,
     workspace-git GB1; UI mode is NativeCliChat since 2e9c4b7);
     agent-terminal-ownership, workspace-recovery, workspace-review:226;
-    native-providers (expects a sidebar-popover pi session in CLI, but new
-    sessions follow the device default, which is UI); every opencode spec
+    native-providers (older pane expectations); agent-hibernation (greps a
+    tmux log line the core stopped printing in 56e2c48); keybindings K1 (it
+    drives the Hosted composer through the picker); every opencode spec
     (opencode is deliberately not installed on this Mac; don't install it).
 - **UI builds:** after `npm run build`, open tabs update themselves within
   about a minute (a PWA service worker); no restart is needed.

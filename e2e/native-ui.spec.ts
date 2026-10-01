@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
@@ -64,12 +65,9 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   }
   const ui = page.getByTestId("native-cli-chat");
   const cli = page.getByTestId("persistent-agent-terminal");
-  const toggle = page.getByTestId("session-mode-toggle");
   try {
     await start();
     await page.goto(url, { waitUntil: "networkidle" });
-    await expect(toggle).toBeEnabled();
-    if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
     await page.getByTestId(`cli-start-agent-${provider}`).click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
@@ -81,7 +79,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/i, { timeout: 30_000 });
       if ((await cli.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await cli.locator(".xterm-helper-textarea").press("Enter");
     }
-    await toggle.click();
+    await setChatMode(page, "hosted");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
     // Fail here, before any real turn, if the cheap-model pin did not take.
@@ -101,7 +99,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     if (provider === "opencode") { nativeId = await ui.getAttribute("data-native-session"); expect(nativeId).toMatch(/^ses/); }
     await expect(ui.locator('[data-native-role="toolResult"]')).not.toHaveCount(0);
     await page.screenshot({ path: path.join(shots, `native-ui-${provider}-${testInfo.project.name}.png`) });
-    await toggle.click();
+    await setChatMode(page, "cli");
     await expect(cli).toHaveAttribute("data-terminal-id", terminalId!);
     await expect(cli.locator(".xterm-rows")).toContainText(token);
     await expect(cli).toHaveAttribute("data-controlling", "true");
@@ -110,24 +108,24 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     if (provider === "opencode") {
       await cli.locator(".xterm-helper-textarea").press("!");
       await expect(cli.locator(".xterm-rows")).toContainText("Shell");
-      await toggle.click();
+      await setChatMode(page, "hosted");
       await ui.getByTestId("native-cli-composer").fill("touch should-not-exist");
       await ui.getByRole("button", { name: "Send", exact: true }).click();
       await expect(ui.getByRole("alert")).toContainText("normal prompt mode");
       expect(fs.existsSync(path.join(fixture, "should-not-exist"))).toBe(false);
-      await toggle.click();
+      await setChatMode(page, "cli");
       await expect(cli).toHaveAttribute("data-controlling", "true");
       await cli.locator(".xterm-helper-textarea").press("Escape");
       await expect(cli.locator(".xterm-rows")).not.toContainText(/\bShell\b/);
     }
     if (provider === "claude" || provider === "opencode") {
       await cli.locator(".xterm-helper-textarea").pressSequentially("CLI draft that must survive", { delay: 10 });
-      await toggle.click();
+      await setChatMode(page, "hosted");
       await ui.getByTestId("native-cli-composer").fill("Do not append to that CLI draft.");
       await ui.getByRole("button", { name: "Send", exact: true }).click();
       await expect(ui.getByRole("alert")).toContainText("draft or dialog open");
       await expect(ui.getByTestId("native-cli-composer")).toHaveValue("Do not append to that CLI draft.");
-      await toggle.click();
+      await setChatMode(page, "cli");
       await expect(cli.locator(".xterm-rows")).toContainText("CLI draft that must survive");
       await cli.locator(".xterm-helper-textarea").press("Control+u");
     } else if (provider === "pi" || provider === "omp") {
@@ -146,14 +144,14 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(cli.locator(".xterm-rows")).toContainText("What exact token did you just read?");
       await testInfo.attach("CLI-follow-up", { body: await cli.locator(".xterm-rows").innerText(), contentType: "text/plain" });
     }
-    await toggle.click();
+    await setChatMode(page, "hosted");
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 30_000 });
     await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 90_000 });
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token);
     await expect(ui).toHaveAttribute("data-native-pid", pid!);
     await expect(ui).toHaveAttribute("data-native-session", nativeId!);
     await ui.getByTestId("native-cli-composer").fill("unsent draft");
-    await toggle.click(); await toggle.click();
+    await setChatMode(page, "cli"); await setChatMode(page, "hosted");
     await expect(ui.getByTestId("native-cli-composer")).toHaveValue("unsent draft");
     await stop(); await start();
     await page.reload({ waitUntil: "networkidle" });
@@ -205,13 +203,13 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(mobile).toContainText("Another view is typing in this agent");
     expect(unexpectedErrors()).toEqual([]);
     await phoneContext.close(); phoneContext = undefined;
-    await toggle.click();
+    await setChatMode(page, "cli");
     if (provider === "codex" || provider === "opencode") {
       await expect(cli).toHaveAttribute("data-controlling", "true");
       await cli.locator(".xterm-helper-textarea").pressSequentially("/new", { delay: 20 });
       await expect(cli.locator(".xterm-rows")).toContainText("/new");
       await cli.locator(".xterm-helper-textarea").press("Enter");
-      await toggle.click();
+      await setChatMode(page, "hosted");
       if (provider === "opencode") await expect(ui).toHaveAttribute("data-native-session", "");
       else await expect.poll(async () => { const id = await ui.getAttribute("data-native-session"); return !!id && id !== nativeId; }, { timeout: 20_000 }).toBe(true);
       await expect(ui).toHaveAttribute("data-native-pid", pid!);
@@ -224,7 +222,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(ui.getByRole("status")).toHaveText("Ready");
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
       if (provider === "opencode") { expect(await ui.getAttribute("data-native-session")).toMatch(/^ses/); expect(await ui.getAttribute("data-native-session")).not.toBe(nativeId); }
-      await toggle.click();
+      await setChatMode(page, "cli");
     }
     await expect(cli).toHaveAttribute("data-controlling", "true");
     await page.getByTestId("pane-tab-chat").click({ button: "right" });
@@ -243,6 +241,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     }
     await phoneContext?.close().catch(() => {});
     await stop();
+    restoreChatMode(); // a failed run may leave the shared settings file in UI mode
     for (const name of ownedTmux()) {
       try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
     }

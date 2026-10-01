@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // store.ts is not side-effect-free at import time: at module scope it calls
-// `applyTheme("catppuccin")` (touches `document.documentElement`) and
+// `applyTheme("perch")` (touches `document.documentElement`) and
 // `socket.connect()` (constructs a real `new WebSocket(...)`) so the app
 // paints its default theme and opens the wire before any component mounts.
 // Both need a DOM global, hence jsdom just for this file (every other test
@@ -40,13 +40,11 @@ class FakeWebSocket {
 const {
   projectsForHost,
   effectiveActiveProject,
-  activeProjectSessions,
+  activeWorkspaceSessions,
   archivedSessions,
   sessionIdsForProject,
   shouldReuseCurrentSession,
   resolveSessionAgent,
-  agentRuntimeCapabilitiesKnown,
-  resolveSessionModeForView,
   omitKey,
   readLastAgentChoiceStored,
   usePerchStore,
@@ -225,14 +223,14 @@ describe("effectiveActiveProject", () => {
   });
 });
 
-describe("activeProjectSessions", () => {
+describe("activeWorkspaceSessions", () => {
   it("returns the effective project's sessions, oldest first", () => {
     const sessions = [
       session({ id: "a", cwd: "/proj1", createdAt: 200 }),
       session({ id: "b", cwd: "/proj1", createdAt: 100 }),
     ];
     const s = state({ sessions, activeProject: { hostId: "local", cwd: "/proj1" } });
-    expect(activeProjectSessions(s).map((x) => x.id)).toEqual(["b", "a"]);
+    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["b", "a"]);
   });
 
   it("excludes archived sessions from the project's list", () => {
@@ -241,17 +239,17 @@ describe("activeProjectSessions", () => {
       session({ id: "b", cwd: "/proj1" }),
     ];
     const s = state({ sessions, activeProject: { hostId: "local", cwd: "/proj1" } });
-    expect(activeProjectSessions(s).map((x) => x.id)).toEqual(["b"]);
+    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["b"]);
   });
 
   it("falls back to just the active session when there's no effective project", () => {
     const sessions = [session({ id: "solo", cwd: "/x" })];
     const s = state({ sessions, sessionId: "solo" });
-    expect(activeProjectSessions(s).map((x) => x.id)).toEqual(["solo"]);
+    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["solo"]);
   });
 
   it("returns empty when there's no effective project and no active session", () => {
-    expect(activeProjectSessions(state())).toEqual([]);
+    expect(activeWorkspaceSessions(state())).toEqual([]);
   });
 });
 
@@ -389,206 +387,6 @@ describe("resolveSessionAgent", () => {
   });
 });
 
-describe("session mode capability handshake safety", () => {
-  it("treats a missing local server.info as unknown, while an empty list is a known legacy peer", () => {
-    const pendingHandshake = {
-      serverInfo: null,
-      workspaceCapabilitiesByHost: {},
-    };
-    expect(agentRuntimeCapabilitiesKnown(pendingHandshake, "local")).toBe(false);
-    expect(resolveSessionModeForView(false, false, undefined, "cli")).toEqual({
-      mode: "hosted",
-      pending: true,
-    });
-
-    const legacyPeer = {
-      serverInfo: {
-        hostname: "legacy",
-        isSsh: false,
-        platform: "test",
-        capabilities: [],
-      },
-      workspaceCapabilitiesByHost: {},
-    };
-    expect(agentRuntimeCapabilitiesKnown(legacyPeer, "local")).toBe(true);
-    expect(resolveSessionModeForView(true, false, undefined, "cli")).toEqual({
-      mode: "cli",
-      pending: false,
-    });
-  });
-
-  it("keeps a server-confirmed CLI mode mounted safely during an invalidation refetch", () => {
-    const modeState = {
-      mode: "cli" as const,
-      scope: "session" as const,
-      revision: 12,
-      deviceId: "device",
-      authoritative: true,
-      state: "loading" as const,
-    };
-    expect(resolveSessionModeForView(true, true, modeState, "hosted")).toEqual({
-      mode: "cli",
-      pending: false,
-    });
-  });
-
-  it("marks a mode reply authoritative so a later read cannot fall back to the global setting", () => {
-    FakeWebSocket.sent = [];
-    usePerchStore.setState({
-      connected: true,
-      sessionId: "mode-session",
-      activeHostId: "local",
-      deviceId: "mode-device",
-      sessions: [session({ id: "mode-session", hostId: "local" })],
-      serverInfo: {
-        hostname: "modern",
-        isSsh: false,
-        platform: "test",
-        protocolVersion: 1,
-        capabilities: ["session.mode.get", "session.mode.set"],
-      },
-      sessionModes: {},
-      settings: {
-        customModels: { claude: [], codex: [] },
-        defaultCwd: null,
-        theme: "catppuccin",
-        soundEnabled: false,
-        toastDelivery: "off",
-        chatMode: "cli",
-        terminalScrollback: 10000,
-        terminalLoginShell: false,
-      },
-    });
-
-    const requestId = usePerchStore.getState().fetchSessionMode("mode-session");
-    expect(requestId).toBeTruthy();
-    handleServerMessage({
-      type: "session.mode",
-      requestId: requestId!,
-      sessionId: "mode-session",
-      deviceId: "mode-device",
-      mode: "hosted",
-      scope: "session",
-      revision: 12,
-    });
-
-    expect(usePerchStore.getState().sessionModes["mode-session"]).toMatchObject({
-      mode: "hosted",
-      authoritative: true,
-      state: "ready",
-    });
-
-    usePerchStore.getState().fetchSessionMode("mode-session");
-    expect(usePerchStore.getState().sessionModes["mode-session"]).toMatchObject({
-      mode: "hosted",
-      authoritative: true,
-      state: "loading",
-    });
-  });
-});
-
-describe("mode policy invalidation across observed sessions", () => {
-  function prepare(ids: string[], workspaces: string[], hosts = ids.map(() => "local")) {
-    FakeWebSocket.sent = [];
-    usePerchStore.setState({
-      connected: true,
-      sessionId: ids[0],
-      activeHostId: "local",
-      activeWorkspaceId: workspaces[0],
-      deviceId: "invalidation-device",
-      sessions: ids.map((id, i) => session({ id, workspaceId: workspaces[i], hostId: hosts[i] })),
-      serverInfo: {
-        hostname: "modern", isSsh: false, platform: "test",
-        capabilities: ["session.mode.get", "session.mode.set"],
-      },
-      sessionModes: Object.fromEntries(ids.map((id) => [id, {
-        mode: "hosted", scope: "default", revision: 1,
-        deviceId: "invalidation-device", authoritative: true, state: "ready",
-      }])),
-    });
-  }
-
-  function reads(): Array<{ requestId: string; sessionId: string }> {
-    return FakeWebSocket.sent.map((frame) => JSON.parse(frame))
-      .filter((frame) => frame.type === "session.mode.get");
-  }
-
-  function reply(request: { requestId: string; sessionId: string }, revision: number) {
-    handleServerMessage({
-      type: "session.mode", requestId: request.requestId, sessionId: request.sessionId,
-      deviceId: "invalidation-device",
-      mode: "cli", scope: "workspace", revision,
-    });
-  }
-
-  it("uses the session's server association instead of another browsed host or workspace", () => {
-    prepare(["association-mode"], ["unused"]);
-    usePerchStore.setState({
-      activeHostId: "remote",
-      activeWorkspaceId: "unrelated-navigation",
-      sessions: [session({ id: "association-mode", hostId: undefined, workspaceId: undefined })],
-    });
-    usePerchStore.getState().fetchSessionMode("association-mode");
-    expect(reads()).toHaveLength(1);
-    expect(reads()[0]).not.toHaveProperty("workspaceId");
-    handleServerMessage({
-      type: "session.mode", requestId: reads()[0].requestId, sessionId: "association-mode", deviceId: "invalidation-device",
-      workspaceId: "server-workspace", mode: "hosted", scope: "default", revision: 2,
-    });
-    usePerchStore.getState().setSessionMode("association-mode", "workspace", "cli");
-    const write = FakeWebSocket.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.type === "session.mode.set");
-    expect(write).toMatchObject({ sessionId: "association-mode", workspaceId: "server-workspace", scope: "workspace" });
-    reply(write, 3);
-  });
-
-  it("refreshes every observed session in the workspace without loading unrelated sessions or hosts", () => {
-    prepare(["workspace-a", "workspace-b", "workspace-c", "workspace-remote"],
-      ["shared", "shared", "other", "shared"], ["local", "local", "local", "remote"]);
-    handleServerMessage({
-      type: "session.mode.invalidated", sessionId: "workspace-a", workspaceId: "shared",
-      hostId: "local", revision: 2,
-    });
-    expect(reads().map((request) => request.sessionId)).toEqual(["workspace-a", "workspace-b"]);
-    for (const request of reads()) reply(request, 2);
-    expect(usePerchStore.getState().sessionModes["workspace-b"].mode).toBe("cli");
-    expect(usePerchStore.getState().sessionModes["workspace-c"].mode).toBe("hosted");
-  });
-
-  it("applies device invalidations across workspaces only for this device and host", () => {
-    prepare(["device-a", "device-b", "device-remote"], ["first", "second", "third"],
-      ["local", "local", "remote"]);
-    handleServerMessage({
-      type: "session.mode.invalidated", sessionId: "device-a", workspaceId: "first",
-      deviceId: "another-device", hostId: "local", revision: 2,
-    });
-    expect(reads()).toEqual([]);
-    handleServerMessage({
-      type: "session.mode.invalidated", sessionId: "device-a", workspaceId: "first",
-      deviceId: "invalidation-device", hostId: "local", revision: 2,
-    });
-    expect(reads().map((request) => request.sessionId)).toEqual(["device-a", "device-b"]);
-    for (const request of reads()) reply(request, 2);
-  });
-
-  it("refetches when an invalidation races an older read instead of losing the policy update", () => {
-    prepare(["race-mode"], ["race-workspace"]);
-    usePerchStore.getState().fetchSessionMode("race-mode");
-    const original = reads()[0];
-    handleServerMessage({
-      type: "session.mode.invalidated", sessionId: "race-mode", workspaceId: "race-workspace",
-      hostId: "local", revision: 3,
-    });
-    expect(reads()).toHaveLength(1);
-    reply(original, 2);
-    expect(reads()).toHaveLength(2);
-    expect(usePerchStore.getState().sessionModes["race-mode"].revision).toBe(1);
-    reply(reads()[1], 3);
-    expect(usePerchStore.getState().sessionModes["race-mode"]).toMatchObject({
-      mode: "cli", revision: 3, authoritative: true, state: "ready",
-    });
-  });
-});
-
 describe("omitKey (per-session map cleanup on session.deleted)", () => {
   it("drops exactly the given key, immutably", () => {
     const map = { a: "claude", b: "codex" };
@@ -659,7 +457,7 @@ describe("bulk-archive fallback (archiving every session in the active project)"
       activeProject: { hostId: "local", cwd: "/proj1" },
     });
     expect(effectiveActiveProject(s)).toEqual({ hostId: "local", cwd: "/other-proj" });
-    expect(activeProjectSessions(s).map((x) => x.id)).toEqual(["c"]);
+    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["c"]);
   });
 
   it("returns null (nav goes to the empty state) when the archived project was the host's only one", () => {
@@ -1011,36 +809,15 @@ describe("agent catalog revisions", () => {
   });
 });
 
-it("a CLI launch preserves an inherited CLI mode and only overrides Hosted", () => {
-  usePerchStore.setState({ connected: true, sessionId: null, sessions: [], messages: [], sessionModes: {}, activeHostId: "local", serverInfo: {
-    hostname: "test", isSsh: false, platform: "test", capabilities: ["session.mode.get", "session.mode.set"],
-  } });
-  const deviceId = usePerchStore.getState().deviceId;
-  for (const [sessionId, inheritedMode] of [["launch-inherits", "cli"], ["launch-overrides", "hosted"]] as const) {
-    FakeWebSocket.sent = [];
-    usePerchStore.getState().createSessionOnHost("local", "/tmp/launch-mode", "pi", "cli");
-    handleServerMessage({ type: "session.created", sessionId });
-    const get = FakeWebSocket.sent.map((text) => JSON.parse(text)).find((message) => message.type === "session.mode.get");
-    expect(get).toBeDefined();
-    handleServerMessage({ type: "session.mode", requestId: get.requestId, sessionId, deviceId, mode: inheritedMode, scope: "device", revision: 1 });
-    const set = FakeWebSocket.sent.map((text) => JSON.parse(text)).find((message) => message.type === "session.mode.set");
-    if (inheritedMode === "cli") {
-      expect(set).toBeUndefined();
-      expect(usePerchStore.getState().sessionModes[sessionId]).toMatchObject({ mode: "cli", scope: "device", state: "ready" });
-    } else {
-      expect(set).toMatchObject({ mode: "cli", scope: "session", sessionId });
-      handleServerMessage({ type: "session.mode", requestId: set.requestId, sessionId, deviceId, mode: "cli", scope: "session", revision: 2 });
-      expect(usePerchStore.getState().sessionModes[sessionId]).toMatchObject({ mode: "cli", scope: "session", state: "ready" });
-    }
-  }
-});
-
 describe("archiveSession (tab close)", () => {
   it("closing the active tab lands on a sibling in the same project, not the newest session elsewhere", () => {
     usePerchStore.setState({
       sessionId: "A",
       activeHostId: "local",
       activeProject: { hostId: "local", cwd: "/p" },
+      // No workspace records: tabs fall back to the project (host + cwd).
+      activeWorkspaceId: null,
+      workspaces: [],
       sessions: [
         session({ id: "A", cwd: "/p", createdAt: 1 }),
         session({ id: "B", cwd: "/p", createdAt: 2 }),

@@ -62,7 +62,7 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
     const sessionId = typeof props.params?.sessionId === "string" ? props.params.sessionId : s.sessionId;
     if (!sessionId) return s.agent;
     const session = s.sessions.find((candidate) => candidate.id === sessionId);
-    const mode = s.sessionModes[sessionId]?.mode ?? s.settings?.chatMode ?? "hosted";
+    const mode = s.settings?.chatMode ?? "cli";
     return mode === "cli" || s.agentManifestsByHost[session?.hostId ?? "local"]?.manifests.some((entry) => entry.id === session?.cliProviderId && entry.nativeUi)
       ? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? s.agent
       : s.hostedAgentBySession[sessionId] ?? session?.lastAgent ?? s.agent;

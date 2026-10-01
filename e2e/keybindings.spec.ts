@@ -193,28 +193,29 @@ test.describe("Keybindings + Navigator (Phase 4)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // K3 — leader,b toggles sidebar collapse; the footer button does the same.
+  // K3 — leader,b toggles sidebar collapse; the top-row button does the same.
+  // Collapsed means the sidebar is not rendered at all.
   // -------------------------------------------------------------------------
-  test("K3. leader,b and the footer button toggle sidebar collapse", async ({ page }) => {
+  test("K3. leader,b and the top-row button toggle sidebar collapse", async ({ page }) => {
     await freshPage(page);
 
-    const sidebar = page.locator(".sidebar");
-    await expect(sidebar).not.toHaveClass(/sidebar--collapsed/);
+    const sidebar = page.locator("aside.sidebar");
+    await expect(sidebar).toHaveCount(1);
 
     await leaderChord(page, "b");
-    await expect(sidebar).toHaveClass(/sidebar--collapsed/, { timeout: 5000 });
+    await expect(sidebar).toHaveCount(0, { timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/k3-sidebar-collapsed.png" });
 
     // The same chord expands it back.
     await leaderChord(page, "b");
-    await expect(sidebar).not.toHaveClass(/sidebar--collapsed/, { timeout: 5000 });
+    await expect(sidebar).toHaveCount(1, { timeout: 5000 });
 
-    // The footer's collapse-toggle button is an equivalent mouse control.
+    // The top row's collapse-toggle button is an equivalent mouse control.
     await page.locator('[data-testid="sidebar-collapse-toggle"]').click();
-    await expect(sidebar).toHaveClass(/sidebar--collapsed/, { timeout: 5000 });
+    await expect(sidebar).toHaveCount(0, { timeout: 5000 });
     await page.locator('[data-testid="sidebar-collapse-toggle"]').click();
-    await expect(sidebar).not.toHaveClass(/sidebar--collapsed/, { timeout: 5000 });
+    await expect(sidebar).toHaveCount(1, { timeout: 5000 });
   });
 
   // -------------------------------------------------------------------------

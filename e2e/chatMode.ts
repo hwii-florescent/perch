@@ -1,14 +1,10 @@
 /**
  * Shared Hosted/CLI chat-mode handling for the suite.
  *
- * Chat mode is a single global setting in `~/.perch/settings.json`, and per
- * AGENTS.md there is **no `--settings-path`**: every instance, including the
- * developer's own app, reads that one file. Several specs used to force it
- * back to a hardcoded `"hosted"` in `afterAll`, which silently overwrote a
- * real CLI-mode preference — and specs that *need* Hosted chrome
- * (`model-chip`, `.chat__input textarea`) simply timed out whenever the file
- * said `"cli"`, producing four false negatives that would mask a real
- * regression.
+ * Chat mode is a single global setting. The suite runs against an isolated
+ * settings file (`PERCH_SETTINGS`, default "cli"), so specs that need Hosted
+ * chrome (`model-chip`, `.chat__input textarea`) must switch to it explicitly
+ * and put it back.
  *
  * So: remember what the user had, set what the spec needs through the real UI
  * (which also updates the running server, unlike a file write), and put the
@@ -19,7 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-export const SETTINGS_FILE = path.join(os.homedir(), ".perch", "settings.json");
+export const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 export type ChatMode = "hosted" | "cli";
 
@@ -37,7 +33,7 @@ function readChatMode(): ChatMode | undefined {
 
 /** Remember the user's chat mode so `restoreChatMode` can put it back. */
 export function rememberChatMode(): void {
-  if (original === undefined) original = readChatMode() ?? "hosted";
+  if (original === undefined) original = readChatMode() ?? "cli";
 }
 
 /**
@@ -83,22 +79,4 @@ export async function setChatMode(page: Page, mode: ChatMode): Promise<void> {
  */
 export async function useHostedMode(page: Page): Promise<void> {
   await setChatMode(page, "hosted");
-}
-
-/**
- * Force the *active session* into Hosted mode from the pane's own control.
- *
- * Every "New session" launcher passes an explicit `mode: "cli"`, which is a
- * session-scoped override and therefore beats the device default — so a spec
- * that needs the Hosted composer cannot get there by changing the global
- * setting alone. This uses the per-session override the product already
- * offers, which is also the mechanism goals.md asks for ("a device default and
- * a per-session override").
- */
-export async function useHostedSession(page: Page): Promise<void> {
-  const toggle = page.getByTestId("session-mode-toggle");
-  await expect(toggle).toBeEnabled({ timeout: 10000 });
-  // aria-checked=true is CLI; Hosted is the unchecked side.
-  if ((await toggle.getAttribute("aria-checked")) === "true") await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "false", { timeout: 10000 });
 }

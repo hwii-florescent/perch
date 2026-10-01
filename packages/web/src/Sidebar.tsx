@@ -705,8 +705,6 @@ export function Sidebar() {
   const upsertHost = usePerchStore((s) => s.upsertHost);
   const archiveSession = usePerchStore((s) => s.archiveSession);
   const deleteSession = usePerchStore((s) => s.deleteSession);
-  const sidebarCollapsed = usePerchStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = usePerchStore((s) => s.toggleSidebar);
   const workspaceCapabilities = usePerchStore((s) => s.workspaceCapabilities);
   const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
 
@@ -771,7 +769,7 @@ export function Sidebar() {
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
   return (
-    <aside className={"sidebar" + (sidebarCollapsed ? " sidebar--collapsed" : "")}>
+    <aside className="sidebar">
       <div className="sidebar__body">
         <button
           type="button"
@@ -848,16 +846,6 @@ export function Sidebar() {
       </div>
 
       <div className="sidebar__footer">
-        <button
-          type="button"
-          className="sidebar__collapse-toggle"
-          data-testid="sidebar-collapse-toggle"
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={toggleSidebar}
-        >
-          {sidebarCollapsed ? "»" : "«"}
-        </button>
         <button
           type="button"
           className="sidebar__gear"

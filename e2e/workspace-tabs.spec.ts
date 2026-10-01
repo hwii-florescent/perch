@@ -10,8 +10,8 @@
  *        tab bar) and back → the same split layout is restored.
  *   W3 — switching via the tab bar vs. the sidebar reach the same target
  *        session and restore the same layout.
- *   W4 — the toolbar button toggles the workspace tools drawer
- *        (Terminal | Files | Git), which is app-level, not part of a layout;
+ *   W4 — the toolbar button toggles the Files | Git drawer (no terminal),
+ *        which is app-level, not part of a layout;
  *        the "+" action in a terminal group's own header adds a second
  *        terminal as a TAB in that SAME group, not a new split group.
  *
@@ -248,12 +248,13 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(drawer).toHaveCount(0);
     await expect(openBtn).toHaveAttribute("aria-pressed", "false");
     await openBtn.click();
-    await expect(drawer.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await expect(drawer).toBeVisible({ timeout: 10000 });
     await expect(openBtn).toHaveAttribute("aria-pressed", "true");
+    // Files is the default tab, and the drawer has no terminal.
+    await expect(drawer.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
+    await expect(drawer.locator(".terminal__surface")).toHaveCount(0);
     // The drawer is not a dockview panel: the layout keeps just chat.
     await expect(page.locator(".dv-tabs-and-actions-container")).toHaveCount(1);
-    await drawer.getByTestId("workspace-tools-files").click();
-    await expect(drawer.locator(".terminal__surface")).toHaveCount(0);
     await page.screenshot({ path: "artifacts/w4-01-opened.png" });
     // The toggle closes the drawer, and reopens it on the last tab.
     await openBtn.click();

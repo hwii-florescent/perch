@@ -43,11 +43,7 @@ pub struct SettingsData {
     pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the client's `THEMES` table). Defaults
-    /// to `"catppuccin"` — herdr's own default theme (Catppuccin Mocha; see
-    /// `reference/herdr/src/app/state.rs::Palette::catppuccin()` and
-    /// `AppState`'s default `theme_name`), so perch matches herdr's look out
-    /// of the box. `"perch"` (perch's original hardcoded look) remains a
-    /// selectable theme, just no longer the default.
+    /// to `"perch"`, perch's monotone look.
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Play a short WebAudio-generated tone when a session finishes a turn
@@ -64,7 +60,7 @@ pub struct SettingsData {
     /// Global chat rendering mode: `"hosted"` (structured chat UI) or
     /// `"cli"` (xterm attached to the real interactive CLI PTY). Used to be
     /// per-chat client state (a footer toggle); now a single global setting
-    /// so every open chat pane renders the same way. Defaults to `"hosted"`.
+    /// so every open chat pane renders the same way. Defaults to `"cli"`.
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
     /// Lines of scrollback each terminal pane retains. Defaults to 10000 —
@@ -83,7 +79,7 @@ pub struct SettingsData {
 }
 
 fn default_theme() -> String {
-    "catppuccin".to_string()
+    "perch".to_string()
 }
 
 fn default_terminal_scrollback() -> u32 {
@@ -95,7 +91,7 @@ fn default_toast_delivery() -> String {
 }
 
 fn default_chat_mode() -> String {
-    "hosted".to_string()
+    "cli".to_string()
 }
 
 fn default_true() -> bool {

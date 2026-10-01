@@ -1,5 +1,6 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import * as fs from "node:fs";
+import { setChatMode } from "./chatMode";
 import * as path from "node:path";
 
 test("agent runtime survives view changes and control transfers between desktop and phone", async ({ page, context, browser }, testInfo) => {
@@ -10,9 +11,6 @@ test("agent runtime survives view changes and control transfers between desktop 
   let phone: Page | undefined;
   let phoneContext: BrowserContext | undefined;
   try {
-    const mode = page.getByTestId("session-mode-toggle");
-    await expect(mode).toBeEnabled();
-    if (await mode.getAttribute("aria-checked") !== "true") await mode.click();
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const desktop = page.getByTestId("persistent-agent-terminal");
@@ -33,9 +31,6 @@ test("agent runtime survives view changes and control transfers between desktop 
     phone = await phoneContext.newPage();
     phone.on("pageerror", (error) => errors.push(error.message));
     await phone.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
-    const phoneMode = phone.getByTestId("session-mode-toggle");
-    await expect(phoneMode).toBeEnabled();
-    if (await phoneMode.getAttribute("aria-checked") !== "true") await phoneMode.click();
     const mobile = phone.getByTestId("persistent-agent-terminal");
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile).toContainText("Another view is typing in this agent");
@@ -61,13 +56,12 @@ test("agent runtime survives view changes and control transfers between desktop 
     await mobile.locator(".xterm-helper-textarea").pressSequentially("_phone", { delay: 15 });
     await expect(desktop.locator(".xterm-rows")).toContainText(`${marker}_phone`);
 
-    // Changing the phone's device mode changes only its view, preserving the
-    // same process and the desktop's independent CLI view.
-    await phoneMode.click();
+    // Chat mode is one global setting: switching to UI and back swaps every
+    // view, preserving the same process.
+    await setChatMode(page, "hosted");
     await expect(phone.locator(".chat__input textarea")).toBeVisible();
     await expect(mobile).toHaveCount(0);
-    await expect(desktop).toHaveAttribute("data-terminal-id", id);
-    await phoneMode.click();
+    await setChatMode(page, "cli");
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
 
@@ -95,6 +89,7 @@ test("agent runtime survives view changes and control transfers between desktop 
     await expect(desktop.getByTestId("cli-exited")).toBeVisible();
     expect(errors).toEqual([]);
   } finally {
+    await setChatMode(page, "cli").catch(() => {});
     // Close only the session created by this isolated browser context.
     await page.evaluate(() => new Promise<void>((resolve) => {
       const ws = new WebSocket(`ws://${location.host}/ws`);
