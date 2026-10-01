@@ -4,7 +4,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * click in the sidebar: select the workspace, open the drawer on `tab`. */
 export async function openWorkspaceTool(page: Page, workspaceId: string, tab: "files" | "gitReview"): Promise<void> {
   await page.locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
-  if (!(await page.getByTestId("workspace-tools").count())) await page.getByTitle("Open terminal").click();
+  if (!(await page.getByTestId("workspace-tools").count())) await page.getByTestId("workspace-tools-toggle").click();
   await page.getByTestId(`workspace-tools-${tab}`).click();
   await expect(page.getByTestId(tab === "files" ? "workspace-files-view" : "workspace-git-review")).toBeVisible({ timeout: 20000 });
 }

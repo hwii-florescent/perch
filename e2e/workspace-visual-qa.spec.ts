@@ -247,7 +247,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
 
     await expectReadableStatus(page.locator(".status-item--cwd").first());
 
-    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+    await page.getByTestId("workspace-tools-terminal").click();
     const shell = page.locator(".terminal--persistent[data-pane-id]:visible").first();
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30000 });
     expect(await clippedControls(shell), "terminal controls clipped at a wide viewport").toEqual([]);

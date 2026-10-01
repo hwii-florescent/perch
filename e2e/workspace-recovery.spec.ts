@@ -154,7 +154,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await worktreeButton.click();
     const popover = page.locator(`[data-testid="worktree-popover-local-${repo}"]`);
     await expect(popover).toBeVisible({ timeout: 5000 });
-    await popover.getByTestId("worktree-new").click();
+    if (await popover.getByTestId("worktree-new").isVisible()) await popover.getByTestId("worktree-new").click(); // + opens on the form
     await popover.getByTestId("worktree-branch-input").fill("wt-recover");
     await popover.getByTestId("worktree-create-submit").click();
     const worktreeEntry = popover

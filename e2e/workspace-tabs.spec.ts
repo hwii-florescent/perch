@@ -10,7 +10,7 @@
  *        tab bar) and back → the same split layout is restored.
  *   W3 — switching via the tab bar vs. the sidebar reach the same target
  *        session and restore the same layout.
- *   W4 — the toolbar ›_ button toggles the workspace tools drawer
+ *   W4 — the toolbar button toggles the workspace tools drawer
  *        (Terminal | Files | Git), which is app-level, not part of a layout;
  *        the "+" action in a terminal group's own header adds a second
  *        terminal as a TAB in that SAME group, not a new split group.
@@ -232,16 +232,16 @@ test.describe("Workspace tabs (Phase 3)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // W4 — toolbar "Open terminal" toggles the terminal area open/closed; the
+  // W4 — toolbar workspace-tools toggle opens the terminal area open/closed; the
   // group header's "+" action adds a new terminal TAB in the same group
   // (Bug 3 fix — previously every click stacked a brand-new split panel).
   // -------------------------------------------------------------------------
-  test("W4. ›_ toggles the workspace tools drawer; + adds a tab to the same group", async ({ page }) => {
+  test("W4. the toolbar toggles the workspace tools drawer; + adds a tab to the same group", async ({ page }) => {
     test.setTimeout(60000);
     // No real agent turn needed — this runs regardless of claude availability.
     await freshPage(page);
 
-    const openBtn = page.getByTitle("Open terminal");
+    const openBtn = page.getByTestId("workspace-tools-toggle");
     const drawer = page.getByTestId("workspace-tools");
     const terminalGroupHeader = page.locator('.dv-tabs-and-actions-container:has([data-testid="terminal-add-tab"])');
 
@@ -255,12 +255,14 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await drawer.getByTestId("workspace-tools-files").click();
     await expect(drawer.locator(".terminal__surface")).toHaveCount(0);
     await page.screenshot({ path: "artifacts/w4-01-opened.png" });
-    // From Files, ›_ goes back to the terminal; from the terminal it closes.
-    await openBtn.click();
-    await expect(drawer.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    // The toggle closes the drawer, and reopens it on the last tab.
     await openBtn.click();
     await expect(drawer).toHaveCount(0);
     await expect(openBtn).toHaveAttribute("aria-pressed", "false");
+    await openBtn.click();
+    await expect(drawer.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
+    await openBtn.click();
+    await expect(drawer).toHaveCount(0);
 
     // A terminal split from the pane menu is a dockview group with its own "+".
     await page.getByTestId("pane-group-menu").click();

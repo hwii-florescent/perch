@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
 import { DockviewShell } from "./dockview/DockviewShell";
@@ -20,6 +20,8 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 
 const TOOLS_STORAGE_KEY = "perch.workspaceTools";
+// The Tauri app on macOS draws its traffic lights over the web view's top row.
+const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
 
 export default function App() {
   const [navigatorOpen, setNavigatorOpen] = useState(false);
@@ -50,9 +52,12 @@ export default function App() {
   }, [tools]);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
 
+  // The toggle reopens the drawer on whichever tab was last shown.
+  const lastTools = useRef<WorkspaceToolsTab>(tools ?? "terminal");
+  if (tools) lastTools.current = tools;
   const toggleTerminal = useCallback(() => {
     if (isMobile) setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
-    else setTools((tab) => tab === "terminal" ? null : "terminal");
+    else setTools((tab) => tab ? null : lastTools.current);
   }, [isMobile]);
 
   // Sidebar Files/Git requests open the drawer on that tab, focused on the
@@ -113,25 +118,51 @@ export default function App() {
   }, [connected]);
   if (unpaired) return <PairingGate onPaired={() => window.location.reload()} />;
 
-  return (
-    <div className={"app" + (isMobile ? " app--mobile" : "")}>
-      <div className="toolbar">
-        <button
-          type="button"
-          className="toolbar__button"
-          title="Open terminal"
-          aria-label="Open terminal"
-          aria-pressed={isMobile ? mobilePane === "terminal" : tools !== null}
-          onClick={toggleTerminal}
-        >
-          {"›_"}
-        </button>
-      </div>
+  // Desktop: the drawer holds Terminal, Files and Git, so its toggle is a
+  // right-panel glyph. The phone's button still opens just the terminal.
+  const terminalButton = isMobile ? (
+    <button
+      type="button"
+      className="toolbar__button"
+      title="Open terminal"
+      aria-label="Open terminal"
+      aria-pressed={mobilePane === "terminal"}
+      onClick={toggleTerminal}
+    >
+      {"›_"}
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="toolbar__button toolbar__button--icon"
+      title="Workspace tools: terminal, files, Git"
+      aria-label="Workspace tools"
+      data-testid="workspace-tools-toggle"
+      aria-pressed={tools !== null}
+      onClick={toggleTerminal}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+        <path d="M10 2.5v11" />
+      </svg>
+    </button>
+  );
 
+  return (
+    <div className={"app" + (isMobile ? " app--mobile" : "") + (MAC_DESKTOP ? " app--mac-desktop" : "")}>
       {isMobile ? (
-        <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
+        <>
+          <div className="toolbar">{terminalButton}</div>
+          <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
+        </>
       ) : (
-        <TabBar />
+        // One row for tabs and ›_ (Orca). In the macOS app it is also the
+        // title bar: the traffic lights sit in its left padding and empty
+        // space drags the window (crates/perch-desktop/src/main.rs).
+        <div className="toolbar toolbar--tabs" data-tauri-drag-region>
+          <TabBar />
+          {terminalButton}
+        </div>
       )}
 
       <div className="app__body">
@@ -152,7 +183,7 @@ export default function App() {
         {!isMobile && tools && <WorkspaceTools tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
       </div>
 
-      <StatusBar onOpenKeybindHelp={openKeybindHelp} />
+      <StatusBar />
       <SettingsModal />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />

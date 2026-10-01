@@ -1,4 +1,5 @@
-import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { WorktreeMenu } from "./WorktreeMenu";
@@ -10,9 +11,59 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-function projectDetail(project: WorkspaceProject): string {
-  if (project.defaultBranch) return `${project.defaultBranch} · ${project.path}`;
-  return project.path;
+type MenuItem = { label: string; testId: string; onSelect: () => void; danger?: boolean } | "divider";
+
+/** Right-click / ⋯ menu for a project or workspace row (Orca's sidebar
+ * context menu, trimmed to what perch does). Same look and dismiss rules as
+ * `PaneContextMenu`. */
+function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label: string; items: MenuItem[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const click = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", click);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", click);
+      document.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+  const height = items.length * 30;
+  return createPortal(
+    <div
+      className="pane-context-menu"
+      role="menu"
+      aria-label={label}
+      data-testid="row-menu"
+      ref={ref}
+      style={{ position: "fixed", zIndex: 9999, minWidth: 180, left: Math.min(x, window.innerWidth - 188), top: Math.max(8, Math.min(y, window.innerHeight - height - 8)) }}
+    >
+      {items.map((item, index) => item === "divider" ? (
+        <div key={index} className="pane-context-menu__divider" />
+      ) : (
+        <button
+          key={item.testId}
+          type="button"
+          role="menuitem"
+          className={"pane-context-menu__item" + (item.danger ? " pane-context-menu__item--danger" : "")}
+          data-testid={item.testId}
+          onClick={() => { onClose(); item.onSelect(); }}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+function copyText(text: string) {
+  void navigator.clipboard?.writeText(text).catch(() => { /* no clipboard: nothing to do */ });
+}
+
+const COLLAPSED_KEY = "perch.sidebar.collapsedProjects";
+function readCollapsed(): string[] {
+  try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 
 function workspacesForProject(
@@ -167,6 +218,53 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const archiveWorkspaceProject = usePerchStore((state) => state.archiveWorkspaceProject);
   const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
   const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
+  const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+  // Collapsed projects hide their workspaces and sessions (per viewer).
+  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
+  function toggleCollapsed(projectId: string) {
+    setCollapsed((current) => {
+      const next = current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId];
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch { /* per-viewer convenience */ }
+      return next;
+    });
+  }
+
+  function projectMenu(project: WorkspaceProject): MenuItem[] {
+    const projectSessions = sessionsForProject(project.id);
+    return [
+      { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
+      { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
+      ...(projectSessions.length > 0
+        ? [{ label: "Archive chats", testId: `workspace-project-archive-chats-${project.id}`, onSelect: () => { for (const session of projectSessions) archiveSession(session.id, true); } }]
+        : []),
+      "divider",
+      { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
+    ];
+  }
+
+  function workspaceMenu(project: WorkspaceProject, workspace: WorkspaceRecord): MenuItem[] {
+    const linked = Boolean(workspace.parentWorkspaceId);
+    const open = (tool: "files" | "git") => {
+      focusWorkspace(workspace.id);
+      if (tool === "files") openWorkspaceFiles(workspace.id);
+      else openWorkspaceGitReview(workspace.id);
+    };
+    return [
+      { label: "Rename", testId: `workspace-rename-item-${workspace.id}`, onSelect: () => setRenamingId(workspace.id) },
+      { label: "Copy path", testId: `workspace-copy-${workspace.id}`, onSelect: () => copyText(workspace.path) },
+      ...(workspace.branch ? [{ label: "Copy branch name", testId: `workspace-copy-branch-${workspace.id}`, onSelect: () => copyText(workspace.branch!) }] : []),
+      { label: workspace.pinned ? "Unpin" : "Pin", testId: `workspace-pin-${workspace.id}`, onSelect: () => pinWorkspace(workspace.id, !workspace.pinned) },
+      "divider",
+      { label: "Files", testId: `workspace-menu-files-${workspace.id}`, onSelect: () => open("files") },
+      { label: "Git", testId: `workspace-menu-git-${workspace.id}`, onSelect: () => open("git") },
+      ...(linked ? ["divider" as const, { label: "Hide from sidebar", testId: `workspace-hide-${workspace.id}`, onSelect: () => setWorkspaceHidden(workspace.id, true) }] : []),
+      ...(linked && project.repoPath
+        ? [{ label: "Delete worktree", testId: `workspace-delete-${workspace.id}`, danger: true, onSelect: () => requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined }) }]
+        : []),
+    ];
+  }
 
   const [addOpen, setAddOpen] = useState(false);
   const [path, setPath] = useState("");
@@ -324,13 +422,39 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               ? worktreeJobs.filter((job) => job.repoPath === project.repoPath || job.repoPath === project.path)
               : [];
             const projectActive = project.id === activeProjectId;
+            const projectCollapsed = collapsed.includes(project.id);
             return (
               <div
                 className={"workspace-project" + (projectActive ? " workspace-project--active" : "")}
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
-                <div className="workspace-project__header">
+                <div
+                  className="workspace-project__header"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setMenu({ x: event.clientX, y: event.clientY, label: "Project actions", items: projectMenu(project) });
+                  }}
+                >
+                {renamingProjectId === project.id ? (
+                  <input
+                    className="workspace-entry__rename"
+                    data-testid={`workspace-project-rename-input-${project.id}`}
+                    aria-label="Project name"
+                    autoFocus
+                    defaultValue={project.name || basename(project.path)}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Enter") {
+                        renameWorkspaceProject(project.id, event.currentTarget.value);
+                        setRenamingProjectId(null);
+                      } else if (event.key === "Escape") {
+                        setRenamingProjectId(null);
+                      }
+                    }}
+                    onBlur={() => setRenamingProjectId(null)}
+                  />
+                ) : (
                 <button
                   type="button"
                   className="workspace-project__button"
@@ -341,23 +465,37 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   <span className="workspace-project__marker" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
                   <span className="workspace-project__body">
                     <strong>{project.name || basename(project.path)}</strong>
-                    <span>{projectDetail(project)}</span>
                   </span>
-                  <span className="workspace-project__chevron" aria-hidden="true">›</span>
                 </button>
-                {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
+                )}
                 <button
                   type="button"
-                  className="workspace-project__remove"
-                  data-testid={`workspace-project-remove-${project.id}`}
-                  title="Remove project from perch (files on disk are kept)"
-                  aria-label={`Remove ${project.name || basename(project.path)}`}
-                  onClick={() => setRemovingProject(project)}
+                  className="workspace-project__icon"
+                  data-testid={`workspace-project-collapse-${project.id}`}
+                  aria-expanded={!projectCollapsed}
+                  title={projectCollapsed ? "Show workspaces and sessions" : "Collapse"}
+                  aria-label={projectCollapsed ? "Expand project" : "Collapse project"}
+                  onClick={() => toggleCollapsed(project.id)}
                 >
-                  ×
+                  {projectCollapsed ? "›" : "⌄"}
                 </button>
+                <button
+                  type="button"
+                  className="workspace-project__icon"
+                  data-testid={`workspace-project-menu-${project.id}`}
+                  title="Project actions"
+                  aria-label="Project actions"
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Project actions", items: projectMenu(project) });
+                  }}
+                >
+                  ⋯
+                </button>
+                {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
                 </div>
-                {(allWorkspaces.length > 0 || projectJobs.length > 0) && (
+                {!projectCollapsed && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
@@ -376,7 +514,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
                       return (
                         <Fragment key={workspace.id}>
-                        <div className="workspace-entry" data-testid={`workspace-entry-${workspace.id}`}>
+                        <div
+                          className="workspace-entry"
+                          data-testid={`workspace-entry-${workspace.id}`}
+                          onContextMenu={(event) => {
+                            if ((event.target as HTMLElement).closest(".workspace-entry__sessions")) return;
+                            event.preventDefault();
+                            setMenu({ x: event.clientX, y: event.clientY, label: "Workspace actions", items: workspaceMenu(project, workspace) });
+                          }}
+                        >
                           {renamingId === workspace.id ? (
                             <input
                               className="workspace-entry__rename"
@@ -416,12 +562,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               </strong>
                               <span>{workspace.branch || workspace.path}</span>
                             </span>
-                            <span className="workspace-entry__state">
-                              {workspace.pinned ? "pinned · " : ""}
-                              {workspace.state === "sleeping" ? "sleeping" : workspace.dirty ? "dirty" : "ready"}
-                            </span>
+                            {/* Only what needs attention; "ready" is the norm. */}
+                            {(workspace.pinned || workspace.state === "sleeping" || workspace.dirty) && (
+                              <span className="workspace-entry__state">
+                                {[workspace.pinned && "pinned", workspace.state === "sleeping" ? "sleeping" : workspace.dirty && "dirty"].filter(Boolean).join(" · ")}
+                              </span>
+                            )}
                           </button>
                           )}
+                          {/* Desktop uses the right-click menu; the phone has no
+                              right-click, so it keeps these buttons. */}
+                          {compact && (
                           <div className="workspace-entry__actions">
                           <button
                             type="button"
@@ -467,9 +618,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               ⊖
                             </button>
                           )}
-                          {/* Desktop opens Files/Git from the ›_ drawer, which follows
-                              the clicked workspace; the phone switcher keeps them here. */}
-                          {compact && (<>
                           <button
                             type="button"
                             className="workspace-entry__files"
@@ -498,8 +646,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             Git
                           </button>
-                          </>)}
                           </div>
+                          )}
                           {workspace.state === "sleeping" && (
                             <button
                               type="button"
@@ -561,6 +709,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           })}
         </div>
       )}
+      {menu && <RowMenu {...menu} onClose={() => setMenu(null)} />}
       {removingProject && (
         <ConfirmDialog
           message={`Remove "${removingProject.name || basename(removingProject.path)}" from perch? Its sessions are archived; the folder on disk is untouched. Add the folder again to bring it back.`}

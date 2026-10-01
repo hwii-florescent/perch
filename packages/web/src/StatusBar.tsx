@@ -2,18 +2,12 @@ import { usePerchStore } from "./store";
 import { StatusDot } from "./components/StatusDot";
 import type { SessionSummary } from "@perch/shared";
 
-function formatTokens(n: number | undefined): string {
-  if (n === undefined) return "-";
+function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 }
 
-function formatCost(n: number | undefined): string {
-  if (n === undefined) return "-";
-  return `$${n.toFixed(3)}`;
-}
-
-export function StatusBar({ onOpenKeybindHelp }: { onOpenKeybindHelp: () => void }) {
+export function StatusBar() {
   const connected = usePerchStore((s) => s.connected);
   const status = usePerchStore((s) => s.status);
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -40,15 +34,9 @@ export function StatusBar({ onOpenKeybindHelp }: { onOpenKeybindHelp: () => void
         {status?.cwd ?? "-"}
       </span>
       <span className="status-item">{status?.branch ?? ""}</span>
-      <span className="status-item">ctx {formatTokens(status?.contextTokens)}</span>
-      <span className="status-item">{formatCost(status?.costUsd)}</span>
-      {/* herdr renders its bottom bars as "key" (accent, bold) + "description"
-       * (dim) pairs — see `reference/herdr/src/ui/navigator.rs::render_footer`.
-       * This mirrors that for the always-visible leader-key hint; the full
-       * table lives behind `?` / KeybindHelp (see keybinds.ts). */}
-      <button type="button" className="status-item status-hint" title="Open the keybind help overlay" onClick={onOpenKeybindHelp}>
-        <kbd className="status-hint__key">ctrl+space</kbd> leader
-      </button>
+      {/* Only Hosted turns report these; a CLI session would show "- -". */}
+      {status?.contextTokens !== undefined && <span className="status-item">ctx {formatTokens(status.contextTokens)}</span>}
+      {status?.costUsd !== undefined && <span className="status-item">${status.costUsd.toFixed(3)}</span>}
     </footer>
   );
 }

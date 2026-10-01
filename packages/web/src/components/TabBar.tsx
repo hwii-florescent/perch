@@ -116,7 +116,7 @@ export function TabBar() {
   }
 
   return (
-    <div className="tab-bar" data-testid="tab-bar">
+    <div className="tab-bar" data-testid="tab-bar" data-tauri-drag-region>
       {orderedTabs.map((s) =>
         renamingId === s.id ? (
           <input

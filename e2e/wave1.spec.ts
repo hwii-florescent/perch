@@ -355,7 +355,7 @@ test.describe("Wave 1 functionality gaps", () => {
   test("F5. Ctrl/Cmd+F opens the in-terminal find bar; Escape closes it", async ({ page }) => {
     await freshPage(page);
 
-    const openBtn = page.getByTitle("Open terminal");
+    const openBtn = page.getByTestId("workspace-tools-toggle");
     await openBtn.click();
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 

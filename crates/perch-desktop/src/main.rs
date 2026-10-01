@@ -97,6 +97,18 @@ fn main() {
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(800.0, 600.0);
 
+            // Orca-style: no separate title bar. The web view's top row (tabs
+            // + ›_) runs under the traffic lights; it pads 78px for them and
+            // is a drag region. The lights centre in a container `14 + y` tall,
+            // so y = 22 centres them on that 36px row (`.app--mac-desktop`).
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 22.0));
+            }
+
             if test_mode {
                 builder = builder.visible(false).focused(false);
             }

@@ -85,6 +85,40 @@ body {
   background: var(--surface-0);
 }
 
+/* Desktop: tabs and ›_ share the one top row. */
+.toolbar--tabs {
+  align-items: center;
+  gap: 0.5rem;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 0.5rem 0 0;
+  background: var(--panel-bg);
+}
+.toolbar--tabs .tab-bar {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  border-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.toolbar--tabs .toolbar__button {
+  padding: 0.2rem 0.5rem;
+}
+.toolbar__button--icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--subtext-0);
+}
+.toolbar__button--icon[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* The macOS app's traffic lights sit in this padding (perch-desktop main.rs). */
+.app--mac-desktop .toolbar--tabs {
+  padding-left: 78px;
+}
+
 .toolbar__button {
   background: var(--surface-1);
   color: var(--text);
@@ -739,13 +773,6 @@ body {
   white-space: nowrap;
 }
 
-.workspace-project__chevron {
-  flex-shrink: 0;
-  color: var(--overlay-1);
-  font-size: 1rem;
-  line-height: 1;
-}
-
 .workspace-project__workspaces {
   padding: 0 0.35rem 0.35rem 1.15rem;
 }
@@ -953,7 +980,7 @@ body {
 }
 
 .workspace-entry__session-close,
-.workspace-project__remove {
+.workspace-project__icon {
   flex-shrink: 0;
   width: 1.3rem;
   height: 1.3rem;
@@ -969,21 +996,38 @@ body {
 }
 
 .workspace-entry__session-row:hover .workspace-entry__session-close,
-.workspace-project__header:hover .workspace-project__remove,
+.workspace-project__header:hover .workspace-project__icon,
 .workspace-entry__session-close:focus-visible,
-.workspace-project__remove:focus-visible {
+.workspace-project__icon:focus-visible {
   opacity: 1;
 }
 
 .workspace-entry__session-close:hover,
-.workspace-project__remove:hover {
+.workspace-project__icon:hover {
   background: var(--surface-1);
   color: var(--text);
 }
 
+/* The project row's ⌄ ⋯ + show on hover (a collapsed project keeps its ›);
+ * the + is WorktreeMenu's trigger. */
+.workspace-project__header .worktree-menu__btn {
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  font-size: 0.95rem;
+  opacity: 0;
+}
+.workspace-project__header:hover .worktree-menu__btn,
+.workspace-project__header .worktree-menu__btn:focus-visible,
+.workspace-project__header .worktree-menu__btn[aria-expanded="true"],
+.workspace-project__icon[aria-expanded="false"] {
+  opacity: 1;
+}
+
 @media (hover: none) {
   .workspace-entry__session-close,
-  .workspace-project__remove {
+  .workspace-project__icon,
+  .workspace-project__header .worktree-menu__btn {
     opacity: 1;
   }
 }
@@ -3967,36 +4011,6 @@ body {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* herdr-style keybind hint: accent+bold "key" next to a dim description,
- * see `reference/herdr/src/ui/navigator.rs::render_footer`. */
-.status-hint {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex-shrink: 0;
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-}
-
-.status-hint:hover .status-hint__key {
-  border-color: var(--accent);
-}
-
-.status-hint__key {
-  font-family: inherit;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--overlay-0);
-  border-radius: var(--radius);
-  padding: 0.05rem 0.3rem;
 }
 
 /* --- Settings modal (Stage D) -------------------------------------------- */

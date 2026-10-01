@@ -2,8 +2,8 @@
  * WorktreeMenu.tsx — Wave 2: git worktree management, ported from herdr.
  *
  * Rendered in each sidebar project header (the `(hostId, cwd)` group row) as
- * a small branch-glyph button, but only when that project's cwd is inside a
- * git repo — signalled by the presence of `workspaceGit[projectKey].branch`,
+ * its "+" (new workspace), which opens straight on the create form, but only
+ * when that project's cwd is inside a git repo — signalled by the presence of `workspaceGit[projectKey].branch`,
  * which the server's background git poll already pushes (`workspace.git`).
  *
  * The popover is portal-rendered (same escape-the-dockview-clipping trick as
@@ -230,7 +230,9 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
       setOpen(false);
       return;
     }
+    // The project header's + is "new workspace": open on the create form.
     openMenu();
+    setShowCreateForm(true);
   }
 
   function handleOpenWorktree(entry: WorktreeEntry) {
@@ -312,9 +314,11 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
           data-testid={`worktree-popover-${hostId}-${cwd}`}
           ref={popoverRef}
           style={popoverStyle}
+          // The form inputs stop key propagation, so Escape is caught here.
+          onKeyDownCapture={(e) => { if (e.key === "Escape") setOpen(false); }}
         >
           <div className="worktree-menu__header">
-            <span className="worktree-menu__title">Worktrees</span>
+            <span className="worktree-menu__title">{showCreateForm ? "New workspace" : "Worktrees"}</span>
             <span className="worktree-menu__repo" title={cwd}>
               {basename(cwd)}
             </span>
@@ -534,11 +538,11 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
         ref={btnRef}
         data-testid={`worktree-menu-${hostId}-${cwd}`}
         onClick={handleBtnClick}
-        title="Git worktrees"
-        aria-label="Git worktrees"
+        title="New workspace (a git worktree)"
+        aria-label="New workspace"
         aria-expanded={open}
       >
-        ⑂
+        +
       </button>
       {popover}
       {pendingRemove && (

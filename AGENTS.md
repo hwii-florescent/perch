@@ -132,7 +132,22 @@ there, not here.
     There is no Release control / Stop CLI bar: taking control takes the
     lease ("last actor drives"), and Stop agent is in the pane ⋯ menu.
   - Tab and session-row × archive the session (restorable from Settings).
-    Project × archives the project; re-registering the folder restores it.
+    Removing a project archives it; re-registering the folder restores it.
+  - One top row: tabs, then the workspace-tools toggle (a right-panel icon,
+    not ›_, since the drawer is more than a terminal). In the macOS app that
+    row is also the title bar (overlay title bar, traffic lights in its
+    78px left padding, `data-tauri-drag-region`).
+  - Sidebar rows stay quiet: a project header is its name plus ⌄ (collapse,
+    per viewer) ⋯ (Rename, Copy path, Archive chats, Remove project) and +
+    (new workspace = the worktree create form). Workspace actions (Rename,
+    Copy path/branch, Pin, Files, Git, Hide, Delete worktree) are in its
+    right-click menu; only the phone switcher, which has no right-click,
+    keeps them as buttons. A workspace shows a state only when it needs
+    attention (pinned, dirty, sleeping), never "ready".
+  - The status bar has no keybind hint, and ctx/cost appear only when a
+    turn reports them. The Ctrl+Space leader still works (`?` lists it).
+  - Menus offer only what perch does. Don't add Orca items with no perch
+    feature behind them (status columns, groups, icons, mark unread).
 - **Store:** anything that reads or replaces `messages` calls
   `flushChunkBuffer()` first (see its doc comment). A late flush silently
   drops text.

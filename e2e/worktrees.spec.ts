@@ -164,7 +164,7 @@ async function pathOfEntry(entry: Locator): Promise<string> {
  * listed. On a host with background creates (`worktree.job`) the popover
  * closes on submit, so it is reopened to read the listing. */
 async function createWorktree(popover: Locator, branch: string): Promise<string> {
-  await popover.locator('[data-testid="worktree-new"]').click();
+  if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
   const branchInput = popover.locator('[data-testid="worktree-branch-input"]');
   await expect(branchInput).toBeVisible({ timeout: 5000 });
   await branchInput.fill(branch);
@@ -437,7 +437,7 @@ test.describe("Git worktrees", () => {
     fs.writeFileSync(hook, "#!/bin/sh\nsleep 8\n", { mode: 0o755 });
     try {
       const popover = await openWorktreeMenu(page);
-      await popover.locator('[data-testid="worktree-new"]').click();
+      if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
       await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-slow");
       await popover.locator('[data-testid="worktree-create-submit"]').click();
       await expect(popover).not.toBeVisible({ timeout: 5000 });
@@ -460,7 +460,7 @@ test.describe("Git worktrees", () => {
     fs.mkdirSync(blocked, { recursive: true });
     fs.writeFileSync(path.join(blocked, "mine.txt"), "x");
     const popover = await openWorktreeMenu(page);
-    await popover.locator('[data-testid="worktree-new"]').click();
+    if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await popover.locator('[data-testid="worktree-branch-input"]').fill("wt-retry");
     await popover.locator('[data-testid="worktree-create-submit"]').click();
     await expect(page.getByTestId("worktree-job-retry-wt-retry")).toBeVisible({ timeout: 20000 });
@@ -488,7 +488,7 @@ test.describe("Git worktrees", () => {
 
     await freshPage(page);
     const popover = await openWorktreeMenu(page);
-    await popover.locator('[data-testid="worktree-new"]').click();
+    if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await popover.locator('[data-testid="worktree-name-input"]').fill("Stack on base!");
     await expect(popover.locator('[data-testid="worktree-branch-input"]')).toHaveAttribute(
       "placeholder", "branch: stack-on-base");
@@ -547,7 +547,7 @@ test.describe("Git worktrees", () => {
 
     // Create a child nested under wt-parent from the create form.
     const menu = await openWorktreeMenu(page);
-    await menu.locator('[data-testid="worktree-new"]').click();
+    if (await menu.locator('[data-testid="worktree-new"]').isVisible()) await menu.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await menu.locator('[data-testid="worktree-branch-input"]').fill("wt-child");
     await menu.locator('[data-testid="worktree-parent-select"]').selectOption(parentId);
     await menu.locator('[data-testid="worktree-create-submit"]').click();
@@ -555,7 +555,7 @@ test.describe("Git worktrees", () => {
     await expect(nested.locator(".workspace-entry").filter({ hasText: "wt-child" })).toHaveCount(1, { timeout: 20000 });
 
     // Pin moves wt-parent to the top of the project.
-    await row("wt-parent").first().hover();
+    await row("wt-parent").first().locator(".workspace-entry__button").click({ button: "right" });
     await page.getByTestId(`workspace-pin-${parentId}`).click();
     const first = projectCard.locator(".workspace-project__workspaces > .workspace-entry").first();
     await expect(first).toContainText("pinned", { timeout: 10000 });
@@ -595,7 +595,7 @@ test.describe("Git worktrees", () => {
     await expect(card).toHaveCount(0);
 
     const id = ((await row.getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
-    await row.hover();
+    await row.locator(".workspace-entry__button").click({ button: "right" });
     await page.getByTestId(`workspace-hide-${id}`).click();
     await expect(row).toHaveCount(0, { timeout: 10000 });
     await expect(card).toHaveText("1 hidden worktree");

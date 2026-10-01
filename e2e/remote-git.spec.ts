@@ -149,7 +149,7 @@ test.describe("Remote host git and worktrees", () => {
     const row = await openRemoteHost(page);
     await row.locator(`[data-testid="worktree-menu-${HOST_ID}-${FIXTURE}"]`).click();
     const popover = page.locator(`[data-testid="worktree-popover-${HOST_ID}-${FIXTURE}"]`);
-    await popover.locator('[data-testid="worktree-new"]').click();
+    if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await popover.locator('[data-testid="worktree-name-input"]').fill("Remote task");
     await expect(popover.locator('[data-testid="worktree-start-input"]')).toBeVisible();
     await expect(popover.locator('[data-testid="worktree-new-branch"]')).toHaveCount(0);

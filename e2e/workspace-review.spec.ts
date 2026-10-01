@@ -404,7 +404,7 @@ test.describe("Workspace Git/review UI", () => {
       git(["commit", "-q", "-m", "first commit after registration"]);
       fs.writeFileSync(REVIEW_FILE, `${WORKTREE_TEXT}\n`);
       const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
-      await project.getByRole("button", { name: "Git worktrees", exact: true }).click();
+      await project.getByRole("button", { name: "New workspace", exact: true }).click();
       const menu = page.getByRole("dialog", { name: "Git worktrees", exact: true });
       await expect(menu.getByTestId(`worktree-entry-${FIXTURE_ROOT}`)).toBeVisible();
       await page.keyboard.press("Escape");
