@@ -3838,6 +3838,16 @@ body {
   align-items: center;
   gap: 0.3rem;
   flex-shrink: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.status-hint:hover .status-hint__key {
+  border-color: var(--accent);
 }
 
 .status-hint__key {

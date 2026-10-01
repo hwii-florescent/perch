@@ -165,7 +165,7 @@ export default function App() {
         </main>
       </div>
 
-      <StatusBar />
+      <StatusBar onOpenKeybindHelp={openKeybindHelp} />
       <SettingsModal />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />

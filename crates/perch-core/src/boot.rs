@@ -289,7 +289,12 @@ pub async fn boot(
     });
 
     let registry = Arc::new(SessionRegistry::new());
-    let default_cwd = std::env::current_dir()?.display().to_string();
+    // A Dock/Finder launch starts in `/`, which would register `/` as a
+    // project on the first session; fall back to $HOME there.
+    let default_cwd = match std::env::current_dir()?.display().to_string() {
+        root if root == "/" => std::env::var("HOME").unwrap_or(root),
+        cwd => cwd,
+    };
 
     if args.headless {
         tracing::info!("[perch] running headless");

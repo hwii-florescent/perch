@@ -20,14 +20,10 @@
  *
  * Focus guard: chords (leader arm + the follow-up letter) and the plain `?`
  * binding are both suppressed while `document.activeElement` is inside a
- * `textarea`/`input`/`[contenteditable]`, OR inside an `.xterm` container.
- * xterm mounts a real (visually hidden) `<textarea class="xterm-helper-
- * textarea">` inside `.xterm` to capture keyboard input (see
- * `views/Terminal.tsx` — `term.open(containerRef.current)` renders into a
- * `.terminal__surface` div that xterm fills with `.xterm-screen`/`.xterm-
- * helper-textarea`), so the `textarea` selector alone would already catch
- * it; `.xterm` is checked too for robustness against xterm internals
- * changing which element actually holds focus.
+ * `textarea`/`input`/`[contenteditable]`. A focused terminal is the
+ * exception for chords: CLI panes always hold focus, so the leader has to
+ * work there. `terminalKeyHandler` keeps xterm from also sending Ctrl+Space
+ * (NUL) and the chord's follow-up letter to the PTY.
  */
 import { useEffect, useRef } from "react";
 import { usePerchStore, activeProjectSessions, effectiveActiveProject } from "./store";
@@ -90,6 +86,27 @@ export const KEYBINDS: KeybindEntry[] = [
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target.closest('input, textarea, [contenteditable=""], [contenteditable="true"], .xterm') != null;
+}
+
+function inTerminal(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".xterm") != null;
+}
+
+/** True while the leader or resize mode waits for its next key. */
+let chordPending = false;
+
+/** xterm's custom key handler (attached by terminalSearch.ts for every
+ * terminal). Returns false for keys perch consumes. Ctrl+Enter and
+ * Shift+Enter use Orca's encodings: plain xterm sends `\r` for both, so
+ * the CLIs could not tell them from Enter. */
+export function terminalKeyHandler(term: { input(data: string): void }, e: KeyboardEvent): boolean {
+  if (e.type !== "keydown") return true;
+  if (chordPending) return false;
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ")) return false;
+  if (e.key !== "Enter" || e.metaKey || e.altKey || e.ctrlKey === e.shiftKey) return true;
+  e.preventDefault();
+  term.input(e.ctrlKey ? "\x1b[13;5u" : "\x1b\r");
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +289,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
 
     function disarm() {
       armedRef.current = false;
+      chordPending = resizeArmedRef.current;
       if (timer != null) {
         clearTimeout(timer);
         timer = null;
@@ -280,6 +298,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
 
     function arm() {
       armedRef.current = true;
+      chordPending = true;
       if (timer != null) clearTimeout(timer);
       timer = setTimeout(disarm, LEADER_TIMEOUT_MS);
     }
@@ -294,6 +313,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     function disarmResize() {
       if (!resizeArmedRef.current) return;
       resizeArmedRef.current = false;
+      chordPending = armedRef.current;
       if (resizeTimer != null) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
@@ -309,6 +329,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
         baseTitle = document.title.replace(/^\[resize\] /, "");
       }
       resizeArmedRef.current = true;
+      chordPending = true;
       document.title = `[resize] ${baseTitle}`;
       if (resizeTimer != null) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(disarmResize, LEADER_TIMEOUT_MS);
@@ -322,7 +343,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       // chord — never intercept real typing).
       if (resizeArmedRef.current) {
         if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
-        if (isEditableTarget(e.target)) {
+        if (isEditableTarget(e.target) && !inTerminal(e.target)) {
           disarmResize();
           return;
         }
@@ -379,9 +400,9 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
 
       const editable = isEditableTarget(e.target);
 
-      // Ctrl+Space -> arm the leader. Ignored while typing.
+      // Ctrl+Space -> arm the leader. Ignored while typing, except in a terminal.
       if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ")) {
-        if (editable) return;
+        if (editable && !inTerminal(e.target)) return;
         e.preventDefault();
         arm();
         return;

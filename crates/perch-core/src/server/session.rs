@@ -894,11 +894,19 @@ pub(super) fn handle_session_create(
             Ok(target) => state.app.git.head_revision(&target).await,
             Err(_) => None,
         };
-        let persisted = state
-            .app
-            .db
-            .create_project("local", &resolved_cwd, None, start_snapshot.as_deref())
-            .and_then(|_| state.app.db.create_session(&session_id, &resolved_cwd));
+        let persisted = {
+            let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+            state
+                .app
+                .db
+                .create_project("local", &resolved_cwd, None, start_snapshot.as_deref())
+                .map(|(project, workspace)| {
+                    // Push the pair so the sidebar shows the folder now, not
+                    // on the next snapshot refresh.
+                    super::workspace::publish_project_pair(&state.app, project, workspace)
+                })
+        }
+        .and_then(|_| state.app.db.create_session(&session_id, &resolved_cwd));
         if let Err(error) = persisted {
             fail(
                 &state.out_tx,

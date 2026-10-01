@@ -13,7 +13,7 @@ function formatCost(n: number | undefined): string {
   return `$${n.toFixed(3)}`;
 }
 
-export function StatusBar() {
+export function StatusBar({ onOpenKeybindHelp }: { onOpenKeybindHelp: () => void }) {
   const connected = usePerchStore((s) => s.connected);
   const status = usePerchStore((s) => s.status);
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -46,9 +46,9 @@ export function StatusBar() {
        * (dim) pairs — see `reference/herdr/src/ui/navigator.rs::render_footer`.
        * This mirrors that for the always-visible leader-key hint; the full
        * table lives behind `?` / KeybindHelp (see keybinds.ts). */}
-      <span className="status-item status-hint" title="Open the keybind help overlay">
+      <button type="button" className="status-item status-hint" title="Open the keybind help overlay" onClick={onOpenKeybindHelp}>
         <kbd className="status-hint__key">ctrl+space</kbd> leader
-      </span>
+      </button>
     </footer>
   );
 }

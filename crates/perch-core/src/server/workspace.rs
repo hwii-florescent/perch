@@ -20,6 +20,34 @@ fn next_snapshot_revision_locked(app: &AppState) -> u64 {
         + 1
 }
 
+/// Broadcast a project and one of its workspaces at a single revision.
+/// Callers hold `foundation_lock`.
+pub(super) fn publish_project_pair(
+    app: &AppState,
+    project: crate::db::ProjectRow,
+    workspace: crate::db::WorkspaceRow,
+) {
+    let revision = next_snapshot_revision_locked(app);
+    broadcast_foundation(
+        app,
+        ServerMessage::ProjectUpdated {
+            request_id: None,
+            project: project_to_wire(project),
+            snapshot_epoch: app.snapshot_epoch.clone(),
+            snapshot_revision: revision,
+        },
+    );
+    broadcast_foundation(
+        app,
+        ServerMessage::WorkspaceUpdated {
+            request_id: None,
+            workspace: workspace_to_wire(workspace),
+            snapshot_epoch: app.snapshot_epoch.clone(),
+            snapshot_revision: revision,
+        },
+    );
+}
+
 fn project_to_wire(row: crate::db::ProjectRow) -> ProjectSummary {
     ProjectSummary {
         id: row.id,

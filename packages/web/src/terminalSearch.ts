@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { SearchAddon } from "@xterm/addon-search";
+import { terminalKeyHandler } from "./keybinds";
 
 export interface TerminalSearchController {
   open: boolean;
@@ -50,6 +51,7 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
+      if (!terminalKeyHandler(term, e)) return false;
       if (e.type !== "keydown") return true;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
