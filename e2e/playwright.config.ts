@@ -2,6 +2,12 @@ import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
 import * as os from "os";
 
+// Every core the suite starts (the webServers and the specs' own spawns,
+// which pass process.env through) gets a test PTY daemon. The default
+// ~/.perch/daemon is the installed app's, and test sessions left in it run it
+// out of fds.
+process.env.PERCHD_DIR ??= "/tmp/perch-e2e-perchd";
+
 export default defineConfig({
   testDir: ".",
   // ORDER MATTERS. `wave2.features.spec.ts` runs FIRST, before
@@ -78,6 +84,7 @@ export default defineConfig({
       env: {
         HOME: os.homedir(),
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+        PERCHD_DIR: "/tmp/perch-e2e-perchd-remote",
       },
     },
   ],
