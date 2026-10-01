@@ -105,14 +105,19 @@ body {
 .toolbar--tabs .toolbar__button {
   padding: 0.2rem 0.5rem;
 }
-.toolbar__button--icon {
+/* The sidebar and drawer toggles: blend into the row, fill only on hover. */
+.toolbar__button.toolbar__button--icon {
   display: inline-flex;
   align-items: center;
   color: var(--subtext-0);
+  background: transparent;
+  border-color: transparent;
 }
-.toolbar__button--icon[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
+.toolbar__button.toolbar__button--icon:hover,
+.toolbar__button.toolbar__button--icon:focus-visible {
+  background: var(--surface-1);
+  border-color: transparent;
+  color: var(--text);
 }
 /* Left section of the top row: app name + sidebar toggle. Expanded, it is as
  * wide as the sidebar so the tabs start above the main column. */
@@ -1262,6 +1267,16 @@ body {
   overflow: hidden;
   background: var(--surface-0);
   border-right: 1px solid var(--overlay-0);
+}
+
+/* As a pane tab it must stay under dockview's group header actions (⋯). */
+.workspace-files--editor {
+  z-index: auto;
+}
+
+.workspace-files--explorer .workspace-files__explorer {
+  flex: 1 1 100%;
+  border-right: 0;
 }
 
 .workspace-files__explorer-heading {

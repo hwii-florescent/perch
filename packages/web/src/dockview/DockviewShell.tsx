@@ -135,8 +135,9 @@ function TerminalPanel(props: IDockviewPanelProps) {
     onPaneChange={(shellPaneId) => props.api.updateParameters({ shellPaneId })} />;
 }
 
-/** Files and Git now open in the ›_ workspace tools drawer (App.tsx); these
- * panel components only keep layouts saved before that move restorable. */
+/** One workspace file's editor, opened as a tab from the drawer's explorer
+ * (`DockviewController.openFile`). `params` round-trip through the saved
+ * layout, so the tab reopens the same file. */
 function FilesPanel(props: IDockviewPanelProps) {
   const workspaceId = typeof props.params?.workspaceId === "string"
     ? props.params.workspaceId
@@ -147,17 +148,18 @@ function FilesPanel(props: IDockviewPanelProps) {
   const initialPath = typeof props.params?.path === "string" ? props.params.path : undefined;
   return (
     <WorkspaceFilesView
+      layout="editor"
       workspaceId={workspaceId}
       initialPath={initialPath}
-      onPathChange={(path) => props.api.updateParameters({ workspaceId, path })}
       onClose={() => props.api.close()}
     />
   );
 }
 
-/** Workspace Git/status/diff/review surface. Git data is keyed by the durable
- * workspace id carried in Dockview params, so a restored mixed layout cannot
- * accidentally display another project's branch or comments. */
+/** Git now lives in the right drawer (App.tsx); this panel only keeps
+ * layouts saved before that move restorable. Git data is keyed by the
+ * durable workspace id carried in Dockview params, so a restored mixed layout
+ * cannot accidentally display another project's branch or comments. */
 function GitReviewPanel(props: IDockviewPanelProps) {
   const workspaceId = typeof props.params?.workspaceId === "string"
     ? props.params.workspaceId

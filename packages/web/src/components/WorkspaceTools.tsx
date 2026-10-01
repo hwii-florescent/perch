@@ -1,4 +1,5 @@
 import { usePerchStore } from "../store";
+import { getDockviewController } from "../dockview/dockviewController";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
@@ -9,19 +10,10 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
   { id: "gitReview", label: "Git" },
 ];
 
-// The open file per workspace, so a reload or a workspace switch comes back
-// to it (per viewer, like the dockview panel params this replaced).
-const pathKey = (workspaceId: string) => `perch.workspaceTools.path.${workspaceId}`;
-function readPath(workspaceId: string): string | undefined {
-  try { return localStorage.getItem(pathKey(workspaceId)) ?? undefined; } catch { return undefined; }
-}
-function writePath(workspaceId: string, path: string) {
-  try { localStorage.setItem(pathKey(workspaceId), path); } catch { /* convenience only */ }
-}
-
 /**
  * The desktop drawer behind the toolbar's right-panel button: the file
- * explorer and Git for whichever workspace is active. Terminals are session
+ * explorer and Git for whichever workspace is active. A clicked file opens as
+ * an editor tab in the main area, beside Chat and terminals. Terminals are session
  * tabs, not drawer content. Git shows only for a git checkout. It belongs to
  * the app, not to a session's saved layout, so it stays open across chats and
  * simply follows the workspace the user clicks.
@@ -66,10 +58,9 @@ export function WorkspaceTools({ tab, onTabChange, onClose }: {
         {tab === "files" && (workspaceId ? (
           <WorkspaceFilesView
             key={workspaceId}
+            layout="explorer"
             workspaceId={workspaceId}
-            initialPath={readPath(workspaceId)}
-            onPathChange={(path) => writePath(workspaceId, path)}
-            onClose={onClose}
+            onOpenFile={(path) => getDockviewController()?.openFile(workspaceId, path)}
           />
         ) : missing)}
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}

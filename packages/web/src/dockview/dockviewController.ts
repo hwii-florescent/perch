@@ -176,6 +176,9 @@ export interface DockviewController {
    * in this shell — used to grey out / relabel already-open sessions in the
    * split-session picker rather than let it silently create a duplicate. */
   openSessionChatIds(): string[];
+  /** Open (or re-activate) a workspace file as an editor tab in the active
+   * pane's group, next to Chat and terminals. Backs the drawer's explorer. */
+  openFile(workspaceId: string, path: string): void;
 }
 
 /** Re-exported so callers (the split-session picker, DockviewShell's drag
@@ -239,6 +242,21 @@ export function createDockviewController(api: DockviewApi): DockviewController {
         title,
         params: { sessionId },
         position: { referencePanel: reference, direction },
+      });
+    },
+    openFile(workspaceId, path) {
+      const id = `file:${workspaceId}:${path}`;
+      const existing = api.panels.find((p) => p.id === id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      api.addPanel({
+        id,
+        component: FILES_COMPONENT,
+        title: path.split("/").pop() || path,
+        params: { workspaceId, path },
+        position: { referencePanel: api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID, direction: "within" },
       });
     },
     openSessionChatIds() {

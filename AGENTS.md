@@ -88,8 +88,8 @@ there, not here.
   - `xtermSetup.ts`: builds every terminal.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
-  - `components/WorkspaceTools.tsx`: the right drawer (Files / Git for the
-    active workspace).
+  - `components/WorkspaceTools.tsx`: the right drawer (file explorer / Git
+    for the active workspace); files open as pane tabs.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
     over a CLI session.
   - `statusDot.ts`: status glyphs.
@@ -116,12 +116,14 @@ there, not here.
   revert):**
   - Naming: Projects are folders; Workspaces are a project's checkout and
     its worktrees; sessions live under a workspace.
-  - Files and Git live only in the right drawer (`WorkspaceTools.tsx`):
-    Files + Git, no Terminal (terminals are tabs), and Git only for a git
+  - The right drawer (`WorkspaceTools.tsx`) holds the file explorer and Git
+    only: no Terminal (terminals are tabs), and Git only for a git
     workspace. It is app-level, not part of a session's layout, and follows
-    the clicked workspace. Don't put them back as per-chat dockview panels;
-    the `files`/`gitReview` panel kinds remain only so old saved layouts
-    restore.
+    the clicked workspace. A clicked file opens as an editor pane tab in the
+    main area beside Chat (`DockviewController.openFile`, the `files` panel
+    kind with `layout="editor"`), saved with the session layout. The phone
+    keeps the combined explorer+editor view. The `gitReview` panel kind
+    remains only so old saved layouts restore.
   - A tab is a terminal. Every CLI agent runs under
     `agent_runtime::in_shell`, so an exited agent leaves a login shell in
     the same pane. `Terminal` is a provider (`ProviderManifest::terminal`),
@@ -146,7 +148,8 @@ there, not here.
     Removing a project archives it; re-registering the folder restores it.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
-    then the drawer toggle (a right-panel icon). In the macOS app that row
+    then the drawer toggle (a right-panel icon). Both toggles are borderless
+    and transparent, filled only on hover. In the macOS app that row
     is also the title bar (overlay title bar, traffic lights in the brand
     section's 78px left padding, `data-tauri-drag-region`).
   - The sidebar collapses to nothing (not rendered; toggle in the top row,

@@ -236,12 +236,18 @@ export interface WorkspaceFilesViewProps {
   initialPath?: string;
   onPathChange?: (path: string) => void;
   onClose?: () => void;
+  /** Desktop splits the surface: `"explorer"` is just the tree (the right
+   * drawer), which hands a clicked file to `onOpenFile`; `"editor"` is just
+   * `initialPath`'s editor (a pane tab in the main area). Unset = both, with
+   * the narrow-width toggle between them (the phone). */
+  layout?: "explorer" | "editor";
+  onOpenFile?: (path: string) => void;
 }
 
 /** Bounded workspace file surface. Directory levels are fetched on demand;
  * files are read only after an explicit click. Drafts stay in the scoped
  * client buffer until the server-side buffer persistence adapter lands. */
-export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose }: WorkspaceFilesViewProps) {
+export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose, layout, onOpenFile }: WorkspaceFilesViewProps) {
   const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
   const documents = useWorkspaceFilesStore((state) => state.documents[workspaceId] ?? EMPTY_DOCUMENTS);
@@ -275,9 +281,9 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     setNotice(null);
     setReloadConfirmOpen(false);
     setMobileExplorerOpen(!restoredPath);
-    if (workspaceId) requestTree(workspaceId, "");
-    if (workspaceId && restoredPath) openFile(workspaceId, restoredPath, true);
-  }, [openFile, requestTree, restoredPath, workspaceId]);
+    if (workspaceId && layout !== "editor") requestTree(workspaceId, "");
+    if (workspaceId && restoredPath && layout !== "explorer") openFile(workspaceId, restoredPath, true);
+  }, [layout, openFile, requestTree, restoredPath, workspaceId]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -338,6 +344,12 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
       setNotice(entry.kind === "symlink" ? "Symlinks are metadata-only and cannot be opened." : "This entry is not editable.");
       return;
     }
+    if (layout === "explorer") {
+      setNotice(null);
+      setSelectedPath(entry.path);
+      onOpenFile?.(entry.path);
+      return;
+    }
     const existing = documents[entry.path];
     if (existing && existing.content !== existing.savedContent) {
       setNotice(`Unsaved draft kept for ${basename(entry.path)}.`);
@@ -361,8 +373,12 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   }
 
   return (
-    <section className="workspace-files" data-testid="workspace-files-view" aria-label={`Files for ${workspace.name}`}>
-      <header className="workspace-files__header">
+    <section
+      className={"workspace-files" + (layout ? ` workspace-files--${layout}` : "")}
+      data-testid={layout === "editor" ? "workspace-file-pane" : "workspace-files-view"}
+      aria-label={`Files for ${workspace.name}`}
+    >
+      {!layout && <header className="workspace-files__header">
         <div className="workspace-files__title-block">
           <span className="workspace-files__eyebrow">Files</span>
           <strong title={workspace.path}>{workspace.name || basename(workspace.path)}</strong>
@@ -371,21 +387,24 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
         <div className="workspace-files__header-actions">
           <button type="button" className="workspace-files__close" onClick={onClose} aria-label="Close files">×</button>
         </div>
-      </header>
+      </header>}
+      {layout === "explorer" && notice && <div className="workspace-files__notice" role="status">{notice}</div>}
 
-      <div className={"workspace-files__body" + (mobileExplorerOpen ? " workspace-files__body--explorer-open" : "")}>
-        <aside className="workspace-files__explorer" aria-label="Workspace file tree">
+      <div className={"workspace-files__body" + (layout === "explorer" || (!layout && mobileExplorerOpen) ? " workspace-files__body--explorer-open" : "")}>
+        {layout !== "editor" && <aside className="workspace-files__explorer" aria-label="Workspace file tree">
           <div className="workspace-files__explorer-heading">
             <span>Explorer</span>
             <div className="workspace-files__explorer-actions">
-              <button
-                type="button"
-                className="workspace-files__mobile-editor"
-                onClick={() => setMobileExplorerOpen(false)}
-                disabled={!selectedPath}
-              >
-                Editor
-              </button>
+              {!layout && (
+                <button
+                  type="button"
+                  className="workspace-files__mobile-editor"
+                  onClick={() => setMobileExplorerOpen(false)}
+                  disabled={!selectedPath}
+                >
+                  Editor
+                </button>
+              )}
               <button type="button" onClick={() => requestTree(workspaceId, "")} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
             </div>
           </div>
@@ -408,16 +427,18 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               onOpenFile={handleOpenFile}
             />
           )}
-        </aside>
+        </aside>}
 
-        <div className="workspace-files__editor-column">
-          <button
-            type="button"
-            className="workspace-files__mobile-explorer"
-            onClick={() => setMobileExplorerOpen(true)}
-          >
-            ‹ Explorer
-          </button>
+        {layout !== "explorer" && <div className="workspace-files__editor-column">
+          {!layout && (
+            <button
+              type="button"
+              className="workspace-files__mobile-explorer"
+              onClick={() => setMobileExplorerOpen(true)}
+            >
+              ‹ Explorer
+            </button>
+          )}
           {!selectedPath || !document ? (
             <div className="workspace-files__empty workspace-files__empty--editor">
               <span className="workspace-files__empty-mark">⌘</span>
@@ -491,7 +512,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               {previewOpen && <PreviewPanel preview={preview ?? { workspaceId, path: selectedPath, requiresSandbox: false, truncated: false, state: "loading" }} />}
             </>
           )}
-        </div>
+        </div>}
       </div>
     </section>
   );
