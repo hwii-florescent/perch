@@ -95,17 +95,15 @@ function workspaceStateFor(state: GitReviewStoreState, workspaceId: string): Wor
   return state.workspaces[workspaceId] ?? EMPTY_WORKSPACE_STATE;
 }
 
-function hostForWorkspace(workspaceId: string): string {
-  const perch = usePerchStore.getState();
+function hostForWorkspace(workspaceId: string, perch = usePerchStore.getState()): string {
   const workspace = perch.workspaces.find((candidate) => candidate.id === workspaceId);
   // A remote host's workspace has no local row; its sessions name the owner.
   const session = workspace ? undefined : perch.sessions.find((candidate) => candidate.workspaceId === workspaceId);
   return workspace?.hostId ?? session?.hostId ?? perch.activeHostId;
 }
 
-function gitCapabilityForWorkspace(workspaceId: string): boolean {
-  const perch = usePerchStore.getState();
-  const hostId = hostForWorkspace(workspaceId);
+export function gitCapabilityForWorkspace(workspaceId: string, perch = usePerchStore.getState()): boolean {
+  const hostId = hostForWorkspace(workspaceId, perch);
   const capabilities = hostId === "local" ? perch.serverInfo?.capabilities : perch.workspaceCapabilitiesByHost[hostId];
   // A missing server.info/capability list means a legacy peer. Do not send a
   // new request until negotiation explicitly advertises the Git family.

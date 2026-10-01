@@ -7,9 +7,8 @@
  *   F3/F4 — Notifications settings section: soundEnabled toggle and
  *        toastDelivery selector (off/app/system), persisted across reload
  *   F5 — in-terminal search (Ctrl/Cmd+F find-bar overlay, Escape closes)
- *   F6 — close confirmation: closing a terminal group holding more than one
- *        terminal tab (single-terminal close stays unconfirmed); deleting a
- *        session via the row's trash icon is immediate, no confirmation
+ *   F6b — deleting a session via the row's trash icon is immediate, no
+ *        confirmation
  *
  * All tests are headless (no --headed / --ui). Tests needing a persisted
  * session (F2's tab-rename, F6b's session-delete) require a real `claude`
@@ -376,55 +375,7 @@ test.describe("Wave 1 functionality gaps", () => {
 
     await page.screenshot({ path: "artifacts/wave1-f5-terminal-search.png" });
 
-    // Single terminal — closing needs no confirmation (Wave 1 item 6).
     await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
-  });
-
-  // -------------------------------------------------------------------------
-  // F6 — close confirmation
-  // -------------------------------------------------------------------------
-  test("F6a. closing a multi-tab terminal group prompts confirm; single terminal does not", async ({ page }) => {
-    await freshPage(page);
-    const openBtn = page.getByTitle("Open terminal");
-
-    // Single terminal: toggling closed needs no confirmation.
-    await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(1, { timeout: 10000 });
-    await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
-    await expect(page.locator('[data-testid="confirm-dialog"]')).toHaveCount(0);
-
-    // Two terminals in the same group: toggling closed now prompts. Dockview
-    // only mounts the *active* tab's content within a group (matching
-    // workspace-tabs.spec.ts's W4 test), so adding a second tab keeps
-    // `.terminal__surface` at 1 — assert on the tab bar (`pane-tab-*`)
-    // instead, which reflects panel count regardless of which is active.
-    await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(1, { timeout: 10000 });
-    const terminalGroupHeader = page.locator(
-      '.dv-tabs-and-actions-container:has([data-testid="terminal-add-tab"])',
-    );
-    await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(1);
-    await page.locator('[data-testid="terminal-add-tab"]').click();
-    await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(2, { timeout: 10000 });
-
-    await openBtn.click();
-    const confirmDialog = page.locator('[data-testid="confirm-dialog"]');
-    await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-    await expect(confirmDialog).toContainText("2");
-
-    // Cancel — terminals remain open.
-    await page.locator('[data-testid="confirm-cancel"]').click();
-    await expect(confirmDialog).not.toBeVisible({ timeout: 3000 });
-    await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(2);
-
-    await page.screenshot({ path: "artifacts/wave1-f6a-confirm-shown.png" });
-
-    // Accept — both close.
-    await openBtn.click();
-    await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-    await page.locator('[data-testid="confirm-accept"]').click();
     await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
   });
 

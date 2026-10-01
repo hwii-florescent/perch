@@ -22,6 +22,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { execSync, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
 
@@ -171,7 +172,9 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     expect(worktreeSession).toBeTruthy();
 
     // 3. A persistent shell terminal with observable process state.
-    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+    // A terminal split is part of the session layout, so it survives reloads.
+    await page.getByTestId("pane-group-menu").click();
+    await page.getByTestId("pane-menu-split-down").click();
     const shell = page.locator(".terminal--persistent[data-pane-id]:visible");
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/, { timeout: 20000 });
     await shellCommand(page, `PERCH_MIX=survived; printf 'before_%s_PID_%s_END\\n' "$PERCH_MIX" "$$"`);
@@ -182,10 +185,8 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     // 4. An unsaved editor draft on the primary checkout, then an external
     //    write so the buffer is in the conflict state at kill time.
     const primaryEntry = project.locator(".workspace-entry").filter({ hasText: "main" }).first();
-    const filesButton = primaryEntry.locator('[data-testid^="workspace-files-"]');
-    await expect(filesButton).toBeVisible({ timeout: 15000 });
-    const primaryWorkspaceId = (await filesButton.getAttribute("data-testid"))!.slice("workspace-files-".length);
-    await filesButton.click();
+    const primaryWorkspaceId = await firstWorkspaceId(primaryEntry);
+    await openWorkspaceTool(page, primaryWorkspaceId, "files");
     await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("workspace-file-entry-src").click();
     await page.getByTestId(`workspace-file-entry-${RELATIVE_FILE}`).click();
@@ -197,7 +198,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await expect(page.getByTestId("workspace-file-conflict")).toBeVisible({ timeout: 15000 });
 
     // 5. An anchored review comment on the same workspace.
-    await primaryEntry.locator('[data-testid^="workspace-git-"]').click();
+    await openWorkspaceTool(page, primaryWorkspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("git-refresh").click();
     const diffLine = page
@@ -247,16 +248,14 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await expect(recoveredShell.locator(".xterm-rows")).toContainText(`after_survived_PID_${shellPid}_END`, { timeout: 20000 });
 
     // File draft and its conflict state are both durable.
-    await recoveredProject
-      .locator(`[data-testid="workspace-files-${primaryWorkspaceId}"]`)
-      .click();
+    await openWorkspaceTool(page, primaryWorkspaceId, "files");
     await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20000 });
     const recoveredEditor = page.getByTestId("workspace-file-editor");
     await expect(recoveredEditor).toHaveValue("draft that must survive the kill\n", { timeout: 25000 });
     await expect(page.getByTestId("workspace-file-conflict")).toBeVisible({ timeout: 20000 });
 
     // The anchored comment is still on the review list.
-    await recoveredProject.locator(`[data-testid="workspace-git-${primaryWorkspaceId}"]`).click();
+    await openWorkspaceTool(page, primaryWorkspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 20000 });
     expect(errors, "recovered page must not raise React errors").toEqual([]);
     // A recovered comment renders inline when its anchor still resolves against

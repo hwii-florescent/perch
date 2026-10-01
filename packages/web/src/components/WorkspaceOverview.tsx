@@ -232,7 +232,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     >
       <div className="workspace-overview__heading">
         <div>
-          <span className="workspace-overview__eyebrow">Workspace</span>
+          <span className="workspace-overview__eyebrow">Projects</span>
           <span className="workspace-overview__count">
             {visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
           </span>
@@ -241,8 +241,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           <button
             type="button"
             className="workspace-overview__icon-button"
-            title="Refresh workspace"
-            aria-label="Refresh workspace"
+            title="Refresh projects"
+            aria-label="Refresh projects"
             data-testid="workspace-refresh"
             onClick={() => fetchWorkspaceSnapshot(activeHostId)}
           >
@@ -425,45 +425,51 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           <div className="workspace-entry__actions">
                           <button
                             type="button"
-                            className="workspace-entry__files"
+                            className="workspace-entry__files workspace-entry__icon"
                             data-testid={`workspace-pin-${workspace.id}`}
                             aria-pressed={workspace.pinned === true}
                             title={workspace.pinned ? "Unpin" : "Pin to the top of the project"}
+                            aria-label={workspace.pinned ? "Unpin" : "Pin"}
                             onClick={(event) => {
                               event.stopPropagation();
                               pinWorkspace(workspace.id, !workspace.pinned);
                             }}
                           >
-                            {workspace.pinned ? "Unpin" : "Pin"}
+                            {workspace.pinned ? "⇣" : "⇡"}
                           </button>
                           {workspace.parentWorkspaceId && project.repoPath && (
                             <button
                               type="button"
-                              className="workspace-entry__files"
+                              className="workspace-entry__files workspace-entry__icon"
                               data-testid={`workspace-delete-${workspace.id}`}
                               title="Delete this worktree and its branch"
+                              aria-label="Delete worktree"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined });
                               }}
                             >
-                              Delete
+                              {"\u{1F5D1}\u{FE0E}"}
                             </button>
                           )}
                           {workspace.parentWorkspaceId && (
                             <button
                               type="button"
-                              className="workspace-entry__files"
+                              className="workspace-entry__files workspace-entry__icon"
                               data-testid={`workspace-hide-${workspace.id}`}
                               title="Hide from the sidebar (the checkout stays)"
+                              aria-label="Hide worktree"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setWorkspaceHidden(workspace.id, true);
                               }}
                             >
-                              Hide
+                              ⊖
                             </button>
                           )}
+                          {/* Desktop opens Files/Git from the ›_ drawer, which follows
+                              the clicked workspace; the phone switcher keeps them here. */}
+                          {compact && (<>
                           <button
                             type="button"
                             className="workspace-entry__files"
@@ -492,6 +498,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             Git
                           </button>
+                          </>)}
                           </div>
                           {workspace.state === "sleeping" && (
                             <button

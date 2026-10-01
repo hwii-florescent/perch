@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { WorkspaceGitReview } from "./WorkspaceGitReview";
-import { EMPTY_GIT_REVIEW_STATE, useWorkspaceGitReviewStore } from "../gitReviewStore";
+import { EMPTY_GIT_REVIEW_STATE, gitCapabilityForWorkspace, useWorkspaceGitReviewStore } from "../gitReviewStore";
 import { usePerchStore } from "../store";
 
 /**
@@ -28,10 +28,15 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
     [sessions, workspaceId],
   );
 
+  // A pane restored before the host advertises Git (a reload) mounts the
+  // review once the capability arrives; mounted earlier, every first request
+  // fails and stays failed.
+  const gitReady = usePerchStore((current) => gitCapabilityForWorkspace(workspaceId, current));
   useEffect(() => {
-    if (usePerchStore.getState().connected) actions.refreshStatus();
-  }, [actions]);
+    if (gitReady) actions.refreshStatus();
+  }, [actions, gitReady]);
 
+  if (!gitReady) return <div className="terminal__notice" role="status">Waiting for this host to offer Git…</div>;
   return (
     <WorkspaceGitReview
       workspaceId={workspaceId}

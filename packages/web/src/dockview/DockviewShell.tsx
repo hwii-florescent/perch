@@ -135,11 +135,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
     onPaneChange={(shellPaneId) => props.api.updateParameters({ shellPaneId })} />;
 }
 
-/** Workspace file panels are ordinary dockview components so the explorer,
- * editor, and its selected workspace travel with the user's saved mixed-pane
- * layout. The workspace id is carried in panel params and therefore survives
- * a session layout round trip without coupling Dockview to the filesystem
- * store. */
+/** Files and Git now open in the ›_ workspace tools drawer (App.tsx); these
+ * panel components only keep layouts saved before that move restorable. */
 function FilesPanel(props: IDockviewPanelProps) {
   const workspaceId = typeof props.params?.workspaceId === "string"
     ? props.params.workspaceId
@@ -271,16 +268,12 @@ function applyDefaultLayout(api: DockviewApi) {
   api.addPanel({ id: "chat", component: "chat", title: "Chat" });
 }
 
-export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => void }) {
+export function DockviewShell() {
   const apiRef = useRef<DockviewApi | null>(null);
   const [readyApi, setReadyApi] = useState<DockviewApi | null>(null);
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
   const sessionLayouts = usePerchStore((s) => s.sessionLayouts);
-  const workspaceFilesWorkspaceId = usePerchStore((s) => s.workspaceFilesWorkspaceId);
-  const closeWorkspaceFiles = usePerchStore((s) => s.closeWorkspaceFiles);
-  const workspaceGitReviewWorkspaceId = usePerchStore((s) => s.workspaceGitReviewWorkspaceId);
-  const closeWorkspaceGitReview = usePerchStore((s) => s.closeWorkspaceGitReview);
   const fetchSessionLayout = usePerchStore((s) => s.fetchSessionLayout);
   const saveSessionLayout = usePerchStore((s) => s.saveSessionLayout);
 
@@ -361,25 +354,10 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
       // Default panel so the shell never renders empty while the first
       // session.layout round-trip is in flight.
       event.api.addPanel({ id: "chat", component: "chat", title: "Chat" });
-      onReady?.(event.api);
 
       // Phase 4: expose this dockview instance to keybinds.ts (leader,x/v/-/z)
       // via the module-level controller — see dockviewController.ts for why.
-      const controller = createDockviewController(event.api);
-      registerDockviewController(controller);
-      // A click can arrive before Dockview has emitted onReady (especially
-      // while restoring a cold page). Consume the pending navigation now
-      // that a live controller exists instead of dropping the user's action.
-      const pendingWorkspaceId = usePerchStore.getState().workspaceFilesWorkspaceId;
-      if (pendingWorkspaceId) {
-        controller.openFiles(pendingWorkspaceId);
-        usePerchStore.getState().closeWorkspaceFiles();
-      }
-      const pendingGitWorkspaceId = usePerchStore.getState().workspaceGitReviewWorkspaceId;
-      if (pendingGitWorkspaceId) {
-        controller.openGitReview(pendingGitWorkspaceId);
-        usePerchStore.getState().closeWorkspaceGitReview();
-      }
+      registerDockviewController(createDockviewController(event.api));
 
       event.api.onDidLayoutChange(() => {
         if (restoringRef.current) return;
@@ -425,28 +403,8 @@ export function DockviewShell({ onReady }: { onReady?: (api: DockviewApi) => voi
         getDockviewController()?.addSessionChatPanel(draggedSessionId, title, referencePanelId, direction);
       });
     },
-    [onReady, flushPendingSave],
+    [flushPendingSave],
   );
-
-  // WorkspaceOverview lives outside Dockview and records an intent in the
-  // store. Turning that intent into a real panel here keeps navigation robust
-  // across desktop/mobile shells and makes the file surface part of the same
-  // persisted layout as chat and terminals.
-  useEffect(() => {
-    if (!workspaceFilesWorkspaceId) return;
-    const controller = getDockviewController();
-    if (!controller) return;
-    controller.openFiles(workspaceFilesWorkspaceId);
-    closeWorkspaceFiles();
-  }, [closeWorkspaceFiles, workspaceFilesWorkspaceId]);
-
-  useEffect(() => {
-    if (!workspaceGitReviewWorkspaceId) return;
-    const controller = getDockviewController();
-    if (!controller) return;
-    controller.openGitReview(workspaceGitReviewWorkspaceId);
-    closeWorkspaceGitReview();
-  }, [closeWorkspaceGitReview, workspaceGitReviewWorkspaceId]);
 
   // On every session switch: flush any pending save for the session being
   // left, mark this activation as "not yet applied", and — critically —

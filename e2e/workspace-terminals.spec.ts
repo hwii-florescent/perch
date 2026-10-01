@@ -25,7 +25,9 @@ test("shell state survives reload, multiple panes, and mobile view release", asy
   observe(page);
   await page.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
   try {
-    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+    // A terminal split is part of the session layout, so it survives reloads.
+    await page.getByTestId("pane-group-menu").click();
+    await page.getByTestId("pane-menu-split-down").click();
     const shell = page.locator(".terminal--persistent:visible");
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/);
     const firstId = (await shell.getAttribute("data-terminal-id"))!;

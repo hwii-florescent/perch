@@ -1,0 +1,81 @@
+import { usePerchStore } from "../store";
+import { TerminalView } from "../views/Terminal";
+import { WorkspaceFilesView } from "./WorkspaceFiles";
+import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
+
+export type WorkspaceToolsTab = "terminal" | "files" | "gitReview";
+
+const TABS: { id: WorkspaceToolsTab; label: string }[] = [
+  { id: "terminal", label: "Terminal" },
+  { id: "files", label: "Files" },
+  { id: "gitReview", label: "Git" },
+];
+
+// The open file per workspace, so a reload or a workspace switch comes back
+// to it (per viewer, like the dockview panel params this replaced).
+const pathKey = (workspaceId: string) => `perch.workspaceTools.path.${workspaceId}`;
+function readPath(workspaceId: string): string | undefined {
+  try { return localStorage.getItem(pathKey(workspaceId)) ?? undefined; } catch { return undefined; }
+}
+function writePath(workspaceId: string, path: string) {
+  try { localStorage.setItem(pathKey(workspaceId), path); } catch { /* convenience only */ }
+}
+
+/**
+ * The desktop drawer behind the toolbar's ›_ button: a shell, the file
+ * explorer and Git for whichever workspace is active. It belongs to the app,
+ * not to a session's saved layout, so it stays open across chats and simply
+ * follows the workspace the user clicks.
+ *
+ * ponytail: the shell is still the active session's own shell pane (shells
+ * are session-owned server-side), so a workspace with no session shows the
+ * last session's shell; Files and Git do follow the workspace exactly.
+ */
+export function WorkspaceTools({ tab, onTabChange, onClose }: {
+  tab: WorkspaceToolsTab;
+  onTabChange: (tab: WorkspaceToolsTab) => void;
+  onClose: () => void;
+}) {
+  const workspaceId = usePerchStore((state) =>
+    state.activeWorkspaceId ?? state.sessions.find((candidate) => candidate.id === state.sessionId)?.workspaceId ?? null);
+  const row = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
+  const missing = <div className="workspace-tools__empty">Pick a workspace in the sidebar.</div>;
+
+  return (
+    <aside className="workspace-tools" data-testid="workspace-tools" aria-label="Workspace tools">
+      <div className="workspace-tools__bar">
+        <nav className="workspace-tools__tabs" aria-label="Workspace tools">
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              className={"workspace-tools__tab" + (tab === id ? " workspace-tools__tab--active" : "")}
+              data-testid={`workspace-tools-${id}`}
+              aria-pressed={tab === id}
+              onClick={() => onTabChange(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <span className="workspace-tools__workspace" title={row?.path}>
+          {row ? row.name || row.path.split("/").pop() : ""}
+        </span>
+        <button type="button" className="workspace-tools__close" aria-label="Close workspace tools" onClick={onClose}>×</button>
+      </div>
+      <div className="workspace-tools__content">
+        {tab === "terminal" && <TerminalView active />}
+        {tab === "files" && (workspaceId ? (
+          <WorkspaceFilesView
+            key={workspaceId}
+            workspaceId={workspaceId}
+            initialPath={readPath(workspaceId)}
+            onPathChange={(path) => writePath(workspaceId, path)}
+            onClose={onClose}
+          />
+        ) : missing)}
+        {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}
+      </div>
+    </aside>
+  );
+}

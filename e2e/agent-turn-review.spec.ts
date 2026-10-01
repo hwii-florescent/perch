@@ -21,6 +21,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
 const BASE_TEXT = "BEFORE_TURN";
@@ -183,9 +184,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     await page.getByRole("button", { name: "Register project", exact: true }).click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     await expect(project).toBeVisible({ timeout: 15000 });
-    const gitButton = project.locator('[data-testid^="workspace-git-"]').first();
-    await expect(gitButton).toBeVisible({ timeout: 15000 });
-    const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
+    const workspaceId = await firstWorkspaceId(project);
 
     // 2. A real CLI agent process in that repository.
     const mode = page.getByTestId("session-mode-toggle");
@@ -225,7 +224,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       .toContain("AGENT_EDIT alpha");
 
     // 4. Open the Git surface and wait for the server to close the boundary.
-    await project.locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     const selector = page.getByTestId("git-diff-target");
     const diff = page.getByTestId("git-diff");
@@ -273,7 +272,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     //    still reports the human edit the turn correctly excluded.
     git("gc --prune=now", repo);
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     await selector.selectOption("lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT alpha", { timeout: 15000 });
@@ -297,7 +296,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       await expect.poll(() => sql("SELECT count(*) FROM agent_change_snapshots WHERE completed = 1;")).toBe("2");
       const betaSession = sql("SELECT session_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
       expect(betaSession).not.toBe(alphaSession);
-      await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+      await openWorkspaceTool(page, workspaceId, "gitReview");
       await page.getByTestId("git-refresh").click();
       await selector.selectOption("lastAgentTurn");
       await expect(diff).toContainText("AGENT_EDIT beta");
@@ -331,7 +330,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       // Reload and select the durable session again, then use the same control
       // on mobile to move between its older turn and the newer workspace turn.
       await page.reload({ waitUntil: "networkidle" });
-      await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+      await openWorkspaceTool(page, workspaceId, "gitReview");
       await selectTurnFor(alphaSession);
       await expect(diff).toContainText(BASE_TEXT);
       await expect(diff).not.toContainText("AGENT_EDIT beta");
@@ -421,9 +420,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await page.getByTestId("workspace-project-path").fill(repo);
     await page.getByRole("button", { name: "Register project", exact: true }).click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
-    const gitButton = project.locator('[data-testid^="workspace-git-"]').first();
-    await expect(gitButton).toBeVisible({ timeout: 15000 });
-    const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
+    const workspaceId = await firstWorkspaceId(project);
 
     const mode = page.getByTestId("session-mode-toggle");
     await expect(mode).toBeEnabled({ timeout: 15000 });
@@ -445,7 +442,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     //    client caches before anything goes wrong.
     await prompt("alpha");
     await expect(rows).toContainText("turnbot_done alpha", { timeout: 60_000 });
-    await project.locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     const selector = page.getByTestId("git-diff-target");
     const option = selector.locator('option[value="lastAgentTurn"]');
@@ -503,7 +500,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
 
     // A client that reconnects to the same state is told the same thing.
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     await expect(option).toHaveText("Last agent turn (turnbot · not captured)", { timeout: 20_000 });
     await expect(option).toHaveAttribute("disabled", /.*/);
@@ -530,7 +527,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await expect(diff).toContainText("AGENT_NEW bulk", { timeout: 15_000 });
     await page.screenshot({ path: testInfo.outputPath("turn-large-count-desktop.png"), fullPage: true });
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await selector.selectOption("lastAgentTurn");
     await expect(summary).toContainText("turnbot changed 513 paths");
     sql(`UPDATE agent_change_snapshots SET after_status = '{}' WHERE snapshot_id = '${bulkTurn}';`);

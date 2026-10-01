@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const RUN_ID = `${Date.now()}-${process.pid}`;
@@ -99,11 +100,8 @@ async function openReview(page: Page, creation: "project" | "session" = "project
 
   const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
   await expect(project).toBeVisible({ timeout: 15000 });
-  const gitButton = project.locator('[data-testid^="workspace-git-"]');
-  await expect(gitButton).toBeVisible({ timeout: 15000 });
-  const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
-  await gitButton.click();
-  await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
+  const workspaceId = await firstWorkspaceId(project);
+  await openWorkspaceTool(page, workspaceId, "gitReview");
   return workspaceId;
 }
 
@@ -248,7 +246,7 @@ test.describe("Workspace Git/review UI", () => {
       await expect(page.locator(".chat__stop")).toHaveCount(0, { timeout: 30000 });
       expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(targetSessionId);
 
-      await project.getByTestId(`workspace-git-${workspaceId}`).click();
+      await openWorkspaceTool(page, workspaceId, "gitReview");
       await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT, { timeout: 15000 });
       const firstNote = `Keep the worktree sentinel readable ${RUN_ID}`;
       const secondNote = `Preserve the index sentinel ${RUN_ID}`;
@@ -417,7 +415,7 @@ test.describe("Workspace Git/review UI", () => {
       await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT);
       await expectWorkspaceStartOffered(page, false);
       await page.reload({ waitUntil: "networkidle" });
-      await project.getByTestId(`workspace-git-${workspaceId}`).click();
+      await openWorkspaceTool(page, workspaceId, "gitReview");
       await expectWorkspaceStartOffered(page, false);
       await page.screenshot({ path: testInfo.outputPath("workspace-start-unavailable.png"), fullPage: true });
     } finally {
@@ -467,7 +465,7 @@ test.describe("Workspace Git/review UI", () => {
 
         await page.reload({ waitUntil: "networkidle" });
         const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
-        await project.getByTestId(`workspace-git-${workspaceId}`).click();
+        await openWorkspaceTool(page, workspaceId, "gitReview");
         await selector.selectOption("workspaceStart");
         await expect(diff).toContainText(HEAD_TEXT);
         expect((await latestDiff(page, "compare")).target).toEqual(initial.target);

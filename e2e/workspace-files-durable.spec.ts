@@ -12,6 +12,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -151,10 +152,8 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await page.getByRole("button", { name: "Register project", exact: true }).click();
       const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
       await expect(project).toBeVisible({ timeout: 15000 });
-      const filesButton = project.locator('[data-testid^="workspace-files-"]');
-      await expect(filesButton).toBeVisible({ timeout: 15000 });
-      const workspaceId = (await filesButton.getAttribute("data-testid"))!.slice("workspace-files-".length);
-      await filesButton.click();
+      const workspaceId = await firstWorkspaceId(project);
+      await openWorkspaceTool(page, workspaceId, "files");
       await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
 
       // Repeated root requests are part of the regression for retained
@@ -232,7 +231,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
 
       // The save must be visible as a Git change, not just as bytes on disk —
       // this is the combined edit/save/status half of V-05.
-      await project.locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
+      await openWorkspaceTool(page, workspaceId, "gitReview");
       await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("git-refresh").click();
       await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE, { timeout: 15000 });
@@ -243,7 +242,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await page.screenshot({ path: testInfo.outputPath("files-durable-status.png"), fullPage: true });
 
       // Back to the editor for the external-conflict half.
-      await project.locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
+      await openWorkspaceTool(page, workspaceId, "files");
       await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
       await showExplorer(page);
       if (!(await page.getByTestId("workspace-file-entry-src/main.txt").count())) {

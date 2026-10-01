@@ -10,10 +10,10 @@
  *        tab bar) and back → the same split layout is restored.
  *   W3 — switching via the tab bar vs. the sidebar reach the same target
  *        session and restore the same layout.
- *   W4 — the toolbar "Open terminal" button toggles the terminal area (first
- *        click opens, second click closes); the "+" action in the terminal
- *        group's own header adds a second terminal as a TAB in that SAME
- *        group, not a new split group.
+ *   W4 — the toolbar ›_ button toggles the workspace tools drawer
+ *        (Terminal | Files | Git), which is app-level, not part of a layout;
+ *        the "+" action in a terminal group's own header adds a second
+ *        terminal as a TAB in that SAME group, not a new split group.
  *
  * All tests are headless. Two real (short, cheap) `claude` turns are used to
  * materialize two sibling sessions in the same project: Fix 3 defers a
@@ -178,7 +178,8 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(page.locator(".terminal__surface")).toHaveCount(0);
 
     // Split: open a terminal pane below chat.
-    await page.getByTitle("Open terminal").click();
+    await page.getByTestId("pane-group-menu").click();
+    await page.getByTestId("pane-menu-split-down").click();
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 
     // Give the 500ms debounced session.layout.set time to fire and round-trip.
@@ -235,42 +236,37 @@ test.describe("Workspace tabs (Phase 3)", () => {
   // group header's "+" action adds a new terminal TAB in the same group
   // (Bug 3 fix — previously every click stacked a brand-new split panel).
   // -------------------------------------------------------------------------
-  test("W4. terminal toggle open/close; + adds a tab to the same group", async ({ page }) => {
+  test("W4. ›_ toggles the workspace tools drawer; + adds a tab to the same group", async ({ page }) => {
     test.setTimeout(60000);
-    // No real agent turn needed — this only exercises dockview panel wiring
-    // against the always-present default Chat panel, so it runs regardless
-    // of claude availability.
+    // No real agent turn needed — this runs regardless of claude availability.
     await freshPage(page);
 
     const openBtn = page.getByTitle("Open terminal");
+    const drawer = page.getByTestId("workspace-tools");
     const terminalGroupHeader = page.locator('.dv-tabs-and-actions-container:has([data-testid="terminal-add-tab"])');
 
-    // Closed by default.
-    await expect(page.locator(".terminal__surface")).toHaveCount(0);
+    await expect(drawer).toHaveCount(0);
     await expect(openBtn).toHaveAttribute("aria-pressed", "false");
-
-    // First click: opens the terminal area.
     await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await expect(drawer.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
     await expect(openBtn).toHaveAttribute("aria-pressed", "true");
-    // Exactly one group qualifies as "a terminal group" so far.
-    await expect(terminalGroupHeader).toHaveCount(1);
-    await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(1);
-
+    // The drawer is not a dockview panel: the layout keeps just chat.
+    await expect(page.locator(".dv-tabs-and-actions-container")).toHaveCount(1);
+    await drawer.getByTestId("workspace-tools-files").click();
+    await expect(drawer.locator(".terminal__surface")).toHaveCount(0);
     await page.screenshot({ path: "artifacts/w4-01-opened.png" });
-
-    // Second click: closes the terminal area entirely (toggle, not another split).
+    // From Files, ›_ goes back to the terminal; from the terminal it closes.
     await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
+    await expect(drawer.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await openBtn.click();
+    await expect(drawer).toHaveCount(0);
     await expect(openBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(page.locator('[data-testid="terminal-add-tab"]')).toHaveCount(0);
 
-    await page.screenshot({ path: "artifacts/w4-02-closed.png" });
-
-    // Third click: re-opens (confirms the toggle isn't a one-shot).
-    await openBtn.click();
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
-    await expect(openBtn).toHaveAttribute("aria-pressed", "true");
+    // A terminal split from the pane menu is a dockview group with its own "+".
+    await page.getByTestId("pane-group-menu").click();
+    await page.getByTestId("pane-menu-split-down").click();
+    await expect(terminalGroupHeader).toHaveCount(1, { timeout: 10000 });
+    await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(1);
 
     // "+" in the terminal group's own header adds a second terminal as a TAB
     // in that SAME group — still exactly one qualifying group, now with two

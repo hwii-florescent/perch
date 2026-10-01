@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { DockviewApi } from "dockview-react";
+import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
 import { DockviewShell } from "./dockview/DockviewShell";
@@ -12,17 +11,17 @@ import { hasSeenOnboarding, markOnboardingSeen } from "./onboarding";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSwitcher } from "./components/MobileSwitcher";
 import { Toast } from "./components/Toast";
-import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useIsMobileWidth } from "./responsive";
 import { useLeaderKey } from "./keybinds";
-import { getDockviewController } from "./dockview/dockviewController";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
+import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
+
+const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 
 export default function App() {
-  const apiRef = useRef<DockviewApi | null>(null);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const [keybindHelpOpen, setKeybindHelpOpen] = useState(false);
   // Wave 2 item 11: first-run onboarding modal. Lazily initialized from
@@ -41,47 +40,34 @@ export default function App() {
   const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
   const closeWorkspaceGitReview = usePerchStore((state) => state.closeWorkspaceGitReview);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
-  // Mirrors the live dockview terminal-open state so the toolbar button can
-  // render pressed/unpressed — see the onDidLayoutChange subscription below.
-  // The actual toggle decision itself is always made from live panel state
-  // (via the controller), not this mirror, so it can never drift out of sync
-  // with reality (e.g. a terminal tab closed via its own close button, or via
-  // the pane context menu, still flips this back correctly).
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  // Wave 1 item 6: when the toolbar toggle is about to close a terminal
-  // *group* holding more than one terminal tab, confirm first (closing a
-  // single terminal stays a one-click, unconfirmed action). Holds the
-  // count to show in the dialog, or null when no confirmation is pending.
-  const [confirmCloseTerminals, setConfirmCloseTerminals] = useState<number | null>(null);
-
-  const handleReady = useCallback((api: DockviewApi) => {
-    apiRef.current = api;
-    const controller = getDockviewController();
-    setTerminalOpen(controller?.hasTerminalOpen() ?? false);
-    api.onDidLayoutChange(() => {
-      setTerminalOpen(getDockviewController()?.hasTerminalOpen() ?? false);
-    });
-  }, []);
+  // The ›_ drawer (Terminal | Files | Git for the active workspace). App
+  // state, not part of a session's layout, so it stays put across chats.
+  const [tools, setTools] = useState<WorkspaceToolsTab | null>(() => {
+    try { return localStorage.getItem(TOOLS_STORAGE_KEY) as WorkspaceToolsTab | null; } catch { return null; }
+  });
+  useEffect(() => {
+    try { if (tools) localStorage.setItem(TOOLS_STORAGE_KEY, tools); else localStorage.removeItem(TOOLS_STORAGE_KEY); } catch { /* per-viewer convenience */ }
+  }, [tools]);
+  const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
 
   const toggleTerminal = useCallback(() => {
-    if (isMobile) {
-      setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
-      return;
-    }
-    const controller = getDockviewController();
-    if (!controller) return;
-    if (controller.hasTerminalOpen()) {
-      const count = controller.terminalPanelCount();
-      if (count > 1) {
-        setConfirmCloseTerminals(count);
-        return;
-      }
-    }
-    controller.toggleTerminalGroup();
+    if (isMobile) setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
+    else setTools((tab) => tab === "terminal" ? null : "terminal");
   }, [isMobile]);
 
+  // Sidebar Files/Git requests open the drawer on that tab, focused on the
+  // requested workspace.
+  useEffect(() => {
+    const workspaceId = workspaceFilesWorkspaceId ?? workspaceGitReviewWorkspaceId;
+    if (isMobile || !workspaceId) return;
+    if (workspaceId !== usePerchStore.getState().activeWorkspaceId) focusWorkspace(workspaceId);
+    setTools(workspaceFilesWorkspaceId ? "files" : "gitReview");
+    closeWorkspaceFiles();
+    closeWorkspaceGitReview();
+  }, [isMobile, workspaceFilesWorkspaceId, workspaceGitReviewWorkspaceId, focusWorkspace, closeWorkspaceFiles, closeWorkspaceGitReview]);
+
   // Workspace navigation originates in the shared switcher on mobile. The
-  // request ids remain in the store so desktop Dockview can consume them when
+  // request ids remain in the store so the desktop drawer can consume them when
   // the viewport grows again; the mobile canvas only selects the matching
   // single pane while the narrow layout is active.
   useEffect(() => {
@@ -135,7 +121,7 @@ export default function App() {
           className="toolbar__button"
           title="Open terminal"
           aria-label="Open terminal"
-          aria-pressed={isMobile ? mobilePane === "terminal" : terminalOpen}
+          aria-pressed={isMobile ? mobilePane === "terminal" : tools !== null}
           onClick={toggleTerminal}
         >
           {"›_"}
@@ -161,8 +147,9 @@ export default function App() {
               onCloseFiles={closeWorkspaceFiles}
               onCloseGitReview={closeWorkspaceGitReview}
             />
-          ) : <DockviewShell onReady={handleReady} />}
+          ) : <DockviewShell />}
         </main>
+        {!isMobile && tools && <WorkspaceTools tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
       </div>
 
       <StatusBar onOpenKeybindHelp={openKeybindHelp} />
@@ -179,17 +166,6 @@ export default function App() {
             markOnboardingSeen();
             setOnboardingOpen(false);
           }}
-        />
-      )}
-      {confirmCloseTerminals !== null && (
-        <ConfirmDialog
-          message={`Close ${confirmCloseTerminals} terminals?`}
-          confirmLabel="Close"
-          onConfirm={() => {
-            setConfirmCloseTerminals(null);
-            getDockviewController()?.toggleTerminalGroup();
-          }}
-          onCancel={() => setConfirmCloseTerminals(null)}
         />
       )}
     </div>

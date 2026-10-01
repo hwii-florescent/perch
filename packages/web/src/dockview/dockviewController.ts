@@ -108,26 +108,6 @@ export interface DockviewController {
    * "chat" or if there is no active panel. Closes terminal panels AND
    * session-chat panels alike — "chat" is the only permanent one. */
   closeActiveTerminalPanel(): void;
-  /** Whether at least one terminal panel currently exists (classified by
-   * `panelKind`, i.e. `component === "terminal"` — NOT "any panel whose id
-   * isn't chat", which would also match session-chat panels). Backs the
-   * toolbar "Open terminal" button's toggle affordance. */
-  hasTerminalOpen(): boolean;
-  /** Number of terminal panels currently open (`panelKind(p) === "terminal"`),
-   * regardless of how they're split across groups or grouped as tabs. Used to
-   * gate the close-confirmation dialog (Wave 1 item 6) — only shown when
-   * `toggleTerminalGroup()` is about to close more than one. */
-  terminalPanelCount(): number;
-  /** Toolbar "Open terminal" button behavior: if no terminal panel exists,
-   * open one split below "chat" (same placement the button always used).
-   * If any terminal panel(s) already exist — regardless of how many separate
-   * groups they're spread across via splits — close all of them, collapsing
-   * back to the single "chat" panel and resetting the toggle to "closed".
-   * Deriving open/closed from live panel state (rather than tracking a
-   * separate boolean) means the toggle self-corrects no matter how a
-   * terminal pane was closed (this button, the pane context menu's "Close",
-   * or a tab's own close button). */
-  toggleTerminalGroup(): void;
   /** Add a new terminal panel as a TAB within the same group as
    * `referencePanelId`, instead of a new split. Backs the "+" action shown
    * in a terminal group's own header (see `DockviewShell.tsx`'s
@@ -192,13 +172,6 @@ export interface DockviewController {
    * the click-to-split session picker and the drag-and-drop path (see
    * `SessionSplitPopover.tsx` / `DockviewShell.tsx`'s drag handlers). */
   addSessionChatPanel(sessionId: string, title: string, referencePanelId: string, direction: Direction): void;
-  /** Open the workspace-scoped file surface as a real dockview panel. A
-   * deterministic id keeps one editor surface per workspace and lets the
-   * persisted dockview layout restore its workspace binding. */
-  openFiles(workspaceId: string, title?: string): void;
-  /** Open the workspace-scoped Git/status/diff/review surface in the saved
-   * dockview layout. A deterministic id prevents duplicate review panes. */
-  openGitReview(workspaceId: string, title?: string): void;
   /** Session ids that currently have an open (or grouped-as-tab) chat panel
    * in this shell — used to grey out / relabel already-open sessions in the
    * split-session picker rather than let it silently create a duplicate. */
@@ -242,30 +215,6 @@ export function createDockviewController(api: DockviewApi): DockviewController {
       if (!active || active.id === PRIMARY_CHAT_PANEL_ID) return;
       api.removePanel(active);
     },
-    hasTerminalOpen() {
-      return api.panels.some((p) => panelKind(p) === "terminal");
-    },
-    terminalPanelCount() {
-      return api.panels.filter((p) => panelKind(p) === "terminal").length;
-    },
-    toggleTerminalGroup() {
-      const terminalPanels = api.panels.filter((p) => panelKind(p) === "terminal");
-      if (terminalPanels.length > 0) {
-        // Close every terminal panel — across however many split groups they
-        // ended up in — collapsing back to just "chat" (and any session-chat
-        // panels, which this toggle never touches) and resetting the toggle
-        // to "closed". Removing a group's last panel disposes the group
-        // itself, so this needs no separate group bookkeeping.
-        for (const panel of terminalPanels) api.removePanel(panel);
-        return;
-      }
-      api.addPanel({
-        id: newPanelId(),
-        component: TERMINAL_COMPONENT,
-        title: "Terminal",
-        position: { referencePanel: PRIMARY_CHAT_PANEL_ID, direction: "below" },
-      });
-    },
     addTerminalTabInGroup(referencePanelId) {
       api.addPanel({
         id: newPanelId(),
@@ -290,40 +239,6 @@ export function createDockviewController(api: DockviewApi): DockviewController {
         title,
         params: { sessionId },
         position: { referencePanel: reference, direction },
-      });
-    },
-    openFiles(workspaceId, title) {
-      if (!workspaceId) return;
-      const id = `files-${workspaceId}`;
-      const existing = api.panels.find((panel) => panel.id === id);
-      if (existing) {
-        existing.api.setActive();
-        return;
-      }
-      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
-      api.addPanel({
-        id,
-        component: FILES_COMPONENT,
-        title: title || "Files",
-        params: { workspaceId },
-        position: { referencePanel, direction: "right" },
-      });
-    },
-    openGitReview(workspaceId, title) {
-      if (!workspaceId) return;
-      const id = `git-review-${workspaceId}`;
-      const existing = api.panels.find((panel) => panel.id === id);
-      if (existing) {
-        existing.api.setActive();
-        return;
-      }
-      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
-      api.addPanel({
-        id,
-        component: GIT_REVIEW_COMPONENT,
-        title: title || "Git & review",
-        params: { workspaceId },
-        position: { referencePanel, direction: "right" },
       });
     },
     openSessionChatIds() {

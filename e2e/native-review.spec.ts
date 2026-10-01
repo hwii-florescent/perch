@@ -5,6 +5,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   test.setTimeout(180_000);
@@ -57,8 +58,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await page.getByRole("button", { name: "Register project", exact: true }).click();
     const project = page.locator(".workspace-project").filter({ hasText: token });
     await expect(project).toBeVisible();
-    const gitButton = project.locator('[data-testid^="workspace-git-"]');
-    const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
+    const workspaceId = await firstWorkspaceId(project);
     const toggle = page.getByTestId("session-mode-toggle");
     await expect(toggle).toBeEnabled();
     if (await toggle.getAttribute("aria-checked") !== "true") await toggle.click();
@@ -68,7 +68,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-controlling", "true");
     if (provider === "codex") {
-      await expect(terminal.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/, { timeout: 30_000 });
+      await expect(terminal.locator(".xterm-rows")).toContainText(/Do you trust the contents|model:.*gpt-/i, { timeout: 30_000 });
       if ((await terminal.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await terminal.locator(".xterm-helper-textarea").press("Enter");
     }
     if (provider === "claude") {
@@ -99,7 +99,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui.getByRole("status")).toHaveText("Ready");
     const nativeId = await ui.getAttribute("data-native-session");
     expect(nativeId).not.toBe("");
-    await gitButton.click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible();
     await page.locator('.workspace-git__path-button[title="notes.txt"]').click();
     await expect(page.getByTestId("git-diff")).toContainText("review_first");

@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
 
@@ -184,12 +185,10 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await page.getByRole("button", { name: "Register project", exact: true }).click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     await expect(project).toBeVisible({ timeout: 15000 });
-    const gitButton = project.locator('[data-testid^="workspace-git-"]').first();
-    await expect(gitButton).toBeVisible({ timeout: 15000 });
-    const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
+    const workspaceId = await firstWorkspaceId(project);
 
     // --- Git review, narrow desktop pane ---------------------------------
-    await gitButton.click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     const review = page.getByTestId("workspace-git-review");
     await expect(review).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("git-status")).toContainText("changed path", { timeout: 20000 });
@@ -210,7 +209,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     expect(await clippedControls(review), "Git review controls clipped once a comment thread renders").toEqual([]);
 
     // --- Files, narrow desktop pane --------------------------------------
-    await project.locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
+    await openWorkspaceTool(page, workspaceId, "files");
     const files = page.getByTestId("workspace-files-view");
     await expect(files).toBeVisible({ timeout: 15000 });
     await page.getByTestId("workspace-file-entry-src").click();
@@ -240,7 +239,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
 
     // --- Wide desktop: the same surfaces, plus terminal and settings -----
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.locator(`[data-testid="workspace-git-${workspaceId}"]`).first().click();
+    await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(review).toBeVisible({ timeout: 15000 });
     expect(await clippedControls(review), "Git review controls clipped at a wide viewport").toEqual([]);
     await expectFocusVisible(review, '[data-testid="git-refresh"]');

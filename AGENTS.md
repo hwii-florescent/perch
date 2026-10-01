@@ -87,7 +87,9 @@ there, not here.
   - `store/index.ts`: the Zustand store, the single source of WS-driven state.
   - `xtermSetup.ts`: builds every terminal.
   - `agentTerminals.ts`: CLI panes.
-  - `Sidebar.tsx`.
+  - `Sidebar.tsx` (Projects → Workspaces → sessions).
+  - `components/WorkspaceTools.tsx`: the ›_ drawer (Terminal / Files / Git
+    for the active workspace).
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
     over a CLI session.
   - `statusDot.ts`: status glyphs.
