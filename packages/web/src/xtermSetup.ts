@@ -117,6 +117,9 @@ export interface PerchTerminal {
    * emulator to match. Returns the new `{cols, rows}` when they changed, else
    * null — callers use that to avoid spamming `terminal.resize`. */
   fit: () => { cols: number; rows: number } | null;
+  /** Take the PTY's size (a view that doesn't own it); the next `fit` then
+   * reports any difference. */
+  follow: (cols: number, rows: number) => void;
   dispose: () => void;
 }
 
@@ -130,6 +133,8 @@ export function createPerchTerminal(
   container: HTMLElement,
   onResize: (cols: number, rows: number) => void,
   profile?: TerminalProfile | null,
+  /** False while the view follows a PTY size it doesn't own. */
+  shouldFit: () => boolean = () => true,
 ): PerchTerminal {
   // The profile's font is the one the user's TUIs are designed around — for a
   // Nerd Font (powerline glyphs, icons) a substitute renders the wrong glyph
@@ -188,6 +193,14 @@ export function createPerchTerminal(
   if (initialTheme) options.theme = initialTheme as ITheme;
 
   const term = new Terminal(options);
+  // ponytail: xterm 6.1.0-beta's WriteBuffer.flushSync (run by every resize)
+  // loops `while (chunk = buffer.shift())`, so a queued "" ends the loop and
+  // it, its callback and every write queued after it are dropped: an empty
+  // replay's callback never fired and its shell sat on "Opening shell…". An
+  // empty Uint8Array is truthy and parses to nothing, keeping write order.
+  // Drop this once xterm's flushSync checks `!== undefined`.
+  const write = term.write.bind(term);
+  term.write = (data, callback) => write(data.length ? data : new Uint8Array(0), callback);
 
   // Re-apply on OS appearance change so an already-open terminal picks up
   // the other palette live rather than only at next mount.
@@ -349,7 +362,7 @@ export function createPerchTerminal(
     // degenerate grid, and pushing it to the PTY makes the CLI reflow its
     // whole UI to ~1 column — damage that is done server-side and survives
     // the pane becoming visible again. Skip instead.
-    if (disposed || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
+    if (disposed || !shouldFit() || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
     try {
       fitWithScaling();
     } catch {
@@ -386,6 +399,12 @@ export function createPerchTerminal(
   return {
     term,
     fit,
+    follow: (cols, rows) => {
+      // `resize` parses already-written output first, at the old size.
+      term.resize(cols, rows);
+      lastCols = cols;
+      lastRows = rows;
+    },
     dispose: () => {
       if (disposed) return;
       disposed = true;

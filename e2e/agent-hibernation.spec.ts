@@ -22,7 +22,7 @@ import { restoreChatMode, setChatMode } from "./chatMode";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 interface AgentStatusFrame {
   state: string;
@@ -111,10 +111,6 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 30_000 });
     const originalPid = await ui.getAttribute("data-native-pid");
     expect(originalPid).toMatch(/^\d+$/);
-    const tmuxNames = [...new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]))];
-    expect(tmuxNames, "one concrete runtime was launched").toHaveLength(1);
-    const tmuxName = tmuxNames[0];
-    execFileSync("tmux", ["has-session", "-t", `=${tmuxName}`], { stdio: "ignore" });
     await setChatMode(page, "cli");
 
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
@@ -143,11 +139,10 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     ).toBe("sleeping");
     const asleep = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(asleep.providerSessionId, "hibernation keeps the resume identity").toBe(providerSessionId);
-    // The process is really gone: its tmux session is not listed any more.
-    expect(() => execFileSync("tmux", ["has-session", "-t", `=${tmuxName}`], { stdio: "ignore" })).toThrow();
+    // The process is really gone (perchd closed its pty).
     await expect.poll(() => {
       try { process.kill(Number(originalPid), 0); return true; } catch { return false; }
-    }, { timeout: 5_000, message: "the original native process must exit after tmux termination" }).toBe(false);
+    }, { timeout: 5_000, message: "the original native process must exit after hibernation" }).toBe(false);
 
     // 4. The original client returns. Its session reopens, which resumes the
     //    recorded conversation — wake never falls back to a fresh session, so
@@ -189,10 +184,6 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
         child.once("exit", () => resolve());
         child.kill("SIGKILL");
       });
-    }
-    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
-    for (const name of ownedTmux) {
-      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already stopped */ }
     }
     restoreChatMode(); // the fixture core shares the suite's settings file; the test ends in UI mode
     fs.rmSync(fixture, { recursive: true, force: true });

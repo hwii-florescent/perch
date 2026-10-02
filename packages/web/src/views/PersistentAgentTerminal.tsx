@@ -8,6 +8,9 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 
+/** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
+const SIZE_MARKER = /\x1b\[8;(\d+);(\d+)t/g;
+
 export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }: {
   sessionId: string; agent: string; cliError?: string | null; onClose?: () => void;
 }) {
@@ -42,9 +45,20 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     setPending(false);
     setExitCode(null);
     setControlling(false);
+    // Until attached, the fitted size is what a new PTY starts at; after,
+    // only the controlling view sizes it and the others follow its markers.
     const created = createPerchTerminal(container.current, (cols, rows) => {
       if (inputId.current) usePerchStore.getState().resizeTerminal(inputId.current, cols, rows);
-    }, usePerchStore.getState().terminalProfile);
+    }, usePerchStore.getState().terminalProfile, () => !attachedId || ownsInput);
+    function write(data: string, callback?: () => void) {
+      let last = 0;
+      for (const match of data.matchAll(SIZE_MARKER)) {
+        created.term.write(data.slice(last, match.index));
+        created.follow(Number(match[2]), Number(match[1]));
+        last = match.index + match[0].length;
+      }
+      created.term.write(data.slice(last), callback);
+    }
     emulator.current = created;
     created.term.options.disableStdin = true;
     setTerm(created.term);
@@ -64,13 +78,13 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
         setStatus(snapshot);
         initialControl = !snapshot.inputOwner;
         const suppressClipboard = created.term.parser.registerOscHandler(52, () => true);
-        created.term.write(replay, () => {
+        write(replay, () => {
           suppressClipboard.dispose();
           replayDone = true;
           if (!disposed) { updateInput(); created.fit(); }
         });
       },
-      (data) => { if (!disposed) created.term.write(data); },
+      (data) => { if (!disposed) write(data); },
       (snapshot, owned) => {
         if (disposed) return;
         ownsInput = owned;

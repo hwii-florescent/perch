@@ -13,6 +13,12 @@ describe("terminalKeyHandler", () => {
     expect(terminalKeyHandler(key({ key: "Enter", ctrlKey: true }))).toBe(true);
     expect(terminalKeyHandler(key({ key: "Enter", shiftKey: true }))).toBe(true);
   });
+
+  it("keeps Cmd combinations (copy, paste, find) with the app", () => {
+    expect(terminalKeyHandler(key({ key: "v", code: "KeyV", metaKey: true }))).toBe(false);
+    expect(terminalKeyHandler(key({ type: "keyup", key: "c", code: "KeyC", metaKey: true }))).toBe(false);
+    expect(terminalKeyHandler(key({ key: "k", code: "KeyK", ctrlKey: true }))).toBe(true);
+  });
 });
 
 describe("kitty keyboard protocol", () => {

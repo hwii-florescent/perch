@@ -53,12 +53,9 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       if (message.type === "terminal.opened") shellIds.add(message.terminal.id);
     }));
   }
-  const seed = (directory: string) => {
-    localStorage.setItem("perch.onboarding.seen", "1");
-    localStorage.setItem("perch.dirBrowser.lastPath.local", directory);
-  };
-  await context.addInitScript(seed, fixture);
-  await secondContext.addInitScript(seed, fixture);
+  const seed = () => localStorage.setItem("perch.onboarding.seen", "1");
+  await context.addInitScript(seed);
+  await secondContext.addInitScript(seed);
   const shots = path.join(root, ".impeccable/review");
   fs.mkdirSync(shots, { recursive: true });
   async function prepare(current: Page) {
@@ -108,7 +105,9 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     expect(ompKey[1].workspaceId).toBe(piKey[1].workspaceId);
     expect(ompKey[1].sessionId).not.toBe(piKey[1].sessionId);
     await second.close();
-    await page.getByTestId("pane-split-session").first().click();
+    // One pane has no header; its top-row tab carries the pane menu.
+    await page.getByTestId(`tab-${ompKey[1].sessionId}`).click({ button: "right" });
+    await page.getByTestId("pane-menu-split-session").click();
     await page.getByTestId(`session-split-option-${piKey[1].sessionId}`).click();
     const omp = page.locator(`[data-testid="persistent-agent-terminal"][data-terminal-id="${ompKey[0]}"]`);
     const pi = page.locator(`[data-testid="persistent-agent-terminal"][data-terminal-id="${piKey[0]}"]`);
@@ -119,7 +118,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(pi).toHaveAttribute("data-controlling", "true");
     await pi.locator(".xterm-helper-textarea").pressSequentially("_split", { delay: 20 });
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft_split");
-    await expect(omp.locator(".xterm-rows")).not.toContainText("_split");
+    await expect(omp.locator(".xterm-rows")).not.toContainText("_draft_split");
     await page.reload({ waitUntil: "networkidle" });
     await expect(omp.locator(".xterm-rows")).toContainText("perch_omp_draft");
     await expect(pi.locator(".xterm-rows")).toContainText("perch_pi_draft_split");
@@ -169,7 +168,8 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(shell.getByText("Shell running", { exact: true })).toBeVisible();
     await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
     await shell.locator(".xterm-helper-textarea").press("Enter");
-    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${fixture}`);
+    // Both sessions started with no project, so in Chats.
+    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${path.join(os.homedir(), ".perch/scratch")}`);
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });

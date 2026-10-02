@@ -51,20 +51,18 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
-      if (!terminalKeyHandler(e)) return false;
-      if (e.type !== "keydown") return true;
-      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
+      if (e.type === "keydown" && e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setOpen(true);
         return false;
       }
-      if (e.key === "Escape" && openRef.current) {
+      if (e.type === "keydown" && e.key === "Escape" && openRef.current) {
         e.preventDefault();
         setOpen(false);
         searchAddonRef.current?.clearActiveDecoration();
         return false;
       }
-      return true;
+      return terminalKeyHandler(e);
     });
   }, [term]);
 

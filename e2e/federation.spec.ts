@@ -17,8 +17,7 @@
  * Tests (serial):
  *   E1 — host switcher lists "test-remote" with a connected dot
  *   E2 — "+ New session" on the remote host creates a session under it
- *   E3 — remote hosted chat turn streams and completes (proves proxy chain)
- *   E4 — remote CLI mode: ModeSwitch → terminal renders → /exit → exited banner
+ *   E4 — a remote claude terminal renders, takes /exit, shows the exited banner
  *   E5 — disable host in settings → disabled dot in the switcher; re-enable → connected
  *
  * Screenshots saved to e2e/screenshots-federation/ (NOT under artifacts/ which
@@ -26,9 +25,6 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -223,15 +219,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}` });
 }
 
-/** Select agent + model via the ModelChip popover. */
-async function selectAgentModel(page: Page, agentId: string, modelId: string): Promise<void> {
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
-  await chip.click();
-  await page.locator(`[data-testid="agent-option-${agentId}"]`).click();
-  await page.locator(`[data-testid="model-option-${modelId}"]`).click();
-}
-
 /**
  * Open the sidebar's host-switcher popover (the environment chip is the
  * button). Returns the popover locator.
@@ -264,21 +251,28 @@ async function switchToHost(page: Page, hostId: string, name: string): Promise<v
 }
 
 /**
- * Open the new-session picker for the *active* host and choose "No project".
- * This is the Fix 2 flow: clicking "+ New session" opens a popover instead of
- * directly creating a session.
+ * Open the new-session picker for the *active* host, pick `agent`, and choose
+ * "No project". Resolves with the new session id.
  */
-async function createRemoteSessionViaPicker(page: Page, hostId: string): Promise<void> {
+async function createRemoteSessionViaPicker(page: Page, hostId: string, agent: string): Promise<string> {
+  const before = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
   const newBtn = page.locator(`[data-testid="new-session-${hostId}"]`);
   await expect(newBtn).toBeEnabled({ timeout: 5000 });
   await newBtn.click();
+  const picker = page.getByTestId("new-session-popover-agent");
+  await expect(picker).toBeEnabled({ timeout: 10_000 });
+  await picker.selectOption(agent);
   const noneOpt = page.locator('[data-testid="project-option-none"]');
   await expect(noneOpt).toBeVisible({ timeout: 5000 });
   await noneOpt.click();
   await expect(noneOpt).not.toBeVisible({ timeout: 3000 });
-  // Let session.created → session.list settle before any caller snapshots the
-  // (host-scoped) sidebar list length.
-  await page.waitForTimeout(800);
+  await expect
+    .poll(async () => {
+      const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      return Boolean(id) && id !== before;
+    })
+    .toBe(true);
+  return (await page.evaluate(() => localStorage.getItem("perch.sessionId")))!;
 }
 
 /** Open the settings modal via the gear button. */
@@ -288,62 +282,13 @@ async function openSettings(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Chat mode settings helpers (global setting lives in ~/.perch/settings.json,
-// not isolated per e2e server — must reset so later specs see Hosted default)
-// ---------------------------------------------------------------------------
-
-const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
-
-function resetChatMode(): void {
-  try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    data.chatMode = "hosted";
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
-  } catch {
-    /* leave alone */
-  }
-}
-
-/** Flip the global chat mode via the Settings modal and wait for it to apply. */
-async function setChatMode(page: Page, mode: "hosted" | "cli"): Promise<void> {
-  await openSettings(page);
-  const toggle = page.locator('[data-testid="settings-chat-mode"]');
-  await expect(toggle).toBeVisible({ timeout: 5000 });
-  const wantChecked = mode === "cli" ? "true" : "false";
-  const current = await toggle.getAttribute("aria-checked");
-  if (current !== wantChecked) {
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", wantChecked, { timeout: 5000 });
-  }
-  await page.keyboard.press("Escape");
-  await expect(page.locator('[data-testid="settings-modal"]')).not.toBeVisible({ timeout: 5000 });
-}
-
-// ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
 
 test.describe("Stage F3: federation e2e", () => {
   test.describe.configure({ mode: "serial" });
 
-  let claudeAvailable = false;
-
   test.beforeAll(async () => {
-    resetChatMode();
-    // Check claude binary availability.
-    const { execSync } = await import("child_process");
-    try {
-      execSync(
-        '[ -x ~/.local/bin/claude ] && echo ok || which claude',
-        { encoding: "utf8", shell: "/bin/sh" },
-      );
-      claudeAvailable = true;
-    } catch {
-      claudeAvailable = false;
-    }
-
     // Clean stale entry from a previous run.
     await deleteRemoteHostIfPresent();
 
@@ -372,7 +317,6 @@ test.describe("Stage F3: federation e2e", () => {
     } catch {
       // Don't fail the suite on cleanup failure.
     }
-    resetChatMode();
   });
 
   // -------------------------------------------------------------------------
@@ -396,191 +340,45 @@ test.describe("Stage F3: federation e2e", () => {
   // E2 — "+ New session" on the remote host creates a session under it
   // -------------------------------------------------------------------------
   test("E2. new-session picker creates remote session", async ({ page }) => {
-    test.setTimeout(120000);
+    test.setTimeout(60000);
     await freshSession(page);
-
     await switchToHost(page, REMOTE_HOST_ID, REMOTE_HOST_NAME);
-
-    // Capture session id before creating the remote session.
-    const idBefore = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-
-    // Open picker via the active host's "+ New session" and choose "No project".
-    // Fix 2: clicking it opens a popover (not direct creation).
-    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
-
-    // The server sends back session.created — localStorage must be updated.
-    await page.waitForFunction(
-      (before: string | null) => localStorage.getItem("perch.sessionId") !== before,
-      idBefore,
-      { timeout: 10000 },
-    );
-
-    const newId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-    expect(newId).toBeTruthy();
-
-    // Fix 3: blank remote session is NOT inserted into the remote DB yet, so
-    // it does NOT appear in the sidebar.  We verify the active session belongs
-    // to the remote host by checking the active session item when it does appear
-    // (after a message is sent), OR simply verify the session.created handshake
-    // completed (localStorage updated above).
-    //
-    // If claude is available, send a quick message so the session persists and
-    // appears in the (now remote-scoped) sidebar list.
-    if (claudeAvailable) {
-      const remoteItems = page.locator(".sidebar__list .session-item");
-      const countBeforeMsg = await remoteItems.count();
-      await selectAgentModel(page, "claude", "claude-haiku-4-5");
-      const textarea = page.locator(".chat__input textarea");
-      await expect(textarea).toBeEnabled({ timeout: 8000 });
-      await textarea.fill("Reply with exactly: e2-remote");
-      await page.locator(".chat__send").click();
-
-      // Wait for the session to appear in the remote-scoped sidebar list.
-      await expect(remoteItems).toHaveCount(countBeforeMsg + 1, { timeout: 15000 });
-
-      // Active session must be the remote one, and the sidebar must still be
-      // scoped to the remote host.
-      await expect(page.locator(".session-item--active")).toBeVisible({ timeout: 10000 });
-      await expect(page.locator(`[data-testid="new-session-${REMOTE_HOST_ID}"]`)).toBeVisible();
-
-      const runningDot = page.locator(".session-item--active .session-status--running");
-      await expect(runningDot).toBeVisible({ timeout: 20000 });
-      await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-    }
-
+    // A remote host relays no agent catalog, so its picker offers Claude/Codex.
+    const id = await createRemoteSessionViaPicker(page, REMOTE_HOST_ID, "claude");
+    // Active in the tab bar and the (remote-scoped, non-workspace) sidebar
+    // list, and the terminal is live.
+    await expect(page.getByTestId(`tab-${id}`)).toHaveClass(/tab-bar__tab--active/, { timeout: 15000 });
+    await expect(page.locator(".session-item--active")).toBeVisible({ timeout: 15000 });
+    await expect(page.locator(`[data-testid="new-session-${REMOTE_HOST_ID}"]`)).toBeVisible();
+    await expect(page.locator(".xterm-rows")).toContainText(/Haiku 4\.5/i, { timeout: 30_000 });
     await shot(page, "fed-e2-remote-session.png");
   });
 
   // -------------------------------------------------------------------------
-  // E3 — remote hosted chat turn streams end-to-end (90 s timeout)
-  // -------------------------------------------------------------------------
-  test("E3. remote hosted chat turn relayed through hub", async ({ page }) => {
-    test.setTimeout(120000);
-
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — skipping E3");
-      return;
-    }
-
-    await freshSession(page);
-    await switchToHost(page, REMOTE_HOST_ID, REMOTE_HOST_NAME);
-
-    // Create a remote session via picker (Fix 2 flow).
-    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
-
-    // Select claude-haiku-4-5.
-    await selectAgentModel(page, "claude", "claude-haiku-4-5");
-
-    const textarea = page.locator(".chat__input textarea");
-    await expect(textarea).toBeEnabled({ timeout: 10000 });
-
-    // Capture count before sending — E2 may have already left a remote session row.
-    const remoteItems = page.locator(".sidebar__list .session-item");
-    const countBeforeE3 = await remoteItems.count();
-
-    await textarea.fill("Reply with exactly: remote-pong");
-    await page.locator(".chat__send").click();
-
-    // Session persists after first message — count must increase by 1.
-    await expect(remoteItems).toHaveCount(countBeforeE3 + 1, { timeout: 15000 });
-
-    // Running dot appears on the remote session.
-    const runningDot = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot).toBeVisible({ timeout: 20000 });
-
-    await shot(page, "fed-e3-remote-chat.png");
-
-    // Turn completes.
-    await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-
-    // Assistant message contains "remote-pong".
-    const assistantMsg = page.locator(".message--assistant").last();
-    await expect(assistantMsg).toBeVisible({ timeout: 10000 });
-    const msgText = await assistantMsg.textContent();
-    expect(msgText).toMatch(/remote-pong/i);
-
-    await shot(page, "fed-e3-remote-chat-done.png");
-  });
-
-  // -------------------------------------------------------------------------
-  // E4 — remote CLI mode: ModeSwitch → terminal relay → /exit → exited banner
+  // E4 — a remote claude terminal: output, input and exit relay through the hub
   // -------------------------------------------------------------------------
   test("E4. remote CLI terminal relay through hub", async ({ page }) => {
     test.setTimeout(120000);
-
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — skipping E4");
-      return;
-    }
-
     await freshSession(page);
     await switchToHost(page, REMOTE_HOST_ID, REMOTE_HOST_NAME);
+    const id = await createRemoteSessionViaPicker(page, REMOTE_HOST_ID, "claude");
 
-    // Create a remote session via picker (Fix 2 flow) and run a hosted turn so
-    // there's a claude session id for the CLI to attach to.
-    await createRemoteSessionViaPicker(page, REMOTE_HOST_ID);
-
-    await selectAgentModel(page, "claude", "claude-haiku-4-5");
-
-    const textarea = page.locator(".chat__input textarea");
-    await expect(textarea).toBeEnabled({ timeout: 10000 });
-
-    // Capture count before sending — previous tests may have left remote session rows.
-    const remoteItems = page.locator(".sidebar__list .session-item");
-    const countBeforeE4 = await remoteItems.count();
-
-    await textarea.fill("Reply with exactly: cli-ready");
-    await page.locator(".chat__send").click();
-
-    // Wait for the session to appear in the remote list and the turn to complete.
-    await expect(remoteItems).toHaveCount(countBeforeE4 + 1, { timeout: 15000 });
-    const runningDot = page.locator(".session-item--active .session-status--running");
-    await expect(runningDot).toBeVisible({ timeout: 20000 });
-    await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-
-    // Switch to CLI mode via the global Settings toggle.
-    await setChatMode(page, "cli");
-
-    // Terminal surface must appear (proves terminal.created relay through hub).
-    const termSurface = page.locator(".terminal__surface");
-    await expect(termSurface).toBeVisible({ timeout: 20000 });
-
-    // Brief pause for the remote CLI to start outputting data.
-    await page.waitForTimeout(3000);
-
+    // Output relay: the CLI's banner renders. (A remote pane is the plain
+    // terminal view, not the local persistent agent terminal.)
+    const rows = page.locator(".xterm-rows");
+    const input = page.locator(".xterm-helper-textarea");
+    await expect(rows).toContainText(/Haiku 4\.5/i, { timeout: 30_000 });
     await shot(page, "fed-e4-cli-relay.png");
 
-    // xterm.js captures keyboard input via a hidden textarea (.xterm-helper-textarea).
-    // Click it to focus, then interact with the CLI.
-    const xtermInput = page.locator(".xterm-helper-textarea");
-    await expect(xtermInput).toBeAttached({ timeout: 10000 });
-    await xtermInput.click({ force: true });
-
-    // The CLI may show a trust dialog on first attach — press Enter to accept
-    // ("Yes, I trust this folder"), then wait for the interactive prompt.
-    await page.waitForTimeout(1000);
-    await xtermInput.press("Enter"); // dismiss trust dialog if present
-    await page.waitForTimeout(2000); // let the CLI reach its interactive prompt
-
-    // Send /exit — proves terminal.input relay.
-    await xtermInput.click({ force: true });
-    await page.keyboard.type("/exit");
-    await page.keyboard.press("Enter");
-    // The agent runs inside a shell: /exit leaves a shell prompt in the
-    // pane, and exiting that shell ends the terminal.
-    await page.waitForTimeout(3000); // the login shell starting
-    await page.keyboard.type("exit");
-    await page.keyboard.press("Enter");
-
-    // Exited banner must appear — proves terminal.exit relay.
-    const exitedBanner = page.locator(".terminal__exited");
-    await expect(exitedBanner).toBeVisible({ timeout: 40000 });
-
+    // Input relay: /exit reaches the CLI. A remote pane runs the CLI bare (no
+    // login shell around it), so its exit shows the exited banner (exit relay).
+    await input.pressSequentially("/exit");
+    await expect(rows).toContainText("Exit the CLI");
+    await input.press("Enter");
+    await expect(page.locator(".terminal__exited")).toBeVisible({ timeout: 30_000 });
     await shot(page, "fed-e4-cli-exited.png");
-
-    // Return to Hosted mode.
-    await setChatMode(page, "hosted");
-    await expect(termSurface).not.toBeVisible({ timeout: 5000 });
+    await page.getByTestId("cli-close-session").click();
+    await expect(page.getByTestId(`tab-${id}`)).toHaveCount(0, { timeout: 10_000 });
   });
 
   // -------------------------------------------------------------------------

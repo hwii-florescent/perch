@@ -99,3 +99,21 @@ describe("selectTerminalTheme", () => {
     expect(selectTerminalTheme({ theme: {} }, true)).toBeUndefined();
   });
 });
+
+describe("createPerchTerminal", () => {
+  it("keeps an empty write's callback, and later writes, across a resize", async () => {
+    // jsdom has no canvas, matchMedia or ResizeObserver; xterm only uses them to measure.
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal } = await import("./xtermSetup");
+    const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
+    const fired: string[] = [];
+    term.write("", () => fired.push("replay"));
+    term.write("live", () => fired.push("live"));
+    term.resize(100, 30); // flushes queued writes synchronously
+    expect(fired).toEqual(["replay", "live"]);
+    expect(term.buffer.active.getLine(0)?.translateToString(true)).toBe("live");
+    dispose();
+  });
+});

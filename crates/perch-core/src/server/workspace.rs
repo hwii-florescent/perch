@@ -462,9 +462,10 @@ pub(super) fn register_worktree_listing(
 
 /// Find worktrees added or removed outside perch without the worktree menu
 /// open (docs/reference/worktree-scan-fingerprint.md in Orca): each local
-/// project's `.git/worktrees` entries and their `gitdir` paths are the
-/// fingerprint, and only a
-/// changed fingerprint pays for `git worktree list`. `seen` is the caller's
+/// project's `.git/worktrees` entries and their `gitdir` paths, plus
+/// `.git/HEAD`, are the fingerprint, and only a new or changed fingerprint
+/// pays for `git worktree list`. HEAD makes the first pass and every branch
+/// switch record the checkout's branch, which the sidebar labels it with. `seen` is the caller's
 /// memory between passes. A linked worktree row whose checkout git no longer
 /// lists (`git worktree remove` in a shell) is archived, like perch's own
 /// delete. Checkouts a create job is still making are left to the job.
@@ -490,10 +491,11 @@ pub(super) async fn discover_worktrees(app: &AppState, seen: &mut HashMap<String
             })
             .unwrap_or_default();
         names.sort();
-        if seen
-            .get(&project.path)
-            .map_or(names.is_empty(), |old| *old == names)
-        {
+        names.push(
+            std::fs::read_to_string(std::path::Path::new(&project.path).join(".git/HEAD"))
+                .unwrap_or_default(),
+        );
+        if seen.get(&project.path) == Some(&names) {
             continue;
         }
         seen.insert(project.path.clone(), names);

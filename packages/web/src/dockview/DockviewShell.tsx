@@ -514,6 +514,7 @@ export function DockviewShell() {
               y={contextMenu.y}
               controller={controller}
               sessionId={apiRef.current ? referencePanelSessionId(apiRef.current, contextMenu.panelId, sessionId) : undefined}
+              onSplitSession={() => setSessionSplit({ referencePanelId: contextMenu.panelId, x: contextMenu.x, y: contextMenu.y })}
               onClose={() => setContextMenu(null)}
             />
           );

@@ -264,7 +264,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       { label: workspace.pinned ? "Unpin" : "Pin", testId: `workspace-pin-${workspace.id}`, onSelect: () => pinWorkspace(workspace.id, !workspace.pinned) },
       "divider",
       { label: "Files", testId: `workspace-menu-files-${workspace.id}`, onSelect: () => open("files") },
-      { label: "Git", testId: `workspace-menu-git-${workspace.id}`, onSelect: () => open("git") },
+      ...(workspace.branch || project.repoPath ? [{ label: "Git", testId: `workspace-menu-git-${workspace.id}`, onSelect: () => open("git") }] : []),
       ...(linked ? ["divider" as const, { label: "Hide from sidebar", testId: `workspace-hide-${workspace.id}`, onSelect: () => setWorkspaceHidden(workspace.id, true) }] : []),
       ...(linked && project.repoPath
         ? [{ label: "Delete worktree", testId: `workspace-delete-${workspace.id}`, danger: true, onSelect: () => requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined }) }]
@@ -642,7 +642,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           >
                             Files
                           </button>
-                          <button
+                          {(workspace.branch || project.repoPath) && <button
                             type="button"
                             className="workspace-entry__files workspace-entry__git"
                             data-testid={`workspace-git-${workspace.id}`}
@@ -655,7 +655,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             }}
                           >
                             Git
-                          </button>
+                          </button>}
                           </div>
                           )}
                           {workspace.state === "sleeping" && (

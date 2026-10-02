@@ -18,16 +18,21 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
  * the app, not to a session's saved layout, so it stays open across chats and
  * simply follows the workspace the user clicks.
  */
-export function WorkspaceTools({ tab, onTabChange, onClose }: {
+export function WorkspaceTools({ requestedWorkspaceId, tab, onTabChange, onClose }: {
+  /** The workspace a sidebar Files/Git action named, if any. */
+  requestedWorkspaceId?: string | null;
   tab: WorkspaceToolsTab;
   onTabChange: (tab: WorkspaceToolsTab) => void;
   onClose: () => void;
 }) {
-  const workspaceId = usePerchStore((state) =>
+  const activeId = usePerchStore((state) =>
     state.activeWorkspaceId ?? state.sessions.find((candidate) => candidate.id === state.sessionId)?.workspaceId ?? null);
+  const workspaceId = requestedWorkspaceId ?? activeId;
   const row = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const project = usePerchStore((state) => state.workspaceProjects.find((candidate) => candidate.id === row?.projectId));
-  const isGit = Boolean(row?.branch || project?.repoPath);
+  // A requested id with no local row is a remote checkout, offered Git only
+  // when its host relays git (`ProjectGitReviewButton`).
+  const isGit = Boolean(row?.branch || project?.repoPath || (requestedWorkspaceId && !row));
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   if (tab === "gitReview" && !isGit) tab = "files";
   const missing = <div className="workspace-tools__empty">Pick a workspace in the sidebar.</div>;

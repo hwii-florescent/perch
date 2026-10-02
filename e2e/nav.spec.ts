@@ -22,7 +22,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import * as fs from "fs";
 import { execSync } from "child_process";
-import { pickProject } from "./projects";
+import { startChat } from "./projects";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -161,43 +161,6 @@ async function freshPage(page: Page): Promise<void> {
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }
 
-function projectRow(page: Page, cwd: string): Locator {
-  return page.locator(`[data-testid="project-row"][data-project-cwd="${cwd}"]`);
-}
-
-/** Create a session whose cwd is `cwd` via the picker's "Type path" fallback,
- * then send a seed message so the server's lazy DB insert runs and the
- * project shows up in the nav. Returns the new session's id. */
-async function createSessionInDir(page: Page, cwd: string, seed: string): Promise<string> {
-  const newBtn = page.locator('[data-testid="new-session-local"]');
-  await expect(newBtn).toBeEnabled({ timeout: 10000 });
-  await newBtn.click();
-  await pickProject(page, cwd);
-
-  // Cheapest possible real turn — the row only needs the insert side effect.
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
-  await chip.click();
-  await page.locator('[data-testid="agent-option-claude"]').click();
-  await page.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
-
-  const textarea = page.locator(".chat__input textarea");
-  await expect(textarea).toBeEnabled({ timeout: 10000 });
-  await textarea.fill(seed);
-  await page.locator(".chat__send").click();
-
-  const active = page.locator(".session-item--active");
-  await expect(active).toBeVisible({ timeout: 20000 });
-  const id = await active.getAttribute("data-session-id");
-  expect(id).toBeTruthy();
-  return id as string;
-}
-
-/** Let any in-flight turn settle so it doesn't bleed into later specs. */
-async function waitForIdle(page: Page): Promise<void> {
-  await expect(page.locator(".session-status--running")).toHaveCount(0, { timeout: 120000 });
-}
-
 async function openHostSwitcher(page: Page): Promise<Locator> {
   await page.locator('[data-testid="host-switcher"]').click();
   const popover = page.locator('[data-testid="host-switcher-popover"]');
@@ -212,16 +175,9 @@ async function openHostSwitcher(page: Page): Promise<Locator> {
 test.describe("Navigation redesign (host switcher + project nav)", () => {
   test.describe.configure({ mode: "serial" });
 
-  let claudeAvailable = false;
 
   test.beforeAll(() => {
     setupFixtures();
-    try {
-      execSync("which claude || [ -x ~/.local/bin/claude ]", { encoding: "utf8", shell: "/bin/sh" });
-      claudeAvailable = true;
-    } catch {
-      claudeAvailable = false;
-    }
   });
 
   test.afterAll(() => {
@@ -232,70 +188,19 @@ test.describe("Navigation redesign (host switcher + project nav)", () => {
   // -------------------------------------------------------------------------
   // N1 — two projects in the nav; tab bar is scoped to the active one
   // -------------------------------------------------------------------------
-  test("N1. two project dirs appear in the nav; the tab bar follows the active project", async ({ page }) => {
-    test.setTimeout(240000);
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — N1 needs two persisted sessions");
-      return;
-    }
-
+  test("N1. the tab bar follows the active project", async ({ page }) => {
     await freshPage(page);
+    const sessionA = await startChat(page, "terminal", PROJ_A);
+    const sessionB = await startChat(page, "terminal", PROJ_B);
 
-    // --- Project A -----------------------------------------------------
-    const sessionA = await createSessionInDir(page, PROJ_A, "nav-a seed " + Date.now());
-    await expect(projectRow(page, PROJ_A)).toBeVisible({ timeout: 15000 });
-    // Creating it also made it the active project, so its sessions are listed.
-    await expect(
-      page.locator(`.sidebar__project--active .session-item[data-session-id="${sessionA}"]`),
-    ).toBeVisible({ timeout: 10000 });
-    await waitForIdle(page);
+    // B is active: the tab bar carries only B's tabs.
+    await expect(page.getByTestId(`tab-${sessionB}`)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId(`tab-${sessionA}`)).toHaveCount(0);
 
-    // --- Project B -----------------------------------------------------
-    const sessionB = await createSessionInDir(page, PROJ_B, "nav-b seed " + Date.now());
-    await expect(projectRow(page, PROJ_B)).toBeVisible({ timeout: 15000 });
-    await waitForIdle(page);
-
-    // Both projects are in the nav.
-    await expect(projectRow(page, PROJ_A)).toBeVisible();
-    await expect(projectRow(page, PROJ_B)).toBeVisible();
-
-    // B is active (it was just created): its sessions are listed, A's are not.
-    await expect(projectRow(page, PROJ_B)).toHaveAttribute("aria-current", "true");
-    await expect(page.locator(`.session-item[data-session-id="${sessionB}"]`)).toBeVisible();
-    await expect(page.locator(`.session-item[data-session-id="${sessionA}"]`)).toHaveCount(0);
-
-    // ...and the tab bar carries only B's tabs.
-    await expect(page.locator(`[data-testid="tab-${sessionB}"]`)).toBeVisible({ timeout: 10000 });
-    await expect(page.locator(`[data-testid="tab-${sessionA}"]`)).toHaveCount(0);
-
-    await page.screenshot({ path: "artifacts/n1-project-b-active.png" });
-
-    // --- Click project A: sidebar + tab bar both re-point ---------------
-    await projectRow(page, PROJ_A).click();
-    await expect(projectRow(page, PROJ_A)).toHaveAttribute("aria-current", "true", { timeout: 5000 });
-    await expect(page.locator(`.session-item[data-session-id="${sessionA}"]`)).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(page.locator(`.session-item[data-session-id="${sessionB}"]`)).toHaveCount(0);
-    await expect(page.locator(`[data-testid="tab-${sessionA}"]`)).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(`[data-testid="tab-${sessionB}"]`)).toHaveCount(0);
-
-    // A is a git checkout, so its row's second line is the branch; B is not,
-    // so its row falls back to a shortened cwd.
-    await expect(projectRow(page, PROJ_A).locator('[data-testid="workspace-git-local"]')).toContainText(
-      "nav-main",
-      { timeout: 20000 },
-    );
-    await expect(projectRow(page, PROJ_B).locator(".sidebar__project-sub")).toBeVisible();
-
-    await page.screenshot({ path: "artifacts/n1-project-a-active.png" });
-
-    // Opening a session from the tab bar keeps the nav on its project.
-    await page.locator(`[data-testid="tab-${sessionA}"]`).click();
-    await expect(
-      page.locator(`.session-item--active[data-session-id="${sessionA}"]`),
-    ).toBeVisible({ timeout: 15000 });
-    await expect(projectRow(page, PROJ_A)).toHaveAttribute("aria-current", "true");
+    // Opening A's session from the sidebar re-points the tab bar.
+    await page.getByTestId(`workspace-session-${sessionA}`).click();
+    await expect(page.getByTestId(`tab-${sessionA}`)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId(`tab-${sessionB}`)).toHaveCount(0);
   });
 
   // -------------------------------------------------------------------------
@@ -339,7 +244,8 @@ test.describe("Navigation redesign (host switcher + project nav)", () => {
       await expect(page.locator(`[data-testid="new-session-${NAV_HOST_ID}"]`)).toBeVisible();
       await expect(page.locator('[data-testid="new-session-local"]')).toHaveCount(0);
       // Local projects are no longer listed while a remote host is active.
-      await expect(projectRow(page, PROJ_A)).toHaveCount(0);
+      const projectA = page.locator(".workspace-project").filter({ hasText: "perch-e2e-nav-a" });
+      await expect(projectA).toHaveCount(0);
 
       await page.screenshot({ path: "artifacts/n2-remote-host-active.png" });
 
@@ -348,9 +254,7 @@ test.describe("Navigation redesign (host switcher + project nav)", () => {
       await popover.locator('[data-testid="host-option-local"]').click();
       await expect(popover).toHaveCount(0, { timeout: 5000 });
       await expect(page.locator('[data-testid="new-session-local"]')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('[data-testid="project-list"] [data-testid="project-row"]').first()).toBeVisible({
-        timeout: 10000,
-      });
+      await expect(projectA.first()).toBeVisible({ timeout: 10000 });
     } finally {
       await deleteNavHost();
     }

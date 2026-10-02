@@ -13,8 +13,9 @@
  * Two bindings are NOT part of the leader chord, matching herdr's actual
  * UX for these (both are also directly reachable without a prefix in most
  * command-palette-style tools):
- *   - `Ctrl/Cmd+K` opens the Navigator unconditionally (even while a text
- *     input has focus — command-palette convention, e.g. Slack/Linear).
+ *   - `Cmd+K` opens the Navigator unconditionally (even while a text
+ *     input has focus — command-palette convention, e.g. Slack/Linear);
+ *     `Ctrl+K` does too, except in a terminal, where it belongs to the PTY.
  *   - plain `?` opens KeybindHelp, but only when focus is NOT inside an
  *     editable element (a bare `?` must still be typeable in the composer).
  *
@@ -44,7 +45,7 @@ export interface KeybindEntry {
 }
 
 export const KEYBINDS: KeybindEntry[] = [
-  { keys: "Ctrl/Cmd+K", description: "Open Navigator", group: "global" },
+  { keys: "Cmd+K (Ctrl+K outside terminals)", description: "Open Navigator", group: "global" },
   { keys: "Ctrl+Space, g", description: "Open Navigator", group: "global" },
   { keys: "?", description: "Open this keybind help (outside inputs)", group: "global" },
   { keys: "Ctrl+Space, ?", description: "Open this keybind help", group: "global" },
@@ -96,14 +97,17 @@ function inTerminal(target: EventTarget | null): boolean {
 let chordPending = false;
 
 /** xterm's custom key handler (attached by terminalSearch.ts for every
- * terminal). Returns false for keys perch consumes: only the leader chord.
- * Everything else, Ctrl/Shift+Enter included, is xterm's to encode; the
- * kitty keyboard protocol (xtermSetup.ts) lets CLIs tell them apart the
- * same way they do in Ghostty. */
+ * terminal). Returns false for keys the PTY must not see: the leader chord,
+ * and Cmd combinations, which belong to the app as in Ghostty (copy, paste,
+ * find, Navigator; the browser default still runs). Without the Cmd rule
+ * the kitty protocol would encode them as CSI u. Everything else, Ctrl/
+ * Shift+Enter included, is xterm's to encode; the kitty keyboard protocol
+ * (xtermSetup.ts) lets CLIs tell those apart as they do in Ghostty. */
 export function terminalKeyHandler(e: KeyboardEvent): boolean {
+  if (e.metaKey) return false;
   if (e.type !== "keydown") return true;
   if (chordPending) return false;
-  return !(e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " "));
+  return !(e.ctrlKey && !e.altKey && (e.code === "Space" || e.key === " "));
 }
 
 // ---------------------------------------------------------------------------
@@ -387,9 +391,10 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
         return;
       }
 
-      // Ctrl/Cmd+K -> Navigator, unconditionally (command-palette convention;
-      // deliberately NOT gated by the editable-focus guard below).
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+      // Cmd+K -> Navigator, unconditionally (command-palette convention;
+      // deliberately NOT gated by the editable-focus guard below). Ctrl+K too,
+      // except in a terminal: there it is the PTY's (readline kill-line).
+      if ((e.metaKey || (e.ctrlKey && !inTerminal(e.target))) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         handlersRef.current.openNavigator();
         return;

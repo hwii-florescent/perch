@@ -15,10 +15,7 @@
  *        Phase 3's per-session layout persistence: switching away to a
  *        sibling session and back still restores the (non-maximized) split,
  *        i.e. the zoom/un-zoom cycle doesn't corrupt or wedge persistence.
- *        Requires two real, persisted sibling sessions (`claudeAvailable`
- *        gate, same pattern as workspace-tabs.spec.ts's W2/W3) since Fix 3
- *        defers a session's DB row — and hence any `session.layout.set`
- *        actually landing — until its first message.
+ *        Uses two plain shell sessions started in Chats.
  *   P4 — the pane header's `⋯` button (`pane-group-menu`, rendered in
  *        dockview's right-header-actions slot, distinct from P2's right-click
  *        tab menu) opens the same `PaneContextMenu` on a *plain* click. This
@@ -32,6 +29,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { shellPanes, startChat, switchViaSidebar, switchViaTabBar } from "./projects";
 
 const BASE_URL = "http://127.0.0.1:7799";
 
@@ -40,47 +38,6 @@ async function freshPage(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-}
-
-async function openLocalPicker(page: Page): Promise<void> {
-  const btn = page.locator('[data-testid="new-session-local"]');
-  await expect(btn).toBeEnabled({ timeout: 10000 });
-  await btn.click();
-  await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
-}
-
-/** Select claude-haiku-4-5, send `text`, and wait for the turn to finish. */
-async function sendAndWait(page: Page, text: string): Promise<void> {
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
-  await chip.click();
-  await page.locator('[data-testid="agent-option-claude"]').click();
-  await page.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
-
-  const textarea = page.locator(".chat__input textarea");
-  await expect(textarea).toBeEnabled({ timeout: 8000 });
-  await textarea.fill(text);
-  await page.locator(".chat__send").click();
-
-  const runningDot = page.locator(".session-item--active .session-status--running");
-  await expect(runningDot).toBeVisible({ timeout: 20000 });
-  await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-}
-
-/** Switch to `sessionId` via its tab-bar pill and wait for it to become active. */
-async function switchViaTabBar(page: Page, sessionId: string): Promise<void> {
-  await page.locator(`[data-testid="tab-${sessionId}"]`).click();
-  await expect(page.locator(`.session-item--active[data-session-id="${sessionId}"]`)).toBeVisible({
-    timeout: 15000,
-  });
-}
-
-/** Switch to `sessionId` via its sidebar row and wait for it to become active. */
-async function switchViaSidebar(page: Page, sessionId: string): Promise<void> {
-  await page.locator(`.session-item[data-session-id="${sessionId}"]`).click();
-  await expect(page.locator(`.session-item--active[data-session-id="${sessionId}"]`)).toBeVisible({
-    timeout: 15000,
-  });
 }
 
 /** Fire the Ctrl+Space leader chord followed by `key`. */
@@ -98,22 +55,9 @@ function nonChatTab(page: Page) {
 test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
   test.describe.configure({ mode: "serial" });
 
-  let claudeAvailable = false;
   let sessionAId = "";
   let sessionBId = "";
 
-  test.beforeAll(async () => {
-    const { execSync } = await import("child_process");
-    try {
-      execSync("which claude || [ -x ~/.local/bin/claude ]", {
-        encoding: "utf8",
-        shell: "/bin/sh",
-      });
-      claudeAvailable = true;
-    } catch {
-      claudeAvailable = false;
-    }
-  });
 
   // -------------------------------------------------------------------------
   // P1 — leader,v splits a new terminal pane into view.
@@ -183,30 +127,9 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
   // back to the session.
   // -------------------------------------------------------------------------
   test("P3. zoom then un-zoom round-trips through layout persistence", async ({ page }) => {
-    test.setTimeout(240000);
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — skipping P3 (needs two real, persisted sessions)");
-      return;
-    }
-
-    // Two sibling sessions in the same project (Fix 3: a session needs a
-    // real message before it has a DB row / persists a layout at all).
     await freshPage(page);
-    await openLocalPicker(page);
-    await page.locator('[data-testid="project-option-none"]').click();
-    await sendAndWait(page, "Reply with exactly: PANE-ALPHA");
-    sessionAId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
-    expect(sessionAId).toBeTruthy();
-
-    // Wave 1 item 1: tab-bar "+" opens a directory-browser popover; the
-    // current project's cwd is preselected as the first quick-pick option.
-    // The tab-bar "+" creates straight into the active project — no popover,
-    // same destination the "project-option-0" quick-pick used to select.
-    await page.locator('[data-testid="tab-new"]').click();
-    await sendAndWait(page, "Reply with exactly: PANE-BETA");
-    sessionBId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
-    expect(sessionBId).toBeTruthy();
-    expect(sessionBId).not.toEqual(sessionAId);
+    sessionAId = await startChat(page);
+    sessionBId = await startChat(page);
 
     // Land back on A and split it. Every session switch re-fetches that
     // session's layout from the server (DockviewShell invalidates any cached
@@ -215,10 +138,10 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     // otherwise the async apply can land *after* the split and wipe it via
     // its clear()+re-add fallback path.
     await switchViaSidebar(page, sessionAId);
-    await expect(page.locator(".terminal__surface")).toHaveCount(0);
+    await expect(shellPanes(page)).toHaveCount(0);
     await page.waitForTimeout(800);
     await leaderChord(page, "v");
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await expect(shellPanes(page)).toHaveCount(1, { timeout: 10000 });
 
     const chat = page.locator(".chat");
     const terminalTab = nonChatTab(page);
@@ -243,21 +166,21 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await page.locator('[data-testid="pane-menu-zoom"]').click();
     await expect(menu).not.toBeVisible({ timeout: 5000 });
     await expect(chat).toBeVisible({ timeout: 10000 });
-    await expect(page.locator(".terminal__surface")).toBeVisible();
+    await expect(shellPanes(page)).toHaveCount(1);
 
     // Give the 500ms debounced session.layout.set time to fire and land.
     await page.waitForTimeout(1500);
 
     // Switch away to B (never split — default single-Chat layout)...
     await switchViaTabBar(page, sessionBId);
-    await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
+    await expect(shellPanes(page)).toHaveCount(0, { timeout: 10000 });
 
     await page.screenshot({ path: "artifacts/p3-on-b-no-terminal.png" });
 
     // ...and back to A: the split should be restored, NOT stuck maximized —
     // both chat and the terminal pane must be visible.
     await switchViaTabBar(page, sessionAId);
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
+    await expect(shellPanes(page)).toHaveCount(1, { timeout: 10000 });
     await expect(chat).toBeVisible();
 
     await page.screenshot({ path: "artifacts/p3-restored-on-a.png" });
@@ -284,8 +207,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
 
     const menu = page.locator('[data-testid="pane-context-menu"]');
     await expect(menu).toBeVisible({ timeout: 5000 });
-    // Split Right / Split Down / Zoom / Rename / Close.
-    await expect(page.locator(".pane-context-menu__item")).toHaveCount(5);
+    // Split Right / Split Down / Split with Session / Zoom / Rename / Close.
+    await expect(page.locator(".pane-context-menu__item")).toHaveCount(6);
 
     await page.screenshot({ path: "artifacts/p4-header-menu.png" });
 

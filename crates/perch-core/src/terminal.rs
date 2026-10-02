@@ -653,6 +653,16 @@ struct AgentViewer {
     on_exit: TerminalExitListener,
 }
 
+/// An agent PTY has one size, set by whichever view holds the resize lease.
+/// Every other view must render at that size or the CLI's cursor-addressed
+/// output wraps into garbage, so the size travels in-band, in order with the
+/// output: each resize reaches every viewer as xterm's "resize to rows;cols"
+/// sequence, and each replay starts with the current one. perch's client
+/// applies it; any other xterm ignores it (window ops are off by default).
+pub fn pty_size_marker(cols: u16, rows: u16) -> String {
+    format!("\x1b[8;{rows};{cols}t")
+}
+
 struct AgentTerminalEntry {
     exited: std::sync::atomic::AtomicBool,
     terminal_id: String,
@@ -670,6 +680,8 @@ struct AgentTerminalEntry {
     /// `resize()` methods remain available for protocol compatibility while
     /// the runtime adapter uses the lease-checked methods.
     viewers: Mutex<HashMap<String, AgentViewer>>,
+    /// The PTY's current `(cols, rows)`; see [`pty_size_marker`].
+    size: Mutex<(u16, u16)>,
     /// Last time PTY output was observed, for Task 2's quiet-period → idle
     /// transition. Updated by the reader thread on every chunk.
     last_activity: Mutex<std::time::Instant>,
@@ -678,6 +690,21 @@ struct AgentTerminalEntry {
     /// when the daemon was unreachable and the process was spawned in-process
     /// as a fallback — then it dies with this runtime, as before perchd.
     daemon_session: Option<String>,
+}
+
+impl AgentTerminalEntry {
+    /// Record a resize and tell every viewer, in order with the output (the
+    /// reader thread fans out under the same lock). Includes the runtime's
+    /// own viewer, so the marker lands in the replay too.
+    fn resized(&self, cols: u16, rows: u16) {
+        if std::mem::replace(&mut *self.size.lock().unwrap(), (cols, rows)) == (cols, rows) {
+            return;
+        }
+        let marker = pty_size_marker(cols, rows);
+        for viewer in self.viewers.lock().unwrap().values() {
+            (viewer.on_data)(self.terminal_id.clone(), marker.clone());
+        }
+    }
 }
 
 /// Registry of agent-attached (`agentAttach`) terminals, one PTY per **session
@@ -869,6 +896,7 @@ impl AgentTerminalRegistry {
             master: Mutex::new(resize),
             killer: Mutex::new(killer),
             viewers: Mutex::new(viewers),
+            size: Mutex::new((cols, rows)),
             last_activity: Mutex::new(std::time::Instant::now()),
             daemon_session,
         });
@@ -1068,9 +1096,20 @@ impl AgentTerminalRegistry {
     /// viewers is a genuine tmux feature (smallest-common-size) that isn't
     /// implemented here; flagged as a known simplification.
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) {
-        if let Some(entry) = self.entries.lock().unwrap().get(session_id) {
-            let _ = entry.master.lock().unwrap().resize(cols, rows);
+        let entry = self.entries.lock().unwrap().get(session_id).cloned();
+        if let Some(entry) = entry {
+            if entry.master.lock().unwrap().resize(cols, rows) {
+                entry.resized(cols, rows);
+            }
         }
+    }
+
+    /// The PTY's current `(cols, rows)`, for the head of a replay.
+    pub fn size(&self, session_id: &str) -> Option<(u16, u16)> {
+        let entries = self.entries.lock().unwrap();
+        entries
+            .get(session_id)
+            .map(|entry| *entry.size.lock().unwrap())
     }
 
     /// Install or clear the lease that owns terminal resize authority.
@@ -1147,6 +1186,8 @@ impl AgentTerminalRegistry {
             return Err(TerminalAuthorityError::NotOwned);
         }
         if entry.master.lock().unwrap().resize(cols, rows) {
+            drop(writer_guard);
+            entry.resized(cols, rows);
             Ok(())
         } else {
             Err(TerminalAuthorityError::ResizeFailed)
@@ -1534,6 +1575,46 @@ mod tests {
         );
 
         registry.kill("session-shared");
+    }
+
+    /// Every view renders at the PTY's one size: a resize reaches each
+    /// viewer in-band, once, and the size is kept for later replays.
+    #[test]
+    fn a_resize_reaches_every_viewer_as_a_size_marker() {
+        let registry = AgentTerminalRegistry::new(Arc::new(|_session_id: &str| {}));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 5".to_string(),
+        ];
+        for viewer in ["viewer-a", "viewer-b"] {
+            let seen = seen.clone();
+            let on_data: TerminalDataListener = Arc::new(move |_id: String, data: String| {
+                if data.contains("\x1b[8;") {
+                    seen.lock().unwrap().push(data);
+                }
+            });
+            let (_, on_exit) = noop_listeners();
+            registry
+                .attach(
+                    "session-size",
+                    viewer,
+                    80,
+                    24,
+                    None,
+                    command.clone(),
+                    on_data,
+                    on_exit,
+                )
+                .expect("attach");
+        }
+        assert_eq!(registry.size("session-size"), Some((80, 24)));
+        registry.resize("session-size", 40, 20);
+        registry.resize("session-size", 40, 20); // unchanged: no second marker
+        assert_eq!(*seen.lock().unwrap(), vec!["\x1b[8;20;40t".to_string(); 2]);
+        assert_eq!(registry.size("session-size"), Some((40, 20)));
+        registry.kill("session-size");
     }
 
     /// A viewer disconnecting must not kill a terminal another viewer still

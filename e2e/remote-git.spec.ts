@@ -40,8 +40,8 @@ type Message = Record<string, unknown> & { type: string };
 
 /** Send `messages` on a fresh hub connection; resolve with the first reply
  * matching `until`. */
-async function hubRequest(messages: object[], until: (m: Message) => boolean, timeout = 20000): Promise<Message> {
-  const ws = new WebSocket(HUB_WS);
+async function hubRequest(messages: object[], until: (m: Message) => boolean, timeout = 20000, url = HUB_WS): Promise<Message> {
+  const ws = new WebSocket(url);
   try {
     return await new Promise<Message>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("hub request timed out")), timeout);
@@ -85,6 +85,10 @@ test.describe("Remote host git and worktrees", () => {
       (m) => m.type === "host.info" && m.hostId === HOST_ID && m.state === "connected",
     );
     capabilities = (info.capabilities as string[] | undefined) ?? [];
+    // A session starts only in a listed project. The hub doesn't relay
+    // project metadata, so register the fixture on the remote directly.
+    await hubRequest([{ type: "project.create", requestId: "rg-project", path: FIXTURE }],
+      (m) => m.requestId === "rg-project", 20000, "ws://127.0.0.1:7800/ws");
     // The one paid call: a haiku turn so the remote persists the session.
     const ws = new WebSocket(HUB_WS);
     await new Promise<void>((resolve, reject) => {

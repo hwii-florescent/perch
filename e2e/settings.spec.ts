@@ -16,10 +16,6 @@
  *   Add custom claude model {id:"claude-test-custom", label:"Test Custom"},
  *   reload page, reopen modal, assert present; then remove and assert gone.
  *   Cleans up test entries from ~/.perch/settings.json at start AND end.
- *
- * D4 "input pinned to bottom":
- *   In Hosted mode with an empty/new session, assert the input row's bounding
- *   box bottom is within ~80px of the chat pane bottom.
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -94,7 +90,6 @@ async function freshSession(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-  await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
 }
 
 /** Open the settings modal via the gear button and wait for it to appear. */
@@ -227,7 +222,6 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
     await closeSettingsEsc(page);
     await page.reload({ waitUntil: "networkidle" });
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".session-item").first()).toBeVisible({ timeout: 15000 });
 
     // Reopen modal — entry should still be there
     await openSettings(page);
@@ -246,36 +240,5 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
     // Cleanup: remove any remaining test models from disk
     await closeSettingsEsc(page);
     cleanTestModels();
-  });
-
-  // ---------------------------------------------------------------------------
-  // D4 — Input row pinned to bottom of chat pane
-  // ---------------------------------------------------------------------------
-  test("D4. input pinned to bottom", async ({ page }) => {
-    await freshSession(page);
-
-    // Make sure we're in Hosted mode (default) with a fresh session.
-    // No messages yet so the input should be at the pane bottom.
-    const chatPane = page.locator(".chat");
-    const inputRow = page.locator(".chat__input");
-
-    await expect(chatPane).toBeVisible({ timeout: 10000 });
-    await expect(inputRow).toBeVisible({ timeout: 10000 });
-
-    const chatBox = await chatPane.boundingBox();
-    const inputBox = await inputRow.boundingBox();
-
-    expect(chatBox).not.toBeNull();
-    expect(inputBox).not.toBeNull();
-
-    if (chatBox && inputBox) {
-      const chatBottom = chatBox.y + chatBox.height;
-      const inputBottom = inputBox.y + inputBox.height;
-      // Input bottom should be within 80px of the chat pane bottom.
-      const delta = Math.abs(chatBottom - inputBottom);
-      expect(delta).toBeLessThanOrEqual(80);
-    }
-
-    await page.screenshot({ path: "artifacts/D4-input-pinned.png" });
   });
 });

@@ -558,11 +558,11 @@ impl AgentRuntimeAdapter {
                     return Err(RuntimeAdapterError::NoRuntime(key.clone()));
                 }
             };
-            let mut snapshot = String::new();
+            let mut snapshot = self.size_marker(&key);
             if let Err(error) =
                 self.terminals
                     .observe(&existing.terminal, &client.id, on_data, on_exit, || {
-                        snapshot = replay.lock().unwrap().text();
+                        snapshot += &replay.lock().unwrap().text();
                         on_ready(&existing, &snapshot);
                     })
             {
@@ -822,11 +822,11 @@ impl AgentRuntimeAdapter {
             );
         }
 
-        let mut snapshot = String::new();
+        let mut snapshot = self.size_marker(&key);
         if let Err(error) = self
             .terminals
             .observe(&identity, &client.id, on_data, on_exit, || {
-                snapshot = replay.lock().unwrap().text();
+                snapshot += &replay.lock().unwrap().text();
                 on_ready(&handle, &snapshot);
             })
         {
@@ -1068,6 +1068,15 @@ impl AgentRuntimeAdapter {
             )?;
             Ok(())
         })
+    }
+
+    /// A replay starts at the PTY's current size, which the replayed bytes
+    /// were (mostly) written for; see `terminal::pty_size_marker`.
+    fn size_marker(&self, key: &AgentKey) -> String {
+        self.terminals
+            .size(&terminal_key(key))
+            .map(|(cols, rows)| crate::terminal::pty_size_marker(cols, rows))
+            .unwrap_or_default()
     }
 
     pub fn resize(

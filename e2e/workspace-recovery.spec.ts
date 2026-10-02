@@ -158,10 +158,15 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     if (await popover.getByTestId("worktree-new").isVisible()) await popover.getByTestId("worktree-new").click(); // + opens on the form
     await popover.getByTestId("worktree-branch-input").fill("wt-recover");
     await popover.getByTestId("worktree-create-submit").click();
+    // The create runs as a background job and closes the menu; reopen it to
+    // reach the new entry.
     const worktreeEntry = popover
       .locator(".worktree-menu__entry")
       .filter({ has: page.locator(".worktree-menu__entry-branch", { hasText: "wt-recover" }) });
-    await expect(worktreeEntry).toBeVisible({ timeout: 30000 });
+    await expect(async () => {
+      if (!(await popover.isVisible())) await worktreeButton.click();
+      await expect(worktreeEntry).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 30000 });
     const worktreePath = ((await worktreeEntry.locator(".worktree-menu__entry-path").textContent()) ?? "").trim();
     expect(worktreePath).toBeTruthy();
 
@@ -174,8 +179,9 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
 
     // 3. A persistent shell terminal with observable process state.
     // A terminal split is part of the session layout, so it survives reloads.
-    await page.getByTestId("pane-group-menu").click();
-    await page.getByTestId("pane-menu-split-down").click();
+    // One pane has no pane header; split with the leader chord (leader,_).
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
     const shell = page.locator(".terminal--persistent[data-pane-id]:visible");
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/, { timeout: 20000 });
     await shellCommand(page, `PERCH_MIX=survived; printf 'before_%s_PID_%s_END\\n' "$PERCH_MIX" "$$"`);
@@ -251,6 +257,9 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     // File draft and its conflict state are both durable.
     await openWorkspaceTool(page, primaryWorkspaceId, "files");
     await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20000 });
+    // A file opens as a top-row tab; open it again from the explorer.
+    await page.getByTestId("workspace-file-entry-src").click();
+    await page.getByTestId(`workspace-file-entry-${RELATIVE_FILE}`).click();
     const recoveredEditor = page.getByTestId("workspace-file-editor");
     await expect(recoveredEditor).toHaveValue("draft that must survive the kill\n", { timeout: 25000 });
     await expect(page.getByTestId("workspace-file-conflict")).toBeVisible({ timeout: 20000 });

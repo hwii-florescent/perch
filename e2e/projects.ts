@@ -28,3 +28,42 @@ export async function pickProject(page: Page, dir: string): Promise<void> {
   await expect(option.first()).toBeVisible({ timeout: 10_000 });
   await option.first().click();
 }
+
+/** Start `agent` through the sidebar's New session popover, in `dir` (added
+ * as a project first) or else in Chats; wait for its terminal and return the
+ * session id. The default `terminal` agent is a plain shell: no model turn,
+ * so specs that only need a persisted session stay fast and free. */
+export async function startChat(page: Page, agent = "terminal", dir?: string): Promise<string> {
+  const before = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+  await page.getByTestId("new-session-local").click();
+  const picker = page.getByTestId("new-session-popover-agent");
+  await expect(picker).toBeEnabled({ timeout: 10_000 });
+  await picker.selectOption(agent);
+  if (dir) await pickProject(page, dir);
+  else await page.getByTestId("project-option-none").click();
+  await expect.poll(async () => {
+    const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+    return Boolean(id) && id !== before;
+  }).toBe(true);
+  const terminal = page.getByTestId("persistent-agent-terminal");
+  await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+  return (await page.evaluate(() => localStorage.getItem("perch.sessionId")))!;
+}
+
+/** Split shell panes (the agent's own terminal is a `.terminal__surface` too). */
+export const shellPanes = (page: Page) =>
+  page.locator('.terminal--persistent:not([data-testid="persistent-agent-terminal"])');
+
+export async function expectActive(page: Page, sessionId: string): Promise<void> {
+  await expect(page.getByTestId(`tab-${sessionId}`)).toHaveClass(/tab-bar__tab--active/, { timeout: 15_000 });
+}
+
+export async function switchViaSidebar(page: Page, sessionId: string): Promise<void> {
+  await page.getByTestId(`workspace-session-${sessionId}`).click();
+  await expectActive(page, sessionId);
+}
+
+export async function switchViaTabBar(page: Page, sessionId: string): Promise<void> {
+  await page.getByTestId(`tab-${sessionId}`).click();
+  await expectActive(page, sessionId);
+}

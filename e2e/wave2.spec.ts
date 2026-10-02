@@ -50,6 +50,7 @@
  */
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { startChat } from "./projects";
 
 const BASE_URL = "http://127.0.0.1:7799";
 
@@ -58,31 +59,6 @@ async function freshPage(page: Page): Promise<void> {
   await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
-}
-
-async function openLocalPicker(page: Page): Promise<void> {
-  const btn = page.locator('[data-testid="new-session-local"]');
-  await expect(btn).toBeEnabled({ timeout: 10000 });
-  await btn.click();
-  await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
-}
-
-/** Select claude-haiku-4-5, send `text`, and wait for the turn to finish. */
-async function sendAndWait(page: Page, text: string): Promise<void> {
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
-  await chip.click();
-  await page.locator('[data-testid="agent-option-claude"]').click();
-  await page.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
-
-  const textarea = page.locator(".chat__input textarea");
-  await expect(textarea).toBeEnabled({ timeout: 8000 });
-  await textarea.fill(text);
-  await page.locator(".chat__send").click();
-
-  const runningDot = page.locator(".session-item--active .session-status--running");
-  await expect(runningDot).toBeVisible({ timeout: 20000 });
-  await expect(runningDot).not.toBeVisible({ timeout: 90000 });
 }
 
 /** Fire the Ctrl+Space leader chord followed by `key`. */
@@ -126,21 +102,6 @@ async function htmlDragAndDrop(page: Page, source: Locator, target: Locator): Pr
 
 test.describe("Wave 2 functionality gaps", () => {
   test.describe.configure({ mode: "serial" });
-
-  let claudeAvailable = false;
-
-  test.beforeAll(async () => {
-    const { execSync } = await import("child_process");
-    try {
-      execSync("which claude || [ -x ~/.local/bin/claude ]", {
-        encoding: "utf8",
-        shell: "/bin/sh",
-      });
-      claudeAvailable = true;
-    } catch {
-      claudeAvailable = false;
-    }
-  });
 
   // -------------------------------------------------------------------------
   // X1 — directional pane focus (leader,h/j/k/l) and cycle (leader,o)
@@ -222,32 +183,9 @@ test.describe("Wave 2 functionality gaps", () => {
   // X3 — drag-to-reorder tabs, persisted across reload
   // -------------------------------------------------------------------------
   test("X3. dragging a tab reorders the strip and persists across reload", async ({ page }) => {
-    test.setTimeout(180000);
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — X3 needs two persisted sibling sessions");
-      return;
-    }
-
     await freshPage(page);
-
-    // Session A.
-    await openLocalPicker(page);
-    await page.locator('[data-testid="project-option-none"]').click();
-    await sendAndWait(page, "Reply with exactly: WAVE2-TAB-A");
-    const sessionAId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
-    expect(sessionAId).toBeTruthy();
-
-    // Session B, same project, via the tab bar's own "+" (Wave 1 item 1 —
-    // this opens the same directory-browser popover as the sidebar's "+",
-    // with the current project's cwd preselected as the first quick-pick
-    // option, so an explicit click on it is required to actually create B).
-    // The tab-bar "+" creates straight into the active project — no popover,
-    // same destination the "project-option-0" quick-pick used to select.
-    await page.locator('[data-testid="tab-new"]').click();
-    await sendAndWait(page, "Reply with exactly: WAVE2-TAB-B");
-    const sessionBId = (await page.locator(".session-item--active").getAttribute("data-session-id")) ?? "";
-    expect(sessionBId).toBeTruthy();
-    expect(sessionBId).not.toEqual(sessionAId);
+    const sessionAId = await startChat(page);
+    const sessionBId = await startChat(page);
 
     const tabA = page.locator(`[data-testid="tab-${sessionAId}"]`);
     const tabB = page.locator(`[data-testid="tab-${sessionBId}"]`);
@@ -273,7 +211,6 @@ test.describe("Wave 2 functionality gaps", () => {
     await htmlDragAndDrop(page, tabB, tabA);
     await expect.poll(orderOfAB, { timeout: 5000 }).toEqual([`tab-${sessionBId}`, `tab-${sessionAId}`]);
 
-    await page.screenshot({ path: "artifacts/x3-reordered.png" });
 
     // Persists across reload (client-side only — localStorage, not the WS
     // protocol).
@@ -281,7 +218,6 @@ test.describe("Wave 2 functionality gaps", () => {
     await expect(page.locator(`[data-testid="tab-${sessionAId}"]`)).toBeVisible({ timeout: 10000 });
     expect(await orderOfAB()).toEqual([`tab-${sessionBId}`, `tab-${sessionAId}`]);
 
-    await page.screenshot({ path: "artifacts/x3-persisted-after-reload.png" });
   });
 
   // -------------------------------------------------------------------------
@@ -328,6 +264,8 @@ test.describe("Wave 2 functionality gaps", () => {
     await freshPage(page);
 
     const badge = page.locator('[data-testid="chat-tab-agent-badge"]');
+    // One pane shows no header; split so the chat pane's tab is shown.
+    await leaderChord(page, "_");
 
     // Default ON.
     await expect(badge).toBeVisible({ timeout: 10000 });
@@ -344,8 +282,6 @@ test.describe("Wave 2 functionality gaps", () => {
 
     await expect(badge).not.toBeVisible({ timeout: 5000 });
 
-    await page.screenshot({ path: "artifacts/x5-badge-hidden.png" });
-
     // Toggle back on.
     await page.locator('[data-testid="settings-gear"]').click();
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
@@ -355,6 +291,5 @@ test.describe("Wave 2 functionality gaps", () => {
     await expect(badge).toBeVisible({ timeout: 5000 });
     await expect(badge).toContainText("claude");
 
-    await page.screenshot({ path: "artifacts/x5-badge-shown.png" });
   });
 });

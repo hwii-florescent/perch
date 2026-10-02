@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as net from "node:net";
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 async function command(page: Page, text: string) {
   const input = page.locator(".terminal--persistent:visible .xterm-helper-textarea");
@@ -120,7 +120,7 @@ test("shell state survives reload, multiple panes, and mobile view release", asy
   }
 });
 
-test("tmux shell recovers its process and state after a core crash", async ({ page, context }) => {
+test("perchd shell recovers its process and state after a core crash", async ({ page, context }) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-shell-restart-"));
   const port = await new Promise<number>((resolve) => {
@@ -165,7 +165,7 @@ test("tmux shell recovers its process and state after a core crash", async ({ pa
     await page.getByTestId("mobile-pane-terminal").click();
     const shell = page.locator(".terminal--persistent");
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/);
-    expect(backend).toBe("tmux");
+    expect(backend).toBe("daemon");
     const originalId = terminalId!;
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     await command(page, `PERCH_RESTART=survived; printf 'before_%s_PID_%s_END\\n' "$PERCH_RESTART" "$$"`);
@@ -184,9 +184,6 @@ test("tmux shell recovers its process and state after a core crash", async ({ pa
     expect(errors).toEqual([]);
   } finally {
     await stop();
-    if (terminalId) {
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-shell-${terminalId}`], { stdio: "ignore" }); } catch { /* Already explicitly closed. */ }
-    }
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

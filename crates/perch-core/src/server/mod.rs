@@ -492,10 +492,7 @@ pub async fn run(
 
     // Load settings store.
     let settings = Arc::new(SettingsStore::load_default());
-    tracing::info!(
-        "[perch] settings loaded from {:?}",
-        crate::settings::default_settings_path()
-    );
+    tracing::info!("[perch] settings loaded from {:?}", settings.path);
 
     // Load hosts store (custom path or default).
     let hosts = Arc::new(if let Some(p) = options.hosts_path {

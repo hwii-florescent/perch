@@ -89,6 +89,11 @@ export default function App() {
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
 
   // The toggle reopens the drawer on whichever tab was last shown.
+  // The workspace a Files/Git request named. A remote checkout has no local
+  // row, so focusing it leaves `activeWorkspaceId` alone; the drawer keeps
+  // this id until focus moves.
+  const [toolsWorkspaceId, setToolsWorkspaceId] = useState<string | null>(null);
+  useEffect(() => setToolsWorkspaceId(null), [activeWorkspaceId]);
   const lastTools = useRef<WorkspaceToolsTab>(tools ?? "files");
   if (tools) lastTools.current = tools;
   const toggleTerminal = useCallback(() => {
@@ -102,6 +107,7 @@ export default function App() {
     const workspaceId = workspaceFilesWorkspaceId ?? workspaceGitReviewWorkspaceId;
     if (isMobile || !workspaceId) return;
     if (workspaceId !== usePerchStore.getState().activeWorkspaceId) focusWorkspace(workspaceId);
+    setToolsWorkspaceId(workspaceId);
     setTools(workspaceFilesWorkspaceId ? "files" : "gitReview");
     closeWorkspaceFiles();
     closeWorkspaceGitReview();
@@ -286,7 +292,7 @@ export default function App() {
             onCommit={(px) => writeWidth(TOOLS_KEY, px)}
           />
         )}
-        {!isMobile && tools && <WorkspaceTools tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
+        {!isMobile && tools && <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
       </div>
 
       <StatusBar />

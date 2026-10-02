@@ -22,6 +22,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { addProject } from "./projects";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 
 const AGENT_SCRIPT = [
@@ -131,13 +132,10 @@ test("a phone pairs over the network, drives the session, and loses access when 
   // The phone is a phone-sized context with its own storage and cookie jar,
   // pointed at the LAN origin.
   const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await phoneContext.addInitScript((directory) => {
+  await phoneContext.addInitScript(() => {
     if (location.protocol !== "http:") return;
     localStorage.setItem("perch.onboarding.seen", "1");
-    // The agent (and therefore the workspace the Git pane opens) must land in
-    // the repository, not the fixture root that contains it.
-    localStorage.setItem("perch.dirBrowser.lastPath.local", directory as string);
-  }, repo);
+  });
   // The suite's shared storageState only covers the hub's origin, and this
   // core runs on its own port, so the host window needs the same seed.
   await context.addInitScript(() => {
@@ -173,6 +171,8 @@ test("a phone pairs over the network, drives the session, and loses access when 
 
     // 2. The host issues a code from Settings → Devices.
     await page.goto(hostUrl, { waitUntil: "networkidle" });
+    // The agent (and so the workspace the Git pane opens) runs in the repo.
+    await addProject(page, repo);
     await page.getByTestId("settings-gear").click();
     const devices = page.getByTestId("settings-devices");
     await expect(devices).toBeVisible({ timeout: 10_000 });
@@ -193,7 +193,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
 
     // 4. The phone drives a real agent: start it, prompt it, read the reply.
     await phone.getByTestId("cli-start-agent").selectOption("phonebot");
-    await phone.getByTestId("cli-start-chats").click();
+    await phone.locator('[data-testid^="cli-start-project-"]').filter({ hasText: "repo" }).click();
     const terminal = phone.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot ready", { timeout: 30_000 });

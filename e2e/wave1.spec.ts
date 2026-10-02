@@ -1,26 +1,19 @@
 /**
  * wave1.spec.ts — e2e coverage for Wave 1 (herdr functionality gaps):
- *   F1 — directory browser for the new-session cwd picker (Browse default,
- *        filter, up/breadcrumb navigation, Type-path fallback, and the
- *        tab-bar "+" creating straight into the active project)
+ *   F1 — the new-session picker offers only listed projects and Chats
  *   F2 — session rename via double-click on a TabBar tab
  *   F3/F4 — Notifications settings section: soundEnabled toggle and
  *        toastDelivery selector (off/app/system), persisted across reload
  *   F5 — in-terminal search (Cmd+F find-bar overlay, Escape closes)
- *   F6b — deleting a session via the row's trash icon is immediate, no
- *        confirmation
  *
- * All tests are headless (no --headed / --ui). Tests needing a persisted
- * session (F2's tab-rename, F6b's session-delete) require a real `claude`
- * turn and are skipped when the CLI isn't available, matching the pattern in
- * sessions.spec.ts / toasts.spec.ts.
+ * All tests are headless (no --headed / --ui).
  */
 
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { pickProject } from "./projects";
+import { pickProject, startChat } from "./projects";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -45,34 +38,6 @@ async function openLocalPicker(page: Page): Promise<void> {
   await expect(btn).toBeEnabled({ timeout: 10000 });
   await btn.click();
   await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
-}
-
-/** Create a session via the "No project" quick-pick, send one message, and
- * wait for the turn to finish so the row is persisted and visible in the
- * sidebar (mirrors sessions.spec.ts's createAndFinishSession). Returns the
- * new session's id. */
-async function createAndFinishSession(page: Page, label: string): Promise<string> {
-  await openLocalPicker(page);
-  await page.locator('[data-testid="project-option-none"]').click();
-
-  const chip = page.locator('[data-testid="model-chip"]');
-  await expect(chip).toBeVisible({ timeout: 10000 });
-  await chip.click();
-  await page.locator('[data-testid="agent-option-claude"]').click();
-  await page.locator('[data-testid="model-option-claude-haiku-4-5"]').click();
-
-  const textarea = page.locator(".chat__input textarea");
-  await expect(textarea).toBeEnabled({ timeout: 8000 });
-  await textarea.fill(`wave1-${label}-${Date.now()}`);
-  await page.locator(".chat__send").click();
-
-  const runningDot = page.locator(".session-item--active .session-status--running");
-  await expect(runningDot).toBeVisible({ timeout: 20000 });
-  await expect(runningDot).not.toBeVisible({ timeout: 90000 });
-
-  const id = await page.locator(".session-item--active").getAttribute("data-session-id");
-  expect(id).toBeTruthy();
-  return id as string;
 }
 
 /** The notification settings as they were before this spec touched anything.
@@ -139,23 +104,12 @@ function restoreNotificationSettingsOnDisk(original: NotificationSettings | null
 test.describe("Wave 1 functionality gaps", () => {
   test.describe.configure({ mode: "serial" });
 
-  let claudeAvailable = false;
   /** Captured before any test runs; restored by F3/F4 through the UI and by
    * `afterAll` on disk as a backstop. */
   let originalNotifications: NotificationSettings | null = null;
 
   test.beforeAll(async () => {
     originalNotifications = readNotificationSettings();
-    const { execSync } = await import("child_process");
-    try {
-      execSync("which claude || [ -x ~/.local/bin/claude ]", {
-        encoding: "utf8",
-        shell: "/bin/sh",
-      });
-      claudeAvailable = true;
-    } catch {
-      claudeAvailable = false;
-    }
   });
 
   test.afterAll(() => {
@@ -183,52 +137,9 @@ test.describe("Wave 1 functionality gaps", () => {
       .toBeTruthy();
   });
 
-  test("F1b. tab-bar + creates a session in the active project (no popover)", async ({ page }) => {
-    await freshPage(page);
-
-    // Pin an active project by creating a session in a known folder through
-    // the sidebar's picker (which keeps the directory browser).
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-tabplus-"));
-    await openLocalPicker(page);
-    await pickProject(page, dir);
-    await expect
-      .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
-      .toBeTruthy();
-    const firstId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-
-    // The tab-bar "+" is the zero-click fast path: it must create straight
-    // into the active project, never open the directory browser.
-    const tabNew = page.locator('[data-testid="tab-new"]');
-    await expect(tabNew).toBeVisible({ timeout: 10000 });
-    await tabNew.click();
-    await expect(page.locator('[data-testid="dir-browser"]')).not.toBeVisible({ timeout: 2000 });
-    await expect
-      .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
-      .not.toBe(firstId);
-
-    // ...and the nav stays scoped to that same project.
-    const pinned = await page.evaluate(() => localStorage.getItem("perch.activeProject"));
-    expect(pinned).toContain(dir);
-
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  // -------------------------------------------------------------------------
-  // F2 — session rename
-  // -------------------------------------------------------------------------
   test("F2. rename via double-click on a TabBar tab", async ({ page }) => {
-    test.setTimeout(150000);
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — F2 needs a persisted session");
-      return;
-    }
-
     await freshPage(page);
-    const id = await createAndFinishSession(page, "rename");
-    const row = page.locator(`.session-item[data-session-id="${id}"]`);
-    await expect(row).toBeVisible({ timeout: 10000 });
-
-    // --- Rename via double-click on the TabBar tab for the same session ---
+    const id = await startChat(page);
     const tab = page.locator(`[data-testid="tab-${id}"]`);
     await expect(tab).toBeVisible({ timeout: 10000 });
     await tab.dblclick();
@@ -238,9 +149,7 @@ test.describe("Wave 1 functionality gaps", () => {
     await tabRenameInput.fill("Renamed via tab");
     await tabRenameInput.press("Enter");
 
-    await expect(row.locator(".session-item__title")).toHaveText("Renamed via tab", { timeout: 5000 });
-
-    await page.screenshot({ path: "artifacts/wave1-f2-tab-renamed.png" });
+    await expect(page.getByTestId(`workspace-session-${id}`)).toContainText("Renamed via tab", { timeout: 5000 });
   });
 
   // -------------------------------------------------------------------------
@@ -334,29 +243,5 @@ test.describe("Wave 1 functionality gaps", () => {
     await expect(searchBar).not.toBeVisible({ timeout: 3000 });
 
     await page.screenshot({ path: "artifacts/wave1-f5-terminal-search.png" });
-  });
-
-  test("F6b. deleting a session via the trash icon is immediate — no confirmation", async ({ page }) => {
-    test.setTimeout(150000);
-    if (!claudeAvailable) {
-      test.skip(true, "claude binary not found — F6b needs a persisted session");
-      return;
-    }
-
-    await freshPage(page);
-    const id = await createAndFinishSession(page, "f6b");
-    const row = page.locator(`.session-item[data-session-id="${id}"]`);
-    await expect(row).toBeVisible({ timeout: 10000 });
-
-    const wrapper = page.locator(`.session-item__wrapper:has([data-session-id="${id}"])`);
-
-    await wrapper.hover();
-    await page.locator(`[data-testid="session-delete-icon-${id}"]`).click();
-
-    // No confirm dialog — the session is deleted immediately.
-    await expect(page.locator('[data-testid="confirm-dialog"]')).toHaveCount(0);
-    await expect(page.locator(`.session-item[data-session-id="${id}"]`)).toHaveCount(0, { timeout: 10000 });
-
-    await page.screenshot({ path: "artifacts/wave1-f6b-deleted.png" });
   });
 });

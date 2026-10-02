@@ -153,7 +153,7 @@ where
 // ---------------------------------------------------------------------------
 
 pub struct SettingsStore {
-    path: PathBuf,
+    pub(crate) path: PathBuf,
     inner: Mutex<Settings>,
 }
 

@@ -110,6 +110,10 @@ there, not here.
     real terminal), never from perch's UI tokens.
   - Never add `@xterm/addon-webgl`: canvas rendering empties `.xterm-rows`,
     which the e2e specs read.
+  - An agent PTY has one size, owned by the view holding the resize lease.
+    The server sends it in-band (`terminal::pty_size_marker`, at each resize
+    and at the head of every replay); other views follow it and never fit
+    (`PersistentAgentTerminal.tsx`), or a narrower view garbles the CLI.
 - **CLI mode:**
   - It mounts no terminal until the session is started (`CliStartPanel`).
   - It shows no provider/model/effort UI; that chrome is Hosted-only.
@@ -170,7 +174,9 @@ there, not here.
   - Terminals behave like Ghostty/iTerm2: perch must never swallow or
     re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
     so Ctrl/Shift+Enter reach CLIs that opt in; the only key perch keeps is
-    the Ctrl+Space leader, and find is Cmd+F (Ctrl+F goes to the PTY). Turn-review capture on Enter is best-effort and never
+    the Ctrl+Space leader. Cmd combinations stay with the app and never reach
+    the PTY (copy, paste, Cmd+F find, Cmd+K Navigator); Ctrl+F and Ctrl+K go
+    to the PTY. Turn-review capture on Enter is best-effort and never
     blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
@@ -243,21 +249,23 @@ there, not here.
     its own before calling it a regression.
   - `ssh::tests::mux_control_path_…` is flaky in the full suite and passes
     on its own.
+  - Each run starts clean: the webServers delete the e2e dbs and stop the
+    e2e daemons before booting, so specs must create what they need
+    (`e2e/projects.ts`: `startChat`, `addProject`).
   - `playwright.config.ts` points `PERCHD_DIR` at `/tmp/perch-e2e-perchd`
     for every core it starts. Never let tests use `~/.perch/daemon`: that
     is the installed app's daemon, and leaked test PTYs exhaust its fds
     ("dup of fd … failed") for the user's real app.
-  - Known failures, not regressions (as of 2026-10-01): Hosted-composer
-    specs that use `model-chip`/`.chat__send` (W1, P3, nav N1, sidebar 2,
-    workspace-git GB1, sessions S2; UI mode is NativeCliChat since 2e9c4b7);
-    workspace-terminals "tmux shell recovers" (expects `tmux`, gets `daemon`);
-    agent-terminal-ownership, workspace-recovery, workspace-review:226;
-    wave1 F1b/F2 (expect the tab-bar `+` to create without its picker) and
-    F6b (`model-chip`);
-    native-providers (older pane expectations); agent-hibernation (greps a
-    tmux log line the core stopped printing in 56e2c48); keybindings K1 (it
-    drives the Hosted composer through the picker); every opencode spec
-    (opencode is deliberately not installed on this Mac; don't install it).
+  - Known failures (as of 2026-10-02; the full run is otherwise green):
+    - Every opencode spec: opencode is deliberately not installed on this
+      Mac; don't install it.
+    - agent-terminal-ownership can fail under load at "phone keeps control
+      after reload". Leases are per connection, so the reloaded view can
+      open before the server drops the old connection's lease, and it then
+      comes up as a watcher.
+    - paired-phone-flows intermittently gets "Delivery could not be
+      confirmed" for the review packet (2 of 9 runs on 2026-10-02, cause not
+      found; 3 of 3 passed at d14bf9f).
 - **UI builds:** after `npm run build`, open tabs update themselves within
   about a minute (a PWA service worker); no restart is needed.
 - **Desktop notifications:** the web view doesn't deliver

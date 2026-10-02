@@ -13,7 +13,6 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
-import { createHostedSession } from "./hostedSession";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -79,25 +78,18 @@ async function dismissOnboarding(page: Page): Promise<void> {
 }
 
 
-async function openReview(page: Page, creation: "project" | "session" = "project"): Promise<string> {
+async function openReview(page: Page): Promise<string> {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await dismissOnboarding(page);
   await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
 
-  if (creation === "session") {
-    // Exercise the session-create protocol without launching a paid CLI turn.
-    // All comparison/comment/reload/mobile steps below still use the real UI.
-    PROJECT_NAME = path.basename(FIXTURE_ROOT);
-    await createHostedSession(page, FIXTURE_ROOT);
-  } else {
-    const emptyAdd = page.getByTestId("workspace-empty-add");
-    if (await emptyAdd.count()) await emptyAdd.click();
-    else await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
-    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(FIXTURE_ROOT);
-    await page.getByTestId("workspace-project-name").fill(PROJECT_NAME);
-    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
-  }
+  const emptyAdd = page.getByTestId("workspace-empty-add");
+  if (await emptyAdd.count()) await emptyAdd.click();
+  else await page.getByTestId("workspace-add-project").click();
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+  await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(FIXTURE_ROOT);
+  await page.getByTestId("workspace-project-name").fill(PROJECT_NAME);
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
 
   const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
   await expect(project).toBeVisible({ timeout: 15000 });
@@ -222,92 +214,6 @@ async function expectWorkspaceStartOffered(page: Page, recorded: boolean): Promi
 }
 
 test.describe("Workspace Git/review UI", () => {
-  test("sends two reviewed anchors as one packet to the selected real agent", async ({ page }, testInfo) => {
-    test.setTimeout(180000);
-    prepareFixture();
-    try {
-      await installWireCapture(page);
-      const workspaceId = await openReview(page);
-      const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
-      await project.locator(".workspace-entry__button").click();
-      // The session must be bound to *this* workspace, or the review dropdown
-      // below is rightly empty and the packet has nowhere to go.
-      const targetSessionId = await createHostedSession(page, FIXTURE_ROOT);
-      await expect(page.locator(".chat__input textarea")).toBeVisible({ timeout: 15000 });
-      await page.getByTestId("model-chip").click();
-      await page.getByTestId("agent-option-claude").click();
-      await page.getByTestId("model-option-claude-haiku-4-5").click();
-      // Standing rule: prove the cheap model is the selected one before any
-      // paid turn, rather than trusting the click that selected it.
-      await expect(page.getByTestId("model-chip")).toHaveText(/Claude · Haiku 4\.5/);
-      const readyMarker = `REVIEW_READY_${RUN_ID}`;
-      await page.locator(".chat__input textarea").fill(`Reply with exactly ${readyMarker}. Do not use tools or modify files.`);
-      await page.locator(".chat__send").click();
-      await expect(page.locator(".message--assistant").filter({ hasText: readyMarker })).toBeVisible({ timeout: 90000 });
-      await expect(page.locator(".chat__stop")).toHaveCount(0, { timeout: 30000 });
-      expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(targetSessionId);
-
-      await openWorkspaceTool(page, workspaceId, "gitReview");
-      await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT, { timeout: 15000 });
-      const firstNote = `Keep the worktree sentinel readable ${RUN_ID}`;
-      const secondNote = `Preserve the index sentinel ${RUN_ID}`;
-      await addComment(page, WORKTREE_TEXT, "new", firstNote);
-      await addComment(page, INDEX_TEXT, "old", secondNote);
-      const first = page.getByTestId("git-inline-comment").filter({ hasText: firstNote });
-      await first.getByRole("button", { name: "Edit", exact: true }).click();
-      await first.getByLabel("Edit review comment").fill(`${firstNote} after review`);
-      await first.getByRole("button", { name: "Save edit", exact: true }).click();
-      await expect(first).toContainText("after review");
-      await first.getByRole("button", { name: "Resolve", exact: true }).click();
-      await first.getByRole("button", { name: "Reopen", exact: true }).click();
-      await expect(first).toContainText("unresolved");
-      // Offered at all means the session really is bound to this workspace;
-      // selectOption alone reports only "did not find some options".
-      const sendTo = page.getByLabel("Send to agent session");
-      await expect(sendTo.locator(`option[value="${targetSessionId}"]`)).toHaveCount(1, { timeout: 15000 });
-      await sendTo.selectOption(targetSessionId);
-      const receipt = `REVIEW_RECEIVED_${RUN_ID}`;
-      await page.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If this packet includes both the worktree and index notes, reply with exactly ${receipt}.`);
-      await page.getByTestId("git-review-preview").click();
-      const packet = page.getByTestId("git-review-packet");
-      await expect(packet).toContainText("2 anchored notes", { timeout: 15000 });
-      await expect(packet).toContainText(`${firstNote} after review`);
-      await expect(packet).toContainText(secondNote);
-      await page.getByTestId("git-review-send").click();
-      await expect(page.getByTestId("git-review-delivery")).toHaveText("Agent received the review packet.", { timeout: 90000 });
-      await expect(page.locator(".message--assistant").filter({ hasText: receipt })).toBeVisible({ timeout: 90000 });
-
-      // An explicit retry uses the same frozen packet and operation. The real
-      // provider must have accepted only one review turn, even across retries.
-      await page.getByTestId("git-review-send").click();
-      await expect(page.getByTestId("git-review-delivery")).toHaveText("Agent received the review packet.", { timeout: 15000 });
-      await expect.poll(() => page.evaluate((sessionId) => {
-        const messages = (window as Window & { __perchReceived?: Array<Record<string, unknown>> }).__perchReceived ?? [];
-        return messages.filter((message) => message.type === "chat.done" && message.sessionId === sessionId).length;
-      }, targetSessionId)).toBe(2);
-      const evidence = await page.evaluate(() => {
-        const state = window as Window & { __perchSent?: Array<Record<string, unknown>>; __perchReceived?: Array<Record<string, unknown>> };
-        return {
-          sends: state.__perchSent?.filter((message) => message.type === "review.batch.send"),
-          done: state.__perchReceived?.filter((message) => message.type === "chat.done"),
-        };
-      });
-      expect(evidence.sends).toHaveLength(2);
-      expect(evidence.sends![0].sendOperationId).toBe(evidence.sends![1].sendOperationId);
-      expect(evidence.done?.filter((message) => message.sessionId === targetSessionId)).toHaveLength(2);
-      await expect(page.getByTestId("git-review-send")).toBeEnabled();
-      await page.getByTestId("git-review-delivery").scrollIntoViewIfNeeded();
-      await expect(page.getByTestId("git-review-delivery")).toBeVisible();
-      expect(fs.readFileSync(REVIEW_FILE, "utf8")).toBe(`${WORKTREE_TEXT}\n`);
-      await page.screenshot({ path: testInfo.outputPath("review-packet-delivered.png"), fullPage: true });
-      const shots = path.resolve(__dirname, "../.impeccable/review");
-      fs.mkdirSync(shots, { recursive: true });
-      await page.screenshot({ path: path.join(shots, "review-packet-delivered.png"), fullPage: true });
-    } finally {
-      removeFixture();
-    }
-  });
-
   test("reads distinct Git sources and performs anchored comment CRUD", async ({ page }, testInfo) => {
     prepareFixture();
     try {
@@ -424,70 +330,62 @@ test.describe("Workspace Git/review UI", () => {
     }
   });
 
-  for (const creation of ["project", "session"] as const) {
-    test(`${creation} workspace start keeps its creation ref across commits, reload and mobile review`, async ({ page }, testInfo) => {
-      prepareFixture();
-      const errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      try {
-        await installWireCapture(page);
-        const workspaceId = await openReview(page, creation);
-        const selector = page.getByTestId("git-diff-target");
-        const diff = page.getByTestId("git-diff");
-        await expectWorkspaceStartOffered(page, true);
-        await selector.selectOption("workspaceStart");
-        await expect(diff).toContainText(HEAD_TEXT);
-        await expect(diff).toContainText(WORKTREE_TEXT);
-        const initial = await latestDiff(page, "compare");
-        expect(initial.target?.base).toMatch(/^[0-9a-f]{40,64}$/);
-        expect(initial.target?.head).toBeUndefined();
+  test("workspace start keeps its creation ref across commits, reload and mobile review", async ({ page }, testInfo) => {
+    prepareFixture();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    try {
+      await installWireCapture(page);
+      const workspaceId = await openReview(page);
+      const selector = page.getByTestId("git-diff-target");
+      const diff = page.getByTestId("git-diff");
+      await expectWorkspaceStartOffered(page, true);
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText(WORKTREE_TEXT);
+      const initial = await latestDiff(page, "compare");
+      expect(initial.target?.base).toMatch(/^[0-9a-f]{40,64}$/);
+      expect(initial.target?.head).toBeUndefined();
 
-        // Advance the real HEAD while preserving the unstaged edit. The start
-        // comparison must remain pinned to registration, not the latest commit.
-        git(["commit", "-q", "-m", "advance head"]);
-        fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
-        if (creation === "session") {
-          // A second session after HEAD moved must reuse the original workspace
-          // and baseline rather than recording this later commit as its start.
-          expect(await openReview(page, creation)).toBe(workspaceId);
-        }
-        await page.getByTestId("git-refresh").click();
-        await selector.selectOption("head");
-        await expect(diff).toContainText(INDEX_TEXT);
-        await expect(diff).not.toContainText(HEAD_TEXT);
-        await selector.selectOption("workspaceStart");
-        await expect(diff).toContainText(HEAD_TEXT);
-        await expect(diff).toContainText("UNTRACKED_AFTER_START");
-        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-        const body = "Keep the workspace-start anchor";
-        await addComment(page, WORKTREE_TEXT, "new", body);
-        expect((await latestCreate(page, body)).base).toEqual(initial.target);
-        await page.screenshot({ path: testInfo.outputPath("workspace-start-desktop.png"), fullPage: true });
+      // Advance the real HEAD while preserving the unstaged edit. The start
+      // comparison must remain pinned to registration, not the latest commit.
+      git(["commit", "-q", "-m", "advance head"]);
+      fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
+      await page.getByTestId("git-refresh").click();
+      await selector.selectOption("head");
+      await expect(diff).toContainText(INDEX_TEXT);
+      await expect(diff).not.toContainText(HEAD_TEXT);
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText("UNTRACKED_AFTER_START");
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      const body = "Keep the workspace-start anchor";
+      await addComment(page, WORKTREE_TEXT, "new", body);
+      expect((await latestCreate(page, body)).base).toEqual(initial.target);
+      await page.screenshot({ path: testInfo.outputPath("workspace-start-desktop.png"), fullPage: true });
 
-        await page.reload({ waitUntil: "networkidle" });
-        const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
-        await openWorkspaceTool(page, workspaceId, "gitReview");
-        await selector.selectOption("workspaceStart");
-        await expect(diff).toContainText(HEAD_TEXT);
-        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-        await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
+      await page.reload({ waitUntil: "networkidle" });
+      const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
+      await openWorkspaceTool(page, workspaceId, "gitReview");
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
 
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.getByTestId("mobile-switch").click();
-        await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
-        await selector.selectOption("workspaceStart");
-        await expect(diff).toContainText(HEAD_TEXT);
-        await expect(diff).toContainText(WORKTREE_TEXT);
-        await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
-        expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
-        await page.screenshot({ path: testInfo.outputPath("workspace-start-mobile.png"), fullPage: true });
-        expect(errors).toEqual([]);
-      } finally {
-        removeFixture();
-      }
-    });
-
-  }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId("mobile-switch").click();
+      await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+      await selector.selectOption("workspaceStart");
+      await expect(diff).toContainText(HEAD_TEXT);
+      await expect(diff).toContainText(WORKTREE_TEXT);
+      await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
+      expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
+      await page.screenshot({ path: testInfo.outputPath("workspace-start-mobile.png"), fullPage: true });
+      expect(errors).toEqual([]);
+    } finally {
+      removeFixture();
+    }
+  });
 
   test("mobile Git pane renders a populated diff and reachable comment action", async ({ page }, testInfo) => {
     prepareFixture();

@@ -60,9 +60,9 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
             list of keybindings.
           </li>
           <li>
-            Press <kbd className="onboarding__kbd">Ctrl+K</kbd> (
-            <kbd className="onboarding__kbd">Cmd+K</kbd> on Mac) to open the
-            Navigator and jump to any session or project.
+            Press <kbd className="onboarding__kbd">Cmd+K</kbd> (or{" "}
+            <kbd className="onboarding__kbd">Ctrl+K</kbd> outside a terminal) to
+            open the Navigator and jump to any session or project.
           </li>
           <li>
             <button

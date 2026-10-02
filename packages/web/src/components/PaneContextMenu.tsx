@@ -1,6 +1,6 @@
 /**
  * PaneContextMenu.tsx — Phase 5 right-click context menu for dockview panel
- * tabs: Split Right, Split Down, Zoom/Restore (toggle), Rename (inline
+ * tabs: Split Right, Split Down, Split with Session, Zoom/Restore (toggle), Rename (inline
  * input), Close. Portal-rendered into `document.body` with `position:
  * fixed`, following the same click-outside/Escape-to-close pattern as
  * `ModelChip.tsx`'s popover and `Sidebar.tsx`'s `SessionMenu`.
@@ -25,10 +25,12 @@ export interface PaneContextMenuProps {
   controller: DockviewController;
   /** The session a chat pane shows; enables "Stop agent". */
   sessionId?: string;
+  /** Opens the "Split with session" picker at the menu's anchor. */
+  onSplitSession: () => void;
   onClose: () => void;
 }
 
-export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, onClose }: PaneContextMenuProps) {
+export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, onSplitSession, onClose }: PaneContextMenuProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(title);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -124,6 +126,17 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
             }}
           >
             Split Down
+          </button>
+          <button
+            type="button"
+            className="pane-context-menu__item"
+            data-testid="pane-menu-split-session"
+            onClick={() => {
+              onSplitSession();
+              onClose();
+            }}
+          >
+            Split with Session…
           </button>
           <button
             type="button"
