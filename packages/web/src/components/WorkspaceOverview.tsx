@@ -6,6 +6,7 @@ import { StatusDot } from "./StatusDot";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryBrowser } from "./DirectoryBrowser";
+import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
 
 function basename(path: string): string {
@@ -223,6 +224,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+  const createSessionOnHost = usePerchStore((state) => state.createSessionOnHost);
+  // A folder that isn't a git repo has no worktrees, so its "+" starts a session there.
+  const [newSession, setNewSession] = useState<{ project: WorkspaceProject; rect: DOMRect } | null>(null);
   // Collapsed projects hide their workspaces and sessions (per viewer).
   const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
   function toggleCollapsed(projectId: string) {
@@ -488,7 +492,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 >
                   ⋯
                 </button>
-                {project.repoPath && <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} />}
+                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} /> : (
+                  <button
+                    type="button"
+                    className="worktree-menu__btn"
+                    data-testid={`workspace-project-new-session-${project.id}`}
+                    title="New session in this folder"
+                    aria-label="New session"
+                    onClick={(event) => setNewSession({ project, rect: event.currentTarget.getBoundingClientRect() })}
+                  >
+                    +
+                  </button>
+                )}
                 </div>
                 {!projectCollapsed && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
                   <div className="workspace-project__workspaces">
@@ -705,6 +720,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
       {menu && <RowMenu {...menu} onClose={() => setMenu(null)} />}
+      {newSession && (
+        <NewSessionPopover
+          hostId={newSession.project.hostId}
+          projectCwds={[newSession.project.path]}
+          anchorRect={newSession.rect}
+          onClose={() => setNewSession(null)}
+          onSelect={(cwd, agent) => createSessionOnHost(newSession.project.hostId, cwd, agent)}
+        />
+      )}
       {removingProject && (
         <ConfirmDialog
           message={`Remove "${removingProject.name || basename(removingProject.path)}" from perch? Its sessions are archived; the folder on disk is untouched. Add the folder again to bring it back.`}

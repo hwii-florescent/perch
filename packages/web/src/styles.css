@@ -1325,9 +1325,9 @@ body {
 .workspace-files__tree-entry {
   display: flex;
   align-items: center;
-  gap: 0.28rem;
+  gap: 0.2rem;
   width: 100%;
-  min-height: 1.75rem;
+  min-height: 1.5rem;
   border: 0;
   color: var(--subtext-0);
   background: transparent;
@@ -1343,10 +1343,7 @@ body {
   color: var(--text);
 }
 
-.workspace-files__tree-entry--selected {
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
+/* One chevron for folders, nothing for files (files keep the same indent). */
 .workspace-files__tree-chevron {
   width: 0.65rem;
   flex-shrink: 0;
@@ -1354,23 +1351,9 @@ body {
   text-align: center;
 }
 
-.workspace-files__tree-chevron--open {
-  color: var(--accent);
-}
-
 .workspace-files__tree-glyph {
-  width: 0.7rem;
   flex-shrink: 0;
-  color: var(--subtext-0);
-  text-align: center;
-}
-
-.workspace-files__tree-glyph--directory {
-  color: var(--blue);
-}
-
-.workspace-files__tree-glyph--symlink {
-  color: var(--yellow);
+  color: var(--overlay-1);
 }
 
 .workspace-files__tree-name {
@@ -6023,11 +6006,17 @@ body {
 
 .workspace-git button:focus-visible,
 .workspace-git input:focus-visible,
-.workspace-git select:focus-visible,
 .workspace-git textarea:focus-visible,
 .workspace-git [role="button"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* WebKit treats a clicked select as :focus-visible; an outline on top of its
+ * border reads as a doubled frame, so selects mark focus with the border. */
+.workspace-git select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .workspace-git__header {

@@ -30,13 +30,6 @@ function formatModifiedAt(metadata?: FileMetadata): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
 
-function entryGlyph(entry: DirectoryEntry): string {
-  if (entry.kind === "directory") return "▸";
-  if (entry.kind === "symlink") return "↗";
-  if (entry.kind === "file") return "·";
-  return "?";
-}
-
 function isEditableFile(entry: DirectoryEntry): boolean {
   return entry.kind === "file" && !entry.readonly;
 }
@@ -81,13 +74,11 @@ function FileTree({
               title={entry.path}
               onClick={() => (isDirectory ? onToggle(entry) : onOpenFile(entry))}
             >
-              <span className={"workspace-files__tree-chevron" + (isOpen ? " workspace-files__tree-chevron--open" : "")} aria-hidden="true">
+              <span className="workspace-files__tree-chevron" aria-hidden="true">
                 {isDirectory ? (isOpen ? "▾" : "▸") : ""}
               </span>
-              <span className={`workspace-files__tree-glyph workspace-files__tree-glyph--${entry.kind}`} aria-hidden="true">
-                {entryGlyph(entry)}
-              </span>
               <span className="workspace-files__tree-name">{entry.name}</span>
+              {entry.kind === "symlink" && <span className="workspace-files__tree-glyph" aria-label="symlink">↗</span>}
               {entry.readonly && <span className="workspace-files__tree-badge">RO</span>}
             </button>
             {isDirectory && isOpen && childTree?.state === "loading" && (
