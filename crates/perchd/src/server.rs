@@ -638,7 +638,12 @@ fn pump_output(dir: &Path, s: &Session, mut reader: Box<dyn Read + Send>) {
     let mut buf = vec![0u8; CHUNK];
     loop {
         let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => return,
+            // Nothing writes to the log after EOF; an exited session must not
+            // hold its fd (replay reads the log by path).
+            Ok(0) | Err(_) => {
+                s.inner.lock().unwrap().log = None;
+                return;
+            }
             Ok(n) => n,
         };
         let bytes = &buf[..n];

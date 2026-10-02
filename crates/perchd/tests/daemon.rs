@@ -111,6 +111,21 @@ fn sessions_outlive_clients_and_replay_their_output() {
     assert!(!info.alive);
     assert_eq!(info.exit_code, Some(3));
 
+    // An exited session holds no fds (its history log closes with the PTY),
+    // yet still replays.
+    let pid = b.health().unwrap().pid;
+    let open_logs = || {
+        let out = std::process::Command::new("lsof").args(["-p", &pid.to_string()]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("/history/") && l.ends_with(".log")).count()
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while open_logs() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(open_logs(), 0, "an exited session still holds its history log");
+    let (_, reader, _) = b.attach("shell-1", None).unwrap();
+    wait_for(&collector(reader), &mut Vec::new(), "second-2");
+
     // An exited session can be recreated under the same id.
     sh(&b, "shell-1");
     assert!(b.session("shell-1").unwrap().unwrap().alive);
