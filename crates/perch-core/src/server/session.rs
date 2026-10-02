@@ -1623,6 +1623,34 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
     });
 }
 
+/// Stop every agent process of a local session, under the caller's
+/// `agent_operation_lock`. Their lifecycle records go too; returns their keys.
+fn stop_session_agents(
+    state: &Arc<ConnState>,
+    session_id: &str,
+) -> Result<Vec<AgentKey>, crate::agent_runtime::RuntimeAdapterError> {
+    let agent_keys = state
+        .app
+        .agent_runtime
+        .lifecycle()
+        .list()
+        .into_iter()
+        .filter(|snapshot| snapshot.key.session_id == session_id)
+        .map(|snapshot| snapshot.key)
+        .collect::<Vec<_>>();
+    for key in &agent_keys {
+        state.app.agent_runtime.remove(key)?;
+    }
+    state.app.agent_terminals.kill(session_id);
+    state
+        .app
+        .running_sessions
+        .lock()
+        .unwrap()
+        .remove(session_id);
+    Ok(agent_keys)
+}
+
 pub(super) fn handle_session_archive(
     state: &Arc<ConnState>,
     raw_text: &str,
@@ -1634,9 +1662,14 @@ pub(super) fn handle_session_archive(
         state.app.hub.forward(&host_id, raw_text);
         return;
     }
-    // An archived session's shells end now; its agent hibernates once idle
-    // and resumes on restore.
+    // Nothing of an archived session keeps running: its agent and shells end
+    // now. Restoring it relaunches the CLI's own resume (`claude --resume
+    // <id>`, `codex resume <id>`); the CLI owns the conversation.
     if archived {
+        let _agent_operation = state.app.agent_operation_lock.lock().unwrap();
+        if let Err(error) = stop_session_agents(state, &session_id) {
+            tracing::warn!(%error, "could not stop an archived session's agent");
+        }
         if let Err(error) = state.app.workspace_terminals.close_session(&session_id) {
             tracing::warn!(%error, "could not close an archived session's shells");
         }
@@ -1665,17 +1698,9 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
     }
 
     let _agent_operation = state.app.agent_operation_lock.lock().unwrap();
-    let agent_keys = state
-        .app
-        .agent_runtime
-        .lifecycle()
-        .list()
-        .into_iter()
-        .filter(|snapshot| snapshot.key.session_id == session_id)
-        .map(|snapshot| snapshot.key)
-        .collect::<Vec<_>>();
-    for key in &agent_keys {
-        if let Err(error) = state.app.agent_runtime.remove(key) {
+    let agent_keys = match stop_session_agents(state, &session_id) {
+        Ok(keys) => keys,
+        Err(error) => {
             fail(
                 &state.out_tx,
                 None,
@@ -1685,7 +1710,7 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
             );
             return;
         }
-    }
+    };
 
     // Cancel any in-flight turn and drop this connection's runtime
     // for the session (claude_runner, pending_turn, etc.).

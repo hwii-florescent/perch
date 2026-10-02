@@ -100,9 +100,8 @@ impl WorkspaceTerminals {
 
     pub fn list(&self, session_id: &str) -> anyhow::Result<Vec<WorkspaceTerminal>> {
         self.db.with_connection(|conn| {
-            let mut statement = conn.prepare(&format!(
-                "{SELECT} WHERE session_id = ?1 ORDER BY rowid"
-            ))?;
+            let mut statement =
+                conn.prepare(&format!("{SELECT} WHERE session_id = ?1 ORDER BY rowid"))?;
             let rows = statement.query_map(params![session_id], read_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
@@ -547,7 +546,9 @@ mod tests {
         db.create_session("many-shells", "/tmp").unwrap();
         let manager = WorkspaceTerminals::new(db.clone()).unwrap();
         for pane in 0..70 {
-            manager.reserve("many-shells", &format!("pane-{pane}"), 80, 24).unwrap();
+            manager
+                .reserve("many-shells", &format!("pane-{pane}"), 80, 24)
+                .unwrap();
         }
         assert_eq!(manager.list("many-shells").unwrap().len(), 70);
         manager.close_session("many-shells").unwrap();

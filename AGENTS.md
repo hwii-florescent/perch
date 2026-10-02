@@ -164,8 +164,8 @@ there, not here.
   - Tab and session-row × delete the session, and so does its agent
     terminal exiting (the agent, then its login shell): its agent and shells
     are killed; the agent's own transcript stays on disk. "Archive chats"
-    archives instead (restorable from Settings): its shells end and its
-    agent hibernates once idle. Removing a project archives it and its open
+    archives instead: its agent and shells end, and Restore (Settings)
+    relaunches the CLI's own resume (`claude --resume <id>`). Removing a project archives it and its open
     sessions (they leave perch; the folder and transcript stay on disk);
     re-registering the folder restores the project. Closing a terminal pane
     ends its shell; only switching sessions leaves one running unseen. No
