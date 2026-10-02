@@ -215,6 +215,9 @@ test.describe("V-05/V-06 durable file workflow", () => {
 
       await page.waitForTimeout(900);
       await page.reload({ waitUntil: "domcontentloaded" });
+      // The file's tab survives a reload but the session view is what
+      // reopens (fileTabs.ts); reopening the tab must show the draft.
+      await page.getByTestId(`file-tab-${RELATIVE_FILE}`).click({ timeout: 20000 });
       await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20000 });
       const restoredEditor = page.getByTestId("workspace-file-editor");
       await expect(restoredEditor).toHaveValue("draft survives beforeunload\n", { timeout: 20000 });

@@ -6357,6 +6357,8 @@ body {
 .workspace-git__batch-form input,
 .workspace-git__batch-form select {
   min-width: 0;
+  /* A select is as wide as its longest option (a long session title). */
+  max-width: 100%;
   border: 1px solid var(--git-border);
   border-radius: var(--radius);
   padding: 0.3rem 0.4rem;
@@ -6378,6 +6380,7 @@ body {
 .workspace-git__toolbar-group {
   gap: 0.45rem;
   min-width: 0;
+  max-width: 100%;
   flex-wrap: wrap;
 }
 
@@ -6388,6 +6391,7 @@ body {
 .workspace-git__field {
   flex-direction: column;
   align-items: flex-start;
+  max-width: 100%;
 }
 
 .workspace-git__field em {
