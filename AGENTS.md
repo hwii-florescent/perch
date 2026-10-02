@@ -12,11 +12,14 @@ in-process) and a headless web server (`perch-core`). Terminals live in
 **perchd** (`crates/perchd`), a detached PTY daemon, so they survive the app
 quitting.
 
-**Direction (2026-09-22):** a fast, lightweight Rust port of
-[Orca](https://github.com/stablyai/orca) (cloned at `~/Github/orca`), **CLI
-mode first**. The Hosted/UI chat surface is frozen: don't extend it.
+**Direction (2026-10-01):** a fast, lightweight agent IDE in Rust, **CLI
+mode first**. perch is not a port of [Orca](https://github.com/stablyai/orca)
+(cloned at `~/Github/orca`): it learns from Orca's design and invariants,
+borrows what fits, and builds features Orca doesn't have. The Hosted/UI chat
+surface is frozen: don't extend it.
 - `docs/ARCHITECTURE.md`: the design and build order.
-- `docs/ORCA-PARITY.md`: the feature gap matrix.
+- `docs/ORCA-PARITY.md`: what perch has of Orca's features, as a reference
+  list, not a spec to match.
 
 ## Commands
 
@@ -89,7 +92,7 @@ there, not here.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
   - `components/WorkspaceTools.tsx`: the right drawer (file explorer / Git
-    for the active workspace); files open as pane tabs.
+    for the active workspace); `fileTabs.ts`: files open as top-row tabs.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
     over a CLI session.
   - `statusDot.ts`: status glyphs.

@@ -1,7 +1,9 @@
 # Orca parity: CLI mode
 
-Where perch stands against [Orca](https://github.com/stablyai/orca) on each
-feature. The design is in `ARCHITECTURE.md`. Orca's user-facing spec is
+Which of [Orca](https://github.com/stablyai/orca)'s features perch has. This
+is a reference list for learning from Orca, not a spec to match: skip what
+doesn't fit perch, and features perch has that Orca lacks aren't listed
+here. The design is in `ARCHITECTURE.md`. Orca's user-facing spec is
 `~/Github/orca/docs/site/content/docs/**/*.mdx`, and its logic is under
 `src/main/*`.
 

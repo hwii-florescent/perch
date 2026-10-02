@@ -2,9 +2,10 @@
  * Onboarding.tsx — Wave 2 item 11: themed first-run modal.
  *
  * Shown once, on first launch (gated by `onboarding.ts`'s localStorage
- * flag) — a brief orientation covering what perch is, the leader key
- * (`Ctrl+Space`), `?` for the full keybind help, `Ctrl/Cmd+K` for the
- * Navigator, and a link-style action to open Settings. Dismissing it (the
+ * flag) — a brief orientation covering what perch is, how to start (add a
+ * project, then `+`), the leader key (`Ctrl+Space`), `?` for the full
+ * keybind help, `Ctrl/Cmd+K` for the Navigator, and a link-style action to
+ * open Settings. Dismissing it (the
  * only way to close it — no backdrop-click-to-dismiss, so a curious click
  * outside the panel doesn't lose the flag-set before it's been read) marks
  * it seen so it never appears again on this browser/profile.
@@ -39,11 +40,16 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
       <div className="onboarding" data-testid="onboarding">
         <h2 className="onboarding__title">Welcome to perch</h2>
         <p className="onboarding__body">
-          perch is a personal agent-babysitting IDE — it runs and supervises coding
-          agents (Claude, Codex) in real terminals and hosted chat sessions, all from
-          one window, whether they're running locally or on a federated remote host.
+          perch runs your coding agents (Claude Code, Codex, pi and more) in real
+          terminal tabs, one window for every project and worktree, on this machine
+          or over SSH. Agents keep running when you close the app.
         </p>
         <ul className="onboarding__tips">
+          <li>
+            Add a project (any folder) from the sidebar, then press{" "}
+            <kbd className="onboarding__kbd">+</kbd> in the top row to start an agent
+            or a terminal in it.
+          </li>
           <li>
             Press <kbd className="onboarding__kbd">Ctrl+Space</kbd> then a letter for
             quick actions — the <em>leader key</em> for everything from splitting
@@ -69,7 +75,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
             >
               Open Settings
             </button>{" "}
-            to add SSH hosts, custom models, and notification preferences.
+            to switch between CLI and UI mode, pick a theme, add SSH hosts, and set notifications.
           </li>
         </ul>
         <button

@@ -1,12 +1,15 @@
-# perch architecture: a Rust Orca
+# perch architecture
 
-This is how perch ports [Orca](https://github.com/stablyai/orca) (MIT) into
-Rust, CLI mode first. Feature gaps are tracked in `ORCA-PARITY.md`. The Orca
-reference checkout is `~/Github/orca` (commit `564f1352`), and its
-`docs/reference/*.md` explain *why* things are built the way they are. Port
-behaviour and invariants, not Orca's file layout, which follows Electron IPC.
+perch is a Rust agent IDE, CLI mode first. It is not a port of
+[Orca](https://github.com/stablyai/orca) (MIT): Orca is the reference we learn
+from, and perch also builds what Orca lacks (for example `direct` hosts,
+which need only the agent CLI and tmux). `ORCA-PARITY.md` lists
+which Orca features perch has. The Orca checkout is `~/Github/orca` (commit
+`564f1352`), and its `docs/reference/*.md` explain *why* things are built the
+way they are. When borrowing, take behaviour and invariants, not Orca's file
+layout, which follows Electron IPC.
 
-## Invariants carried over from Orca
+## Invariants learned from Orca
 
 1. **The daemon owns PTYs.** Quitting, crashing or updating the app never
    kills an agent. The runtime *adopts* a live daemon; it never replaces one.
@@ -129,7 +132,7 @@ The pattern: a domain module with no protocol dependency, plus a thin
 | Worktrees (phase 3): background create with progress, cancel and retry; a start-from ref (branch, SHA or remote); branch naming; `.worktreeinclude` and shared dirs; delete with branch review; sleep, archive, pin, rename, nesting; showing external worktrees | `worktree.rs` | `main/git`, `main/runtime/rpc/methods/worktree*.ts` |
 | Agent launch | `agent_fleet.rs`, `agent_runtime.rs`, `agent_catalog.rs` | `main/agent-launch`, `main/providers` |
 | Terminals | `terminal.rs`, `workspace_terminals.rs`, `daemon.rs` | `main/pty`, `main/daemon` |
-| Layout: tabs, splits and focus per worktree (phase 4) | new `db/layout.rs` | `rpc/methods/session-tabs*.ts` |
+| Layout: tabs, splits and focus per worktree (phase 4) | today a session's dockview layout (`session.layout.*`, `db/sessions.rs`); per-worktree tabs/focus planned | `rpc/methods/session-tabs*.ts` |
 | Quick commands (phase 4) | new `db/quick_commands.rs` | `terminal-quick-command-rpc-schema.ts` |
 | Git / review | `source_control.rs`, `review.rs`, `server/git.rs` | `main/git`, `main/source-control` |
 | Files | `filesystem.rs`, `db/file_buffers.rs` | `rpc/methods/files*.ts` |
