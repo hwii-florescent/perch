@@ -35,12 +35,11 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
     if (!valid && first) onChange(first);
   }, [catalog?.state, discovery, first, hostId, onChange, preferred, valid, value]);
   return <div>
-    <div className={"agent-picker" + (className ? ` ${className}` : "")} role="group" aria-label="Agent">
-      {choices.map((entry) => <button key={entry.id} type="button"
-        className={"agent-picker__btn" + (entry.id === value ? " agent-picker__btn--active" : "")}
-        data-testid={`${testIdPrefix}-${entry.id}`} disabled={!connected || (discovery && catalog?.state !== "ready")}
-        aria-pressed={entry.id === value} onClick={() => onChange(entry.id)}>{entry.label}</button>)}
-    </div>
+    <select className={"agent-picker" + (className ? ` ${className}` : "")} aria-label="Agent"
+      data-testid={testIdPrefix} value={valid ? value : ""} disabled={!connected || (discovery && catalog?.state !== "ready") || !choices.length}
+      onChange={(event) => onChange(event.target.value)}>
+      {choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+    </select>
     {discovery && <button type="button" className="agent-catalog__action" onClick={() => { onManage?.(); manage(); }}>Manage agents</button>}
     {discovery && catalog?.state === "error" && <p role="alert">{catalog.error}</p>}
     {discovery && catalog?.state === "ready" && !choices.length && <p role="status">Enable or install an agent in Manage agents.</p>}

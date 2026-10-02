@@ -54,9 +54,10 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-project-path").fill(fixture);
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(fixture);
     await page.getByTestId("workspace-project-name").fill(token);
-    await page.getByRole("button", { name: "Register project", exact: true }).click();
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
     const project = page.locator(".workspace-project").filter({ hasText: token });
     await expect(project).toBeVisible();
     const workspaceId = await firstWorkspaceId(project);

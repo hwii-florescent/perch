@@ -147,9 +147,10 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
 
       await page.getByTestId("workspace-add-project").click();
-      await page.getByTestId("workspace-project-path").fill(FIXTURE_ROOT);
+      await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+      await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(FIXTURE_ROOT);
       await page.getByTestId("workspace-project-name").fill(PROJECT_NAME);
-      await page.getByRole("button", { name: "Register project", exact: true }).click();
+      await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
       const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
       await expect(project).toBeVisible({ timeout: 15000 });
       const workspaceId = await firstWorkspaceId(project);

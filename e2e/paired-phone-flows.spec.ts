@@ -186,8 +186,9 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     // without this the phone's Git pane opens the wrong repository.
     await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 20_000 });
     await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-project-path").fill(repo);
-    await page.getByRole("button", { name: "Register project", exact: true }).click();
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(repo);
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
     await expect(page.locator(".workspace-project").filter({ hasText: repoName })).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId("settings-gear").click();

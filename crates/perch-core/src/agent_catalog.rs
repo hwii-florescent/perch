@@ -1,9 +1,9 @@
 //! CLI launch metadata adapted from Orca's MIT-licensed catalog.
 //! See THIRD_PARTY_NOTICES.md for the pinned source and license.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
 
@@ -99,7 +99,9 @@ pub fn resolve_executable(provider_id: &str, executable: &str) -> Result<PathBuf
     }
     for candidate in &candidates {
         if let Ok(path) = agent_fleet::resolve_executable(candidate, None) {
-            return Ok(path);
+            if !is_namesake(provider_id, &path) {
+                return Ok(path);
+            }
         }
     }
     // Finder and headless shells may have a smaller PATH than a login shell.
@@ -128,13 +130,47 @@ pub fn resolve_executable(provider_id: &str, executable: &str) -> Result<PathBuf
         for directory in &directories {
             let path = directory.join(candidate);
             if let Ok(resolved) = agent_fleet::resolve_executable(&path.to_string_lossy(), None) {
-                return Ok(resolved);
+                if !is_namesake(provider_id, &resolved) {
+                    return Ok(resolved);
+                }
             }
         }
     }
     Err(format!(
         "executable `{executable}` was not found on PATH or in standard install locations"
     ))
+}
+
+/// A different tool installed under an agent's executable name. Homebrew's
+/// `goose` formula is pressly's DB-migration CLI (Block's agent is
+/// `block-goose-cli`), so a bare PATH hit would list Goose as installed.
+fn is_namesake(provider_id: &str, path: &Path) -> bool {
+    let Some(marker) = namesake_version_marker(provider_id) else {
+        return false;
+    };
+    // ponytail: cached per path for the process lifetime; reinstalling a
+    // different tool at the same path needs a restart to be re-probed.
+    static SEEN: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(&known) = seen.lock().unwrap().get(path) {
+        return known;
+    }
+    let namesake = std::process::Command::new(path)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).starts_with(marker));
+    seen.lock().unwrap().insert(path.to_path_buf(), namesake);
+    namesake
+}
+
+/// `--version` output prefix of the namesake, never of the agent itself.
+fn namesake_version_marker(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "goose" => Some("goose version:"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -159,5 +195,26 @@ mod tests {
             teams.environment.set["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
             "1"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pressly_goose_is_not_the_goose_agent() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("perch-namesake-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = |name: &str, version: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\necho '{version}'\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        assert!(is_namesake(
+            "goose",
+            &fake("migrate", "goose version: v3.27.1")
+        ));
+        assert!(!is_namesake("goose", &fake("agent", "goose 1.9.0")));
+        assert!(!is_namesake("claude", &fake("claude", "goose version: v3")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

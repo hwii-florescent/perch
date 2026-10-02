@@ -97,10 +97,11 @@ async function registerProject(page: Page, cwd: string): Promise<void> {
   const card = rail.locator('[data-testid^="workspace-project-"]').filter({ hasText: FIXTURE_NAME });
   if ((await card.count()) > 0) return;
   await page.getByTestId("workspace-add-project").click();
-  const pathInput = page.getByTestId("workspace-project-path");
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+  const pathInput = page.getByTestId("workspace-add-form").getByTestId("project-path-input");
   await expect(pathInput).toBeVisible({ timeout: 5000 });
   await pathInput.fill(cwd);
-  await rail.locator('button[type="submit"]').click();
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
   await expect(card).toHaveCount(1, { timeout: 20000 });
 }
 

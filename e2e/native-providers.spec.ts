@@ -90,7 +90,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeEnabled();
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
-        await current.getByTestId("new-session-popover-agent-pi").click();
+        await current.getByTestId("new-session-popover-agent").selectOption("pi");
       } else {
         await current.getByTestId(`cli-start-agent-${provider}`).click();
         await current.getByTestId("cli-start-browse").click();

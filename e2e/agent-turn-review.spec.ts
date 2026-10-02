@@ -180,8 +180,9 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     // 1. A durable project, so the session's workspace owns the turn history.
     await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-project-path").fill(repo);
-    await page.getByRole("button", { name: "Register project", exact: true }).click();
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(repo);
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     await expect(project).toBeVisible({ timeout: 15000 });
     const workspaceId = await firstWorkspaceId(project);
@@ -281,7 +282,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       const alphaSession = sql("SELECT session_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
       const firstTerminalId = await terminal.getAttribute("data-terminal-id");
       await page.getByTestId("tab-new").click();
-      await page.getByTestId("new-session-popover-agent-turnbot").click();
+      await page.getByTestId("new-session-popover-agent").selectOption("turnbot");
       await page.getByTestId("project-option-0").click();
       const secondTerminal = page.locator('[data-testid="persistent-agent-terminal"]:visible').last();
       await expect(secondTerminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
@@ -414,8 +415,9 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
 
     await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-project-path").fill(repo);
-    await page.getByRole("button", { name: "Register project", exact: true }).click();
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(repo);
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     const workspaceId = await firstWorkspaceId(project);
 

@@ -181,8 +181,9 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await page.goto(url, { waitUntil: "networkidle" });
     await expect(page.getByTestId("workspace-overview")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("workspace-add-project").click();
-    await page.getByTestId("workspace-project-path").fill(repo);
-    await page.getByRole("button", { name: "Register project", exact: true }).click();
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(repo);
+    await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     await expect(project).toBeVisible({ timeout: 15000 });
     const workspaceId = await firstWorkspaceId(project);

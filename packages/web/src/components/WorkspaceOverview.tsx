@@ -1,10 +1,11 @@
-import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { DirectoryBrowser } from "./DirectoryBrowser";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
 
 function basename(path: string): string {
@@ -268,7 +269,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }
 
   const [addOpen, setAddOpen] = useState(false);
-  const [path, setPath] = useState("");
   const [name, setName] = useState("");
 
   // The home screen's "Add project" (NoSessionPanel.tsx) opens this form.
@@ -280,7 +280,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   useEffect(() => {
     if (createRequest?.status !== "success") return;
-    setPath("");
     setName("");
     setAddOpen(false);
     clearCreateRequest();
@@ -296,8 +295,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     [activeHostId, projects],
   );
 
-  function submitProject(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submitProject(path: string) {
     if (!path.trim() || createRequest?.status === "pending") return;
     createWorkspaceProject(path, name, activeHostId);
   }
@@ -366,17 +364,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       </div>
 
       {addOpen && (
-        <form className="workspace-overview__add-form" onSubmit={submitProject}>
-          <label>
-            <span>Folder path</span>
-            <input
-              autoFocus
-              value={path}
-              onChange={(event) => setPath(event.target.value)}
-              placeholder="/path/to/project"
-              data-testid="workspace-project-path"
-            />
-          </label>
+        <div className="workspace-overview__add-form" data-testid="workspace-add-form">
           <label>
             <span>Name <em>optional</em></span>
             <input
@@ -386,17 +374,16 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               data-testid="workspace-project-name"
             />
           </label>
+          {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
+          <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
           <div className="workspace-overview__form-actions">
             <button type="button" className="workspace-overview__quiet-button" disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
               Cancel
             </button>
-            <button type="submit" className="workspace-overview__primary-button" disabled={!path.trim() || createRequest?.status === "pending"}>
-              Register project
-            </button>
           </div>
           {createRequest?.status === "pending" && <span className="workspace-overview__form-status" role="status">Registering folder…</span>}
           {createRequest?.status === "error" && <span className="workspace-overview__form-status workspace-overview__form-status--error" role="alert">{createRequest.error || "Could not register this folder."}</span>}
-        </form>
+        </div>
       )}
 
       {snapshot?.state === "loading" && (

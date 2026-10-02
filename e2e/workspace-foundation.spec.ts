@@ -40,9 +40,10 @@ async function dismissOnboarding(page: Page): Promise<void> {
 
 async function addProject(page: Page, folder: string, name: string): Promise<string> {
   await page.getByTestId("workspace-add-project").click();
-  await page.getByTestId("workspace-project-path").fill(folder);
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+  await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(folder);
   await page.getByTestId("workspace-project-name").fill(name);
-  await page.getByRole("button", { name: "Register project", exact: true }).click();
+  await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
   const project = page.locator(".workspace-project").filter({ hasText: name });
   await expect(project).toBeVisible({ timeout: 15000 });
   const testId = await project.getAttribute("data-testid");
@@ -64,16 +65,18 @@ test.describe("V-01 project/workspace registration", () => {
       const emptyAdd = page.getByTestId("workspace-empty-add");
       if (await emptyAdd.count()) await emptyAdd.click();
       else await page.getByTestId("workspace-add-project").click();
-      await page.getByTestId("workspace-project-path").fill(`${FIRST_PATH}-missing`);
+      await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
+      await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(`${FIRST_PATH}-missing`);
       await page.getByTestId("workspace-project-name").fill(FIRST_NAME);
-      await page.getByRole("button", { name: "Register project", exact: true }).click();
+      await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
       const error = page.locator(".workspace-overview__add-form").getByRole("alert").filter({ hasText: "project path is not an existing directory" });
       await expect(error).toBeVisible({ timeout: 15000 });
-      await expect(page.getByTestId("workspace-project-path")).toHaveValue(`${FIRST_PATH}-missing`);
+      await expect(page.getByTestId("workspace-add-form").getByTestId("project-path-input")).toHaveValue(`${FIRST_PATH}-missing`);
       await expect(page.getByTestId("workspace-project-name")).toHaveValue(FIRST_NAME);
 
-      await page.getByTestId("workspace-project-path").fill(FIRST_PATH);
-      await page.getByRole("button", { name: "Register project", exact: true }).click();
+
+      await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(FIRST_PATH);
+      await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
       const firstId = await (async () => {
         const project = page.locator(".workspace-project").filter({ hasText: FIRST_NAME });
         await expect(project).toBeVisible({ timeout: 15000 });

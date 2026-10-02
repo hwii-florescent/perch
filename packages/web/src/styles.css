@@ -674,7 +674,7 @@ body {
   font-style: normal;
 }
 
-.workspace-overview__add-form input {
+.workspace-overview__add-form > label input {
   min-width: 0;
   width: 100%;
   padding: 0.34rem 0.42rem;
@@ -685,7 +685,7 @@ body {
   font: 0.72rem/1.2 inherit;
 }
 
-.workspace-overview__add-form input:focus {
+.workspace-overview__add-form > label input:focus {
   border-color: var(--accent);
   outline: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
   outline-offset: 1px;
@@ -3842,49 +3842,30 @@ body {
   text-overflow: ellipsis;
 }
 
-/* --- AgentPicker (Bug 2/3 fix) — the claude/codex segmented control used by
-   session-*create* flows (sidebar "+ New session" popover, NoSessionPanel).
-   Same look as `.cli-start__agents`/`.cli-start__agent-btn` (CLI mode's own
-   provider toggle) so every agent picker in the app reads as one family. --- */
+/* --- AgentPicker — the agent dropdown used by session-*create* flows
+   (sidebar "+ New session" popover). --- */
 
 .agent-picker {
-  flex-wrap: wrap;
-  display: flex;
-  gap: 0.25rem;
+  width: 100%;
+  min-height: 32px;
+  padding: 0.3rem 0.45rem;
+  background: var(--panel-bg);
+  color: var(--text);
   border: 1px solid var(--overlay-0);
   border-radius: var(--radius);
-  padding: 0.3rem;
+  font: inherit;
 }
 
-.agent-picker__btn {
-  min-height: 44px;
-  flex: 1;
-  background: none;
-  color: var(--subtext-0);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 0.35rem 0.5rem;
-  font-size: 0.85rem;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
-}
-
-.agent-picker__btn:hover {
-  background: var(--surface-1);
-  color: var(--text);
-}
-
-.agent-picker__btn--active {
-  background: var(--surface-1);
-  color: var(--accent);
-  border-color: var(--overlay-0);
+.agent-picker:focus-visible {
+  border-color: var(--accent);
+  outline: none;
 }
 
 /* Inside the new-session popover the picker sits above the project list, so
  * it needs its own bottom margin/padding instead of relying on a parent gap
  * (`.new-session-popover` has none — see its rule above). */
 .new-session-popover__agent {
+  width: calc(100% - 1rem);
   margin: 0.5rem;
   margin-bottom: 0.25rem;
 }
