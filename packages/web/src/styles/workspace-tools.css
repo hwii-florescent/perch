@@ -1,0 +1,111 @@
+/* --- App body (sidebar + dock area row) ----------------------------------- */
+
+.app__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* --- Workspace tools drawer (›_) ----------------------------------------- */
+
+/* Draggable column divider (ResizeHandle.tsx). The negative margin overlaps
+ * the neighbours' borders so the grab area is wider than the layout gap. */
+.resize-handle {
+  flex: 0 0 5px;
+  margin: 0 -2px;
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+  outline: none;
+}
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: transparent;
+}
+.resize-handle:hover::after,
+.resize-handle:active::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.workspace-tools {
+  width: var(--tools-width, min(46vw, 760px));
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--overlay-0);
+  background: var(--panel-bg);
+}
+
+.workspace-tools__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.workspace-tools__tabs {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.workspace-tools__tab,
+.workspace-tools__close {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.2rem 0.55rem;
+  color: var(--overlay-1);
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.workspace-tools__tab:hover,
+.workspace-tools__close:hover {
+  color: var(--text);
+}
+
+.workspace-tools__tab--active {
+  border-color: var(--overlay-0);
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+.workspace-tools__workspace {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--overlay-1);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.workspace-tools__content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-tools__content > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-tools__empty {
+  padding: 1rem;
+  color: var(--overlay-1);
+  font-size: 0.8rem;
+}

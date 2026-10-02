@@ -1,0 +1,146 @@
+/* --- Terminal -------------------------------------------------------------- */
+
+/* No padding and no background of our own: xterm paints its own background
+ * from the user's terminal profile, and a perch-coloured inset around it
+ * would frame the terminal in a colour their terminal never uses. Edge to
+ * edge is also what a terminal window looks like. */
+.terminal {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+}
+
+.terminal__surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* xterm measures this element to derive its grid, and `createPerchTerminal`
+   * re-fits on every container resize. Without `overflow: hidden` a repaint
+   * that momentarily overflows can grow the box, which grows the fit, which
+   * grows the box — a resize feedback loop that shows up as the terminal
+   * "creeping" while the window is being dragged. */
+  overflow: hidden;
+}
+
+/* The fitted grid is whole cells, so it leaves a sliver right (plus the
+ * scrollbar gutter) and below. Paint it with the profile's background, as
+ * Ghostty/iTerm2 do: `.xterm` carries that background, so stretch it over
+ * the surface and drop xterm.css's #000 viewport. FitAddon measures the
+ * surface, not `.xterm`, so the grid is unchanged. */
+.terminal__surface .xterm { height: 100%; }
+.terminal__surface .xterm:not(.allow-transparency) .xterm-viewport { background-color: transparent; }
+
+.terminal--persistent { flex-direction: column; }
+.terminal__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 1.5rem 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--overlay-0);
+  color: var(--subtext-0);
+  font-size: 0.8rem;
+}
+.terminal__toolbar button, .terminal__toolbar select {
+  min-height: 32px;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface-0);
+  padding: 0.25rem 0.5rem;
+}
+.terminal__toolbar select { min-width: 0; max-width: 140px; }
+/* The agent's bar floats over the terminal: it comes and goes with control,
+ * and a row in the flow would resize the PTY (and make the CLI repaint). */
+.terminal__toolbar--overlay {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.9rem;
+  z-index: 2;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+}
+.terminal__connection { margin-right: auto; }
+.terminal__toolbar button:disabled { opacity: 0.5; }
+.terminal__notice { padding: 0.75rem; color: var(--subtext-0); font-size: 0.85rem; }
+.app--mobile .terminal__toolbar button, .app--mobile .terminal__toolbar select { min-height: 44px; }
+.app--mobile .terminal__connection { display: none; }
+.app--mobile .terminal__toolbar { padding-right: 0.5rem; }
+
+
+.terminal__exited {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  color: var(--subtext-0);
+}
+
+/* CLI-mode variant: the agent process is gone and the xterm below is usually
+ * a cleared screen, so this is the pane's only remaining affordance — centre
+ * it and give it the two ways out (respawn the CLI, or drop back to Hosted)
+ * rather than leaving a dead terminal the user can only stare at. */
+.terminal__exited--cli {
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  background: var(--panel-bg);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 35%);
+}
+
+.terminal__exited-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.terminal__exited-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--overlay-0);
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.terminal__exited-btn:hover {
+  background: var(--overlay-0);
+}
+
+.terminal__exited-btn--primary {
+  border-color: color-mix(in srgb, var(--blue) 60%, var(--panel-bg));
+  color: var(--blue);
+}
+
+.terminal__cli-error {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--red) 20%, var(--panel-bg));
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--panel-bg));
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  color: var(--red);
+  max-width: 90%;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

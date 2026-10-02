@@ -1,0 +1,104 @@
+.dockview-theme-perch {
+  --dv-color-abyss-dark: var(--panel-bg);
+  --dv-color-abyss: var(--surface-0);
+  --dv-color-abyss-light: var(--surface-1);
+  --dv-color-abyss-lighter: var(--overlay-0);
+  --dv-color-abyss-accent: var(--accent);
+  --dv-color-abyss-primary-text: var(--text);
+  --dv-color-abyss-secondary-text: var(--subtext-0);
+  --dv-group-view-background-color: var(--panel-bg);
+  --dv-tabs-and-actions-container-background-color: var(--surface-0);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--panel-bg);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--surface-0);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--panel-bg);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--surface-0);
+  --dv-tab-divider-color: var(--overlay-0);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--subtext-0);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--subtext-0);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--subtext-0);
+  --dv-separator-border: var(--overlay-0);
+  --dv-paneview-header-border-color: var(--overlay-0);
+  --dv-tabs-and-actions-container-font-size: 0.82rem;
+  --dv-tabs-and-actions-container-height: 2.1rem;
+}
+
+/* herdr draws every pane with a 1px border: accent when focused, overlay0
+ * otherwise (`reference/herdr/src/ui/panes.rs::render_pane_borders`). dockview
+ * groups are perch's equivalent of herdr's panes, so mirror that rule on the
+ * group chrome itself rather than leaving groups borderless. */
+.dockview-theme-perch .dv-groupview {
+  border: 1px solid var(--overlay-0);
+}
+
+.dockview-theme-perch .dv-groupview.dv-active-group {
+  border-color: var(--overlay-1);
+}
+
+/* The pane header's action buttons (the `⋯` pane menu and the split-session
+ * button) live in dockview's `.dv-tabs-and-actions-container`, laid out as a
+ * normal-flow flex sibling above `.dv-content-container`. Perch sets no
+ * `z-index`/`isolation` on that header, while the Hosted chat column inside the
+ * content (`.chat` height:100% → `.chat__list-container` position:relative →
+ * `.chat__list`) shares the same stacking context — so the browser routed a
+ * plain click on `[data-testid="pane-group-menu"]` to `.chat__list` instead of
+ * the button (reachable only via `dispatchEvent`). Give the header its own
+ * stacking context above the content so the buttons are hit-testable.
+ * `position:relative` with no offsets moves nothing — it only fixes hit/paint
+ * order — and `isolation:isolate` on `.chat` guarantees the chat subtree can
+ * never paint into the header's stacking context. */
+.dockview-theme-perch .dv-tabs-and-actions-container {
+  position: relative;
+  z-index: 1;
+}
+
+/* Wave 2 item 12: transparent wrapper around `DockviewDefaultTab` so
+ * `PaneTab` (DockviewShell.tsx) can render the "active agent" badge as a
+ * real, testable DOM node alongside it. `.dv-default-tab`'s own layout rules
+ * in dockview's CSS are descendant selectors (`.dv-tab .dv-default-tab`),
+ * not direct-child ones, so this wrapper needs to replicate the same
+ * height/width/flex box `.dv-default-tab` itself expects from its parent —
+ * without this, the tab would collapse to its content's natural (0) height. */
+.pane-tab {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.pane-tab__agent-badge {
+  flex-shrink: 0;
+  margin-right: 0.4rem;
+  color: var(--subtext-0);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+/* The permanent "chat" panel can never actually be closed (see
+ * `canClosePanel` in dockviewController.ts), so hide its tab's close (X)
+ * button entirely — this also frees up the trailing space in the tab for
+ * the item-12 agent badge above to sit flush after the title instead of
+ * competing with the close button for room. */
+.pane-tab[data-testid="pane-tab-chat"] .dv-default-tab-action {
+  display: none;
+}
+
+.dockview-group-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.dockview-group-action:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}

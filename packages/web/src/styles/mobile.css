@@ -1,0 +1,325 @@
+/* --- Mobile header / switcher (Phase 5: narrow-width collapse) ----------- */
+
+.mobile-header {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  padding-top: calc(0.4rem + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--overlay-0);
+  background: var(--surface-0);
+}
+
+.mobile-header__row--top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mobile-header__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mobile-header__switch {
+  min-height: 44px;
+  flex-shrink: 0;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mobile-header__switch:hover {
+  border-color: var(--accent);
+}
+
+.mobile-header__row--bottom {
+  padding-left: calc(0.9rem + 0.4rem);
+}
+
+.mobile-header__project {
+  font-size: 0.75rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+/* The narrow canvas owns one pane at a time. Keeping the content wrapper a
+ * flex item with a definite height preserves the same `.chat`/terminal/file
+ * surface sizing contract that Dockview normally supplies. */
+.mobile-pane-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--panel-bg);
+}
+
+.mobile-pane-shell__nav {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  padding: 0.3rem 0.45rem;
+  border-bottom: 1px solid var(--overlay-0);
+  background: var(--panel-bg);
+  overflow-x: auto;
+}
+
+.mobile-pane-shell__tab {
+  min-height: 44px;
+  flex: 1 0 auto;
+  min-width: 4.2rem;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.32rem 0.55rem;
+  color: var(--overlay-1);
+  background: var(--surface-0);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.mobile-pane-shell__tab:hover,
+.mobile-pane-shell__tab:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.mobile-pane-shell__tab--active {
+  border-color: var(--accent);
+  color: var(--panel-bg);
+  background: var(--accent);
+  font-weight: 700;
+}
+
+.app--mobile .agent-picker,
+.app--mobile .cli-start__secondary,
+.app--mobile .toolbar__button {
+  min-height: 44px;
+}
+
+.mobile-pane-shell__content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.mobile-pane-shell__content > .chat,
+.mobile-pane-shell__content > .terminal,
+.mobile-pane-shell__content > .workspace-files,
+.mobile-pane-shell__content > .workspace-git {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mobile-pane-shell__empty {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: 1.5rem;
+  color: var(--subtext-0);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.mobile-switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 3000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mobile-switcher {
+  width: min(320px, 88vw);
+  height: 100%;
+  background: var(--surface-0);
+  border-left: 1px solid var(--overlay-0);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-switcher__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 0.7rem 0.9rem;
+  padding-top: calc(0.7rem + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.mobile-switcher__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mobile-switcher__close {
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+
+.mobile-switcher__close:hover {
+  color: var(--text);
+}
+
+.mobile-switcher__actions {
+  flex-shrink: 0;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.mobile-switcher__new-btn {
+  width: 100%;
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mobile-switcher__new-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mobile-switcher__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+
+.mobile-switcher__list--workspace {
+  padding: 0;
+}
+
+.mobile-switcher__list--workspace .workspace-overview {
+  min-height: 100%;
+  border-bottom: 0;
+}
+
+.mobile-switcher__project {
+  padding: 0.3rem 0;
+}
+
+.mobile-switcher__project-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--subtext-0);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mobile-switcher__project-host {
+  font-weight: 400;
+  text-transform: none;
+  opacity: 0.8;
+}
+
+.mobile-switcher__session {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.mobile-switcher__session:hover {
+  background: var(--surface-1);
+}
+
+.mobile-switcher__session--active {
+  background: var(--surface-1);
+  color: var(--accent);
+}
+
+.mobile-switcher__session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-switcher__footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--overlay-0);
+  padding: 0.5rem 0.9rem;
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
+.mobile-switcher__settings {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.mobile-switcher__settings:hover {
+  border-color: var(--accent);
+}
+
+/* Below the breakpoint, the desktop Sidebar+TabBar chrome is swapped for
+ * MobileHeader+MobileSwitcher (see App.tsx / responsive.ts). Belt-and-braces
+ * hide here too, in case a narrow window is reached without a React
+ * re-render (e.g. print preview / non-JS contexts) — App.tsx already omits
+ * these components from the tree at this width, so in the normal case this
+ * media query never has anything to hide. */
+@media (max-width: 700px) {
+  .sidebar,
+  .tab-bar {
+    display: none;
+  }
+}

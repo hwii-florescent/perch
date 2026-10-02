@@ -1,0 +1,156 @@
+/* --- Session item wrapper + hover action icons -------------------------- */
+
+.session-item__wrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.session-item__wrapper .session-item {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Hover trash icon — one-click, immediate delete (no confirmation). Hidden
+ * until the row is hovered/focused. */
+.session-item__delete-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.6rem;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+  border-left: 1px solid transparent;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.session-item__wrapper:hover .session-item__delete-btn,
+.session-item__wrapper:focus-within .session-item__delete-btn {
+  display: flex;
+}
+
+.session-item__delete-btn:hover {
+  color: var(--red);
+  background: var(--surface-1);
+}
+
+/* --- New-session picker popover (Fix 2) ---------------------------------- */
+
+.new-session-popover {
+  /* herdr overlay chrome — see `.model-chip__popover` comment above. */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  /* `max-height` is set inline (Sidebar.tsx), clamped to the viewport below
+   * the anchor. This flex column + the `min-height: 0` flex children below
+   * (`__projects`, `.dir-browser` → `.dir-browser__list`) let the popover's
+   * inner lists scroll independently while the breadcrumb/filter/footer
+   * (Wave 1 F1 regression: `dir-browser-use` must stay reachable) never get
+   * pushed off-screen. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Known-project quick-pick rows: capped to ~5 visible rows and scrollable so
+ * a long history of distinct cwds can't push the DirectoryBrowser (and its
+ * "Use this folder" button) below the fold. */
+.new-session-popover__projects {
+  /* Yields height to the DirectoryBrowser on short viewports. */
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 190px;
+}
+
+.new-session-popover__item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.45rem 0.75rem 0.35rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-session-popover__item:hover {
+  background: var(--surface-1);
+}
+
+.new-session-popover__item--none {
+  flex-shrink: 0;
+  color: var(--subtext-0);
+  font-weight: 400;
+}
+
+.new-session-popover__item-cwd {
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.1rem;
+}
+
+.new-session-popover__divider {
+  flex-shrink: 0;
+  height: 1px;
+  background: var(--overlay-0);
+  margin: 0.15rem 0;
+}
+
+.new-session-popover__custom {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.new-session-popover__input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+
+.new-session-popover__input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.new-session-popover__create-btn {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.new-session-popover__create-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

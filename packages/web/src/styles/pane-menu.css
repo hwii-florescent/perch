@@ -1,0 +1,83 @@
+/* --- Pane context menu (Phase 5: pane splitting/zoom/context-menu) ------- */
+
+.pane-context-menu {
+  /* herdr overlay chrome — see `.model-chip__popover` comment above
+   * (menus.rs calls `render_panel_shell(..., accent, panel_bg)` for every
+   * context menu). */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  padding: 0.3rem 0;
+}
+
+.pane-context-menu__item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.pane-context-menu__item:hover {
+  background: var(--surface-1);
+}
+
+.pane-context-menu__item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: none;
+}
+
+.pane-context-menu__item--danger {
+  color: var(--red);
+}
+
+.pane-context-menu__divider {
+  height: 1px;
+  background: var(--overlay-0);
+  margin: 0.25rem 0;
+}
+
+.pane-context-menu__rename {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.pane-context-menu__rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
+.pane-context-menu__rename-input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.pane-context-menu__rename-confirm {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--panel-bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}

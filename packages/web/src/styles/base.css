@@ -1,0 +1,74 @@
+:root {
+  color-scheme: dark;
+  /* --- semantic tokens (16) -----------------------------------------------
+   * The default look is perch's own monotone palette (`PERCH_DEFAULT` in
+   * `themes.ts`, identical values): neutral greys like a plain terminal
+   * emulator, with color reserved for status. Other themes are selectable in
+   * Settings; the Rust `default_theme()` in protocol.rs/settings.rs agrees. */
+  --accent: #c8c8c8;
+  --panel-bg: #161616;
+  --surface-0: #262626;
+  --surface-1: #333333;
+  --surface-dim: #1c1c1c;
+  --overlay-0: #3a3a3a;
+  --overlay-1: #7a7a7a;
+  --text: #d8d8d8;
+  --subtext-0: #9a9a9a;
+  --mauve: #a993c9;
+  --green: #7fb685;
+  --yellow: #d3b46a;
+  --red: #d77a7a;
+  --blue: #7aa2d7;
+  --teal: #7fb8b8;
+  --peach: #d39a6a;
+  /* --- deprecated aliases: kept so existing component CSS keeps working --- */
+  --bg: var(--panel-bg);
+  --surface: var(--surface-0);
+  --surface-alt: var(--surface-1);
+  --border: var(--overlay-0);
+  --muted: var(--subtext-0);
+  --danger: var(--red);
+  /* Flat/minimal corner radius for panel-like chrome (sidebar, tabs, status
+   * bar, overlays, popovers, buttons) — herdr's ratatui panes render with
+   * `ratatui::symbols::border::PLAIN` (square corners); a small radius here
+   * is the closest sane web equivalent without looking broken. Chat message
+   * bubbles and inline code/pre blocks intentionally keep their own (larger)
+   * radius since they're chat content, not TUI chrome. */
+  --radius: 3px;
+  /* Native checkboxes/radios follow the theme, not the browser's blue. */
+  accent-color: var(--accent);
+  /* herdr is a terminal app — the whole UI reads as a TUI, so the base font
+   * is a monospace stack rather than the system sans-serif perch used
+   * before. Falls through to the platform's default monospace if none of
+   * the named faces are installed. */
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--panel-bg);
+  color: var(--text);
+  /* Terminal-dense line spacing instead of prose-comfortable 1.5+. */
+  line-height: 1.3;
+  /* Avoids the classic mobile double-tap zoom + rubber-band scroll feel. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}

@@ -8,7 +8,7 @@
  * `PaneContextMenu` in Sidebar.tsx and `SettingsModal`'s backdrop+panel),
  * rather than a single global App-level singleton. Styled like every other
  * overlay in the app — accent border + panel-bg fill (see
- * `.model-chip__popover` comment in styles.css).
+ * `.model-chip__popover` comment in styles/composer.css).
  */
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";

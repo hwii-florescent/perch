@@ -1,0 +1,225 @@
+/* --- Host switcher chip (top-left) --------------------------------------- */
+
+.sidebar__host-switcher {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  width: 100%;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--overlay-0);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.sidebar__host-switcher:hover {
+  background: var(--surface-1);
+}
+
+.sidebar__host-switcher .sidebar__env {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.sidebar__host-switcher-caret {
+  flex-shrink: 0;
+  color: var(--subtext-0);
+  font-size: 0.7rem;
+  padding: 0.6rem 0.5rem 0 0;
+}
+
+.sidebar__local-actions {
+  padding: 0.5rem 0.5rem 0.35rem;
+  flex-shrink: 0;
+}
+
+.sidebar__local-actions .sidebar__new-btn {
+  margin: 0;
+  width: 100%;
+}
+
+/* --- Host switcher popover ------------------------------------------------ */
+
+.host-switcher-popover {
+  /* herdr overlay chrome — same as `.new-session-popover`. */
+  background: var(--panel-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  min-width: 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.host-switcher-popover__list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.host-switcher-popover__row {
+  display: flex;
+  flex-direction: column;
+}
+
+.host-switcher-popover__row-top {
+  display: flex;
+  align-items: center;
+}
+
+.host-switcher-popover__row--active {
+  background: var(--surface-0);
+}
+
+.host-switcher-popover__item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.host-switcher-popover__item:hover {
+  background: var(--surface-1);
+}
+
+.host-switcher-popover__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-switcher-popover__state {
+  flex-shrink: 0;
+  font-size: 0.66rem;
+  color: var(--subtext-0);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* "direct" mode marker in the host switcher — a host with no perch on it,
+   whose hosted turns run detached over SSH. Visually distinct from the
+   connection-state text next to it because it describes the *kind* of host,
+   not its current state. */
+.host-switcher-popover__badge {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid var(--surface-2);
+  color: var(--mauve, var(--subtext-0));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Per-host mode select in the Settings hosts list. */
+.settings-modal__host-mode {
+  flex-shrink: 0;
+  min-width: 5.5rem;
+}
+
+.host-switcher-popover__enabled {
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem 0 0;
+  cursor: pointer;
+}
+
+/* Actionable error text under a host row, e.g. "perch not installed on
+ * remote…" — the HostStateDot title carries the full text too, but this
+ * makes the failure visible without hovering. */
+.host-switcher-popover__error {
+  padding: 0 0.6rem 0.4rem 1.55rem;
+  font-size: 0.68rem;
+  color: var(--red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-switcher-popover__divider {
+  height: 1px;
+  background: var(--overlay-0);
+}
+
+.host-switcher-popover__manage {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+}
+
+.host-switcher-popover__manage:hover {
+  background: var(--surface-1);
+}
+
+/* --- Host connection state dots ------------------------------------------ */
+
+.host-state {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.host-state--connected {
+  background: var(--accent);
+}
+
+.host-state--connecting {
+  background: var(--yellow);
+  animation: host-connecting-pulse 1.4s ease-in-out infinite;
+}
+
+.host-state--error {
+  background: var(--red);
+}
+
+.host-state--disabled {
+  background: var(--subtext-0);
+}
+
+@keyframes host-connecting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* --- Settings modal host state dot --------------------------------------- */
+
+.settings-modal__host-error {
+  font-size: 0.72rem;
+  color: var(--red);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Advanced add-row (directUrl / remoteCmd) */
+
+.settings-modal__add-row--advanced {
+  margin-top: 0.35rem;
+  opacity: 0.75;
+}

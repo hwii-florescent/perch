@@ -1,0 +1,38 @@
+/* Session status dot (herdr-parity static glyph system, Phase 2).
+   Static — no pulsing. `.session-status`/`--running`/`--idle` are kept as
+   legacy aliases so existing e2e selectors keep matching; the actual glyph
+   rendering and coloring lives in `.agent-status-dot`/`.agent-status-dot--*`
+   (see `statusDot.ts` / `components/StatusDot.tsx`). */
+
+.session-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.agent-status-dot {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.agent-status-dot--blocked {
+  color: var(--red);
+}
+
+.agent-status-dot--working {
+  color: var(--yellow);
+}
+
+.agent-status-dot--done {
+  color: var(--teal);
+}
+
+.agent-status-dot--idle {
+  color: var(--green);
+}
+
+.agent-status-dot--unknown {
+  color: var(--overlay-1);
+}

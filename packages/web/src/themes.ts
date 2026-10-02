@@ -11,7 +11,7 @@
  * default, and `applyTheme()`'s fallback below for the client-side one.
  *
  * `applyTheme(name)` sets each token as a CSS custom property on
- * `document.documentElement.style`, which is all `styles.css` needs since
+ * `document.documentElement.style`, which is all `styles/` needs since
  * every themed rule reads its color via `var(--token)`.
  */
 
@@ -36,7 +36,7 @@ export interface Palette {
 
 /** perch's default look: monotone neutral greys, like a plain terminal
  * emulator (or Orca's default), with muted colors kept for status only.
- * `styles.css`'s `:root` tokens hold the same values. */
+ * `styles/base.css` `:root` tokens hold the same values. */
 export const PERCH_DEFAULT: Palette = {
   accent: "#c8c8c8",
   panelBg: "#161616",

@@ -1,0 +1,245 @@
+
+.session-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.session-item:hover {
+  background: var(--surface-1);
+}
+
+.session-item--active {
+  /* herdr: the selected sidebar row gets a full surface0 background
+   * (`ui/sidebar.rs::render_workspace_list` / `render_sidebar_collapsed`,
+   * `is_selected` -> `Style::default().bg(p.surface0)`) — surface-1 is
+   * reserved for hover per the `Palette` doc comment ("surface1: slightly
+   * lighter surface for hover/active states"). The left accent bar is kept
+   * as an extra affordance on top of that. */
+  background: var(--surface-0);
+  border-left-color: var(--accent);
+}
+
+.session-item__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.session-item__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.session-item__meta {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.session-item__time {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* --- Sidebar project navigation (herdr "spaces" list) -------------------- */
+
+.sidebar__project {
+  margin-bottom: 0.25rem;
+}
+
+/* Sessions of the active project are nested one level in, so the project
+ * rows above/below them stay readable as the top navigation level. */
+.sidebar__project .session-item__wrapper {
+  padding-left: 0.85rem;
+}
+
+.sidebar__project .session-item {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+.sidebar__project-header {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0 0.35rem;
+}
+
+/* The clickable body of a project row: [aggregate dot] [name / subline] [n] */
+.sidebar__project-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.3rem;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.sidebar__project-select:hover {
+  background: var(--surface-1);
+}
+
+.sidebar__project--active > .sidebar__project-header > .sidebar__project-select {
+  background: var(--surface-0);
+  border-left-color: var(--accent);
+}
+
+.sidebar__project-dot {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.sidebar__project-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar__project-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar__project-subline {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar__project-sub {
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__project-count {
+  font-size: 0.68rem;
+  color: var(--subtext-0);
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.35rem;
+  flex-shrink: 0;
+}
+
+/* Bulk "close all sessions in this project" trigger — sits in the project
+   header alongside the worktree-menu branch button, styled the same way
+   (icon-only, no border, dims until hovered) so the header reads as one
+   family of affordances rather than a mismatched extra control. */
+.sidebar__project-close-all {
+  flex-shrink: 0;
+  align-self: center;
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.sidebar__project-close-all:hover {
+  color: var(--accent);
+  background: var(--surface-1);
+}
+
+.sidebar__empty {
+  margin: 0.6rem 0.65rem;
+  font-size: 0.72rem;
+  color: var(--subtext-0);
+}
+
+/* --- Sidebar project git status (Phase 6) -------------------------------- */
+
+.sidebar__project-git {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar__project-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 8rem;
+}
+
+.sidebar__project-ahead,
+.sidebar__project-behind {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* --- Sidebar footer / gear (C1) ------------------------------------------ */
+
+.sidebar__footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.4rem 0.5rem;
+  gap: 0.35rem;
+  border-top: 1px solid var(--overlay-0);
+}
+
+.sidebar__gear {
+  background: none;
+  border: none;
+  color: var(--subtext-0);
+  font-size: 1.1rem;
+  padding: 0.25rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.sidebar__gear:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}

@@ -165,7 +165,7 @@ there, not here.
     (`activeWorkspaceSessions` in `store/selectors.ts`), and `+` creates in
     that workspace's path.
   - The default theme is `"perch"`: monotone neutral greys, color only for
-    status. `styles.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
+    status. `styles/base.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
     `default_theme()` must agree. The active tab and pane are marked in grey,
     not with an accent fill.
   - perch never archives: closing is deleting. Tab and session-row ×,

@@ -576,7 +576,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
 
   // Position: open below the anchor button, left-aligned. Clamped to the
   // viewport: the project list grows one row per listed project.
-  // `.new-session-popover` is a flex column (see styles.css); this cap makes
+  // `.new-session-popover` is a flex column (see styles/session-picker.css); this cap makes
   // the `__projects` list scroll internally.
   const top = anchorRect.bottom + 4;
   const style: React.CSSProperties = {

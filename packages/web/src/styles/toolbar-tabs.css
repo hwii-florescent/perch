@@ -1,0 +1,250 @@
+/* --- Toolbar / dockview shell -------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--overlay-0);
+  padding: 0.35rem 0.5rem;
+  padding-top: calc(0.35rem + env(safe-area-inset-top));
+  background: var(--surface-0);
+}
+
+/* Desktop: tabs and ›_ share the one top row. */
+.toolbar--tabs {
+  align-items: center;
+  gap: 0.5rem;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 0.5rem 0 0;
+  background: var(--panel-bg);
+}
+.toolbar--tabs .tab-bar {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  border-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.toolbar--tabs .toolbar__button {
+  padding: 0.2rem 0.5rem;
+}
+/* The sidebar and drawer toggles: blend into the row, fill only on hover. */
+.toolbar__button.toolbar__button--icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--subtext-0);
+  background: transparent;
+  border-color: transparent;
+}
+.toolbar__button.toolbar__button--icon:hover,
+.toolbar__button.toolbar__button--icon:focus-visible {
+  background: var(--surface-1);
+  border-color: transparent;
+  color: var(--text);
+}
+/* Left section of the top row: app name + sidebar toggle. Expanded, it is as
+ * wide as the sidebar so the tabs start above the main column. */
+.toolbar__brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: var(--sidebar-width, 240px);
+  padding: 0 0.5rem 0 0.75rem;
+  border-right: 1px solid var(--overlay-0);
+  margin-right: -0.5rem; /* cancel the row gap: tabs start above the main column */
+}
+.toolbar__brand--collapsed {
+  width: auto;
+  border-right: 0;
+  margin-right: 0;
+}
+.toolbar__app-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--subtext-0);
+  user-select: none;
+}
+/* The macOS app's traffic lights sit in this padding (perch-desktop main.rs). */
+.app--mac-desktop .toolbar__brand {
+  padding-left: 78px;
+}
+
+.toolbar__button {
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.toolbar__button:hover {
+  border-color: var(--accent);
+}
+
+/* --- Tab bar (Phase 3: Workspace → Tab → Pane model) ---------------------- */
+/* Strip of sessions belonging to the active project (hostId, cwd). Static —
+ * no pulsing/animation, consistent with the rest of the herdr-parity look. */
+
+.tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--overlay-0);
+  /* herdr's tab bar (`ui/tabs.rs::render_tab_bar`) fills the whole strip with
+   * panel_bg first, then draws each tab's own bg on top — mirror that here
+   * instead of the surface-1 backdrop the old perch look used. */
+  background: var(--panel-bg);
+  overflow-x: auto;
+}
+
+.tab-bar__tab {
+  /* herdr: inactive named tab = surface0 bg / overlay1 fg
+   * (`ui/tabs.rs::render_tab_bar`). */
+  background: var(--surface-0);
+  color: var(--overlay-1);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tab-bar__tab:hover {
+  border-color: var(--overlay-1);
+  color: var(--text);
+}
+
+.tab-bar__tab-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.tab-bar__tab-wrap .tab-bar__tab {
+  padding-right: 1.6rem;
+}
+
+.tab-bar__close {
+  position: absolute;
+  top: 50%;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--overlay-1);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tab-bar__close:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.tab-bar__close--active {
+  color: var(--panel-bg);
+}
+
+.tab-bar__close--active:hover {
+  background: color-mix(in srgb, var(--panel-bg) 25%, transparent);
+  color: var(--panel-bg);
+}
+
+.tab-bar__tab--active {
+  background: var(--surface-1);
+  color: var(--text);
+  border-color: var(--overlay-1);
+}
+
+.tab-bar__tab--active:hover {
+  border-color: var(--overlay-1);
+  color: var(--text);
+}
+
+/* Wave 2 item 10: drag-to-reorder visual states. Dragged tab dims slightly;
+ * the tab currently under the pointer gets an accent-colored insertion edge
+ * so the drop target is unambiguous without a separate ghost/preview element. */
+.tab-bar__tab--dragging {
+  opacity: 0.5;
+}
+
+.tab-bar__tab--drag-over {
+  border-color: var(--accent);
+  box-shadow: -2px 0 0 var(--accent);
+}
+
+.tab-bar__rename-input {
+  /* Inline rename input (Wave 1 item 2), sized/positioned to slot into the
+   * tab strip in place of the tab button being renamed. */
+  background: var(--surface-0);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-family: inherit;
+  width: 10rem;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.tab-bar__new {
+  background: var(--surface-1);
+  color: var(--subtext-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.tab-bar__new:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.dock-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+/* An open file tab covers the session's panes, which stay mounted (and their
+ * terminals sized) underneath. */
+.file-tab-view {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  background: var(--panel-bg);
+}
+
+.tab-bar__dirty {
+  color: var(--subtext-0);
+}

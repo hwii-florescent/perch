@@ -1,0 +1,641 @@
+/* --- Durable project/workspace navigator ---------------------------------- */
+
+.workspace-overview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.workspace-overview__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  padding: 0.55rem 0.55rem 0.45rem 0.65rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--overlay-0) 72%, transparent);
+}
+
+.workspace-overview__heading > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.workspace-overview__eyebrow {
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-overview__count {
+  color: var(--subtext-0);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.workspace-overview__heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.workspace-overview__icon-button,
+.workspace-overview__add-button,
+.workspace-overview__quiet-button,
+.workspace-overview__primary-button,
+.workspace-entry__restore,
+.workspace-overview__empty button {
+  border-radius: var(--radius);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.workspace-overview__icon-button {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--subtext-0);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.workspace-overview__icon-button:hover,
+.workspace-overview__icon-button:focus-visible {
+  border-color: var(--overlay-0);
+  color: var(--text);
+}
+
+.workspace-overview__add-button {
+  padding: 0.22rem 0.42rem;
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.workspace-overview__add-button:hover,
+.workspace-overview__add-button:focus-visible {
+  border-color: var(--accent);
+}
+
+.workspace-overview__add-form {
+  display: grid;
+  gap: 0.42rem;
+  flex-shrink: 0;
+  padding: 0.55rem 0.65rem;
+  background: var(--surface-dim);
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.workspace-overview__add-form label {
+  display: grid;
+  gap: 0.16rem;
+  color: var(--subtext-0);
+  font-size: 0.65rem;
+}
+
+.workspace-overview__add-form em {
+  color: var(--overlay-1);
+  font-style: normal;
+}
+
+.workspace-overview__add-form > label input {
+  min-width: 0;
+  width: 100%;
+  padding: 0.34rem 0.42rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: 0.72rem/1.2 inherit;
+}
+
+.workspace-overview__add-form > label input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.workspace-overview__form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  padding-top: 0.15rem;
+}
+
+.workspace-overview__quiet-button,
+.workspace-overview__primary-button {
+  padding: 0.3rem 0.45rem;
+  font-size: 0.68rem;
+}
+
+.workspace-overview__quiet-button {
+  background: transparent;
+  border: 1px solid var(--overlay-0);
+  color: var(--subtext-0);
+}
+
+.workspace-overview__primary-button {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--panel-bg);
+  font-weight: 700;
+}
+
+.workspace-overview__primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.workspace-overview__quiet-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.workspace-overview__form-status {
+  color: var(--subtext-0);
+  font-size: 0.64rem;
+}
+
+.workspace-overview__form-status--error {
+  color: var(--red);
+}
+
+.workspace-overview__state {
+  flex-shrink: 0;
+  padding: 0.55rem 0.65rem;
+  color: var(--subtext-0);
+  font-size: 0.7rem;
+}
+
+.workspace-overview__state--error {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--red);
+}
+
+.workspace-overview__state button {
+  margin-left: auto;
+  padding: 0.2rem 0.38rem;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-overview__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.28rem 0;
+}
+
+.workspace-project {
+  border-bottom: 1px solid color-mix(in srgb, var(--overlay-0) 45%, transparent);
+}
+
+.workspace-project__button,
+.workspace-entry__button,
+.workspace-entry__session {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-project__button {
+  flex: 1;
+  gap: 0.45rem;
+  padding: 0.5rem 0.55rem 0.45rem 0.65rem;
+  background: transparent;
+  color: var(--text);
+}
+
+.workspace-project__header {
+  display: flex;
+  align-items: center;
+  padding-right: 0.35rem;
+}
+
+.workspace-project__button:hover,
+.workspace-project--active .workspace-project__button {
+  background: var(--surface-1);
+}
+
+.workspace-project--active .workspace-project__button {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.workspace-project__marker {
+  flex-shrink: 0;
+  width: 0.75rem;
+  color: var(--accent);
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.workspace-project__body,
+.workspace-entry__body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.1rem;
+}
+
+.workspace-project__body strong,
+.workspace-entry__body strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-project__body span,
+.workspace-entry__body span {
+  overflow: hidden;
+  color: var(--subtext-0);
+  font-size: 0.63rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-project__workspaces {
+  padding: 0 0.35rem 0.35rem 1.15rem;
+}
+
+.workspace-entry {
+  position: relative;
+  border-left: 1px solid var(--overlay-0);
+}
+
+.workspace-entry__button {
+  gap: 0.35rem;
+  padding: 0.35rem 0.3rem 0.32rem 0.45rem;
+  background: transparent;
+  color: var(--text);
+}
+
+.workspace-entry__button:hover,
+.workspace-entry__button--active {
+  background: color-mix(in srgb, var(--surface-1) 75%, transparent);
+}
+
+.workspace-entry__button--active {
+  box-shadow: inset 2px 0 0 var(--teal);
+}
+
+.workspace-entry__dot {
+  flex-shrink: 0;
+  width: 0.7rem;
+  color: var(--teal);
+  font-size: 0.58rem;
+  text-align: center;
+}
+
+.workspace-entry__state {
+  flex-shrink: 0;
+  color: var(--subtext-0);
+  font-size: 0.58rem;
+}
+
+.workspace-entry__restore {
+  margin: 0 0.3rem 0.3rem 1.45rem;
+  padding: 0.18rem 0.35rem;
+  background: transparent;
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 0.6rem;
+}
+
+/* Files and Git share one anchored row. They used to carry the absolute
+ * positioning individually, which stacked them in the same corner: the later
+ * Git button covered Files completely, so a real click on Files always landed
+ * on Git. */
+.workspace-entry__actions {
+  position: absolute;
+  right: 0.3rem;
+  /* Top, not bottom: the entry also holds its session rows, and a bottom
+   * anchor lands the actions on the last session's close button. */
+  top: 0.3rem;
+  display: flex;
+  gap: 0.2rem;
+}
+
+.workspace-entry__files {
+  padding: 0.14rem 0.28rem;
+  /* Opaque: on hover the actions sit over the name and state columns. */
+  background: var(--surface-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+/* Pin / delete / hide are glyphs so the hover row stays clear of the name. */
+.workspace-entry__icon {
+  font-size: 0.78rem;
+  padding: 0.05rem 0.3rem;
+}
+
+.workspace-entry:hover .workspace-entry__files,
+.workspace-entry__files:focus-visible {
+  opacity: 1;
+}
+
+.workspace-entry__files:hover,
+.workspace-entry__files:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workspace-entry__children {
+  margin-left: 0.9rem;
+}
+
+.workspace-hidden__toggle {
+  width: 100%;
+  padding: 0.25rem 0.45rem 0.25rem 1.45rem;
+  background: transparent;
+  border: 0;
+  color: var(--overlay-1);
+  font-family: inherit;
+  font-size: 0.62rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-hidden__toggle:hover,
+.workspace-hidden__toggle:focus-visible {
+  color: var(--accent);
+}
+
+.workspace-hidden__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem 0.2rem 1.45rem;
+}
+
+.workspace-entry__rename {
+  width: calc(100% - 0.6rem);
+  margin: 0.25rem 0.3rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--surface-0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.worktree-job__row {
+  cursor: default;
+}
+
+.worktree-job--failed .workspace-entry__dot,
+.worktree-job--failed .workspace-entry__body span {
+  color: var(--red);
+}
+
+.worktree-job__error {
+  display: -webkit-box;
+  margin: 0 0.3rem 0.3rem 1.45rem;
+  overflow: hidden;
+  color: var(--red);
+  font-size: 0.6rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.worktree-job__action {
+  flex-shrink: 0;
+  padding: 0.14rem 0.3rem;
+  background: transparent;
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  color: var(--subtext-0);
+  font-family: inherit;
+  font-size: 0.58rem;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.worktree-job__action:hover,
+.worktree-job__action:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workspace-entry__sessions {
+  padding: 0 0.3rem 0.25rem 1.45rem;
+}
+
+.workspace-entry__session {
+  gap: 0.35rem;
+  padding: 0.23rem 0.25rem;
+  background: transparent;
+  color: var(--subtext-0);
+  font-size: 0.64rem;
+}
+
+.workspace-entry__session:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.workspace-entry__session span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-entry__session--active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.workspace-entry__session-row {
+  display: flex;
+  align-items: center;
+}
+
+.workspace-entry__session-close,
+.workspace-project__icon {
+  flex-shrink: 0;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--overlay-1);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.workspace-entry__session-row:hover .workspace-entry__session-close,
+.workspace-project__header:hover .workspace-project__icon,
+.workspace-entry__session-close:focus-visible,
+.workspace-project__icon:focus-visible {
+  opacity: 1;
+}
+
+.workspace-entry__session-close:hover,
+.workspace-project__icon:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+/* The project row's ⌄ ⋯ + show on hover (a collapsed project keeps its ›);
+ * the + is WorktreeMenu's trigger. */
+.workspace-project__header .worktree-menu__btn {
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  font-size: 0.95rem;
+  opacity: 0;
+}
+.workspace-project__header:hover .worktree-menu__btn,
+.workspace-project__header .worktree-menu__btn:focus-visible,
+.workspace-project__header .worktree-menu__btn[aria-expanded="true"],
+.workspace-project__icon[aria-expanded="false"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .workspace-entry__session-close,
+  .workspace-project__icon,
+  .workspace-project__header .worktree-menu__btn {
+    opacity: 1;
+  }
+}
+
+/* Chats: a flat list of "No project" sessions after the projects, like a
+ * chat app's Recents (WorkspaceOverview.tsx). */
+.workspace-chats {
+  padding-bottom: 0.25rem;
+}
+
+.workspace-chats__title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.55rem 0.45rem 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--subtext-0);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-chats__title:hover,
+.workspace-chats__title:focus-visible {
+  color: var(--text);
+}
+
+.workspace-chats__new {
+  flex-shrink: 0;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--subtext-0);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workspace-chats__new:hover,
+.workspace-chats__new:focus-visible {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.workspace-chats__list {
+  padding: 0 0.3rem 0.25rem 0.4rem;
+}
+
+.workspace-chats__chat {
+  font-size: 0.7rem;
+  padding: 0.3rem 0.3rem;
+}
+
+.workspace-overview__empty {
+  display: grid;
+  justify-items: start;
+  gap: 0.32rem;
+  padding: 1.1rem 0.75rem;
+  color: var(--subtext-0);
+  font-size: 0.68rem;
+}
+
+.workspace-overview__empty-mark {
+  color: var(--accent);
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.workspace-overview__empty strong {
+  color: var(--text);
+  font-size: 0.77rem;
+}
+
+.workspace-overview__empty button {
+  margin-top: 0.18rem;
+  padding: 0.28rem 0.45rem;
+  background: var(--surface-1);
+  border: 1px solid var(--overlay-0);
+  color: var(--accent);
+  font: 0.66rem/1.2 inherit;
+}
+
+.workspace-overview__empty button:hover,
+.workspace-overview__empty button:focus-visible {
+  border-color: var(--accent);
+}
+
+.workspace-project__button:focus-visible,
+.workspace-entry__button:focus-visible,
+.workspace-entry__session:focus-visible,
+.workspace-entry__restore:focus-visible,
+.workspace-entry__files:focus-visible,
+.workspace-overview__state button:focus-visible,
+.workspace-overview__quiet-button:focus-visible,
+.workspace-overview__primary-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import App from "./App";
 import { usePerchStore } from "./store";
-import "./styles.css";
+import "./styles/index.css";
 
 // PWA service worker. Registering through virtual:pwa-register (rather than
 // the plugin's plain injected register call) matters: in autoUpdate mode this

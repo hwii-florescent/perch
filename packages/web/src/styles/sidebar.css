@@ -1,0 +1,125 @@
+/* --- Sidebar -------------------------------------------------------------- */
+
+.sidebar {
+  width: var(--sidebar-width, 240px);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-0);
+  border-right: 1px solid var(--overlay-0);
+  overflow: hidden;
+}
+
+/* The sidebar body (everything between top and footer) is scrollable so
+ * local + remote host sections can coexist without overflowing. */
+.sidebar__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Environment header */
+
+.sidebar__env {
+  flex-shrink: 0;
+  padding: 0.6rem 0.65rem 0.5rem;
+  border-bottom: 1px solid var(--overlay-0);
+}
+
+.sidebar__env-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.sidebar__env-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+}
+
+.sidebar__env-badge--local {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.sidebar__env-badge--remote {
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  color: var(--yellow);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+}
+
+.sidebar__env-badge--ssh {
+  background: color-mix(in srgb, var(--blue) 15%, transparent);
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+}
+
+.sidebar__env-host {
+  font-size: 0.75rem;
+  color: var(--text);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__env-platform {
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  margin-left: auto;
+}
+
+.sidebar__env-cwd {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--subtext-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* New session button */
+
+.sidebar__new-btn {
+  flex-shrink: 0;
+  margin: 0.5rem 0.5rem 0.35rem;
+  background: var(--surface-1);
+  color: var(--accent);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.sidebar__new-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.sidebar__new-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Session list */
+
+.sidebar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.2rem 0;
+}
