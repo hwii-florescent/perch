@@ -1,6 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -157,17 +156,6 @@ test("configured providers retain identity and isolation across desktop and mobi
     if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
-    }
-    // Recover from assertion failure without killing any unrelated tmux.
-    for (const key of keys.values()) {
-      const hash = createHash("sha256");
-      for (const value of [key.workspaceId, key.sessionId, key.agentId]) {
-        const bytes = Buffer.from(value);
-        const length = Buffer.alloc(8);
-        length.writeBigUInt64LE(BigInt(bytes.length));
-        hash.update(length); hash.update(bytes);
-      }
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-agent-${hash.digest("hex")}`], { stdio: "ignore" }); } catch { /* Already stopped through the UI. */ }
     }
     fs.closeSync(log);
     await testInfo.attach("fixture-core.log", { body: fs.readFileSync(coreLog), contentType: "text/plain" });
