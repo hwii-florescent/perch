@@ -68,7 +68,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   try {
     await start();
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByTestId(`cli-start-agent-${provider}`).click();
+    await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });

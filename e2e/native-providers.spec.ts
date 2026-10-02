@@ -64,7 +64,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   async function prepare(current: Page) {
     await current.goto(url, { waitUntil: "networkidle" });
     for (const provider of ["claude", "codex", "omp", "pi"]) {
-      await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeVisible();
+      await expect(current.getByTestId("cli-start-agent").locator(`option[value="${provider}"]`)).toHaveCount(1);
     }
   }
   try {
@@ -87,12 +87,12 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await prepare(page);
     await prepare(second);
     for (const [current, provider] of [[page, "omp"], [second, "pi"]] as const) {
-      await expect(current.getByTestId(`cli-start-agent-${provider}`)).toBeEnabled();
+      await expect(current.getByTestId("cli-start-agent").locator(`option[value="${provider}"]`)).toHaveCount(1);
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
         await current.getByTestId("new-session-popover-agent").selectOption("pi");
       } else {
-        await current.getByTestId(`cli-start-agent-${provider}`).click();
+        await current.getByTestId("cli-start-agent").selectOption(`${provider}`);
         await current.getByTestId("cli-start-browse").click();
       }
       await current.getByRole("button", { name: "Use this folder", exact: true }).click();

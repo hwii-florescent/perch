@@ -188,7 +188,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     const workspaceId = await firstWorkspaceId(project);
 
     // 2. A real CLI agent process in that repository.
-    await page.getByTestId(`cli-start-agent-${provider}`).click();
+    await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
@@ -421,7 +421,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     const project = page.locator(".workspace-project").filter({ hasText: path.basename(repo) });
     const workspaceId = await firstWorkspaceId(project);
 
-    await page.getByTestId("cli-start-agent-turnbot").click();
+    await page.getByTestId("cli-start-agent").selectOption("turnbot");
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");

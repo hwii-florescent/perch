@@ -205,7 +205,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await page.keyboard.press("Escape");
 
     // 2. The phone starts a real Claude CLI in the repository.
-    await phone.getByTestId("cli-start-agent-claude").click();
+    await phone.getByTestId("cli-start-agent").selectOption("claude");
     await phone.getByTestId("cli-start-browse").click();
     await phone.getByRole("button", { name: "Use this folder", exact: true }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 40_000 });

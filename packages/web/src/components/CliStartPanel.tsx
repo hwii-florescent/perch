@@ -124,26 +124,16 @@ export function CliStartPanel({ agent }: { agent: string }) {
           provider and the project it should run in.
         </p>
 
-        <div className="cli-start__agents" role="group" aria-label="CLI provider">
-          {choices.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className={
-                "cli-start__agent-btn" + (a.id === selectedAgent ? " cli-start__agent-btn--active" : "")
-              }
-              data-testid={`cli-start-agent-${a.id}`}
-              disabled={manifestCapability && (
-                manifestState?.state !== "ready" || !a.available
-              )}
-              title={a.reason}
-              aria-pressed={a.id === selectedAgent}
-              onClick={() => { setPicked(true); setSelectedAgent(a.id); }}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
+        <select
+          className="agent-picker"
+          aria-label="CLI provider"
+          data-testid="cli-start-agent"
+          value={choices.some((a) => a.id === selectedAgent) ? selectedAgent : ""}
+          disabled={!choices.length || (manifestCapability && manifestState?.state !== "ready")}
+          onChange={(event) => { setPicked(true); setSelectedAgent(event.target.value); }}
+        >
+          {choices.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select>
 
         {manifestCapability && <button type="button" className="agent-catalog__action" data-testid="cli-manage-agents" onClick={openAgentCatalog}>Manage agents</button>}
 

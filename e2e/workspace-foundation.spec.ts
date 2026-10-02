@@ -74,7 +74,6 @@ test.describe("V-01 project/workspace registration", () => {
       await expect(page.getByTestId("workspace-add-form").getByTestId("project-path-input")).toHaveValue(`${FIRST_PATH}-missing`);
       await expect(page.getByTestId("workspace-project-name")).toHaveValue(FIRST_NAME);
 
-
       await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(FIRST_PATH);
       await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
       const firstId = await (async () => {

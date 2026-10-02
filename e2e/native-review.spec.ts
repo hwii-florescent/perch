@@ -61,7 +61,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const project = page.locator(".workspace-project").filter({ hasText: token });
     await expect(project).toBeVisible();
     const workspaceId = await firstWorkspaceId(project);
-    await page.getByTestId(`cli-start-agent-${provider}`).click();
+    await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
     await page.getByTestId("cli-start-browse").click();
     await page.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");

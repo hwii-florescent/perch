@@ -192,7 +192,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await page.keyboard.press("Escape");
 
     // 4. The phone drives a real agent: start it, prompt it, read the reply.
-    await phone.getByTestId("cli-start-agent-phonebot").click();
+    await phone.getByTestId("cli-start-agent").selectOption("phonebot");
     await phone.getByTestId("cli-start-browse").click();
     await phone.getByRole("button", { name: "Use this folder", exact: true }).click();
     const terminal = phone.getByTestId("persistent-agent-terminal");
