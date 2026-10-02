@@ -93,8 +93,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     // 1. Start a real CLI agent and complete a conversation turn.
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("cli-start-agent").selectOption("claude");
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.getByTestId("cli-start-chats").click();
     const cli = page.getByTestId("persistent-agent-terminal");
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 60_000 });
     await expect(cli.locator(".xterm-rows")).toContainText(/Claude Code/, { timeout: 60_000 });

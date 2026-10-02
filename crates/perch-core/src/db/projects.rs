@@ -412,6 +412,27 @@ impl HistoryDb {
         get_workspace_locked(&conn, id)
     }
 
+    /// The listed (not removed) workspace at exactly `path`, if any. New
+    /// sessions may only start in one of these or in Chats.
+    pub fn listed_workspace_at(
+        &self,
+        host_id: &str,
+        path: &str,
+    ) -> anyhow::Result<Option<WorkspaceRow>> {
+        let conn = self.conn.lock().unwrap();
+        let host_id = normalized_host_id(host_id);
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT w.id FROM workspaces w JOIN projects p ON p.id = w.project_id
+                 WHERE w.host_id = ?1 AND w.path = ?2 AND w.state <> 'archived' AND p.archived = 0
+                 ORDER BY w.created_at ASC, w.id ASC LIMIT 1",
+                params![host_id, canonical_path_for_host(host_id, path)],
+                |row| row.get(0),
+            )
+            .optional()?;
+        id.map_or(Ok(None), |id| get_workspace_locked(&conn, &id))
+    }
+
     pub fn set_workspace_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<WorkspaceRow> {
         let conn = self.conn.lock().unwrap();
         let changed = conn.execute(

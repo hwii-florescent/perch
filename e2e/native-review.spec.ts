@@ -62,8 +62,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(project).toBeVisible();
     const workspaceId = await firstWorkspaceId(project);
     await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.locator('[data-testid^="cli-start-project-"]').filter({ hasText: path.basename(fixture) }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-controlling", "true");
     if (provider === "codex") {

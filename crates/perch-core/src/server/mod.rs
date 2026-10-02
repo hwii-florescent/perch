@@ -693,6 +693,10 @@ pub async fn run(
     // handle it can spawn on.
     let _ = agent_activity_app.set(state.clone());
     agent_history::attach_runtime(tokio::runtime::Handle::current());
+    // Sessions left open in a project removed before removal took them along.
+    if let Err(error) = session::archive_sessions_of_removed_projects(&state) {
+        tracing::warn!("could not remove sessions of removed projects: {error}");
+    }
     // A claimed prompt or review packet may have crossed the dispatch barrier
     // immediately before a prior process exited. Preserve it as explicitly
     // unconfirmed so reconnect/reload paths cannot launch a duplicate.

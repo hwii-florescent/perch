@@ -117,8 +117,7 @@ test("configured providers retain identity and isolation across desktop and mobi
     await phone.screenshot({ path: path.join(shots, `provider-picker-mobile-${testInfo.project.name}.png`) });
     await page.getByTestId("cli-start-agent").selectOption("fixture-alpha");
     for (const current of [page, phone]) {
-      await current.getByTestId("cli-start-browse").click();
-      await current.getByRole("button", { name: "Use this folder", exact: true }).click();
+      await current.getByTestId("cli-start-chats").click();
     }
     const desktopTerminal = page.getByTestId("persistent-agent-terminal");
     const mobileTerminal = phone.getByTestId("persistent-agent-terminal");

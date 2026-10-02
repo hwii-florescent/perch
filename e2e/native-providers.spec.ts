@@ -91,11 +91,11 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
         await current.getByTestId("new-session-popover-agent").selectOption("pi");
+        await current.getByTestId("project-option-none").click();
       } else {
         await current.getByTestId("cli-start-agent").selectOption(`${provider}`);
-        await current.getByTestId("cli-start-browse").click();
+        await current.getByTestId("cli-start-chats").click();
       }
-      await current.getByRole("button", { name: "Use this folder", exact: true }).click();
       const terminal = current.getByTestId("persistent-agent-terminal");
       await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
       await expect(terminal).toHaveAttribute("data-controlling", "true");

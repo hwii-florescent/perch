@@ -22,6 +22,7 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import * as fs from "fs";
 import { execSync } from "child_process";
+import { pickProject } from "./projects";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -171,12 +172,7 @@ async function createSessionInDir(page: Page, cwd: string, seed: string): Promis
   const newBtn = page.locator('[data-testid="new-session-local"]');
   await expect(newBtn).toBeEnabled({ timeout: 10000 });
   await newBtn.click();
-  await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-  const input = page.locator('[data-testid="project-path-input"]');
-  await expect(input).toBeVisible({ timeout: 5000 });
-  await input.fill(cwd);
-  await page.locator('[data-testid="dir-browser-use"]').click();
-  await expect(input).not.toBeVisible({ timeout: 3000 });
+  await pickProject(page, cwd);
 
   // Cheapest possible real turn — the row only needs the insert side effect.
   const chip = page.locator('[data-testid="model-chip"]');

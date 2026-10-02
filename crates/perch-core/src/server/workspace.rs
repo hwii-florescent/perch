@@ -1008,7 +1008,18 @@ pub(super) fn handle_project_archive(
         );
         return;
     };
-    match state.app.db.set_project_archived(&project.id, archived) {
+    // Removing a project removes its sessions from perch too (archived, like
+    // closing their tabs); the folder and transcripts stay on disk.
+    match state
+        .app
+        .db
+        .set_project_archived(&project.id, archived)
+        .and_then(|project| {
+            if archived {
+                super::session::archive_sessions_of_removed_projects(&state.app)?;
+            }
+            Ok(project)
+        }) {
         Ok(project) => {
             let revision = next_snapshot_revision_locked(&state.app);
             broadcast_foundation(

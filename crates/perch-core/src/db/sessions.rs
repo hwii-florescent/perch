@@ -165,6 +165,23 @@ impl HistoryDb {
         self.create_session_on_host(id, cwd, "local")
     }
 
+    /// Removing a project removes its sessions from perch, like closing their
+    /// tabs: archived, not deleted. The folder and the agent's own transcript
+    /// stay on disk, so the agent can still resume them outside perch.
+    pub fn archive_sessions_of_removed_projects(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "UPDATE sessions SET archived = 1
+             WHERE archived = 0 AND COALESCE(NULLIF(host_id, ''), 'local') = 'local'
+               AND project_id IN (SELECT id FROM projects WHERE archived = 1)
+             RETURNING id",
+        )?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
     /// Lazily materialize a session row, tagged with the host that owns it.
     /// `host_id` is `"local"` for ordinary sessions and a direct-mode host id
     /// for detached ones. `INSERT OR IGNORE` keeps this a no-op for rows that

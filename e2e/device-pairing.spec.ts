@@ -193,8 +193,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
 
     // 4. The phone drives a real agent: start it, prompt it, read the reply.
     await phone.getByTestId("cli-start-agent").selectOption("phonebot");
-    await phone.getByTestId("cli-start-browse").click();
-    await phone.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await phone.getByTestId("cli-start-chats").click();
     const terminal = phone.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot ready", { timeout: 30_000 });

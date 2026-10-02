@@ -158,7 +158,18 @@ there, not here.
     `default_theme()` must agree. The active tab and pane are marked in grey,
     not with an accent fill.
   - Tab and session-row × archive the session (restorable from Settings).
-    Removing a project archives it; re-registering the folder restores it.
+    Removing a project archives it and its open sessions (they leave perch;
+    the folder and the agent's own transcript stay on disk); re-registering
+    the folder restores the project.
+  - A session starts only in a listed project's workspace or in Chats
+    (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
+    session minted on connect, go to Chats. There is no "start in any
+    folder" picker, and perch never registers a project implicitly ($HOME
+    included); `+ Add` is the only way a folder becomes a project. A session
+    stays in the project it started in whatever its terminal cd's into.
+  - Terminals behave like Ghostty/iTerm2: perch must never swallow or
+    re-encode input. Turn-review capture on Enter is best-effort and never
+    blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
     then the drawer toggle (a right-panel icon). Both toggles are borderless
@@ -236,7 +247,8 @@ there, not here.
     ("dup of fd … failed") for the user's real app.
   - Known failures, not regressions (as of 2026-10-01): Hosted-composer
     specs that use `model-chip`/`.chat__send` (W1, P3, nav N1, sidebar 2,
-    workspace-git GB1; UI mode is NativeCliChat since 2e9c4b7);
+    workspace-git GB1, sessions S2; UI mode is NativeCliChat since 2e9c4b7);
+    workspace-terminals "tmux shell recovers" (expects `tmux`, gets `daemon`);
     agent-terminal-ownership, workspace-recovery, workspace-review:226;
     native-providers (older pane expectations); agent-hibernation (greps a
     tmux log line the core stopped printing in 56e2c48); keybindings K1 (it

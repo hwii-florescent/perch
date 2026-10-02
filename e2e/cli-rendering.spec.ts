@@ -119,10 +119,7 @@ async function openCliSession(page: Page): Promise<void> {
 
   // CLI is the suite default (isolated settings file).
   await expect(page.locator('[data-testid="cli-start-panel"]')).toBeVisible({ timeout: 15000 });
-  await page.locator('[data-testid="cli-start-browse"]').click();
-  const useFolder = page.locator('button:has-text("Use this folder")');
-  await expect(useFolder).toBeVisible({ timeout: 15000 });
-  await useFolder.click();
+  await page.locator('[data-testid="cli-start-chats"]').click();
 
   const surface = page.locator(".terminal__surface");
   await expect(surface).toBeVisible({ timeout: 25000 });

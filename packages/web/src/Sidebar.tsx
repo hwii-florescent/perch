@@ -36,7 +36,6 @@ import {
   type ProjectGroup,
 } from "./store";
 import { StatusDot } from "./components/StatusDot";
-import { DirectoryBrowser } from "./components/DirectoryBrowser";
 import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker } from "./components/AgentPicker";
@@ -598,13 +597,9 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
   const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
 
   // Position: open below the anchor button, left-aligned. Clamped to the
-  // viewport: the known-projects quick-pick list grows one row per distinct
-  // cwd seen in the DB (e2e fixture leftovers, long-lived real usage, ...),
-  // and combined with the embedded DirectoryBrowser it can exceed the
-  // viewport height, stranding the "Use this folder" button below the fold.
+  // viewport: the project list grows one row per listed project.
   // `.new-session-popover` is a flex column (see styles.css); this cap makes
-  // its internal regions (`__projects` list, DirectoryBrowser's folder list)
-  // scroll internally while the breadcrumb/filter/footer stay pinned.
+  // the `__projects` list scroll internally.
   const top = anchorRect.bottom + 4;
   const style: React.CSSProperties = {
     position: "fixed",
@@ -668,16 +663,8 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
         onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
         No project
-        <span className="new-session-popover__item-cwd">~</span>
+        <span className="new-session-popover__item-cwd">Chats</span>
       </button>
-      <div className="new-session-popover__divider" />
-      <DirectoryBrowser
-        hostId={hostId}
-        onUseFolder={(path) => {
-          onSelect(path, selectedAgent);
-          onClose();
-        }}
-      />
     </div>,
     document.body
   );
@@ -691,6 +678,7 @@ export function Sidebar() {
   const connected = usePerchStore((s) => s.connected);
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
+  const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const serverInfo = usePerchStore((s) => s.serverInfo);
   const status = usePerchStore((s) => s.status);
   const hosts = usePerchStore((s) => s.hosts);
@@ -732,14 +720,10 @@ export function Sidebar() {
     : workspaceCapabilitiesByHost[activeHostId] ?? []
   ).includes("workspace.snapshot");
 
-  const projectCwds = [
-    ...new Set(
-      sessions
-        .filter((s) => (s.hostId ?? "local") === activeHostId)
-        .map((s) => s.cwd)
-        .filter(Boolean)
-    ),
-  ];
+  // New sessions start in a listed project or in Chats, never an unadded folder.
+  const projectCwds = workspaceProjects
+    .filter((project) => project.hostId === activeHostId && !project.archived)
+    .map((project) => project.path);
 
   const choices: HostChoice[] = [
     {

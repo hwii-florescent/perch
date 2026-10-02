@@ -1316,10 +1316,15 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       activeProjectId: stableProjectId,
       activeWorkspaceId: stableWorkspaceId,
     }));
-    if (stableWorkspaceId && hasWorkspaceCapability(get(), newHostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
+    // A session can outlive its removed (archived) project; there is nothing
+    // to focus then, and asking would only surface "workspace is archived".
+    const focusWorkspace = get().workspaces.find((workspace) => workspace.id === stableWorkspaceId);
+    const focusable = focusWorkspace && focusWorkspace.state !== "archived"
+      && !get().workspaceProjects.find((project) => project.id === focusWorkspace.projectId)?.archived;
+    if (focusable && hasWorkspaceCapability(get(), newHostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
       const requestId = newId();
       sendWorkspaceMessage(
-        { type: "workspace.focus", requestId, workspaceId: stableWorkspaceId },
+        { type: "workspace.focus", requestId, workspaceId: focusWorkspace.id },
         newHostId,
         WORKSPACE_CAPABILITIES.workspaceFocus,
       );

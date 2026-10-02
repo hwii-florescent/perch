@@ -30,7 +30,6 @@
 import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
-import { DirectoryBrowser } from "./DirectoryBrowser";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -46,9 +45,9 @@ export function CliStartPanel({ agent }: { agent: string }) {
   const manifestState = usePerchStore((s) => s.agentManifestsByHost[activeHostId]);
   const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
   const startCli = usePerchStore((s) => s.startCli);
+  const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const openAgentCatalog = usePerchStore((s) => s.openAgentCatalog);
-  const [browsing, setBrowsing] = useState(false);
   // The provider the user has picked in *this* panel, defaulting to whatever
   // Chat.tsx resolved (this session's remembered choice, or the global
   // fallback — see `cliAgentBySession`). Local state so the toggle is
@@ -103,15 +102,11 @@ export function CliStartPanel({ agent }: { agent: string }) {
   // picked an existing session" case and never the housekeeping one.
   const current = sessions.find((s) => s.id === sessionId);
 
-  // Distinct project cwds already in use on this host — the same quick-pick
-  // the sidebar's "+" offers, so the two entry points agree.
-  const projectCwds = Array.from(
-    new Set(
-      sessions
-        .filter((s) => (s.hostId ?? "local") === activeHostId && s.cwd)
-        .map((s) => s.cwd),
-    ),
-  );
+  // Sessions start only in a project listed in perch, or in Chats — the
+  // same choices the sidebar's "+" offers, so the two entry points agree.
+  const projectCwds = workspaceProjects
+    .filter((project) => project.hostId === activeHostId && !project.archived)
+    .map((project) => project.path);
 
   const agentLabel = selectedManifest?.displayName ?? AGENTS.find((candidate) => candidate.id === selectedAgent)?.label ?? selectedAgent;
 
@@ -196,26 +191,15 @@ export function CliStartPanel({ agent }: { agent: string }) {
           </div>
         )}
 
-        {browsing ? (
-          <div className="cli-start__section">
-            <div className="cli-start__section-label">Choose a folder</div>
-            <DirectoryBrowser
-              hostId={activeHostId}
-              onUseFolder={(path) => {
-                if (selectedAvailable) createSessionOnHost(activeHostId, path, selectedAgent);
-              }}
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="cli-start__secondary"
-            data-testid="cli-start-browse"
-            onClick={() => setBrowsing(true)}
-          >
-            Browse for another folder…
-          </button>
-        )}
+        <button
+          type="button"
+          className="cli-start__secondary"
+          data-testid="cli-start-chats"
+          disabled={!selectedAvailable}
+          onClick={() => createSessionOnHost(activeHostId, "~", selectedAgent)}
+        >
+          No project (Chats)
+        </button>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 /**
  * sessions.spec.ts — e2e tests for session lifecycle fixes:
- *   S1 — "+" opens picker; choosing "No project" creates a session whose
- *         group is the home-dir name
+ *   S1 — "+" opens picker; choosing "No project" creates a session in
+ *         the Chats scratch folder, never a $HOME project
  *   S2 — blank session does NOT appear in a second tab's sidebar until a
  *         message is sent (real claude-haiku-4-5 turn, 90 s timeout)
  *   S3 — clicking "+" twice with an empty active session does not produce
@@ -81,7 +81,7 @@ test.describe("Session lifecycle fixes", () => {
   // -------------------------------------------------------------------------
   // S1 — "+" opens picker; "No project" creates session grouped by home dir
   // -------------------------------------------------------------------------
-  test("S1. + opens picker and No-project creates session in home-dir group", async ({ page }) => {
+  test("S1. + opens picker and No-project creates session in Chats", async ({ page }) => {
     await freshPage(page);
     await waitForSessionList(page);
 
@@ -93,14 +93,8 @@ test.describe("Session lifecycle fixes", () => {
     const noneBtn = page.locator('[data-testid="project-option-none"]');
     await expect(noneBtn).toBeVisible({ timeout: 5000 });
 
-    // Also check for the directory browser (Wave 1) and its "Type path"
-    // fallback (free-text input + confirm button).
-    await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible();
-    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-    await expect(page.locator('[data-testid="project-path-input"]')).toBeVisible();
-    await expect(page.locator('[data-testid="dir-browser-use"]')).toBeVisible();
-    // Switch back to Browse mode before continuing with the "No project" flow.
-    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
+    // No folder browser: sessions start in a listed project or in Chats.
+    await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
 
     // Click "No project" — sends session.create with cwd "~".
     await noneBtn.click();

@@ -206,8 +206,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
     // 2. The phone starts a real Claude CLI in the repository.
     await phone.getByTestId("cli-start-agent").selectOption("claude");
-    await phone.getByTestId("cli-start-browse").click();
-    await phone.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await phone.locator('[data-testid^="cli-start-project-"]').filter({ hasText: repoName }).click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 40_000 });
     const terminalId = await cli.getAttribute("data-terminal-id");
     await expect(cli.locator(".xterm-rows")).toContainText("Claude Code", { timeout: 40_000 });

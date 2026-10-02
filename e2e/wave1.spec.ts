@@ -20,6 +20,7 @@ import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pickProject } from "./projects";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,7 +44,7 @@ async function openLocalPicker(page: Page): Promise<void> {
   const btn = page.locator('[data-testid="new-session-local"]');
   await expect(btn).toBeEnabled({ timeout: 10000 });
   await btn.click();
-  await expect(page.locator('[data-testid="dir-browser"]')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('[data-testid="project-option-none"]')).toBeVisible({ timeout: 5000 });
 }
 
 /** Create a session via the "No project" quick-pick, send one message, and
@@ -162,65 +163,24 @@ test.describe("Wave 1 functionality gaps", () => {
   });
 
   // -------------------------------------------------------------------------
-  // F1 — directory browser
+  // F1 — the new-session picker offers listed projects and Chats only
   // -------------------------------------------------------------------------
-  test("F1. directory browser: browse/filter/up, type-path fallback, and cwd selection", async ({ page }) => {
+  test("F1. new-session picker offers only listed projects and Chats", async ({ page }) => {
     await freshPage(page);
     await openLocalPicker(page);
 
-    const browser = page.locator('[data-testid="dir-browser"]');
-    await expect(browser).toBeVisible();
-    await expect(page.locator('[data-testid="dir-browser-filter"]')).toBeVisible();
+    // No folder browser: a session never starts in a folder perch wasn't given.
+    await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
+    const chats = page.locator('[data-testid="project-option-none"]');
+    await expect(chats).toContainText("Chats");
 
-    // Filtering narrows the list live; an unmatchable filter empties it.
-    const filterInput = page.locator('[data-testid="dir-browser-filter"]');
-    await filterInput.fill("zzzz-no-such-entry-zzzz");
-    await expect(page.locator(".dir-browser__empty")).toBeVisible({ timeout: 3000 });
-    await filterInput.fill("");
-
-    // Descend into the first available entry (if any — home dirs vary) and
-    // come back up via the explicit "up" button; breadcrumb round-trips.
-    const firstEntry = page.locator('[data-testid^="dir-browser-entry-"]').first();
-    if ((await firstEntry.count()) > 0) {
-      await firstEntry.click();
-      await expect(page.locator('[data-testid="dir-browser-up"]')).toBeEnabled({ timeout: 5000 });
-      await page.locator('[data-testid="dir-browser-up"]').click();
-      await expect(page.locator('[data-testid="dir-browser-filter"]')).toBeVisible({ timeout: 5000 });
-    }
-
-    // "Type path" toggle reveals the manual fallback input and toggles back.
-    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-    const pathInput = page.locator('[data-testid="project-path-input"]');
-    await expect(pathInput).toBeVisible();
-    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-    await expect(pathInput).not.toBeVisible();
-
-    // Regression guard: with many known-project quick-pick rows (real
-    // ~/.perch DB accumulates one per distinct cwd across e2e runs), the
-    // popover used to grow past the viewport bottom and strand this button
-    // out of reach (231 click retries, "element is outside of the
-    // viewport"). It must always be within the 1280x720 viewport.
-    const useBtn = page.locator('[data-testid="dir-browser-use"]');
-    await expect(useBtn).toBeVisible();
-    const viewport = page.viewportSize();
-    const box = await useBtn.boundingBox();
-    expect(viewport).toBeTruthy();
-    expect(box).toBeTruthy();
-    if (viewport && box) {
-      expect(box.y).toBeGreaterThanOrEqual(0);
-      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-    }
-
-    // "Use this folder" confirms the current path and creates a session. The
-    // popover closes synchronously (before the session.create round-trip
+    // The popover closes synchronously (before the session.create round-trip
     // resolves), so poll localStorage rather than reading it right away.
-    await useBtn.click();
-    await expect(browser).not.toBeVisible({ timeout: 3000 });
+    await chats.click();
+    await expect(chats).not.toBeVisible({ timeout: 3000 });
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 5000 })
       .toBeTruthy();
-
-    await page.screenshot({ path: "artifacts/wave1-f1-dir-browser.png" });
   });
 
   test("F1b. tab-bar + creates a session in the active project (no popover)", async ({ page }) => {
@@ -230,9 +190,7 @@ test.describe("Wave 1 functionality gaps", () => {
     // the sidebar's picker (which keeps the directory browser).
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-tabplus-"));
     await openLocalPicker(page);
-    await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-    await page.locator('[data-testid="project-path-input"]').fill(dir);
-    await page.locator('[data-testid="dir-browser-use"]').click();
+    await pickProject(page, dir);
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
       .toBeTruthy();

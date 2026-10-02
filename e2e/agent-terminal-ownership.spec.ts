@@ -11,8 +11,7 @@ test("agent runtime survives view changes and control transfers between desktop 
   let phone: Page | undefined;
   let phoneContext: BrowserContext | undefined;
   try {
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.getByTestId("cli-start-chats").click();
     const desktop = page.getByTestId("persistent-agent-terminal");
     await expect(desktop).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(desktop).toHaveAttribute("data-controlling", "true");

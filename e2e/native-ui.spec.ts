@@ -69,8 +69,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await start();
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.getByTestId("cli-start-chats").click();
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(cli).toHaveAttribute("data-controlling", "true");
     await expect(cli.locator(".xterm-rows")).toContainText(provider === "opencode" ? /OpenCode|opencode|Ask anything/i : provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });

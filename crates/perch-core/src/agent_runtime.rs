@@ -1024,8 +1024,11 @@ impl AgentRuntimeAdapter {
         if data.contains(['\r', '\n'])
             && (!crate::native_ui::supported(&key.agent_id) || native_ready)
         {
-            self.record_turn_boundary(key, true)
-                .map_err(RuntimeAdapterError::Process)?;
+            // Turn review is best-effort; a failed snapshot must never eat
+            // the keystroke that submits a prompt or answers a dialog.
+            if let Err(error) = self.record_turn_boundary(key, true) {
+                tracing::warn!(?key, %error, "could not record turn boundary");
+            }
             // A title-owned turn starts when the title says so: an Enter
             // that dismisses a menu must not leave the session running.
             if !native_ready && !self.has_title_status(&key.session_id) {
@@ -1761,6 +1764,13 @@ mod tests {
                 channel: ControlChannel::Input
             }))
         ));
+        // A failed turn snapshot (e.g. the project was removed) must not eat Enter.
+        adapter
+            .set_turn_boundary_listener(Arc::new(|_, _| anyhow::bail!("workspace is archived")))
+            .unwrap();
+        adapter
+            .input(&key, &lease, "\r", 3, Duration::from_millis(100))
+            .unwrap();
         let mut dispatched = false;
         assert!(adapter
             .dispatch_native_control(&key, &stale, |_| {

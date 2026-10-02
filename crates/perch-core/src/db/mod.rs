@@ -1162,6 +1162,55 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_project_removes_its_sessions_and_unlists_its_folder() {
+        let path = temp_db_path("remove-project-sessions");
+        let removed = std::env::temp_dir().join(format!("perch-removed-{}", Uuid::new_v4()));
+        let kept = std::env::temp_dir().join(format!("perch-kept-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&removed).unwrap();
+        std::fs::create_dir_all(&kept).unwrap();
+        let (removed_path, kept_path) = (removed.to_string_lossy(), kept.to_string_lossy());
+        let db = HistoryDb::open(&path).unwrap();
+        let (project, _) = db
+            .create_project("local", &removed_path, None, None)
+            .unwrap();
+        let (kept_project, _) = db.create_project("local", &kept_path, None, None).unwrap();
+        db.create_session("gone", &removed_path).unwrap();
+        db.create_session("stays", &kept_path).unwrap();
+        assert!(db
+            .listed_workspace_at("local", &removed_path)
+            .unwrap()
+            .is_some());
+        assert!(db
+            .archive_sessions_of_removed_projects()
+            .unwrap()
+            .is_empty());
+
+        db.set_project_archived(&project.id, true).unwrap();
+        assert_eq!(
+            db.archive_sessions_of_removed_projects().unwrap(),
+            vec!["gone".to_string()]
+        );
+        assert!(db
+            .listed_workspace_at("local", &removed_path)
+            .unwrap()
+            .is_none());
+        assert!(db
+            .listed_workspace_at("local", &kept_path)
+            .unwrap()
+            .is_some());
+        // "stays" was untouched: it is still open until its own project goes.
+        db.set_project_archived(&kept_project.id, true).unwrap();
+        assert_eq!(
+            db.archive_sessions_of_removed_projects().unwrap(),
+            vec!["stays".to_string()]
+        );
+
+        drop(db);
+        std::fs::remove_dir_all(&removed).ok();
+        std::fs::remove_dir_all(&kept).ok();
+    }
+
+    #[test]
     fn worktree_refresh_never_invents_a_missing_creation_snapshot() {
         let path = temp_db_path("worktree-missing-start");
         let root = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));

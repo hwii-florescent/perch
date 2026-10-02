@@ -129,7 +129,11 @@ pub(super) async fn capture(
     let Some(workspace_id) = session.workspace_id else {
         return Ok(());
     };
-    let workspace = db.resolve_workspace(&workspace_id)?;
+    // A removed (archived) project's agent can outlive its listing; there is
+    // no workspace left to review, so record nothing rather than fail.
+    let Ok(workspace) = db.resolve_workspace(&workspace_id) else {
+        return Ok(());
+    };
     let target = match WorkspaceTarget::new(workspace.id.clone(), workspace.path) {
         Ok(target) => target,
         Err(_) => return Ok(()),

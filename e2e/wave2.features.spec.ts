@@ -50,6 +50,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync, execSync } from "child_process";
+import { pickProject } from "./projects";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -96,9 +97,7 @@ async function openLocalPicker(page: Page): Promise<void> {
  * persisted and visible in the sidebar. Returns the new session's id. */
 async function createSessionInDir(page: Page, dir: string, label: string): Promise<string> {
   await openLocalPicker(page);
-  await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-  await page.locator('[data-testid="project-path-input"]').fill(dir);
-  await page.locator('[data-testid="dir-browser-use"]').click();
+  await pickProject(page, dir);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 8000 })
     .toBeTruthy();

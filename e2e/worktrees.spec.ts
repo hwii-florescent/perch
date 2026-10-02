@@ -30,6 +30,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { pickProject } from "./projects";
 
 const BASE_URL = process.env.PERCH_E2E_BASE ?? "http://127.0.0.1:7799";
 
@@ -121,12 +122,7 @@ async function createSessionForCwd(page: Page, cwd: string): Promise<void> {
   const newBtn = page.locator('[data-testid="new-session-local"]');
   await expect(newBtn).toBeEnabled({ timeout: 10000 });
   await newBtn.click();
-  await page.locator('[data-testid="dir-browser-mode-toggle"]').click();
-  const input = page.locator('[data-testid="project-path-input"]');
-  await expect(input).toBeVisible({ timeout: 5000 });
-  await input.fill(cwd);
-  await page.locator('[data-testid="dir-browser-use"]').click();
-  await expect(input).not.toBeVisible({ timeout: 3000 });
+  await pickProject(page, cwd);
   // The status bar carries the resolved session cwd — proof the create landed
   // on this checkout before any worktree assertion runs.
   await expect(page.locator(".status-bar")).toContainText(cwd, { timeout: 20000 });

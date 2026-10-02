@@ -189,8 +189,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
 
     // 2. A real CLI agent process in that repository.
     await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.locator('[data-testid^="cli-start-project-"]').filter({ hasText: path.basename(repo) }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(terminal.locator(".xterm-rows")).toContainText(provider === "turnbot" ? "turnbot ready" : "Claude Code", { timeout: 30_000 });
@@ -422,8 +421,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     const workspaceId = await firstWorkspaceId(project);
 
     await page.getByTestId("cli-start-agent").selectOption("turnbot");
-    await page.getByTestId("cli-start-browse").click();
-    await page.getByRole("button", { name: "Use this folder", exact: true }).click();
+    await page.locator('[data-testid^="cli-start-project-"]').filter({ hasText: path.basename(repo) }).click();
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     const rows = terminal.locator(".xterm-rows");

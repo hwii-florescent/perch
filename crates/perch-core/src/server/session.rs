@@ -829,6 +829,35 @@ pub(super) fn status_message(status: crate::status::StatusInfo) -> ServerMessage
     }
 }
 
+/// "No project" sessions (cwd `~` or none, including the blank one minted on
+/// connect) run in one scratch folder listed as "Chats", so perch never turns
+/// $HOME into a project. Callers hold `foundation_lock`.
+pub(super) fn chats_pair(
+    app: &AppState,
+) -> anyhow::Result<(crate::db::ProjectRow, crate::db::WorkspaceRow)> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
+    std::fs::create_dir_all(&scratch)?;
+    let (project, workspace) =
+        app.db
+            .create_project("local", &scratch.display().to_string(), Some("Chats"), None)?;
+    let project = if project.archived {
+        app.db.set_project_archived(&project.id, false)?
+    } else {
+        project
+    };
+    Ok((project, workspace))
+}
+
+/// Removing a project removes its open sessions from perch (see
+/// `archive_sessions_of_removed_projects`) and tells every viewer.
+pub(super) fn archive_sessions_of_removed_projects(app: &AppState) -> anyhow::Result<()> {
+    for session_id in app.db.archive_sessions_of_removed_projects()? {
+        notify_session_updated(app, &session_id);
+    }
+    Ok(())
+}
+
 pub(super) fn handle_session_create(
     state: &Arc<ConnState>,
     cwd: Option<String>,
@@ -857,66 +886,52 @@ pub(super) fn handle_session_create(
         state.app.hub.forward(target, &forward_json);
         return;
     }
-    // Local session creation — Fix 2: validate the requested cwd.
-    let resolved_cwd = if let Some(raw_cwd) = cwd {
-        // Expand a leading `~` to the user's home directory.
-        let expanded = if raw_cwd == "~" || raw_cwd.starts_with("~/") {
-            let home = std::env::var("HOME").unwrap_or_default();
-            if raw_cwd == "~" {
-                home
-            } else {
-                format!("{home}{}", &raw_cwd[1..])
-            }
-        } else {
-            raw_cwd
-        };
-        // Validate that it's an existing directory.
-        if !std::path::Path::new(&expanded).is_dir() {
+    // Local session creation: a session starts in a project listed in perch
+    // or in Chats, never in a folder perch hasn't been given ("+ Add" is how
+    // a folder becomes a project). Once started, the session stays in that
+    // project whatever the terminal later cd's into.
+    let requested = cwd.filter(|cwd| cwd != "~");
+    if let Some(cwd) = &requested {
+        let listed = state.app.db.listed_workspace_at("local", cwd);
+        if !matches!(listed, Ok(Some(_))) || !std::path::Path::new(cwd).is_dir() {
             let _ = state.out_tx.send(ServerMessage::Error {
-                message: format!("cwd is not an existing directory: {expanded}"),
+                message: format!("{cwd} is not a project in perch; add it first or start in Chats"),
                 request_id: None,
                 code: None,
                 retryable: false,
             });
             return;
         }
-        expanded
-    } else {
-        state.app.default_cwd.clone()
-    };
+    }
     let state = state.clone();
     tokio::spawn(async move {
         let session_id = Uuid::new_v4().to_string();
-        // Use the same creation boundary as explicit project registration,
-        // before a client can start an agent. Existing workspaces are returned
-        // untouched: a later session must never backfill their missing ref.
-        let start_snapshot = match WorkspaceTarget::new(&resolved_cwd, &resolved_cwd) {
-            Ok(target) => state.app.git.head_revision(&target).await,
-            Err(_) => None,
-        };
-        let persisted = {
-            let _foundation_guard = state.app.foundation_lock.lock().unwrap();
-            state
-                .app
-                .db
-                .create_project("local", &resolved_cwd, None, start_snapshot.as_deref())
-                .map(|(project, workspace)| {
-                    // Push the pair so the sidebar shows the folder now, not
-                    // on the next snapshot refresh.
-                    super::workspace::publish_project_pair(&state.app, project, workspace)
+        let persisted = match requested {
+            Some(cwd) => state.app.db.create_session(&session_id, &cwd).map(|()| cwd),
+            None => {
+                let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+                chats_pair(&state.app).and_then(|(project, workspace)| {
+                    let cwd = workspace.path.clone();
+                    state.app.db.create_session(&session_id, &cwd)?;
+                    // Push the pair so Chats shows in the sidebar right away.
+                    super::workspace::publish_project_pair(&state.app, project, workspace);
+                    Ok(cwd)
                 })
-        }
-        .and_then(|_| state.app.db.create_session(&session_id, &resolved_cwd));
-        if let Err(error) = persisted {
-            fail(
-                &state.out_tx,
-                None,
-                "session_create_failed",
-                format!("could not persist session: {error}"),
-                true,
-            );
-            return;
-        }
+            }
+        };
+        let resolved_cwd = match persisted {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                fail(
+                    &state.out_tx,
+                    None,
+                    "session_create_failed",
+                    format!("could not persist session: {error}"),
+                    true,
+                );
+                return;
+            }
+        };
         state.app.registry.create(&session_id, &resolved_cwd);
         insert_runtime(&state, &session_id, &resolved_cwd, None, None, None);
         set_active_session(&state, &session_id);
