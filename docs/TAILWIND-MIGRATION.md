@@ -36,6 +36,9 @@ Done:
   identical, see "Slice log".
 - **Slice 2: status dot** (`components/StatusDot.tsx`, `Sidebar.tsx` project
   dot, `status-dot.css` deleted). See "Slice log".
+- **Slice 3: status bar + terminal search** (`StatusBar.tsx`,
+  `components/TerminalSearchBar.tsx`, `status-bar.css` deleted). Harness gained
+  states `05b`–`05e` first. See "Slice log".
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -43,7 +46,7 @@ Done:
 | toast.css | – | **migrated and deleted** |
 | base.css | 75 | keep: `:root` tokens + reset. Tokens stay (themes.ts). Only `.app` could move. |
 | status-dot.css | – | **migrated and deleted** |
-| status-bar.css | 94 | not started (also holds terminal-search rules) |
+| status-bar.css | – | **migrated and deleted** (incl. terminal-search) |
 | onboarding.css | 93 | not started |
 | pane-menu.css | 84 | not started |
 | navigator.css | 255 | not started |
@@ -72,7 +75,6 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`status-bar.css` (+ terminal-search rules in it) →
 `onboarding.css` → `pane-menu.css` → `navigator.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
@@ -81,7 +83,8 @@ Notes for the next ones:
   migrating anything that renders there): Hosted chat + composer + slash/model
   popovers (`window.usePerchStore.setState` can inject messages, as the toast
   state does), pairing gate, directory-browser modal, mobile file/git panes,
-  drag-reorder states, disabled/error states, terminal-search bar.
+  drag-reorder states, disabled/error states. (Terminal-search bar and the
+  status bar's reconnecting / ctx / cost states are covered by `05b`–`05d`.)
 
 ## Rules for a migrated component
 
@@ -126,7 +129,7 @@ Notes for the next ones:
 
 `e2e/visual/visual.mjs` boots an isolated headless core on :7791 (state in
 `/tmp/perch-visual`, fixed fixture repo, fixed clock, serves any web build via
-`PERCH_WEB_DIST`), walks 27 UI states, and records per state a screenshot, the
+`PERCH_WEB_DIST`), walks 31 UI states, and records per state a screenshot, the
 computed style + box of **every** element, a hover dump and a keyboard-focus
 dump, in **Chromium and WebKit** (the Mac app is a WKWebView). It never touches
 `~/.perch`.
@@ -218,6 +221,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 0 | Split `styles.css` → `styles/*.css` (d743211) | built CSS byte-identical |
 | 1 | Tailwind infra + toast | tsc clean; 215/215 unit tests; harness `IDENTICAL` in Chromium and WebKit (computed styles, boxes, text, hover and focus dumps all equal); 8 Chromium screenshot differences (3–14 px) reviewed, none inside the toast region (its pixels are identical), all at rounded-corner edges that also differ between two runs of the unmodified baseline. `e2e/toasts.spec.ts` needs a real claude turn and was not run. |
 | 2 | status dot | tsc clean; 215/215 unit tests; harness: no computed-style, box, text, hover or focus differences in Chromium or WebKit. Screenshot differences (Chromium 03/04/15/20c/22, WebKit 13/14, incl. ~1800 px in the git drawer) all reappear when the unmodified baseline is snapped twice (`base` vs `base2`) and none is on a status dot. `e2e/status-glyphs.spec.ts` 3/3 passed (real haiku-4-5 turns). |
+| 3 | status bar + terminal search | tsc clean; 215/215 unit tests; harness vs a baseline re-snapped with the new states: no computed-style, box, text, hover or focus differences in Chromium or WebKit (the two it caught on the way, footer side-border colours and the input's `outline` computed width/colour, are fixed: `border-t-overlay-0`, `[outline:none]`). 7 Chromium corner-speck screenshot diffs reviewed by name (03, 12, 17, 17b, 17c, 20c, 22), none in the status bar or find bar, all in the baseline-vs-baseline noise set. e2e (against a fresh `npm run build`): status-glyphs, worktrees, wave1 (Cmd+F find bar) pass; `workspace-recovery` fails at its `perch.sessionId` assertion on the committed tree too (pre-existing, unrelated). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -230,3 +234,18 @@ Slice 2 notes: the `.agent-status-dot--*` colour rules were dead everywhere
 ported. `.session-status*` had no e2e or TSX user left and was dropped;
 `.sidebar__project-dot` likewise. `.agent-status-dot` and
 `.agent-status-dot--<state>` stay as unstyled hooks (`e2e/status-glyphs.spec.ts`).
+Slice 3 notes: the e2e webServer serves `packages/web/dist`, so **run
+`npm run build` before any e2e run** or it tests the previous build. New harness
+states: `05b-terminal-search` (Cmd+F, input autofocus asserted, query typed),
+`05c-terminal-search-closed` (Escape closes, Cmd+F reopens, the x button
+closes; throws naming the step if any fails), `05d-statusbar-reconnecting-extras`
+(`connected:false` + `contextTokens`/`costUsd` injected via the store),
+`05e-statusbar-restored` (nocapture). A state that follows a capture must not
+assume focus: the capture ends by blurring (05c clicks the input first). The
+baseline had to be re-snapped (`/tmp/perch-vis/base-dist` is still the original
+build; only `snap` needs repeating, with the new harness). Mobile safe-area
+padding is kept as `pb-[calc(0.4rem+env(safe-area-inset-bottom))]`; headless
+`env()` is 0 so the harness cannot see it, the built CSS was checked to contain
+it. Hook classes kept: `status-bar`, `status-item--cwd`; the terminal-search
+`data-testid`s are untouched. `.status-dot*`, `.status-item` and
+`.terminal-search*` had no e2e/TSX users beyond these files and were dropped.

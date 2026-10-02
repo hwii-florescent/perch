@@ -143,6 +143,46 @@ const STATES = [
     const tab = page.locator('[data-testid^="tab-"]:not([data-testid^="tab-close"]):not([data-testid="tab-bar"]):not([data-testid="tab-new"])').first();
     ctx.tabId = (await tab.getAttribute("data-testid")).slice(4);
   } },
+  // Terminal find bar: Cmd+F opens it with the input focused (autoFocus).
+  { name: "05b-terminal-search", run: async (page) => {
+    await page.locator(".terminal__surface, .xterm").first().click();
+    await page.keyboard.press("Meta+F");
+    const input = page.getByTestId("term-search-input");
+    await input.waitFor({ timeout: 5000 });
+    if (!(await input.evaluate((n) => n === document.activeElement))) throw new Error("term-search input not focused");
+    await input.fill("sentinel");
+    await sleep(300);
+  } },
+  // Close behaviour: Escape closes, and so does the x button.
+  { name: "05c-terminal-search-closed", run: async (page) => {
+    const bar = page.getByTestId("term-search");
+    const step = (what, p) => p.catch((e) => { throw new Error(`${what}: ${e.message.split("\n")[0]}`); });
+    await page.getByTestId("term-search-input").click(); // capture ends with the focus walk blurred
+    await page.keyboard.press("Escape");
+    await step("Escape closes the bar", bar.waitFor({ state: "detached", timeout: 3000 }));
+    await page.keyboard.press("Meta+F");
+    await step("Cmd+F reopens the bar", page.getByTestId("term-search-input").waitFor({ timeout: 5000 }));
+    await bar.getByTitle("Close (Escape)").click();
+    await step("x button closes the bar", bar.waitFor({ state: "detached", timeout: 3000 }));
+    await sleep(300);
+  } },
+  // Status bar, reconnecting (red dot) and with the optional ctx/cost items.
+  { name: "05d-statusbar-reconnecting-extras", run: async (page) => {
+    await page.evaluate(() => {
+      const st = window.usePerchStore;
+      st.setState({ connected: false, status: { ...(st.getState().status ?? { cwd: "/", branch: "main" }), contextTokens: 12345, costUsd: 0.0421 } });
+    });
+    await page.getByTitle("reconnecting...").waitFor();
+    await sleep(300);
+  } },
+  { name: "05e-statusbar-restored", run: async (page) => {
+    await page.evaluate(() => {
+      const st = window.usePerchStore;
+      const { contextTokens, costUsd, ...rest } = st.getState().status ?? {};
+      st.setState({ connected: true, status: rest.cwd ? rest : st.getState().status });
+    });
+    await sleep(300);
+  }, nocapture: true },
   { name: "06-tab-hover-menu", run: async (page, ctx) => {
     await page.getByTestId(`tab-${ctx.tabId}`).click({ button: "right" });
     await sleep(300);

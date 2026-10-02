@@ -1,4 +1,5 @@
 import { usePerchStore } from "./store";
+import { cn } from "./lib/cn";
 import { StatusDot } from "./components/StatusDot";
 import type { SessionSummary } from "@perch/shared";
 
@@ -24,19 +25,19 @@ export function StatusBar() {
       : undefined);
 
   return (
-    <footer className="status-bar">
+    <footer className="status-bar flex shrink-0 items-center gap-3 overflow-x-auto border-t border-t-overlay-0 bg-surface-0 px-3 pt-[0.4rem] pb-[calc(0.4rem+env(safe-area-inset-bottom))] text-[0.78rem] whitespace-nowrap text-subtext-0">
       <span
-        className={connected ? "status-dot status-dot--ok" : "status-dot status-dot--off"}
+        className={cn("size-2 shrink-0 rounded-[50%]", connected ? "bg-accent" : "bg-red")}
         title={connected ? "connected" : "reconnecting..."}
       />
       {activeSession && <StatusDot session={activeSession} />}
-      <span className="status-item status-item--cwd" title={status?.cwd}>
+      <span className="status-item--cwd min-w-0 flex-1 overflow-hidden text-ellipsis" title={status?.cwd}>
         {status?.cwd ?? "-"}
       </span>
-      <span className="status-item">{status?.branch ?? ""}</span>
+      <span>{status?.branch ?? ""}</span>
       {/* Only Hosted turns report these; a CLI session would show "- -". */}
-      {status?.contextTokens !== undefined && <span className="status-item">ctx {formatTokens(status.contextTokens)}</span>}
-      {status?.costUsd !== undefined && <span className="status-item">${status.costUsd.toFixed(3)}</span>}
+      {status?.contextTokens !== undefined && <span>ctx {formatTokens(status.contextTokens)}</span>}
+      {status?.costUsd !== undefined && <span>${status.costUsd.toFixed(3)}</span>}
     </footer>
   );
 }
