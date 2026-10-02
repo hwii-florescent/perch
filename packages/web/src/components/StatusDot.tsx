@@ -4,13 +4,11 @@
  * herdr-parity semantic tokens. No animation — herdr's current status dots
  * are static, and pulsing must not be reintroduced here.
  *
- * Also emits the legacy `.session-status`/`.session-status--running|--idle`
- * classes so existing e2e selectors (`e2e/sidebar.spec.ts`,
- * `e2e/cli-sync.spec.ts`, etc.) keep working unchanged: those only ever
- * distinguished running vs. not-running, which maps 1:1 onto the new
- * "working" vs. everything-else split.
+ * `.agent-status-dot` / `.agent-status-dot--<state>` carry no styles; they are
+ * the hooks `e2e/status-glyphs.spec.ts` locates dots by.
  */
 import type { SessionSummary } from "@perch/shared";
+import { cn } from "../lib/cn";
 import { sessionDotState, DOT_GLYPH } from "../statusDot";
 
 export interface StatusDotProps {
@@ -21,10 +19,12 @@ export interface StatusDotProps {
 export function StatusDot({ session, className }: StatusDotProps) {
   const state = sessionDotState(session);
   const { glyph, color } = DOT_GLYPH[state];
-  const legacy = state === "working" ? "session-status--running" : "session-status--idle";
-  const classes = ["agent-status-dot", `agent-status-dot--${state}`, "session-status", legacy, className]
-    .filter(Boolean)
-    .join(" ");
+  const classes = cn(
+    "agent-status-dot",
+    `agent-status-dot--${state}`,
+    "mt-[0.15rem] inline-flex shrink-0 items-center justify-center text-[0.7rem] leading-none",
+    className,
+  );
 
   return (
     <span className={classes} style={{ color }} title={`status: ${state}`} aria-hidden="true">

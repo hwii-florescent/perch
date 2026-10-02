@@ -490,7 +490,7 @@ function ProjectRow({
           onClick={() => onSelectProject(group.cwd)}
         >
           <span
-            className={`agent-status-dot agent-status-dot--${dotState} sidebar__project-dot`}
+            className={`agent-status-dot agent-status-dot--${dotState} shrink-0 text-[0.7rem] leading-none`}
             style={{ color }}
             title={`status: ${dotState}`}
             aria-hidden="true"

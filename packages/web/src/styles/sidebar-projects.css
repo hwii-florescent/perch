@@ -111,12 +111,6 @@
   border-left-color: var(--accent);
 }
 
-.sidebar__project-dot {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  line-height: 1;
-}
-
 .sidebar__project-body {
   display: flex;
   flex-direction: column;

@@ -34,13 +34,15 @@ Done:
 - Visual-parity harness `e2e/visual/` (fails closed, Chromium + WebKit).
 - **Slice 1: toast** (`components/Toast.tsx`, `toast.css` deleted). Verified
   identical, see "Slice log".
+- **Slice 2: status dot** (`components/StatusDot.tsx`, `Sidebar.tsx` project
+  dot, `status-dot.css` deleted). See "Slice log".
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
 | tailwind.css | – | infra, done |
 | toast.css | – | **migrated and deleted** |
 | base.css | 75 | keep: `:root` tokens + reset. Tokens stay (themes.ts). Only `.app` could move. |
-| status-dot.css | 39 | not started (next; see notes) |
+| status-dot.css | – | **migrated and deleted** |
 | status-bar.css | 94 | not started (also holds terminal-search rules) |
 | onboarding.css | 93 | not started |
 | pane-menu.css | 84 | not started |
@@ -70,17 +72,11 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`status-dot.css` → `status-bar.css` (+ terminal-search rules in it) →
+`status-bar.css` (+ terminal-search rules in it) →
 `onboarding.css` → `pane-menu.css` → `navigator.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
-- **status-dot:** `StatusDot.tsx` sets the colour inline, so the
-  `.agent-status-dot--*` colour rules are dead there, but `Sidebar.tsx:493`
-  uses the raw class with no inline style and relies on them. Migrate both
-  call sites together. e2e depends on the classes `.agent-status-dot`,
-  `.agent-status-dot--idle|working|done`, `.session-status`, `.status-bar`,
-  `.status-item--cwd`: keep them as unstyled hook classes.
 - **Not covered by the harness yet** (add a state in `visual.mjs` *before*
   migrating anything that renders there): Hosted chat + composer + slash/model
   popovers (`window.usePerchStore.setState` can inject messages, as the toast
@@ -221,9 +217,16 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 |---|---|---|
 | 0 | Split `styles.css` → `styles/*.css` (d743211) | built CSS byte-identical |
 | 1 | Tailwind infra + toast | tsc clean; 215/215 unit tests; harness `IDENTICAL` in Chromium and WebKit (computed styles, boxes, text, hover and focus dumps all equal); 8 Chromium screenshot differences (3–14 px) reviewed, none inside the toast region (its pixels are identical), all at rounded-corner edges that also differ between two runs of the unmodified baseline. `e2e/toasts.spec.ts` needs a real claude turn and was not run. |
+| 2 | status dot | tsc clean; 215/215 unit tests; harness: no computed-style, box, text, hover or focus differences in Chromium or WebKit. Screenshot differences (Chromium 03/04/15/20c/22, WebKit 13/14, incl. ~1800 px in the git drawer) all reappear when the unmodified baseline is snapped twice (`base` vs `base2`) and none is on a status dot. `e2e/status-glyphs.spec.ts` 3/3 passed (real haiku-4-5 turns). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
 is fixed and covered by `selftest.mjs`. An earlier `--with-snap` check hung for
 ~10 minutes because `--only` still ran every later state; fixed (see the
 fail-closed list above).
+
+Slice 2 notes: the `.agent-status-dot--*` colour rules were dead everywhere
+(both call sites set `style={{ color }}` inline), so they were deleted, not
+ported. `.session-status*` had no e2e or TSX user left and was dropped;
+`.sidebar__project-dot` likewise. `.agent-status-dot` and
+`.agent-status-dot--<state>` stay as unstyled hooks (`e2e/status-glyphs.spec.ts`).
