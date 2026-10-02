@@ -3523,6 +3523,14 @@ body {
   overflow: hidden;
 }
 
+/* The fitted grid is whole cells, so it leaves a sliver right (plus the
+ * scrollbar gutter) and below. Paint it with the profile's background, as
+ * Ghostty/iTerm2 do: `.xterm` carries that background, so stretch it over
+ * the surface and drop xterm.css's #000 viewport. FitAddon measures the
+ * surface, not `.xterm`, so the grid is unchanged. */
+.terminal__surface .xterm { height: 100%; }
+.terminal__surface .xterm:not(.allow-transparency) .xterm-viewport { background-color: transparent; }
+
 .terminal--persistent { flex-direction: column; }
 .terminal__toolbar {
   display: flex;
