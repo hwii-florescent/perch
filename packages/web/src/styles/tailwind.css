@@ -1,0 +1,51 @@
+/* Tailwind v4 without preflight: the legacy CSS in this folder still depends on
+ * the browser's defaults, so resetting them would change un-migrated screens.
+ * Utilities are layered, so an unlayered legacy rule beats them: a migrated
+ * element must carry no legacy class that styles it.
+ * Plan and progress: docs/TAILWIND-MIGRATION.md */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+/* Scan TS/TSX only; the legacy .css files hold words that read as utilities. */
+@source "../**/*.{ts,tsx}";
+@source not "../**/*.test.{ts,tsx}";
+
+/* Runtime themes (themes.ts) set the :root vars, so every token is `inline`:
+ * the utility reads var(--x) at use, never a value frozen at build time.
+ * Never define a mono font token here (see the migration doc, gotchas). */
+@theme inline {
+  --color-*: initial;
+  --font-*: initial;
+  --color-accent: var(--accent);
+  --color-panel-bg: var(--panel-bg);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-dim: var(--surface-dim);
+  --color-overlay-0: var(--overlay-0);
+  --color-overlay-1: var(--overlay-1);
+  --color-fg: var(--text);
+  --color-subtext-0: var(--subtext-0);
+  --color-mauve: var(--mauve);
+  --color-green: var(--green);
+  --color-yellow: var(--yellow);
+  --color-red: var(--red);
+  --color-blue: var(--blue);
+  --color-teal: var(--teal);
+  --color-peach: var(--peach);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --radius-ui: var(--radius);
+}
+
+@theme {
+  --animate-toast-in: toast-in 0.15s ease-out;
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.4rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

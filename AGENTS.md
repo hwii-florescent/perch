@@ -278,6 +278,11 @@ there, not here.
     - paired-phone-flows intermittently gets "Delivery could not be
       confirmed" for the review packet (2 of 9 runs on 2026-10-02, cause not
       found; 3 of 3 passed at d14bf9f).
+- **Styling is mid-migration to Tailwind v4.** CSS still living in
+  `packages/web/src/styles/*.css` is being moved into utility classes one
+  verified slice at a time. Read `docs/TAILWIND-MIGRATION.md` (status, rules,
+  the fail-closed visual-parity check in `e2e/visual/`) before touching UI
+  styles; don't restyle by hand-editing a file listed there as migrated.
 - **UI builds:** after `npm run build`, open tabs update themselves within
   about a minute (a PWA service worker); no restart is needed.
 - **Desktop notifications:** the web view doesn't deliver
