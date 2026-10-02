@@ -218,6 +218,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const createRequest = usePerchStore((state) => state.workspaceProjectCreate);
   const clearCreateRequest = usePerchStore((state) => state.clearWorkspaceProjectCreate);
   const archiveSession = usePerchStore((state) => state.archiveSession);
+  const deleteSession = usePerchStore((state) => state.deleteSession);
   const archiveWorkspaceProject = usePerchStore((state) => state.archiveWorkspaceProject);
   const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
   const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
@@ -687,9 +688,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                     type="button"
                                     className="workspace-entry__session-close"
                                     data-testid={`workspace-session-close-${session.id}`}
-                                    title="Close session (restore it from Settings → Archived sessions)"
+                                    title="Close session"
                                     aria-label={`Close ${session.title || "session"}`}
-                                    onClick={() => archiveSession(session.id, true)}
+                                    onClick={() => deleteSession(session.id)}
                                   >
                                     ×
                                   </button>

@@ -494,12 +494,12 @@ export interface PerchState {
    * sessions are listed is Settings → Archived sessions, which is also where
    * they are restored (`archived: false`) or permanently deleted from. */
   archiveSession: (sessionId: string, archived: boolean) => void;
-  /** Permanently delete a session. Irreversible — unlike archiveSession there
-   * is no undo. Server-side cleanup (DB rows, in-flight turn, CLI-attached
-   * terminal) happens on receipt of `session.deleted`, which also drives the
-   * local sessions[]/sessionLayouts/cliTerminalIds cleanup and — if the
-   * deleted session was the active one — switching to the most recent
-   * remaining session (or a blank/empty state if none remain). */
+  /** Permanently delete a session: what a tab's ×, the session row's × and
+   * exiting its terminal do. Irreversible — unlike archiveSession there is no
+   * undo. The server stops its agent and shells and drops its rows, then
+   * broadcasts `session.deleted`, which drives the local cleanup. Leaving the
+   * active session lands on a neighbouring tab of the same workspace, or the
+   * home screen. */
   deleteSession: (sessionId: string) => void;
   /** Rename a session (Wave 1 item 2). Sets a persistent user title override
    * that wins over the auto-derived first-message title once non-empty. */
@@ -1689,16 +1689,12 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   archiveSession: (sessionId, archived) => {
     socket.send({ type: "session.archive", sessionId, archived });
-    const state = get();
-    if (!archived || state.sessionId !== sessionId) return;
-    // Closing the active tab lands on a neighbouring tab of the same
-    // workspace, like a browser; closing its last tab shows the home screen.
-    const siblings = activeWorkspaceSessions(state).filter((s) => s.id !== sessionId && !s.archived);
-    switchAwayFromActiveSession(siblings, state.activeHostId);
+    if (archived) leaveSession(get(), sessionId);
   },
 
   deleteSession: (sessionId) => {
     socket.send({ type: "session.delete", sessionId });
+    leaveSession(get(), sessionId);
   },
 
   renameSession: (sessionId, title) => {
@@ -2070,6 +2066,15 @@ function scheduleChunkFlush(sessionId: string): void {
  * blank/empty state. `candidates` must already exclude the departing session
  * (and any other session that is no longer selectable, i.e. archived ones).
  */
+/** Leaving the active session lands on a neighbouring tab of the same
+ * workspace, like a browser; leaving its last tab shows the home screen,
+ * never another workspace's session. */
+function leaveSession(state: PerchState, sessionId: string): void {
+  if (state.sessionId !== sessionId) return;
+  const siblings = activeWorkspaceSessions(state).filter((s) => s.id !== sessionId);
+  switchAwayFromActiveSession(siblings, state.activeHostId);
+}
+
 function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string): void {
   const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
   const sameHost = candidates
@@ -2604,7 +2609,8 @@ export function handleServerMessage(msg: ServerMessage): void {
     }
     case "session.deleted": {
       const state = usePerchStore.getState();
-      const wasActive = state.sessionId === msg.sessionId;
+      // Deleted elsewhere (this client already left its own deletes).
+      leaveSession(state, msg.sessionId);
       const remainingSessions = state.sessions.filter((s) => s.id !== msg.sessionId);
       usePerchStore.setState({
         sessions: remainingSessions,
@@ -2628,12 +2634,6 @@ export function handleServerMessage(msg: ServerMessage): void {
         }
       }
       pendingBackgroundLoads.delete(msg.sessionId);
-      if (wasActive) {
-        switchAwayFromActiveSession(
-          remainingSessions.filter((s) => !s.archived),
-          state.activeHostId
-        );
-      }
       break;
     }
     case "server.info": {

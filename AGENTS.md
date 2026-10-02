@@ -161,10 +161,12 @@ there, not here.
     status. `styles.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
     `default_theme()` must agree. The active tab and pane are marked in grey,
     not with an accent fill.
-  - Tab and session-row × archive the session (restorable from Settings).
-    Removing a project archives it and its open sessions (they leave perch;
-    the folder and the agent's own transcript stay on disk); re-registering
-    the folder restores the project.
+  - Tab and session-row × delete the session, and so does its agent
+    terminal exiting (the agent, then its login shell): its agent and shells
+    are killed; the agent's own transcript stays on disk. "Archive chats"
+    archives instead (restorable from Settings). Removing a project archives
+    it and its open sessions (they leave perch; the folder and transcript
+    stay on disk); re-registering the folder restores the project.
   - A session starts only in a listed project's workspace or in Chats
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any

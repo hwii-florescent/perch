@@ -634,7 +634,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
   const persistedCliProvider = usePerchStore((state) => state.sessions.find((session) => session.id === sessionId)?.cliProviderId);
   const cliAgent = sessionId ? (cliAgentBySession[sessionId] ?? persistedCliProvider ?? agent) : agent;
   const cliError = usePerchStore((s) => s.cliError);
-  const archiveSession = usePerchStore((s) => s.archiveSession);
+  const deleteSession = usePerchStore((s) => s.deleteSession);
   const sessionSummary = usePerchStore((s) =>
     sessionId ? s.sessions.find((candidate) => candidate.id === sessionId) : undefined,
   );
@@ -894,7 +894,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
           sessionId={sessionId}
           agent={cliAgent}
           cliError={cliError}
-          onClose={() => archiveSession(sessionId, true)}
+          onClose={() => deleteSession(sessionId)}
         />
       ) : mode === "cli" ? (
         <CliStartPanel agent={cliAgent} />

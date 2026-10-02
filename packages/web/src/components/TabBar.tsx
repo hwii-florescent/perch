@@ -49,7 +49,7 @@ export function TabBar() {
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
-  const archiveSession = usePerchStore((s) => s.archiveSession);
+  const deleteSession = usePerchStore((s) => s.deleteSession);
   const fileTabs = useFileTabs((s) => s.tabs);
   const activeFile = useFileTabs((s) => s.active);
   const showSession = useFileTabs((s) => s.showSession);
@@ -179,15 +179,15 @@ export function TabBar() {
           >
             {tabLabel(s)}
           </button>
-          {/* Archive, not delete: Settings → Archived sessions restores it,
-           * and an idle archived agent hibernates on its own. */}
+          {/* Like closing a tab in Orca: the session, its agent and its shells
+           * end (the agent's own transcript stays on disk). */}
           <button
             type="button"
             className={"tab-bar__close" + (s.id === sessionId ? " tab-bar__close--active" : "")}
             data-testid={`tab-close-${s.id}`}
-            title="Close session (restore it from Settings → Archived sessions)"
+            title="Close session"
             aria-label={`Close ${tabLabel(s)}`}
-            onClick={() => archiveSession(s.id, true)}
+            onClick={() => deleteSession(s.id)}
           >
             ×
           </button>
