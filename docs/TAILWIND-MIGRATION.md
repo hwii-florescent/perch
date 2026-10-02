@@ -129,7 +129,7 @@ Notes for the next ones:
 
 `e2e/visual/visual.mjs` boots an isolated headless core on :7791 (state in
 `/tmp/perch-visual`, fixed fixture repo, fixed clock, serves any web build via
-`PERCH_WEB_DIST`), walks 31 UI states, and records per state a screenshot, the
+`PERCH_WEB_DIST`), walks 32 UI states, and records per state a screenshot, the
 computed style + box of **every** element, a hover dump and a keyboard-focus
 dump, in **Chromium and WebKit** (the Mac app is a WKWebView). It never touches
 `~/.perch`.
@@ -249,3 +249,15 @@ padding is kept as `pb-[calc(0.4rem+env(safe-area-inset-bottom))]`; headless
 it. Hook classes kept: `status-bar`, `status-item--cwd`; the terminal-search
 `data-testid`s are untouched. `.status-dot*`, `.status-item` and
 `.terminal-search*` had no e2e/TSX users beyond these files and were dropped.
+
+Focus on the find bar (follow-up to slice 3): state `05b2-terminal-search-focus`
+uses the new per-state `focusWalk: { start, targets }`: focus the input, Tab
+through, then `.focus()` each target, all recorded in `focus.json` (records now
+carry `via` and fall back to `title` for an id). Why both: Chromium's Tab walk
+reaches Previous/Next/Close, but **WebKit's Tab skips buttons** (it goes
+input → `resize-sidebar` …), so only the direct `.focus()` records cover them
+there. Hover records also take `title` as an id (the find-bar buttons have no
+testid). Re-snapped the baseline (shape change); slice 3 vs baseline: no
+computed-style, hover or focus differences in either engine; 6 Chromium
+corner-speck screenshot diffs (06, 13, 14, 17b, 20, 20c, 1–9 px, none in the find
+bar) reviewed by name.

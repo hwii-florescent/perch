@@ -153,6 +153,14 @@ const STATES = [
     await input.fill("sentinel");
     await sleep(300);
   } },
+  // Keyboard focus on the find bar's input and Previous/Next/Close buttons.
+  { name: "05b2-terminal-search-focus", focusWalk: {
+    start: '[data-testid="term-search-input"]',
+    targets: ['[data-testid="term-search"] [title^="Previous"]', '[data-testid="term-search"] [title^="Next"]', '[data-testid="term-search"] [title^="Close"]'],
+  }, run: async (page) => {
+    await page.getByTestId("term-search-input").click();
+    await sleep(200);
+  } },
   // Close behaviour: Escape closes, and so does the x button.
   { name: "05c-terminal-search-closed", run: async (page) => {
     const bar = page.getByTestId("term-search");
@@ -361,7 +369,7 @@ async function stopCore(core) {
   try { execSync(`pkill -f '__perchd serve --dir ${WORK}/perchd'`, { stdio: "ignore" }); } catch {}
 }
 
-async function capture(page, outDir, name) {
+async function capture(page, outDir, name, state = {}) {
   await page.mouse.move(1, 1);
   await sleep(200);
   const dump = await page.evaluate(DUMP, { props: PROPS, skipSel: SKIP_SEL });
@@ -388,7 +396,7 @@ async function capture(page, outDir, name) {
     try {
       await t.hover({ timeout: 800, force: true });
       await sleep(40);
-      hovers.push({ i, id: (await t.getAttribute("data-testid")) || "", d: await t.evaluate(HOVER_DUMP, HOVER_PROPS) });
+      hovers.push({ i, id: (await t.getAttribute("data-testid")) || (await t.getAttribute("title")) || "", d: await t.evaluate(HOVER_DUMP, HOVER_PROPS) });
     } catch { hovers.push({ i, err: true }); }
   }
   fs.writeFileSync(`${outDir}/${name}.hover.json`, JSON.stringify(hovers));
@@ -396,15 +404,34 @@ async function capture(page, outDir, name) {
 
   // keyboard focus ring: Tab through, record the focused element's look
   const focus = [];
+  const FOCUS_PROPS = [...HOVER_PROPS, "outline-width", "outline-color", "outline-offset", "border-top-width"];
+  const readFocus = (via) => page.evaluate(({ props, via }) => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return null;
+    const cs = getComputedStyle(el);
+    return { id: el.getAttribute("data-testid") || el.getAttribute("title") || "", via, tag: el.tagName.toLowerCase(), s: Object.fromEntries(props.map((k) => [k, cs.getPropertyValue(k)])) };
+  }, { props: FOCUS_PROPS, via });
   await page.evaluate(() => document.activeElement?.blur());
+  // `state.focusWalk`: also walk from a known start, because the walk from
+  // <body> can run out of steps (or, in WebKit, skip buttons) before it gets
+  // to an element deep in the page. Real Tab presses first, then each target
+  // focused directly, so both engines record the focused look.
+  if (state.focusWalk) {
+    const { start, targets } = state.focusWalk;
+    await page.locator(start).focus();
+    focus.push(await readFocus("start"));
+    for (let i = 0; i < targets.length + 1; i++) { await page.keyboard.press("Tab"); focus.push(await readFocus("tab")); }
+    for (const t of targets) {
+      await page.locator(t).focus();
+      const rec = await readFocus("focus()");
+      if (!rec || !rec.id) throw new Error(`focus walk: ${t} did not take focus`);
+      focus.push(rec);
+    }
+    await page.evaluate(() => document.activeElement?.blur());
+  }
   for (let i = 0; i < 25; i++) {
     await page.keyboard.press("Tab");
-    focus.push(await page.evaluate((props) => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return null;
-      const cs = getComputedStyle(el);
-      return { id: el.getAttribute("data-testid") || "", tag: el.tagName.toLowerCase(), s: Object.fromEntries(props.map((k) => [k, cs.getPropertyValue(k)])) };
-    }, [...HOVER_PROPS, "outline-width", "outline-color", "outline-offset", "border-top-width"]));
+    focus.push(await readFocus("tab"));
   }
   fs.writeFileSync(`${outDir}/${name}.focus.json`, JSON.stringify(focus));
   await page.evaluate(() => { document.activeElement?.blur(); document.querySelector("style[data-vis-freeze]")?.remove(); });
@@ -445,13 +472,13 @@ async function snapEngine(engine, dist, outDir, only) {
           if (!wanted) continue;
           const fresh = await mk(true);
           await state.run(fresh.page, ctx);
-          await capture(fresh.page, outDir, state.name);
+          await capture(fresh.page, outDir, state.name, state);
           await fresh.context.close();
           continue;
         }
         await page.setViewportSize(state.viewport ?? { width: 1280, height: 800 });
         await state.run(page, ctx);
-        if (wanted) await capture(page, outDir, state.name);
+        if (wanted) await capture(page, outDir, state.name, state);
       } catch (e) {
         failures.push(`${state.name}: ${String(e.message).split("\n")[0]}`);
         try { await page.screenshot({ path: `${outDir}/${state.name}.FAILED.png` }); } catch {}
