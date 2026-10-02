@@ -145,6 +145,10 @@ export interface SettingsData {
    * visibly change the user's prompt and PATH. Does not affect agent-attach
    * (CLI-mode) panes, which spawn the CLI directly. */
   terminalLoginShell: boolean;
+  /** Provider id a click on a workspace with no sessions starts (e.g.
+   * `"terminal"`). Empty (the default, and absent from older peers) shows
+   * the start picker instead. */
+  emptyWorkspaceAgent?: string;
 }
 
 /**
@@ -165,6 +169,7 @@ export interface SettingsPatch {
   chatMode?: "hosted" | "cli";
   terminalScrollback?: number;
   terminalLoginShell?: boolean;
+  emptyWorkspaceAgent?: string;
 }
 
 export type HostMode = "perch" | "direct";

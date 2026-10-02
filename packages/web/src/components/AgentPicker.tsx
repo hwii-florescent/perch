@@ -2,6 +2,19 @@ import { useEffect, useRef } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 
+/** The CLI agents `hostId` can start in a pane (its enabled, installed
+ * manifests), fetched on demand. Shared by every "start a session" surface. */
+export function useAgentChoices(hostId: string) {
+  const connected = usePerchStore((s) => s.connected);
+  const discovery = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("agent.manifest.list") ?? false);
+  const catalog = usePerchStore((s) => s.agentManifestsByHost[hostId]);
+  const fetch = usePerchStore((s) => s.fetchAgentManifests);
+  useEffect(() => { if (connected && discovery) fetch(hostId); }, [connected, discovery, fetch, hostId]);
+  const choices: { id: string; label: string; isDefault?: boolean }[] = discovery ? (catalog?.manifests ?? []).filter((entry) => entry.available && entry.enabled !== false && entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"))
+    .map((entry) => ({ id: entry.id, label: entry.displayName, isDefault: entry.isDefault })) : AGENTS;
+  return { connected, discovery, catalog, choices };
+}
+
 /** Installed CLI choices for workspace/session creation. Legacy hosts retain
  * their two known integrations until they advertise manifest discovery. */
 export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, testIdPrefix = "new-session-agent", className }: {
@@ -14,16 +27,10 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
 }) {
   const activeHost = usePerchStore((s) => s.activeHostId);
   const hostId = hostIdProp ?? activeHost;
-  const connected = usePerchStore((s) => s.connected);
-  const discovery = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("agent.manifest.list") ?? false);
-  const catalog = usePerchStore((s) => s.agentManifestsByHost[hostId]);
-  const fetch = usePerchStore((s) => s.fetchAgentManifests);
+  const { connected, discovery, catalog, choices } = useAgentChoices(hostId);
   const manage = usePerchStore((s) => s.openAgentCatalog);
   const seededHost = useRef<string | null>(null);
-  useEffect(() => { if (connected && discovery) fetch(hostId); }, [connected, discovery, fetch, hostId]);
-  const choices = discovery ? (catalog?.manifests ?? []).filter((entry) => entry.available && entry.enabled !== false && entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"))
-    .map((entry) => ({ id: entry.id, label: entry.displayName, isDefault: entry.isDefault })) : AGENTS;
-  const preferred = choices.find((entry) => "isDefault" in entry && entry.isDefault)?.id;
+  const preferred = choices.find((entry) => entry.isDefault)?.id;
   const first = choices[0]?.id;
   const valid = choices.some((entry) => entry.id === value);
   useEffect(() => {

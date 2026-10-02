@@ -17,6 +17,7 @@ import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
 import { socket } from "../ws";
 import { AgentCatalog } from "./AgentCatalog";
+import { useAgentChoices } from "./AgentPicker";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
 // `createPerchTerminal` actually clamps to cannot drift apart.
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
@@ -97,6 +98,7 @@ function ChatModeSection() {
   // round-trip. The store's settings.current handler re-applies the
   // authoritative value (and drives every open chat pane) once it lands.
   const [chatMode, setChatMode] = useState<"hosted" | "cli">(settings?.chatMode ?? "cli");
+  const { choices: agentChoices } = useAgentChoices(usePerchStore((s) => s.activeHostId));
 
   useEffect(() => {
     if (!settings) return;
@@ -116,6 +118,19 @@ function ChatModeSection() {
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </div>
       <p className="settings-modal__muted">UI or CLI for every session.</p>
+      <div className="settings-modal__field-row">
+        <span className="settings-modal__field-label">Empty workspace opens</span>
+        <select
+          className="settings-modal__input"
+          data-testid="settings-empty-workspace-agent"
+          value={settings?.emptyWorkspaceAgent ?? ""}
+          onChange={(e) => updateSettings({ emptyWorkspaceAgent: e.target.value })}
+        >
+          <option value="">Ask (show the picker)</option>
+          {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        </select>
+      </div>
+      <p className="settings-modal__muted">What clicking a workspace with no open tabs starts.</p>
     </section>
   );
 }

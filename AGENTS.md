@@ -140,7 +140,13 @@ there, not here.
     tab's × (`PersistentAgentTerminal.tsx`); "Stop agent" does the same.
   - Closing a workspace's last tab shows the home screen
     (`NoSessionPanel.tsx`: app name, Add project, New session, shortcuts),
-    never another workspace's session.
+    never another workspace's session. Clicking a workspace with no sessions
+    never keeps showing another's either: it starts Settings → "Empty
+    workspace opens" (`settings.emptyWorkspaceAgent`), else shows that
+    workspace's start picker (`NoSessionPanel.tsx`).
+  - Chats (`~/.perch/scratch`) is listed after the projects as a flat chat
+    list (⌄ collapse, ⋯ Close all chats, ✎ new chat), with no scratch
+    workspace row.
   - One pane shows no pane header: the top-row tab names it. Splits show
     every group's header (`syncPaneHeaders` in `DockviewShell.tsx`).
     Right-clicking a session's top tab opens its pane menu (split, zoom,

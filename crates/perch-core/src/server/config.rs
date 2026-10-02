@@ -27,6 +27,7 @@ pub(super) fn handle_settings_update(
         chat_mode: patch.chat_mode,
         terminal_scrollback: patch.terminal_scrollback,
         terminal_login_shell: patch.terminal_login_shell,
+        empty_workspace_agent: patch.empty_workspace_agent,
     };
     match state.app.settings.update(store_patch) {
         Ok(updated) => {
@@ -116,6 +117,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         chat_mode: s.chat_mode.clone(),
         terminal_scrollback: s.terminal_scrollback,
         terminal_login_shell: s.terminal_login_shell,
+        empty_workspace_agent: s.empty_workspace_agent.clone(),
     }
 }
 

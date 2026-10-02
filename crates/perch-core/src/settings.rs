@@ -65,6 +65,10 @@ pub struct Settings {
     /// Spawn plain terminal panes as a login shell. Defaults to `false`.
     #[serde(default)]
     pub terminal_login_shell: bool,
+    /// Provider id a click on a workspace with no sessions starts
+    /// (e.g. `"terminal"`). Empty (the default) shows the start picker.
+    #[serde(default)]
+    pub empty_workspace_agent: String,
 }
 
 impl Default for Settings {
@@ -78,6 +82,7 @@ impl Default for Settings {
             chat_mode: default_chat_mode(),
             terminal_scrollback: default_terminal_scrollback(),
             terminal_login_shell: false,
+            empty_workspace_agent: String::new(),
         }
     }
 }
@@ -129,6 +134,7 @@ pub struct SettingsPatch {
     pub chat_mode: Option<String>,
     pub terminal_scrollback: Option<u32>,
     pub terminal_login_shell: Option<bool>,
+    pub empty_workspace_agent: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -223,6 +229,9 @@ impl SettingsStore {
         }
         if let Some(login_shell) = patch.terminal_login_shell {
             guard.terminal_login_shell = login_shell;
+        }
+        if let Some(agent) = patch.empty_workspace_agent {
+            guard.empty_workspace_agent = agent;
         }
         let snapshot = guard.clone();
         drop(guard);

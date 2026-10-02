@@ -82,6 +82,12 @@ function workspacesForProject(
     });
 }
 
+/** The Chats project: the scratch folder "No project" sessions run in
+ * (`session::chats_pair`). Listed as a flat chat list after the projects. */
+function isChatsProject(project: WorkspaceProject): boolean {
+  return project.path.endsWith("/.perch/scratch");
+}
+
 function sessionsForWorkspace(
   sessions: SessionSummary[],
   workspace: WorkspaceRecord,
@@ -288,7 +294,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     clearCreateRequest();
   }, [clearCreateRequest, createRequest?.status]);
 
-  const visibleProjects = useMemo(
+  const hostProjects = useMemo(
     () => projects
       .filter((project) => project.hostId === activeHostId)
       .sort((a, b) => {
@@ -297,6 +303,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       }),
     [activeHostId, projects],
   );
+  const chatsProject = hostProjects.find(isChatsProject);
+  const visibleProjects = hostProjects.filter((project) => !isChatsProject(project));
 
   function submitProject(path: string) {
     if (!path.trim() || createRequest?.status === "pending") return;
@@ -310,10 +318,27 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
+  /** A clicked workspace with no sessions never keeps showing another
+   * workspace's session: it starts the agent set in Settings → "Empty
+   * workspace opens", else shows its start picker (`NoSessionPanel`). */
+  function openEmptyWorkspace(hostId: string, path: string) {
+    const state = usePerchStore.getState();
+    const agent = state.settings?.emptyWorkspaceAgent;
+    if (agent) createSessionOnHost(hostId, path, agent);
+    else state.showWorkspaceHome();
+  }
+
   function navigateToProject(projectId: string) {
     focusWorkspaceProject(projectId);
     const nextSession = sessionsForProject(projectId)[0];
-    if (nextSession && nextSession.id !== sessionId) switchSession(nextSession.id);
+    if (nextSession) {
+      if (nextSession.id !== sessionId) switchSession(nextSession.id);
+    } else {
+      const state = usePerchStore.getState();
+      const project = projects.find((candidate) => candidate.id === projectId);
+      const workspace = workspaces.find((candidate) => candidate.id === state.activeWorkspaceId);
+      if (project) openEmptyWorkspace(project.hostId, workspace?.path ?? project.path);
+    }
     onNavigate?.();
   }
 
@@ -325,11 +350,98 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       return;
     }
     const workspaceSessions = sessionsForWorkspace(sessions, workspace);
-    if (!workspaceSessions.some((candidate) => candidate.id === sessionId) && workspaceSessions[0]) {
-      switchSession(workspaceSessions[0].id);
+    if (!workspaceSessions.some((candidate) => candidate.id === sessionId)) {
+      if (workspaceSessions[0]) switchSession(workspaceSessions[0].id);
+      else openEmptyWorkspace(workspace.hostId, workspace.path);
     }
     onNavigate?.();
   }
+
+  // After the projects, inside their scrolling list (or after the empty state).
+  const chatsSection = chatsProject && (() => {
+        const chats = sessionsForProject(chatsProject.id);
+        const chatsCollapsed = collapsed.includes(chatsProject.id);
+        const chatsWorkspace = workspacesForProject(workspaces, chatsProject.id)[0];
+        return (
+          <div className="workspace-chats" data-testid="workspace-chats">
+            <div className="workspace-project__header">
+              <button
+                type="button"
+                className="workspace-chats__title"
+                data-testid="workspace-chats-collapse"
+                aria-expanded={!chatsCollapsed}
+                onClick={() => toggleCollapsed(chatsProject.id)}
+              >
+                Chats <span aria-hidden="true">{chatsCollapsed ? "›" : "⌄"}</span>
+              </button>
+              {chats.length > 0 && (
+                <button
+                  type="button"
+                  className="workspace-project__icon"
+                  data-testid="workspace-chats-menu"
+                  title="Chats actions"
+                  aria-label="Chats actions"
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Chats actions", items: [
+                      { label: "Close all chats", testId: "workspace-chats-close-all", danger: true, onSelect: () => { for (const chat of chats) deleteSession(chat.id); } },
+                    ] });
+                  }}
+                >
+                  ⋯
+                </button>
+              )}
+              <button
+                type="button"
+                className="workspace-chats__new"
+                data-testid="workspace-chats-new"
+                title="New chat"
+                aria-label="New chat"
+                onClick={() => {
+                  if (chatsWorkspace) focusWorkspace(chatsWorkspace.id);
+                  else focusWorkspaceProject(chatsProject.id);
+                  openEmptyWorkspace(chatsProject.hostId, chatsWorkspace?.path ?? chatsProject.path);
+                  onNavigate?.();
+                }}
+              >
+                ✎
+              </button>
+            </div>
+            {!chatsCollapsed && chats.length > 0 && (
+              <div className="workspace-chats__list">
+                {chats.map((session) => (
+                  <div className="workspace-entry__session-row" key={session.id}>
+                    <button
+                      type="button"
+                      className={"workspace-entry__session workspace-chats__chat" + (session.id === sessionId ? " workspace-entry__session--active" : "")}
+                      data-testid={`workspace-session-${session.id}`}
+                      title={session.title || "New chat"}
+                      onClick={() => {
+                        switchSession(session.id);
+                        onNavigate?.();
+                      }}
+                    >
+                      <StatusDot session={session} />
+                      <span>{session.title || "New chat"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="workspace-entry__session-close"
+                      data-testid={`workspace-session-close-${session.id}`}
+                      title="Close chat"
+                      aria-label={`Close ${session.title || "chat"}`}
+                      onClick={() => deleteSession(session.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+  })();
 
   return (
     <section
@@ -399,7 +511,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
 
-      {visibleProjects.length === 0 && snapshot?.state !== "loading" ? (
+      {visibleProjects.length === 0 && snapshot?.state !== "loading" && (
         <div className="workspace-overview__empty">
           <span className="workspace-overview__empty-mark" aria-hidden="true">＋</span>
           <strong>Register a project</strong>
@@ -410,8 +522,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             </button>
           )}
         </div>
-      ) : (
-        <div className="workspace-overview__list" data-testid="project-list">
+      )}
+      <div className="workspace-overview__list" data-testid="project-list">
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
@@ -716,8 +828,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               </div>
             );
           })}
-        </div>
-      )}
+          {chatsSection}
+      </div>
       {menu && <RowMenu {...menu} onClose={() => setMenu(null)} />}
       {newSession && (
         <NewSessionPopover

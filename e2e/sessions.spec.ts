@@ -1,18 +1,33 @@
 /**
  * sessions.spec.ts — session lifecycle:
  *   S1 — "New session" opens a picker of listed projects plus "No project",
- *         with no folder browser; "No project" starts the session in Chats.
+ *         with no folder browser; "No project" starts the session in Chats,
+ *         a flat chat list after the projects with no scratch-folder row.
  *   S4 — a row's × deletes the session, and so does exiting its terminal:
  *         it leaves the sidebar for good.
  *   S5 — a project's "Close all sessions" and "Remove project" delete its
  *         sessions and end what they run; the removed project is gone.
+ *   S6 — clicking a workspace with no sessions never keeps showing another
+ *         workspace's session: it shows that workspace's start picker, or
+ *         starts the Settings default ("Empty workspace opens") directly.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
-import { startChat } from "./projects";
+import { addProject, startChat } from "./projects";
+
+/** Set Settings → "Empty workspace opens" through the real modal. */
+async function setEmptyWorkspaceAgent(page: Page, agent: string): Promise<void> {
+  await page.getByTestId("settings-gear").click();
+  const select = page.getByTestId("settings-empty-workspace-agent");
+  if (agent) await expect(select.locator(`option[value="${agent}"]`)).toHaveCount(1, { timeout: 10_000 });
+  await select.selectOption(agent);
+  await expect(select).toHaveValue(agent);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-modal")).toHaveCount(0);
+}
 
 async function open(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
@@ -29,7 +44,10 @@ test.describe("Session lifecycle", () => {
     await page.keyboard.press("Escape");
 
     const id = await startChat(page);
-    await expect(page.locator(".workspace-entry", { has: page.getByTestId(`workspace-session-${id}`) })).toContainText(".perch/scratch");
+    const chats = page.getByTestId("workspace-chats");
+    await expect(chats.getByTestId(`workspace-session-${id}`)).toBeVisible();
+    await expect(page.getByTestId("project-list")).not.toContainText("scratch");
+    await expect(chats).not.toContainText("scratch");
   });
 
   test("S4. × and exiting the terminal delete the session", async ({ page }) => {
@@ -84,6 +102,37 @@ test.describe("Session lifecycle", () => {
       for (const id of [closed, removed]) await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("S6. An empty workspace shows its start picker, or opens the Settings default", async ({ page }) => {
+    const picked = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-empty-a-")));
+    const auto = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-empty-b-")));
+    try {
+      await open(page);
+      await setEmptyWorkspaceAgent(page, "");
+      const chat = await startChat(page);
+      await addProject(page, picked);
+      await page.locator(`.workspace-entry__button[title="${picked}"]`).click();
+      await expect(page.getByTestId("persistent-agent-terminal")).toHaveCount(0);
+      await expect(page.getByTestId(`tab-${chat}`)).toHaveCount(0);
+      await page.getByTestId("workspace-start-terminal").click();
+      await expect(page.getByTestId("persistent-agent-terminal")).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+      await expect.poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId"))).not.toBe(chat);
+
+      const first = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      await setEmptyWorkspaceAgent(page, "terminal");
+      await addProject(page, auto);
+      await page.locator(`.workspace-entry__button[title="${auto}"]`).click();
+      await expect(page.getByTestId("workspace-start-terminal")).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => localStorage.getItem("perch.sessionId")), { timeout: 15_000 }).not.toBe(first);
+      await expect(page.getByTestId(`tab-${first}`)).toHaveCount(0);
+      await expect(page.getByTestId("persistent-agent-terminal")).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+    } finally {
+      await page.keyboard.press("Escape");
+      await setEmptyWorkspaceAgent(page, "").catch(() => {});
+      fs.rmSync(picked, { recursive: true, force: true });
+      fs.rmSync(auto, { recursive: true, force: true });
     }
   });
 });

@@ -1102,6 +1102,62 @@ body {
   }
 }
 
+/* Chats: a flat list of "No project" sessions after the projects, like a
+ * chat app's Recents (WorkspaceOverview.tsx). */
+.workspace-chats {
+  padding-bottom: 0.25rem;
+}
+
+.workspace-chats__title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.55rem 0.45rem 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--subtext-0);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-chats__title:hover,
+.workspace-chats__title:focus-visible {
+  color: var(--text);
+}
+
+.workspace-chats__new {
+  flex-shrink: 0;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--subtext-0);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workspace-chats__new:hover,
+.workspace-chats__new:focus-visible {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.workspace-chats__list {
+  padding: 0 0.3rem 0.25rem 0.4rem;
+}
+
+.workspace-chats__chat {
+  font-size: 0.7rem;
+  padding: 0.3rem 0.3rem;
+}
+
 .workspace-overview__empty {
   display: grid;
   justify-items: start;
@@ -3874,6 +3930,30 @@ body {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text);
+}
+
+.home__name--workspace {
+  font-size: 1.6rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home__link {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--subtext-0);
+  cursor: pointer;
+}
+
+.home__link:hover,
+.home__link:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .home__hint {

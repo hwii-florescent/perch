@@ -490,6 +490,10 @@ export interface PerchState {
    * `agent`/`model` fields so the pane header and the next `chat.send`
    * reflect it immediately). */
   createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: string) => void;
+  /** Close the session view and keep the workspace focus: the main area shows
+   * the focused workspace's start picker (`NoSessionPanel`). What clicking a
+   * workspace with no sessions does. The session itself keeps running. */
+  showWorkspaceHome: () => void;
   /** Permanently delete a session: what a tab's ×, the session row's × and
    * exiting its terminal do. Irreversible. The server stops its agent and shells and drops its rows, then
    * broadcasts `session.deleted`, which drives the local cleanup. Leaving the
@@ -1681,6 +1685,16 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     }
   },
 
+  showWorkspaceHome: () => {
+    try {
+      localStorage.removeItem("perch.sessionId");
+    } catch {
+      // ignore
+    }
+    flushChunkBuffer();
+    set({ sessionId: null, messages: [], streamingMessageId: null, cliError: null });
+  },
+
   deleteSession: (sessionId) => {
     socket.send({ type: "session.delete", sessionId });
     leaveSession(get(), sessionId);
@@ -2072,22 +2086,10 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
     usePerchStore.getState().switchSession(next.id);
     return;
   }
-  try {
-    localStorage.removeItem("perch.sessionId");
-  } catch {
-    // ignore
-  }
-  flushChunkBuffer();
+  usePerchStore.getState().showWorkspaceHome();
   writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, null);
   writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, null);
-  usePerchStore.setState({
-    sessionId: null,
-    messages: [],
-    streamingMessageId: null,
-    cliError: null,
-    activeProjectId: null,
-    activeWorkspaceId: null,
-  });
+  usePerchStore.setState({ activeProjectId: null, activeWorkspaceId: null });
 }
 
 type WorkspaceWireMessage = {
