@@ -189,3 +189,16 @@ checkpoint commit.
 5. **Navigation**: Cmd-J, Cmd-P, dashboard.
 6. **Agent CLI.**
 7. Tiers 2–4 of the parity matrix. Tier 5 is deferred.
+
+## Backlog
+
+Polish CLI mode first; phone and UI mode come after (decided 2026-10-02).
+
+- **Phone: control after reload.** Leases are per connection, so a reloaded
+  view can open before the server drops the old connection's lease, and it
+  comes up as a watcher (agent-terminal-ownership fails under load).
+- **Phone: review delivery.** paired-phone-flows intermittently gets
+  "Delivery could not be confirmed" (2 of 9 runs on 2026-10-02; cause not
+  found).
+- **Phone: watching a wider agent.** A watcher renders at the PTY's size
+  and shows its left part; scale the font to fit the width instead.
