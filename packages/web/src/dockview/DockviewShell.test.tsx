@@ -28,7 +28,7 @@ it("applies a saved layout that arrives before Dockview is ready", async () => {
   document.body.appendChild(mount);
   const root = createRoot(mount);
   const api = {
-    addPanel: vi.fn(), fromJSON: vi.fn(), panels: [],
+    addPanel: vi.fn(), fromJSON: vi.fn(), panels: [], groups: [],
     toJSON: vi.fn(() => ({ panels: {} })),
     onDidLayoutChange: vi.fn(), onUnhandledDragOver: vi.fn(), onDidDrop: vi.fn(),
   };

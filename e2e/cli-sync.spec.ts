@@ -153,9 +153,9 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // A2 — dead CLI PTY respawns on re-enter
+  // A2 — exiting the CLI and then its shell closes the session
   // ---------------------------------------------------------------------------
-  test("A2. dead CLI PTY respawns on re-enter", async ({ page }) => {
+  test("A2. exiting the CLI and its shell closes the session", async ({ page }) => {
     if (!claudeAvailable) {
       test.skip(true, "claude binary not found — skipping A2 (needs a claude session for CLI attach)");
       return;
@@ -164,7 +164,7 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await freshSession(page);
 
     // Create a fresh session as Hosted (blank — not in sidebar until first message).
-    await createHostedTestSession(page);
+    const sessionId = await createHostedTestSession(page);
 
     // Run a hosted claude turn so there is a claude_session_id to resume in CLI.
     await selectAgentModel(page, "claude", MODEL_HAIKU);
@@ -207,24 +207,9 @@ test.describe("CLI/Hosted model-sync (Stage A)", () => {
     await page.keyboard.type("exit");
     await page.keyboard.press("Enter");
 
-    const exitedBanner = page.locator(".terminal__exited");
-    await expect(exitedBanner).toBeVisible({ timeout: 30000 });
-
-    await page.screenshot({ path: "artifacts/A2-02-exited-banner.png" });
-
-    // Toggle back to Hosted.
-    await setChatMode(page, "hosted");
-    await expect(termSurface).not.toBeVisible({ timeout: 5000 });
-
-    // Toggle back to CLI — should spawn a fresh PTY.
-    await setChatMode(page, "cli");
-    await expect(termSurface).toBeVisible({ timeout: 10000 });
-    await expect(exitedBanner).not.toBeVisible({ timeout: 15000 });
-
-    await page.screenshot({ path: "artifacts/A2-03-fresh-pty.png" });
-
-    // Restore only this session to Hosted mode.
-    await setChatMode(page, "hosted");
+    // Nothing is left running: the session closes (its tab is gone). Other
+    // specs' sessions share this folder, so a sibling tab takes over here.
+    await expect(page.getByTestId(`tab-${sessionId}`)).toHaveCount(0, { timeout: 30000 });
   });
 
   // ---------------------------------------------------------------------------

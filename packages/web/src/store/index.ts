@@ -1686,10 +1686,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     socket.send({ type: "session.archive", sessionId, archived });
     const state = get();
     if (!archived || state.sessionId !== sessionId) return;
-    // Closing the active tab lands on a neighbouring tab, like a browser.
-    const open = (list: SessionSummary[]) => list.filter((s) => s.id !== sessionId && !s.archived);
-    const siblings = open(activeWorkspaceSessions(state));
-    switchAwayFromActiveSession(siblings.length ? siblings : open(state.sessions), state.activeHostId);
+    // Closing the active tab lands on a neighbouring tab of the same
+    // workspace, like a browser; closing its last tab shows the home screen.
+    const siblings = activeWorkspaceSessions(state).filter((s) => s.id !== sessionId && !s.archived);
+    switchAwayFromActiveSession(siblings, state.activeHostId);
   },
 
   deleteSession: (sessionId) => {

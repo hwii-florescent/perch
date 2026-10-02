@@ -13,7 +13,9 @@ import { MobileSwitcher } from "./components/MobileSwitcher";
 import { Toast } from "./components/Toast";
 import { useIsMobileWidth } from "./responsive";
 import { useLeaderKey } from "./keybinds";
-import { usePerchStore } from "./store";
+import { usePerchStore, effectiveWorkspace } from "./store";
+import { fileTabKey, useFileTabs } from "./fileTabs";
+import { WorkspaceFilesView } from "./components/WorkspaceFiles";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
@@ -62,6 +64,11 @@ export default function App() {
   const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
   const closeWorkspaceGitReview = usePerchStore((state) => state.closeWorkspaceGitReview);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
+  // The file tab shown instead of the session, when it belongs to the
+  // workspace on screen (the sessions' dockview stays mounted underneath).
+  const shownWorkspaceId = usePerchStore((state) => effectiveWorkspace(state)?.id ?? null);
+  const activeFile = useFileTabs((state) =>
+    state.tabs.find((tab) => tab.workspaceId === shownWorkspaceId && fileTabKey(tab) === state.active));
   // The right drawer (Files | Git for the active workspace). App state, not
   // part of a session's layout, so it stays put across chats. An old stored
   // "terminal" tab maps to Files.
@@ -250,7 +257,21 @@ export default function App() {
               onCloseFiles={closeWorkspaceFiles}
               onCloseGitReview={closeWorkspaceGitReview}
             />
-          ) : <DockviewShell />}
+          ) : (
+            <>
+              <DockviewShell />
+              {activeFile && (
+                <div className="file-tab-view">
+                  <WorkspaceFilesView
+                    key={fileTabKey(activeFile)}
+                    layout="editor"
+                    workspaceId={activeFile.workspaceId}
+                    initialPath={activeFile.path}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </main>
         {!isMobile && tools && (
           <ResizeHandle

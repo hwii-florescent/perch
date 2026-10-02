@@ -119,14 +119,24 @@ there, not here.
   - The right drawer (`WorkspaceTools.tsx`) holds the file explorer and Git
     only: no Terminal (terminals are tabs), and Git only for a git
     workspace. It is app-level, not part of a session's layout, and follows
-    the clicked workspace. A clicked file opens as an editor pane tab in the
-    main area beside Chat (`DockviewController.openFile`, the `files` panel
-    kind with `layout="editor"`), saved with the session layout. The phone
-    keeps the combined explorer+editor view. The `gitReview` panel kind
-    remains only so old saved layouts restore.
+    the clicked workspace. A clicked file opens as a top-row tab after the
+    workspace's sessions, before `+` (`fileTabs.ts`, per viewer); the active
+    file covers the main area while the session's panes stay mounted
+    underneath. The phone keeps the combined explorer+editor view. The
+    `files`/`gitReview` panel kinds remain only so old saved layouts
+    restore.
   - A tab is a terminal. Every CLI agent runs under
     `agent_runtime::in_shell`, so an exited agent leaves a login shell in
-    the same pane. `Terminal` is a provider (`ProviderManifest::terminal`),
+    the same pane. When that shell exits too (lifecycle `exited`, which
+    hibernation's `sleeping` never is), the session closes itself like its
+    tab's × (`PersistentAgentTerminal.tsx`); "Stop agent" does the same.
+  - Closing a workspace's last tab shows the home screen
+    (`NoSessionPanel.tsx`: app name, Add project, New session, shortcuts),
+    never another workspace's session.
+  - One pane shows no pane header: the top-row tab names it. Splits show
+    every group's header (`syncPaneHeaders` in `DockviewShell.tsx`).
+    Right-clicking a session's top tab opens its pane menu (split, zoom,
+    Stop agent). `Terminal` is a provider (`ProviderManifest::terminal`),
     listed last in the `+` picker so it is never the default.
   - UI/CLI is one global setting (`settings.chatMode`, default `"cli"`),
     changed only in Settings → Chat Mode and pushed to every connected

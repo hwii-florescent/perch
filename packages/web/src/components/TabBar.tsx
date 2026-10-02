@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { applyStoredTabOrder, saveTabOrder } from "../tabOrder";
+import { fileTabKey, useFileTabs, type FileTab } from "../fileTabs";
+import { useWorkspaceFilesStore } from "../filesystemStore";
+import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import type { SessionSummary } from "@perch/shared";
 
 const MAX_TAB_LABEL = 24;
@@ -30,6 +33,11 @@ function tabLabel(session: SessionSummary): string {
  * the CLI picker (`NewSessionPopover`) for this workspace's path on its host;
  * with no workspace it uses the active project's cwd, and the sidebar's
  * "+ New session" button keeps picking a *different* folder one click away.
+ *
+ * Files opened from the drawer's explorer sit after the sessions, before "+"
+ * (`fileTabs.ts`); the active one replaces the session view in the main area.
+ * Right-clicking a session tab opens its pane menu (split, zoom, stop agent),
+ * since a single-pane layout shows no pane header.
  */
 export function TabBar() {
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -42,6 +50,9 @@ export function TabBar() {
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
   const archiveSession = usePerchStore((s) => s.archiveSession);
+  const fileTabs = useFileTabs((s) => s.tabs);
+  const activeFile = useFileTabs((s) => s.active);
+  const showSession = useFileTabs((s) => s.showSession);
 
   const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -66,6 +77,8 @@ export function TabBar() {
   // leader,n/p and the visible strip can never disagree.
   const tabs = activeWorkspaceSessions(navState);
   const orderedTabs = projectKey ? applyStoredTabOrder(projectKey, tabs) : tabs;
+  const workspaceFiles = ws ? fileTabs.filter((tab) => tab.workspaceId === ws.id) : [];
+  const fileShown = activeFile !== null && workspaceFiles.some((tab) => fileTabKey(tab) === activeFile);
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
@@ -139,7 +152,7 @@ export function TabBar() {
             type="button"
             className={[
               "tab-bar__tab",
-              s.id === sessionId ? "tab-bar__tab--active" : "",
+              s.id === sessionId && !fileShown ? "tab-bar__tab--active" : "",
               s.id === draggingId ? "tab-bar__tab--dragging" : "",
               s.id === dragOverId ? "tab-bar__tab--drag-over" : "",
             ]
@@ -152,7 +165,13 @@ export function TabBar() {
             onDragOver={(e) => handleTabDragOver(e, s.id)}
             onDrop={() => handleTabDrop(s.id)}
             onDragEnd={handleTabDragEnd}
-            onClick={() => switchSession(s.id)}
+            onClick={() => { showSession(); switchSession(s.id); }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              showSession();
+              if (s.id !== sessionId) switchSession(s.id);
+              openSessionPaneMenu(e.clientX, e.clientY);
+            }}
             onDoubleClick={() => {
               setRenamingId(s.id);
               setRenameValue(s.title || "");
@@ -176,6 +195,8 @@ export function TabBar() {
         )
       )}
 
+      {workspaceFiles.map((tab) => <FileTabButton key={fileTabKey(tab)} tab={tab} active={fileTabKey(tab) === activeFile} />)}
+
       <button
         type="button"
         className="tab-bar__new"
@@ -196,5 +217,38 @@ export function TabBar() {
         />
       )}
     </div>
+  );
+}
+
+/** A file's tab: its name, a ● while it has unsaved changes, and ×. */
+function FileTabButton({ tab, active }: { tab: FileTab; active: boolean }) {
+  const open = useFileTabs((s) => s.open);
+  const close = useFileTabs((s) => s.close);
+  const dirty = useWorkspaceFilesStore((s) => {
+    const document = s.documents[tab.workspaceId]?.[tab.path];
+    return document != null && document.content !== document.savedContent;
+  });
+  const name = tab.path.split("/").pop() || tab.path;
+  return (
+    <span className="tab-bar__tab-wrap">
+      <button
+        type="button"
+        className={"tab-bar__tab tab-bar__tab--file" + (active ? " tab-bar__tab--active" : "")}
+        data-testid={`file-tab-${tab.path}`}
+        title={tab.path}
+        onClick={() => open(tab.workspaceId, tab.path)}
+      >
+        {name}{dirty && <span className="tab-bar__dirty" aria-label="unsaved changes"> ●</span>}
+      </button>
+      <button
+        type="button"
+        className={"tab-bar__close" + (active ? " tab-bar__close--active" : "")}
+        data-testid={`file-tab-close-${tab.path}`}
+        aria-label={`Close ${name}`}
+        onClick={() => close(fileTabKey(tab))}
+      >
+        ×
+      </button>
+    </span>
   );
 }

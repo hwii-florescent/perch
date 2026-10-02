@@ -83,10 +83,12 @@ test("agent runtime survives view changes and control transfers between desktop 
     // Only the view holding input can stop the agent (pane menu → Stop agent).
     await desktop.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(desktop).toHaveAttribute("data-controlling", "true");
-    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    // The session's pane menu opens from its top-row tab. A stopped agent
+    // has exited, so its session closes on every view.
+    await page.locator(".tab-bar__tab--active").click({ button: "right" });
     await page.getByTestId("pane-menu-stop-agent").click();
-    await expect(mobile.getByTestId("cli-exited")).toBeVisible();
-    await expect(desktop.getByTestId("cli-exited")).toBeVisible();
+    await expect(mobile).toHaveCount(0);
+    await expect(desktop).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {
     await setChatMode(page, "cli").catch(() => {});

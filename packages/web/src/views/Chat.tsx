@@ -646,7 +646,10 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
     return Boolean(capabilities?.includes("agent.ui.get") && s.agentManifestsByHost[owningHostId]?.manifests.some((entry) => entry.id === cliAgent && entry.nativeUi));
   });
   const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
-  useEffect(() => { if (connected) fetchAgentManifests(owningHostId); }, [connected, owningHostId, fetchAgentManifests]);
+  // Capabilities arrive with server.info, which can land after `connected`.
+  const canListManifests = usePerchStore((s) => s.connected && Boolean(
+    (owningHostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[owningHostId])?.includes("agent.manifest.list")));
+  useEffect(() => { if (canListManifests) fetchAgentManifests(owningHostId); }, [canListManifests, owningHostId, fetchAgentManifests]);
   const sessionCommands = usePerchStore((s) => s.sessionCommands);
   const fetchCommands = usePerchStore((s) => s.fetchCommands);
   // UI/CLI is one global setting. An agent with no UI surface (a terminal, a

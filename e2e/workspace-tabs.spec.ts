@@ -178,8 +178,9 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(page.locator(".terminal__surface")).toHaveCount(0);
 
     // Split: open a terminal pane below chat.
-    await page.getByTestId("pane-group-menu").click();
-    await page.getByTestId("pane-menu-split-down").click();
+    // One pane has no pane header; split with the leader chord (leader,_).
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 
     // Give the 500ms debounced session.layout.set time to fire and round-trip.
@@ -266,8 +267,9 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(drawer).toHaveCount(0);
 
     // A terminal split from the pane menu is a dockview group with its own "+".
-    await page.getByTestId("pane-group-menu").click();
-    await page.getByTestId("pane-menu-split-down").click();
+    // One pane has no pane header; split with the leader chord (leader,_).
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
     await expect(terminalGroupHeader).toHaveCount(1, { timeout: 10000 });
     await expect(terminalGroupHeader.locator('[data-testid^="pane-tab-"]')).toHaveCount(1);
 

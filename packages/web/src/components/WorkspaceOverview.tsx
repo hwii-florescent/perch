@@ -1,4 +1,5 @@
 import { FormEvent, Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
@@ -269,6 +270,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [addOpen, setAddOpen] = useState(false);
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
+
+  // The home screen's "Add project" (NoSessionPanel.tsx) opens this form.
+  useEffect(() => {
+    const open = () => setAddOpen(true);
+    window.addEventListener(ADD_PROJECT_EVENT, open);
+    return () => window.removeEventListener(ADD_PROJECT_EVENT, open);
+  }, []);
 
   useEffect(() => {
     if (createRequest?.status !== "success") return;

@@ -122,7 +122,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await freshPage(page);
 
     const chatTab = page.locator('[data-testid="pane-tab-chat"]');
-    await expect(chatTab).toBeVisible({ timeout: 10000 });
+    // One pane shows no pane header: the top row already names the session.
+    await expect(chatTab).toBeHidden({ timeout: 10000 });
     await expect(page.locator(".terminal__surface")).toHaveCount(0);
 
     await leaderChord(page, "v");
@@ -142,7 +143,11 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await freshPage(page);
 
     const chatTab = page.locator('[data-testid="pane-tab-chat"]');
-    await expect(chatTab).toBeVisible({ timeout: 10000 });
+    // Pane headers (and their tabs) appear once there is more than one pane.
+    await leaderChord(page, "v");
+    const newTab = nonChatTab(page);
+    await expect(newTab).toBeVisible({ timeout: 10000 });
+    await expect(chatTab).toBeVisible();
 
     await chatTab.click({ button: "right" });
     const menu = page.locator('[data-testid="pane-context-menu"]');
@@ -155,13 +160,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await expect(page.locator('[data-testid="pane-menu-close"]')).toBeDisabled();
 
     await page.screenshot({ path: "artifacts/p2-context-menu.png" });
-
-    await page.locator('[data-testid="pane-menu-split-right"]').click();
+    await page.keyboard.press("Escape");
     await expect(menu).not.toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
-
-    const newTab = nonChatTab(page);
-    await expect(newTab).toBeVisible({ timeout: 5000 });
 
     // Right-click the new terminal tab — its Close must be enabled this time.
     await newTab.click({ button: "right" });
@@ -172,7 +172,7 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     await closeBtn.click();
     await expect(menu).not.toBeVisible({ timeout: 5000 });
     await expect(page.locator(".terminal__surface")).toHaveCount(0, { timeout: 10000 });
-    await expect(chatTab).toBeVisible();
+    await expect(chatTab).toBeHidden();
 
     await page.screenshot({ path: "artifacts/p2-closed-via-menu.png" });
   });
@@ -271,8 +271,9 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
   test("P4. header ⋯ button opens the pane menu on a plain click", async ({ page }) => {
     await freshPage(page);
 
-    const chatTab = page.locator('[data-testid="pane-tab-chat"]');
-    await expect(chatTab).toBeVisible({ timeout: 10000 });
+    // The header (and its ⋯) shows once there is more than one pane.
+    await leaderChord(page, "v");
+    await expect(nonChatTab(page)).toBeVisible({ timeout: 10000 });
 
     // A plain locator click must reach the button — before the fix this timed
     // out with `.chat__list ... intercepts pointer events` and only a
@@ -291,8 +292,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     // And the wiring works end-to-end: Split Right adds a terminal pane.
     await page.locator('[data-testid="pane-menu-split-right"]').click();
     await expect(menu).not.toBeVisible({ timeout: 5000 });
-    await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
-    await expect(nonChatTab(page)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".terminal__surface")).toHaveCount(2, { timeout: 10000 });
+    await expect(nonChatTab(page)).toHaveCount(2, { timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/p4-split-from-header-menu.png" });
   });

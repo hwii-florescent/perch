@@ -152,7 +152,9 @@ test.describe("CLI-mode terminal rendering", () => {
     if (!terminals?.created.size) return;
     // Stop through the owning visible viewer. Another raw WS connection is
     // deliberately unable to kill an agent whose input belongs to this one.
-    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    const tab = page.locator(".tab-bar__tab--active");
+    if (!(await tab.count())) return; // already closed: an exited agent closes its session
+    await tab.click({ button: "right" });
     const stop = page.getByTestId("pane-menu-stop-agent");
     if (await stop.isVisible()) await stop.click();
     else await page.keyboard.press("Escape");

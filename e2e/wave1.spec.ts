@@ -356,8 +356,9 @@ test.describe("Wave 1 functionality gaps", () => {
     await freshPage(page);
 
     // A terminal split from the pane menu (the drawer has no terminal).
-    await page.getByTestId("pane-group-menu").click();
-    await page.getByTestId("pane-menu-split-down").click();
+    // One pane has no pane header; split with the leader chord (leader,_).
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 
     // Focus the terminal pane, then fire the find shortcut. Our handler

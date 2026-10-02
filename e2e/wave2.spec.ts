@@ -149,7 +149,7 @@ test.describe("Wave 2 functionality gaps", () => {
     await freshPage(page);
 
     const chatTab = page.locator('[data-testid="pane-tab-chat"]');
-    await expect(chatTab).toBeVisible({ timeout: 10000 });
+    await expect(chatTab).toBeAttached({ timeout: 10000 });
 
     // Split a terminal to the right of chat — two groups now exist.
     await leaderChord(page, "v");

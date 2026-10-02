@@ -118,6 +118,14 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     };
   }, [connected, sessionId, agent, restart]);
 
+  // The agent and the shell it runs in have both exited (the user left the
+  // shell): the session is done, so close it like its tab's ×. Hibernation
+  // also closes the pty but leaves the agent `sleeping`, never `exited`.
+  const finished = exitCode !== null && status?.state === "exited";
+  useEffect(() => {
+    if (finished) onClose?.();
+  }, [finished, onClose]);
+
   async function takeControl() {
     if (!binding.current || pending) return;
     setPending(true);

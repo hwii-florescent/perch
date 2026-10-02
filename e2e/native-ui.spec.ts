@@ -225,9 +225,10 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await setChatMode(page, "cli");
     }
     await expect(cli).toHaveAttribute("data-controlling", "true");
-    await page.getByTestId("pane-tab-chat").click({ button: "right" });
+    await page.locator(".tab-bar__tab--active").click({ button: "right" });
     await page.getByTestId("pane-menu-stop-agent").click();
-    await expect(cli.getByTestId("cli-exited")).toBeVisible();
+    // An exited agent closes its session.
+    await expect(page.locator(`[data-terminal-id="${terminalId}"]`)).toHaveCount(0);
     if (provider === "codex" || provider === "opencode") await expect.poll(() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(false);
     completed = true;
   } finally {

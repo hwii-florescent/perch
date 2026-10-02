@@ -1,5 +1,5 @@
 import { usePerchStore } from "../store";
-import { getDockviewController } from "../dockview/dockviewController";
+import { useFileTabs } from "../fileTabs";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
@@ -13,7 +13,7 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
 /**
  * The desktop drawer behind the toolbar's right-panel button: the file
  * explorer and Git for whichever workspace is active. A clicked file opens as
- * an editor tab in the main area, beside Chat and terminals. Terminals are session
+ * a top-row tab beside the workspace's sessions (`fileTabs.ts`). Terminals are session
  * tabs, not drawer content. Git shows only for a git checkout. It belongs to
  * the app, not to a session's saved layout, so it stays open across chats and
  * simply follows the workspace the user clicks.
@@ -60,7 +60,7 @@ export function WorkspaceTools({ tab, onTabChange, onClose }: {
             key={workspaceId}
             layout="explorer"
             workspaceId={workspaceId}
-            onOpenFile={(path) => getDockviewController()?.openFile(workspaceId, path)}
+            onOpenFile={(path) => useFileTabs.getState().open(workspaceId, path)}
           />
         ) : missing)}
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}

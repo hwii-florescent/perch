@@ -1,36 +1,25 @@
 /**
- * NoSessionPanel.tsx — Bug 2 fix. What the chat pane shows when there is
- * genuinely no active session (`sessionId === null`): after deleting the last
- * remaining session, `switchAwayFromActiveSession` (store.ts) correctly falls
- * back to `sessionId: null` when nothing is left to switch to, but the chat
- * view used to render its normal (disabled) composer with a placeholder that
- * just said "Connecting..." — misleading, since the WebSocket is connected
- * and nothing is pending; it was a dead end with no way out.
+ * NoSessionPanel.tsx — the home screen: what the main area shows when no
+ * session is open (`sessionId === null`), e.g. after the last tab of a
+ * workspace is closed or its agent and shell exit. Modelled on Orca's: the
+ * app name, a one-line hint, the two ways in, and the shortcuts worth knowing.
  *
- * Two distinct situations reach here and must not share a message (per
- * AGENTS.md's `connected` boolean already existing precisely to distinguish
- * them):
- *  - genuinely disconnected — the composer *was* right to say something like
- *    "Connecting...", just not this unconditionally;
- *  - connected, but with no session open — give the user a real way out
- *    (create one in the active project) rather than a disabled input.
- *
- * Structured the same way as `CliStartPanel` (its closest precedent): a
- * centered card, a title, a one-line hint, and a primary action button.
- *
- * Bug 2/3 fix: also the primary place to pick claude vs codex for the session
- * this button is about to create — this is exactly the "no projects, no
- * session open" repro from the bug report, so it carries the canonical
- * `new-session-agent-{claude,codex}` testids (see `AgentPicker`).
+ * Disconnected is a different situation and gets its own message: nothing
+ * can be started until the socket is back.
  */
 import { useState } from "react";
 import { usePerchStore, effectiveActiveProject } from "../store";
-import { AgentPicker } from "./AgentPicker";
+import { NewSessionPopover } from "../Sidebar";
 
-function basename(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || path;
-}
+/** Asks the sidebar's project list to open its "register a folder" form. */
+export const ADD_PROJECT_EVENT = "perch:add-project";
+
+const SHORTCUTS: [string, string[]][] = [
+  ["New session", ["Ctrl", "Space", "C"]],
+  ["Jump to a session", ["Ctrl", "K"]],
+  ["Toggle sidebar", ["Ctrl", "Space", "B"]],
+  ["All shortcuts", ["?"]],
+];
 
 export function NoSessionPanel({ connected }: { connected: boolean }) {
   const activeHostId = usePerchStore((s) => s.activeHostId);
@@ -38,9 +27,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   // The fallback project is derived; subscribe to its scalar path so a
   // disconnect cannot turn repeated snapshot reads into a render loop.
   const projectCwd = usePerchStore((s) => effectiveActiveProject(s)?.cwd);
-  const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
-  const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
-  const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
 
   if (!connected) {
     return (
@@ -53,31 +40,49 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
     );
   }
 
+  function addProject() {
+    const state = usePerchStore.getState();
+    if (state.sidebarCollapsed) state.toggleSidebar();
+    // After the sidebar has rendered, when it was just reopened.
+    setTimeout(() => window.dispatchEvent(new Event(ADD_PROJECT_EVENT)));
+  }
+
   return (
-    <div className="no-session" data-testid="no-session-panel">
-      <div className="no-session__card">
-        <h2 className="no-session__title">No session open</h2>
-        <p className="no-session__hint">
-          {projectCwd
-            ? `Start a new chat in ${basename(projectCwd)}, or pick a session from the sidebar.`
-            : "Create a new session to get started, or pick one from the sidebar."}
-        </p>
-        <AgentPicker
-          value={selectedAgent}
-          onChange={(a) => {
-            setSelectedAgent(a);
-            if (a === "claude" || a === "codex") setLastAgentChoice(a);
-          }}
-        />
-        <button
-          type="button"
-          className="no-session__primary"
-          data-testid="no-session-create"
-          onClick={() => createSessionOnHost(activeHostId, projectCwd, selectedAgent)}
-        >
-          {projectCwd ? `New session in ${basename(projectCwd)}` : "New session"}
-        </button>
+    <div className="no-session home" data-testid="no-session-panel">
+      <div className="home__card">
+        <h1 className="home__name">perch</h1>
+        <p className="home__hint">Select a workspace from the sidebar to begin.</p>
+        <div className="home__actions">
+          <button type="button" className="home__action" data-testid="home-add-project" onClick={addProject}>
+            Add project
+          </button>
+          <button
+            type="button"
+            className="home__action"
+            data-testid="no-session-create"
+            onClick={(e) => setAnchor(e.currentTarget.getBoundingClientRect())}
+          >
+            New session
+          </button>
+        </div>
+        <dl className="home__keys">
+          {SHORTCUTS.map(([label, keys]) => (
+            <div key={label} className="home__key-row">
+              <dt>{label}</dt>
+              <dd>{keys.map((key) => <kbd key={key}>{key}</kbd>)}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
+      {anchor && (
+        <NewSessionPopover
+          hostId={activeHostId}
+          projectCwds={projectCwd ? [projectCwd] : []}
+          anchorRect={anchor}
+          onClose={() => setAnchor(null)}
+          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent)}
+        />
+      )}
     </div>
   );
 }

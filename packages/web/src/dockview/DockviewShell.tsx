@@ -40,6 +40,21 @@ import { WorkspaceGitReviewPane } from "../components/WorkspaceGitReviewPane";
  * module-level-singleton shell. */
 let openPaneContextMenu: ((panelId: string, title: string, x: number, y: number) => void) | null = null;
 
+/** The session's pane menu, opened from its top-row tab (TabBar.tsx): a
+ * single-pane layout hides the pane header that otherwise carries it. */
+export function openSessionPaneMenu(x: number, y: number): void {
+  openPaneContextMenu?.("chat", "Chat", x, y);
+}
+
+/** One pane needs no header: the top row's tab already names it. Splits show
+ * every group's header so panes can be told apart, moved and closed. */
+function syncPaneHeaders(api: DockviewApi): void {
+  const single = api.groups.length === 1 && api.groups[0]!.panels.length <= 1;
+  for (const group of api.groups) {
+    if (group.header.hidden !== single) group.header.hidden = single;
+  }
+}
+
 /** Same bridge pattern as `openPaneContextMenu` above, for the "split with
  * another session" picker (`SessionSplitPopover.tsx`) opened from
  * `PaneGroupHeaderActions`'s new button — that component is also rendered by
@@ -135,9 +150,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
     onPaneChange={(shellPaneId) => props.api.updateParameters({ shellPaneId })} />;
 }
 
-/** One workspace file's editor, opened as a tab from the drawer's explorer
- * (`DockviewController.openFile`). `params` round-trip through the saved
- * layout, so the tab reopens the same file. */
+/** Files open as top-row tabs now (`fileTabs.ts`); this panel only keeps
+ * layouts saved with a file pane restorable, as that file's editor. */
 function FilesPanel(props: IDockviewPanelProps) {
   const workspaceId = typeof props.params?.workspaceId === "string"
     ? props.params.workspaceId
@@ -356,12 +370,14 @@ export function DockviewShell() {
       // Default panel so the shell never renders empty while the first
       // session.layout round-trip is in flight.
       event.api.addPanel({ id: "chat", component: "chat", title: "Chat" });
+      syncPaneHeaders(event.api);
 
       // Phase 4: expose this dockview instance to keybinds.ts (leader,x/v/-/z)
       // via the module-level controller — see dockviewController.ts for why.
       registerDockviewController(createDockviewController(event.api));
 
       event.api.onDidLayoutChange(() => {
+        syncPaneHeaders(event.api);
         if (restoringRef.current) return;
         const activeId = appliedSessionIdRef.current;
         if (!activeId) return;
@@ -467,6 +483,7 @@ export function DockviewShell() {
       applyDefaultLayout(api);
     } finally {
       restoringRef.current = false;
+      syncPaneHeaders(api);
       appliedSessionIdRef.current = sessionId;
       savedPanelIdsRef.current = Object.keys(api.toJSON().panels).sort().join("\0");
     }

@@ -250,8 +250,9 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     // The drawer has no terminal: close it and split one from the pane menu.
     await page.getByTestId("workspace-tools-toggle").click();
     await expect(page.getByTestId("workspace-tools")).toHaveCount(0);
-    await page.getByTestId("pane-group-menu").click();
-    await page.getByTestId("pane-menu-split-down").click();
+    // One pane has no pane header; split with the leader chord (leader,_).
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
     const shell = page.locator(".terminal--persistent[data-pane-id]:visible").first();
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30000 });
     expect(await clippedControls(shell), "terminal controls clipped at a wide viewport").toEqual([]);
