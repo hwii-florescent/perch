@@ -642,16 +642,15 @@ pub async fn run(
         git: Arc::new(GitService::new(GitConfig::default())),
     };
 
-    // No AppState cycle: the recorder owns only the DB/Git services and this
-    // core's runtime handle. PTY reader threads can use the same barrier.
+    // No AppState cycle: the recorder owns only the DB/Git services. PTY
+    // reader threads can use the same barrier.
     let turn_db = state.db.clone();
     let turn_git = state.git.clone();
-    let turn_runtime = tokio::runtime::Handle::current();
     state
         .agent_runtime
         .set_turn_boundary_listener(Arc::new(move |key, before| {
             let capture = || {
-                turn_runtime.block_on(agent_history::capture(
+                agent_history::CAPTURE_RUNTIME.block_on(agent_history::capture(
                     &turn_db,
                     &turn_git,
                     &key.session_id,
@@ -686,10 +685,8 @@ pub async fn run(
         .detached
         .attach_sink(Arc::new(DetachedSink { app: state.clone() }));
     // Turn boundaries are recorded from a pty reader thread as well as from
-    // async handlers, so `agent_history` needs both this state and a runtime
-    // handle it can spawn on.
+    // async handlers, so `agent_history` needs this state.
     let _ = agent_activity_app.set(state.clone());
-    agent_history::attach_runtime(tokio::runtime::Handle::current());
     // perch used to archive instead of deleting; nothing archived is ever
     // shown again, so delete it (ending anything it still runs).
     let purge = state.db.local_session_ids(None).and_then(|sessions| {

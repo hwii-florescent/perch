@@ -24,8 +24,20 @@ use std::sync::LazyLock;
 /// unchanged.
 static HISTORY: LazyLock<TurnHistory> = LazyLock::new(TurnHistory::default);
 
-/// See [`attach_runtime`].
-static RUNTIME: std::sync::OnceLock<tokio::runtime::Handle> = std::sync::OnceLock::new();
+/// Every boundary capture runs here, never on the server's runtime. The
+/// synchronous barrier (`set_turn_boundary_listener`) blocks while holding
+/// `agent_operation_lock`, and server tasks take that std mutex on runtime
+/// workers. A capture that needed one of those workers (a git reader queued
+/// behind a worker blocked on the lock) froze the whole core, HTTP included.
+/// One worker: `HISTORY.capture` serializes captures anyway.
+pub(super) static CAPTURE_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name("perch-turn-capture")
+        .enable_all()
+        .build()
+        .expect("could not start the turn capture runtime")
+});
 
 #[derive(Default)]
 struct TurnHistory {
@@ -69,28 +81,12 @@ pub(super) fn observe_session(app: &AppState, session_id: &str) {
     }
     let app = app.clone();
     let session_id = session_id.to_string();
-    // `observe_session` is called from async handlers *and* from the agent
-    // terminal activity callback, which runs on a pty reader thread with no
-    // current runtime — `tokio::spawn` would panic there.
-    let Some(runtime) = tokio::runtime::Handle::try_current()
-        .ok()
-        .or_else(|| RUNTIME.get().cloned())
-    else {
-        return;
-    };
-    runtime.spawn(async move {
+    // Called from async handlers and from pty reader threads alike.
+    CAPTURE_RUNTIME.spawn(async move {
         if let Err(error) = capture(&app.db, &app.git, &session_id, running).await {
             tracing::warn!(session_id, %error, "could not record agent turn boundary");
         }
     });
-}
-
-/// Record a runtime to spawn boundary captures on when the caller has none.
-/// Called once per server boot; the first one wins, which is what a test
-/// process running several cores needs (any runtime can host the capture —
-/// the state it works on is passed in).
-pub(super) fn attach_runtime(handle: tokio::runtime::Handle) {
-    let _ = RUNTIME.set(handle);
 }
 
 /// Forget a session's transition state. Called when the session row goes
@@ -328,6 +324,38 @@ fn summarize_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The turn barrier blocks while holding `agent_operation_lock`, and
+    /// server workers block on that lock. A capture must finish without any
+    /// of them, or the core deadlocks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn a_capture_needs_no_server_worker() {
+        let root = std::env::temp_dir().join(format!("perch-turn-worker-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let init = std::process::Command::new("git")
+            .args(["-c", "core.hooksPath=/dev/null", "init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(init.success());
+        let db = HistoryDb::open(root.join("history.sqlite")).unwrap();
+        let session = Uuid::new_v4().to_string();
+        db.create_session(&session, repo.to_str().unwrap()).unwrap();
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let git = GitService::default();
+            let result = CAPTURE_RUNTIME.block_on(capture(&db, &git, &session, true));
+            let _ = done.send(result.map_err(|error| error.to_string()));
+        });
+        // Block the only server worker, as a task waiting on the lock does.
+        tokio::spawn(async move { finished.recv_timeout(std::time::Duration::from_secs(30)) })
+            .await
+            .unwrap()
+            .expect("the capture waited on a blocked server worker")
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn a_bounded_path_list_keeps_the_full_turn_count_after_reopen() {
