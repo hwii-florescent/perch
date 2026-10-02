@@ -164,9 +164,12 @@ there, not here.
   - Tab and session-row × delete the session, and so does its agent
     terminal exiting (the agent, then its login shell): its agent and shells
     are killed; the agent's own transcript stays on disk. "Archive chats"
-    archives instead (restorable from Settings). Removing a project archives
-    it and its open sessions (they leave perch; the folder and transcript
-    stay on disk); re-registering the folder restores the project.
+    archives instead (restorable from Settings): its shells end and its
+    agent hibernates once idle. Removing a project archives it and its open
+    sessions (they leave perch; the folder and transcript stay on disk);
+    re-registering the folder restores the project. Closing a terminal pane
+    ends its shell; only switching sessions leaves one running unseen. No
+    process perch starts may outlive what the UI shows.
   - A session starts only in a listed project's workspace or in Chats
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any

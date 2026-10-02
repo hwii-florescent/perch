@@ -108,6 +108,9 @@ export interface DockviewController {
    * "chat" or if there is no active panel. Closes terminal panels AND
    * session-chat panels alike — "chat" is the only permanent one. */
   closeActiveTerminalPanel(): void;
+  /** Close a panel (never "chat"). Closing a terminal pane ends its shell,
+   * like closing a tab in a terminal app; only switching sessions keeps it. */
+  closePanel(panelId: string): void;
   /** Add a new terminal panel as a TAB within the same group as
    * `referencePanelId`, instead of a new split. Backs the "+" action shown
    * in a terminal group's own header (see `DockviewShell.tsx`'s
@@ -199,7 +202,16 @@ function newPanelId(): string {
 }
 
 /** Build a controller bound to a live dockview `api` instance. */
-export function createDockviewController(api: DockviewApi): DockviewController {
+/** `endShell` ends the shell a closed terminal pane showed (by its shell pane id). */
+export function createDockviewController(api: DockviewApi, endShell?: (shellPaneId: string) => void): DockviewController {
+  function closePanel(panelId: string): void {
+    const panel = api.getPanel(panelId);
+    if (!panel || panel.id === PRIMARY_CHAT_PANEL_ID) return;
+    if (panel.view.contentComponent === TERMINAL_COMPONENT) {
+      endShell?.(typeof panel.params?.shellPaneId === "string" ? panel.params.shellPaneId : panel.id);
+    }
+    api.removePanel(panel);
+  }
   return {
     addTerminalPanel(direction) {
       const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
@@ -211,10 +223,9 @@ export function createDockviewController(api: DockviewApi): DockviewController {
       });
     },
     closeActiveTerminalPanel() {
-      const active = api.activePanel;
-      if (!active || active.id === PRIMARY_CHAT_PANEL_ID) return;
-      api.removePanel(active);
+      if (api.activePanel) closePanel(api.activePanel.id);
     },
+    closePanel,
     addTerminalTabInGroup(referencePanelId) {
       api.addPanel({
         id: newPanelId(),

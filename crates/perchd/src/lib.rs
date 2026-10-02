@@ -7,11 +7,33 @@ pub mod server;
 use std::path::Path;
 use std::process::Command;
 
+/// Lift the open-file soft limit to the hard one. Apps launched from the
+/// Dock get 256, and every live terminal costs four (PTY master, reader,
+/// writer, history log), so the default caps perch at a few dozen shells.
+/// Shells inherit it, as they would from a terminal app.
+pub fn raise_fd_limit() {
+    // SAFETY: plain syscalls on a local, fully initialised struct.
+    unsafe {
+        let mut limit: libc::rlimit = std::mem::zeroed();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 {
+            return;
+        }
+        // macOS refuses a soft limit above OPEN_MAX (10240) even when the
+        // hard limit is unlimited.
+        let want = limit.rlim_max.min(10240);
+        if limit.rlim_cur < want {
+            limit.rlim_cur = want;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+        }
+    }
+}
+
 /// Parse `serve`/`connect`/`version` arguments and run. Shared by the `perchd`
 /// binary and `perch-core __perchd`, so both expose the same interface.
 /// `exe_prefix` is the argv that re-runs this entry point (e.g. `["perch-core",
 /// "__perchd"]`), used when `connect` has to start a daemon.
 pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
+    raise_fd_limit();
     let mut dir = server::default_dir();
     let mut idle = Some(std::time::Duration::from_secs(60));
     let mut rest = args.iter();
@@ -97,4 +119,21 @@ fn bridge_stdio(dir: &Path, exe_prefix: Vec<String>) -> std::io::Result<()> {
     }
     drop(up);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn raises_a_dock_sized_fd_limit() {
+        let current = || unsafe {
+            let mut limit: libc::rlimit = std::mem::zeroed();
+            libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit);
+            limit
+        };
+        let mut limit = current();
+        limit.rlim_cur = 256;
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+        super::raise_fd_limit();
+        assert_eq!(current().rlim_cur, limit.rlim_max.min(10240));
+    }
 }

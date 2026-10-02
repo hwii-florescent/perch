@@ -1634,6 +1634,13 @@ pub(super) fn handle_session_archive(
         state.app.hub.forward(&host_id, raw_text);
         return;
     }
+    // An archived session's shells end now; its agent hibernates once idle
+    // and resumes on restore.
+    if archived {
+        if let Err(error) = state.app.workspace_terminals.close_session(&session_id) {
+            tracing::warn!(%error, "could not close an archived session's shells");
+        }
+    }
     match state.app.db.set_archived(&session_id, archived) {
         Ok(()) => {
             // Broadcast a session.updated so all tabs update immediately.

@@ -122,6 +122,39 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // P2b — closing a terminal pane (its menu, or its tab's ×) ends its shell:
+  // a later pane's shell picker never lists it.
+  // -------------------------------------------------------------------------
+  test("P2b. closing a terminal pane ends its shell", async ({ page }) => {
+    await freshPage(page);
+    await startChat(page);
+    const picker = page.getByRole("combobox", { name: "Shell pane" });
+    async function splitWithOneShell(): Promise<void> {
+      await leaderChord(page, "_");
+      await expect(shellPanes(page)).toHaveCount(1, { timeout: 10000 });
+      await expect(picker.locator("option")).toHaveCount(1, { timeout: 10000 });
+    }
+    async function reload(): Promise<void> {
+      await expect(shellPanes(page)).toHaveCount(0, { timeout: 10000 });
+      await page.waitForTimeout(1500); // the debounced layout save
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.getByTestId("persistent-agent-terminal")).toBeVisible({ timeout: 15000 });
+    }
+
+    await splitWithOneShell();
+    await nonChatTab(page).click({ button: "right" });
+    await page.getByTestId("pane-menu-close").click();
+    await reload();
+
+    await splitWithOneShell();
+    await nonChatTab(page).hover();
+    await nonChatTab(page).locator(".dv-default-tab-action").click();
+    await reload();
+
+    await splitWithOneShell();
+  });
+
+  // -------------------------------------------------------------------------
   // P3 — zoom then un-zoom via the context menu round-trips through Phase 3's
   // layout persistence: the (non-maximized) split survives a switch away and
   // back to the session.

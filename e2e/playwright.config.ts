@@ -64,8 +64,8 @@ export default defineConfig({
       //
       // Each run starts clean: the db and the test daemon (whose PTYs outlive
       // the core by design) are dropped first, or every run inherits the
-      // sessions and live shells of all earlier ones until the 64-shell cap
-      // refuses new ones. Runs only when Playwright boots the server itself.
+      // sessions and live shells of all earlier ones until the daemon runs out
+      // of fds. Runs only when Playwright boots the server itself.
       command: "rm -f /tmp/perch-e2e-hub.sqlite*; pkill -f '__perchd serve --dir /tmp/perch-e2e-perchd$'; cargo run -p perch-core -- --port 7799 --db-path /tmp/perch-e2e-hub.sqlite --hosts-path /tmp/perch-e2e-hub-hosts.json",
       cwd: path.resolve(__dirname, ".."),
       url: "http://127.0.0.1:7799/",

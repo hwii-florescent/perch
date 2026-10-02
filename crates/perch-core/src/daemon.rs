@@ -16,6 +16,7 @@ static CLIENT: Mutex<Option<Client>> = Mutex::new(None);
 /// [`connect`]), run it and exit. Call first thing in `main`, before any async
 /// runtime or window exists.
 pub fn run_if_requested() {
+    perchd::raise_fd_limit(); // for the core and the daemon alike
     let mut args = std::env::args();
     let _exe = args.next();
     if args.next().as_deref() != Some("__perchd") {

@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-pub const MAX_WORKSPACE_TERMINALS: usize = 64;
 const MAX_VIEWERS: usize = 32;
 
 const SCHEMA: &str = "
@@ -102,10 +101,9 @@ impl WorkspaceTerminals {
     pub fn list(&self, session_id: &str) -> anyhow::Result<Vec<WorkspaceTerminal>> {
         self.db.with_connection(|conn| {
             let mut statement = conn.prepare(&format!(
-                "{SELECT} WHERE session_id = ?1 ORDER BY rowid LIMIT ?2"
+                "{SELECT} WHERE session_id = ?1 ORDER BY rowid"
             ))?;
-            let rows =
-                statement.query_map(params![session_id, MAX_WORKSPACE_TERMINALS], read_row)?;
+            let rows = statement.query_map(params![session_id], read_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
@@ -139,8 +137,6 @@ impl WorkspaceTerminals {
                 tx.commit()?;
                 return Ok((row, false));
             }
-            let count: usize = tx.query_row("SELECT COUNT(*) FROM workspace_terminals", [], |row| row.get(0))?;
-            if count >= MAX_WORKSPACE_TERMINALS { bail!("close an existing terminal before opening another"); }
             let row = WorkspaceTerminal {
                 id: uuid::Uuid::new_v4().to_string(), session_id: session_id.to_string(), workspace_id,
                 pane_id: pane_id.to_string(), cwd: session.cwd, cols, rows,
@@ -359,13 +355,25 @@ impl WorkspaceTerminals {
         self.close_locked(session_id, terminal_id)
     }
 
+    /// Archiving a session closes its shells: nothing it leaves running is
+    /// out of sight.
+    pub fn close_session(&self, session_id: &str) -> anyhow::Result<()> {
+        let _operation = self.operations.lock().unwrap();
+        self.close_all_locked(session_id)
+    }
+
     /// Deleting a session also closes its shells under the same spawn lock.
     pub fn delete_session(&self, session_id: &str) -> anyhow::Result<()> {
         let _operation = self.operations.lock().unwrap();
+        self.close_all_locked(session_id)?;
+        self.db.delete_session(session_id)
+    }
+
+    fn close_all_locked(&self, session_id: &str) -> anyhow::Result<()> {
         for terminal in self.list(session_id)? {
             self.close_locked(session_id, &terminal.id)?;
         }
-        self.db.delete_session(session_id)
+        Ok(())
     }
 
     fn close_locked(&self, session_id: &str, terminal_id: &str) -> anyhow::Result<()> {
@@ -531,5 +539,19 @@ mod tests {
         }
         manager.delete_session("lost-shell").unwrap();
         assert!(db.get_session("lost-shell").unwrap().is_none());
+    }
+
+    #[test]
+    fn shells_are_uncapped_and_archiving_closes_every_one() {
+        let db = Arc::new(HistoryDb::open(":memory:").unwrap());
+        db.create_session("many-shells", "/tmp").unwrap();
+        let manager = WorkspaceTerminals::new(db.clone()).unwrap();
+        for pane in 0..70 {
+            manager.reserve("many-shells", &format!("pane-{pane}"), 80, 24).unwrap();
+        }
+        assert_eq!(manager.list("many-shells").unwrap().len(), 70);
+        manager.close_session("many-shells").unwrap();
+        assert!(manager.list("many-shells").unwrap().is_empty());
+        assert!(db.get_session("many-shells").unwrap().is_some());
     }
 }

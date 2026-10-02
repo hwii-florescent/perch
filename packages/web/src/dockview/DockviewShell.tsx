@@ -15,6 +15,7 @@ import "./paneSplit.css";
 import { ChatView } from "../views/Chat";
 import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
+import { closeWorkspaceTerminal, listWorkspaceTerminals } from "../workspaceTerminals";
 import {
   createDockviewController,
   getDockviewController,
@@ -92,7 +93,7 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
         openPaneContextMenu?.(props.api.id, props.api.title ?? "", e.clientX, e.clientY);
       }}
     >
-      <DockviewDefaultTab {...props} />
+      <DockviewDefaultTab {...props} closeActionOverride={() => getDockviewController()?.closePanel(props.api.id)} />
       {showAgentBadge && (
         // NOT "pane-tab-agent-badge": e2e's `nonChatTab()`/`[data-testid^="pane-tab-"]`
         // locators (pane-splitting.spec.ts, wave2.spec.ts) match on that
@@ -284,6 +285,19 @@ function applyDefaultLayout(api: DockviewApi) {
   api.addPanel({ id: "chat", component: "chat", title: "Chat" });
 }
 
+/** A closed terminal pane's shell ends with it; only switching sessions keeps
+ * a pane's shell running out of view. */
+function endPaneShell(paneId: string): void {
+  const sessionId = usePerchStore.getState().sessionId;
+  if (!sessionId) return;
+  listWorkspaceTerminals(sessionId)
+    .then((rows) => {
+      const row = rows.find((candidate) => candidate.paneId === paneId);
+      return row && closeWorkspaceTerminal(sessionId, row.id);
+    })
+    .catch((error: Error) => console.warn("[perch] could not end the closed pane's shell:", error.message));
+}
+
 export function DockviewShell() {
   const apiRef = useRef<DockviewApi | null>(null);
   const [readyApi, setReadyApi] = useState<DockviewApi | null>(null);
@@ -374,7 +388,7 @@ export function DockviewShell() {
 
       // Phase 4: expose this dockview instance to keybinds.ts (leader,x/v/-/z)
       // via the module-level controller — see dockviewController.ts for why.
-      registerDockviewController(createDockviewController(event.api));
+      registerDockviewController(createDockviewController(event.api, endPaneShell));
 
       event.api.onDidLayoutChange(() => {
         syncPaneHeaders(event.api);
