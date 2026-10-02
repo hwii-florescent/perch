@@ -3,15 +3,15 @@
  * `@xterm/addon-search`, shared between `views/Terminal.tsx` and
  * `views/AgentCliTerminal.tsx`.
  *
- * Ctrl/Cmd+F opens a find-bar overlay while a terminal pane is focused.
+ * Cmd+F opens a find-bar overlay while a terminal pane is focused.
  * Implemented via `term.attachCustomKeyEventHandler` rather than a DOM-level
  * keydown listener: xterm registers that handler ahead of its own key
  * evaluation and calls it once per keydown on *that terminal's* hidden
  * textarea, so the shortcut is naturally scoped to "this pane is focused"
  * (only the focused terminal's textarea receives the event at all), and
  * returning `false` both lets us `preventDefault()` the browser's native
- * find dialog and stops xterm from also sending Ctrl+F through as literal
- * PTY input.
+ * find dialog. Ctrl+F is left to the PTY (readline's forward-char), as in
+ * Ghostty and iTerm2.
  */
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
@@ -46,14 +46,14 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
     };
   }, [term]);
 
-  // Intercept Ctrl/Cmd+F (open) and Escape (close, only while open) before
+  // Intercept Cmd+F (open) and Escape (close, only while open) before
   // xterm's own key handling.
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
-      if (!terminalKeyHandler(term, e)) return false;
+      if (!terminalKeyHandler(e)) return false;
       if (e.type !== "keydown") return true;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+      if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setOpen(true);
         return false;

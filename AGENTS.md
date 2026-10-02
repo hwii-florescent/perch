@@ -168,7 +168,9 @@ there, not here.
     included); `+ Add` is the only way a folder becomes a project. A session
     stays in the project it started in whatever its terminal cd's into.
   - Terminals behave like Ghostty/iTerm2: perch must never swallow or
-    re-encode input. Turn-review capture on Enter is best-effort and never
+    re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
+    so Ctrl/Shift+Enter reach CLIs that opt in; the only key perch keeps is
+    the Ctrl+Space leader, and find is Cmd+F (Ctrl+F goes to the PTY). Turn-review capture on Enter is best-effort and never
     blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
@@ -250,6 +252,8 @@ there, not here.
     workspace-git GB1, sessions S2; UI mode is NativeCliChat since 2e9c4b7);
     workspace-terminals "tmux shell recovers" (expects `tmux`, gets `daemon`);
     agent-terminal-ownership, workspace-recovery, workspace-review:226;
+    wave1 F1b/F2 (expect the tab-bar `+` to create without its picker) and
+    F6b (`model-chip`);
     native-providers (older pane expectations); agent-hibernation (greps a
     tmux log line the core stopped printing in 56e2c48); keybindings K1 (it
     drives the Hosted composer through the picker); every opencode spec

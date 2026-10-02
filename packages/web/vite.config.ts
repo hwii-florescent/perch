@@ -12,6 +12,11 @@ export default defineConfig({
   base: "./",
   build: {
     outDir: "dist",
+    // Vite's default target (es2020 + firefox78) makes esbuild lower `||=`,
+    // and that lowering miscompiles xterm 6.1's DECRQM handler into a
+    // ReferenceError that wedges the parser. Every perch client (WKWebView,
+    // current Safari/Chrome) runs ES2022 natively.
+    target: "es2022",
   },
   plugins: [
     react(),

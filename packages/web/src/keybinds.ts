@@ -96,17 +96,14 @@ function inTerminal(target: EventTarget | null): boolean {
 let chordPending = false;
 
 /** xterm's custom key handler (attached by terminalSearch.ts for every
- * terminal). Returns false for keys perch consumes. Ctrl+Enter and
- * Shift+Enter use Orca's encodings: plain xterm sends `\r` for both, so
- * the CLIs could not tell them from Enter. */
-export function terminalKeyHandler(term: { input(data: string): void }, e: KeyboardEvent): boolean {
+ * terminal). Returns false for keys perch consumes: only the leader chord.
+ * Everything else, Ctrl/Shift+Enter included, is xterm's to encode; the
+ * kitty keyboard protocol (xtermSetup.ts) lets CLIs tell them apart the
+ * same way they do in Ghostty. */
+export function terminalKeyHandler(e: KeyboardEvent): boolean {
   if (e.type !== "keydown") return true;
   if (chordPending) return false;
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ")) return false;
-  if (e.key !== "Enter" || e.metaKey || e.altKey || e.ctrlKey === e.shiftKey) return true;
-  e.preventDefault();
-  term.input(e.ctrlKey ? "\x1b[13;5u" : "\x1b\r");
-  return false;
+  return !(e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " "));
 }
 
 // ---------------------------------------------------------------------------

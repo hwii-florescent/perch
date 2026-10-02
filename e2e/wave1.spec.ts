@@ -6,7 +6,7 @@
  *   F2 — session rename via double-click on a TabBar tab
  *   F3/F4 — Notifications settings section: soundEnabled toggle and
  *        toastDelivery selector (off/app/system), persisted across reload
- *   F5 — in-terminal search (Ctrl/Cmd+F find-bar overlay, Escape closes)
+ *   F5 — in-terminal search (Cmd+F find-bar overlay, Escape closes)
  *   F6b — deleting a session via the row's trash icon is immediate, no
  *        confirmation
  *
@@ -310,7 +310,7 @@ test.describe("Wave 1 functionality gaps", () => {
   // -------------------------------------------------------------------------
   // F5 — in-terminal search
   // -------------------------------------------------------------------------
-  test("F5. Ctrl/Cmd+F opens the in-terminal find bar; Escape closes it", async ({ page }) => {
+  test("F5. Cmd+F opens the in-terminal find bar; Escape closes it", async ({ page }) => {
     await freshPage(page);
 
     // A terminal split from the pane menu (the drawer has no terminal).
@@ -319,10 +319,10 @@ test.describe("Wave 1 functionality gaps", () => {
     await page.keyboard.press("_");
     await expect(page.locator(".terminal__surface")).toBeVisible({ timeout: 10000 });
 
-    // Focus the terminal pane, then fire the find shortcut. Our handler
-    // accepts either Ctrl or Cmd, so Control+F works cross-platform here.
+    // Focus the terminal pane, then fire the find shortcut. Ctrl+F belongs
+    // to the PTY, as in Ghostty.
     await page.locator(".terminal__surface").click();
-    await page.keyboard.press("Control+F");
+    await page.keyboard.press("Meta+F");
 
     const searchBar = page.locator('[data-testid="term-search"]');
     await expect(searchBar).toBeVisible({ timeout: 5000 });

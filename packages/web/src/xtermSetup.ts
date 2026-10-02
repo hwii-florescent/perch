@@ -163,6 +163,10 @@ export function createPerchTerminal(
     macOptionClickForcesSelection: true,
     drawBoldTextInBrightColors: true,
     allowProposedApi: true, // required by the Unicode 11 addon
+    // Answer the CLIs' `CSI ? u` query like Ghostty does, so Ctrl+Enter,
+    // Shift+Enter and friends arrive distinct from Enter once a CLI opts in.
+    // Shells that never opt in still get plain `\r`.
+    vtExtensions: { kittyKeyboard: true },
   };
   // Cursor shape/blink: same discipline as the palette below. Only set when
   // the profile actually says something; absent means "leave xterm's own
