@@ -41,7 +41,6 @@ const {
   projectsForHost,
   effectiveActiveProject,
   activeWorkspaceSessions,
-  archivedSessions,
   sessionIdsForProject,
   shouldReuseCurrentSession,
   resolveSessionAgent,
@@ -138,22 +137,6 @@ describe("projectsForHost", () => {
     expect(groups.length).toBe(1);
   });
 
-  it("excludes archived sessions entirely", () => {
-    const sessions = [
-      session({ id: "a", cwd: "/proj1", archived: true }),
-      session({ id: "b", cwd: "/proj1", archived: false }),
-    ];
-    const groups = projectsForHost(state({ sessions }), "local");
-    expect(groups.length).toBe(1);
-    expect(groups[0]!.sessions.map((s) => s.id)).toEqual(["b"]);
-  });
-
-  it("drops a project entirely once every one of its sessions is archived", () => {
-    const sessions = [session({ id: "a", cwd: "/proj1", archived: true })];
-    const groups = projectsForHost(state({ sessions }), "local");
-    expect(groups).toEqual([]);
-  });
-
   it("groups sessions with no cwd under '(unknown)'", () => {
     const sessions = [session({ id: "a", cwd: undefined as unknown as string })];
     const groups = projectsForHost(state({ sessions }), "local");
@@ -191,7 +174,7 @@ describe("effectiveActiveProject", () => {
   it("falls back to the most recent project when the pin is empty and the active session IS persisted", () => {
     // Same "pin points at an empty project" shape, but this time sessionId
     // corresponds to a real row in `sessions` — so the project genuinely
-    // disappeared (deleted/archived) rather than being pending creation.
+    // disappeared (deleted) rather than being pending creation.
     const sessions = [
       session({ id: "real-session", cwd: "/other-proj", createdAt: 5 }),
     ];
@@ -233,15 +216,6 @@ describe("activeWorkspaceSessions", () => {
     expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["b", "a"]);
   });
 
-  it("excludes archived sessions from the project's list", () => {
-    const sessions = [
-      session({ id: "a", cwd: "/proj1", archived: true }),
-      session({ id: "b", cwd: "/proj1" }),
-    ];
-    const s = state({ sessions, activeProject: { hostId: "local", cwd: "/proj1" } });
-    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["b"]);
-  });
-
   it("falls back to just the active session when there's no effective project", () => {
     const sessions = [session({ id: "solo", cwd: "/x" })];
     const s = state({ sessions, sessionId: "solo" });
@@ -253,31 +227,8 @@ describe("activeWorkspaceSessions", () => {
   });
 });
 
-describe("archivedSessions", () => {
-  it("returns only archived sessions, newest first", () => {
-    const sessions = [
-      session({ id: "a", archived: true, createdAt: 100 }),
-      session({ id: "b", archived: false, createdAt: 300 }),
-      session({ id: "c", archived: true, createdAt: 300 }),
-    ];
-    expect(archivedSessions(sessions).map((s) => s.id)).toEqual(["c", "a"]);
-  });
-
-  it("spans all hosts, unlike projectsForHost", () => {
-    const sessions = [
-      session({ id: "a", archived: true, hostId: "local" }),
-      session({ id: "b", archived: true, hostId: "remote1" }),
-    ];
-    expect(archivedSessions(sessions).map((s) => s.id).sort()).toEqual(["a", "b"]);
-  });
-
-  it("returns empty when nothing is archived", () => {
-    expect(archivedSessions([session({ id: "a" })])).toEqual([]);
-  });
-});
-
 describe("sessionIdsForProject", () => {
-  it("returns ids of every non-archived session matching host + cwd", () => {
+  it("returns ids of every session matching host + cwd", () => {
     const sessions = [
       session({ id: "a", cwd: "/proj1" }),
       session({ id: "b", cwd: "/proj1" }),
@@ -297,14 +248,6 @@ describe("sessionIdsForProject", () => {
   it("treats an absent hostId as 'local'", () => {
     const sessions = [session({ id: "a", cwd: "/proj1", hostId: undefined })];
     expect(sessionIdsForProject(sessions, "local", "/proj1")).toEqual(["a"]);
-  });
-
-  it("excludes already-archived sessions (bulk action should not double-archive)", () => {
-    const sessions = [
-      session({ id: "a", cwd: "/proj1", archived: true }),
-      session({ id: "b", cwd: "/proj1", archived: false }),
-    ];
-    expect(sessionIdsForProject(sessions, "local", "/proj1")).toEqual(["b"]);
   });
 
   it("matches the '(unknown)' fallback projectsForHost uses for a missing cwd", () => {
@@ -435,39 +378,6 @@ describe("readLastAgentChoiceStored / setLastAgentChoice (persisted create-flow 
     // Restore so this doesn't leak into other tests in this file.
     usePerchStore.getState().setLastAgentChoice("claude");
     expect(usePerchStore.getState().lastAgentChoice).toBe("claude");
-  });
-});
-
-describe("bulk-archive fallback (archiving every session in the active project)", () => {
-  it("effectiveActiveProject falls back to another project once the active one is archived away", () => {
-    // Simulates the sidebar's "archive all" bulk action: every session in
-    // the pinned project gets archived (one `session.updated` per id, same
-    // as the single-session archive path), leaving the pin dangling —
-    // exactly the same shape `projectsForHost` already handles for a single
-    // archived/deleted session (see the "falls back" cases above), just
-    // reached via the bulk path instead of one row's archive button.
-    const sessions = [
-      session({ id: "a", cwd: "/proj1", archived: true, createdAt: 200 }),
-      session({ id: "b", cwd: "/proj1", archived: true, createdAt: 100 }),
-      session({ id: "c", cwd: "/other-proj", createdAt: 5 }),
-    ];
-    const s = state({
-      sessions,
-      sessionId: "a",
-      activeProject: { hostId: "local", cwd: "/proj1" },
-    });
-    expect(effectiveActiveProject(s)).toEqual({ hostId: "local", cwd: "/other-proj" });
-    expect(activeWorkspaceSessions(s).map((x) => x.id)).toEqual(["c"]);
-  });
-
-  it("returns null (nav goes to the empty state) when the archived project was the host's only one", () => {
-    const sessions = [session({ id: "a", cwd: "/proj1", archived: true })];
-    const s = state({
-      sessions,
-      sessionId: "a",
-      activeProject: { hostId: "local", cwd: "/proj1" },
-    });
-    expect(effectiveActiveProject(s)).toBeNull();
   });
 });
 
@@ -652,7 +562,6 @@ describe("durable workspace navigation", () => {
     name: id,
     path,
     favorite: false,
-    archived: false,
     createdAt: 1,
     updatedAt: 1,
   });
@@ -809,7 +718,7 @@ describe("agent catalog revisions", () => {
   });
 });
 
-describe("archiveSession (tab close)", () => {
+describe("deleteSession (tab close)", () => {
   it("closing the active tab lands on a sibling in the same project, not the newest session elsewhere", () => {
     usePerchStore.setState({
       sessionId: "A",
@@ -825,9 +734,9 @@ describe("archiveSession (tab close)", () => {
       ],
     });
     FakeWebSocket.sent.length = 0;
-    usePerchStore.getState().archiveSession("A", true);
+    usePerchStore.getState().deleteSession("A");
     const sent = FakeWebSocket.sent.map((frame) => JSON.parse(frame) as { type: string; sessionId?: string });
-    expect(sent[0]).toMatchObject({ type: "session.archive", sessionId: "A" });
+    expect(sent[0]).toMatchObject({ type: "session.delete", sessionId: "A" });
     expect(sent.at(-1)).toMatchObject({ sessionId: "B" });
   });
 });

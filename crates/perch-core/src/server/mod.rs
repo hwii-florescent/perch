@@ -690,9 +690,20 @@ pub async fn run(
     // handle it can spawn on.
     let _ = agent_activity_app.set(state.clone());
     agent_history::attach_runtime(tokio::runtime::Handle::current());
-    // Sessions left open in a project removed before removal took them along.
-    if let Err(error) = session::archive_sessions_of_removed_projects(&state) {
-        tracing::warn!("could not remove sessions of removed projects: {error}");
+    // perch used to archive instead of deleting; nothing archived is ever
+    // shown again, so delete it (ending anything it still runs).
+    let purge = state.db.local_session_ids(None).and_then(|sessions| {
+        sessions
+            .iter()
+            .try_for_each(|id| session::delete_session(&state, id))?;
+        state
+            .db
+            .archived_project_ids()?
+            .iter()
+            .try_for_each(|id| state.db.delete_project(id))
+    });
+    if let Err(error) = purge {
+        tracing::warn!("could not delete archived sessions and projects: {error}");
     }
     // A claimed prompt or review packet may have crossed the dispatch barrier
     // immediately before a prior process exited. Preserve it as explicitly
@@ -2231,7 +2242,7 @@ fn foundation_capabilities() -> Vec<String> {
         "project.list",
         "project.create",
         "project.rename",
-        "project.archive",
+        "project.remove",
         "project.focus",
         "workspace.snapshot",
         "workspace.focus",
@@ -2894,7 +2905,6 @@ mod session_viewer_filter_tests {
                 host_id: "local".to_string(),
                 cli_started: false,
                 cli_provider_id: None,
-                archived: false,
                 unseen: false,
                 blocked: false,
                 stale: false,

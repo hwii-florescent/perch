@@ -24,7 +24,7 @@ import { beginSessionDrag } from "./sessionDrag";
 
 export interface SessionSplitPopoverProps {
   /** Candidate sessions to split in — caller has already excluded the
-   * session the triggering group is showing and (typically) archived ones. */
+   * session the triggering group is showing. */
   sessions: SessionSummary[];
   /** Session ids that already have an open chat panel somewhere in this
    * shell (`DockviewController.openSessionChatIds()`) — rendered with a

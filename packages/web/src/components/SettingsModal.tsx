@@ -7,13 +7,10 @@
  *    (with optional directUrl and remoteCmd inputs).
  *  - Custom models: per agent, list + add.
  *  - Default working directory: text input + Save.
- *  - Archived sessions: opens a subpage (the modal body swaps out) listing
- *    every archived session across hosts, with Restore / Delete per row.
- *    Archived sessions render nowhere else in the UI.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { usePerchStore, archivedSessions } from "../store";
+import { usePerchStore } from "../store";
 import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
@@ -632,149 +629,12 @@ function TerminalSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Archived sessions — entry row + subpage
-// ---------------------------------------------------------------------------
-
-/** Last path segment of a cwd, for the project column. */
-function projectName(cwd: string): string {
-  const parts = cwd.replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || cwd;
-}
-
-/**
- * The entry point for the archived-sessions subpage. Archived sessions are
- * hidden from every navigation surface (sidebar, tab bar, navigator), so this
- * panel is the only place they can be seen — and the only place they can be
- * restored from or permanently deleted.
- */
-function ArchivedSessionsSection({ onOpen }: { onOpen: () => void }) {
-  const sessions = usePerchStore((s) => s.sessions);
-  const count = sessions.filter((s) => s.archived).length;
-
-  return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Archived Sessions</h3>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">
-          {count === 0 ? "None archived" : `${count} archived session${count === 1 ? "" : "s"}`}
-        </span>
-        <button
-          type="button"
-          className="settings-modal__btn settings-modal__btn--primary"
-          data-testid="settings-archived-open"
-          onClick={onOpen}
-        >
-          Manage…
-        </button>
-      </div>
-      <p className="settings-modal__muted">
-        Archiving a session hides it from the sidebar and tab bar. Restore it here to bring
-        it back, or delete it permanently.
-      </p>
-    </section>
-  );
-}
-
-/** The archived-sessions subpage itself: archived sessions grouped by host
- * (local first, then federated hosts), with per-row Restore / Delete. */
-function ArchivedSessionsPanel() {
-  const sessions = usePerchStore((s) => s.sessions);
-  const hosts = usePerchStore((s) => s.hosts);
-  const archiveSession = usePerchStore((s) => s.archiveSession);
-  const deleteSession = usePerchStore((s) => s.deleteSession);
-
-  const rows = archivedSessions(sessions);
-
-  const hostLabel = (hostId: string): string =>
-    hostId === "local" ? "Local" : (hosts.find((h) => h.id === hostId)?.name ?? hostId);
-
-  // Group by host, matching the sidebar's mental model. "local" always sorts
-  // first; the rest keep first-appearance order (rows arrive newest-first).
-  const groups = new Map<string, typeof rows>();
-  for (const s of rows) {
-    const id = s.hostId ?? "local";
-    const group = groups.get(id);
-    if (group) group.push(s);
-    else groups.set(id, [s]);
-  }
-  const groupIds = [...groups.keys()].sort((a, b) =>
-    a === "local" ? -1 : b === "local" ? 1 : 0,
-  );
-
-  return (
-    <section className="settings-modal__section" data-testid="settings-archived-panel">
-      {rows.length === 0 ? (
-        <p className="settings-modal__empty" data-testid="settings-archived-empty">
-          No archived sessions.
-        </p>
-      ) : (
-        groupIds.map((hostId) => (
-          <div
-            key={hostId}
-            className="settings-modal__archived-group"
-            data-testid={`archived-host-group-${hostId}`}
-          >
-            <h4 className="settings-modal__archived-group-title">{hostLabel(hostId)}</h4>
-            <ul className="settings-modal__archived-list">
-              {groups.get(hostId)!.map((s) => (
-                <li
-                  key={s.id}
-                  className="settings-modal__archived-row"
-                  data-testid={`archived-row-${s.id}`}
-                  data-session-id={s.id}
-                >
-                  <div className="settings-modal__archived-body">
-                    <span className="settings-modal__archived-title">
-                      {s.title || "(untitled session)"}
-                    </span>
-                    <span className="settings-modal__archived-meta">
-                      <span className="settings-modal__archived-project" title={s.cwd}>
-                        {projectName(s.cwd)}
-                      </span>
-                      <span className="settings-modal__archived-date">
-                        {new Date(s.createdAt).toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </span>
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-modal__btn settings-modal__btn--primary"
-                    data-testid={`archived-restore-${s.id}`}
-                    onClick={() => archiveSession(s.id, false)}
-                  >
-                    Restore
-                  </button>
-                  {/* No confirmation, matching the sidebar's one-click delete. */}
-                  <button
-                    type="button"
-                    className="settings-modal__btn settings-modal__btn--danger"
-                    data-testid={`archived-delete-${s.id}`}
-                    onClick={() => deleteSession(s.id)}
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // SettingsModal
 // ---------------------------------------------------------------------------
 
 /** Which view the modal body is showing. The modal is a flat scrolling list of
- * sections by default; "archived" swaps the body for the archived-sessions
- * subpage (reached from the Archived Sessions section's "Manage…" button). */
-type SettingsView = "main" | "archived" | "agents";
+ * sections by default; "agents" swaps the body for the agent catalog. */
+type SettingsView = "main" | "agents";
 
 
 // ---------------------------------------------------------------------------
@@ -918,7 +778,7 @@ export function SettingsModal() {
         data-testid="settings-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={view === "agents" ? "Agents" : view === "archived" ? "Archived Sessions" : "Settings"}
+        aria-label={view === "agents" ? "Agents" : "Settings"}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="settings-modal__header">
@@ -926,7 +786,7 @@ export function SettingsModal() {
             <button
               type="button"
               className="settings-modal__back"
-              data-testid="settings-archived-back"
+              data-testid="settings-back"
               aria-label="Back to settings"
               onClick={() => setView("main")}
             >
@@ -934,7 +794,7 @@ export function SettingsModal() {
             </button>
           )}
           <h2 className="settings-modal__title">
-            {view === "archived" ? "Archived Sessions" : view === "agents" ? "Agents" : "Settings"}
+            {view === "agents" ? "Agents" : "Settings"}
           </h2>
           <button
             type="button"
@@ -947,9 +807,7 @@ export function SettingsModal() {
         </div>
 
         <div className="settings-modal__body">
-          {view === "agents" ? <AgentCatalog /> : view === "archived" ? (
-            <ArchivedSessionsPanel />
-          ) : (
+          {view === "agents" ? <AgentCatalog /> : (
             <>
               <ThemeSection />
               <ChatModeSection />
@@ -961,7 +819,6 @@ export function SettingsModal() {
               <NotificationsSection />
               <InterfaceSection />
               <TerminalSection />
-              <ArchivedSessionsSection onOpen={() => setView("archived")} />
               <DevicesSection />
               <SshHostsSection />
               <CustomModelsSection />

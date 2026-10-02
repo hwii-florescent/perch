@@ -27,7 +27,6 @@ export { readLastAgentChoiceStored } from "./persistence";
 import { activeWorkspaceSessions, omitKey, resolveSessionAgent, shouldReuseCurrentSession } from "./selectors";
 export {
   activeWorkspaceSessions,
-  archivedSessions,
   effectiveActiveProject,
   effectiveWorkspace,
   omitKey,
@@ -356,7 +355,9 @@ export interface PerchState {
   focusWorkspaceProject: (projectId: string) => void;
   focusWorkspace: (workspaceId: string) => void;
   renameWorkspaceProject: (projectId: string, name: string) => void;
-  archiveWorkspaceProject: (projectId: string, archived: boolean) => void;
+  /** Delete a project and its sessions (their agents and shells end); the
+   * folder stays on disk. */
+  removeWorkspaceProject: (projectId: string) => void;
   renameWorkspace: (workspaceId: string, name: string) => void;
   pinWorkspace: (workspaceId: string, pinned: boolean) => void;
   setWorkspaceHidden: (workspaceId: string, hidden: boolean) => void;
@@ -489,14 +490,8 @@ export interface PerchState {
    * `agent`/`model` fields so the pane header and the next `chat.send`
    * reflect it immediately). */
   createSessionOnHost: (hostId: string, cwd?: string, agentChoice?: string) => void;
-  /** Archive or unarchive a session. Archiving hides it everywhere in the
-   * nav (sidebar, tab bar, navigator) immediately; the only place archived
-   * sessions are listed is Settings → Archived sessions, which is also where
-   * they are restored (`archived: false`) or permanently deleted from. */
-  archiveSession: (sessionId: string, archived: boolean) => void;
   /** Permanently delete a session: what a tab's ×, the session row's × and
-   * exiting its terminal do. Irreversible — unlike archiveSession there is no
-   * undo. The server stops its agent and shells and drops its rows, then
+   * exiting its terminal do. Irreversible. The server stops its agent and shells and drops its rows, then
    * broadcasts `session.deleted`, which drives the local cleanup. Leaving the
    * active session lands on a neighbouring tab of the same workspace, or the
    * home screen. */
@@ -834,7 +829,7 @@ const WORKSPACE_CAPABILITIES = {
   projectCreate: "project.create",
   projectFocus: "project.focus",
   projectRename: "project.rename",
-  projectArchive: "project.archive",
+  projectRemove: "project.remove",
   workspaceFocus: "workspace.focus",
   workspaceRename: "workspace.rename",
   workspaceRestore: "workspace.restore",
@@ -1285,7 +1280,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     // switcher, toast) re-scopes the nav onto that session's host + project.
     const newProject = s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
     const stableProjectId = s?.projectId ?? get().workspaceProjects.find(
-      (project) => project.hostId === newHostId && project.path === s?.cwd && !project.archived,
+      (project) => project.hostId === newHostId && project.path === s?.cwd,
     )?.id ?? null;
     const stableWorkspaceId = s?.workspaceId ?? (stableProjectId
       ? get().workspaces.find((workspace) => workspace.projectId === stableProjectId && workspace.state !== "archived")?.id ?? null
@@ -1316,11 +1311,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       activeProjectId: stableProjectId,
       activeWorkspaceId: stableWorkspaceId,
     }));
-    // A session can outlive its removed (archived) project; there is nothing
-    // to focus then, and asking would only surface "workspace is archived".
+    // A removed worktree's workspace is archived; there is nothing to focus
+    // then, and asking would only surface "workspace is archived".
     const focusWorkspace = get().workspaces.find((workspace) => workspace.id === stableWorkspaceId);
-    const focusable = focusWorkspace && focusWorkspace.state !== "archived"
-      && !get().workspaceProjects.find((project) => project.id === focusWorkspace.projectId)?.archived;
+    const focusable = focusWorkspace && focusWorkspace.state !== "archived";
     if (focusable && hasWorkspaceCapability(get(), newHostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
       const requestId = newId();
       sendWorkspaceMessage(
@@ -1352,7 +1346,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   setActiveProject: (hostId, cwd) => {
     const stableProject = get().workspaceProjects.find(
-      (project) => project.hostId === hostId && project.path === cwd && !project.archived,
+      (project) => project.hostId === hostId && project.path === cwd,
     );
     if (stableProject && hasWorkspaceCapability(get(), hostId, WORKSPACE_CAPABILITIES.projectFocus)) {
       get().focusWorkspaceProject(stableProject.id);
@@ -1430,7 +1424,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   focusWorkspaceProject: (projectId) => {
     const state = get();
     const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
-    if (!project || project.archived) return;
+    if (!project) return;
     if (!state.connected) return;
     const previousFocus = {
       projectId: state.activeProjectId,
@@ -1464,7 +1458,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const state = get();
     const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId);
     const project = workspace && state.workspaceProjects.find((candidate) => candidate.id === workspace.projectId);
-    if (!workspace || !project || workspace.state === "archived" || project.archived) return;
+    if (!workspace || !project || workspace.state === "archived") return;
     if (!state.connected) return;
     const previousFocus = {
       projectId: state.activeProjectId,
@@ -1506,15 +1500,15 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     );
   },
 
-  archiveWorkspaceProject: (projectId, archived) => {
+  removeWorkspaceProject: (projectId) => {
     const state = get();
     const project = state.workspaceProjects.find((candidate) => candidate.id === projectId);
-    if (!project || !state.connected || !hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectArchive)) return;
+    if (!project || !state.connected || !hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectRemove)) return;
     const requestId = newId();
     sendWorkspaceMessage(
-      { type: "project.archive", requestId, projectId, archived },
+      { type: "project.remove", requestId, projectId },
       project.hostId,
-      WORKSPACE_CAPABILITIES.projectArchive,
+      WORKSPACE_CAPABILITIES.projectRemove,
     );
   },
 
@@ -1685,11 +1679,6 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       if (cwd) msg.cwd = cwd;
       socket.send(msg);
     }
-  },
-
-  archiveSession: (sessionId, archived) => {
-    socket.send({ type: "session.archive", sessionId, archived });
-    if (archived) leaveSession(get(), sessionId);
   },
 
   deleteSession: (sessionId) => {
@@ -2058,14 +2047,6 @@ function scheduleChunkFlush(sessionId: string): void {
   chunkRafs.set(sessionId, raf);
 }
 
-/**
- * The active session just went away — it was deleted, or archived (archiving
- * hides a session everywhere, so an open archived chat must be closed exactly
- * the way a deleted one is). Switch to the most recent remaining session on
- * the same host, else the most recent on any host, else fall back to a
- * blank/empty state. `candidates` must already exclude the departing session
- * (and any other session that is no longer selectable, i.e. archived ones).
- */
 /** Leaving the active session lands on a neighbouring tab of the same
  * workspace, like a browser; leaving its last tab shows the home screen,
  * never another workspace's session. */
@@ -2075,6 +2056,11 @@ function leaveSession(state: PerchState, sessionId: string): void {
   switchAwayFromActiveSession(siblings, state.activeHostId);
 }
 
+/**
+ * The active session just went away. Switch to the most recent of
+ * `candidates` (which already exclude the departing session) on the same
+ * host, else the most recent on any host, else fall back to a blank state.
+ */
 function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string): void {
   const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
   const sameHost = candidates
@@ -2580,7 +2566,7 @@ export function handleServerMessage(msg: ServerMessage): void {
           activeHostId = msg.session.hostId ?? "local";
           activeProject = { hostId: activeHostId, cwd: msg.session.cwd };
           activeProjectId = msg.session.projectId ?? state.workspaceProjects.find(
-            (project) => project.hostId === activeHostId && project.path === msg.session.cwd && !project.archived,
+            (project) => project.hostId === activeHostId && project.path === msg.session.cwd,
           )?.id ?? null;
           activeWorkspaceId = msg.session.workspaceId ?? (activeProjectId
             ? state.workspaces.find((workspace) => workspace.projectId === activeProjectId && workspace.state !== "archived")?.id ?? null
@@ -2593,18 +2579,6 @@ export function handleServerMessage(msg: ServerMessage): void {
 
         return { sessions, toasts, activeProject, activeHostId, activeProjectId, activeWorkspaceId };
       });
-      // Archiving hides a session everywhere, so archiving the *open* one has
-      // to close it exactly the way deleting it does — otherwise the chat
-      // stays mounted on a session with no row anywhere in the nav. The check
-      // lives here (rather than in `archiveSession`) so it also fires when the
-      // archive came from another tab or from the Settings panel.
-      if (msg.session.archived && usePerchStore.getState().sessionId === msg.session.id) {
-        const state = usePerchStore.getState();
-        switchAwayFromActiveSession(
-          state.sessions.filter((s) => s.id !== msg.session.id && !s.archived),
-          state.activeHostId
-        );
-      }
       break;
     }
     case "session.deleted": {
@@ -2763,7 +2737,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         if (sessionEntry.cwd) {
           writeActiveProjectStored({ hostId, cwd: sessionEntry.cwd });
           const projectId = sessionEntry.projectId ?? usePerchStore.getState().workspaceProjects.find(
-            (project) => project.hostId === hostId && project.path === sessionEntry.cwd && !project.archived,
+            (project) => project.hostId === hostId && project.path === sessionEntry.cwd,
           )?.id ?? null;
           const workspaceId = sessionEntry.workspaceId ?? (projectId
             ? usePerchStore.getState().workspaces.find((workspace) => workspace.projectId === projectId && workspace.state !== "archived")?.id ?? null

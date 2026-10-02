@@ -57,7 +57,6 @@ fn project_to_wire(row: crate::db::ProjectRow) -> ProjectSummary {
         repo_path: row.repo_path,
         default_branch: row.default_branch,
         favorite: row.favorite,
-        archived: row.archived,
         settings: row
             .settings
             .and_then(|settings| serde_json::from_str(&settings).ok()),
@@ -816,14 +815,13 @@ pub(super) fn handle_project_list(
     state: &Arc<ConnState>,
     request_id: String,
     host_id: Option<String>,
-    include_archived: bool,
 ) {
     if let Some(message) = reject_non_local_foundation_host(host_id.as_deref(), &request_id) {
         let _ = state.out_tx.send(message);
         return;
     }
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
-    match state.app.db.list_projects("local", include_archived) {
+    match state.app.db.list_projects("local", false) {
         Ok(projects) => {
             let _ = state.out_tx.send(ServerMessage::ProjectList {
                 request_id,
@@ -874,24 +872,12 @@ pub(super) async fn handle_project_create(
         Err(_) => None,
     };
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
-    // Registering a removed (archived) folder again brings it back.
-    match state
-        .app
-        .db
-        .create_project(
-            "local",
-            &canonical,
-            name.as_deref(),
-            start_snapshot.as_deref(),
-        )
-        .and_then(|(project, workspace)| {
-            let project = if project.archived {
-                state.app.db.set_project_archived(&project.id, false)?
-            } else {
-                project
-            };
-            Ok((project, workspace))
-        }) {
+    match state.app.db.create_project(
+        "local",
+        &canonical,
+        name.as_deref(),
+        start_snapshot.as_deref(),
+    ) {
         Ok((project, workspace)) => {
             let revision = next_snapshot_revision_locked(&state.app);
             let project = project_to_wire(project);
@@ -993,13 +979,11 @@ pub(super) fn handle_project_rename(
     }
 }
 
-pub(super) fn handle_project_archive(
+pub(super) fn handle_project_remove(
     state: &Arc<ConnState>,
     request_id: String,
     project_id: String,
-    archived: bool,
 ) {
-    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
     let Some(project) = local_project(&state.app, &project_id) else {
         fail(
             &state.out_tx,
@@ -1010,25 +994,29 @@ pub(super) fn handle_project_archive(
         );
         return;
     };
-    // Removing a project removes its sessions from perch too (archived, like
-    // closing their tabs); the folder and transcripts stay on disk.
-    match state
+    // Removing a project deletes it and its sessions (their agents and
+    // shells end); the folder and the agents' transcripts stay on disk.
+    // Sessions go first, outside foundation_lock: opening an agent takes
+    // agent_operation_lock before it.
+    let removed = state
         .app
         .db
-        .set_project_archived(&project.id, archived)
-        .and_then(|project| {
-            if archived {
-                super::session::archive_sessions_of_removed_projects(&state.app)?;
-            }
-            Ok(project)
-        }) {
-        Ok(project) => {
+        .local_session_ids(Some(&project.id))
+        .and_then(|sessions| {
+            sessions
+                .iter()
+                .try_for_each(|id| super::session::delete_session(&state.app, id))
+        });
+    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+    match removed.and_then(|()| state.app.db.delete_project(&project.id)) {
+        Ok(()) => {
             let revision = next_snapshot_revision_locked(&state.app);
             broadcast_foundation(
                 &state.app,
-                ServerMessage::ProjectUpdated {
+                ServerMessage::ProjectDeleted {
                     request_id: Some(request_id.clone()),
-                    project: project_to_wire(project),
+                    project_id: project.id,
+                    host_id: "local".to_string(),
                     snapshot_epoch: state.app.snapshot_epoch.clone(),
                     snapshot_revision: revision,
                 },
@@ -1039,8 +1027,8 @@ pub(super) fn handle_project_archive(
             fail(
                 &state.out_tx,
                 request_id,
-                "project_archive_failed",
-                format!("project.archive failed: {err}"),
+                "project_remove_failed",
+                format!("project.remove failed: {err}"),
                 true,
             );
         }

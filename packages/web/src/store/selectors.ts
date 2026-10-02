@@ -30,17 +30,11 @@ export type ProjectNavState = Pick<
   workspaces?: WorkspaceRecord[];
 };
 
-/**
- * Projects belonging to `hostId`, newest-first. Archived sessions are always
- * excluded — archiving is the "make it disappear" action, so a project whose
- * sessions were all archived drops out of the nav entirely. Archived sessions
- * are only reachable from Settings → Archived sessions (restore / delete).
- */
+/** Projects belonging to `hostId`, newest-first. */
 export function projectsForHost(state: ProjectNavState, hostId: string): ProjectGroup[] {
   const map = new Map<string, ProjectGroup>();
   for (const s of state.sessions) {
     if ((s.hostId ?? "local") !== hostId) continue;
-    if (s.archived) continue;
     const cwd = s.cwd ?? "(unknown)";
     const key = `${hostId}:${cwd}`;
     let group = map.get(key);
@@ -65,7 +59,7 @@ export function projectsForHost(state: ProjectNavState, hostId: string): Project
  *    sessions yet) — detected by the active session having no row — in which
  *    case the pin is kept so the new project doesn't blink out of the nav;
  *  - otherwise the project genuinely disappeared (its last session was
- *    deleted or archived), so fall back to the host's most recent project.
+ *    deleted), so fall back to the host's most recent project.
  * `null` means the active host has no projects at all.
  */
 export function effectiveActiveProject(state: ProjectNavState): ActiveProject | null {
@@ -98,8 +92,7 @@ export function effectiveWorkspace(state: ProjectNavState): WorkspaceRecord | nu
  * stored drag order) and the one `keybinds.ts` (leader,n/p/1-9) cycles
  * through, so both always agree. A session with no `workspaceId` belongs to
  * the workspace whose `(hostId, path)` matches its `(hostId, cwd)`. With no
- * effective workspace it falls back to the whole project `(hostId, cwd)`.
- * Archived sessions are always omitted. */
+ * effective workspace it falls back to the whole project `(hostId, cwd)`. */
 export function activeWorkspaceSessions(state: ProjectNavState): SessionSummary[] {
   const ws = effectiveWorkspace(state);
   if (ws) {
@@ -109,32 +102,22 @@ export function activeWorkspaceSessions(state: ProjectNavState): SessionSummary[
           s.workspaceId === ws.id ||
           (!s.workspaceId && (s.hostId ?? "local") === ws.hostId && s.cwd === ws.path),
       )
-      .filter((s) => !s.archived)
       .sort((a, b) => a.createdAt - b.createdAt);
   }
   const project = effectiveActiveProject(state);
   if (!project) {
     const current = state.sessions.find((s) => s.id === state.sessionId);
-    return current && !current.archived ? [current] : [];
+    return current ? [current] : [];
   }
   return state.sessions
     .filter((s) => (s.hostId ?? "local") === project.hostId && s.cwd === project.cwd)
-    .filter((s) => !s.archived)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/** Every archived session known to the client, newest-first. The one place
- * archived sessions surface in the UI is Settings → Archived sessions, which
- * renders straight from this. Spans all hosts (the sidebar's host/project
- * scoping deliberately does not apply — the panel is a global recycle bin). */
-export function archivedSessions(sessions: SessionSummary[]): SessionSummary[] {
-  return sessions.filter((s) => s.archived).sort((a, b) => b.createdAt - a.createdAt);
-}
-
-/** Ids of the non-archived sessions belonging to one project (host + cwd),
- * using the exact same membership rule as `projectsForHost` (absent hostId
- * treated as "local", already-archived sessions excluded). Backs the
- * sidebar's "archive all sessions in this project" bulk action — kept as a
+/** Ids of the sessions belonging to one project (host + cwd), using the
+ * exact same membership rule as `projectsForHost` (absent hostId treated as
+ * "local"). Backs the sidebar's "close all sessions in this project" bulk
+ * action — kept as a
  * pure function so the bulk action's selection can be unit-tested without
  * mounting `Sidebar.tsx`. */
 export function sessionIdsForProject(
@@ -143,7 +126,7 @@ export function sessionIdsForProject(
   cwd: string
 ): string[] {
   return sessions
-    .filter((s) => (s.hostId ?? "local") === hostId && !s.archived && (s.cwd ?? "(unknown)") === cwd)
+    .filter((s) => (s.hostId ?? "local") === hostId && (s.cwd ?? "(unknown)") === cwd)
     .map((s) => s.id);
 }
 

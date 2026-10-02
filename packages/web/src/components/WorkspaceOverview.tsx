@@ -88,7 +88,6 @@ function sessionsForWorkspace(
 ): SessionSummary[] {
   return sessions
     .filter((session) => {
-      if (session.archived) return false;
       if (session.workspaceId) return session.workspaceId === workspace.id;
       return (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path;
     })
@@ -217,9 +216,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const sessionId = usePerchStore((state) => state.sessionId);
   const createRequest = usePerchStore((state) => state.workspaceProjectCreate);
   const clearCreateRequest = usePerchStore((state) => state.clearWorkspaceProjectCreate);
-  const archiveSession = usePerchStore((state) => state.archiveSession);
   const deleteSession = usePerchStore((state) => state.deleteSession);
-  const archiveWorkspaceProject = usePerchStore((state) => state.archiveWorkspaceProject);
+  const removeWorkspaceProject = usePerchStore((state) => state.removeWorkspaceProject);
   const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
   const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
   const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
@@ -244,7 +242,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
       { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
       ...(projectSessions.length > 0
-        ? [{ label: "Archive chats", testId: `workspace-project-archive-chats-${project.id}`, onSelect: () => { for (const session of projectSessions) archiveSession(session.id, true); } }]
+        ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
         : []),
       "divider",
       { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
@@ -292,7 +290,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   const visibleProjects = useMemo(
     () => projects
-      .filter((project) => project.hostId === activeHostId && !project.archived)
+      .filter((project) => project.hostId === activeHostId)
       .sort((a, b) => {
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
         return b.updatedAt - a.updatedAt;
@@ -732,11 +730,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       )}
       {removingProject && (
         <ConfirmDialog
-          message={`Remove "${removingProject.name || basename(removingProject.path)}" from perch? Its sessions are archived; the folder on disk is untouched. Add the folder again to bring it back.`}
+          message={`Remove "${removingProject.name || basename(removingProject.path)}" from perch? Its sessions close (their agents and shells end); the folder and the agents' transcripts stay on disk.`}
           confirmLabel="Remove"
           onConfirm={() => {
-            for (const session of sessionsForProject(removingProject.id)) archiveSession(session.id, true);
-            archiveWorkspaceProject(removingProject.id, true);
+            removeWorkspaceProject(removingProject.id);
             setRemovingProject(null);
           }}
           onCancel={() => setRemovingProject(null)}

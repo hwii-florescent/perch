@@ -542,7 +542,7 @@ export function DockviewShell() {
           // showing — splitting a pane with the very session it's already
           // bound to would just be a same-session duplicate.
           const excludeId = referencePanelSessionId(api, sessionSplit.referencePanelId, sessionId);
-          const candidates = sessions.filter((s) => !s.archived && s.id !== excludeId);
+          const candidates = sessions.filter((s) => s.id !== excludeId);
           return (
             <SessionSplitPopover
               sessions={candidates}

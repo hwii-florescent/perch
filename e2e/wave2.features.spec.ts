@@ -7,8 +7,7 @@
  *        `TerminalSection`).
  *   T2 — login-shell toggle for plain terminal panes: hydrates, toggles,
  *        persists across reload.
- *   T3 — a project's ⋯ → "Archive chats" archives every session in it (they
- *        leave the nav and live in Settings → Archived Sessions).
+ *   T3 — a project's ⋯ → "Close all sessions" deletes every session in it.
  *   T4 — closing a workspace's last tab shows the home screen
  *        (`no-session-panel`), whose New session gets you out again.
  *
@@ -228,9 +227,9 @@ test.describe("Wave 2 (Phase 15) features", () => {
   });
 
   // -------------------------------------------------------------------------
-  // T3 — archive every session in a project
+  // T3 — close every session in a project
   // -------------------------------------------------------------------------
-  test("T3. Archive chats archives every session in the project", async ({ page }) => {
+  test("T3. Close all sessions deletes every session in the project", async ({ page }) => {
     await freshPage(page);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-wave2-closeall-"));
     try {
@@ -243,18 +242,12 @@ test.describe("Wave 2 (Phase 15) features", () => {
 
       const project = page.locator(".workspace-project").filter({ hasText: path.basename(dir) });
       await project.locator('[data-testid^="workspace-project-menu-"]').click();
-      await page.locator('[data-testid^="workspace-project-archive-chats-"]').click();
+      await page.locator('[data-testid^="workspace-project-close-all-"]').click();
       for (const id of ids) await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
 
       await page.reload({ waitUntil: "networkidle" });
       await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
       for (const id of ids) await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
-
-      await openSettings(page);
-      await page.locator('[data-testid="settings-archived-open"]').click();
-      for (const id of ids) await expect(page.getByTestId(`archived-row-${id}`)).toBeVisible();
-      await page.keyboard.press("Escape");
-      await closeSettings(page);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

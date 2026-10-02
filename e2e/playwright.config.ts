@@ -14,10 +14,10 @@ export default defineConfig({
   testDir: ".",
   // ORDER MATTERS. `wave2.features.spec.ts` runs FIRST, before
   // `federation.spec.ts`: its T4 test needs to reach `sessionId: null`, which
-  // is only possible when no non-archived session exists anywhere the hub can
+  // is only possible when no session exists anywhere the hub can
   // see. Sessions federation.spec leaves on the remote (:7800) stay listed by
-  // the hub without it owning them — they can be
-  // neither archived nor deleted from here, and any one of them is something
+  // the hub without it owning them — they cannot be deleted from here, and
+  // any one of them is something
   // `switchAwayFromActiveSession` falls back to. Running before the federation
   // spec adds that host is the only cheap way to guarantee the precondition.
   // (T4 also removes any host left over from a previous run; federation.spec

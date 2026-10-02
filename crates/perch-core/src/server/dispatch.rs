@@ -262,12 +262,6 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::HostsUpsert { host } => config::handle_hosts_upsert(state, host),
         ClientMessage::HostsDelete { id } => config::handle_hosts_delete(state, id),
 
-        // Fix 4: Archive / unarchive a session.
-        ClientMessage::SessionArchive {
-            session_id,
-            archived,
-        } => session::handle_session_archive(state, raw_text, session_id, archived),
-
         // Permanently delete a session: cancel any in-flight turn, kill any
         // CLI-attached terminal, drop it from every in-memory bookkeeping
         // structure, delete its DB rows, then fan the deletion out to every
@@ -740,8 +734,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::ProjectList {
             request_id,
             host_id,
-            include_archived,
-        } => workspace::handle_project_list(state, request_id, host_id, include_archived),
+        } => workspace::handle_project_list(state, request_id, host_id),
         ClientMessage::ProjectCreate {
             request_id,
             host_id,
@@ -758,11 +751,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             project_id,
             name,
         } => workspace::handle_project_rename(state, request_id, project_id, name),
-        ClientMessage::ProjectArchive {
+        ClientMessage::ProjectRemove {
             request_id,
             project_id,
-            archived,
-        } => workspace::handle_project_archive(state, request_id, project_id, archived),
+        } => workspace::handle_project_remove(state, request_id, project_id),
         ClientMessage::ProjectFocus {
             request_id,
             project_id,

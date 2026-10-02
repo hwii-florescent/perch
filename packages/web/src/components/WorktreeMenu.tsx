@@ -115,7 +115,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const workspaces = usePerchStore((s) => s.workspaces);
   const parentChoices = useMemo(() => {
     if (!hostCaps?.includes("workspace.nest")) return [];
-    const project = projects.find((p) => p.hostId === hostId && p.repoPath === cwd && !p.archived);
+    const project = projects.find((p) => p.hostId === hostId && p.repoPath === cwd);
     return project
       ? workspaces.filter((w) => w.projectId === project.id && w.parentWorkspaceId && w.state !== "archived" && !w.hidden)
       : [];

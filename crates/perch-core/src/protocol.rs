@@ -247,10 +247,6 @@ pub struct SessionSummary {
     /// instance; a host `id` for any federated remote.
     #[serde(default = "default_local_host_id")]
     pub host_id: String,
-    /// Whether this session has been archived.  Defaults to `false` when the
-    /// field is absent on the wire (older remote perch instances).
-    #[serde(default)]
-    pub archived: bool,
     /// Whether this session finished a turn while no connected client was
     /// actively viewing it (herdr's `done` state = `Idle && !seen`). Cleared
     /// as soon as any client subscribes/switches to the session. Defaults to
@@ -361,7 +357,6 @@ pub struct ProjectSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
     pub favorite: bool,
-    pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<Value>,
     pub created_at: i64,
@@ -1039,12 +1034,8 @@ pub enum ClientMessage {
     #[serde(rename = "hosts.delete", rename_all = "camelCase")]
     HostsDelete { id: String },
 
-    #[serde(rename = "session.archive", rename_all = "camelCase")]
-    SessionArchive { session_id: String, archived: bool },
-
     /// Permanently delete a session: its messages, its DB row, any in-flight
-    /// turn, and any CLI-attached terminal. Irreversible — unlike
-    /// `session.archive`, there is no `deleted: bool` toggle.
+    /// turn, its agent and its shells. Closing a tab sends this.
     #[serde(rename = "session.delete", rename_all = "camelCase")]
     SessionDelete { session_id: String },
 
@@ -1491,8 +1482,6 @@ pub enum ClientMessage {
         request_id: String,
         #[serde(default)]
         host_id: Option<String>,
-        #[serde(default)]
-        include_archived: bool,
     },
 
     /// Create (or idempotently look up) a project for a canonical local path.
@@ -1513,11 +1502,11 @@ pub enum ClientMessage {
         name: String,
     },
 
-    #[serde(rename = "project.archive", rename_all = "camelCase")]
-    ProjectArchive {
+    /// Delete a project and its sessions; the folder stays on disk.
+    #[serde(rename = "project.remove", rename_all = "camelCase")]
+    ProjectRemove {
         request_id: String,
         project_id: String,
-        archived: bool,
     },
 
     #[serde(rename = "project.focus", rename_all = "camelCase")]

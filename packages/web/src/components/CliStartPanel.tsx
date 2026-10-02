@@ -105,7 +105,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
   // Sessions start only in a project listed in perch, or in Chats — the
   // same choices the sidebar's "+" offers, so the two entry points agree.
   const projectCwds = workspaceProjects
-    .filter((project) => project.hostId === activeHostId && !project.archived)
+    .filter((project) => project.hostId === activeHostId)
     .map((project) => project.path);
 
   const agentLabel = selectedManifest?.displayName ?? AGENTS.find((candidate) => candidate.id === selectedAgent)?.label ?? selectedAgent;

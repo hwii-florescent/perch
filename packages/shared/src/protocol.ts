@@ -344,8 +344,6 @@ export interface SessionSummary {
   /** Which hub host owns this session.  "local" (or absent) means the
    * session lives on the directly-connected server instance. */
   hostId?: string;
-  /** Whether this session has been archived.  Defaults to false when absent. */
-  archived?: boolean;
   /** Whether this session finished a turn while no connected client was
    * actively viewing it (herdr's `done` state = `Idle && !seen`). Cleared as
    * soon as any client subscribes/switches to the session. Defaults to false
@@ -966,15 +964,8 @@ export interface HostsDeleteMessage {
   id: string;
 }
 
-export interface SessionArchiveMessage {
-  type: "session.archive";
-  sessionId: string;
-  archived: boolean;
-}
-
 /** Permanently delete a session: its messages, its DB row, any in-flight
- * turn, and any CLI-attached terminal. Irreversible — unlike
- * SessionArchiveMessage, there is no `deleted: boolean` toggle. */
+ * turn, its agent and its shells. Closing a tab sends this. */
 export interface SessionDeleteMessage {
   type: "session.delete";
   sessionId: string;
@@ -1343,7 +1334,6 @@ export interface ProjectSummary {
   repoPath?: string;
   defaultBranch?: string;
   favorite: boolean;
-  archived: boolean;
   settings?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
@@ -1376,7 +1366,6 @@ export interface ProjectListMessage {
   type: "project.list";
   requestId: string;
   hostId?: string;
-  includeArchived?: boolean;
 }
 
 export interface ProjectCreateMessage {
@@ -1394,11 +1383,11 @@ export interface ProjectRenameMessage {
   name: string;
 }
 
-export interface ProjectArchiveMessage {
-  type: "project.archive";
+/** Delete a project and its sessions; the folder stays on disk. */
+export interface ProjectRemoveMessage {
+  type: "project.remove";
   requestId: string;
   projectId: string;
-  archived: boolean;
 }
 
 export interface ProjectFocusMessage {
@@ -1495,7 +1484,6 @@ export type ClientMessage =
   | HostsListMessage
   | HostsUpsertMessage
   | HostsDeleteMessage
-  | SessionArchiveMessage
   | SessionDeleteMessage
   | SessionLayoutGetMessage
   | SessionLayoutSetMessage
@@ -1539,7 +1527,7 @@ export type ClientMessage =
   | ProjectListMessage
   | ProjectCreateMessage
   | ProjectRenameMessage
-  | ProjectArchiveMessage
+  | ProjectRemoveMessage
   | ProjectFocusMessage
   | WorkspaceSnapshotMessage
   | WorkspaceFocusMessage

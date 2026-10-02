@@ -165,19 +165,18 @@ impl HistoryDb {
         self.create_session_on_host(id, cwd, "local")
     }
 
-    /// Removing a project removes its sessions from perch, like closing their
-    /// tabs: archived, not deleted. The folder and the agent's own transcript
-    /// stay on disk, so the agent can still resume them outside perch.
-    pub fn archive_sessions_of_removed_projects(&self) -> anyhow::Result<Vec<String>> {
+    /// Local sessions to delete: those of `project_id`, or with `None`, those
+    /// left archived (or in an archived project) from when perch archived.
+    pub fn local_session_ids(&self, project_id: Option<&str>) -> anyhow::Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "UPDATE sessions SET archived = 1
-             WHERE archived = 0 AND COALESCE(NULLIF(host_id, ''), 'local') = 'local'
-               AND project_id IN (SELECT id FROM projects WHERE archived = 1)
-             RETURNING id",
+            "SELECT id FROM sessions
+             WHERE COALESCE(NULLIF(host_id, ''), 'local') = 'local'
+               AND (project_id = ?1 OR (?1 IS NULL AND (archived = 1
+                    OR project_id IN (SELECT id FROM projects WHERE archived = 1))))",
         )?;
         let ids = stmt
-            .query_map([], |row| row.get(0))?
+            .query_map(params![project_id], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         Ok(ids)
     }
@@ -291,14 +290,6 @@ impl HistoryDb {
         Ok(())
     }
 
-    pub fn set_archived(&self, id: &str, archived: bool) -> anyhow::Result<()> {
-        self.conn.lock().unwrap().execute(
-            "UPDATE sessions SET archived = ?2 WHERE id = ?1",
-            params![id, archived as i32],
-        )?;
-        Ok(())
-    }
-
     /// Flip a CLI-mode session's `cli_activity` flag on — see the
     /// `cli_activity` migration comment and [`SESSION_VISIBILITY_FILTER`].
     /// Callers (`server.rs`'s `terminal.input` handler) are expected to only
@@ -344,9 +335,8 @@ impl HistoryDb {
         Ok(())
     }
 
-    /// Permanently remove a session and all of its persisted messages. Unlike
-    /// `set_archived`, this is destructive and irreversible — callers are
-    /// responsible for tearing down any in-memory runtime/PTY state first.
+    /// Permanently remove a session and all of its persisted messages. Callers
+    /// are responsible for tearing down any in-memory runtime/PTY state first.
     pub fn delete_session(&self, id: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;

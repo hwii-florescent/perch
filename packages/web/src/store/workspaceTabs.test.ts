@@ -15,7 +15,6 @@ const sessions = [
   sess("c", { workspaceId: "w-main", createdAt: 30 }),
   sess("a", { workspaceId: "w-main", createdAt: 10 }),
   sess("legacy", { cwd: "/repo", createdAt: 20 }), // no workspaceId: matched by (hostId, cwd)
-  sess("archived", { workspaceId: "w-main", archived: true, createdAt: 5 }),
   sess("other", { workspaceId: "w-other", createdAt: 40 }), // same cwd, a workspace we have no record of
   sess("sibling", { workspaceId: "w-tree", cwd: "/repo-wt", createdAt: 15 }),
 ];
@@ -31,7 +30,7 @@ const nav = (o: Partial<ProjectNavState> = {}): ProjectNavState => ({
 const ids = (s: ProjectNavState) => activeWorkspaceSessions(s).map((x) => x.id);
 
 describe("activeWorkspaceSessions", () => {
-  it("scopes to the workspace, keeps the cwd fallback, drops archived and sibling worktrees", () => {
+  it("scopes to the workspace, keeps the cwd fallback, drops sibling worktrees", () => {
     expect(ids(nav())).toEqual(["a", "legacy", "c"]);
     expect(ids(nav({ activeWorkspaceId: "w-tree", sessionId: "sibling" }))).toEqual(["sibling"]);
   });

@@ -72,8 +72,8 @@ export function TabBar() {
   const cwd = ws?.path ?? project?.cwd ?? null;
   const projectKey = ws ? `${ws.hostId}:ws:${ws.id}` : cwd ? `${hostId}:${cwd}` : null;
 
-  // `activeWorkspaceSessions` already scopes + orders (createdAt ascending) and
-  // drops archived sessions — the same list `keybinds.ts` cycles through, so
+  // `activeWorkspaceSessions` already scopes + orders (createdAt ascending) —
+  // the same list `keybinds.ts` cycles through, so
   // leader,n/p and the visible strip can never disagree.
   const tabs = activeWorkspaceSessions(navState);
   const orderedTabs = projectKey ? applyStoredTabOrder(projectKey, tabs) : tabs;

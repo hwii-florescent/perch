@@ -161,15 +161,15 @@ there, not here.
     status. `styles.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
     `default_theme()` must agree. The active tab and pane are marked in grey,
     not with an accent fill.
-  - Tab and session-row × delete the session, and so does its agent
-    terminal exiting (the agent, then its login shell): its agent and shells
-    are killed; the agent's own transcript stays on disk. "Archive chats"
-    archives instead: its agent and shells end, and Restore (Settings)
-    relaunches the CLI's own resume (`claude --resume <id>`). Removing a project archives it and its open
-    sessions (they leave perch; the folder and transcript stay on disk);
-    re-registering the folder restores the project. Closing a terminal pane
-    ends its shell; only switching sessions leaves one running unseen. No
-    process perch starts may outlive what the UI shows.
+  - perch never archives: closing is deleting. Tab and session-row ×,
+    the agent terminal exiting (the agent, then its login shell), "Close
+    all sessions" and "Remove project" delete the sessions (their agents
+    and shells are killed) and, for Remove project, the project. The folder
+    and the agent's own transcript stay on disk; resuming is the CLI's
+    (`claude --resume <id>`), and adding the folder again registers a fresh
+    project. Closing a terminal pane ends its shell; only switching sessions
+    leaves one running unseen. No process perch starts may outlive what the
+    UI shows. (Archived workspaces are removed worktrees, a separate thing.)
   - A session starts only in a listed project's workspace or in Chats
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any
@@ -194,7 +194,7 @@ there, not here.
     dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
     `perch.layout.*`).
   - Sidebar rows stay quiet: a project header is its name plus ⌄ (collapse,
-    per viewer) ⋯ (Rename, Copy path, Archive chats, Remove project) and +
+    per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,
     Copy path/branch, Pin, Files, Git, Hide, Delete worktree) are in its
     right-click menu; only the phone switcher, which has no right-click,

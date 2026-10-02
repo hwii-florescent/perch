@@ -3,9 +3,9 @@
  *   S1 — "New session" opens a picker of listed projects plus "No project",
  *         with no folder browser; "No project" starts the session in Chats.
  *   S4 — a row's × deletes the session, and so does exiting its terminal:
- *         it leaves the sidebar for good and is not listed as archived.
- *   S5 — "Archive chats" archives instead, ending what the session runs:
- *         Settings → Archived sessions restores or deletes it.
+ *         it leaves the sidebar for good.
+ *   S5 — a project's "Close all sessions" and "Remove project" delete its
+ *         sessions and end what they run; the removed project is gone.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -43,64 +43,45 @@ test.describe("Session lifecycle", () => {
     await expect(page.getByTestId(`workspace-session-${exited}`)).toHaveCount(0, { timeout: 15000 });
 
     await page.reload({ waitUntil: "networkidle" });
-    await page.getByTestId("settings-gear").click();
-    await page.getByTestId("settings-archived-open").click();
-    await expect(page.getByTestId("settings-archived-panel")).toBeVisible();
-    for (const id of [closed, exited]) {
-      await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
-      await expect(page.getByTestId(`archived-row-${id}`)).toHaveCount(0);
-    }
+    await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
+    for (const id of [closed, exited]) await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
   });
 
-  test("S5. Archive chats archives; Settings restores or deletes", async ({ page }) => {
+  test("S5. Close all sessions and Remove project delete sessions and end what they run", async ({ page }) => {
     await open(page);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sessions-archive-"));
-    try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sessions-remove-"));
+    const project = page.locator(".workspace-project").filter({ hasText: path.basename(dir) });
+    /** Start a shell session in `dir` running a uniquely named `sleep`;
+     * returns its id and whether that sleep is still running. */
+    async function busySession(): Promise<[string, () => boolean]> {
       const id = await startChat(page, "terminal", dir);
-      const row = page.getByTestId(`workspace-session-${id}`);
-      const archived = page.getByTestId(`archived-row-${id}`);
-      const project = page.locator(".workspace-project").filter({ hasText: path.basename(dir) });
-
-      async function archive(): Promise<void> {
-        await project.locator('[data-testid^="workspace-project-menu-"]').click();
-        await page.locator('[data-testid^="workspace-project-archive-chats-"]').click();
-        await expect(row).toHaveCount(0);
-      }
-      async function openArchivedPanel(): Promise<void> {
-        await page.getByTestId("settings-gear").click();
-        await page.getByTestId("settings-archived-open").click();
-        await expect(page.getByTestId("settings-archived-panel")).toBeVisible();
-      }
-      async function closeSettings(): Promise<void> {
-        await page.keyboard.press("Escape"); // the subpage
-        await page.keyboard.press("Escape"); // the modal
-        await expect(page.getByTestId("settings-modal")).not.toBeVisible();
-      }
-
-      // Archiving ends what the session runs: nothing keeps going unseen.
       const marker = `sleep ${40000 + Math.floor(Math.random() * 9999)}`;
       await page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea").pressSequentially(`${marker}\n`);
       const running = () => spawnSync("pgrep", ["-f", marker]).status === 0;
       await expect.poll(running).toBe(true);
-      await archive();
-      await expect.poll(running).toBe(false);
-      await openArchivedPanel();
-      await page.getByTestId(`archived-restore-${id}`).click();
-      await expect(archived).toHaveCount(0);
-      await closeSettings();
-      await expect(row).toBeVisible();
+      return [id, running];
+    }
+    async function projectMenu(item: string): Promise<void> {
+      await project.locator('[data-testid^="workspace-project-menu-"]').click();
+      await page.locator(`[data-testid^="workspace-project-${item}-"]`).click();
+    }
+    try {
+      const [closed, closedRunning] = await busySession();
+      await projectMenu("close-all");
+      await expect(page.getByTestId(`workspace-session-${closed}`)).toHaveCount(0);
+      await expect.poll(closedRunning).toBe(false);
 
-      await archive();
-      await openArchivedPanel();
-      await page.getByTestId(`archived-delete-${id}`).click();
-      await expect(page.getByTestId("confirm-dialog")).toHaveCount(0);
-      await expect(archived).toHaveCount(0);
-      await closeSettings();
+      const [removed, removedRunning] = await busySession();
+      await projectMenu("remove");
+      await page.getByTestId("confirm-accept").click();
+      await expect(project).toHaveCount(0);
+      await expect(page.getByTestId(`workspace-session-${removed}`)).toHaveCount(0);
+      await expect.poll(removedRunning).toBe(false);
 
       await page.reload({ waitUntil: "networkidle" });
-      await expect(row).toHaveCount(0);
-      await openArchivedPanel();
-      await expect(archived).toHaveCount(0);
+      await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
+      await expect(project).toHaveCount(0);
+      for (const id of [closed, removed]) await expect(page.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

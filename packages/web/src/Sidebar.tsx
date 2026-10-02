@@ -292,11 +292,10 @@ interface SessionItemProps {
   session: SessionSummary;
   isActive: boolean;
   onSwitch: (id: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
   onDelete: (sessionId: string) => void;
 }
 
-function SessionItem({ session, isActive, onSwitch, onArchive, onDelete }: SessionItemProps) {
+function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps) {
   const itemClass = isActive ? "session-item session-item--active" : "session-item";
 
   return (
@@ -316,22 +315,6 @@ function SessionItem({ session, isActive, onSwitch, onArchive, onDelete }: Sessi
             <span className="session-item__time">{relativeTime(session.createdAt)}</span>
           </div>
         </div>
-      </button>
-      {/* Archiving always makes the row vanish (archived sessions never render
-       * in the nav) — restoring one happens from Settings → Archived sessions,
-       * so this button is archive-only, never a toggle. */}
-      <button
-        type="button"
-        className="session-item__archive-btn"
-        data-testid={`session-archive-icon-${session.id}`}
-        title="Archive session"
-        aria-label="Archive session"
-        onClick={(e) => {
-          e.stopPropagation();
-          onArchive(session.id, true);
-        }}
-      >
-        📦
       </button>
       {/* No confirmation: the user asked for a one-click, immediate delete
        * (unlike the multi-tab terminal-group close and worktree-remove
@@ -403,7 +386,7 @@ function ProjectSubline({ projectKey, hostId, cwd }: { projectKey: string; hostI
  * without first switching projects. */
 function ProjectWorktrees({ projectKey, hostId, cwd }: { projectKey: string; hostId: string; cwd: string }) {
   const git = usePerchStore((s) => s.workspaceGit[projectKey]);
-  const registered = usePerchStore((s) => s.workspaceProjects.some((project) => project.hostId === hostId && project.repoPath === cwd && !project.archived));
+  const registered = usePerchStore((s) => s.workspaceProjects.some((project) => project.hostId === hostId && project.repoPath === cwd));
   if (registered) return null; // The project rail owns this menu and shortcut.
   // Non-git projects have no worktrees (backend `worktree.rs list` errors on a
   // non-git cwd, matching herdr's `not_git_worktree` guard). Rather than hide
@@ -476,7 +459,6 @@ function ProjectRow({
   sessionId,
   onSelectProject,
   onSwitch,
-  onArchive,
   onDelete,
 }: {
   group: ProjectGroup;
@@ -485,16 +467,13 @@ function ProjectRow({
   sessionId: string | null;
   onSelectProject: (cwd: string) => void;
   onSwitch: (id: string) => void;
-  onArchive: (sessionId: string, archived: boolean) => void;
   onDelete: (sessionId: string) => void;
 }) {
   const dotState = aggregateDotState(group.sessions);
   const { glyph, color } = DOT_GLYPH[dotState];
-  // Bulk "archive all sessions in this project" — archive, not delete, is
-  // the default and only bulk action here (see the module doc comment):
-  // archived sessions stay restorable from Settings → Archived Sessions,
-  // unlike delete. Requires an explicit inline confirm (never `window.confirm`,
-  // which blocks the page) naming the exact count before anything happens.
+  // Bulk "close all sessions in this project". Requires an explicit inline
+  // confirm (never `window.confirm`, which blocks the page) naming the exact
+  // count before anything happens.
   const [confirmingCloseAll, setConfirmingCloseAll] = useState(false);
   const sessionCount = group.sessions.length;
 
@@ -534,14 +513,14 @@ function ProjectRow({
           type="button"
           className="sidebar__project-close-all"
           data-testid="project-close-all"
-          title="Archive all sessions in this project"
-          aria-label="Archive all sessions in this project"
+          title="Close all sessions in this project"
+          aria-label="Close all sessions in this project"
           onClick={(e) => {
             e.stopPropagation();
             setConfirmingCloseAll(true);
           }}
         >
-          📦
+          ✕
         </button>
       </div>
       {isActiveProject &&
@@ -551,21 +530,20 @@ function ProjectRow({
             session={s}
             isActive={s.id === sessionId}
             onSwitch={onSwitch}
-            onArchive={onArchive}
             onDelete={onDelete}
           />
         ))}
       {confirmingCloseAll && (
         <ConfirmDialog
-          message={`Archive all ${sessionCount} session${sessionCount === 1 ? "" : "s"} in "${basename(group.cwd)}"? You can restore them later from Settings → Archived Sessions.`}
-          confirmLabel="Archive all"
+          message={`Close all ${sessionCount} session${sessionCount === 1 ? "" : "s"} in "${basename(group.cwd)}"? Their agents and shells end; the folder and the agents' transcripts stay on disk.`}
+          confirmLabel="Close all"
           cancelLabel="Cancel"
           onConfirm={() => {
             // sessionIdsForProject re-derives membership from group.sessions'
             // own ids at click time rather than reusing the array reference,
             // matching the pure selection logic unit-tested in store.test.ts.
             for (const id of sessionIdsForProject(group.sessions, hostId, group.cwd)) {
-              onArchive(id, true);
+              onDelete(id);
             }
             setConfirmingCloseAll(false);
           }}
@@ -691,7 +669,6 @@ export function Sidebar() {
   const setActiveHost = usePerchStore((s) => s.setActiveHost);
   const setActiveProject = usePerchStore((s) => s.setActiveProject);
   const upsertHost = usePerchStore((s) => s.upsertHost);
-  const archiveSession = usePerchStore((s) => s.archiveSession);
   const deleteSession = usePerchStore((s) => s.deleteSession);
   const workspaceCapabilities = usePerchStore((s) => s.workspaceCapabilities);
   const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
@@ -722,7 +699,7 @@ export function Sidebar() {
 
   // New sessions start in a listed project or in Chats, never an unadded folder.
   const projectCwds = workspaceProjects
-    .filter((project) => project.hostId === activeHostId && !project.archived)
+    .filter((project) => project.hostId === activeHostId)
     .map((project) => project.path);
 
   const choices: HostChoice[] = [
@@ -820,7 +797,6 @@ export function Sidebar() {
                   sessionId={sessionId}
                   onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
                   onSwitch={switchSession}
-                  onArchive={archiveSession}
                   onDelete={deleteSession}
                 />
               ))

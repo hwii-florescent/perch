@@ -91,7 +91,6 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sessions
-      .filter((s) => !s.archived)
       .filter((s) => filter === "all" || sessionDotState(s) === filter)
       .filter((s) => !q || s.title.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
       .sort((a, b) => b.createdAt - a.createdAt);

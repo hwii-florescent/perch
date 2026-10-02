@@ -684,7 +684,6 @@ pub(super) fn build_session_summary(
         host_id: row.host_id,
         cli_started: row.cli_started,
         cli_provider_id: row.cli_provider_id,
-        archived: row.archived,
         unseen: unseen.contains(&row.id),
         blocked: blocked.contains(&row.id),
         stale: stale.contains(&row.id),
@@ -838,24 +837,8 @@ pub(super) fn chats_pair(
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
     std::fs::create_dir_all(&scratch)?;
-    let (project, workspace) =
-        app.db
-            .create_project("local", &scratch.display().to_string(), Some("Chats"), None)?;
-    let project = if project.archived {
-        app.db.set_project_archived(&project.id, false)?
-    } else {
-        project
-    };
-    Ok((project, workspace))
-}
-
-/// Removing a project removes its open sessions from perch (see
-/// `archive_sessions_of_removed_projects`) and tells every viewer.
-pub(super) fn archive_sessions_of_removed_projects(app: &AppState) -> anyhow::Result<()> {
-    for session_id in app.db.archive_sessions_of_removed_projects()? {
-        notify_session_updated(app, &session_id);
-    }
-    Ok(())
+    app.db
+        .create_project("local", &scratch.display().to_string(), Some("Chats"), None)
 }
 
 pub(super) fn handle_session_create(
@@ -1623,94 +1606,12 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
     });
 }
 
-/// Stop every agent process of a local session, under the caller's
-/// `agent_operation_lock`. Their lifecycle records go too; returns their keys.
-fn stop_session_agents(
-    state: &Arc<ConnState>,
-    session_id: &str,
-) -> Result<Vec<AgentKey>, crate::agent_runtime::RuntimeAdapterError> {
-    let agent_keys = state
-        .app
-        .agent_runtime
-        .lifecycle()
-        .list()
-        .into_iter()
-        .filter(|snapshot| snapshot.key.session_id == session_id)
-        .map(|snapshot| snapshot.key)
-        .collect::<Vec<_>>();
-    for key in &agent_keys {
-        state.app.agent_runtime.remove(key)?;
-    }
-    state.app.agent_terminals.kill(session_id);
-    state
-        .app
-        .running_sessions
-        .lock()
-        .unwrap()
-        .remove(session_id);
-    Ok(agent_keys)
-}
-
-pub(super) fn handle_session_archive(
-    state: &Arc<ConnState>,
-    raw_text: &str,
-    session_id: String,
-    archived: bool,
-) {
-    // Route remote sessions through the hub.
-    if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
-        state.app.hub.forward(&host_id, raw_text);
-        return;
-    }
-    // Nothing of an archived session keeps running: its agent and shells end
-    // now. Restoring it relaunches the CLI's own resume (`claude --resume
-    // <id>`, `codex resume <id>`); the CLI owns the conversation.
-    if archived {
-        let _agent_operation = state.app.agent_operation_lock.lock().unwrap();
-        if let Err(error) = stop_session_agents(state, &session_id) {
-            tracing::warn!(%error, "could not stop an archived session's agent");
-        }
-        if let Err(error) = state.app.workspace_terminals.close_session(&session_id) {
-            tracing::warn!(%error, "could not close an archived session's shells");
-        }
-    }
-    match state.app.db.set_archived(&session_id, archived) {
-        Ok(()) => {
-            // Broadcast a session.updated so all tabs update immediately.
-            notify_session_updated(&state.app, &session_id);
-        }
-        Err(e) => {
-            let _ = state.out_tx.send(ServerMessage::Error {
-                message: format!("session.archive failed: {e}"),
-                request_id: None,
-                code: None,
-                retryable: false,
-            });
-        }
-    }
-}
-
 pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, session_id: String) {
     // Route remote sessions through the hub.
     if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
         state.app.hub.forward(&host_id, raw_text);
         return;
     }
-
-    let _agent_operation = state.app.agent_operation_lock.lock().unwrap();
-    let agent_keys = match stop_session_agents(state, &session_id) {
-        Ok(keys) => keys,
-        Err(error) => {
-            fail(
-                &state.out_tx,
-                None,
-                "agent_stop_failed",
-                error.to_string(),
-                true,
-            );
-            return;
-        }
-    };
 
     // Cancel any in-flight turn and drop this connection's runtime
     // for the session (claude_runner, pending_turn, etc.).
@@ -1758,73 +1659,64 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
         // terminal lives in the app-wide registry.
         state.terminals.kill(&terminal_id);
     }
-    state.app.agent_terminals.kill(&session_id);
-
-    // Drop every other piece of in-memory bookkeeping keyed by this
-    // session id.
-    state.app.registry.remove(&session_id);
-    super::agent_history::forget_session(&session_id);
-    state
-        .app
-        .running_sessions
-        .lock()
-        .unwrap()
-        .remove(&session_id);
-    state
-        .app
-        .unseen_sessions
-        .lock()
-        .unwrap()
-        .remove(&session_id);
-    state
-        .app
-        .blocked_sessions
-        .lock()
-        .unwrap()
-        .remove(&session_id);
-    state
-        .app
-        .session_viewers
-        .lock()
-        .unwrap()
-        .remove(&session_id);
     if state.active_session_id.lock().unwrap().as_deref() == Some(session_id.as_str()) {
         *state.active_session_id.lock().unwrap() = None;
     }
-
-    match state.app.workspace_terminals.delete_session(&session_id) {
-        Ok(()) => {
-            for key in &agent_keys {
-                let _ = state.app.agent_persistence.delete_snapshot(key);
-                state.app.agent_modes.lock().unwrap().remove(key);
-            }
-            state
-                .app
-                .cli_active_sessions
-                .lock()
-                .unwrap()
-                .remove(&session_id);
-
-            // Fan out to every connection (this one included) via the
-            // same broadcast channel hosts.upsert/delete use, since
-            // the row a normal session.updated event looks up is gone.
-            let _ = state
-                .app
-                .hub
-                .hub_events_tx
-                .send(Arc::new(ServerMessage::SessionDeleted {
-                    session_id: session_id.clone(),
-                }));
-        }
-        Err(e) => {
-            let _ = state.out_tx.send(ServerMessage::Error {
-                message: format!("session.delete failed: {e}"),
-                request_id: None,
-                code: None,
-                retryable: false,
-            });
-        }
+    if let Err(error) = delete_session(&state.app, &session_id) {
+        fail(
+            &state.out_tx,
+            None,
+            "session_delete_failed",
+            format!("session.delete failed: {error}"),
+            true,
+        );
     }
+}
+
+/// Delete a local session for every viewer: its agents and shells end, then
+/// its row goes. The project folder and the agent's own transcript stay on
+/// disk; resuming is the CLI's (`claude --resume <id>`).
+pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result<()> {
+    let _agent_operation = app.agent_operation_lock.lock().unwrap();
+    let agent_keys = app
+        .agent_runtime
+        .lifecycle()
+        .list()
+        .into_iter()
+        .filter(|snapshot| snapshot.key.session_id == session_id)
+        .map(|snapshot| snapshot.key)
+        .collect::<Vec<_>>();
+    for key in &agent_keys {
+        app.agent_runtime
+            .remove(key)
+            .map_err(|error| anyhow::anyhow!("could not stop its agent: {error}"))?;
+    }
+    app.agent_terminals.kill(session_id);
+    app.registry.remove(session_id);
+    super::agent_history::forget_session(session_id);
+    for set in [
+        &app.running_sessions,
+        &app.unseen_sessions,
+        &app.blocked_sessions,
+    ] {
+        set.lock().unwrap().remove(session_id);
+    }
+    app.session_viewers.lock().unwrap().remove(session_id);
+    app.workspace_terminals.delete_session(session_id)?;
+    for key in &agent_keys {
+        let _ = app.agent_persistence.delete_snapshot(key);
+        app.agent_modes.lock().unwrap().remove(key);
+    }
+    app.cli_active_sessions.lock().unwrap().remove(session_id);
+    // Fan out to every connection: the row a session.updated would look up
+    // is gone.
+    let _ = app
+        .hub
+        .hub_events_tx
+        .send(Arc::new(ServerMessage::SessionDeleted {
+            session_id: session_id.to_string(),
+        }));
+    Ok(())
 }
 
 pub(super) fn handle_session_layout_get(
@@ -1861,8 +1753,8 @@ pub(super) fn handle_session_layout_set(
     session_id: String,
     layout: serde_json::Value,
 ) {
-    // Route remote sessions through the hub — fire-and-forget, same
-    // as session.archive (no reply is expected by the caller).
+    // Route remote sessions through the hub — fire-and-forget (no reply
+    // is expected by the caller).
     if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
         state.app.hub.forward(&host_id, raw_text);
         return;

@@ -8,7 +8,6 @@ function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     title: "session",
     cwd: "/tmp",
     createdAt: 0,
-    archived: false,
     blocked: false,
     unseen: false,
     status: "idle",

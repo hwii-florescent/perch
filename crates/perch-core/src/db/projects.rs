@@ -63,6 +63,21 @@ pub type WorkspaceSnapshot = (
     Option<String>,
 );
 
+/// Workspace-keyed tables whose rows go with a deleted project.
+const WORKSPACE_TABLES: &[&str] = &[
+    "agent_change_snapshots",
+    "agent_lifecycle",
+    "agent_lifecycle_transitions",
+    "prompt_operations",
+    "review_comments",
+    "review_packets",
+    "file_buffers",
+    "file_save_intents",
+    "file_save_operations",
+    "git_previews",
+    "workspace_terminals",
+];
+
 impl HistoryDb {
     // -----------------------------------------------------------------------
     // Durable project/workspace metadata
@@ -317,7 +332,41 @@ impl HistoryDb {
         get_project_locked(&conn, id)?.ok_or_else(|| anyhow::anyhow!("project disappeared"))
     }
 
-    pub fn set_project_archived(&self, id: &str, archived: bool) -> anyhow::Result<ProjectRow> {
+    /// Delete a project, its workspaces and their rows. Callers delete its
+    /// sessions first (that ends their processes). The folder on disk stays;
+    /// adding it again registers a new project.
+    pub fn delete_project(&self, id: &str) -> anyhow::Result<()> {
+        // Move any active selection off the project before it goes.
+        self.set_project_archived(id, true)?;
+        let conn = self.conn.lock().unwrap();
+        for table in WORKSPACE_TABLES {
+            let sql = format!(
+                "DELETE FROM {table} WHERE workspace_id IN (SELECT id FROM workspaces WHERE project_id = ?1)"
+            );
+            match conn.execute(&sql, params![id]) {
+                // Some tables exist only once their feature first ran.
+                Err(error) if error.to_string().contains("no such table") => {}
+                result => {
+                    result?;
+                }
+            }
+        }
+        conn.execute("DELETE FROM workspaces WHERE project_id = ?1", params![id])?;
+        conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Projects removed while removal still archived them.
+    pub fn archived_project_ids(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM projects WHERE archived = 1")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    fn set_project_archived(&self, id: &str, archived: bool) -> anyhow::Result<ProjectRow> {
         let conn = self.conn.lock().unwrap();
         let _project = get_project_locked(&conn, id)?
             .ok_or_else(|| anyhow::anyhow!("project not found: {id}"))?;

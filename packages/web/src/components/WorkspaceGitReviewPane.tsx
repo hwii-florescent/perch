@@ -17,7 +17,7 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
   const sessions = usePerchStore((current) => current.sessions);
   const workspaceSessions = useMemo(
     () => sessions
-      .filter((session) => !session.archived && (session.workspaceId === workspaceId || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path)))
+      .filter((session) => session.workspaceId === workspaceId || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path))
       .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId ?? session.lastAgent })),
     [sessions, workspace, workspaceId],
   );

@@ -1116,45 +1116,35 @@ mod tests {
     }
 
     #[test]
-    fn project_creation_is_idempotent_and_does_not_unarchive() {
+    fn project_creation_is_idempotent_and_a_deleted_project_comes_back_fresh() {
         let path = temp_db_path("workspace-idempotent");
         let project_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&project_dir).unwrap();
         let db = HistoryDb::open(&path).unwrap();
+        let dir = project_dir.to_string_lossy();
 
         let (first, workspace) = db
-            .create_project(
-                "local",
-                &project_dir.to_string_lossy(),
-                Some("Original"),
-                Some("creation-head"),
-            )
+            .create_project("local", &dir, Some("Original"), Some("creation-head"))
             .unwrap();
-        db.set_project_archived(&first.id, true).unwrap();
         let (again, same_workspace) = db
-            .create_project(
-                "local",
-                &project_dir.to_string_lossy(),
-                Some("Changed"),
-                Some("later-head"),
-            )
+            .create_project("local", &dir, Some("Changed"), Some("later-head"))
             .unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(again.name, "Original");
-        assert!(again.archived);
         assert_eq!(same_workspace.id, workspace.id);
-        assert_eq!(workspace.start_snapshot.as_deref(), Some("creation-head"));
-        assert_eq!(same_workspace.start_snapshot, workspace.start_snapshot);
-        assert!(db.focus_project(&first.id).is_err());
+        assert_eq!(
+            same_workspace.start_snapshot.as_deref(),
+            Some("creation-head")
+        );
 
-        let restored = db.set_project_archived(&first.id, false).unwrap();
-        assert!(!restored.archived);
-        let (_, focused) = db.focus_project(&first.id).unwrap();
-        assert_eq!(focused.id, workspace.id);
-        let (_, _, active_project, active_workspace) =
-            db.workspace_snapshot("local", None).unwrap();
-        assert_eq!(active_project.as_deref(), Some(first.id.as_str()));
-        assert_eq!(active_workspace.as_deref(), Some(workspace.id.as_str()));
+        db.delete_project(&first.id).unwrap();
+        assert!(db.focus_project(&first.id).is_err());
+        let (fresh, fresh_workspace) = db
+            .create_project("local", &dir, Some("Changed"), None)
+            .unwrap();
+        assert_ne!(fresh.id, first.id);
+        assert_eq!(fresh.name, "Changed");
+        assert_ne!(fresh_workspace.id, workspace.id);
 
         drop(db);
         std::fs::remove_dir_all(&project_dir).ok();
@@ -1162,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_project_removes_its_sessions_and_unlists_its_folder() {
+    fn removing_a_project_lists_its_sessions_and_unlists_its_folder() {
         let path = temp_db_path("remove-project-sessions");
         let removed = std::env::temp_dir().join(format!("perch-removed-{}", Uuid::new_v4()));
         let kept = std::env::temp_dir().join(format!("perch-kept-{}", Uuid::new_v4()));
@@ -1173,23 +1163,17 @@ mod tests {
         let (project, _) = db
             .create_project("local", &removed_path, None, None)
             .unwrap();
-        let (kept_project, _) = db.create_project("local", &kept_path, None, None).unwrap();
+        db.create_project("local", &kept_path, None, None).unwrap();
         db.create_session("gone", &removed_path).unwrap();
         db.create_session("stays", &kept_path).unwrap();
-        assert!(db
-            .listed_workspace_at("local", &removed_path)
-            .unwrap()
-            .is_some());
-        assert!(db
-            .archive_sessions_of_removed_projects()
-            .unwrap()
-            .is_empty());
-
-        db.set_project_archived(&project.id, true).unwrap();
         assert_eq!(
-            db.archive_sessions_of_removed_projects().unwrap(),
+            db.local_session_ids(Some(&project.id)).unwrap(),
             vec!["gone".to_string()]
         );
+        // Nothing is archived, so there is nothing for startup to purge.
+        assert!(db.local_session_ids(None).unwrap().is_empty());
+
+        db.delete_project(&project.id).unwrap();
         assert!(db
             .listed_workspace_at("local", &removed_path)
             .unwrap()
@@ -1198,16 +1182,62 @@ mod tests {
             .listed_workspace_at("local", &kept_path)
             .unwrap()
             .is_some());
-        // "stays" was untouched: it is still open until its own project goes.
-        db.set_project_archived(&kept_project.id, true).unwrap();
-        assert_eq!(
-            db.archive_sessions_of_removed_projects().unwrap(),
-            vec!["stays".to_string()]
-        );
+        assert!(db.archived_project_ids().unwrap().is_empty());
 
         drop(db);
         std::fs::remove_dir_all(&removed).ok();
         std::fs::remove_dir_all(&kept).ok();
+    }
+
+    #[test]
+    fn archived_leftovers_are_listed_for_the_startup_purge() {
+        let path = temp_db_path("archived-purge");
+        let (kept, gone) = (
+            std::env::temp_dir().join(format!("perch-kept-{}", Uuid::new_v4())),
+            std::env::temp_dir().join(format!("perch-gone-{}", Uuid::new_v4())),
+        );
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::create_dir_all(&gone).unwrap();
+        let db = HistoryDb::open(&path).unwrap();
+        db.create_project("local", &kept.to_string_lossy(), None, None)
+            .unwrap();
+        let (gone_project, _) = db
+            .create_project("local", &gone.to_string_lossy(), None, None)
+            .unwrap();
+        for (id, dir) in [("open", &kept), ("closed", &kept), ("orphaned", &gone)] {
+            db.create_session(id, &dir.to_string_lossy()).unwrap();
+        }
+        {
+            // What archiving used to leave behind.
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE sessions SET archived = 1 WHERE id = 'closed'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE projects SET archived = 1 WHERE id = ?1",
+                params![gone_project.id],
+            )
+            .unwrap();
+        }
+        let mut leftovers = db.local_session_ids(None).unwrap();
+        leftovers.sort();
+        assert_eq!(leftovers, ["closed", "orphaned"]);
+        assert_eq!(
+            db.archived_project_ids().unwrap(),
+            [gone_project.id.clone()]
+        );
+
+        for id in &leftovers {
+            db.delete_session(id).unwrap();
+        }
+        db.delete_project(&gone_project.id).unwrap();
+        assert!(db.local_session_ids(None).unwrap().is_empty());
+        assert!(db.archived_project_ids().unwrap().is_empty());
+        assert!(db.get_session("open").unwrap().is_some());
+
+        drop(db);
+        std::fs::remove_dir_all(&kept).ok();
+        std::fs::remove_dir_all(&gone).ok();
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -1448,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn archiving_active_project_selects_or_clears_a_visible_fallback() {
+    fn deleting_active_project_selects_or_clears_a_visible_fallback() {
         let path = temp_db_path("workspace-fallback");
         let first_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
         let second_dir = std::env::temp_dir().join(format!("perch-project-{}", Uuid::new_v4()));
@@ -1462,7 +1492,7 @@ mod tests {
             .create_project("local", &second_dir.to_string_lossy(), None, None)
             .unwrap();
         db.focus_project(&first.id).unwrap();
-        db.set_project_archived(&first.id, true).unwrap();
+        db.delete_project(&first.id).unwrap();
         let (_, _, active_project, active_workspace) =
             db.workspace_snapshot("local", None).unwrap();
         assert_eq!(active_project.as_deref(), Some(second.id.as_str()));
@@ -1471,7 +1501,7 @@ mod tests {
             Some(second_workspace.id.as_str())
         );
 
-        db.set_project_archived(&second.id, true).unwrap();
+        db.delete_project(&second.id).unwrap();
         let (_, _, active_project, active_workspace) =
             db.workspace_snapshot("local", None).unwrap();
         assert!(active_project.is_none());

@@ -2003,7 +2003,7 @@ body {
   flex-shrink: 0;
 }
 
-/* Bulk "archive all sessions in this project" trigger — sits in the project
+/* Bulk "close all sessions in this project" trigger — sits in the project
    header alongside the worktree-menu branch button, styled the same way
    (icon-only, no border, dims until hovered) so the header reads as one
    family of affordances rather than a mismatched extra control. */
@@ -4273,115 +4273,6 @@ body {
   flex-shrink: 0;
 }
 
-/* Archived-sessions subpage */
-
-.settings-modal__back {
-  background: none;
-  border: none;
-  color: var(--subtext-0);
-  font-size: 1.2rem;
-  line-height: 1;
-  padding: 0.1rem 0.4rem 0.25rem;
-  margin-right: 0.4rem;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: color 0.12s ease, background 0.12s ease;
-}
-
-.settings-modal__back:hover {
-  color: var(--text);
-  background: var(--surface-1);
-}
-
-/* The title sits between the back button and the close button, so let it take
- * the slack in the header's space-between layout. */
-.settings-modal__back + .settings-modal__title {
-  flex: 1;
-}
-
-.settings-modal__archived-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.settings-modal__archived-group + .settings-modal__archived-group {
-  margin-top: 0.9rem;
-}
-
-/* Host header above each group — same visual register as the sidebar's host
- * chip: small caps-ish label, accent colored. */
-.settings-modal__archived-group-title {
-  margin: 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-}
-
-.settings-modal__archived-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.settings-modal__archived-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  background: var(--surface-1);
-  border: 1px solid var(--overlay-0);
-  border-radius: var(--radius);
-  font-size: 0.82rem;
-}
-
-.settings-modal__archived-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.settings-modal__archived-title {
-  font-weight: 600;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-modal__archived-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.74rem;
-  color: var(--subtext-0);
-  min-width: 0;
-}
-
-.settings-modal__archived-project {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-modal__archived-date {
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-/* `--danger` has `margin-left: auto` for the host/model rows; here the body
- * already takes the slack, so the two action buttons stay side by side. */
-.settings-modal__archived-row .settings-modal__btn--danger {
-  margin-left: 0;
-}
-
 /* Add row */
 
 .settings-modal__add-row {
@@ -4459,37 +4350,8 @@ body {
   min-width: 0;
 }
 
-/* Hover archive icon — single-click archive/unarchive toggle. Hidden until
- * the row is hovered/focused, same reveal pattern as .session-item__delete-btn. */
-.session-item__archive-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 1.6rem;
-  background: none;
-  border: none;
-  color: var(--subtext-0);
-  font-size: 0.8rem;
-  cursor: pointer;
-  padding: 0;
-  border-left: 1px solid transparent;
-  transition: color 0.1s ease, background 0.1s ease;
-}
-
-.session-item__wrapper:hover .session-item__archive-btn,
-.session-item__wrapper:focus-within .session-item__archive-btn {
-  display: flex;
-}
-
-.session-item__archive-btn:hover {
-  color: var(--text);
-  background: var(--surface-1);
-}
-
 /* Hover trash icon — one-click, immediate delete (no confirmation). Hidden
- * until the row is hovered/focused, same reveal pattern as
- * .session-item__archive-btn. */
+ * until the row is hovered/focused. */
 .session-item__delete-btn {
   display: none;
   align-items: center;
