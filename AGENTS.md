@@ -32,6 +32,7 @@ cargo fmt --check && cargo clippy --workspace --all-targets   # expect exactly 5
 cargo run -p perch-core -- --port 7788     # flags/env: --db-path PERCH_DB, --hosts-path PERCH_HOSTS, PERCHD_DIR, PERCH_SETTINGS, --headless, --base-path
 cargo run -p perch-desktop                 # macOS / Linux+webkit2gtk; PERCH_DESKTOP_TEST=1 = hidden, unfocused window
 npm run build && (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build)   # installers
+scripts/reinstall-desktop.sh               # macOS: build perch.app, quit, install to /Applications, reopen (perchd keeps running)
 cd e2e && npx playwright test <spec> [-g name]   # boots :7799 + :7800 itself; real agent turns
 cd e2e && npx playwright test -c worktree-lifecycle.config.ts   # phase 3, own core on :7796
 ```
