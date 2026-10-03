@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cn } from "../lib/cn";
 import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { applyStoredTabOrder, saveTabOrder } from "../tabOrder";
@@ -8,6 +9,14 @@ import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import type { SessionSummary } from "@perch/shared";
 
 const MAX_TAB_LABEL = 24;
+
+// Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
+const TAB = "shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-overlay-1 [font-family:inherit] hover:border-overlay-1 hover:text-fg";
+const TAB_ACTIVE = "border-overlay-1 bg-surface-1 text-fg";
+const CLOSE = "absolute top-1/2 right-[0.3rem] h-[1.1rem] w-[1.1rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-overlay-1 [border:0] [font-family:inherit] [transform:translateY(-50%)]";
+const closeButton = (active: boolean) => cn(CLOSE, active
+  ? "text-panel-bg hover:bg-[color-mix(in_srgb,var(--panel-bg)_25%,transparent)] hover:text-panel-bg"
+  : "hover:bg-surface-1 hover:text-fg");
 
 /** Short pill label for a tab. Falls back to "New session" for a session
  * with no user messages yet (title is "" until the first chat.send). */
@@ -129,14 +138,14 @@ export function TabBar() {
   }
 
   return (
-    <div className="tab-bar" data-testid="tab-bar" data-tauri-drag-region>
+    <div className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {orderedTabs.map((s) =>
         renamingId === s.id ? (
           <input
             key={s.id}
             ref={renameInputRef}
             type="text"
-            className="tab-bar__rename-input"
+            className="w-40 shrink-0 rounded-ui border border-accent bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] [outline:none]"
             data-testid="rename-input"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
@@ -147,17 +156,16 @@ export function TabBar() {
             }}
           />
         ) : (
-          <span key={s.id} className="tab-bar__tab-wrap">
+          <span key={s.id} className="relative inline-flex shrink-0">
           <button
             type="button"
-            className={[
+            className={cn(
               "tab-bar__tab",
-              s.id === sessionId && !fileShown ? "tab-bar__tab--active" : "",
-              s.id === draggingId ? "tab-bar__tab--dragging" : "",
-              s.id === dragOverId ? "tab-bar__tab--drag-over" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
+              TAB,
+              s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
+              s.id === draggingId && "opacity-50",
+              s.id === dragOverId && "border-accent shadow-[-2px_0_0_var(--accent)]",
+            )}
             data-testid={`tab-${s.id}`}
             title={s.title || "New session"}
             draggable
@@ -183,7 +191,7 @@ export function TabBar() {
            * end (the agent's own transcript stays on disk). */}
           <button
             type="button"
-            className={"tab-bar__close" + (s.id === sessionId ? " tab-bar__close--active" : "")}
+            className={closeButton(s.id === sessionId)}
             data-testid={`tab-close-${s.id}`}
             title="Close session"
             aria-label={`Close ${tabLabel(s)}`}
@@ -199,7 +207,7 @@ export function TabBar() {
 
       <button
         type="button"
-        className="tab-bar__new"
+        className="h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:border-accent hover:text-fg"
         data-testid="tab-new"
         title="New session in this workspace"
         aria-label="New session in this workspace"
@@ -230,19 +238,19 @@ function FileTabButton({ tab, active }: { tab: FileTab; active: boolean }) {
   });
   const name = tab.path.split("/").pop() || tab.path;
   return (
-    <span className="tab-bar__tab-wrap">
+    <span className="relative inline-flex shrink-0">
       <button
         type="button"
-        className={"tab-bar__tab tab-bar__tab--file" + (active ? " tab-bar__tab--active" : "")}
+        className={cn("tab-bar__tab", TAB, active && ["tab-bar__tab--active", TAB_ACTIVE])}
         data-testid={`file-tab-${tab.path}`}
         title={tab.path}
         onClick={() => open(tab.workspaceId, tab.path)}
       >
-        {name}{dirty && <span className="tab-bar__dirty" aria-label="unsaved changes"> ●</span>}
+        {name}{dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>
       <button
         type="button"
-        className={"tab-bar__close" + (active ? " tab-bar__close--active" : "")}
+        className={closeButton(active)}
         data-testid={`file-tab-close-${tab.path}`}
         aria-label={`Close ${name}`}
         onClick={() => close(fileTabKey(tab))}

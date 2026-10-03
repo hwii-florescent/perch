@@ -191,6 +191,40 @@ const STATES = [
     });
     await sleep(300);
   }, nocapture: true },
+  // Tab strip with two tabs: inactive tab, drag source/target, inline rename.
+  // The second session is closed again by 05i so later states are unchanged.
+  { name: "05f-two-tabs", run: async (page, ctx) => {
+    await page.getByTestId("tab-new").click();
+    await page.getByTestId("new-session-popover-agent").selectOption("terminal");
+    await page.getByTestId("project-option-0").click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid^="tab-"]:not([data-testid^="tab-close"]):not([data-testid="tab-bar"]):not([data-testid="tab-new"])').length === 2, null, { timeout: 30000 });
+    await page.locator('[data-testid="persistent-agent-terminal"][data-terminal-id]:visible').first().waitFor({ timeout: 30000 });
+    const ids = await page.locator('[data-testid^="tab-"]:not([data-testid^="tab-close"]):not([data-testid="tab-bar"]):not([data-testid="tab-new"])').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid").slice(4)));
+    if (ids.length !== 2) throw new Error(`expected 2 tabs, got ${ids.length}`);
+    ctx.tab2Id = ids.find((i) => i !== ctx.tabId);
+    await sleep(1200);
+  } },
+  { name: "05g-tab-drag-over", run: async (page, ctx) => {
+    const dt = await page.evaluateHandle(() => new DataTransfer());
+    await page.getByTestId(`tab-${ctx.tabId}`).dispatchEvent("dragstart", { dataTransfer: dt });
+    await page.getByTestId(`tab-${ctx.tab2Id}`).dispatchEvent("dragover", { dataTransfer: dt });
+    await sleep(200);
+    if (!(await page.getByTestId(`tab-${ctx.tabId}`).evaluate((n) => getComputedStyle(n).opacity === "0.5"))) throw new Error("source tab not in dragging state");
+  } },
+  { name: "05h-tab-rename", run: async (page, ctx) => {
+    await page.getByTestId(`tab-${ctx.tabId}`).dispatchEvent("dragend");
+    await page.getByTestId(`tab-${ctx.tab2Id}`).dblclick();
+    await page.getByTestId("rename-input").waitFor();
+    await sleep(200);
+  } },
+  { name: "05i-two-tabs-closed", nocapture: true, run: async (page, ctx) => {
+    // the capture ends by blurring, which already commits the (unchanged) rename
+    if (await page.getByTestId("rename-input").count()) await page.getByTestId("rename-input").press("Escape");
+    await page.getByTestId(`tab-close-${ctx.tab2Id}`).click();
+    await page.getByTestId(`tab-${ctx.tab2Id}`).waitFor({ state: "detached", timeout: 10000 });
+    await page.getByTestId(`tab-${ctx.tabId}`).click();
+    await sleep(800);
+  } },
   { name: "06-tab-hover-menu", run: async (page, ctx) => {
     await page.getByTestId(`tab-${ctx.tabId}`).click({ button: "right" });
     await sleep(300);
@@ -357,6 +391,12 @@ const STATES = [
     await page.getByTestId("mobile-switcher").waitFor();
     await sleep(400);
   } },
+  // The macOS app's title-bar row: brand padded for the traffic lights, then collapsed.
+  { name: "22b-mac-desktop-brand", tauri: true, run: async () => {} },
+  { name: "22c-mac-desktop-brand-collapsed", tauri: true, run: async (page) => {
+    await page.getByTestId("sidebar-collapse-toggle").click();
+    await sleep(300);
+  } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
   // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
   { name: "23b-onboarding-phone", fresh: true, viewport: { width: 390, height: 520 }, run: async (page) => {
@@ -492,9 +532,11 @@ async function snapEngine(engine, dist, outDir, only) {
     core = await bootCore(dist);
     browser = await ENGINES[engine].launch();
     const ctx = {};
-    const mk = async (fresh) => {
+    const mk = async (fresh, tauri = false) => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
       if (!fresh) await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
+      // The macOS app: App.tsx pads the brand for the traffic lights when this global exists.
+      if (tauri) await context.addInitScript(() => { window.__TAURI_INTERNALS__ = { invoke: async () => null, transformCallback: () => 0 }; });
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
       await page.clock.setFixedTime(new Date("2026-01-01T12:00:00Z"));
@@ -512,9 +554,9 @@ async function snapEngine(engine, dist, outDir, only) {
       if (index > lastWanted) break;
       const wanted = !state.nocapture && (!only || state.name.includes(only));
       try {
-        if (state.fresh) {
+        if (state.fresh || state.tauri) {
           if (!wanted) continue;
-          const fresh = await mk(true);
+          const fresh = await mk(!!state.fresh, !!state.tauri);
           if (state.viewport) { await fresh.page.setViewportSize(state.viewport); await sleep(300); }
           await state.run(fresh.page, ctx);
           await capture(fresh.page, outDir, state.name, state);

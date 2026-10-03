@@ -50,6 +50,9 @@ Done:
 - **Slice 7: workspace tools drawer + resize handle + `.app__body`**
   (`WorkspaceTools.tsx`, `ResizeHandle.tsx`, `App.tsx`; `workspace-tools.css`
   deleted). Harness gained `11b-drawer-focus`. See "Slice log".
+- **Slice 8: toolbar + tab bar** (`App.tsx` top row, brand, toggles, `.dock-area`,
+  file-tab view; `components/TabBar.tsx`; `toolbar-tabs.css` deleted; two
+  `mobile.css` selectors moved). Harness gained `05f`–`05i`, `22b`, `22c`.
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -62,7 +65,7 @@ Done:
 | pane-menu.css | – | **migrated and deleted** |
 | navigator.css | – | **migrated and deleted** (Navigator + KeybindHelp) |
 | workspace-tools.css | – | **migrated and deleted** (drawer, `.app__body`, `ResizeHandle`) |
-| toolbar-tabs.css | 251 | not started |
+| toolbar-tabs.css | – | **migrated and deleted** (top row, tab bar, `.dock-area`, file-tab view) |
 | sidebar.css | 126 | not started |
 | sidebar-projects.css | 246 | not started |
 | host-switcher.css | 226 | not started |
@@ -86,7 +89,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`toolbar-tabs.css` → … ; leave
+`sidebar.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -237,6 +240,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 5 | pane/row context menu | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `06b`): no computed-style, box, text, hover or focus difference in any of the 34 states in Chromium or WebKit; `06` (pane menu: normal, danger, disabled Close) and `06b` (inline rename) pixel-identical in both; 7 Chromium corner-speck screenshot diffs reviewed by name (03, 13, 14, 16, 17b, 20, 20c; the 17b menu region itself is clean). e2e after `npm run build`: pane-splitting (5/5), native-ui claude/codex/omp (exercise Stop agent) pass. |
 | 6 | navigator + keybind help | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `09b`/`09c`/`10b`): no computed-style, box, text, hover or focus difference in any state in Chromium or WebKit; 09, 09b, 09c, 10, 10b pixel-identical. 10 Chromium corner-speck screenshot diffs (03, 13, 14, 16, 17, 17c, 18, 20, 20c, 22; 1-12 px, none in a modal) reviewed by name. e2e after `npm run build`: keybindings (5/5). |
 | 7 | workspace tools drawer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `11b`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 40 states in Chromium or WebKit, incl. the divider `::after` highlight and the drawer buttons' focus. 11 Chromium corner-speck screenshot diffs (04, 06, 12-17b, 20, 20c; 1-9 px; the drawer ones, 13/14 at x=759 y=41, are the same specks slice 6 showed before the drawer was migrated) reviewed by name. e2e after `npm run build`: workspace-tabs and the layout specs pass (4/4); `toasts` (TN1, TN2, real haiku turns) pass against the migrated build. `workspace-visual-qa` fails at line 258 on the committed tree too (see Pre-existing failures). |
+| 8 | toolbar + tab bar | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 46 states in Chromium or WebKit, including the new two-tab strip (`05f`), drag source/target (`05g`, opacity + accent edge), inline tab rename (`05h`), and the macOS-app brand padding, expanded and collapsed (`22b`, `22c`). 11 Chromium corner-speck screenshot diffs (03, 12, 13, 14, 16, 17b, 17c, 18, 20c, 22, 22b; 1-24 px, at the tab-edge x=272/479 and sidebar x=9 specks seen before this slice, and the start-picker box corners in 03/22b) reviewed by name; 05f/05g/05h/22c are pixel-identical. e2e after `npm run build`: wave2 (tab drag-reorder, rename), workspace-tabs, responsive, pane-splitting, keybindings pass; `workspace-files-durable` failed once at line 266 in the multi-spec run and passed 2/2 alone (timing flake under load). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -296,6 +300,20 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 8 notes: the harness gained `tauri: true` states (a fresh context that
+defines `window.__TAURI_INTERNALS__`, as the macOS app does), the only way to
+see `App.tsx`'s `MAC_DESKTOP` brand padding (`pl-[78px]`). Folding
+`.toolbar` + `.toolbar--tabs` and `.tab-bar` + `.toolbar--tabs .tab-bar` into
+single class lists is safe because each only ever appears together; the legacy
+overrides were resolved by hand (e.g. `.tab-bar`'s `flex-shrink:0` is dead:
+`flex:1` follows it). `translateY(-50%)` is `[transform:translateY(-50%)]`,
+because `-translate-y-1/2` sets the `translate` property and changes the
+computed `transform`. The mobile `.tab-bar{display:none}` safety rule became
+`max-[700px]:hidden` on the element; `.app--mobile .toolbar__button` min-height
+became `min-h-[44px]` on the phone's button (the only one under `.app--mobile`).
+`env(safe-area-inset-top)` is 0 headless, so the built CSS was checked to contain
+it. Hooks kept: `tab-bar`, `tab-bar__tab`, `tab-bar__tab--active`, `dock-area`.
 
 Slice 7 notes: the harness now falls back to `aria-label` as a record id (hover
 and focus dumps) so unlabeled icon buttons (the drawer's ×) can be targets.

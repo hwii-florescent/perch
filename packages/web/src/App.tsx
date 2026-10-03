@@ -21,10 +21,13 @@ import { PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
 import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { cn } from "./lib/cn";
 
 const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 // The Tauri app on macOS draws its traffic lights over the web view's top row.
 const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
+// The sidebar and drawer toggles blend into the top row and fill only on hover.
+const ICON_BUTTON = "inline-flex items-center rounded-ui border border-transparent bg-transparent px-2 py-[0.2rem] text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
 const toolsDefault = () => Math.min(760, Math.round(window.innerWidth * 0.46));
 
 // Per-viewer column widths (px), set by dragging the dividers.
@@ -170,7 +173,7 @@ export default function App() {
   const terminalButton = isMobile ? (
     <button
       type="button"
-      className="toolbar__button"
+      className="min-h-[44px] rounded-ui border border-overlay-0 bg-surface-1 px-[0.6rem] py-[0.3rem] text-[0.9rem] leading-none text-fg [font-family:inherit] hover:border-accent"
       title="Open terminal"
       aria-label="Open terminal"
       aria-pressed={mobilePane === "terminal"}
@@ -181,7 +184,7 @@ export default function App() {
   ) : (
     <button
       type="button"
-      className="toolbar__button toolbar__button--icon"
+      className={ICON_BUTTON}
       title="Files and Git for this workspace"
       aria-label="Files and Git"
       data-testid="workspace-tools-toggle"
@@ -198,7 +201,7 @@ export default function App() {
   const sidebarToggle = (
     <button
       type="button"
-      className="toolbar__button toolbar__button--icon"
+      className={ICON_BUTTON}
       title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       data-testid="sidebar-collapse-toggle"
@@ -219,7 +222,7 @@ export default function App() {
     >
       {isMobile ? (
         <>
-          <div className="toolbar">{terminalButton}</div>
+          <div className="flex shrink-0 justify-end border-b border-b-overlay-0 bg-surface-0 px-2 pb-[0.35rem] pt-[calc(0.35rem+env(safe-area-inset-top))]">{terminalButton}</div>
           <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
         </>
       ) : (
@@ -227,9 +230,16 @@ export default function App() {
         // the drawer toggle. In the macOS app it is also the title bar: the
         // traffic lights sit in the brand section's left padding and empty
         // space drags the window (crates/perch-desktop/src/main.rs).
-        <div className="toolbar toolbar--tabs" data-tauri-drag-region>
-          <div className={"toolbar__brand" + (sidebarCollapsed ? " toolbar__brand--collapsed" : "")} data-tauri-drag-region>
-            <span className="toolbar__app-name" data-tauri-drag-region>perch</span>
+        <div className="box-border flex h-9 shrink-0 items-center justify-end gap-2 border-b border-b-overlay-0 bg-panel-bg pr-2" data-tauri-drag-region>
+          <div
+            className={cn(
+              "box-border flex shrink-0 items-center justify-between gap-2 self-stretch pr-2",
+              MAC_DESKTOP ? "pl-[78px]" : "pl-3",
+              !sidebarCollapsed && "-mr-2 w-[var(--sidebar-width,240px)] border-r border-r-overlay-0",
+            )}
+            data-tauri-drag-region
+          >
+            <span className="text-[0.85rem] font-semibold text-subtext-0 select-none" data-tauri-drag-region>perch</span>
             {sidebarToggle}
           </div>
           <TabBar />
@@ -252,7 +262,7 @@ export default function App() {
             onCommit={(px) => writeWidth(SIDEBAR_KEY, px)}
           />
         )}
-        <main className="dock-area">
+        <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
           {isMobile ? (
             <MobilePaneShell
               activePane={mobilePane}
@@ -267,7 +277,7 @@ export default function App() {
             <>
               <DockviewShell />
               {activeFile && (
-                <div className="file-tab-view">
+                <div className="absolute inset-0 z-10 flex bg-panel-bg">
                   <WorkspaceFilesView
                     key={fileTabKey(activeFile)}
                     layout="editor"

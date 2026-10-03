@@ -110,8 +110,7 @@
 }
 
 .app--mobile .agent-picker,
-.app--mobile .cli-start__secondary,
-.app--mobile .toolbar__button {
+.app--mobile .cli-start__secondary {
   min-height: 44px;
 }
 
@@ -318,8 +317,7 @@
  * these components from the tree at this width, so in the normal case this
  * media query never has anything to hide. */
 @media (max-width: 700px) {
-  .sidebar,
-  .tab-bar {
+  .sidebar {
     display: none;
   }
 }
