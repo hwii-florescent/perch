@@ -526,10 +526,59 @@ const STATES = [
     await page.getByTestId("mobile-header").waitFor({ timeout: 10000 });
     await sleep(500);
   } },
+  // Phone pane tabs: Files, Git, Terminal, the "choose a workspace" placeholder, then back to Chat.
+  { name: "21b-phone-pane-files", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-pane-files").click();
+    await page.getByTestId("mobile-active-pane-files").waitFor();
+    await sleep(800);
+  } },
+  { name: "21c-phone-pane-git", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-pane-git").click();
+    await page.getByTestId("mobile-active-pane-gitReview").waitFor();
+    await sleep(800);
+  } },
+  { name: "21d-phone-pane-terminal", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-pane-terminal").click();
+    await page.getByTestId("mobile-active-pane-terminal").waitFor();
+    await sleep(800);
+  } },
+  { name: "21e-phone-pane-empty", viewport: { width: 390, height: 844 }, run: async (page, ctx) => {
+    await page.evaluate(() => { window.__visWs = window.usePerchStore.getState().activeWorkspaceId; window.usePerchStore.setState({ activeWorkspaceId: null }); });
+    await page.getByTestId("mobile-pane-files").click();
+    await page.getByText("Choose a workspace from Switch before opening files.").waitFor();
+    await sleep(300);
+  } },
+  { name: "21f-phone-pane-chat", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ activeWorkspaceId: window.__visWs }));
+    await page.getByTestId("mobile-pane-chat").click();
+    await page.getByTestId("mobile-active-pane-chat").waitFor();
+    await sleep(500);
+  } },
   { name: "22-phone-switcher", viewport: { width: 390, height: 844 }, run: async (page) => {
     await page.getByTestId("mobile-switch").click();
     await page.getByTestId("mobile-switcher").waitFor();
     await sleep(400);
+  } },
+  // Without workspace navigation the switcher lists sessions by project instead.
+  { name: "22a-phone-switcher-sessions", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-switcher-close").click();
+    // The harness server keeps no session rows for these panes, so inject two (one active) as 01c2 does.
+    await page.evaluate(() => {
+      const st = window.usePerchStore;
+      window.__visPhone = { caps: st.getState().workspaceCapabilities, sessions: st.getState().sessions, sid: st.getState().sessionId };
+      st.setState({ workspaceCapabilities: [], sessionId: "vis-m1", sessions: [
+        { id: "vis-m1", title: "Active phone session", cwd: "/tmp/perch-visual/repo", createdAt: 1, status: "idle" },
+        { id: "vis-m2", title: "", cwd: "/tmp/perch-visual/repo", createdAt: 2, status: "idle" },
+        { id: "vis-m3", title: "A very long session title that has to be clipped by the narrow switcher panel", cwd: "/tmp/perch-visual/other", hostId: "vis-a", createdAt: 3, status: "idle" },
+      ] });
+    });
+    await page.getByTestId("mobile-switch").click();
+    await page.locator(".mobile-switcher__project").first().waitFor();
+    await sleep(400);
+  } },
+  { name: "22a2-phone-switcher-closed", nocapture: true, viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-switcher-close").click();
+    await page.evaluate(() => { const p = window.__visPhone; window.usePerchStore.setState({ workspaceCapabilities: p.caps, sessions: p.sessions, sessionId: p.sid }); });
   } },
   // The macOS app's title-bar row: brand padded for the traffic lights, then collapsed.
   { name: "22b-mac-desktop-brand", tauri: true, run: async () => {} },
@@ -631,7 +680,17 @@ async function capture(page, outDir, name, state = {}) {
   if (hideTerm) await hideTerm.evaluate((n) => n.remove());
 
   // hover/focus read end states: freeze transitions so timing can't leak in
-  await page.addStyleTag({ content: "*,*::before,*::after{transition:none!important;animation:none!important}" }).then((h) => h.evaluate((n) => n.setAttribute("data-vis-freeze", "1")));
+  // An attribute on <html> gates the rule: removing a `*` style tag leaves WebKit with stale `none`
+  // transitions on elements behind overlays, and that leaked into the next states' dumps.
+  await page.evaluate(() => {
+    if (!document.getElementById("vis-freeze-css")) {
+      const st = document.createElement("style");
+      st.id = "vis-freeze-css";
+      st.textContent = "html[data-vis-freeze] *,html[data-vis-freeze] *::before,html[data-vis-freeze] *::after{transition:none!important;animation:none!important}";
+      document.head.append(st);
+    }
+    document.documentElement.setAttribute("data-vis-freeze", "1");
+  });
   // hover: each interactive element, plus its surrounding group (reveals)
   const targets = page.locator("button:visible, a:visible, [role=button]:visible, select:visible, input:visible, textarea:visible, [data-testid^=workspace-entry-]:visible, [data-testid^=workspace-project-]:visible, [data-testid^=session-item]:visible");
   const n = Math.min(await targets.count(), 45);
@@ -679,7 +738,7 @@ async function capture(page, outDir, name, state = {}) {
     focus.push(await readFocus("tab"));
   }
   fs.writeFileSync(`${outDir}/${name}.focus.json`, JSON.stringify(focus));
-  await page.evaluate(() => { document.activeElement?.blur(); document.querySelector("style[data-vis-freeze]")?.remove(); });
+  await page.evaluate(() => { document.activeElement?.blur(); document.documentElement.removeAttribute("data-vis-freeze"); });
 }
 
 /** One engine, one fresh core. Returns the list of failures (empty = clean). */

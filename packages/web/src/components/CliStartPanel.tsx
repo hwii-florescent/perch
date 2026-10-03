@@ -42,7 +42,7 @@ const BTN = "flex cursor-pointer flex-col gap-[0.15rem] rounded-ui border px-3 p
 const OFF = "disabled:cursor-not-allowed disabled:opacity-[0.55] disabled:hover:bg-surface-0";
 const PRIMARY = `${BTN} ${OFF} border-[color:color-mix(in_srgb,var(--accent)_55%,var(--panel-bg))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-bg))] font-semibold text-fg [font-family:inherit] [font-size:inherit] [line-height:inherit]`;
 const PROJECT = `${BTN} ${OFF} border-overlay-0 bg-surface-0 text-fg [font:inherit]`;
-const SECONDARY = `cli-start__secondary ${BTN} border-dashed border-overlay-0 bg-transparent text-[0.85rem] text-subtext-0 ${FONT}`;
+const SECONDARY = `[.app--mobile_&]:min-h-[44px] ${BTN} border-dashed border-overlay-0 bg-transparent text-[0.85rem] text-subtext-0 ${FONT}`;
 const STATUS_BUTTON = "cursor-pointer bg-transparent p-0 text-accent underline [border:0] [font:inherit]";
 
 function basename(path: string): string {

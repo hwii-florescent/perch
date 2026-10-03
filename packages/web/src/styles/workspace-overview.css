@@ -639,3 +639,9 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* Compact overview inside the phone switcher (MobileSwitcher). */
+.mobile-switcher__list--workspace .workspace-overview {
+  min-height: 100%;
+  border-bottom: 0;
+}

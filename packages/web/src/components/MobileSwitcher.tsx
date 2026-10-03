@@ -10,6 +10,7 @@
  * slide-over rather than an anchored popover.
  */
 import { usePerchStore } from "../store";
+import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { WorkspaceOverview } from "./WorkspaceOverview";
 import type { SessionSummary } from "@perch/shared";
@@ -82,17 +83,17 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
   }
 
   return (
-    <div className="mobile-switcher-backdrop" onClick={onClose}>
+    <div className="fixed inset-0 z-[3000] flex justify-end bg-[rgba(0,0,0,0.5)]" onClick={onClose}>
       <div
-        className="mobile-switcher"
+        className="flex h-full w-[min(320px,88vw)] flex-col overflow-hidden border-l border-l-overlay-0 bg-surface-0 shadow-[-8px_0_32px_rgba(0,0,0,0.5)]"
         data-testid="mobile-switcher"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mobile-switcher__header">
-          <span className="mobile-switcher__title">Sessions</span>
+        <div className="flex shrink-0 items-center justify-between border-b border-b-overlay-0 px-[0.9rem] pt-[calc(0.7rem_+_env(safe-area-inset-top))] pb-[0.7rem]">
+          <span className="text-[0.95rem] font-semibold text-fg">Sessions</span>
           <button
             type="button"
-            className="mobile-switcher__close"
+            className="cursor-pointer px-[0.3rem] py-[0.1rem] text-[1.3rem] leading-none text-subtext-0 [background:none] [border:none] hover:text-fg"
             data-testid="mobile-switcher-close"
             aria-label="Close"
             onClick={onClose}
@@ -101,10 +102,10 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
           </button>
         </div>
 
-        <div className="mobile-switcher__actions">
+        <div className="shrink-0 border-b border-b-overlay-0 px-[0.9rem] py-[0.6rem]">
           <button
             type="button"
-            className="mobile-switcher__new-btn"
+            className="w-full cursor-pointer rounded-ui bg-accent px-[0.6rem] py-[0.45rem] text-[0.85rem] font-semibold text-panel-bg [border:none] [font-family:inherit] disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="mobile-switcher-new-session"
             disabled={!connected}
             onClick={handleNewSession}
@@ -114,32 +115,32 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
         </div>
 
         {workspaceNavigationEnabled ? (
-          <div className="mobile-switcher__list mobile-switcher__list--workspace">
+          <div className="mobile-switcher__list--workspace flex-1 overflow-y-auto p-0">
             <WorkspaceOverview compact onNavigate={onClose} />
           </div>
         ) : (
-          <div className="mobile-switcher__list">
+          <div className="flex-1 overflow-y-auto py-[0.4rem]">
             {groups.map((group) => (
-              <div className="mobile-switcher__project" key={group.key}>
-                <div className="mobile-switcher__project-header" title={group.cwd}>
+              <div className="mobile-switcher__project py-[0.3rem]" key={group.key}>
+                <div className="flex items-center gap-[0.4rem] px-[0.9rem] py-[0.3rem] text-[0.75rem] font-semibold tracking-[0.03em] text-subtext-0 uppercase" title={group.cwd}>
                   {basename(group.cwd)}
                   {group.hostId !== "local" && (
-                    <span className="mobile-switcher__project-host">{group.hostId}</span>
+                    <span className="font-normal normal-case opacity-80">{group.hostId}</span>
                   )}
                 </div>
                 {group.sessions.map((s) => (
                   <button
                     type="button"
                     key={s.id}
-                    className={
-                      "mobile-switcher__session" +
-                      (s.id === sessionId ? " mobile-switcher__session--active" : "")
-                    }
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2 px-[0.9rem] py-2 text-left text-[0.85rem] [border:none] [font-family:inherit] [transition:background_0.1s_ease] hover:bg-surface-1",
+                      s.id === sessionId ? "bg-surface-1 text-accent" : "bg-transparent text-fg",
+                    )}
                     data-testid={`mobile-switcher-session-${s.id}`}
                     onClick={() => handleSwitch(s.id)}
                   >
                     <StatusDot session={s} />
-                    <span className="mobile-switcher__session-title">
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                       {s.title || "(new session)"}
                     </span>
                   </button>
@@ -149,10 +150,10 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
           </div>
         )}
 
-        <div className="mobile-switcher__footer">
+        <div className="shrink-0 border-t border-t-overlay-0 px-[0.9rem] pt-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]">
           <button
             type="button"
-            className="mobile-switcher__settings"
+            className="w-full cursor-pointer rounded-ui border border-overlay-0 px-[0.6rem] py-[0.4rem] text-left text-[0.82rem] text-fg [background:none] [font-family:inherit] hover:border-accent"
             data-testid="mobile-switcher-settings"
             title="Settings"
             aria-label="Settings"

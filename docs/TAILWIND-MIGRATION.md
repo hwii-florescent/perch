@@ -82,6 +82,12 @@ Done:
   `08d` (back); and the screenshot now hides the terminal instead of masking
   it while the modal is open (the mask painted over the whole modal, so 07/08
   had no pixel coverage before).
+- **Slice 16: phone chrome** (`MobileHeader.tsx`, `MobilePaneShell.tsx`,
+  `MobileSwitcher.tsx`, `.app--mobile` min-heights folded into `AGENT_PICKER`
+  and the CLI-start secondary button; `mobile.css` deleted). Harness gained
+  `21b`-`21f` (Files/Git/Terminal tabs, the no-workspace placeholder, back to
+  Chat) and `22a`/`22a2` (switcher in its sessions-by-project mode, with
+  injected sessions). The freeze rule is now gated by an attribute on `<html>`.
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -103,7 +109,7 @@ Done:
 | directory-browser.css | – | **migrated and deleted** (DirectoryBrowser + ConfirmDialog) |
 | cli-start.css | – | **migrated and deleted** (CliStartPanel, `AGENT_PICKER`, NoSessionPanel home) |
 | worktree-menu.css | – | **migrated and deleted** (WorktreeMenu popover + the shared `ui/icon-button` glyph button) |
-| mobile.css | 325 | not started |
+| mobile.css | – | **migrated and deleted** (MobileHeader/PaneShell/Switcher); the pane-fill child rule moved to `terminal.css`, the compact-overview rule to the end of `workspace-overview.css` |
 | pairing.css | – | **migrated and deleted** (`PairingGate`); 3 unrelated rules moved to the end of `settings.css`, `git-review.css`, `mobile.css` |
 | workspace-overview.css | 641 | not started |
 | composer.css | 500 | not started (Hosted chat is frozen: restyle only) |
@@ -118,7 +124,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`mobile.css` → `workspace-overview.css` → … ; leave
+`workspace-overview.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -277,6 +283,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 13 | directory browser + confirm dialog | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `03b`-`03e`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 62 states in Chromium or WebKit. 11 Chromium screenshot diffs (03, 03c, 03d, 03e, 05g, 12, 16b, 17c, 18, 20, 20c; 1-27 px) reviewed by name; the ones in migrated regions (03c: the ↑ crumb button corner x=18; 03e: the sidebar LOCAL badge corners) are ±1-7 levels on anti-aliased rounded corners (zoomed crop checked), the rest are the tab-edge / start-picker specks. 18 (confirm) differs by 1 px at the tab edge only. e2e after `npm run build`: workspace-foundation, sessions, worktrees, wave1, wave2.features, workspace-review, remote-git pass (24 + the second batch). |
 | 14 | CLI start + home | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit. 18 Chromium screenshot diffs of 1-18 px, all scattered anti-aliasing specks at sidebar/tab-edge corners (01a/04 crops checked: no visible change in the start card or picker). e2e after `npm run build`: nav, sessions, wave2.features, provider-config pass (10). |
 | 15 | settings modal | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08b`-`08d` and the modal screenshot fix): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit; no screenshot difference in any settings state (07, 08, 08b-08d, 20). 23 other Chromium screenshot diffs, all 1-29 px anti-aliasing specks at the sidebar/tab-edge corners. e2e after `npm run build`: settings, theme, provider-config, wave1, federation pass (15). `workspace-visual-qa` still fails at line 258 (pre-existing). |
+| 16 | phone chrome | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `21b`-`21f`, `22a` and the attribute-gated freeze): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit, except a WebKit-only `transition-property: all -> none` in `05d` that is a harness flake (the freeze leaving stale `none` on Dockview elements behind overlays; two isolated `--only 05d` runs, base and new, are identical, 0 differences). Chromium screenshot diffs of 1-14 px; the three in migrated regions (21d, 21e, 22) measured with a canvas pixel diff: max delta 1-2 levels, rounded-corner anti-aliasing of the pane tabs and switch button. e2e after `npm run build`: responsive, workspace-foundation, device-pairing, paired-phone-flows pass (8). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -336,6 +343,13 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 16 notes: `mobile-pane-shell__content`, `mobile-switcher__list--workspace`
+and `mobile-switcher__project` stay as tokens (two moved context rules and the
+harness select on them). The phone tab's `font: inherit` is
+`[font-family:inherit] [line-height:inherit]` only: an inherit-weight utility
+sorts after `font-bold` and flattens the active tab. An active tab still takes
+`hover:text-fg` (the old `:hover` rule out-ranked `--active`).
 
 Slice 15 notes: e2e selects `settings-modal__{body,backdrop,host-row,agent-block,
 model-row,theme-option--active}`, kept as unstyled hook tokens; `__panel--agents`
