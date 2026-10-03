@@ -35,6 +35,44 @@ const URL_ = `http://127.0.0.1:${PORT}`;
 const WORK = "/tmp/perch-visual";
 const REPO = `${WORK}/repo`;
 const pinGitScroll = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollTop > 0) el.scrollTop = 0; });
+// A hosted transcript for the frozen chat view: markdown, a thinking row, a bash call, an edit (diff and badge), a plan card, an error.
+const TRANSCRIPT = [
+  { id: "m1", role: "user", text: "Please fix the login bug and add a test.", thinking: "", tools: [], streaming: false },
+  { id: "m2", role: "assistant", agent: "claude", model: "haiku", turnStartedAt: 1767268800000, elapsedSec: 12, streaming: false,
+    text: "Here is what I did:\n\n## Fix\n\n1. Read the **handler**\n2. Patched `auth.ts`\n\n```ts\nconst ok = check(user);\n```\n\n> The test now passes.\n\nSee [the docs](https://example.com) for details.\n\n---\n\nDone.",
+    thinking: "Considering the options carefully before editing.",
+    tools: [
+      { name: "Bash", input: { command: "npm test" }, result: "3 passed", done: true },
+      { name: "Edit", input: { file_path: "src/auth.ts", old_string: "const ok = false;\nreturn ok;", new_string: "const ok = check(user);\nreturn ok;" }, result: "ok", done: true },
+    ] },
+  { id: "m3", role: "assistant", text: "1. Read the handler\n2. Patch the check\n3. Add a test", kind: "plan", thinking: "", tools: [], streaming: false, planApproved: false },
+  { id: "m4", role: "assistant", text: "", thinking: "", tools: [], streaming: false, error: "The agent exited unexpectedly." },
+];
+// Hosted chat on a fresh page: hosted mode and one claude session (known only to the page), with its slash commands.
+// `sessionId` is the store's active-session key; `transcript` fills the session's messages.
+const hostedPage = async (page, transcript = []) => {
+  await page.getByTestId("onboarding-dismiss").click();
+  await page.waitForFunction(() => !!window.usePerchStore.getState().settings);
+  await sleep(800);
+  const inject = (messages) => page.evaluate((msgs) => {
+    const st = window.usePerchStore.getState();
+    const sid = "hosted-vis";
+    window.usePerchStore.setState({
+      settings: { ...st.settings, chatMode: "hosted" },
+      sessions: [{ id: sid, title: "Hosted chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, lastAgent: "claude", status: "idle", cliStarted: false }],
+      sessionId: sid,
+      cliAgentBySession: { ...st.cliAgentBySession, [sid]: "claude" },
+      sessionCommands: { [sid]: { claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] } },
+      messagesBySession: { ...st.messagesBySession, [sid]: msgs },
+      messages: msgs,
+    });
+  }, messages);
+  await inject(transcript);
+  await page.locator(".chat__input textarea").waitFor();
+  await sleep(1200);
+  await inject(transcript); // the session switch and command fetch land first; put the fixtures back
+  await sleep(500);
+};
 // Refresh only reloads status and notes; flipping a diff option reloads the diff.
 const reloadGitDiff = async (page) => {
   await page.getByTestId("git-refresh").click();
@@ -1118,6 +1156,67 @@ const STATES = [
     await page.getByTestId("pairing-gate").waitFor();
     await page.getByTestId("pairing-code").fill("ABCD2345");
   } },
+  // Hosted composer (frozen UI). A fresh page gets hosted mode, one claude session and its slash commands injected
+  // through the store (no agent runs); the transcript stays empty, so these states cover the composer only.
+  { name: "24-hosted-composer", fresh: true, run: async (page) => {
+    await hostedPage(page);
+  } },
+  { name: "24b-composer-typed-plan", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await page.locator(".chat__input textarea").fill("Please fix the login bug\nand add a test");
+    await page.getByTestId("composer-plan-toggle").click();
+    await sleep(300);
+  } },
+  { name: "24c-composer-model-popover", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await page.getByTestId("model-chip").click();
+    await page.locator(".model-chip__popover").waitFor();
+    await sleep(300);
+  } },
+  { name: "24d-composer-effort-menu", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await page.getByTestId("effort-chip").click();
+    await page.getByTestId("effort-option-high").waitFor();
+    await sleep(300);
+  } },
+  { name: "24e-composer-slash", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    const box = page.locator(".chat__input textarea");
+    await box.fill("/");
+    await sleep(1500); // the server's command fetch lands first; put the fixtures back, then narrow the query
+    await page.evaluate(() => window.usePerchStore.setState({ sessionCommands: { "hosted-vis": { claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] } } }));
+    await box.fill("/re");
+    await page.getByTestId("composer-slash-popover").waitFor();
+    await page.keyboard.press("ArrowDown");
+    await sleep(300);
+  } },
+  { name: "24g-composer-attachment", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+    await page.locator(".attachment-bar__chips, .attachment-bar__error").first().waitFor({ timeout: 15000 });
+    await sleep(500);
+  } },
+  { name: "24h-hosted-transcript", fresh: true, run: async (page) => {
+    await hostedPage(page, TRANSCRIPT);
+    await page.locator(".message--assistant").first().waitFor();
+    await sleep(300);
+  } },
+  { name: "24i-hosted-transcript-expanded", fresh: true, run: async (page) => {
+    await hostedPage(page, TRANSCRIPT);
+    await page.locator("details.message__worked-for").first().evaluate((el) => { el.open = true; });
+    await page.locator("details.tool-row").evaluateAll((els) => els.forEach((el) => { el.open = true; }));
+    await sleep(400);
+  } },
+  { name: "24j-hosted-message-actions", fresh: true, holdHover: ".message--assistant", run: async (page) => {
+    await hostedPage(page, TRANSCRIPT);
+    await sleep(200);
+  } },
+  { name: "24k-hosted-streaming", fresh: true, run: async (page) => {
+    await hostedPage(page, [...TRANSCRIPT, { id: "m-stream", role: "assistant", text: "", thinking: "", tools: [], streaming: true }]);
+    await page.evaluate(() => window.usePerchStore.setState({ streamingMessageId: "m-stream", streamingMessageIdBySession: { "hosted-vis": "m-stream" } }));
+    await page.getByRole("button", { name: "Stop" }).waitFor();
+    await sleep(300);
+  } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
   // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
   { name: "23b-onboarding-phone", fresh: true, viewport: { width: 390, height: 520 }, run: async (page) => {
@@ -1322,7 +1421,7 @@ async function snapEngine(engine, dist, outDir, only) {
           if (!wanted) continue;
           const fresh = await mk(!!state.fresh, !!state.tauri, !!state.unpaired);
           if (state.viewport) { await fresh.page.setViewportSize(state.viewport); await sleep(300); }
-          await state.run(fresh.page, ctx);
+          try { await state.run(fresh.page, ctx); } catch (e) { try { await fresh.page.screenshot({ path: `${outDir}/${state.name}.FAILED.png` }); e.shot = true; } catch {} throw e; }
           await capture(fresh.page, outDir, state.name, state);
           await fresh.context.close();
           continue;
@@ -1332,7 +1431,7 @@ async function snapEngine(engine, dist, outDir, only) {
         if (wanted) await capture(page, outDir, state.name, state);
       } catch (e) {
         failures.push(`${state.name}: ${String(e.message).split("\n").slice(0, process.env.VIS_VERBOSE ? 14 : 1).join(" / ")}`);
-        try { await page.screenshot({ path: `${outDir}/${state.name}.FAILED.png` }); } catch {}
+        if (!e.shot) try { await page.screenshot({ path: `${outDir}/${state.name}.FAILED.png` }); } catch {}
         break;
       }
     }
