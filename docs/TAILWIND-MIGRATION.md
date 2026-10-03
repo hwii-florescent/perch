@@ -412,6 +412,11 @@ counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
 
+Slice 24 notes: `workspace-git__comment` stays on the card as a hook
+(`workspace-review` e2e selects it); the first run failed on it. Only
+`unresolved` and `resolved` are utility-styled; other statuses get the legacy
+class token and the CSS rule wins (utilities are layered).
+
 Slice 21 notes: the first migrated build silently lost every `[@container(...)]:`
 and `[font-family:monospace]` class because they were written as `${N}` /
 `${MONO}` template interpolations (the harness caught it: narrow rules not
