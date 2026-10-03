@@ -42,71 +42,16 @@
   border-color: var(--accent);
 }
 
-.workspace-git__comment-actions {
-  display: flex;
-  align-items: center;
-}
-
 .workspace-git__comment-summary {
   color: var(--git-muted);
   font-size: 0.7rem;
 }
 
-.workspace-git__body,
-.workspace-git__main {
-  min-width: 0;
-  min-height: 0;
-}
-
-.workspace-git__body {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.workspace-git__main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  overflow: hidden;
+.workspace-git__comment-summary {
+  padding: 0 0.7rem 0.45rem;
 }
 
 .workspace-git__file-state--conflict {
-  color: var(--red);
-}
-
-.workspace-git__button {
-  border: 1px solid var(--git-border);
-  border-radius: var(--radius);
-  padding: 0.3rem 0.5rem;
-  color: var(--text);
-  background: var(--surface-1);
-  font-size: 0.7rem;
-  white-space: nowrap;
-}
-
-.workspace-git__button:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.workspace-git__button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.workspace-git__button--primary {
-  border-color: var(--accent);
-  color: var(--base);
-  background: var(--accent);
-}
-
-.workspace-git__button--quiet {
-  background: transparent;
-}
-
-.workspace-git__button--danger,
-.workspace-git__button--danger:hover:not(:disabled) {
   color: var(--red);
 }
 
@@ -118,28 +63,6 @@
 .workspace-git__comment-status--stale,
 .workspace-git__comment-status--orphaned {
   color: var(--yellow);
-}
-
-.workspace-git__comment-actions {
-  justify-content: flex-end;
-  gap: 0.3rem;
-}
-
-.workspace-git__comment-actions button {
-  border: 0;
-  padding: 0.2rem 0.3rem;
-  color: var(--accent);
-  background: transparent;
-  font-size: 0.66rem;
-}
-
-.workspace-git__comment-actions .workspace-git__button {
-  border: 1px solid var(--git-border);
-  padding: 0.3rem 0.5rem;
-}
-
-.workspace-git__comment-summary {
-  padding: 0 0.7rem 0.45rem;
 }
 
 .workspace-git__review-list {
@@ -194,102 +117,6 @@
 
 .workspace-git__banner--info {
   color: var(--accent);
-}
-
-.workspace-git__toast {
-  position: absolute;
-  right: 0.8rem;
-  bottom: 0.8rem;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  max-width: min(30rem, calc(100% - 1.6rem));
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--red);
-  border-radius: var(--radius);
-  color: var(--red);
-  background: var(--panel-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-.workspace-git__toast button {
-  border: 0;
-  color: inherit;
-  background: transparent;
-}
-
-.workspace-git__confirm {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.62);
-}
-
-.workspace-git__confirm-card {
-  width: min(32rem, 100%);
-  max-height: 90%;
-  padding: 0.9rem;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  overflow: auto;
-  background: var(--panel-bg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-}
-
-.workspace-git__confirm-card h3 {
-  margin: 0.3rem 0;
-}
-
-.workspace-git__confirm-card p {
-  color: var(--git-muted);
-}
-
-.workspace-git__confirm-card ul {
-  max-height: 8rem;
-  margin: 0.55rem 0;
-  padding-left: 1.2rem;
-  overflow: auto;
-  font-family: var(--font-mono, monospace);
-  font-size: 0.7rem;
-}
-
-/* Pane width, not window width: a Git pane can be this narrow inside a wide
- * window, and when these were viewport rules they fought the container rules
- * below — a phone got the horizontal file rail *and* the narrow vertical
- * column at once, which is what made the file list render behind the diff. */
-@container (max-width: 700px) {
-  .workspace-git__body {
-    display: block;
-    overflow: auto;
-  }
-
-  .workspace-git__main {
-    min-height: 26rem;
-  }
-}
-
-/* Dockview can give a Git pane a narrow width even while the browser itself
- * is wide. Stack the source-control summary above the review canvas at that
- * container width so the changed-file rail cannot cover the diff or its
- * actions. This same rule keeps the mobile Git pane usable when it is the
- * one active surface. */
-@container (max-width: 700px) {
-  .workspace-git__body {
-    display: flex;
-    flex-direction: column;
-    overflow: auto;
-  }
-
-  .workspace-git__main {
-    flex: 1 1 auto;
-    min-height: 27rem;
-    overflow: hidden;
-  }
-
 }
 
 /* Structured view of the interactive CLI's native conversation. */

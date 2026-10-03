@@ -48,6 +48,20 @@ const COMMENT = "workspace-git__comment mt-[0.3rem] border-l-2 px-[0.55rem] py-[
 const COMMENT_TONE: Record<string, string> = { resolved: "border-l-green opacity-[0.72]", unresolved: "border-l-accent" };
 const PILL_TONE: Record<string, string> = { resolved: "text-green", unresolved: "text-accent" };
 const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui border border-[color:var(--git-border)] bg-surface-1 p-[0.4rem] text-fg";
+// The legacy `.workspace-git button { font: inherit }` out-ranked `__button`'s font-size, so these keep the inherited size
+// (and `comment-actions` buttons need `!` to beat that unlayered reset, as the old later same-specificity rule did).
+const BTN = "rounded-ui border px-2 py-[0.3rem] whitespace-nowrap disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:border-accent";
+const BTN_DEFAULT = `${BTN} border-[color:var(--git-border)] bg-surface-1 text-fg [&:hover:not(:disabled)]:text-accent`;
+const BTN_QUIET = `${BTN} border-[color:var(--git-border)] bg-transparent text-fg [&:hover:not(:disabled)]:text-accent`;
+const BTN_PRIMARY = `${BTN} border-accent bg-accent text-inherit [&:hover:not(:disabled)]:text-accent`;
+const BTN_DANGER = `${BTN} border-[color:var(--git-border)] bg-surface-1 text-red [&:hover:not(:disabled)]:text-red`;
+// Inside `comment-actions` every button is a transparent accent link; a `__button` there keeps its frame.
+const CA_BTN_BASE = "rounded-ui border border-[color:var(--git-border)] bg-transparent px-2 py-[0.3rem] text-[0.66rem]! whitespace-nowrap text-accent disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:border-accent";
+const CA_BTN = `${CA_BTN_BASE} [&:hover:not(:disabled)]:text-accent`;
+const CA_BTN_DANGER = `${CA_BTN_BASE} [&:hover:not(:disabled)]:text-red`;
+const CA_LINK = "[border:0] bg-transparent px-[0.3rem] py-[0.2rem] text-[0.66rem]! text-accent";
+const CA_LINK_DANGER = `${CA_LINK} [&:hover:not(:disabled)]:text-red`;
+const COMMENT_ACTIONS = "flex items-center justify-end gap-[0.3rem]";
 const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
@@ -587,19 +601,19 @@ export function WorkspaceGitReview({
               onChange={(event) => setEditingBody(event.target.value)}
               aria-label="Edit review comment"
             />
-            <div className="workspace-git__comment-actions">
-              <button type="button" onClick={() => saveEdit(comment)}>Save edit</button>
-              <button type="button" className="workspace-git__button--quiet" onClick={() => setEditingCommentId(null)}>Cancel</button>
+            <div className={COMMENT_ACTIONS}>
+              <button type="button" className={CA_LINK} onClick={() => saveEdit(comment)}>Save edit</button>
+              <button type="button" className={CA_LINK} onClick={() => setEditingCommentId(null)}>Cancel</button>
             </div>
           </>
         ) : <p className="mx-0 my-[0.28rem] whitespace-pre-wrap">{comment.body}</p>}
         {editingCommentId !== comment.id && (
-          <div className="workspace-git__comment-actions">
-            <button type="button" onClick={() => beginEdit(comment)}>Edit</button>
-            <button type="button" onClick={() => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version)}>
+          <div className={COMMENT_ACTIONS}>
+            <button type="button" className={CA_LINK} onClick={() => beginEdit(comment)}>Edit</button>
+            <button type="button" className={CA_LINK} onClick={() => actions.resolveComment(comment.id, comment.status !== "resolved", comment.version)}>
               {comment.status === "resolved" ? "Reopen" : "Resolve"}
             </button>
-            <button type="button" className="workspace-git__button--danger" onClick={() => actions.deleteComment(comment.id, comment.version)}>Delete</button>
+            <button type="button" className={CA_LINK_DANGER} onClick={() => actions.deleteComment(comment.id, comment.version)}>Delete</button>
           </div>
         )}
       </article>
@@ -625,14 +639,14 @@ export function WorkspaceGitReview({
           <span className="text-[0.7rem] text-subtext-0" title={workspaceId}>Workspace {workspaceId.slice(0, 8)}</span>
         </div>
         <div className="flex shrink-0 items-center gap-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-end [@container(max-width:700px)]:gap-[0.3rem]">
-          <button type="button" className="workspace-git__button" data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
+          <button type="button" className={BTN_DEFAULT} data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
           <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
             {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
           </span>
         </div>
       </header>
 
-      <div className="workspace-git__body">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:overflow-auto">
         <aside className="flex min-h-0 w-[17rem] min-w-[14rem] flex-col overflow-y-auto border-r border-r-[color:var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:max-h-[12rem] [@container(max-width:700px)]:[border-right:none] [@container(max-width:700px)]:border-b [@container(max-width:700px)]:border-b-[color:var(--git-border)]" data-testid="git-status">
           <div className="flex items-center justify-between gap-[0.6rem] pt-[0.65rem] pr-[0.7rem] pb-[0.45rem] pl-[0.7rem]">
             <div className="flex min-w-0 flex-col gap-[0.1rem]">
@@ -691,21 +705,21 @@ export function WorkspaceGitReview({
 
           <div className="mt-auto flex flex-col gap-[0.42rem] border-t border-t-[color:var(--git-border)] p-[0.65rem] [@container(max-width:700px)]:mt-0">
             <div className="flex items-center gap-[0.3rem]">
-              <button type="button" className="workspace-git__button flex-1" disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
-              <button type="button" className="workspace-git__button flex-1" disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
+              <button type="button" className={`${BTN_DEFAULT} flex-1`} disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
+              <button type="button" className={`${BTN_DEFAULT} flex-1`} disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
             </div>
             <div className="flex items-center gap-[0.3rem]">
-              <button type="button" className="workspace-git__button workspace-git__button--danger flex-1" data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
+              <button type="button" className={`${BTN_DANGER} flex-1`} data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
             </div>
             <label className="flex min-w-0 flex-col items-stretch gap-[0.35rem] text-[0.68rem] text-subtext-0">
               <span>Commit staged changes</span>
               <input className={TB_INPUT} value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
             </label>
-            <button type="button" className="workspace-git__button workspace-git__button--primary" disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
+            <button type="button" className={BTN_PRIMARY} disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
           </div>
         </aside>
 
-        <div className="workspace-git__main">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[27rem] [@container(max-width:700px)]:flex-auto">
           <div className="flex flex-wrap items-end justify-between gap-[0.65rem] border-b border-b-[color:var(--git-border)] px-[0.7rem] py-[0.55rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start">
             <div className={TB_GROUP}>
               <label className={TB_FIELD}>
@@ -736,7 +750,7 @@ export function WorkspaceGitReview({
                     <datalist id="git-review-refs">{refs.map((ref) => <option value={ref.name} key={`${ref.remote ? "remote" : "local"}:${ref.name}`}>{ref.target.slice(0, 8)}</option>)}</datalist>
                   </label>
                   <label className={TB_FIELD}><span>Head <em className="font-normal">optional</em></span><input className={TB_INPUT} value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
-                  <button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
+                  <button type="button" className={BTN_QUIET} onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
                 </>
               )}
             </div>
@@ -829,7 +843,7 @@ export function WorkspaceGitReview({
                     <div className="m-[0.7rem] rounded-ui border border-accent p-[0.65rem]" data-testid="git-comment-composer">
                       <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
                       <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                      <div className="workspace-git__comment-actions mt-[0.4rem]"><button type="button" className="workspace-git__button workspace-git__button--primary" disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
+                      <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}><button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
                     </div>
                   )}
                 </>
@@ -838,7 +852,7 @@ export function WorkspaceGitReview({
           </div>
 
           <section className="shrink-0 max-h-[17rem] overflow-y-auto border-t border-t-[color:var(--git-border)]" data-testid="git-review-panel">
-            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className="workspace-git__button" disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
             {comments.length > 0 && <div className="workspace-git__comment-summary">Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
             {unplacedComments.length > 0 && (
               <div className="workspace-git__review-list" data-testid="git-review-list">
@@ -854,7 +868,7 @@ export function WorkspaceGitReview({
               </div>
             )}
             {batchPreview && (
-              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:monospace]">{batchPreview.markdown}</pre><div className="workspace-git__comment-actions"><button type="button" className="workspace-git__button workspace-git__button--primary" onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
+              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:monospace]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
             {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className="workspace-git__banner workspace-git__banner--info" role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."
@@ -866,15 +880,15 @@ export function WorkspaceGitReview({
         </div>
       </div>
 
-      {(localActionError || actionError) && <div className="workspace-git__toast workspace-git__toast--error" role="alert">{localActionError || actionError}<button type="button" aria-label="Dismiss" onClick={() => setLocalActionError(null)}>×</button></div>}
+      {(localActionError || actionError) && <div className="absolute right-[0.8rem] bottom-[0.8rem] z-[5] flex max-w-[min(30rem,calc(100%-1.6rem))] items-center gap-2 rounded-ui border border-red bg-panel-bg px-[0.65rem] py-[0.55rem] text-red shadow-[0_8px_24px_rgba(0,0,0,0.35)]" role="alert">{localActionError || actionError}<button type="button" className="[border:0] bg-transparent text-inherit" aria-label="Dismiss" onClick={() => setLocalActionError(null)}>×</button></div>}
       {confirmAction && (
-        <div className="workspace-git__confirm" role="dialog" aria-modal="true" aria-labelledby={confirmTitleId}>
-          <div className="workspace-git__confirm-card" ref={confirmCardRef}>
+        <div className="absolute inset-0 z-10 grid place-items-center bg-[rgba(0,0,0,0.62)] p-4" role="dialog" aria-modal="true" aria-labelledby={confirmTitleId}>
+          <div className="max-h-[90%] w-[min(32rem,100%)] overflow-auto rounded-ui border border-accent bg-panel-bg p-[0.9rem] shadow-[0_12px_32px_rgba(0,0,0,0.5)]" ref={confirmCardRef}>
             <span className={EYEBROW}>Confirm {confirmAction.kind}</span>
-            <h3 id={confirmTitleId}>{confirmAction.kind === "commit" ? "Commit staged changes?" : "Discard selected changes?"}</h3>
-            <p>{confirmAction.kind === "commit" ? `This will create “${confirmAction.message}” in ${workspaceName || workspaceId}.` : `This permanently changes ${confirmAction.receipt.paths.length} selected path${confirmAction.receipt.paths.length === 1 ? "" : "s"}.`}</p>
-            <ul>{confirmAction.receipt.paths.map((path) => <li key={path}>{path}</li>)}</ul>
-            <div className="workspace-git__comment-actions"><button ref={confirmButtonRef} type="button" className="workspace-git__button workspace-git__button--danger" data-testid="git-confirm-action" onClick={() => { if (confirmAction.kind === "commit") actions.commit(confirmAction.receipt.previewId, confirmAction.message); else actions.discard(confirmAction.receipt.previewId); setConfirmAction(null); }}>Confirm {confirmAction.kind}</button><button type="button" className="workspace-git__button workspace-git__button--quiet" data-testid="git-cancel-action" onClick={() => setConfirmAction(null)}>Cancel</button></div>
+            <h3 className="my-[0.3rem]" id={confirmTitleId}>{confirmAction.kind === "commit" ? "Commit staged changes?" : "Discard selected changes?"}</h3>
+            <p className="text-subtext-0">{confirmAction.kind === "commit" ? `This will create “${confirmAction.message}” in ${workspaceName || workspaceId}.` : `This permanently changes ${confirmAction.receipt.paths.length} selected path${confirmAction.receipt.paths.length === 1 ? "" : "s"}.`}</p>
+            <ul className="my-[0.55rem] max-h-[8rem] overflow-auto pl-[1.2rem] text-[0.7rem] [font-family:monospace]">{confirmAction.receipt.paths.map((path) => <li key={path}>{path}</li>)}</ul>
+            <div className={COMMENT_ACTIONS}><button ref={confirmButtonRef} type="button" className={CA_BTN_DANGER} data-testid="git-confirm-action" onClick={() => { if (confirmAction.kind === "commit") actions.commit(confirmAction.receipt.previewId, confirmAction.message); else actions.discard(confirmAction.receipt.previewId); setConfirmAction(null); }}>Confirm {confirmAction.kind}</button><button type="button" className={CA_BTN} data-testid="git-cancel-action" onClick={() => setConfirmAction(null)}>Cancel</button></div>
           </div>
         </div>
       )}

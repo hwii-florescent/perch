@@ -668,6 +668,29 @@ const STATES = [
     await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
     await sleep(500);
   } },
+  // The confirm card (danger accept, quiet cancel) for a discard and for a commit; cleanup restores the index and selection.
+  { name: "14q-git-discard-confirm", run: async (page) => {
+    await page.getByLabel("Select src/main.txt").check();
+    await page.getByTestId("git-discard-preview").click();
+    await page.getByRole("dialog").waitFor({ timeout: 20000 });
+    await sleep(500);
+  } },
+  { name: "14r-git-commit-confirm", run: async (page) => {
+    await page.getByTestId("git-cancel-action").click();
+    await page.getByRole("button", { name: "Stage selected" }).click();
+    await page.getByLabel("Select src/main.txt").waitFor();
+    await page.getByPlaceholder("Describe the change").fill("a commit message");
+    await page.getByRole("button", { name: "Preview commit" }).click();
+    await page.getByRole("dialog").waitFor({ timeout: 20000 });
+    await sleep(500);
+  } },
+  { name: "14s-git-confirm-cleanup", nocapture: true, run: async (page) => {
+    await page.getByTestId("git-cancel-action").click();
+    await page.getByRole("button", { name: "Unstage", exact: true }).click();
+    await page.getByLabel("Select src/main.txt").uncheck();
+    await page.getByPlaceholder("Describe the change").fill("");
+    await sleep(500);
+  } },
   { name: "15-worktree-menu", run: async (page) => {
     await page.getByTestId("workspace-tools-toggle").click(); // close drawer
     await sleep(300);
