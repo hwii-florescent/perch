@@ -50,6 +50,21 @@ const TRANSCRIPT = [
 ];
 // Hosted chat on a fresh page: hosted mode and one claude session (known only to the page), with its slash commands.
 // `sessionId` is the store's active-session key; `transcript` fills the session's messages.
+// Answer the composer's upload POST inside the page (a page-level fetch stub: the app's service worker bypasses
+// Playwright's request routing in WebKit, and a real upload would write into the user's ~/.perch/uploads).
+// Fails the state if the upload never reaches the stub.
+const stubUpload = async (page, status, body) => {
+  await page.evaluate(({ status, body }) => {
+    const real = window.fetch.bind(window);
+    window.__uploadHits = 0;
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      if (/\/upload\?/.test(url)) { window.__uploadHits++; return Promise.resolve(new Response(body, { status, headers: { "Content-Type": "application/json" } })); }
+      return real(input, init);
+    };
+  }, { status, body });
+};
+const uploadHits = (page) => page.evaluate(() => window.__uploadHits);
 const hostedPage = async (page, transcript = []) => {
   await page.getByTestId("onboarding-dismiss").click();
   await page.waitForFunction(() => !!window.usePerchStore.getState().settings);
@@ -1196,17 +1211,19 @@ const STATES = [
   // failure are both deterministic and neither can stand in for the other.
   { name: "24g-composer-attachment", fresh: true, run: async (page) => {
     await hostedPage(page);
-    await page.route(/\/upload\?/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }) }));
+    await stubUpload(page, 200, JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }));
     await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
     await page.getByTestId("attachment-chip-notes.txt").waitFor({ timeout: 15000 });
+    if ((await uploadHits(page)) !== 1) throw new Error("24g: the upload did not go through the stub");
     if ((await page.locator(".attachment-bar__error").count()) !== 0) throw new Error("24g: an upload error is showing next to the success chip");
     await sleep(500);
   } },
   { name: "24g2-composer-attachment-error", fresh: true, run: async (page) => {
     await hostedPage(page);
-    await page.route(/\/upload\?/, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "boom" }));
+    await stubUpload(page, 500, "boom");
     await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
     await page.locator(".attachment-bar__error").waitFor({ timeout: 15000 });
+    if ((await uploadHits(page)) !== 1) throw new Error("24g2: the upload did not go through the stub");
     const msg = (await page.locator(".attachment-bar__error").textContent()) ?? "";
     if (!msg.includes("upload failed (500)")) throw new Error(`24g2: unexpected error text ${JSON.stringify(msg)}`);
     if ((await page.locator(".attachment-chip").count()) !== 0) throw new Error("24g2: a chip is showing next to the upload error");
