@@ -57,6 +57,10 @@ Done:
   `components/HostStateDot.tsx` used by Sidebar and SettingsModal;
   `sidebar.css`, `host-switcher.css` deleted). Harness gained `01b`–`01d`, two
   disabled fixture hosts, pinned fixture mtimes.
+- **Slice 10: session items, project rows, new-session popover, sidebar footer**
+  (`Sidebar.tsx`; `session-picker.css`, `sidebar-projects.css` deleted).
+  Harness gained `01c2`-`01c4` (injected per-host session list, row hover,
+  delete-button hover) and the `holdHover` state option.
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -71,10 +75,10 @@ Done:
 | workspace-tools.css | – | **migrated and deleted** (drawer, `.app__body`, `ResizeHandle`) |
 | toolbar-tabs.css | – | **migrated and deleted** (top row, tab bar, `.dock-area`, file-tab view) |
 | sidebar.css | – | **migrated and deleted** (sidebar shell, env header, + New session) |
-| sidebar-projects.css | 246 | not started |
+| sidebar-projects.css | – | **migrated and deleted** (session items, project rows, footer/gear, git status) |
 | host-switcher.css | – | **migrated and deleted** (switcher button, popover, `HostStateDot`); 3 `settings-modal__*` rules moved to the top of `settings.css` |
 | settings.css | 309 | not started |
-| session-picker.css | 157 | not started |
+| session-picker.css | – | **migrated and deleted** (session item wrapper + delete, new-session popover) |
 | directory-browser.css | 274 | not started |
 | cli-start.css | 322 | not started |
 | worktree-menu.css | 251 | not started |
@@ -93,7 +97,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`session-picker.css` / `sidebar-projects.css` → … ; leave
+`pairing.css` / `worktree-menu.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -246,6 +250,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 7 | workspace tools drawer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `11b`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 40 states in Chromium or WebKit, incl. the divider `::after` highlight and the drawer buttons' focus. 11 Chromium corner-speck screenshot diffs (04, 06, 12-17b, 20, 20c; 1-9 px; the drawer ones, 13/14 at x=759 y=41, are the same specks slice 6 showed before the drawer was migrated) reviewed by name. e2e after `npm run build`: workspace-tabs and the layout specs pass (4/4); `toasts` (TN1, TN2, real haiku turns) pass against the migrated build. `workspace-visual-qa` fails at line 258 on the committed tree too (see Pre-existing failures). |
 | 8 | toolbar + tab bar | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 46 states in Chromium or WebKit, including the new two-tab strip (`05f`), drag source/target (`05g`, opacity + accent edge), inline tab rename (`05h`), and the macOS-app brand padding, expanded and collapsed (`22b`, `22c`). 11 Chromium corner-speck screenshot diffs (03, 12, 13, 14, 16, 17b, 17c, 18, 20c, 22, 22b; 1-24 px, at the tab-edge x=272/479 and sidebar x=9 specks seen before this slice, and the start-picker box corners in 03/22b) reviewed by name; 05f/05g/05h/22c are pixel-identical. e2e after `npm run build`: wave2 (tab drag-reorder, rename), workspace-tabs, responsive, pane-splitting, keybindings pass; `workspace-files-durable` failed once at line 266 in the multi-spec run and passed 2/2 alone (timing flake under load). |
 | 9 | sidebar shell + host switcher | tsc clean; 215/215 unit tests; harness (baseline and new both re-snapped with `01b`-`01d` and pinned mtimes): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 49 states in Chromium or WebKit. `01b` (popover: local connected, `direct` badge, disabled, injected error row), `01c` (remote selected: HOST header, disabled + New session) show 10-16 px of ±1-value specks, all at rounded corners of the start picker (x=554/967/968) and the sidebar's Register-folder button (x=13), none inside the popover or header (checked per pixel). 9 Chromium screenshot diffs reviewed by name. e2e after `npm run build`: sidebar, nav, federation (E1, E2, E4-E6: host dots connected/disabled/error), settings (host CRUD), responsive, theme, keybindings: 28/28. |
+| 10 | session items + project rows + popover + footer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `01c2`-`01c4`): no computed-style, box, text, focus or pseudo-element difference in any of the 52 states in Chromium or WebKit; the new states show the per-host project list (git ahead/behind, plain subline, nested sessions, blocked dot), the row under the pointer with the reveal, and the delete button under the pointer (red on `surface-1`). One transient hover-dump difference in `03` (two elements swapped in the group dump) did not reproduce: `--only 03-add` on both builds is IDENTICAL including hover. 9 Chromium corner-speck screenshot diffs (01b, 01c4, 03, 04, 13, 16, 18, 20c, 22; 2-19 px, at the start-picker corners x=554/968, sidebar x=9 and tab edges, none in a migrated region) reviewed by name. e2e after `npm run build`: sessions, federation, remote-git, sidebar, nav, wave1, wave2, wave2.features, worktrees (48 tests) pass. |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -305,6 +310,24 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 10 notes: **legacy specificity can differ from the utility order.** The
+active project row's `.sidebar__project--active > … > .sidebar__project-select`
+(0,3,0) beat `:hover` (0,2,0), so an active row keeps its fill under the
+pointer: the migrated row applies `hover:bg-surface-1` only when inactive. The
+session item's `--active` (0,1,0) lost to `.session-item:hover` (0,2,0), so there
+`hover:` stays on both. The `.sidebar__project .session-item*` descendant rules
+became plain padding (SessionItem is only rendered in ProjectRow). `group-hover:`
+and `group-focus-within:` honour the custom `hover` variant (no
+`@media (hover:hover)` in the build; the harness check passes). Dead rules were
+dropped: `new-session-popover__divider|custom|input|create-btn` had no TSX user.
+`new-session-popover` stays on the popover as a hook because
+`git-review.css:1081` (`.new-session-popover > div:first-child`, the AgentPicker
+wrapper) still targets it; move that rule when git-review is done.
+`holdHover: <selector>` in a state keeps the pointer on that element for the
+screenshot and dump (the capture otherwise parks it at 1,1), needed for
+hover-revealed UI. An element hidden until hover must be revealed first (the
+`01c4` run hovers the row, then the button).
 
 Slice 9 notes: **Tailwind `/15` colour modifiers mix in oklab**, so a legacy
 `color-mix(in srgb, var(--accent) 15%, transparent)` computes to

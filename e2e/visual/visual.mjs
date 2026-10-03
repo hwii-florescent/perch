@@ -129,7 +129,27 @@ const STATES = [
     await page.getByTestId("host-switcher-popover").waitFor({ state: "detached" });
     await sleep(400);
   } },
+  // The per-host project list (hosts without workspace.snapshot): project rows with an
+  // active project's sessions, git branch + ahead/behind, a plain cwd subline, and the
+  // hover-revealed delete button. State is injected; the server knows nothing of vis-a.
+  { name: "01c2-host-sessions", run: async (page) => {
+    await page.evaluate(() => {
+      const now = new Date("2026-01-01T12:00:00Z").getTime();
+      const mk = (id, title, cwd, ago, extra = {}) => ({ id, title, cwd, createdAt: now - ago, status: "idle", hostId: "vis-a", ...extra });
+      window.usePerchStore.setState({
+        sessions: [mk("vis-s1", "Fix the parser", "/srv/app", 120000), mk("vis-s2", "", "/srv/app", 7200000, { blocked: true }), mk("vis-s3", "Docs", "/srv/docs", 90000000)],
+        workspaceGit: { "vis-a:/srv/app": { branch: "feature/long-branch-name-here", ahead: 2, behind: 1 } },
+      });
+    });
+    await page.locator('[data-testid="project-row"]').first().click();
+    await sleep(300);
+  } },
+  { name: "01c3-session-row-hover", holdHover: "[data-session-id]", run: async () => {} },
+  { name: "01c4-session-delete-hover", holdHover: '[data-testid^="session-delete-icon-"]', run: async (page) => {
+    await page.locator("[data-session-id]").first().hover(); // reveals the button first
+  } },
   { name: "01d-host-local", nocapture: true, run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ sessions: [], workspaceGit: {} }));
     await page.getByTestId("host-switcher").click();
     await page.getByTestId("host-option-local").click();
     await page.getByTestId("host-switcher-popover").waitFor({ state: "detached" });
@@ -474,7 +494,9 @@ async function stopCore(core) {
 }
 
 async function capture(page, outDir, name, state = {}) {
-  await page.mouse.move(1, 1);
+  // `holdHover`: keep the pointer on this element for the screenshot and style dump (hover-revealed UI).
+  if (state.holdHover) await page.locator(state.holdHover).first().hover();
+  else await page.mouse.move(1, 1);
   await sleep(200);
   const dump = await page.evaluate(DUMP, { props: PROPS, skipSel: SKIP_SEL });
   if (dump.length < 5) throw new Error(`empty capture (${dump.length} elements): the app did not render`);

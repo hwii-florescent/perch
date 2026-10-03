@@ -2,14 +2,12 @@
 @import "./base.css";
 @import "./workspace-overview.css";
 @import "./workspace-files.css";
-@import "./sidebar-projects.css";
 @import "./dockview.css";
 @import "./chat.css";
 @import "./composer.css";
 @import "./terminal.css";
 @import "./cli-start.css";
 @import "./settings.css";
-@import "./session-picker.css";
 @import "./directory-browser.css";
 @import "./mobile.css";
 @import "./worktree-menu.css";

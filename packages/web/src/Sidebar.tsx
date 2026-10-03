@@ -152,6 +152,8 @@ interface HostChoice {
   direct?: boolean;
 }
 
+const POPOVER_PICK = "flex w-full cursor-pointer flex-col bg-transparent px-3 pt-[0.45rem] pb-[0.35rem] text-left text-[0.82rem] font-semibold text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-1";
+const POPOVER_PICK_CWD = "mt-[0.1rem] overflow-hidden text-[0.7rem] font-normal text-ellipsis whitespace-nowrap text-subtext-0";
 const POPOVER_ITEM = "flex min-w-0 flex-1 cursor-pointer items-center gap-[0.45rem] bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.8rem] text-fg [font-family:inherit] [border:none] hover:bg-surface-1";
 
 function HostSwitcherPopover({
@@ -283,23 +285,24 @@ interface SessionItemProps {
 }
 
 function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps) {
-  const itemClass = isActive ? "session-item session-item--active" : "session-item";
-
   return (
-    <div className="session-item__wrapper">
+    <div className="group relative flex items-stretch pl-[0.85rem]">
       <button
         type="button"
-        className={itemClass}
+        className={cn(
+          "flex w-full min-w-0 flex-1 cursor-pointer items-start gap-[0.45rem] border-current px-[0.65rem] py-[0.3rem] text-left text-[0.82rem] text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease] hover:bg-surface-1",
+          isActive ? "session-item--active bg-surface-0 border-l-accent" : "bg-transparent border-l-transparent",
+        )}
         data-session-id={session.id}
         onClick={() => onSwitch(session.id)}
       >
         <StatusDot session={session} />
-        <div className="session-item__body">
-          <div className="session-item__title">
+        <div className="min-w-0 flex-1">
+          <div className="overflow-hidden text-[0.82rem] leading-[1.3] text-ellipsis whitespace-nowrap">
             {session.title || "(new session)"}
           </div>
-          <div className="session-item__meta">
-            <span className="session-item__time">{relativeTime(session.createdAt)}</span>
+          <div className="mt-[0.15rem] flex gap-[0.4rem] overflow-hidden text-[0.7rem] whitespace-nowrap text-subtext-0">
+            <span className="ml-auto shrink-0">{relativeTime(session.createdAt)}</span>
           </div>
         </div>
       </button>
@@ -308,7 +311,7 @@ function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps
        * confirmations, which still route through ConfirmDialog). */}
       <button
         type="button"
-        className="session-item__delete-btn"
+        className="hidden w-[1.6rem] shrink-0 cursor-pointer items-center justify-center border-current bg-transparent p-0 text-[0.85rem] text-subtext-0 [border-style:none_none_none_solid] border-l border-l-transparent [transition:color_0.1s_ease,background_0.1s_ease] group-focus-within:flex group-hover:flex hover:bg-surface-1 hover:text-red"
         data-testid={`session-delete-icon-${session.id}`}
         title="Delete session"
         aria-label="Delete session"
@@ -335,15 +338,15 @@ function ProjectGitStatus({ projectKey, hostId }: { projectKey: string; hostId: 
   const git = usePerchStore((s) => s.workspaceGit[projectKey]);
   if (!git || !git.branch) return null;
   return (
-    <span className="sidebar__project-git" data-testid={`workspace-git-${hostId}`} title={git.branch}>
-      <span className="sidebar__project-branch">{git.branch}</span>
+    <span className="flex min-w-0 items-center gap-[0.3rem] overflow-hidden text-[0.7rem] text-subtext-0" data-testid={`workspace-git-${hostId}`} title={git.branch}>
+      <span className="max-w-32 overflow-hidden text-ellipsis whitespace-nowrap">{git.branch}</span>
       {git.ahead > 0 && (
-        <span className="sidebar__project-ahead" style={{ color: "var(--green)" }}>
+        <span className="shrink-0 font-semibold" style={{ color: "var(--green)" }}>
           ↑{git.ahead}
         </span>
       )}
       {git.behind > 0 && (
-        <span className="sidebar__project-behind" style={{ color: "var(--red)" }}>
+        <span className="shrink-0 font-semibold" style={{ color: "var(--red)" }}>
           ↓{git.behind}
         </span>
       )}
@@ -358,7 +361,7 @@ function ProjectSubline({ projectKey, hostId, cwd }: { projectKey: string; hostI
   const git = usePerchStore((s) => s.workspaceGit[projectKey]);
   if (git?.branch) return <ProjectGitStatus projectKey={projectKey} hostId={hostId} />;
   return (
-    <span className="sidebar__project-sub" title={cwd}>
+    <span className="overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0" title={cwd}>
       {shortCwd(cwd)}
     </span>
   );
@@ -465,11 +468,15 @@ function ProjectRow({
   const sessionCount = group.sessions.length;
 
   return (
-    <div className={"sidebar__project" + (isActiveProject ? " sidebar__project--active" : "")}>
-      <div className="sidebar__project-header">
+    <div className="mb-1">
+      <div className="sidebar__project-header flex items-stretch gap-1 px-[0.35rem]">
         <button
           type="button"
-          className="sidebar__project-select"
+          className={cn(
+            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui border-current px-[0.3rem] py-[0.4rem] text-left text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease]",
+            // The legacy active rule outranked :hover, so an active row keeps its fill under the pointer.
+            isActiveProject ? "bg-surface-0 border-l-accent" : "bg-transparent border-l-transparent hover:bg-surface-1",
+          )}
           data-testid="project-row"
           data-project-cwd={group.cwd}
           aria-current={isActiveProject ? "true" : undefined}
@@ -484,21 +491,21 @@ function ProjectRow({
           >
             {glyph}
           </span>
-          <span className="sidebar__project-body">
-            <span className="sidebar__project-name" title={group.cwd}>
+          <span className="flex min-w-0 flex-1 flex-col gap-[0.1rem]">
+            <span className="min-w-0 overflow-hidden text-[0.82rem] font-semibold text-ellipsis whitespace-nowrap text-fg" title={group.cwd}>
               {basename(group.cwd)}
             </span>
-            <span className="sidebar__project-subline">
+            <span className="flex min-w-0 items-center overflow-hidden">
               <ProjectSubline projectKey={group.key} hostId={hostId} cwd={group.cwd} />
             </span>
           </span>
-          <span className="sidebar__project-count">{sessionCount}</span>
+          <span className="shrink-0 rounded-ui border border-overlay-0 bg-surface-1 px-[0.35rem] py-[0.05rem] text-[0.68rem] text-subtext-0">{sessionCount}</span>
         </button>
         <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
         <ProjectGitReviewButton hostId={hostId} sessions={group.sessions} />
         <button
           type="button"
-          className="sidebar__project-close-all"
+          className="shrink-0 cursor-pointer self-center rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent"
           data-testid="project-close-all"
           title="Close all sessions in this project"
           aria-label="Close all sessions in this project"
@@ -592,7 +599,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
   }, [onClose]);
 
   return createPortal(
-    <div className="new-session-popover" ref={popoverRef} style={style}>
+    <div className="new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" ref={popoverRef} style={style}>
       <AgentPicker
         hostId={hostId}
         onManage={onClose}
@@ -605,30 +612,30 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
         className="new-session-popover__agent"
       />
       {projectCwds.length > 0 && (
-        <div className="new-session-popover__projects">
+        <div className="max-h-[190px] min-h-0 shrink overflow-y-auto">
           {projectCwds.map((cwd, i) => (
             <button
               key={cwd}
               type="button"
-              className="new-session-popover__item"
+              className={POPOVER_PICK}
               data-testid={`project-option-${i}`}
               onClick={() => { onSelect(cwd, selectedAgent); onClose(); }}
               title={cwd}
             >
               {basename(cwd)}
-              <span className="new-session-popover__item-cwd">{cwd}</span>
+              <span className={POPOVER_PICK_CWD}>{cwd}</span>
             </button>
           ))}
         </div>
       )}
       <button
         type="button"
-        className="new-session-popover__item new-session-popover__item--none"
+        className={cn(POPOVER_PICK, "shrink-0 font-normal text-subtext-0")}
         data-testid="project-option-none"
         onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
         No project
-        <span className="new-session-popover__item-cwd">Chats</span>
+        <span className={POPOVER_PICK_CWD}>Chats</span>
       </button>
     </div>,
     document.body
@@ -773,7 +780,7 @@ export function Sidebar() {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto py-[0.2rem]" data-testid="project-list">
             {projects.length === 0 ? (
-              <p className="sidebar__empty">No projects yet.</p>
+              <p className="mx-[0.65rem] my-[0.6rem] text-[0.72rem] text-subtext-0">No projects yet.</p>
             ) : (
               projects.map((group) => (
                 <ProjectRow
@@ -792,10 +799,10 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="sidebar__footer">
+      <div className="flex shrink-0 items-center justify-end gap-[0.35rem] border-t border-t-overlay-0 px-2 py-[0.4rem]">
         <button
           type="button"
-          className="sidebar__gear"
+          className="cursor-pointer rounded-ui bg-transparent p-1 text-[1.1rem] leading-none text-subtext-0 [border:none] [transition:color_0.12s_ease,background_0.12s_ease] hover:bg-surface-1 hover:text-fg"
           data-testid="settings-gear"
           title="Settings"
           aria-label="Settings"
