@@ -45,6 +45,8 @@ Done:
   primitive; `PaneContextMenu.tsx`, `WorkspaceOverview.tsx` `RowMenu`;
   `pane-menu.css` deleted) plus an infra fix: `hover:` is now a plain `:hover`
   (see slice 5 notes). Harness gained `06b-pane-menu-rename`.
+- **Slice 6: navigator + keybind help** (`Navigator.tsx`, `KeybindHelp.tsx`,
+  `navigator.css` deleted). Harness gained `09b`, `09c`, `10b`. See "Slice log".
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -55,7 +57,7 @@ Done:
 | status-bar.css | – | **migrated and deleted** (incl. terminal-search) |
 | onboarding.css | – | **migrated and deleted** |
 | pane-menu.css | – | **migrated and deleted** |
-| navigator.css | 255 | not started |
+| navigator.css | – | **migrated and deleted** (Navigator + KeybindHelp) |
 | workspace-tools.css | 112 | not started |
 | toolbar-tabs.css | 251 | not started |
 | sidebar.css | 126 | not started |
@@ -81,7 +83,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`navigator.css` → … ; leave
+`workspace-tools.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -230,6 +232,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 3 | status bar + terminal search | tsc clean; 215/215 unit tests; harness vs a baseline re-snapped with the new states: no computed-style, box, text, hover or focus differences in Chromium or WebKit (the two it caught on the way, footer side-border colours and the input's `outline` computed width/colour, are fixed: `border-t-overlay-0`, `[outline:none]`). 7 Chromium corner-speck screenshot diffs reviewed by name (03, 12, 17, 17b, 17c, 20c, 22), none in the status bar or find bar, all in the baseline-vs-baseline noise set. e2e (against a fresh `npm run build`): status-glyphs, worktrees, wave1 (Cmd+F find bar) pass; `workspace-recovery` fails at its `perch.sessionId` assertion on the committed tree too (pre-existing, unrelated). |
 | 4 | onboarding | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new state): `23-onboarding` and `23b-onboarding-phone` (390x520, panel scrolls) identical in Chromium and WebKit including pixels, hover and focus; no computed-style, box, text, hover or focus difference in any of the 33 states. 10 Chromium corner-speck screenshot diffs (03, 04, 06, 13, 14, 16, 17b, 17c, 20c, 22; 1–14 px, none show the modal) reviewed by name. e2e after `npm run build`: wave2 X4 onboarding, workspace-foundation, workspace-review, workspace-files-durable pass (7/7). |
 | 5 | pane/row context menu | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `06b`): no computed-style, box, text, hover or focus difference in any of the 34 states in Chromium or WebKit; `06` (pane menu: normal, danger, disabled Close) and `06b` (inline rename) pixel-identical in both; 7 Chromium corner-speck screenshot diffs reviewed by name (03, 13, 14, 16, 17b, 20, 20c; the 17b menu region itself is clean). e2e after `npm run build`: pane-splitting (5/5), native-ui claude/codex/omp (exercise Stop agent) pass. |
+| 6 | navigator + keybind help | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `09b`/`09c`/`10b`): no computed-style, box, text, hover or focus difference in any state in Chromium or WebKit; 09, 09b, 09c, 10, 10b pixel-identical. 10 Chromium corner-speck screenshot diffs (03, 13, 14, 16, 17, 17c, 18, 20, 20c, 22; 1-12 px, none in a modal) reviewed by name. e2e after `npm run build`: keybindings (5/5). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -289,6 +292,19 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 6 notes: **`[border:none]` plus a side utility is order-unsafe.** Tailwind
+emits arbitrary properties after the utilities, so `[border:none]` wiped
+`border-l-2` / `border-b`. For "one-sided border on a button/input" use
+`[border-style:none_none_solid]` (or `none_none_none_solid`), the width utility
+(`border-b` / `border-l-2`) and `border-current`: the UA's default border
+*colour* on the none sides otherwise shows in computed style (grey instead of
+the text colour). Two-property transitions are
+`[transition:color_0.12s_ease,background_0.12s_ease]`; `transition-[a,b]` +
+`duration-*` computes a different (single-value) duration list. `font-[inherit]`
+is ambiguous (weight vs family): write `[font-family:inherit]`. A `[background:none]`
+base clashes with a `bg-*` state, so it is applied only in the unselected branch.
+No e2e used a legacy navigator/keybind-help class (only testids).
 
 ## Pre-existing failures (not caused by the migration)
 

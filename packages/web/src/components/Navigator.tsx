@@ -19,10 +19,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
+import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { sessionDotState, type AgentDotState } from "../statusDot";
 import type { SessionSummary } from "@perch/shared";
 import { getDockviewController } from "../dockview/dockviewController";
+
+const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_none_solid] border-current border-l-2 border-l-transparent";
+const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1 border-l-accent" : "[background:none]");
+const ROW_TITLE = "min-w-12 shrink overflow-hidden text-ellipsis whitespace-nowrap";
+const ROW_CWD = "ml-auto min-w-0 shrink-[3] overflow-hidden text-ellipsis whitespace-nowrap text-[0.72rem] text-subtext-0";
 
 export interface NavigatorProps {
   open: boolean;
@@ -152,30 +158,31 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   if (!open) return null;
 
   const modal = (
-    <div className="navigator__backdrop" onClick={onClose}>
+    <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-[rgba(0,0,0,0.55)] pt-[12vh]" onClick={onClose}>
       <div
-        className="navigator"
+        className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[min(480px,calc(100dvh_-_16vh_-_2rem))] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         data-testid="navigator"
         onClick={(e) => e.stopPropagation()}
       >
         <input
           ref={inputRef}
           type="text"
-          className="navigator__input"
+          className="shrink-0 bg-surface-1 px-4 py-3 [font-family:inherit] text-[0.95rem] text-fg [border-style:none_none_solid] border-current border-b border-b-overlay-0 [outline:none]"
           data-testid="navigator-input"
           placeholder="Search sessions, agents, commands…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
 
-        <div className="navigator__chips">
+        <div className="flex shrink-0 gap-[0.3rem] border-b border-b-overlay-0 px-4 py-2">
           {FILTER_CHIPS.map((chip) => (
             <button
               key={chip.id}
               type="button"
-              className={
-                "navigator__chip" + (filter === chip.id ? " navigator__chip--active" : "")
-              }
+              className={cn(
+                "cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.55rem] py-[0.15rem] [font-family:inherit] text-[0.72rem] text-subtext-0 [transition:color_0.12s_ease,border-color_0.12s_ease]",
+                filter === chip.id && "border-accent text-accent",
+              )}
               data-testid={`navigator-filter-${chip.id}`}
               onClick={() => setFilter(chip.id)}
             >
@@ -184,23 +191,19 @@ export function Navigator({ open, onClose }: NavigatorProps) {
           ))}
         </div>
 
-        <div className="navigator__list" ref={listRef}>
+        <div className="flex-1 overflow-y-auto py-[0.3rem]" ref={listRef}>
           {commands.map((command, index) => <button key={command.id} type="button"
-            className={"navigator__row" + (index === selected ? " navigator__row--selected" : "")}
+            className={row(index === selected)}
             data-testid={`navigator-command-${command.id}`} data-selected={index === selected}
             onMouseEnter={() => setSelected(index)} onClick={() => { onClose(); command.run(); }}>
-            <span className="navigator__row-title">{command.label}</span><span className="navigator__row-cwd">{command.detail}</span>
+            <span className={ROW_TITLE}>{command.label}</span><span className={ROW_CWD}>{command.detail}</span>
           </button>)}
-          {rows.length + commands.length === 0 && <div className="navigator__empty">No matches</div>}
+          {rows.length + commands.length === 0 && <div className="p-4 text-center text-[0.82rem] text-subtext-0">No matches</div>}
           {rows.map((s, i) => (
             <button
               key={s.id}
               type="button"
-              className={
-                "navigator__row" +
-                (i + commands.length === selected ? " navigator__row--selected" : "") +
-                (s.id === sessionId ? " navigator__row--current" : "")
-              }
+              className={row(i + commands.length === selected)}
               data-testid={`navigator-row-${s.id}`}
               data-selected={i + commands.length === selected}
               onMouseEnter={() => setSelected(i + commands.length)}
@@ -210,8 +213,8 @@ export function Navigator({ open, onClose }: NavigatorProps) {
               }}
             >
               <StatusDot session={s} />
-              <span className="navigator__row-title">{s.title || "(untitled)"}</span>
-              <span className="navigator__row-cwd">{projectLabel(s)}</span>
+              <span className={cn(ROW_TITLE, s.id === sessionId && "font-semibold")}>{s.title || "(untitled)"}</span>
+              <span className={ROW_CWD}>{projectLabel(s)}</span>
             </button>
           ))}
         </div>

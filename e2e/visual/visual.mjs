@@ -219,12 +219,27 @@ const STATES = [
     await page.getByTestId("navigator").waitFor();
     await sleep(300);
   } },
+  { name: "09b-navigator-empty", run: async (page) => {
+    await page.getByTestId("navigator-input").fill("zzzqqq");
+    await page.getByText("No matches").waitFor();
+    await sleep(200);
+  } },
+  { name: "09c-navigator-chip", run: async (page) => {
+    await page.getByTestId("navigator-input").fill("");
+    await page.locator('[data-testid^="navigator-filter-"]').nth(1).click();
+    await sleep(200);
+  } },
   { name: "10-keybind-help", run: async (page) => {
     await closeOverlays(page);
     await page.keyboard.press("Control+Space");
     await page.keyboard.press("?");
     await page.getByTestId("keybind-help").waitFor();
     await sleep(300);
+  } },
+  { name: "10b-keybind-help-empty", run: async (page) => {
+    await page.getByTestId("keybind-help-search").fill("zzzqqq");
+    await page.getByText("No matching keybindings").waitFor();
+    await sleep(200);
   } },
   { name: "11-drawer-files", run: async (page, ctx) => {
     await closeOverlays(page);
