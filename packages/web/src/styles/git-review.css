@@ -42,9 +42,7 @@
   border-color: var(--accent);
 }
 
-.workspace-git__section-heading,
 .workspace-git__review-heading,
-.workspace-git__action-row,
 .workspace-git__packet-meta,
 .workspace-git__comment-actions,
 .workspace-git__batch-form {
@@ -52,7 +50,6 @@
   align-items: center;
 }
 
-.workspace-git__status-note,
 .workspace-git__comment-summary,
 .workspace-git__packet-meta span {
   color: var(--git-muted);
@@ -78,17 +75,11 @@
   overflow: hidden;
 }
 
-.workspace-git__section-heading,
 .workspace-git__review-heading {
   justify-content: space-between;
   gap: 0.6rem;
 }
 
-.workspace-git__section-heading {
-  padding: 0.65rem 0.7rem 0.45rem;
-}
-
-.workspace-git__section-heading > div,
 .workspace-git__review-heading > div {
   display: flex;
   flex-direction: column;
@@ -96,34 +87,8 @@
   min-width: 0;
 }
 
-.workspace-git__select-all {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--git-muted);
-  font-size: 0.68rem;
-  white-space: nowrap;
-}
-
 .workspace-git__file-state--conflict {
   color: var(--red);
-}
-
-.workspace-git__source-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.42rem;
-  margin-top: auto;
-  padding: 0.65rem;
-  border-top: 1px solid var(--git-border);
-}
-
-.workspace-git__action-row {
-  gap: 0.3rem;
-}
-
-.workspace-git__action-row .workspace-git__button {
-  flex: 1;
 }
 
 .workspace-git__button {
@@ -161,7 +126,6 @@
   color: var(--red);
 }
 
-.workspace-git__commit-field,
 .workspace-git__field {
   display: flex;
   align-items: center;
@@ -171,12 +135,6 @@
   font-size: 0.68rem;
 }
 
-.workspace-git__commit-field {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.workspace-git__commit-field input,
 .workspace-git__field input,
 .workspace-git__field select,
 .workspace-git__batch-form input,
@@ -323,14 +281,6 @@
 }
 
 .workspace-git__empty--error,
-.workspace-git__status-note--error {
-  color: var(--red);
-}
-
-.workspace-git__status-note {
-  padding: 0.55rem 0.7rem;
-}
-
 .workspace-git__banner {
   margin: 0.55rem 0.7rem;
   padding: 0.4rem 0.5rem;
@@ -417,10 +367,6 @@
   .workspace-git__body {
     display: block;
     overflow: auto;
-  }
-
-  .workspace-git__source-actions {
-    margin-top: 0;
   }
 
   .workspace-git__main {

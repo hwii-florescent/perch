@@ -48,6 +48,7 @@ const COMMENT = "workspace-git__comment mt-[0.3rem] border-l-2 px-[0.55rem] py-[
 const COMMENT_TONE: Record<string, string> = { resolved: "border-l-green opacity-[0.72]", unresolved: "border-l-accent" };
 const PILL_TONE: Record<string, string> = { resolved: "text-green", unresolved: "text-accent" };
 const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui border border-[color:var(--git-border)] bg-surface-1 p-[0.4rem] text-fg";
+const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
 export interface WorkspaceGitReviewProps {
@@ -633,12 +634,12 @@ export function WorkspaceGitReview({
 
       <div className="workspace-git__body">
         <aside className="flex min-h-0 w-[17rem] min-w-[14rem] flex-col overflow-y-auto border-r border-r-[color:var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:max-h-[12rem] [@container(max-width:700px)]:[border-right:none] [@container(max-width:700px)]:border-b [@container(max-width:700px)]:border-b-[color:var(--git-border)]" data-testid="git-status">
-          <div className="workspace-git__section-heading">
-            <div>
+          <div className="flex items-center justify-between gap-[0.6rem] pt-[0.65rem] pr-[0.7rem] pb-[0.45rem] pl-[0.7rem]">
+            <div className="flex min-w-0 flex-col gap-[0.1rem]">
               <span className={EYEBROW}>Workspace status</span>
               <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
             </div>
-            <label className="workspace-git__select-all">
+            <label className="inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
               <input
                 type="checkbox"
                 checked={changedFiles.length > 0 && selectedCount === changedFiles.length}
@@ -649,8 +650,8 @@ export function WorkspaceGitReview({
             </label>
           </div>
 
-          {statusState === "loading" && <div className="workspace-git__status-note" role="status">Reading Git status…</div>}
-          {statusState === "error" && <div className="workspace-git__status-note workspace-git__status-note--error" role="alert">{statusError || "Git status is unavailable."}</div>}
+          {statusState === "loading" && <div className={STATUS_NOTE} role="status">Reading Git status…</div>}
+          {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
           {status && (
             <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui border border-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] px-[0.55rem] py-2">
               <div className="flex items-center justify-between gap-2"><strong className="overflow-hidden text-ellipsis whitespace-nowrap">{status.branch || "Detached HEAD"}</strong><span className="text-yellow [font-family:monospace] text-[0.66rem]">{shortHash(status.head)}</span></div>
@@ -685,20 +686,20 @@ export function WorkspaceGitReview({
                 </button>
               </div>
             ))}
-            {statusState !== "loading" && changedFiles.length === 0 && <div className="workspace-git__status-note">Working tree is clean.</div>}
+            {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
           </div>
 
-          <div className="workspace-git__source-actions">
-            <div className="workspace-git__action-row">
-              <button type="button" className="workspace-git__button" disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
-              <button type="button" className="workspace-git__button" disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
+          <div className="mt-auto flex flex-col gap-[0.42rem] border-t border-t-[color:var(--git-border)] p-[0.65rem] [@container(max-width:700px)]:mt-0">
+            <div className="flex items-center gap-[0.3rem]">
+              <button type="button" className="workspace-git__button flex-1" disabled={selectedCount === 0} onClick={() => actions.stage([...selectedPaths])}>Stage selected</button>
+              <button type="button" className="workspace-git__button flex-1" disabled={selectedCount === 0} onClick={() => actions.unstage([...selectedPaths])}>Unstage</button>
             </div>
-            <div className="workspace-git__action-row">
-              <button type="button" className="workspace-git__button workspace-git__button--danger" data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
+            <div className="flex items-center gap-[0.3rem]">
+              <button type="button" className="workspace-git__button workspace-git__button--danger flex-1" data-testid="git-discard-preview" disabled={selectedCount === 0} onClick={() => requestDiscard("worktree")}>Discard selected</button>
             </div>
-            <label className="workspace-git__commit-field">
+            <label className="flex min-w-0 flex-col items-stretch gap-[0.35rem] text-[0.68rem] text-subtext-0">
               <span>Commit staged changes</span>
-              <input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
+              <input className={TB_INPUT} value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe the change" />
             </label>
             <button type="button" className="workspace-git__button workspace-git__button--primary" disabled={stagedCount === 0 || !commitMessage.trim()} onClick={requestCommitPreview}>Preview commit</button>
           </div>
@@ -764,7 +765,7 @@ export function WorkspaceGitReview({
           {lastAgentTurn?.state === "unavailable" && (
             /* Never silently substitute an older turn for this one: the newest
                turn is the one the label promises, and it was not captured. */
-            <p className="workspace-git__status-note" data-testid="git-turn-unavailable">
+            <p className={STATUS_NOTE} data-testid="git-turn-unavailable">
               This agent turn was not captured, so it cannot be compared. The next turn records a fresh baseline.
             </p>
           )}
@@ -776,7 +777,7 @@ export function WorkspaceGitReview({
                 const path = filePath(file);
                 return <button type="button" className={`${DIFF_FILE} ${activeFile === path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span className="text-[0.64rem] text-accent capitalize">{file.status}</span><strong className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{path}</strong><small className="text-[0.64rem] text-subtext-0">{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
               })}
-              {diffState !== "loading" && diffFiles.length === 0 && <div className="workspace-git__status-note">No files in this diff.</div>}
+              {diffState !== "loading" && diffFiles.length === 0 && <div className={STATUS_NOTE}>No files in this diff.</div>}
             </nav>
 
             <div className={`min-h-0 min-w-0 flex-1 overflow-auto [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
