@@ -448,6 +448,11 @@
   font-family: inherit;
 }
 
+/* The Settings Chat Mode row sits the pill right after its label, not at the far edge. */
+.settings-modal__field-row .mode-switch {
+  margin-left: 0;
+}
+
 .mode-switch__label {
   font-size: 0.72rem;
   font-weight: 600;

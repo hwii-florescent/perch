@@ -332,6 +332,32 @@ const STATES = [
     await page.getByTestId("settings-modal").evaluate((m) => { m.querySelectorAll("*").forEach((n) => { if (n.scrollHeight > n.clientHeight + 20 && /auto|scroll/.test(getComputedStyle(n).overflowY)) n.scrollTop = n.scrollHeight; }); });
     await sleep(300);
   } },
+  // Settings with a custom model row, a pairing code, then the Agents subpage and back.
+  { name: "08b-settings-model-and-pair", run: async (page) => {
+    const block = page.locator(".settings-modal__agent-block", { hasText: "claude" });
+    await block.getByPlaceholder("Model ID").fill("vis-model-1");
+    await block.getByPlaceholder("Label (optional)").fill("Visual model");
+    await block.getByRole("button", { name: "Add" }).click();
+    await page.locator(".settings-modal__model-row", { hasText: "vis-model-1" }).waitFor();
+    await page.getByTestId("pair-start").click();
+    const box = page.getByTestId("pair-code");
+    await box.waitFor();
+    // the code is random and the countdown ticks: swap both for static clones (React updates the detached originals)
+    await box.evaluate((b) => { for (const el of b.querySelectorAll("strong, span")) { const c = el.cloneNode(true); c.textContent = el.tagName === "STRONG" ? "ABCD-EFGH" : "Enter it on the other device. Expires in 4:59."; el.replaceWith(c); } });
+    await box.scrollIntoViewIfNeeded();
+    await sleep(300);
+  } },
+  { name: "08c-settings-agents", run: async (page) => {
+    await page.getByRole("button", { name: "Manage agents" }).click();
+    await page.getByTestId("agent-catalog").waitFor();
+    await sleep(800);
+  } },
+  { name: "08d-settings-back", run: async (page) => {
+    await page.getByTestId("settings-back").click();
+    await page.locator(".settings-modal__model-row", { hasText: "vis-model-1" }).getByRole("button", { name: "Remove" }).click();
+    await page.locator(".settings-modal__model-row", { hasText: "vis-model-1" }).waitFor({ state: "detached" });
+    await sleep(300);
+  } },
   { name: "09-navigator", run: async (page) => {
     await closeOverlays(page);
     await page.keyboard.press("Meta+k");
@@ -591,13 +617,18 @@ async function capture(page, outDir, name, state = {}) {
   fs.writeFileSync(`${outDir}/${name}.dump.json`, JSON.stringify(dump));
   // Volatile text (file mtime, workspace id) and the terminal are masked so
   // that a pixel difference always means a real one.
+  // Under the settings modal a mask would paint over the modal itself (the mask
+  // sits above everything), so hide the terminal there instead.
+  const modalOpen = (await page.getByTestId("settings-modal").count()) > 0;
+  const hideTerm = modalOpen ? await page.addStyleTag({ content: ".xterm{visibility:hidden!important}" }) : null;
   await page.screenshot({
     path: `${outDir}/${name}.png`,
     animations: "disabled",
     caret: "hide",
-    mask: [page.locator(".xterm"), page.getByText(/\d+ B · \d+\/\d+\/\d+/), page.getByText(/^Workspace\s*[0-9a-f]{8}$/), page.getByText(/^[0-9a-f]{8}$/)],
+    mask: [...(modalOpen ? [] : [page.locator(".xterm")]), page.getByText(/\d+ B · \d+\/\d+\/\d+/), page.getByText(/^Workspace\s*[0-9a-f]{8}$/), page.getByText(/^[0-9a-f]{8}$/)],
     maskColor: "#ff00ff",
   });
+  if (hideTerm) await hideTerm.evaluate((n) => n.remove());
 
   // hover/focus read end states: freeze transitions so timing can't leak in
   await page.addStyleTag({ content: "*,*::before,*::after{transition:none!important;animation:none!important}" }).then((h) => h.evaluate((n) => n.setAttribute("data-vis-freeze", "1")));

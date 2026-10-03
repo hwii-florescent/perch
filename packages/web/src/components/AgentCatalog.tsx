@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MUTED } from "./ui/settings";
 import type { AgentManifestSummary } from "@perch/shared";
 import { usePerchStore } from "../store";
 
@@ -38,7 +39,7 @@ export function AgentCatalog() {
     </div>;
   }
   return <div className="agent-catalog" data-testid="agent-catalog">
-    <p className="settings-modal__muted">Run your agent’s CLI in a workspace folder. Install links open each agent’s setup instructions; Refresh checks this host again.</p>
+    <p className={MUTED}>Run your agent’s CLI in a workspace folder. Install links open each agent’s setup instructions; Refresh checks this host again.</p>
     <div className="agent-catalog__toolbar">
       <label>Host <select aria-label="Agent host" value={hostId} onChange={(e) => setHostId(e.target.value)}>
         <option value="local">This host</option>{hosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}

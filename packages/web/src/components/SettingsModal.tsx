@@ -23,6 +23,11 @@ import { useAgentChoices } from "./AgentPicker";
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
 import { HostStateDot } from "./HostStateDot";
+import { cn } from "../lib/cn";
+import {
+  ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
+  LIST, MODEL_ROW, MUTED, NAME, SECTION, SECTION_TITLE, SELECT, SELECT_HOST,
+} from "./ui/settings";
 
 // ---------------------------------------------------------------------------
 // ThemeSection
@@ -44,23 +49,23 @@ function ThemeSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Theme</h3>
-      <ul className="settings-modal__theme-list">
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Theme</h3>
+      <ul className="m-0 mb-2 flex list-none flex-wrap gap-[0.4rem] p-0">
         {THEME_NAMES.map((name) => (
           <li key={name}>
             <button
               type="button"
-              className={
-                "settings-modal__theme-option" +
-                (name === current ? " settings-modal__theme-option--active" : "")
-              }
+              className={cn(
+                "flex cursor-pointer items-center gap-[0.4rem] rounded-ui border bg-surface-1 px-[0.65rem] py-[0.3rem] text-[0.8rem] hover:border-overlay-1",
+                name === current ? "settings-modal__theme-option--active border-accent text-accent" : "border-overlay-0 text-fg",
+              )}
               data-testid={`theme-option-${name}`}
               onClick={() => handleSelect(name)}
             >
               <span className="settings-modal__theme-option-name">{name}</span>
               {name === current && (
-                <span className="settings-modal__theme-option-check" aria-hidden="true">
+                <span className="text-accent" aria-hidden="true">
                   ✓
                 </span>
               )}
@@ -98,17 +103,17 @@ function ChatModeSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Chat Mode</h3>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">UI / CLI</span>
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Chat Mode</h3>
+      <div className={FIELD_ROW}>
+        <span className="text-subtext-0">UI / CLI</span>
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </div>
-      <p className="settings-modal__muted">UI or CLI for every session.</p>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">Empty workspace opens</span>
+      <p className={MUTED}>UI or CLI for every session.</p>
+      <div className={FIELD_ROW}>
+        <span className="text-subtext-0">Empty workspace opens</span>
         <select
-          className="settings-modal__input"
+          className={INPUT}
           data-testid="settings-empty-workspace-agent"
           value={settings?.emptyWorkspaceAgent ?? ""}
           onChange={(e) => updateSettings({ emptyWorkspaceAgent: e.target.value })}
@@ -117,7 +122,7 @@ function ChatModeSection() {
           {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
       </div>
-      <p className="settings-modal__muted">What clicking a workspace with no open tabs starts.</p>
+      <p className={MUTED}>What clicking a workspace with no open tabs starts.</p>
     </section>
   );
 }
@@ -171,13 +176,13 @@ function SshHostsSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">SSH Hosts</h3>
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>SSH Hosts</h3>
 
       {hosts.length === 0 ? (
-        <p className="settings-modal__empty">No hosts configured.</p>
+        <p className={EMPTY}>No hosts configured.</p>
       ) : (
-        <ul className="settings-modal__host-list">
+        <ul className={LIST}>
           {hosts.map((h) => {
             const info = hostStates[h.id];
             // Derive display state: info.state if available, else infer.
@@ -185,17 +190,17 @@ function SshHostsSection() {
               ? info.state
               : h.enabled ? "connecting" : "disabled";
             return (
-              <li key={h.id} className="settings-modal__host-row">
+              <li key={h.id} className={HOST_ROW}>
                 <HostStateDot state={state} error={info?.error} />
-                <span className="settings-modal__host-name">{h.name}</span>
-                <span className="settings-modal__host-addr">
+                <span className={NAME}>{h.name}</span>
+                <span className={ADDR}>
                   {h.sshHost}:{h.remotePort}
                 </span>
                 {/* Mode is editable in place: switching an existing host to
                     direct is the normal migration path once the remote no
                     longer needs a perch checkout. */}
                 <select
-                  className="settings-modal__select settings-modal__host-mode"
+                  className={SELECT_HOST}
                   data-testid={`host-mode-${h.name}`}
                   title="perch = remote runs its own perch; direct = remote only needs claude/codex + tmux"
                   value={h.mode ?? "perch"}
@@ -205,11 +210,11 @@ function SshHostsSection() {
                   <option value="direct">direct</option>
                 </select>
                 {state === "error" && info?.error && (
-                  <span className="settings-modal__host-error" title={info.error}>
+                  <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-red" title={info.error}>
                     {info.error.length > 40 ? info.error.slice(0, 40) + "…" : info.error}
                   </span>
                 )}
-                <label className="settings-modal__host-enabled" title="Enabled">
+                <label className="flex shrink-0 cursor-pointer items-center gap-[0.3rem] text-[0.78rem] text-subtext-0" title="Enabled">
                   <input
                     type="checkbox"
                     checked={h.enabled}
@@ -219,7 +224,7 @@ function SshHostsSection() {
                 </label>
                 <button
                   type="button"
-                  className="settings-modal__btn settings-modal__btn--danger"
+                  className={BTN_DANGER}
                   data-testid={`host-delete-${h.name}`}
                   onClick={() => deleteHost(h.id)}
                 >
@@ -231,10 +236,10 @@ function SshHostsSection() {
         </ul>
       )}
 
-      <div className="settings-modal__add-row">
+      <div className={ADD_ROW}>
         <input
           type="text"
-          className="settings-modal__input"
+          className={INPUT}
           placeholder="Name"
           value={newName}
           data-testid="host-name-input"
@@ -242,7 +247,7 @@ function SshHostsSection() {
         />
         <input
           type="text"
-          className="settings-modal__input"
+          className={INPUT}
           placeholder="SSH host"
           value={newSshHost}
           data-testid="host-ssh-input"
@@ -250,13 +255,13 @@ function SshHostsSection() {
         />
         <input
           type="number"
-          className="settings-modal__input settings-modal__input--port"
+          className={INPUT_PORT}
           placeholder="Port"
           value={newPort}
           onChange={(e) => setNewPort(e.target.value)}
         />
         <select
-          className="settings-modal__select"
+          className={SELECT}
           data-testid="host-mode-input"
           title="direct = remote only needs claude/codex + tmux; perch = remote runs its own perch"
           value={newMode}
@@ -267,7 +272,7 @@ function SshHostsSection() {
         </select>
         <button
           type="button"
-          className="settings-modal__btn settings-modal__btn--primary"
+          className={BTN_PRIMARY}
           data-testid="host-add"
           onClick={handleAdd}
         >
@@ -276,10 +281,10 @@ function SshHostsSection() {
       </div>
 
       {/* Advanced optional fields */}
-      <div className="settings-modal__add-row settings-modal__add-row--advanced">
+      <div className={`${ADD_ROW} mt-[0.35rem] opacity-75`}>
         <input
           type="text"
-          className="settings-modal__input"
+          className={INPUT}
           placeholder="Direct URL (optional, e.g. ws://127.0.0.1:7800/ws)"
           value={newDirectUrl}
           data-testid="host-direct-url-input"
@@ -287,7 +292,7 @@ function SshHostsSection() {
         />
         <input
           type="text"
-          className="settings-modal__input"
+          className={INPUT}
           placeholder="Remote start cmd (optional, {port} placeholder)"
           value={newRemoteCmd}
           data-testid="host-remote-cmd-input"
@@ -340,24 +345,24 @@ function CustomModelsSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Custom Models</h3>
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Custom Models</h3>
       {(["claude", "codex"] as AgentKindKey[]).map((agent) => {
         const list = (settings.customModels[agent] ?? []) as ModelEntry[];
         return (
-          <div key={agent} className="settings-modal__agent-block">
-            <h4 className="settings-modal__agent-title">{agent}</h4>
+          <div key={agent} className="settings-modal__agent-block mb-3">
+            <h4 className="m-0 mb-[0.35rem] text-[0.8rem] font-semibold tracking-[0.04em] text-subtext-0 uppercase">{agent}</h4>
             {list.length === 0 ? (
-              <p className="settings-modal__empty">No custom {agent} models.</p>
+              <p className={EMPTY}>No custom {agent} models.</p>
             ) : (
-              <ul className="settings-modal__model-list">
+              <ul className={LIST}>
                 {list.map((m) => (
-                  <li key={m.id} className="settings-modal__model-row">
-                    <span className="settings-modal__model-id">{m.id}</span>
-                    <span className="settings-modal__model-label">{m.label}</span>
+                  <li key={m.id} className={MODEL_ROW}>
+                    <span className={NAME}>{m.id}</span>
+                    <span className={ADDR}>{m.label}</span>
                     <button
                       type="button"
-                      className="settings-modal__btn settings-modal__btn--danger"
+                      className={BTN_DANGER}
                       onClick={() => handleRemove(agent, m.id)}
                     >
                       Remove
@@ -366,24 +371,24 @@ function CustomModelsSection() {
                 ))}
               </ul>
             )}
-            <div className="settings-modal__add-row">
+            <div className={ADD_ROW}>
               <input
                 type="text"
-                className="settings-modal__input"
+                className={INPUT}
                 placeholder="Model ID"
                 value={newId[agent]}
                 onChange={(e) => setNewId((prev) => ({ ...prev, [agent]: e.target.value }))}
               />
               <input
                 type="text"
-                className="settings-modal__input"
+                className={INPUT}
                 placeholder="Label (optional)"
                 value={newLabel[agent]}
                 onChange={(e) => setNewLabel((prev) => ({ ...prev, [agent]: e.target.value }))}
               />
               <button
                 type="button"
-                className="settings-modal__btn settings-modal__btn--primary"
+                className={BTN_PRIMARY}
                 onClick={() => handleAdd(agent)}
               >
                 Add
@@ -416,25 +421,25 @@ function DefaultCwdSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Default Working Directory</h3>
-      <div className="settings-modal__add-row">
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Default Working Directory</h3>
+      <div className={ADD_ROW}>
         <input
           type="text"
-          className="settings-modal__input settings-modal__input--wide"
+          className={INPUT_WIDE}
           placeholder="/path/to/your/project"
           value={cwd}
           onChange={(e) => setCwd(e.target.value)}
         />
         <button
           type="button"
-          className="settings-modal__btn settings-modal__btn--primary"
+          className={BTN_PRIMARY}
           onClick={handleSave}
         >
           Save
         </button>
       </div>
-      <p className="settings-modal__muted">
+      <p className={MUTED}>
         Used as the cwd for new sessions. Leave empty to use the server process directory.
       </p>
     </section>
@@ -484,9 +489,9 @@ function NotificationsSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Notifications</h3>
-      <label className="settings-modal__checkbox-row">
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Notifications</h3>
+      <label className={CHECKBOX_ROW}>
         <input
           type="checkbox"
           data-testid="settings-sound-enabled"
@@ -495,10 +500,10 @@ function NotificationsSection() {
         />
         Play a sound when a session finishes or needs attention
       </label>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">Toast delivery</span>
+      <div className={FIELD_ROW}>
+        <span className="text-subtext-0">Toast delivery</span>
         <select
-          className="settings-modal__select"
+          className={SELECT}
           data-testid="settings-toast-delivery"
           value={toastDelivery}
           onChange={(e) => handleToastDeliveryChange(e.target.value as "off" | "app" | "system")}
@@ -511,7 +516,7 @@ function NotificationsSection() {
       {toastDelivery === "system" &&
         typeof Notification !== "undefined" &&
         Notification.permission === "denied" && (
-          <p className="settings-modal__muted">
+          <p className={MUTED}>
             System notifications are blocked in your browser settings — falling back to in-app toasts.
           </p>
         )}
@@ -536,9 +541,9 @@ function InterfaceSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Interface</h3>
-      <label className="settings-modal__checkbox-row">
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Interface</h3>
+      <label className={CHECKBOX_ROW}>
         <input
           type="checkbox"
           data-testid="settings-pane-labels"
@@ -593,13 +598,13 @@ function TerminalSection() {
   };
 
   return (
-    <section className="settings-modal__section">
-      <h3 className="settings-modal__section-title">Terminal</h3>
-      <div className="settings-modal__field-row">
-        <span className="settings-modal__field-label">Scrollback (lines)</span>
+    <section className={SECTION}>
+      <h3 className={SECTION_TITLE}>Terminal</h3>
+      <div className={FIELD_ROW}>
+        <span className="text-subtext-0">Scrollback (lines)</span>
         <input
           type="number"
-          className="settings-modal__input settings-modal__input--port"
+          className={INPUT_PORT}
           data-testid="settings-terminal-scrollback"
           min={MIN_SCROLLBACK}
           max={MAX_SCROLLBACK}
@@ -607,10 +612,10 @@ function TerminalSection() {
           onChange={(e) => handleScrollbackChange(e.target.value)}
         />
       </div>
-      <p className="settings-modal__muted">
+      <p className={MUTED}>
         {MIN_SCROLLBACK}–{MAX_SCROLLBACK} lines; takes effect on newly-opened terminal panes.
       </p>
-      <label className="settings-modal__checkbox-row">
+      <label className={CHECKBOX_ROW}>
         <input
           type="checkbox"
           data-testid="settings-terminal-login-shell"
@@ -619,7 +624,7 @@ function TerminalSection() {
         />
         Spawn plain terminal panes as a login shell
       </label>
-      <p className="settings-modal__muted">
+      <p className={MUTED}>
         Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created
         terminals.
       </p>
@@ -677,15 +682,15 @@ function DevicesSection() {
   }, [code, remaining]);
 
   return (
-    <section className="settings-modal__section" data-testid="settings-devices">
-      <h3 className="settings-modal__section-title">Devices</h3>
-      <p className="settings-modal__muted">
+    <section className={SECTION} data-testid="settings-devices">
+      <h3 className={SECTION_TITLE}>Devices</h3>
+      <p className={MUTED}>
         Anything reaching this host from another machine needs a paired device. Local access never does.
       </p>
       {code ? (
-        <div className="settings-modal__pair-code" data-testid="pair-code">
-          <strong>{code}</strong>
-          <span className="settings-modal__muted">
+        <div className="my-2 flex flex-wrap items-center gap-[0.6rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
+          <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono,monospace)]">{code}</strong>
+          <span className={MUTED}>
             Enter it on the other device. Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
           </span>
           <button
@@ -709,13 +714,13 @@ function DevicesSection() {
         </button>
       )}
       {devices.length === 0 ? (
-        <p className="settings-modal__empty">No paired devices.</p>
+        <p className={EMPTY}>No paired devices.</p>
       ) : (
-        <ul className="settings-modal__host-list" data-testid="paired-devices">
+        <ul className={LIST} data-testid="paired-devices">
           {devices.map((device) => (
-            <li key={device.id} className="settings-modal__host-row">
-              <span className="settings-modal__host-name">{device.name}</span>
-              <span className="settings-modal__host-addr">
+            <li key={device.id} className={HOST_ROW}>
+              <span className={NAME}>{device.name}</span>
+              <span className={ADDR}>
                 last seen {new Date(device.lastSeenAt).toLocaleString()}
               </span>
               <button
@@ -768,19 +773,22 @@ export function SettingsModal() {
 
   return (
     <div
-      className="settings-modal__backdrop"
+      className="settings-modal__backdrop fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]"
       onClick={() => setSettingsOpen(false)}
     >
       <div
         ref={panelRef}
-        className={"settings-modal__panel" + (view === "agents" ? " settings-modal__panel--agents" : "")}
+        className={cn(
+          "flex max-h-[calc(100dvh_-_4rem)] w-[min(640px,calc(100vw_-_2rem))] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]",
+          view === "agents" && "settings-modal__panel--agents",
+        )}
         data-testid="settings-modal"
         role="dialog"
         aria-modal="true"
         aria-label={view === "agents" ? "Agents" : "Settings"}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="settings-modal__header">
+        <div className="flex shrink-0 items-center justify-between border-b border-b-overlay-0 px-4 pt-[0.85rem] pb-3">
           {view !== "main" && (
             <button
               type="button"
@@ -792,12 +800,12 @@ export function SettingsModal() {
               ‹
             </button>
           )}
-          <h2 className="settings-modal__title">
+          <h2 className="m-0 text-[1rem] font-semibold text-fg">
             {view === "agents" ? "Agents" : "Settings"}
           </h2>
           <button
             type="button"
-            className="settings-modal__close"
+            className="cursor-pointer rounded-ui px-[0.35rem] py-[0.2rem] text-[1rem] leading-none text-subtext-0 [background:none] [border:none] [transition:color_0.12s_ease,background_0.12s_ease] hover:bg-surface-1 hover:text-fg"
             aria-label="Close settings"
             onClick={() => setSettingsOpen(false)}
           >
@@ -805,14 +813,14 @@ export function SettingsModal() {
           </button>
         </div>
 
-        <div className="settings-modal__body">
+        <div className="settings-modal__body flex-1 overflow-y-auto py-2">
           {view === "agents" ? <AgentCatalog /> : (
             <>
               <ThemeSection />
               <ChatModeSection />
-              <section className="settings-modal__section">
-                <h3 className="settings-modal__section-title">Agents</h3>
-                <p className="settings-modal__muted">Installed CLIs, available agents, and your default launcher.</p>
+              <section className={SECTION}>
+                <h3 className={SECTION_TITLE}>Agents</h3>
+                <p className={MUTED}>Installed CLIs, available agents, and your default launcher.</p>
                 <button type="button" className="agent-catalog__action" onClick={() => setView("agents")}>Manage agents</button>
               </section>
               <NotificationsSection />
