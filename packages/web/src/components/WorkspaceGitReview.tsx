@@ -38,6 +38,11 @@ const PATH_BUTTON_IDLE = "border-transparent";
 const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 // `conflict` keeps its legacy rule in git-review.css (no harness state yet).
 const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", untracked: "text-yellow", conflict: "workspace-git__file-state--conflict" };
+const TB_FIELD = "flex min-w-0 max-w-full flex-col items-start gap-[0.35rem] text-[0.68rem] text-subtext-0";
+const TB_INPUT = "min-w-0 max-w-full rounded-ui border border-[color:var(--git-border)] bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
+const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
+const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start";
+const DIFF_FILE = "flex min-w-0 flex-col items-start gap-[0.1rem] rounded-ui border px-[0.45rem] py-[0.42rem] text-left text-fg [background:none] hover:bg-surface-1";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
 export interface WorkspaceGitReviewProps {
@@ -695,11 +700,11 @@ export function WorkspaceGitReview({
         </aside>
 
         <div className="workspace-git__main">
-          <div className="workspace-git__diff-toolbar">
-            <div className="workspace-git__toolbar-group">
-              <label className="workspace-git__field">
+          <div className="flex flex-wrap items-end justify-between gap-[0.65rem] border-b border-b-[color:var(--git-border)] px-[0.7rem] py-[0.55rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start">
+            <div className={TB_GROUP}>
+              <label className={TB_FIELD}>
                 <span>Compare</span>
-                <select data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
+                <select className={TB_INPUT} data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
                   <option value="workingTree">Working tree</option>
                   <option value="staged">Staged</option>
                   <option value="head">HEAD</option>
@@ -708,9 +713,9 @@ export function WorkspaceGitReview({
                   <option value="compare">Another ref…</option>
                 </select>
               </label>
-              <label className="workspace-git__field">
+              <label className={TB_FIELD}>
                 <span>Turn session</span>
-                <select data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
+                <select className={TB_INPUT} data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
                   chooseTarget("workingTree");
                   actions.selectAgentSession(event.target.value || undefined);
                 }}>
@@ -720,19 +725,19 @@ export function WorkspaceGitReview({
               </label>
               {compareOpen && (
                 <>
-                  <label className="workspace-git__field"><span>Base ref</span>
-                    <input list="git-review-refs" data-testid="git-base-selector" value={compareBase} onChange={(event) => setCompareBase(event.target.value)} placeholder="main" />
+                  <label className={TB_FIELD}><span>Base ref</span>
+                    <input className={TB_INPUT} list="git-review-refs" data-testid="git-base-selector" value={compareBase} onChange={(event) => setCompareBase(event.target.value)} placeholder="main" />
                     <datalist id="git-review-refs">{refs.map((ref) => <option value={ref.name} key={`${ref.remote ? "remote" : "local"}:${ref.name}`}>{ref.target.slice(0, 8)}</option>)}</datalist>
                   </label>
-                  <label className="workspace-git__field"><span>Head <em>optional</em></span><input value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
+                  <label className={TB_FIELD}><span>Head <em className="font-normal">optional</em></span><input className={TB_INPUT} value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
                   <button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
                 </>
               )}
             </div>
-            <div className="workspace-git__toolbar-group workspace-git__toolbar-group--secondary">
-              <label className="workspace-git__check"><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
-              <label className="workspace-git__check"><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
-              <label className="workspace-git__field workspace-git__field--compact"><span>Context</span><select value={contextLines} onChange={(event) => setContextLines(Number(event.target.value))}><option value={0}>0 lines</option><option value={3}>3 lines</option><option value={8}>8 lines</option></select></label>
+            <div className={`${TB_GROUP} justify-end`}>
+              <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
+              <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
+              <label className={TB_FIELD}><span>Context</span><select className={`${TB_INPUT} w-[5rem]`} value={contextLines} onChange={(event) => setContextLines(Number(event.target.value))}><option value={0}>0 lines</option><option value={3}>3 lines</option><option value={8}>8 lines</option></select></label>
             </div>
           </div>
 
@@ -759,12 +764,12 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          <div className="workspace-git__diff-layout">
-            <nav className="workspace-git__diff-files" aria-label="Changed files">
-              <div className="workspace-git__section-heading"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:min-h-[20rem]">
+            <nav className="flex w-auto min-w-[7rem] flex-[0_1_clamp(7rem,28%,13rem)] flex-col gap-[0.15rem] overflow-y-auto border-r border-r-[color:var(--git-border)] p-[0.35rem] [@container(max-width:700px)]:w-[clamp(7rem,28%,10rem)] [@container(max-width:700px)]:flex-[0_1_clamp(7rem,28%,10rem)]" aria-label="Changed files">
+              <div className="flex items-center justify-between gap-[0.6rem] pt-1 pr-[0.3rem] pb-[0.4rem] pl-[0.3rem]"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
               {diffFiles.map((file) => {
                 const path = filePath(file);
-                return <button type="button" className={`workspace-git__diff-file${activeFile === path ? " workspace-git__diff-file--active" : ""}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span>{file.status}</span><strong>{path}</strong><small>{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
+                return <button type="button" className={`${DIFF_FILE} ${activeFile === path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span className="text-[0.64rem] text-accent capitalize">{file.status}</span><strong className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{path}</strong><small className="text-[0.64rem] text-subtext-0">{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
               })}
               {diffState !== "loading" && diffFiles.length === 0 && <div className="workspace-git__status-note">No files in this diff.</div>}
             </nav>

@@ -551,6 +551,19 @@ const STATES = [
     await pinGitScroll(page);
     await sleep(500);
   } },
+  // "Another ref…" opens the base/head inputs and the Clear base button; clearing closes them again.
+  { name: "14f-git-compare-open", run: async (page) => {
+    await page.getByTestId("git-diff-target").selectOption("compare");
+    await page.getByTestId("git-base-selector").waitFor();
+    await page.getByTestId("git-base-selector").fill("main");
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14g-git-compare-cleared", run: async (page) => {
+    await page.getByRole("button", { name: "Clear base" }).click();
+    await page.getByTestId("git-base-selector").waitFor({ state: "detached" });
+    await sleep(500);
+  } },
   { name: "15-worktree-menu", run: async (page) => {
     await page.getByTestId("workspace-tools-toggle").click(); // close drawer
     await sleep(300);
