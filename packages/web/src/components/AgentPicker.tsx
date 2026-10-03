@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
+import { cn } from "../lib/cn";
+
+/** The native select, with a drawn chevron (WebKit ignores min-height on a native select).
+ * `agent-picker` stays as a hook: mobile.css lifts its min-height on phones. */
+export const AGENT_PICKER = "agent-picker min-h-[32px] w-full appearance-none rounded-ui border border-overlay-0 py-[0.3rem] pr-[1.6rem] pl-[0.45rem] text-fg [background:linear-gradient(45deg,transparent_50%,var(--subtext-0)_50%)_right_0.85rem_center/5px_5px_no-repeat,linear-gradient(135deg,var(--subtext-0)_50%,transparent_50%)_right_0.55rem_center/5px_5px_no-repeat,var(--panel-bg)] [font:inherit] focus-visible:border-accent focus-visible:[outline:none]";
 
 /** The CLI agents `hostId` can start in a pane (its enabled, installed
  * manifests), fetched on demand. Shared by every "start a session" surface. */
@@ -42,7 +47,7 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
     if (!valid && first) onChange(first);
   }, [catalog?.state, discovery, first, hostId, onChange, preferred, valid, value]);
   return <div>
-    <select className={"agent-picker" + (className ? ` ${className}` : "")} aria-label="Agent"
+    <select className={cn(AGENT_PICKER, className)} aria-label="Agent"
       data-testid={testIdPrefix} value={valid ? value : ""} disabled={!connected || (discovery && catalog?.state !== "ready") || !choices.length}
       onChange={(event) => onChange(event.target.value)}>
       {choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}

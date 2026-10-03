@@ -16,6 +16,15 @@ import { useState } from "react";
 import { usePerchStore, effectiveActiveProject } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { useAgentChoices } from "./AgentPicker";
+import { cn } from "../lib/cn";
+
+// Both screens share the cli-start card layout; `home` centres it.
+const PANEL = "flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto bg-panel-bg px-4 py-8";
+const FONT = "[font-family:inherit] [font-weight:inherit] [line-height:inherit]";
+const NAME = "m-0 text-[2.4rem] font-bold tracking-[-0.02em] text-fg";
+const HINT = "m-0 text-center text-[0.85rem] text-subtext-0";
+const KBD = `min-w-6 rounded-ui border border-overlay-0 bg-surface-0 px-[0.35rem] py-[0.1rem] text-center text-[0.75rem] text-fg ${FONT}`;
+const ACTION = `cursor-pointer rounded-ui border border-overlay-0 bg-surface-0 px-[0.9rem] py-2 text-[0.85rem] text-fg ${FONT} hover:border-overlay-1 hover:bg-surface-1 focus-visible:border-overlay-1 focus-visible:bg-surface-1`;
 
 /** Asks the sidebar's project list to open its "register a folder" form. */
 export const ADD_PROJECT_EVENT = "perch:add-project";
@@ -39,10 +48,10 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
 
   if (!connected) {
     return (
-      <div className="no-session" data-testid="no-session-panel">
-        <div className="no-session__card">
-          <h2 className="no-session__title">Connecting…</h2>
-          <p className="no-session__hint">Waiting for the connection to perch to come back.</p>
+      <div className={cn(PANEL, "items-start")} data-testid="no-session-panel">
+        <div className="flex w-full max-w-[26rem] flex-col gap-3">
+          <h2 className="m-0 text-[1rem] font-semibold text-fg">Connecting…</h2>
+          <p className="m-0 text-[0.85rem] leading-[1.45] text-subtext-0">Waiting for the connection to perch to come back.</p>
         </div>
       </div>
     );
@@ -62,28 +71,28 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   }
 
   return (
-    <div className="no-session home" data-testid="no-session-panel">
-      <div className="home__card">
-        <h1 className="home__name">perch</h1>
-        <p className="home__hint">Select a workspace from the sidebar to begin.</p>
-        <div className="home__actions">
-          <button type="button" className="home__action" data-testid="home-add-project" onClick={addProject}>
+    <div className={cn(PANEL, "items-center")} data-testid="no-session-panel">
+      <div className="flex w-full max-w-[24rem] flex-col items-center gap-4">
+        <h1 className={NAME}>perch</h1>
+        <p className={HINT}>Select a workspace from the sidebar to begin.</p>
+        <div className="flex flex-wrap justify-center gap-[0.6rem]">
+          <button type="button" className={ACTION} data-testid="home-add-project" onClick={addProject}>
             Add project
           </button>
           <button
             type="button"
-            className="home__action"
+            className={ACTION}
             data-testid="no-session-create"
             onClick={(e) => setAnchor(e.currentTarget.getBoundingClientRect())}
           >
             New session
           </button>
         </div>
-        <dl className="home__keys">
+        <dl className="mx-0 mt-4 mb-0 flex w-full flex-col gap-[0.45rem]">
           {SHORTCUTS.map(([label, keys]) => (
-            <div key={label} className="home__key-row">
+            <div key={label} className="flex items-center justify-between gap-4 text-[0.8rem] text-subtext-0">
               <dt>{label}</dt>
-              <dd>{keys.map((key) => <kbd key={key}>{key}</kbd>)}</dd>
+              <dd className="m-0 flex gap-1">{keys.map((key) => <kbd key={key} className={KBD}>{key}</kbd>)}</dd>
             </div>
           ))}
         </dl>
@@ -111,17 +120,17 @@ function WorkspaceStart({ hostId, name, path }: { hostId: string; name: string; 
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const { choices } = useAgentChoices(hostId);
   return (
-    <div className="no-session home" data-testid="no-session-panel">
-      <div className="home__card">
-        <h1 className="home__name home__name--workspace">{name}</h1>
-        <p className="home__hint" title={path}>{path}</p>
-        <p className="home__hint">What do you want to open?</p>
-        <div className="home__actions">
+    <div className={cn(PANEL, "items-center")} data-testid="no-session-panel">
+      <div className="flex w-full max-w-[24rem] flex-col items-center gap-4">
+        <h1 className={cn(NAME, "max-w-full overflow-hidden text-[1.6rem] text-ellipsis whitespace-nowrap")}>{name}</h1>
+        <p className={HINT} title={path}>{path}</p>
+        <p className={HINT}>What do you want to open?</p>
+        <div className="flex flex-wrap justify-center gap-[0.6rem]">
           {choices.map((choice) => (
             <button
               key={choice.id}
               type="button"
-              className="home__action"
+              className={ACTION}
               data-testid={`workspace-start-${choice.id}`}
               onClick={() => createSessionOnHost(hostId, path, choice.id)}
             >
@@ -129,7 +138,7 @@ function WorkspaceStart({ hostId, name, path }: { hostId: string; name: string; 
             </button>
           ))}
         </div>
-        <button type="button" className="home__link" onClick={() => setSettingsOpen(true)}>
+        <button type="button" className="cursor-pointer bg-transparent p-0 text-[0.75rem] text-subtext-0 [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:text-fg hover:underline focus-visible:text-fg focus-visible:underline" onClick={() => setSettingsOpen(true)}>
           Open one automatically: Settings → Empty workspace opens
         </button>
       </div>

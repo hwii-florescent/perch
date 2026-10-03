@@ -30,6 +30,20 @@
 import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
+import { cn } from "../lib/cn";
+import { AGENT_PICKER } from "./AgentPicker";
+
+// `font: inherit` plus a size is order-unsafe as utilities, so: family/weight/line-height inherit.
+// Paths are long and the interesting end is the tail: clip from the left.
+const CWD = "overflow-hidden text-left text-[0.75rem] font-normal text-ellipsis whitespace-nowrap text-subtext-0 [direction:rtl]";
+const STATUS = "flex items-baseline gap-[0.45rem] text-[0.78rem] text-subtext-0";
+const FONT = "[font-family:inherit] [font-weight:inherit] [line-height:inherit]";
+const BTN = "flex cursor-pointer flex-col gap-[0.15rem] rounded-ui border px-3 py-[0.55rem] text-left hover:bg-surface-1";
+const OFF = "disabled:cursor-not-allowed disabled:opacity-[0.55] disabled:hover:bg-surface-0";
+const PRIMARY = `${BTN} ${OFF} border-[color:color-mix(in_srgb,var(--accent)_55%,var(--panel-bg))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-bg))] font-semibold text-fg [font-family:inherit] [font-size:inherit] [line-height:inherit]`;
+const PROJECT = `${BTN} ${OFF} border-overlay-0 bg-surface-0 text-fg [font:inherit]`;
+const SECONDARY = `cli-start__secondary ${BTN} border-dashed border-overlay-0 bg-transparent text-[0.85rem] text-subtext-0 ${FONT}`;
+const STATUS_BUTTON = "cursor-pointer bg-transparent p-0 text-accent underline [border:0] [font:inherit]";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -111,16 +125,16 @@ export function CliStartPanel({ agent }: { agent: string }) {
   const agentLabel = selectedManifest?.displayName ?? AGENTS.find((candidate) => candidate.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
-    <div className="cli-start" data-testid="cli-start-panel">
-      <div className="cli-start__card">
-        <h2 className="cli-start__title">Start a {agentLabel} session</h2>
-        <p className="cli-start__hint">
+    <div className="flex min-h-0 min-w-0 flex-1 items-start justify-center overflow-y-auto bg-panel-bg px-4 py-8" data-testid="cli-start-panel">
+      <div className="cli-start__card flex w-full max-w-[26rem] flex-col gap-3">
+        <h2 className="m-0 text-[1rem] font-semibold text-fg">Start a {agentLabel} session</h2>
+        <p className="m-0 text-[0.85rem] leading-[1.45] text-subtext-0">
           CLI mode runs {agentLabel} in a terminal. Choose the
           provider and the project it should run in.
         </p>
 
         <select
-          className="agent-picker"
+          className={AGENT_PICKER}
           aria-label="CLI provider"
           data-testid="cli-start-agent"
           value={choices.some((a) => a.id === selectedAgent) ? selectedAgent : ""}
@@ -133,25 +147,25 @@ export function CliStartPanel({ agent }: { agent: string }) {
         {manifestCapability && <button type="button" className="agent-catalog__action" data-testid="cli-manage-agents" onClick={openAgentCatalog}>Manage agents</button>}
 
         {manifestCapability && manifestState?.state === "ready" && !firstAvailableId && (
-          <div className="cli-start__provider-status" role="status">
+          <div className={STATUS} role="status">
             No CLI providers are available on this host. Install a provider or check its configuration, then retry.
-            <button type="button" onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
+            <button type="button" className={STATUS_BUTTON} onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
           </div>
         )}
 
         {manifestState?.state === "loading" && (
-          <div className="cli-start__provider-status" role="status" data-testid="cli-manifest-loading">
+          <div className={STATUS} role="status" data-testid="cli-manifest-loading">
             Checking providers on {activeHostId === "local" ? "this host" : activeHostId}…
           </div>
         )}
         {manifestState?.state === "error" && (
-          <div className="cli-start__provider-status cli-start__provider-status--error" role="alert">
+          <div className={cn(STATUS, "text-red")} role="alert">
             {manifestState.error || "Provider discovery failed."}
-            <button type="button" onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
+            <button type="button" className={STATUS_BUTTON} onClick={() => fetchAgentManifests(activeHostId)}>Retry</button>
           </div>
         )}
         {manifestState?.state === "ready" && selectedManifest && !selectedManifest.available && (
-          <div className="cli-start__provider-status cli-start__provider-status--error" role="alert" data-testid="cli-provider-unavailable">
+          <div className={cn(STATUS, "text-red")} role="alert" data-testid="cli-provider-unavailable">
             {selectedManifest.displayName} is unavailable on this host. {selectedManifest.reason || "Choose an available provider."}
           </div>
         )}
@@ -159,32 +173,32 @@ export function CliStartPanel({ agent }: { agent: string }) {
         {current?.cwd && (
           <button
             type="button"
-            className="cli-start__primary"
+            className={PRIMARY}
             data-testid="cli-start-here"
             disabled={!selectedAvailable}
             onClick={() => startCli(current.id, selectedAgent)}
           >
             Start in {basename(current.cwd)}
-            <span className="cli-start__cwd">{current.cwd}</span>
+            <span className={CWD}>{current.cwd}</span>
           </button>
         )}
 
         {projectCwds.length > 0 && (
-          <div className="cli-start__section">
-            <div className="cli-start__section-label">New chat in</div>
-            <div className="cli-start__projects">
+          <div className="flex flex-col gap-[0.4rem]">
+            <div className="text-[0.75rem] tracking-[0.04em] text-overlay-1 uppercase">New chat in</div>
+            <div className="flex flex-col gap-[0.3rem]">
               {projectCwds.map((cwd, i) => (
                 <button
                   key={cwd}
                   type="button"
-                  className="cli-start__project"
+                  className={PROJECT}
                   data-testid={`cli-start-project-${i}`}
                   title={cwd}
                   disabled={!selectedAvailable}
                   onClick={() => createSessionOnHost(activeHostId, cwd, selectedAgent)}
                 >
                   {basename(cwd)}
-                  <span className="cli-start__cwd">{cwd}</span>
+                  <span className={CWD}>{cwd}</span>
                 </button>
               ))}
             </div>
@@ -193,7 +207,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
 
         <button
           type="button"
-          className="cli-start__secondary"
+          className={SECONDARY}
           data-testid="cli-start-chats"
           disabled={!selectedAvailable}
           onClick={() => createSessionOnHost(activeHostId, "~", selectedAgent)}

@@ -610,7 +610,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
           if (a === "claude" || a === "codex") setLastAgentChoice(a);
         }}
         testIdPrefix="new-session-popover-agent"
-        className="new-session-popover__agent"
+        className="m-2 mb-1 w-[calc(100%_-_1rem)]"
       />
       {projectCwds.length > 0 && (
         <div className="max-h-[190px] min-h-0 shrink overflow-y-auto">

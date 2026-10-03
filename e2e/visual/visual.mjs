@@ -115,6 +115,21 @@ async function closeOverlays(page) { await page.keyboard.press("Escape"); await 
  * leaves the page in the state to capture. */
 const STATES = [
   { name: "01-home", run: async () => {} },
+  // CLI start panel with provider discovery failed: empty disabled picker, error status + Retry,
+  // disabled project / Chats buttons. 01a2 restores the real manifests.
+  { name: "01a-cli-start-error", run: async (page) => {
+    await page.evaluate(() => {
+      const st = window.usePerchStore;
+      window.__visManifests = st.getState().agentManifestsByHost;
+      st.setState({ agentManifestsByHost: { ...window.__visManifests, local: { ...(window.__visManifests.local ?? {}), state: "error", error: "Provider discovery failed (vis)", manifests: [] } } });
+    });
+    await page.getByText("Provider discovery failed (vis)").waitFor();
+    await sleep(300);
+  } },
+  { name: "01a2-cli-start-restored", nocapture: true, run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ agentManifestsByHost: window.__visManifests }));
+    await sleep(300);
+  } },
   // Host switcher: popover (local connected, direct badge, disabled, an injected error row),
   // a remote selected (HOST header, disabled + New session), then back to local.
   { name: "01b-host-switcher", run: async (page) => {
@@ -144,12 +159,18 @@ const STATES = [
     await page.locator('[data-testid="project-row"]').first().click();
     await sleep(300);
   } },
+  // The CLI start panel of a listed, not-yet-started session: the "Start in <folder>" primary button.
+  { name: "01c2b-cli-start-primary", run: async (page) => {
+    await page.evaluate(() => { window.__visSid = window.usePerchStore.getState().sessionId; window.usePerchStore.setState({ sessionId: "vis-s1" }); });
+    await page.getByTestId("cli-start-here").waitFor();
+    await sleep(300);
+  } },
   { name: "01c3-session-row-hover", holdHover: "[data-session-id]", run: async () => {} },
   { name: "01c4-session-delete-hover", holdHover: '[data-testid^="session-delete-icon-"]', run: async (page) => {
     await page.locator("[data-session-id]").first().hover(); // reveals the button first
   } },
   { name: "01d-host-local", nocapture: true, run: async (page) => {
-    await page.evaluate(() => window.usePerchStore.setState({ sessions: [], workspaceGit: {} }));
+    await page.evaluate(() => window.usePerchStore.setState({ sessions: [], workspaceGit: {}, sessionId: window.__visSid ?? null }));
     await page.getByTestId("host-switcher").click();
     await page.getByTestId("host-option-local").click();
     await page.getByTestId("host-switcher-popover").waitFor({ state: "detached" });
@@ -440,6 +461,21 @@ const STATES = [
     await page.getByTestId(`workspace-project-menu-${ctx.projectId}`).click({ force: true });
     await page.getByTestId(`workspace-project-close-all-${ctx.projectId}`).click();
     await page.getByTestId("no-session-panel").waitFor({ timeout: 10000 });
+    await sleep(500);
+  } },
+  // A workspace with no sessions shows its own start picker; then the disconnected placeholder.
+  { name: "20b2-workspace-start", run: async (page, ctx) => {
+    await page.locator(`[data-testid="workspace-entry-${ctx.workspaceId}"] .workspace-entry__button`).first().click();
+    await page.getByText("What do you want to open?").waitFor({ timeout: 10000 });
+    await sleep(400);
+  } },
+  { name: "20b3-no-session-connecting", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ connected: false }));
+    await page.getByText("Connecting…").waitFor({ timeout: 10000 });
+    await sleep(300);
+  } },
+  { name: "20b4-reconnected", nocapture: true, run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ connected: true }));
     await sleep(500);
   } },
   { name: "20c-toast", run: async (page) => {
