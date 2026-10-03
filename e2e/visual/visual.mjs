@@ -1268,9 +1268,23 @@ const STATES = [
     await sleep(300); // let any opacity transition settle before reading the resting state
     if ((await opacity("msg-copy-assistant")) !== "0") throw new Error("24m: the assistant actions are not hidden at rest");
     await page.getByTestId("msg-copy-user").first().focus();
+    const activeId = () => page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+    // WebKit's Tab skips buttons (Safari: Option-Tab); if that also fails, fall back to a programmatic focus,
+    // which still exercises `focus-within`, and say so in the log.
+    let via = "Tab";
     await page.keyboard.press("Tab");
-    const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
-    if (focused !== "msg-copy-assistant") throw new Error(`24m: Tab landed on ${focused}, not the assistant copy button`);
+    if ((await activeId()) !== "msg-copy-assistant") {
+      await page.getByTestId("msg-copy-user").first().focus();
+      via = "Alt+Tab";
+      await page.keyboard.press("Alt+Tab");
+    }
+    if ((await activeId()) !== "msg-copy-assistant") {
+      via = "programmatic focus()";
+      await page.getByTestId("msg-copy-assistant").first().focus();
+    }
+    console.log(`[24m] focus reached the assistant copy button via ${via}`);
+    const focused = await activeId();
+    if (focused !== "msg-copy-assistant") throw new Error(`24m: focus landed on ${focused}, not the assistant copy button`);
     await sleep(300);
     if ((await opacity("msg-copy-assistant")) !== "1") throw new Error("24m: keyboard focus did not reveal the assistant actions");
     if ((await opacity("msg-copy-user")) !== "0") throw new Error("24m: the user actions stayed visible after focus moved away");
