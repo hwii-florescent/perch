@@ -26,7 +26,7 @@ import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
-  LIST, MODEL_ROW, MUTED, NAME, SECTION, SECTION_TITLE, SELECT, SELECT_HOST,
+  CATALOG_ACTION, LIST, MODEL_ROW, MUTED, NAME, SECTION, SECTION_TITLE, SELECT, SELECT_HOST,
 } from "./ui/settings";
 
 // ---------------------------------------------------------------------------
@@ -779,8 +779,8 @@ export function SettingsModal() {
       <div
         ref={panelRef}
         className={cn(
-          "flex max-h-[calc(100dvh_-_4rem)] w-[min(640px,calc(100vw_-_2rem))] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]",
-          view === "agents" && "settings-modal__panel--agents",
+          "flex max-h-[calc(100dvh_-_4rem)] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]",
+          view === "agents" ? "w-[min(960px,calc(100vw_-_2rem))]" : "w-[min(640px,calc(100vw_-_2rem))]",
         )}
         data-testid="settings-modal"
         role="dialog"
@@ -821,7 +821,7 @@ export function SettingsModal() {
               <section className={SECTION}>
                 <h3 className={SECTION_TITLE}>Agents</h3>
                 <p className={MUTED}>Installed CLIs, available agents, and your default launcher.</p>
-                <button type="button" className="agent-catalog__action" onClick={() => setView("agents")}>Manage agents</button>
+                <button type="button" className={CATALOG_ACTION} onClick={() => setView("agents")}>Manage agents</button>
               </section>
               <NotificationsSection />
               <InterfaceSection />

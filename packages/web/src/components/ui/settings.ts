@@ -1,3 +1,7 @@
+/** Ghost button of the agent catalog; also the "Manage agents" button in the settings list, the CLI start panel and the agent picker. */
+export const CATALOG_TOGGLE = "box-border min-h-[44px] cursor-pointer rounded-ui bg-transparent px-[0.7rem] py-[0.45rem] text-subtext-0 no-underline [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] text-[0.85rem] hover:bg-surface-1 hover:text-fg focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px] disabled:cursor-default disabled:opacity-[0.55]";
+export const CATALOG_ACTION = `flex items-center gap-2 ${CATALOG_TOGGLE}`;
+
 /** Settings-modal chrome shared by `SettingsModal` and `AgentCatalog`.
  * `settings-modal__*` tokens that e2e selects on (`host-row`, `agent-block`,
  * `model-row`, `body`, `backdrop`) are kept as unstyled hooks at the use site. */

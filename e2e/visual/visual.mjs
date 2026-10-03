@@ -352,6 +352,19 @@ const STATES = [
     await page.getByTestId("agent-catalog").waitFor();
     await sleep(800);
   } },
+  { name: "08c2-agents-search", run: async (page) => {
+    await page.getByRole("searchbox", { name: "Search agents" }).fill("cod");
+    await sleep(300);
+  } },
+  { name: "08c3-agents-no-match", run: async (page) => {
+    await page.getByRole("searchbox", { name: "Search agents" }).fill("zzzqqq");
+    await page.getByText("No agents match your search.").waitFor();
+    await sleep(200);
+  } },
+  { name: "08c4-agents-clear", run: async (page) => {
+    await page.getByRole("searchbox", { name: "Search agents" }).fill("");
+    await sleep(300);
+  } },
   { name: "08d-settings-back", run: async (page) => {
     await page.getByTestId("settings-back").click();
     await page.locator(".settings-modal__model-row", { hasText: "vis-model-1" }).getByRole("button", { name: "Remove" }).click();
@@ -678,6 +691,13 @@ const STATES = [
   { name: "20d-toast-cleared", run: async (page) => {
     await page.evaluate(() => { window.setTimeout = window.__origSetTimeout; window.usePerchStore.setState({ toasts: [] }); });
   }, nocapture: true },
+  { name: "21b4-phone-settings-agents", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("settings-gear").click();
+    await page.getByTestId("settings-modal").waitFor();
+    await page.getByRole("button", { name: "Manage agents" }).click();
+    await page.getByTestId("agent-catalog").waitFor();
+    await sleep(800);
+  } },
   { name: "21-phone-header", viewport: { width: 390, height: 844 }, run: async (page) => {
     await closeOverlays(page);
     await page.getByTestId("settings-gear").click({ trial: true }).catch(() => {});

@@ -32,6 +32,7 @@ import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
 import { AGENT_PICKER } from "./AgentPicker";
+import { CATALOG_ACTION } from "./ui/settings";
 
 // `font: inherit` plus a size is order-unsafe as utilities, so: family/weight/line-height inherit.
 // Paths are long and the interesting end is the tail: clip from the left.
@@ -144,7 +145,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
           {choices.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
         </select>
 
-        {manifestCapability && <button type="button" className="agent-catalog__action" data-testid="cli-manage-agents" onClick={openAgentCatalog}>Manage agents</button>}
+        {manifestCapability && <button type="button" className={cn(CATALOG_ACTION, "mx-auto mb-4")} data-testid="cli-manage-agents" onClick={openAgentCatalog}>Manage agents</button>}
 
         {manifestCapability && manifestState?.state === "ready" && !firstAvailableId && (
           <div className={STATUS} role="status">

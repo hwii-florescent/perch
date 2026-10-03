@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
+import { CATALOG_ACTION } from "./ui/settings";
 
 /** The native select, with a drawn chevron (WebKit ignores min-height on a native select).
  * Phones lift the min-height to a 44px touch target. */
@@ -22,13 +23,14 @@ export function useAgentChoices(hostId: string) {
 
 /** Installed CLI choices for workspace/session creation. Legacy hosts retain
  * their two known integrations until they advertise manifest discovery. */
-export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, testIdPrefix = "new-session-agent", className }: {
+export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, testIdPrefix = "new-session-agent", className, wrapClassName }: {
   value: string;
   onChange: (agent: string) => void;
   onManage?: () => void;
   hostId?: string;
   testIdPrefix?: string;
   className?: string;
+  wrapClassName?: string;
 }) {
   const activeHost = usePerchStore((s) => s.activeHostId);
   const hostId = hostIdProp ?? activeHost;
@@ -46,13 +48,13 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
     }
     if (!valid && first) onChange(first);
   }, [catalog?.state, discovery, first, hostId, onChange, preferred, valid, value]);
-  return <div>
+  return <div className={wrapClassName}>
     <select className={cn(AGENT_PICKER, className)} aria-label="Agent"
       data-testid={testIdPrefix} value={valid ? value : ""} disabled={!connected || (discovery && catalog?.state !== "ready") || !choices.length}
       onChange={(event) => onChange(event.target.value)}>
       {choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
     </select>
-    {discovery && <button type="button" className="agent-catalog__action" onClick={() => { onManage?.(); manage(); }}>Manage agents</button>}
+    {discovery && <button type="button" className={CATALOG_ACTION} onClick={() => { onManage?.(); manage(); }}>Manage agents</button>}
     {discovery && catalog?.state === "error" && <p role="alert">{catalog.error}</p>}
     {discovery && catalog?.state === "ready" && !choices.length && <p role="status">Enable or install an agent in Manage agents.</p>}
   </div>;
