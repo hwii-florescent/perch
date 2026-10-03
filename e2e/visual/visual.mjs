@@ -408,6 +408,74 @@ const STATES = [
     await page.getByTestId("workspace-file-editor").waitFor({ timeout: 15000 });
     await sleep(400);
   } },
+  // The file editor: dirty draft, wrap + find, preview, reload confirm, on-disk conflict (+ compare), then back to clean.
+  { name: "12b-file-edit", run: async (page) => {
+    const editor = page.getByTestId("workspace-file-editor");
+    await editor.click();
+    await page.keyboard.type("edit ");
+    await page.getByTitle("Unsaved changes").waitFor();
+    await sleep(900);
+  } },
+  { name: "12c-file-wrap-find", run: async (page) => {
+    await page.getByRole("button", { name: "Wrap", exact: true }).click();
+    await page.getByTestId("workspace-file-search").fill("sentinel");
+    await sleep(300);
+  } },
+  { name: "12d-file-preview", run: async (page) => {
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page.getByTestId("workspace-file-preview-content").waitFor({ timeout: 15000 });
+    await sleep(300);
+  } },
+  { name: "12e-file-reload-confirm", run: async (page) => {
+    await page.getByRole("button", { name: "Reload", exact: true }).click();
+    await page.getByTestId("workspace-file-reload-confirm").waitFor();
+    await sleep(300);
+  } },
+  { name: "12f-file-conflict", run: async (page) => {
+    await page.getByRole("button", { name: "Keep draft" }).click();
+    fs.appendFileSync(`${REPO}/src/main.txt`, "changed on disk\n");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByTestId("workspace-file-conflict").waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Compare" }).click();
+    await page.getByTestId("workspace-file-compare").waitFor({ timeout: 15000 });
+    await sleep(400);
+  } },
+  { name: "12g-file-clean", nocapture: true, run: async (page) => {
+    await page.getByRole("button", { name: "Reload disk" }).click();
+    await page.getByRole("button", { name: "Discard and reload" }).click();
+    fs.writeFileSync(`${REPO}/src/main.txt`, "modified sentinel with a fairly long line of content\n");
+    const PINNED = new Date("2026-01-01T12:00:00Z");
+    fs.utimesSync(`${REPO}/src/main.txt`, PINNED, PINNED);
+    await page.getByRole("button", { name: "Reload", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-file-editor"]')?.value === "modified sentinel with a fairly long line of content\n", null, { timeout: 15000 });
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page.getByRole("button", { name: "Wrap", exact: true }).click();
+    await page.getByTestId("workspace-file-search").fill("");
+    await sleep(500);
+  } },
+  // More tree rows: symlink glyph, RO badge, an empty folder, an unreadable folder (error + Retry), the HTML preview.
+  { name: "12h-tree-extras", run: async (page) => {
+    fs.chmodSync(`${REPO}/locked-dir`, 0o000);
+    await page.getByTestId("workspace-file-entry-empty-dir").click();
+    await page.getByText("Empty folder").waitFor();
+    await page.getByTestId("workspace-file-entry-locked-dir").click();
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 15000 });
+    await sleep(300);
+  } },
+  { name: "12i-html-preview", run: async (page) => {
+    fs.chmodSync(`${REPO}/locked-dir`, 0o755);
+    await page.getByTestId("workspace-file-entry-page.html").click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page.locator("iframe[title=\"Sandboxed file preview\"]").waitFor({ timeout: 15000 });
+    await sleep(500);
+  } },
+  { name: "12j-tree-cleanup", nocapture: true, run: async (page) => {
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page.getByTestId("workspace-file-entry-src/main.txt").click();
+    await page.getByTestId("workspace-file-entry-empty-dir").click();
+    await page.getByTestId("workspace-file-entry-locked-dir").click();
+    await sleep(400);
+  } },
   { name: "13-drawer-git", run: async (page) => {
     await page.getByTestId("workspace-tools-gitReview").click();
     await page.getByTestId("workspace-git-review").waitFor({ timeout: 20000 });
@@ -622,6 +690,16 @@ const STATES = [
     await page.getByTestId("mobile-active-pane-files").waitFor();
     await sleep(800);
   } },
+  // A file opened on the phone: the single-column editor with its "‹ Explorer" button, then back to the tree.
+  { name: "21b2-phone-file-open", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("workspace-file-entry-README.md").click();
+    await page.getByTestId("workspace-file-editor").waitFor({ timeout: 15000 });
+    await sleep(600);
+  } },
+  { name: "21b3-phone-file-explorer", viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByRole("button", { name: "‹ Explorer" }).click();
+    await sleep(400);
+  } },
   { name: "21c-phone-pane-git", viewport: { width: 390, height: 844 }, run: async (page) => {
     await page.getByTestId("mobile-pane-git").click();
     await page.getByTestId("mobile-active-pane-gitReview").waitFor();
@@ -722,6 +800,7 @@ const ALL_ENGINES = Object.keys(ENGINES);
 const expectedStates = (only) => STATES.filter((s) => !s.nocapture && (!only || s.name.includes(only))).map((s) => s.name);
 
 async function bootCore(dist) {
+  try { fs.chmodSync(`${REPO}/locked-dir`, 0o755); } catch { /* first run */ }
   fs.rmSync(WORK, { recursive: true, force: true });
   fs.mkdirSync(`${REPO}/src`, { recursive: true });
   fs.writeFileSync(`${REPO}/src/main.txt`, "committed sentinel\n");
@@ -733,9 +812,18 @@ async function bootCore(dist) {
   git(`worktree add -q -b wt-extra ${WORK}/wt-extra`, REPO);
   fs.writeFileSync(`${REPO}/src/main.txt`, "modified sentinel with a fairly long line of content\n");
   fs.writeFileSync(`${REPO}/untracked.txt`, "new\n");
+  // Tree variety: an HTML file (sandboxed preview), a symlink, an empty folder, a read-only file, a folder the
+  // 12h state makes unreadable.
+  fs.writeFileSync(`${REPO}/page.html`, "<h1>fixture page</h1>\n");
+  fs.symlinkSync("README.md", `${REPO}/link.md`);
+  fs.mkdirSync(`${REPO}/empty-dir`);
+  fs.mkdirSync(`${REPO}/locked-dir`);
+  fs.writeFileSync(`${REPO}/locked-dir/inside.txt`, "x\n");
+  fs.writeFileSync(`${REPO}/readonly.txt`, "ro\n");
+  fs.chmodSync(`${REPO}/readonly.txt`, 0o444);
   // Pin mtimes: the file view prints them, and "9:59 PM" vs "10:03 PM" differs by a character's width.
   const PINNED = new Date("2026-01-01T12:00:00Z");
-  for (const f of ["src/main.txt", "README.md", "untracked.txt"]) fs.utimesSync(`${REPO}/${f}`, PINNED, PINNED);
+  for (const f of ["src/main.txt", "README.md", "untracked.txt", "page.html", "readonly.txt"]) fs.utimesSync(`${REPO}/${f}`, PINNED, PINNED);
   // Two disabled remotes (never connected, so no ssh): a direct-mode one and a perch-mode one.
   fs.writeFileSync(`${WORK}/hosts.json`, JSON.stringify({ hosts: [
     { id: "vis-a", name: "vis-a", sshHost: "vis-a.example.invalid", remotePort: 7788, enabled: false, mode: "direct" },
@@ -776,7 +864,8 @@ async function capture(page, outDir, name, state = {}) {
   // that a pixel difference always means a real one.
   // Under the settings modal a mask would paint over the modal itself (the mask
   // sits above everything), so hide the terminal there instead.
-  const modalOpen = (await page.getByTestId("settings-modal").count()) > 0;
+  // The same goes for an open file tab, which covers the (still mounted) terminal.
+  const modalOpen = (await page.getByTestId("settings-modal").count()) > 0 || (await page.getByTestId("workspace-file-pane").count()) > 0;
   const hideTerm = modalOpen ? await page.addStyleTag({ content: ".xterm{visibility:hidden!important}" }) : null;
   await page.screenshot({
     path: `${outDir}/${name}.png`,
@@ -869,7 +958,7 @@ async function snapEngine(engine, dist, outDir, only) {
     const ctx = {};
     const mk = async (fresh, tauri = false, unpaired = false) => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
-      if (!fresh) await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
+      if (!fresh) await context.addInitScript(() => { try { localStorage.setItem("perch.onboarding.seen", "1"); } catch { /* sandboxed preview frame */ } });
       // The macOS app: App.tsx pads the brand for the traffic lights when this global exists.
       // The pairing gate: the host answers GET /pair with paired:false; a code is rejected with a message.
       // A rejected handshake is what an unpaired device sees; the gate shows while the socket is down.
@@ -908,7 +997,7 @@ async function snapEngine(engine, dist, outDir, only) {
         await state.run(page, ctx);
         if (wanted) await capture(page, outDir, state.name, state);
       } catch (e) {
-        failures.push(`${state.name}: ${String(e.message).split("\n")[0]}`);
+        failures.push(`${state.name}: ${String(e.message).split("\n").slice(0, process.env.VIS_VERBOSE ? 14 : 1).join(" / ")}`);
         try { await page.screenshot({ path: `${outDir}/${state.name}.FAILED.png` }); } catch {}
         break;
       }

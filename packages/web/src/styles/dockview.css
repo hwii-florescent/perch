@@ -102,3 +102,17 @@
   color: var(--text);
   background: var(--surface-1);
 }
+
+@media (max-width: 700px) {
+  /* Mobile is a single active-pane surface. Dockview keeps split groups in
+   * the DOM for fast restoration, but the inactive groups must not consume
+   * half the phone or leave the active editor with clipped controls. */
+  .dockview-theme-perch .dv-view-container > .dv-view:has(.dv-inactive-group) {
+    display: none;
+  }
+
+  .dockview-theme-perch .dv-view-container > .dv-view:has(.dv-active-group) {
+    left: 0 !important;
+    width: 100% !important;
+  }
+}

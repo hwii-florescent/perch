@@ -8,6 +8,29 @@ import {
   type WorkspacePreviewState,
   type WorkspaceTreeState,
 } from "../filesystemStore";
+import { cn } from "../lib/cn";
+
+// The legacy rules set `font:` shorthands with an undefined variable and with `inherit`
+// inside the shorthand (invalid), so text here inherits the page font and buttons keep the browser's default:
+// `[font:inherit]` only where an element would otherwise fall back to its UA font.
+// The pane's own width, not the viewport's, decides the narrow layout (`@container` below).
+// Tokens kept for e2e/CSS: `workspace-files`, `__mobile-explorer`, `__file-title`, `__save`.
+const SECTION = "workspace-files relative flex h-full min-h-0 w-full min-w-0 flex-col bg-panel-bg text-fg [box-shadow:none] [container-type:inline-size]";
+const EMPTY = "grid min-h-full content-center justify-items-start gap-[0.35rem] p-5 text-[0.72rem] text-subtext-0";
+const PREVIEW_STATE = "shrink-0 px-[0.7rem] py-[0.55rem] text-[0.68rem] text-subtext-0";
+const COMPARE_LABEL = "mb-[0.2rem] block text-subtext-0 uppercase";
+const BTN = "min-h-[1.8rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.48rem] py-[0.28rem] text-subtext-0";
+const BTN_HOVER = "hover:border-accent hover:text-fg focus-visible:border-accent focus-visible:text-fg";
+const TOOL = `${BTN} ${BTN_HOVER} disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]`;
+const TOOL_ACTIVE = "min-h-[1.8rem] cursor-pointer rounded-ui border border-accent bg-transparent px-[0.48rem] py-[0.28rem] text-accent hover:text-fg focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]";
+const DANGER = "border-red! text-red!";
+const ACTIONS = "flex shrink-0 items-center gap-[0.35rem]";
+const TREE_STATE = "px-[0.65rem] py-[0.45rem] text-[0.68rem] text-subtext-0";
+const TREE_BUTTON = "ml-[0.35rem] cursor-pointer rounded-ui border border-current bg-transparent px-[0.26rem] py-[0.12rem] text-inherit [font:inherit]";
+const CODE = "text-overlay-1 [font:inherit]";
+const PRE = "m-0 overflow-auto border border-overlay-0 bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
+const BANNER = "shrink-0 border-b border-b-[color:color-mix(in_srgb,var(--yellow)_35%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
+const MOBILE_BTN = "hidden min-h-[2.5rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.55rem] py-[0.35rem] text-accent hover:border-accent focus-visible:border-accent";
 
 const EMPTY_TREES: Record<string, WorkspaceTreeState> = {};
 const EMPTY_DOCUMENTS: Record<string, WorkspaceDocumentState> = {};
@@ -58,36 +81,39 @@ function FileTree({
   const tree = trees[path];
   if (!tree) return null;
   return (
-    <div className="workspace-files__tree-level" data-testid={`workspace-file-tree-${path || "root"}`}>
+    <div className="min-w-0" data-testid={`workspace-file-tree-${path || "root"}`}>
       {tree.entries.map((entry) => {
         const isDirectory = entry.kind === "directory";
         const isOpen = expanded.has(entry.path);
         const childTree = trees[entry.path];
         const selected = selectedPath === entry.path;
         return (
-          <div key={entry.path} className="workspace-files__tree-node">
+          <div key={entry.path} className="min-w-0">
             <button
               type="button"
-              className={"workspace-files__tree-entry" + (selected ? " workspace-files__tree-entry--selected" : "")}
+              className={cn(
+                "flex min-h-[1.5rem] w-full cursor-pointer items-center gap-[0.2rem] text-left [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
+                selected ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
+              )}
               style={{ paddingLeft: `${0.35 + level * 0.85}rem` }}
               data-testid={`workspace-file-entry-${entry.path}`}
               title={entry.path}
               onClick={() => (isDirectory ? onToggle(entry) : onOpenFile(entry))}
             >
-              <span className="workspace-files__tree-chevron" aria-hidden="true">
+              <span className="w-[0.65rem] shrink-0 text-center text-overlay-1" aria-hidden="true">
                 {isDirectory ? (isOpen ? "▾" : "▸") : ""}
               </span>
-              <span className="workspace-files__tree-name">{entry.name}</span>
-              {entry.kind === "symlink" && <span className="workspace-files__tree-glyph" aria-label="symlink">↗</span>}
-              {entry.readonly && <span className="workspace-files__tree-badge">RO</span>}
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
+              {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" aria-label="symlink">↗</span>}
+              {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}
             </button>
             {isDirectory && isOpen && childTree?.state === "loading" && (
-              <div className="workspace-files__tree-state" style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>Loading…</div>
+              <div className={TREE_STATE} style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>Loading…</div>
             )}
             {isDirectory && isOpen && childTree?.state === "error" && (
-              <div className="workspace-files__tree-state workspace-files__tree-state--error" style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>
+              <div className={cn(TREE_STATE, "text-red")} style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>
                 {childTree.error || "Could not load folder."}
-                <button type="button" onClick={() => onToggle(entry)}>Retry</button>
+                <button type="button" className={TREE_BUTTON} onClick={() => onToggle(entry)}>Retry</button>
               </div>
             )}
             {isDirectory && isOpen && childTree?.state === "ready" && (
@@ -105,8 +131,8 @@ function FileTree({
           </div>
         );
       })}
-      {tree.truncated && <div className="workspace-files__tree-state">Large folder · narrow the view to load more</div>}
-      {tree.state === "ready" && tree.entries.length === 0 && <div className="workspace-files__tree-state">Empty folder</div>}
+      {tree.truncated && <div className={TREE_STATE}>Large folder · narrow the view to load more</div>}
+      {tree.state === "ready" && tree.entries.length === 0 && <div className={TREE_STATE}>Empty folder</div>}
     </div>
   );
 }
@@ -160,22 +186,22 @@ function metadataSummary(metadata?: FileMetadata): string {
 }
 
 function PreviewPanel({ preview }: { preview: WorkspacePreviewState }) {
-  if (preview.state === "loading") return <div className="workspace-files__preview-state">Loading preview…</div>;
-  if (preview.state === "error") return <div className="workspace-files__preview-state workspace-files__preview-state--error" role="alert">{preview.error || "Preview unavailable."}</div>;
+  if (preview.state === "loading") return <div className={PREVIEW_STATE}>Loading preview…</div>;
+  if (preview.state === "error") return <div className={cn(PREVIEW_STATE, "text-red")} role="alert">{preview.error || "Preview unavailable."}</div>;
   if (preview.state !== "ready") return null;
   if (preview.kind === "html" && preview.content) {
     return (
-      <div className="workspace-files__preview-frame-wrap">
-        <div className="workspace-files__preview-note">HTML is isolated in a sandboxed preview.</div>
-        <iframe className="workspace-files__preview-frame" sandbox="" title="Sandboxed file preview" srcDoc={preview.content} />
+      <div className="flex min-h-[8rem] flex-[0_1_40%] flex-col border-t border-t-overlay-0">
+        <div className={cn(PREVIEW_STATE, "py-[0.3rem] text-yellow")}>HTML is isolated in a sandboxed preview.</div>
+        <iframe className="min-h-[8rem] w-full flex-1 bg-[#fff] [border:0]" sandbox="" title="Sandboxed file preview" srcDoc={preview.content} />
       </div>
     );
   }
   if (preview.kind === "image" || preview.kind === "binary" || preview.kind === "tooLarge") {
-    return <div className="workspace-files__preview-state">{preview.message || "This file is not rendered in the editor."}</div>;
+    return <div className={PREVIEW_STATE}>{preview.message || "This file is not rendered in the editor."}</div>;
   }
   return (
-    <pre className="workspace-files__preview-content" data-testid="workspace-file-preview-content">
+    <pre className={cn(PRE, "max-h-[30%] border-t border-t-overlay-0")} data-testid="workspace-file-preview-content">
       {preview.content || preview.message || "No preview content."}
     </pre>
   );
@@ -197,25 +223,25 @@ function ConflictPanel({
   const [compareOpen, setCompareOpen] = useState(false);
   const conflict = document.conflict;
   return (
-    <div className="workspace-files__conflict" role="alert" data-testid="workspace-file-conflict">
-      <strong>File changed on disk.</strong>
+    <div className="grid shrink-0 gap-[0.3rem] border-b border-b-[color:color-mix(in_srgb,var(--red)_35%,transparent)] bg-[color-mix(in_srgb,var(--red)_7%,transparent)] px-[0.65rem] py-[0.55rem] text-[0.68rem] text-subtext-0" role="alert" data-testid="workspace-file-conflict">
+      <strong className="text-red">File changed on disk.</strong>
       <span>Your draft is preserved. Choose how to reconcile it.</span>
-      <div className="workspace-files__conflict-meta">
-        {conflict?.expectedVersion && <code>opened {conflict.expectedVersion.slice(0, 10)}</code>}
-        {conflict?.actualVersion && <code>disk {conflict.actualVersion.slice(0, 10)}</code>}
+      <div className="flex gap-[0.65rem]">
+        {conflict?.expectedVersion && <code className={CODE}>opened {conflict.expectedVersion.slice(0, 10)}</code>}
+        {conflict?.actualVersion && <code className={CODE}>disk {conflict.actualVersion.slice(0, 10)}</code>}
       </div>
-      <div className="workspace-files__conflict-actions">
-        <button type="button" onClick={() => { onCompare(); setCompareOpen(true); }}>Compare</button>
-        <button type="button" onClick={onReload}>Reload disk</button>
-        <button type="button" className="workspace-files__danger-button" onClick={onOverwrite}>Overwrite disk</button>
+      <div className={cn(ACTIONS, "justify-end")}>
+        <button type="button" className={cn(BTN, BTN_HOVER)} onClick={() => { onCompare(); setCompareOpen(true); }}>Compare</button>
+        <button type="button" className={cn(BTN, BTN_HOVER)} onClick={onReload}>Reload disk</button>
+        <button type="button" className={cn(BTN, BTN_HOVER, DANGER)} onClick={onOverwrite}>Overwrite disk</button>
       </div>
       {compareOpen && preview?.state === "ready" && preview.content && (
-        <div className="workspace-files__compare" data-testid="workspace-file-compare">
-          <div><span>Draft</span><pre>{document.content}</pre></div>
-          <div><span>Disk preview</span><pre>{preview.content}</pre></div>
+        <div className="grid max-h-[13rem] min-h-[6rem] grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.45rem] overflow-auto [@container(max-width:460px)]:grid-cols-[1fr]" data-testid="workspace-file-compare">
+          <div className="min-w-0"><span className={COMPARE_LABEL}>Draft</span><pre className={PRE}>{document.content}</pre></div>
+          <div className="min-w-0"><span className={COMPARE_LABEL}>Disk preview</span><pre className={PRE}>{preview.content}</pre></div>
         </div>
       )}
-      {compareOpen && (!preview || preview.state === "loading") && <div className="workspace-files__tree-state">Loading the current disk content…</div>}
+      {compareOpen && (!preview || preview.state === "loading") && <div className={TREE_STATE}>Loading the current disk content…</div>}
     </div>
   );
 }
@@ -355,55 +381,64 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     if (!existing || existing.state === "error") openFile(workspaceId, entry.path);
   }
 
+  const explorerOpen = layout === "explorer" || (!layout && mobileExplorerOpen);
+
   if (!workspace) {
     return (
-      <section className="workspace-files" data-testid="workspace-files-view">
-        <div className="workspace-files__empty">Workspace is no longer available.</div>
+      <section className={SECTION} data-testid="workspace-files-view">
+        <div className={EMPTY}>Workspace is no longer available.</div>
       </section>
     );
   }
 
   return (
     <section
-      className={"workspace-files" + (layout ? ` workspace-files--${layout}` : "")}
+      className={cn(SECTION, layout === "editor" ? "z-auto" : "z-[3]")}
       data-testid={layout === "editor" ? "workspace-file-pane" : "workspace-files-view"}
       aria-label={`Files for ${workspace.name}`}
     >
-      {!layout && <header className="workspace-files__header">
-        <div className="workspace-files__title-block">
-          <span className="workspace-files__eyebrow">Files</span>
-          <strong title={workspace.path}>{workspace.name || basename(workspace.path)}</strong>
-          <span title={workspace.path}>{workspace.path}</span>
+      {!layout && <header className="flex min-h-[3.1rem] items-center justify-between gap-3 border-b border-b-overlay-0 bg-surface-0 px-[0.7rem] py-2 [@container(max-width:460px)]:min-h-[3.4rem]">
+        <div className="grid min-w-0 gap-[0.12rem]">
+          <span className="tracking-[0.1em] text-accent uppercase">Files</span>
+          <strong className="overflow-hidden text-[0.86rem] text-ellipsis whitespace-nowrap" title={workspace.path}>{workspace.name || basename(workspace.path)}</strong>
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-subtext-0" title={workspace.path}>{workspace.path}</span>
         </div>
-        <div className="workspace-files__header-actions">
-          <button type="button" className="workspace-files__close" onClick={onClose} aria-label="Close files">×</button>
+        <div className={ACTIONS}>
+          <button type="button" className={cn(BTN, BTN_HOVER, "w-[1.8rem] p-0 text-[1rem] [@container(max-width:460px)]:h-[2.5rem] [@container(max-width:460px)]:w-[2.5rem]")} onClick={onClose} aria-label="Close files">×</button>
         </div>
       </header>}
-      {layout === "explorer" && notice && <div className="workspace-files__notice" role="status">{notice}</div>}
+      {layout === "explorer" && notice && <div className={cn(BANNER, "px-[0.65rem] py-[0.3rem]")} role="status">{notice}</div>}
 
-      <div className={"workspace-files__body" + (layout === "explorer" || (!layout && mobileExplorerOpen) ? " workspace-files__body--explorer-open" : "")}>
-        {layout !== "editor" && <aside className="workspace-files__explorer" aria-label="Workspace file tree">
-          <div className="workspace-files__explorer-heading">
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {layout !== "editor" && <aside
+          className={cn(
+            "flex min-h-0 flex-col overflow-hidden bg-surface-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:[border-right:none]",
+            layout === "explorer" ? "flex-[1_1_100%]" : "flex-[0_0_230px] border-r border-r-overlay-0",
+            !explorerOpen && "[@container(max-width:460px)]:hidden",
+          )}
+          aria-label="Workspace file tree"
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_70%,transparent)] pt-[0.42rem] pr-[0.55rem] pb-[0.35rem] pl-[0.65rem] tracking-[0.07em] text-subtext-0 uppercase">
             <span>Explorer</span>
-            <div className="workspace-files__explorer-actions">
+            <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
               {!layout && (
                 <button
                   type="button"
-                  className="workspace-files__mobile-editor"
+                  className={cn(BTN, BTN_HOVER, "hidden min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem] [@container(max-width:460px)]:inline-block")}
                   onClick={() => setMobileExplorerOpen(false)}
                   disabled={!selectedPath}
                 >
                   Editor
                 </button>
               )}
-              <button type="button" onClick={() => requestTree(workspaceId, "")} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
+              <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={() => requestTree(workspaceId, "")} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
             </div>
           </div>
-          {rootTree?.state === "loading" && <div className="workspace-files__tree-state" role="status">Loading tree…</div>}
+          {rootTree?.state === "loading" && <div className={TREE_STATE} role="status">Loading tree…</div>}
           {rootTree?.state === "error" && (
-            <div className="workspace-files__tree-state workspace-files__tree-state--error" role="alert">
+            <div className={cn(TREE_STATE, "text-red")} role="alert">
               {rootTree.error || "Could not load file tree."}
-              <button type="button" onClick={() => requestTree(workspaceId, "")}>Retry</button>
+              <button type="button" className={TREE_BUTTON} onClick={() => requestTree(workspaceId, "")}>Retry</button>
             </div>
           )}
           {rootTree?.state === "ready" && (
@@ -420,46 +455,46 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           )}
         </aside>}
 
-        {layout !== "explorer" && <div className="workspace-files__editor-column">
+        {layout !== "explorer" && <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-panel-bg", explorerOpen && "[@container(max-width:460px)]:hidden", !explorerOpen && "[@container(max-width:460px)]:flex-[1_1_100%]")}>
           {!layout && (
             <button
               type="button"
-              className="workspace-files__mobile-explorer"
+              className={cn("workspace-files__mobile-explorer", MOBILE_BTN, "[@container(max-width:460px)]:mt-[0.4rem] [@container(max-width:460px)]:mr-[0.65rem] [@container(max-width:460px)]:ml-[0.65rem] [@container(max-width:460px)]:block [@container(max-width:460px)]:self-start")}
               onClick={() => setMobileExplorerOpen(true)}
             >
               ‹ Explorer
             </button>
           )}
           {!selectedPath || !document ? (
-            <div className="workspace-files__empty workspace-files__empty--editor">
-              <span className="workspace-files__empty-mark">⌘</span>
-              <strong>Open a file to edit</strong>
+            <div className={EMPTY}>
+              <span className="text-accent">⌘</span>
+              <strong className="text-[0.9rem] text-fg">Open a file to edit</strong>
               <span>Folders load one level at a time. Files stay inside this workspace.</span>
             </div>
           ) : (
             <>
-              <div className="workspace-files__editor-header">
-                <div className="workspace-files__file-title">
-                  <strong title={selectedPath}>{basename(selectedPath)}</strong>
-                  <span title={selectedPath}>{selectedPath}</span>
-                  {dirty && <span className="workspace-files__dirty" title="Unsaved changes">●</span>}
+              <div className="flex shrink-0 items-center justify-between gap-[0.65rem] border-b border-b-overlay-0 px-[0.65rem] py-[0.42rem] [@container(max-width:460px)]:flex-wrap">
+                <div className="workspace-files__file-title flex min-w-0 items-baseline gap-[0.45rem] [@container(max-width:460px)]:flex-[1_1_9rem]">
+                  <strong className="overflow-hidden text-[0.78rem] text-ellipsis whitespace-nowrap text-fg" title={selectedPath}>{basename(selectedPath)}</strong>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-subtext-0" title={selectedPath}>{selectedPath}</span>
+                  {dirty && <span className="text-[0.65rem] text-yellow" title="Unsaved changes">●</span>}
                 </div>
-                <div className="workspace-files__editor-actions">
-                  <button type="button" className={wrap ? "workspace-files__tool workspace-files__tool--active" : "workspace-files__tool"} onClick={() => setWrap((value) => !value)}>Wrap</button>
-                  <button type="button" className={previewOpen ? "workspace-files__tool workspace-files__tool--active" : "workspace-files__tool"} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
-                  <button type="button" className="workspace-files__tool" onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"}>Reload</button>
-                  <button type="button" className="workspace-files__save" onClick={() => saveFile(workspaceId, selectedPath)} disabled={!dirty || document.state === "saving" || document.state === "loading"}>
+                <div className={cn(ACTIONS, "[@container(max-width:460px)]:max-w-full [@container(max-width:460px)]:min-w-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:flex-wrap [@container(max-width:460px)]:gap-[0.2rem]")}>
+                  <button type="button" className={wrap ? TOOL_ACTIVE : TOOL} onClick={() => setWrap((value) => !value)}>Wrap</button>
+                  <button type="button" className={previewOpen ? TOOL_ACTIVE : TOOL} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
+                  <button type="button" className={TOOL} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"}>Reload</button>
+                  <button type="button" className="workspace-files__save min-h-[1.8rem] cursor-pointer rounded-ui border border-accent bg-accent px-[0.48rem] py-[0.28rem] font-bold text-panel-bg disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]" onClick={() => saveFile(workspaceId, selectedPath)} disabled={!dirty || document.state === "saving" || document.state === "loading"}>
                     {document.state === "saving" ? "Saving…" : "Save"}
                   </button>
                 </div>
               </div>
-              <div className="workspace-files__meta-line">
-                <span>{metadataSummary(document.metadata)}</span>
-                {document.version && <code>v {document.version.slice(0, 12)}</code>}
+              <div className="flex min-h-[1.55rem] items-center gap-[0.65rem] overflow-hidden px-[0.65rem] whitespace-nowrap text-subtext-0">
+                <span className="overflow-hidden text-ellipsis">{metadataSummary(document.metadata)}</span>
+                {document.version && <code className={CODE}>v {document.version.slice(0, 12)}</code>}
                 {search && <span>{matches} match{matches === 1 ? "" : "es"}</span>}
                 {document.bufferState === "saving" && <span role="status">Draft syncing…</span>}
-                {document.bufferState === "error" && <span className="workspace-files__error" role="alert">Draft recovery unavailable</span>}
-                {document.error && document.state !== "conflict" && <span className="workspace-files__error" role="alert">{document.error}</span>}
+                {document.bufferState === "error" && <span className="text-red" role="alert">Draft recovery unavailable</span>}
+                {document.error && document.state !== "conflict" && <span className="text-red" role="alert">{document.error}</span>}
               </div>
               {document.state === "conflict" && (
                 <ConflictPanel
@@ -470,26 +505,27 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
                   onOverwrite={() => overwriteFile(workspaceId, selectedPath)}
                 />
               )}
-              {notice && <div className="workspace-files__notice" role="status">{notice}</div>}
+              {notice && <div className={cn(BANNER, "px-[0.65rem] py-[0.3rem]")} role="status">{notice}</div>}
               {reloadConfirmOpen && (
-                <div className="workspace-files__reload-confirm" role="status" data-testid="workspace-file-reload-confirm">
-                  <span>Discard this unsaved draft and reload from disk?</span>
-                  <div className="workspace-files__conflict-actions">
-                    <button type="button" onClick={() => setReloadConfirmOpen(false)}>Keep draft</button>
-                    <button type="button" className="workspace-files__danger-button" onClick={confirmReload}>Discard and reload</button>
+                <div className={cn(BANNER, "flex items-center justify-between gap-[0.6rem] px-[0.65rem] py-[0.42rem] [@container(max-width:460px)]:flex-col [@container(max-width:460px)]:items-start")} role="status" data-testid="workspace-file-reload-confirm">
+                  <span className="min-w-0">Discard this unsaved draft and reload from disk?</span>
+                  <div className={cn(ACTIONS, "justify-end")}>
+                    <button type="button" className={cn(BTN, BTN_HOVER)} onClick={() => setReloadConfirmOpen(false)}>Keep draft</button>
+                    <button type="button" className={cn(BTN, BTN_HOVER, DANGER)} onClick={confirmReload}>Discard and reload</button>
                   </div>
                 </div>
               )}
-              <label className="workspace-files__search">
+              <label className="flex shrink-0 items-center gap-[0.4rem] border-y border-y-[color:color-mix(in_srgb,var(--overlay-0)_65%,transparent)] px-[0.65rem] py-1 text-subtext-0">
                 <span>Find</span>
-                <input data-testid="workspace-file-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search in file" />
+                <input className="min-w-0 flex-1 rounded-ui border border-overlay-0 bg-surface-0 px-[0.3rem] py-1 text-fg [font:inherit] focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]" data-testid="workspace-file-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search in file" />
                 {search && <span>{matches}</span>}
               </label>
-              <div className={"workspace-files__editor" + (wrap ? " workspace-files__editor--wrap" : "")}>
-                <div className="workspace-files__gutter" ref={gutterRef} aria-hidden="true">
-                  {gutterLines.map((line, index) => <span key={index}>{line ?? ""}</span>)}
+              <div className="flex min-h-[12rem] min-w-0 flex-1 overflow-hidden bg-surface-dim">
+                <div className="flex-[0_0_3.2rem] overflow-hidden border-r border-r-overlay-0 bg-surface-0 pt-[0.7rem] pr-[0.7rem] pb-4 pl-[0.3rem] text-right text-overlay-1 select-none" ref={gutterRef} aria-hidden="true">
+                  {gutterLines.map((line, index) => <span className="block h-[1.55em]" key={index}>{line ?? ""}</span>)}
                 </div>
                 <textarea
+                  className={cn("min-h-0 min-w-0 flex-1 resize-none overflow-auto bg-transparent pt-[0.7rem] pr-3 pb-4 pl-3 text-fg [border:0] [font:inherit] [outline:0] [tab-size:2]", wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre")}
                   data-testid="workspace-file-editor"
                   ref={editorRef}
                   value={document.content}
