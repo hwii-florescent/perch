@@ -1192,11 +1192,25 @@ const STATES = [
     await page.keyboard.press("ArrowDown");
     await sleep(300);
   } },
+  // The upload endpoint is answered by the page (the fixture session is not a real server session), so success and
+  // failure are both deterministic and neither can stand in for the other.
   { name: "24g-composer-attachment", fresh: true, run: async (page) => {
     await hostedPage(page);
+    await page.route(/\/upload\?/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }) }));
     await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
-    await page.locator(".attachment-bar__chips, .attachment-bar__error").first().waitFor({ timeout: 15000 });
+    await page.getByTestId("attachment-chip-notes.txt").waitFor({ timeout: 15000 });
+    if ((await page.locator(".attachment-bar__error").count()) !== 0) throw new Error("24g: an upload error is showing next to the success chip");
     await sleep(500);
+  } },
+  { name: "24g2-composer-attachment-error", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await page.route(/\/upload\?/, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "boom" }));
+    await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+    await page.locator(".attachment-bar__error").waitFor({ timeout: 15000 });
+    const msg = (await page.locator(".attachment-bar__error").textContent()) ?? "";
+    if (!msg.includes("upload failed (500)")) throw new Error(`24g2: unexpected error text ${JSON.stringify(msg)}`);
+    if ((await page.locator(".attachment-chip").count()) !== 0) throw new Error("24g2: a chip is showing next to the upload error");
+    await sleep(300);
   } },
   { name: "24h-hosted-transcript", fresh: true, run: async (page) => {
     await hostedPage(page, TRANSCRIPT);
@@ -1218,6 +1232,31 @@ const STATES = [
     await page.evaluate(() => window.usePerchStore.setState({ streamingMessageId: "m-stream", streamingMessageIdBySession: { "hosted-vis": "m-stream" } }));
     await page.getByRole("button", { name: "Stop" }).waitFor();
     await sleep(300);
+  } },
+  // Plan card after "Approve & run": the button is spent ("Approved", disabled).
+  { name: "24l-hosted-plan-approved", fresh: true, run: async (page) => {
+    await hostedPage(page, TRANSCRIPT.map((m) => (m.kind === "plan" ? { ...m, planApproved: true } : m)));
+    const approve = page.getByTestId("plan-approve");
+    await approve.waitFor();
+    if ((await approve.textContent())?.trim() !== "Approved") throw new Error("24l: the plan card does not say Approved");
+    if (!(await approve.isDisabled())) throw new Error("24l: the approved plan button is not disabled");
+    await sleep(300);
+  } },
+  // Keyboard focus (no pointer) reveals a message's hidden actions: Tab from the user's action button lands on the
+  // assistant's, whose `focus-within` makes its (opacity 0) action row visible while the user's row hides again.
+  { name: "24m-hosted-message-actions-focus", fresh: true, run: async (page) => {
+    await hostedPage(page, TRANSCRIPT);
+    await page.mouse.move(1, 1);
+    const opacity = (testId) => page.getByTestId(testId).first().evaluate((el) => getComputedStyle(el.parentElement).opacity);
+    await sleep(300); // let any opacity transition settle before reading the resting state
+    if ((await opacity("msg-copy-assistant")) !== "0") throw new Error("24m: the assistant actions are not hidden at rest");
+    await page.getByTestId("msg-copy-user").first().focus();
+    await page.keyboard.press("Tab");
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+    if (focused !== "msg-copy-assistant") throw new Error(`24m: Tab landed on ${focused}, not the assistant copy button`);
+    await sleep(300);
+    if ((await opacity("msg-copy-assistant")) !== "1") throw new Error("24m: keyboard focus did not reveal the assistant actions");
+    if ((await opacity("msg-copy-user")) !== "0") throw new Error("24m: the user actions stayed visible after focus moved away");
   } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
   // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
