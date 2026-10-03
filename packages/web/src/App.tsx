@@ -237,7 +237,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="app__body">
+      <div className="flex min-h-0 flex-1">
         {showSidebar && <Sidebar />}
         {showSidebar && (
           <ResizeHandle

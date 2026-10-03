@@ -249,6 +249,14 @@ const STATES = [
     await page.getByTestId("workspace-files-view").waitFor({ timeout: 20000 });
     await sleep(500);
   } },
+  // Keyboard focus on the column dividers (focus-visible highlight) and the drawer's buttons.
+  { name: "11b-drawer-focus", focusWalk: {
+    start: '[data-testid="resize-tools"]',
+    targets: ['[data-testid="resize-sidebar"]', '[data-testid="workspace-tools-files"]', '[data-testid="workspace-tools"] button[aria-label="Close Files and Git"]'],
+  }, run: async (page) => {
+    await page.getByTestId("resize-tools").focus();
+    await sleep(200);
+  } },
   { name: "12-file-open", run: async (page) => {
     await page.getByTestId("workspace-file-entry-src").click();
     await page.getByTestId("workspace-file-entry-src/main.txt").click();
@@ -425,7 +433,7 @@ async function capture(page, outDir, name, state = {}) {
     try {
       await t.hover({ timeout: 800, force: true });
       await sleep(40);
-      hovers.push({ i, id: (await t.getAttribute("data-testid")) || (await t.getAttribute("title")) || "", d: await t.evaluate(HOVER_DUMP, HOVER_PROPS) });
+      hovers.push({ i, id: (await t.getAttribute("data-testid")) || (await t.getAttribute("title")) || (await t.getAttribute("aria-label")) || "", d: await t.evaluate(HOVER_DUMP, HOVER_PROPS) });
     } catch { hovers.push({ i, err: true }); }
   }
   fs.writeFileSync(`${outDir}/${name}.hover.json`, JSON.stringify(hovers));
@@ -438,7 +446,7 @@ async function capture(page, outDir, name, state = {}) {
     const el = document.activeElement;
     if (!el || el === document.body) return null;
     const cs = getComputedStyle(el);
-    return { id: el.getAttribute("data-testid") || el.getAttribute("title") || "", via, tag: el.tagName.toLowerCase(), s: Object.fromEntries(props.map((k) => [k, cs.getPropertyValue(k)])) };
+    return { id: el.getAttribute("data-testid") || el.getAttribute("title") || el.getAttribute("aria-label") || "", via, tag: el.tagName.toLowerCase(), s: Object.fromEntries(props.map((k) => [k, cs.getPropertyValue(k)])) };
   }, { props: FOCUS_PROPS, via });
   await page.evaluate(() => document.activeElement?.blur());
   // `state.focusWalk`: also walk from a known start, because the walk from

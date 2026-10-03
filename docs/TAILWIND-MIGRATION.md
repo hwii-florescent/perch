@@ -47,6 +47,9 @@ Done:
   (see slice 5 notes). Harness gained `06b-pane-menu-rename`.
 - **Slice 6: navigator + keybind help** (`Navigator.tsx`, `KeybindHelp.tsx`,
   `navigator.css` deleted). Harness gained `09b`, `09c`, `10b`. See "Slice log".
+- **Slice 7: workspace tools drawer + resize handle + `.app__body`**
+  (`WorkspaceTools.tsx`, `ResizeHandle.tsx`, `App.tsx`; `workspace-tools.css`
+  deleted). Harness gained `11b-drawer-focus`. See "Slice log".
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -58,7 +61,7 @@ Done:
 | onboarding.css | – | **migrated and deleted** |
 | pane-menu.css | – | **migrated and deleted** |
 | navigator.css | – | **migrated and deleted** (Navigator + KeybindHelp) |
-| workspace-tools.css | 112 | not started |
+| workspace-tools.css | – | **migrated and deleted** (drawer, `.app__body`, `ResizeHandle`) |
 | toolbar-tabs.css | 251 | not started |
 | sidebar.css | 126 | not started |
 | sidebar-projects.css | 246 | not started |
@@ -83,7 +86,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`workspace-tools.css` → … ; leave
+`toolbar-tabs.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -233,6 +236,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 4 | onboarding | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new state): `23-onboarding` and `23b-onboarding-phone` (390x520, panel scrolls) identical in Chromium and WebKit including pixels, hover and focus; no computed-style, box, text, hover or focus difference in any of the 33 states. 10 Chromium corner-speck screenshot diffs (03, 04, 06, 13, 14, 16, 17b, 17c, 20c, 22; 1–14 px, none show the modal) reviewed by name. e2e after `npm run build`: wave2 X4 onboarding, workspace-foundation, workspace-review, workspace-files-durable pass (7/7). |
 | 5 | pane/row context menu | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `06b`): no computed-style, box, text, hover or focus difference in any of the 34 states in Chromium or WebKit; `06` (pane menu: normal, danger, disabled Close) and `06b` (inline rename) pixel-identical in both; 7 Chromium corner-speck screenshot diffs reviewed by name (03, 13, 14, 16, 17b, 20, 20c; the 17b menu region itself is clean). e2e after `npm run build`: pane-splitting (5/5), native-ui claude/codex/omp (exercise Stop agent) pass. |
 | 6 | navigator + keybind help | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `09b`/`09c`/`10b`): no computed-style, box, text, hover or focus difference in any state in Chromium or WebKit; 09, 09b, 09c, 10, 10b pixel-identical. 10 Chromium corner-speck screenshot diffs (03, 13, 14, 16, 17, 17c, 18, 20, 20c, 22; 1-12 px, none in a modal) reviewed by name. e2e after `npm run build`: keybindings (5/5). |
+| 7 | workspace tools drawer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `11b`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 40 states in Chromium or WebKit, incl. the divider `::after` highlight and the drawer buttons' focus. 11 Chromium corner-speck screenshot diffs (04, 06, 12-17b, 20, 20c; 1-9 px; the drawer ones, 13/14 at x=759 y=41, are the same specks slice 6 showed before the drawer was migrated) reviewed by name. e2e after `npm run build`: workspace-tabs and the layout specs pass (4/4); `toasts` (TN1, TN2, real haiku turns) pass against the migrated build. `workspace-visual-qa` fails at line 258 on the committed tree too (see Pre-existing failures). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -292,6 +296,14 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 7 notes: the harness now falls back to `aria-label` as a record id (hover
+and focus dumps) so unlabeled icon buttons (the drawer's ×) can be targets.
+`[font:inherit]` + `text-[0.75rem]` is order-unsafe for the same reason as
+`[border:none]` (the shorthand is emitted after the size utility and resets
+it): the drawer buttons use `[font-family:inherit] [font-weight:inherit]
+[line-height:inherit]` instead. Not covered: the "Pick a workspace" empty
+message (not reachable in the harness without a no-workspace store state).
 
 Slice 6 notes: **`[border:none]` plus a side utility is order-unsafe.** Tailwind
 emits arbitrary properties after the utilities, so `[border:none]` wiped

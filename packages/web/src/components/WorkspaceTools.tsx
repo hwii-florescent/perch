@@ -1,7 +1,10 @@
 import { usePerchStore } from "../store";
+import { cn } from "../lib/cn";
 import { useFileTabs } from "../fileTabs";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
+
+const BTN = "cursor-pointer rounded-ui border border-transparent bg-transparent px-[0.55rem] py-[0.2rem] text-[0.75rem] text-overlay-1 [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:text-fg";
 
 export type WorkspaceToolsTab = "files" | "gitReview";
 
@@ -35,17 +38,17 @@ export function WorkspaceTools({ requestedWorkspaceId, tab, onTabChange, onClose
   const isGit = Boolean(row?.branch || project?.repoPath || (requestedWorkspaceId && !row));
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   if (tab === "gitReview" && !isGit) tab = "files";
-  const missing = <div className="workspace-tools__empty">Pick a workspace in the sidebar.</div>;
+  const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
   return (
-    <aside className="workspace-tools" data-testid="workspace-tools" aria-label="Files and Git">
-      <div className="workspace-tools__bar">
-        <nav className="workspace-tools__tabs" aria-label="Files and Git">
+    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col border-l border-l-overlay-0 bg-panel-bg" data-testid="workspace-tools" aria-label="Files and Git">
+      <div className="flex items-center gap-2 border-b border-b-overlay-0 px-[0.4rem] py-1">
+        <nav className="flex gap-[0.15rem]" aria-label="Files and Git">
           {tabs.map(({ id, label }) => (
             <button
               key={id}
               type="button"
-              className={"workspace-tools__tab" + (tab === id ? " workspace-tools__tab--active" : "")}
+              className={cn(BTN, tab === id && "border-overlay-0 bg-surface-0 text-fg")}
               data-testid={`workspace-tools-${id}`}
               aria-pressed={tab === id}
               onClick={() => onTabChange(id)}
@@ -54,12 +57,12 @@ export function WorkspaceTools({ requestedWorkspaceId, tab, onTabChange, onClose
             </button>
           ))}
         </nav>
-        <span className="workspace-tools__workspace" title={row?.path}>
+        <span className="min-w-0 flex-1 overflow-hidden text-right text-[0.72rem] text-ellipsis whitespace-nowrap text-overlay-1" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
-        <button type="button" className="workspace-tools__close" aria-label="Close Files and Git" onClick={onClose}>×</button>
+        <button type="button" className={BTN} aria-label="Close Files and Git" onClick={onClose}>×</button>
       </div>
-      <div className="workspace-tools__content">
+      <div className="flex min-h-0 flex-1 overflow-hidden [&>*]:min-h-0 [&>*]:min-w-0 [&>*]:flex-1">
         {tab === "files" && (workspaceId ? (
           <WorkspaceFilesView
             key={workspaceId}

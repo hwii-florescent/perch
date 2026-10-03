@@ -42,7 +42,7 @@ export function ResizeHandle({ value, min, max, defaultValue, edge, onChange, on
       aria-valuemax={max}
       tabIndex={0}
       data-testid={testId}
-      className="resize-handle"
+      className="relative z-5 mx-[-2px] my-0 flex-[0_0_5px] cursor-col-resize bg-transparent [outline:none] after:absolute after:top-0 after:bottom-0 after:left-[2px] after:w-px after:bg-transparent after:content-[''] hover:after:bg-accent active:after:bg-accent focus-visible:after:bg-accent"
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);
