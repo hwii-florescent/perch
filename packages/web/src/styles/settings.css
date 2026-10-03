@@ -328,3 +328,21 @@
   color: var(--panel-bg);
   margin-left: auto;
 }
+
+/* Moved from pairing.css (it was imported last, so these stay last here). */
+.settings-modal__pair-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+  background: var(--surface-0);
+  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+}
+
+.settings-modal__pair-code strong {
+  font: 1.15rem/1 var(--font-mono, monospace);
+  letter-spacing: 0.22em;
+}

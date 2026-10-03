@@ -437,6 +437,18 @@ const STATES = [
     await page.getByTestId("sidebar-collapse-toggle").click();
     await sleep(300);
   } },
+  // Device pairing gate (replaces the app): empty, then a rejected code, then phone width.
+  { name: "22d-pairing-gate", unpaired: true, run: async (page) => { await page.getByTestId("pairing-gate").waitFor(); } },
+  { name: "22e-pairing-gate-error", unpaired: true, run: async (page) => {
+    await page.getByTestId("pairing-code").fill("abcd2345");
+    await page.getByTestId("pairing-submit").click();
+    await page.getByTestId("pairing-error").waitFor();
+    await sleep(200);
+  } },
+  { name: "22f-pairing-gate-phone", unpaired: true, viewport: { width: 390, height: 700 }, run: async (page) => {
+    await page.getByTestId("pairing-gate").waitFor();
+    await page.getByTestId("pairing-code").fill("ABCD2345");
+  } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
   // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
   { name: "23b-onboarding-phone", fresh: true, viewport: { width: 390, height: 520 }, run: async (page) => {
@@ -581,10 +593,16 @@ async function snapEngine(engine, dist, outDir, only) {
     core = await bootCore(dist);
     browser = await ENGINES[engine].launch();
     const ctx = {};
-    const mk = async (fresh, tauri = false) => {
+    const mk = async (fresh, tauri = false, unpaired = false) => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
       if (!fresh) await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
       // The macOS app: App.tsx pads the brand for the traffic lights when this global exists.
+      // The pairing gate: the host answers GET /pair with paired:false; a code is rejected with a message.
+      // A rejected handshake is what an unpaired device sees; the gate shows while the socket is down.
+      if (unpaired) await context.routeWebSocket(/\/ws/, (ws) => ws.close());
+      if (unpaired) await context.route("**/pair", (route) => route.request().method() === "POST"
+        ? route.fulfill({ status: 400, contentType: "text/plain", body: "that pairing code has expired" })
+        : route.fulfill({ json: { paired: false } }));
       if (tauri) await context.addInitScript(() => { window.__TAURI_INTERNALS__ = { invoke: async () => null, transformCallback: () => 0 }; });
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
@@ -603,9 +621,9 @@ async function snapEngine(engine, dist, outDir, only) {
       if (index > lastWanted) break;
       const wanted = !state.nocapture && (!only || state.name.includes(only));
       try {
-        if (state.fresh || state.tauri) {
+        if (state.fresh || state.tauri || state.unpaired) {
           if (!wanted) continue;
-          const fresh = await mk(!!state.fresh, !!state.tauri);
+          const fresh = await mk(!!state.fresh, !!state.tauri, !!state.unpaired);
           if (state.viewport) { await fresh.page.setViewportSize(state.viewport); await sleep(300); }
           await state.run(fresh.page, ctx);
           await capture(fresh.page, outDir, state.name, state);

@@ -1091,3 +1091,12 @@
 .native-cli-chat__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; }
 .native-cli-chat__actions .native-cli-chat__hint { flex: 1; }
 .native-cli-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Moved from pairing.css (it was imported last, so these stay last here). */
+.workspace-git__turn-summary {
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--git-border);
+  color: var(--git-muted);
+  font-size: 0.72rem;
+}

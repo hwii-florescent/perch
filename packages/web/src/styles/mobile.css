@@ -309,3 +309,27 @@
 .mobile-switcher__settings:hover {
   border-color: var(--accent);
 }
+
+/* Moved from pairing.css (it was imported last, so these stay last here). */
+.mobile-header__gear {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  margin-left: auto;
+  color: var(--subtext-0);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* The gear takes over the auto margin, so the switch button sits next to it. */
+.mobile-header__gear + .mobile-header__switch {
+  margin-left: 0.4rem;
+}
+
+.mobile-header__gear:hover,
+.mobile-header__gear:focus-visible {
+  color: var(--text);
+  border-color: var(--overlay-0);
+}

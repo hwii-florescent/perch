@@ -61,6 +61,10 @@ Done:
   (`Sidebar.tsx`; `session-picker.css`, `sidebar-projects.css` deleted).
   Harness gained `01c2`-`01c4` (injected per-host session list, row hover,
   delete-button hover) and the `holdHover` state option.
+- **Slice 11: pairing gate** (`PairingGate.tsx`; `pairing.css` deleted; its
+  `settings-modal__pair-code`, `workspace-git__turn-summary`,
+  `mobile-header__gear` rules moved verbatim to their owners' files). Harness
+  gained `22d`-`22f` (`unpaired: true` states).
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -83,7 +87,7 @@ Done:
 | cli-start.css | 322 | not started |
 | worktree-menu.css | 251 | not started |
 | mobile.css | 325 | not started |
-| pairing.css | 130 | not started |
+| pairing.css | – | **migrated and deleted** (`PairingGate`); 3 unrelated rules moved to the end of `settings.css`, `git-review.css`, `mobile.css` |
 | workspace-overview.css | 641 | not started |
 | composer.css | 500 | not started (Hosted chat is frozen: restyle only) |
 | chat.css | 536 | not started (frozen, same) |
@@ -97,7 +101,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`pairing.css` / `worktree-menu.css` → … ; leave
+`worktree-menu.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -251,6 +255,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 8 | toolbar + tab bar | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 46 states in Chromium or WebKit, including the new two-tab strip (`05f`), drag source/target (`05g`, opacity + accent edge), inline tab rename (`05h`), and the macOS-app brand padding, expanded and collapsed (`22b`, `22c`). 11 Chromium corner-speck screenshot diffs (03, 12, 13, 14, 16, 17b, 17c, 18, 20c, 22, 22b; 1-24 px, at the tab-edge x=272/479 and sidebar x=9 specks seen before this slice, and the start-picker box corners in 03/22b) reviewed by name; 05f/05g/05h/22c are pixel-identical. e2e after `npm run build`: wave2 (tab drag-reorder, rename), workspace-tabs, responsive, pane-splitting, keybindings pass; `workspace-files-durable` failed once at line 266 in the multi-spec run and passed 2/2 alone (timing flake under load). |
 | 9 | sidebar shell + host switcher | tsc clean; 215/215 unit tests; harness (baseline and new both re-snapped with `01b`-`01d` and pinned mtimes): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 49 states in Chromium or WebKit. `01b` (popover: local connected, `direct` badge, disabled, injected error row), `01c` (remote selected: HOST header, disabled + New session) show 10-16 px of ±1-value specks, all at rounded corners of the start picker (x=554/967/968) and the sidebar's Register-folder button (x=13), none inside the popover or header (checked per pixel). 9 Chromium screenshot diffs reviewed by name. e2e after `npm run build`: sidebar, nav, federation (E1, E2, E4-E6: host dots connected/disabled/error), settings (host CRUD), responsive, theme, keybindings: 28/28. |
 | 10 | session items + project rows + popover + footer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `01c2`-`01c4`): no computed-style, box, text, focus or pseudo-element difference in any of the 52 states in Chromium or WebKit; the new states show the per-host project list (git ahead/behind, plain subline, nested sessions, blocked dot), the row under the pointer with the reveal, and the delete button under the pointer (red on `surface-1`). One transient hover-dump difference in `03` (two elements swapped in the group dump) did not reproduce: `--only 03-add` on both builds is IDENTICAL including hover. 9 Chromium corner-speck screenshot diffs (01b, 01c4, 03, 04, 13, 16, 18, 20c, 22; 2-19 px, at the start-picker corners x=554/968, sidebar x=9 and tab edges, none in a migrated region) reviewed by name. e2e after `npm run build`: sessions, federation, remote-git, sidebar, nav, wave1, wave2, wave2.features, worktrees (48 tests) pass. |
+| 11 | pairing gate | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `22d`-`22f`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 55 states in Chromium or WebKit; the gate (empty, rejected code, phone width with a typed code) is pixel-identical in both engines. 8 Chromium corner-speck screenshot diffs (01b, 01c, 01c3, 13, 14, 16, 18, 20c; 1-11 px, none in the gate) reviewed by name. e2e after `npm run build`: device-pairing and settings pass (4/4). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -310,6 +315,19 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 11 notes: **`--base` is never defined** (second undefined-variable bug
+after `--font-mono`; `git-review.css` uses it ~15x: expect the same treatment
+there). `.pairing { background: var(--base) }` was invalid at computed-value
+time, so the gate has no background of its own, and `.pairing__submit {
+color: var(--base) }` computes to `unset`, i.e. the label *inherits* the page
+text colour (`text-inherit`; grey on the grey accent, low contrast, preserved).
+`font: 600 0.85rem/1 inherit` on the submit is dropped by the browser (inherit
+in a shorthand), so it carries no font utilities. The `unpaired: true` harness
+states stub the WebSocket (`context.routeWebSocket`) because the gate only shows
+while the socket is down, and answer `/pair` with `paired:false` / a 400.
+`var(--font-mono, monospace)` was written as `[font:1rem/1.2_monospace]` (the
+computed result) so no scanned file mentions the word.
 
 Slice 10 notes: **legacy specificity can differ from the utility order.** The
 active project row's `.sidebar__project--active > … > .sidebar__project-select`

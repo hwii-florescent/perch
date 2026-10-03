@@ -9,6 +9,10 @@
 import { useState } from "react";
 import { claimPairing } from "../pairing";
 
+// The legacy rules read `var(--base)`, which no stylesheet defines, so the page
+// background was never set and the button label inherits (`text-inherit`).
+const INPUT = "min-h-11 min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_monospace] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
+
 export function PairingGate({ onPaired }: { onPaired: () => void }) {
   const [code, setCode] = useState("");
   const [name, setName] = useState(() => (/iPhone|iPad|Android/i.test(navigator.userAgent) ? "Phone" : "Browser"));
@@ -31,16 +35,17 @@ export function PairingGate({ onPaired }: { onPaired: () => void }) {
   }
 
   return (
-    <div className="pairing" data-testid="pairing-gate">
-      <form className="pairing__card" onSubmit={submit}>
-        <h1 className="pairing__title">Pair this device</h1>
-        <p className="pairing__hint">
+    <div className="flex min-h-screen items-center justify-center p-6 text-fg" data-testid="pairing-gate">
+      <form className="flex w-[min(26rem,100%)] flex-col gap-[0.85rem] rounded-[calc(var(--radius)*2)] border border-overlay-0 bg-panel-bg p-6" onSubmit={submit}>
+        <h1 className="m-0 text-[1.1rem]">Pair this device</h1>
+        <p className="m-0 text-[0.8rem] leading-[1.45] text-subtext-0">
           On the machine running perch, open Settings → Devices and choose “Pair a device”. Enter the
           code it shows. It is valid for five minutes.
         </p>
-        <label className="pairing__field">
+        <label className="flex flex-col gap-[0.3rem] text-[0.72rem] text-subtext-0">
           <span>Pairing code</span>
           <input
+            className={INPUT}
             data-testid="pairing-code"
             value={code}
             onChange={(event) => setCode(event.target.value.toUpperCase())}
@@ -51,17 +56,18 @@ export function PairingGate({ onPaired }: { onPaired: () => void }) {
             placeholder="ABCD2345"
           />
         </label>
-        <label className="pairing__field">
+        <label className="flex flex-col gap-[0.3rem] text-[0.72rem] text-subtext-0">
           <span>Name this device</span>
           <input
+            className={INPUT}
             data-testid="pairing-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={64}
           />
         </label>
-        {error && <p className="pairing__error" role="alert" data-testid="pairing-error">{error}</p>}
-        <button type="submit" className="pairing__submit" data-testid="pairing-submit" disabled={pending || !code.trim()}>
+        {error && <p className="m-0 text-[0.78rem] text-red" role="alert" data-testid="pairing-error">{error}</p>}
+        <button type="submit" className="min-h-11 cursor-pointer rounded-ui bg-accent text-inherit [border:0] disabled:cursor-not-allowed disabled:opacity-[0.55]" data-testid="pairing-submit" disabled={pending || !code.trim()}>
           {pending ? "Pairing…" : "Pair device"}
         </button>
       </form>
