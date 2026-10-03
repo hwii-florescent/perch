@@ -69,6 +69,9 @@ Done:
   deleted; `components/ui/icon-button.ts` = second shared primitive, used by
   WorktreeMenu, Sidebar and WorkspaceOverview). Harness gained a second git
   worktree in the fixture and `16b`/`16c` (failed create job).
+- **Slice 13: directory browser + confirm dialog** (`DirectoryBrowser.tsx`,
+  `ConfirmDialog.tsx`; `directory-browser.css` deleted). Harness gained
+  `03b`-`03e` (git badge, empty filter, type-a-path empty/filled).
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -87,7 +90,7 @@ Done:
 | host-switcher.css | – | **migrated and deleted** (switcher button, popover, `HostStateDot`); 3 `settings-modal__*` rules moved to the top of `settings.css` |
 | settings.css | 309 | not started |
 | session-picker.css | – | **migrated and deleted** (session item wrapper + delete, new-session popover) |
-| directory-browser.css | 274 | not started |
+| directory-browser.css | – | **migrated and deleted** (DirectoryBrowser + ConfirmDialog) |
 | cli-start.css | 322 | not started |
 | worktree-menu.css | – | **migrated and deleted** (WorktreeMenu popover + the shared `ui/icon-button` glyph button) |
 | mobile.css | 325 | not started |
@@ -105,7 +108,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`directory-browser.css` → … ; leave
+`cli-start.css` / `settings.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -261,6 +264,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 10 | session items + project rows + popover + footer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `01c2`-`01c4`): no computed-style, box, text, focus or pseudo-element difference in any of the 52 states in Chromium or WebKit; the new states show the per-host project list (git ahead/behind, plain subline, nested sessions, blocked dot), the row under the pointer with the reveal, and the delete button under the pointer (red on `surface-1`). One transient hover-dump difference in `03` (two elements swapped in the group dump) did not reproduce: `--only 03-add` on both builds is IDENTICAL including hover. 9 Chromium corner-speck screenshot diffs (01b, 01c4, 03, 04, 13, 16, 18, 20c, 22; 2-19 px, at the start-picker corners x=554/968, sidebar x=9 and tab edges, none in a migrated region) reviewed by name. e2e after `npm run build`: sessions, federation, remote-git, sidebar, nav, wave1, wave2, wave2.features, worktrees (48 tests) pass. |
 | 11 | pairing gate | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `22d`-`22f`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 55 states in Chromium or WebKit; the gate (empty, rejected code, phone width with a typed code) is pixel-identical in both engines. 8 Chromium corner-speck screenshot diffs (01b, 01c, 01c3, 13, 14, 16, 18, 20c; 1-11 px, none in the gate) reviewed by name. e2e after `npm run build`: device-pairing and settings pass (4/4). |
 | 12 | worktree menu + icon button | tsc clean; 215/215 unit tests; harness (baseline and new re-snapped; fixture now has a second checkout `wt-extra`, so the popover lists a non-primary entry with Delete): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 58 states in Chromium or WebKit; popover states 15, 16 and the failed-create job row 16b are pixel-identical except the 4 px tab-edge speck at x=479. 14 Chromium corner-speck screenshot diffs reviewed by name. e2e after `npm run build`: worktrees, remote-git, workspace-git, workspace-foundation (17) and the phase-3 `worktree-lifecycle.config.ts` (11) pass. |
+| 13 | directory browser + confirm dialog | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `03b`-`03e`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 62 states in Chromium or WebKit. 11 Chromium screenshot diffs (03, 03c, 03d, 03e, 05g, 12, 16b, 17c, 18, 20, 20c; 1-27 px) reviewed by name; the ones in migrated regions (03c: the ↑ crumb button corner x=18; 03e: the sidebar LOCAL badge corners) are ±1-7 levels on anti-aliased rounded corners (zoomed crop checked), the rest are the tab-edge / start-picker specks. 18 (confirm) differs by 1 px at the tab edge only. e2e after `npm run build`: workspace-foundation, sessions, worktrees, wave1, wave2.features, workspace-review, remote-git pass (24 + the second batch). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -320,6 +324,16 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 13 notes: `confirm-dialog__message` stays as a hook (remote-git and
+worktrees specs read it). The ConfirmDialog buttons share one `BTN` string and
+differ by the accept fill; `hover:[filter:brightness(1.1)]` is the accept hover.
+`:hover:not(:disabled)` is `[&:hover:not(:disabled)]:…`. The directory browser
+lists the real `$HOME` in the harness (`03` shows the user's own folders), so
+`03b` walks up to `/` and down to the fixture directory to get a listing with
+git badges that does not depend on the machine. A crop helper for pixel
+inspection (a throwaway canvas script: draw both PNGs scaled, read the result)
+is the way to judge a handful of differing pixels; there is no image library.
 
 Slice 12 notes: `components/ui/icon-button.ts` (`ICON_BUTTON`) is the borderless
 dim-until-hovered glyph button: five sites (WorktreeMenu +, the ± git button, the

@@ -168,6 +168,30 @@ const STATES = [
     ctx.projectId = (await project.locator('[data-testid^="workspace-project-menu-"]').first().getAttribute("data-testid")).slice("workspace-project-menu-".length);
   } },
   { name: "03-add-form", run: async (page) => { await page.getByTestId("workspace-add-project").click(); await sleep(200); } },
+  // Directory browser: a directory with git checkouts (badge), a filter that matches nothing,
+  // then type-a-path mode (Use disabled, then enabled).
+  { name: "03b-dirbrowser-git-badge", run: async (page) => {
+    const up = page.getByTestId("dir-browser-up");
+    await up.click(); await sleep(250);
+    await up.click(); await sleep(250);
+    for (const name of ["private", "tmp", "perch-visual"]) { await page.getByTestId(`dir-browser-entry-${name}`).click(); await sleep(250); }
+    await page.getByTestId("dir-browser-entry-repo").waitFor();
+    await sleep(200);
+  } },
+  { name: "03c-dirbrowser-filter-empty", run: async (page) => {
+    await page.getByTestId("dir-browser-filter").fill("zzzqqq");
+    await page.getByText("No subfolders").waitFor();
+    await sleep(200);
+  } },
+  { name: "03d-dirbrowser-type-path", run: async (page) => {
+    await page.getByTestId("dir-browser-mode-toggle").click();
+    await page.getByTestId("project-path-input").waitFor();
+    await sleep(200);
+  } },
+  { name: "03e-dirbrowser-type-filled", run: async (page) => {
+    await page.getByTestId("project-path-input").fill("/tmp/perch-visual/repo");
+    await sleep(200);
+  } },
   { name: "04-new-session-popover", run: async (page) => {
     await page.getByTestId("workspace-add-project").click().catch(() => {});
     await closeOverlays(page);
