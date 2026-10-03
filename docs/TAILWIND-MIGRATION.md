@@ -39,6 +39,8 @@ Done:
 - **Slice 3: status bar + terminal search** (`StatusBar.tsx`,
   `components/TerminalSearchBar.tsx`, `status-bar.css` deleted). Harness gained
   states `05b`–`05e` first. See "Slice log".
+- **Slice 4: onboarding** (`components/Onboarding.tsx`, `onboarding.css`
+  deleted). Harness gained `23b-onboarding-phone` first. See "Slice log".
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -47,7 +49,7 @@ Done:
 | base.css | 75 | keep: `:root` tokens + reset. Tokens stay (themes.ts). Only `.app` could move. |
 | status-dot.css | – | **migrated and deleted** |
 | status-bar.css | – | **migrated and deleted** (incl. terminal-search) |
-| onboarding.css | 93 | not started |
+| onboarding.css | – | **migrated and deleted** |
 | pane-menu.css | 84 | not started |
 | navigator.css | 255 | not started |
 | workspace-tools.css | 112 | not started |
@@ -75,7 +77,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`onboarding.css` → `pane-menu.css` → `navigator.css` → … ; leave
+`pane-menu.css` → `navigator.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -129,7 +131,7 @@ Notes for the next ones:
 
 `e2e/visual/visual.mjs` boots an isolated headless core on :7791 (state in
 `/tmp/perch-visual`, fixed fixture repo, fixed clock, serves any web build via
-`PERCH_WEB_DIST`), walks 32 UI states, and records per state a screenshot, the
+`PERCH_WEB_DIST`), walks 33 UI states, and records per state a screenshot, the
 computed style + box of **every** element, a hover dump and a keyboard-focus
 dump, in **Chromium and WebKit** (the Mac app is a WKWebView). It never touches
 `~/.perch`.
@@ -222,6 +224,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 1 | Tailwind infra + toast | tsc clean; 215/215 unit tests; harness `IDENTICAL` in Chromium and WebKit (computed styles, boxes, text, hover and focus dumps all equal); 8 Chromium screenshot differences (3–14 px) reviewed, none inside the toast region (its pixels are identical), all at rounded-corner edges that also differ between two runs of the unmodified baseline. `e2e/toasts.spec.ts` needs a real claude turn and was not run. |
 | 2 | status dot | tsc clean; 215/215 unit tests; harness: no computed-style, box, text, hover or focus differences in Chromium or WebKit. Screenshot differences (Chromium 03/04/15/20c/22, WebKit 13/14, incl. ~1800 px in the git drawer) all reappear when the unmodified baseline is snapped twice (`base` vs `base2`) and none is on a status dot. `e2e/status-glyphs.spec.ts` 3/3 passed (real haiku-4-5 turns). |
 | 3 | status bar + terminal search | tsc clean; 215/215 unit tests; harness vs a baseline re-snapped with the new states: no computed-style, box, text, hover or focus differences in Chromium or WebKit (the two it caught on the way, footer side-border colours and the input's `outline` computed width/colour, are fixed: `border-t-overlay-0`, `[outline:none]`). 7 Chromium corner-speck screenshot diffs reviewed by name (03, 12, 17, 17b, 17c, 20c, 22), none in the status bar or find bar, all in the baseline-vs-baseline noise set. e2e (against a fresh `npm run build`): status-glyphs, worktrees, wave1 (Cmd+F find bar) pass; `workspace-recovery` fails at its `perch.sessionId` assertion on the committed tree too (pre-existing, unrelated). |
+| 4 | onboarding | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new state): `23-onboarding` and `23b-onboarding-phone` (390x520, panel scrolls) identical in Chromium and WebKit including pixels, hover and focus; no computed-style, box, text, hover or focus difference in any of the 33 states. 10 Chromium corner-speck screenshot diffs (03, 04, 06, 13, 14, 16, 17b, 17c, 20c, 22; 1–14 px, none show the modal) reviewed by name. e2e after `npm run build`: wave2 X4 onboarding, workspace-foundation, workspace-review, workspace-files-durable pass (7/7). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -261,3 +264,21 @@ testid). Re-snapped the baseline (shape change); slice 3 vs baseline: no
 computed-style, hover or focus differences in either engine; 6 Chromium
 corner-speck screenshot diffs (06, 13, 14, 17b, 20, 20c, 1–9 px, none in the find
 bar) reviewed by name.
+
+Slice 4 notes: `border:none` is `[border:none]`, not `border-none` (which only sets
+`border-style` and leaves the UA's 2px computed width); likewise
+`bg-transparent`, not `bg-none` (that is `background-image`). Five `<kbd>`s share
+a local `KBD` string in `Onboarding.tsx`; the `<li>` text styles are a
+`[&>li]:` variant on the `<ul>`. No e2e used a legacy onboarding class (only
+`data-testid="onboarding"` / `onboarding-dismiss`).
+
+## Pre-existing failures (not caused by the migration)
+
+Tracked here so they are not mistaken for regressions; do not fix inside a slice.
+
+- `e2e/workspace-recovery.spec.ts:62` "mixed workspaces, sessions, terminal,
+  draft conflict and comments recover after a core kill" fails at line 247
+  (`localStorage perch.sessionId` is not the worktree session after the core
+  restart). Verified on 2026-10-02 against the committed tree with the slice
+  stashed (and a fresh `npm run build`): same failure, so it predates slice 3.
+  Cause not investigated. Not listed in AGENTS.md's known failures yet.

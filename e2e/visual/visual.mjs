@@ -327,6 +327,12 @@ const STATES = [
     await sleep(400);
   } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
+  // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
+  { name: "23b-onboarding-phone", fresh: true, viewport: { width: 390, height: 520 }, run: async (page) => {
+    await page.getByTestId("onboarding").waitFor();
+    const scrolls = await page.getByTestId("onboarding").evaluate((n) => n.scrollHeight > n.clientHeight);
+    if (!scrolls) throw new Error("onboarding panel does not overflow at 390x520; make the viewport shorter");
+  } },
 ];
 
 // -------------------------------------------------------------------- snap --
@@ -471,6 +477,7 @@ async function snapEngine(engine, dist, outDir, only) {
         if (state.fresh) {
           if (!wanted) continue;
           const fresh = await mk(true);
+          if (state.viewport) { await fresh.page.setViewportSize(state.viewport); await sleep(300); }
           await state.run(fresh.page, ctx);
           await capture(fresh.page, outDir, state.name, state);
           await fresh.context.close();

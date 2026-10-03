@@ -17,6 +17,9 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
 
+const KBD =
+  "rounded-ui border border-overlay-0 bg-surface-1 px-[0.4rem] py-[0.05rem] text-[0.78rem] text-accent [font-family:ui-monospace,SFMono-Regular,Menlo,monospace]";
+
 export interface OnboardingProps {
   onDismiss: () => void;
 }
@@ -36,38 +39,41 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
   }, [onDismiss]);
 
   const modal = (
-    <div className="onboarding__backdrop">
-      <div className="onboarding" data-testid="onboarding">
-        <h2 className="onboarding__title">Welcome to perch</h2>
-        <p className="onboarding__body">
+    <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-[rgba(0,0,0,0.55)]">
+      <div
+        className="max-h-[calc(100dvh_-_4rem)] w-[min(480px,calc(100vw_-_2rem))] overflow-y-auto rounded-ui border border-accent bg-panel-bg px-[1.4rem] pt-5 pb-[1.4rem] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        data-testid="onboarding"
+      >
+        <h2 className="m-0 mb-[0.6rem] text-[1.15rem] font-semibold text-fg">Welcome to perch</h2>
+        <p className="m-0 mb-[0.9rem] text-[0.85rem] leading-[1.5] text-subtext-0">
           perch runs your coding agents (Claude Code, Codex, pi and more) in real
           terminal tabs, one window for every project and worktree, on this machine
           or over SSH. Agents keep running when you close the app.
         </p>
-        <ul className="onboarding__tips">
+        <ul className="m-0 mb-[1.1rem] flex list-none flex-col gap-[0.6rem] p-0 [&>li]:text-[0.85rem] [&>li]:leading-[1.5] [&>li]:text-fg">
           <li>
             Add a project (any folder) from the sidebar, then press{" "}
-            <kbd className="onboarding__kbd">+</kbd> in the top row to start an agent
+            <kbd className={KBD}>+</kbd> in the top row to start an agent
             or a terminal in it.
           </li>
           <li>
-            Press <kbd className="onboarding__kbd">Ctrl+Space</kbd> then a letter for
+            Press <kbd className={KBD}>Ctrl+Space</kbd> then a letter for
             quick actions — the <em>leader key</em> for everything from splitting
             panes to jumping sessions.
           </li>
           <li>
-            Press <kbd className="onboarding__kbd">?</kbd> any time to see the full
+            Press <kbd className={KBD}>?</kbd> any time to see the full
             list of keybindings.
           </li>
           <li>
-            Press <kbd className="onboarding__kbd">Cmd+K</kbd> (or{" "}
-            <kbd className="onboarding__kbd">Ctrl+K</kbd> outside a terminal) to
+            Press <kbd className={KBD}>Cmd+K</kbd> (or{" "}
+            <kbd className={KBD}>Ctrl+K</kbd> outside a terminal) to
             open the Navigator and jump to any session or project.
           </li>
           <li>
             <button
               type="button"
-              className="onboarding__link"
+              className="cursor-pointer bg-transparent p-0 text-[0.85rem] text-accent underline [border:none] [font-family:inherit] hover:text-fg"
               onClick={() => {
                 setSettingsOpen(true);
                 onDismiss();
@@ -80,7 +86,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
         </ul>
         <button
           type="button"
-          className="onboarding__dismiss"
+          className="cursor-pointer rounded-ui bg-accent px-4 py-[0.45rem] text-[0.85rem] font-semibold text-panel-bg [border:none] [transition:opacity_0.12s_ease] hover:opacity-85"
           data-testid="onboarding-dismiss"
           onClick={onDismiss}
         >
