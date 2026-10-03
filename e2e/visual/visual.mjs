@@ -35,6 +35,7 @@ const URL_ = `http://127.0.0.1:${PORT}`;
 const WORK = "/tmp/perch-visual";
 const REPO = `${WORK}/repo`;
 const pinGitScroll = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollTop > 0) el.scrollTop = 0; });
+const pinGitBottom = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight; });
 
 const PROPS = [
   "display", "position", "top", "right", "bottom", "left", "z-index", "float",
@@ -592,6 +593,79 @@ const STATES = [
     await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
     await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
     await pinGitScroll(page);
+    await sleep(500);
+  } },
+  // The review panel: an unresolved note (heading, summary, batch form), the packet preview, a send attempt, then cleanup.
+  { name: "14m-git-review-notes", run: async (page) => {
+    const line = page.locator('[data-testid="git-diff-line"][data-side="new"]').first();
+    await line.hover();
+    await line.getByTestId("git-comment-add").click();
+    await page.getByTestId("git-comment-body").fill("a review note");
+    await page.getByTestId("git-comment-composer").getByRole("button", { name: "Add comment" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ timeout: 20000 });
+    await page.getByLabel("Send to agent session").waitFor();
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  // The fixture has no agent session the server accepts a packet for: the real preview fails (error toast, below),
+  // then the page answers preview/send itself and the harness pushes the delivery updates.
+  { name: "14m2-git-review-preview-error", run: async (page) => {
+    const select = page.getByLabel("Send to agent session");
+    await select.selectOption({ index: 1 });
+    await page.getByLabel("Request").fill("please address these notes");
+    await page.getByTestId("git-review-preview").click();
+    await page.getByRole("alert").getByText("could not be prepared").waitFor({ timeout: 20000 });
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "14n-git-review-packet", run: async (page) => {
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await page.evaluate(() => {
+      const sockets = new Set();
+      const send = WebSocket.prototype.send;
+      const reply = (ws, msg) => ws.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(msg) }));
+      window.__reviewReply = (msg) => sockets.forEach((ws) => reply(ws, msg));
+      WebSocket.prototype.send = function (data) {
+        let msg = null;
+        try { msg = JSON.parse(data); } catch {}
+        if (msg?.type === "review.batch.preview") {
+          sockets.add(this);
+          reply(this, { type: "review.batch.preview.result", requestId: msg.requestId, packet: {
+            packetId: "packet-visual", idempotencyKey: "key-visual", sendOperationId: msg.sendOperationId, workspaceId: msg.workspaceId,
+            targetSessionId: msg.targetSessionId, currentRevision: msg.currentRevision,
+            comments: [{ commentId: "c1" }],
+            markdown: "# Review packet\n\n- src/main.txt line 1: a review note\n\nplease address these notes",
+          } });
+          return;
+        }
+        if (msg?.type === "review.batch.send") {
+          sockets.add(this);
+          window.__pendingSend = { requestId: msg.requestId, workspaceId: msg.workspaceId, packetId: msg.packetId, sendOperationId: msg.sendOperationId };
+          return;
+        }
+        return send.call(this, data);
+      };
+    });
+    await page.getByTestId("git-review-preview").click();
+    await page.getByTestId("git-review-packet").waitFor({ timeout: 20000 });
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "14o-git-review-waiting", run: async (page) => {
+    await page.getByTestId("git-review-send").click();
+    await page.getByText("Waiting for the agent").waitFor();
+    await pinGitBottom(page);
+    await sleep(400);
+  } },
+  { name: "14o2-git-review-delivered", run: async (page) => {
+    await page.evaluate(() => window.__reviewReply({ type: "review.batch.delivery", hostId: "local", ...window.__pendingSend, requestId: undefined, delivery: "delivered" }));
+    await page.getByTestId("git-review-delivery").getByText("Agent received").waitFor();
+    await pinGitBottom(page);
+    await sleep(400);
+  } },
+  { name: "14p-git-review-cleanup", nocapture: true, run: async (page) => {
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
     await sleep(500);
   } },
   { name: "15-worktree-menu", run: async (page) => {

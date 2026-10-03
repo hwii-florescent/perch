@@ -837,8 +837,8 @@ export function WorkspaceGitReview({
             </div>
           </div>
 
-          <section className="workspace-git__review-panel" data-testid="git-review-panel">
-            <div className="workspace-git__review-heading"><div><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className="workspace-git__button" disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+          <section className="shrink-0 max-h-[17rem] overflow-y-auto border-t border-t-[color:var(--git-border)]" data-testid="git-review-panel">
+            <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className="workspace-git__button" disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
             {comments.length > 0 && <div className="workspace-git__comment-summary">Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
             {unplacedComments.length > 0 && (
               <div className="workspace-git__review-list" data-testid="git-review-list">
@@ -848,13 +848,13 @@ export function WorkspaceGitReview({
               </div>
             )}
             {unresolvedCount > 0 && (
-              <div className="workspace-git__batch-form">
-                <label className="workspace-git__field"><span>Send to agent session</span><select aria-label="Send to agent session" value={selectedSessionId ?? ""} onChange={(event) => setSelectedSessionId(event.target.value || undefined)}><option value="">Choose a session</option>{sessions.map((session) => <option value={session.id} key={session.id}>{session.title}{session.agent ? ` · ${session.agent}` : ""}</option>)}</select></label>
-                <label className="workspace-git__field workspace-git__field--grow"><span>Request</span><input value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
+              <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch">
+                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><select aria-label="Send to agent session" className={TB_INPUT} value={selectedSessionId ?? ""} onChange={(event) => setSelectedSessionId(event.target.value || undefined)}><option value="">Choose a session</option>{sessions.map((session) => <option value={session.id} key={session.id}>{session.title}{session.agent ? ` · ${session.agent}` : ""}</option>)}</select></label>
+                <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={TB_INPUT} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}
             {batchPreview && (
-              <div className="workspace-git__packet" data-testid="git-review-packet"><div className="workspace-git__packet-meta"><strong>Packet ready</strong><span>{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code>{batchPreview.packetId}</code></div><pre>{batchPreview.markdown}</pre><div className="workspace-git__comment-actions"><button type="button" className="workspace-git__button workspace-git__button--primary" onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
+              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:monospace]">{batchPreview.markdown}</pre><div className="workspace-git__comment-actions"><button type="button" className="workspace-git__button workspace-git__button--primary" onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
             {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className="workspace-git__banner workspace-git__banner--info" role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."
