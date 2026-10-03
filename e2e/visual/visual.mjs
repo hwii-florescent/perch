@@ -447,6 +447,96 @@ const STATES = [
     await page.getByText("Create failed").waitFor({ state: "detached" });
     await sleep(300);
   } },
+  // Sidebar project list under injected state: a sleeping + pinned workspace (Restore), a nested worktree,
+  // a running create job, active and long-titled session rows, chat rows. 16l puts the store back.
+  { name: "16d-overview-injected", run: async (page, ctx) => {
+    await page.evaluate((ctx) => {
+      const st = window.usePerchStore, g = st.getState();
+      window.__visOv = { workspaces: g.workspaces, sessions: g.sessions, jobs: g.worktreeJobs, projects: g.workspaceProjects, snap: g.workspaceSnapshotByHost, sid: g.sessionId };
+      const main = g.workspaces.find((w) => w.id === ctx.workspaceId);
+      const chats = g.workspaces.find((w) => w.path.endsWith("/.perch/scratch"));
+      const project = g.workspaceProjects.find((p) => p.id === main.projectId);
+      const extra = [];
+      // a linked worktree of the main checkout, with a worktree nested under it
+      const base = { ...main, dirty: false, state: "active", pinned: false, hidden: false };
+      extra.push({ ...base, id: "vis-linked", name: "linked-wt", branch: "linked", path: "/tmp/perch-visual/wt-linked", parentWorkspaceId: main.id });
+      extra.push({ ...base, id: "vis-nested", name: "nested-child", branch: "nested", path: "/tmp/perch-visual/wt-nested", parentWorkspaceId: "vis-linked" });
+      const mk = (id, title, w, n) => ({ id, title, cwd: w.path, workspaceId: w.id, hostId: w.hostId, createdAt: n, status: "idle" });
+      st.setState({
+        workspaces: [...g.workspaces.map((w) => (w.id === main.id ? { ...w, state: "sleeping", pinned: true } : w)), ...extra],
+        sessions: [mk("vis-o1", "Active session", main, 3), mk("vis-o2", "A very long session title that has to be clipped by the sidebar column", main, 2), ...(chats ? [mk("vis-o3", "A chat", chats, 1)] : [])],
+        worktreeJobs: [{ jobId: "vis-j1", repoPath: project.repoPath ?? project.path, branch: "job-run", path: "/tmp/perch-visual/wt-job", status: "running", phase: "Checking out", startedAt: 1 }],
+        sessionId: "vis-o1",
+      });
+    }, ctx);
+    await page.getByTestId("worktree-job-job-run").waitFor();
+    await sleep(400);
+  } },
+  { name: "16e-overview-hidden-open", run: async (page, ctx) => {
+    await page.getByTestId(`workspace-hidden-${ctx.projectId}`).click();
+    await sleep(300);
+  } },
+  { name: "16f-overview-collapsed", run: async (page, ctx) => {
+    await page.getByTestId(`workspace-project-collapse-${ctx.projectId}`).click();
+    await sleep(300);
+  } },
+  { name: "16g-overview-expanded", nocapture: true, run: async (page, ctx) => {
+    await page.getByTestId(`workspace-project-collapse-${ctx.projectId}`).click();
+    await sleep(300);
+  } },
+  { name: "16h-overview-load-error", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ workspaceSnapshotByHost: { ...window.usePerchStore.getState().workspaceSnapshotByHost, local: { state: "error", error: "Workspace could not be loaded." } } }));
+    await page.getByRole("alert").filter({ hasText: "Workspace could not be loaded." }).waitFor();
+    await sleep(300);
+  } },
+  { name: "16i-overview-loading", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ workspaceSnapshotByHost: { ...window.usePerchStore.getState().workspaceSnapshotByHost, local: { state: "loading" } } }));
+    await page.getByText("Loading workspace…").waitFor();
+    await sleep(300);
+  } },
+  // No projects: the "Register a project" card, then the add form with a pending and an error status.
+  { name: "16j-overview-empty", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ workspaceSnapshotByHost: window.__visOv.snap, workspaceProjects: [] }));
+    await page.getByText("Register a project").waitFor();
+    await sleep(300);
+  } },
+  { name: "16k-overview-form-status", run: async (page) => {
+    await page.getByTestId("workspace-empty-add").click();
+    await page.evaluate(() => window.usePerchStore.setState({ workspaceProjectCreate: { requestId: "vis-r", hostId: "local", path: "/x", status: "error", error: "Could not register this folder." } }));
+    await page.getByRole("alert").filter({ hasText: "Could not register" }).waitFor();
+    await sleep(300);
+  } },
+  { name: "16k2-overview-form-pending", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState({ workspaceProjectCreate: { requestId: "vis-r", hostId: "local", path: "/x", status: "pending" } }));
+    await page.getByText("Registering folder…").waitFor();
+    await sleep(300);
+  } },
+  { name: "16l-overview-restored", nocapture: true, run: async (page) => {
+    await page.evaluate(() => {
+      const o = window.__visOv;
+      window.usePerchStore.setState({ workspaceProjectCreate: null, workspaces: o.workspaces, sessions: o.sessions, worktreeJobs: o.jobs, workspaceProjects: o.projects, workspaceSnapshotByHost: o.snap, sessionId: o.sid });
+    });
+    await page.getByTestId("workspace-cancel").click().catch(() => {});
+    await page.getByRole("button", { name: "Cancel" }).first().click().catch(() => {});
+    await sleep(400);
+  } },
+  { name: "16m-overview-rename-workspace", run: async (page, ctx) => {
+    await page.getByTestId(`workspace-entry-${ctx.workspaceId}`).click({ button: "right" });
+    await page.getByTestId(`workspace-rename-item-${ctx.workspaceId}`).click();
+    await page.getByTestId(`workspace-rename-${ctx.workspaceId}`).waitFor();
+    await sleep(300);
+  } },
+  { name: "16n-overview-rename-project", run: async (page, ctx) => {
+    if (await page.getByTestId(`workspace-rename-${ctx.workspaceId}`).count()) await page.getByTestId(`workspace-rename-${ctx.workspaceId}`).press("Escape");
+    await page.getByTestId(`workspace-project-menu-${ctx.projectId}`).click({ force: true });
+    await page.getByTestId(`workspace-project-rename-${ctx.projectId}`).click();
+    await page.getByTestId(`workspace-project-rename-input-${ctx.projectId}`).waitFor();
+    await sleep(300);
+  } },
+  { name: "16o-overview-rename-done", nocapture: true, run: async (page, ctx) => {
+    if (await page.getByTestId(`workspace-project-rename-input-${ctx.projectId}`).count()) await page.getByTestId(`workspace-project-rename-input-${ctx.projectId}`).press("Escape");
+    await sleep(300);
+  } },
   { name: "17-project-menu", run: async (page, ctx) => {
     await closeOverlays(page);
     await page.locator(`[data-testid="workspace-project-${ctx.projectId}"]`).hover();
@@ -579,6 +669,24 @@ const STATES = [
   { name: "22a2-phone-switcher-closed", nocapture: true, viewport: { width: 390, height: 844 }, run: async (page) => {
     await page.getByTestId("mobile-switcher-close").click();
     await page.evaluate(() => { const p = window.__visPhone; window.usePerchStore.setState({ workspaceCapabilities: p.caps, sessions: p.sessions, sessionId: p.sid }); });
+  } },
+  // The phone switcher's workspace list (compact overview) with a linked worktree, which gets the
+  // Pin / Delete / Hide buttons, and a pinned workspace.
+  { name: "22a3-phone-switcher-workspaces", viewport: { width: 390, height: 844 }, run: async (page, ctx) => {
+    await page.evaluate((ctx) => {
+      const st = window.usePerchStore, g = st.getState();
+      window.__visWs2 = g.workspaces;
+      const main = g.workspaces.find((w) => w.id === ctx.workspaceId);
+      const linked = { ...main, id: "vis-linked", name: "linked-wt", branch: "linked", path: "/tmp/perch-visual/wt-linked", parentWorkspaceId: main.id, dirty: false, state: "active", pinned: true, hidden: false };
+      st.setState({ workspaces: [...g.workspaces, linked] });
+    }, ctx);
+    await page.getByTestId("mobile-switch").click();
+    await page.getByTestId("workspace-pin-vis-linked").waitFor();
+    await sleep(400);
+  } },
+  { name: "22a4-phone-switcher-workspaces-closed", nocapture: true, viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("mobile-switcher-close").click();
+    await page.evaluate(() => window.usePerchStore.setState({ workspaces: window.__visWs2 }));
   } },
   // The macOS app's title-bar row: brand padded for the traffic lights, then collapsed.
   { name: "22b-mac-desktop-brand", tauri: true, run: async () => {} },

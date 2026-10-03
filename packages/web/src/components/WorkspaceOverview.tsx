@@ -12,6 +12,31 @@ import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
 
+// Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
+// `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
+// `workspace-project__workspaces`, `workspace-entry__sessions` and `workspace-overview__add-form`.
+const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
+const FONT = "[font-family:inherit] [font-size:inherit] [font-weight:inherit]";
+const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
+const SESSION = `${ROW_BTN} cursor-pointer gap-[0.35rem] bg-transparent px-[0.25rem] py-[0.23rem] text-[0.64rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
+const SESSION_TITLE = "overflow-hidden text-ellipsis whitespace-nowrap";
+const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
+const DOT = "w-[0.7rem] shrink-0 text-center text-[0.58rem] text-teal";
+const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] pt-[0.35rem] pr-[0.3rem] pb-[0.32rem] pl-[0.45rem] text-fg hover:bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] ${FOCUS}`;
+const STRONG = "overflow-hidden text-[0.76rem] font-bold text-ellipsis whitespace-nowrap text-fg";
+const SPAN = "overflow-hidden text-[0.63rem] text-ellipsis whitespace-nowrap text-subtext-0";
+const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
+const SMALL_BTN = "shrink-0 cursor-pointer rounded-ui border px-[0.3rem] py-[0.14rem] text-[0.58rem] leading-[1.1] [font-family:inherit]";
+const JOB_ACTION = `${SMALL_BTN} border-overlay-0 bg-transparent text-subtext-0 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent`;
+// Glyph buttons at the end of a row: shown on hover of the row (`group/ph`, `group/row`),
+// on keyboard focus, always on touch.
+const REVEAL = "opacity-0 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
+const GLYPH = `h-[1.3rem] w-[1.3rem] shrink-0 cursor-pointer rounded-ui p-0 leading-none [background:none] [border:0] ${FONT} hover:bg-surface-1 hover:text-fg`;
+const PROJECT_ICON = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/ph:opacity-100 aria-[expanded=false]:opacity-100`;
+const SESSION_CLOSE = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/row:opacity-100`;
+const HEADER_PLUS = "h-[1.3rem] w-[1.3rem] p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
+const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:mr-[0.3rem] [@media(max-width:700px)]:mb-[0.35rem] [@media(max-width:700px)]:ml-[1.45rem] [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
+
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || path;
@@ -110,10 +135,10 @@ function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecor
   const setWorkspaceHidden = usePerchStore((state) => state.setWorkspaceHidden);
   const count = workspaces.length;
   return (
-    <div className="workspace-hidden">
+    <div>
       <button
         type="button"
-        className="workspace-hidden__toggle"
+        className={`w-full cursor-pointer pt-1 pr-[0.45rem] pb-1 pl-[1.45rem] text-left text-[0.62rem] text-overlay-1 [background:none] [border:0] [font-family:inherit] hover:text-accent focus-visible:text-accent`}
         aria-expanded={open}
         data-testid={`workspace-hidden-${projectId}`}
         onClick={() => setOpen(!open)}
@@ -121,14 +146,14 @@ function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecor
         {count} hidden worktree{count === 1 ? "" : "s"}
       </button>
       {open && workspaces.map((workspace) => (
-        <div className="workspace-hidden__row" key={workspace.id} title={workspace.path}>
-          <span className="workspace-entry__body">
-            <strong>{workspace.branch || basename(workspace.path)}</strong>
-            <span>{workspace.path}</span>
+        <div className="flex items-center gap-[0.35rem] py-[0.2rem] pr-[0.45rem] pl-[1.45rem]" key={workspace.id} title={workspace.path}>
+          <span className={BODY}>
+            <strong className={STRONG}>{workspace.branch || basename(workspace.path)}</strong>
+            <span className={SPAN}>{workspace.path}</span>
           </span>
           <button
             type="button"
-            className="worktree-job__action"
+            className={JOB_ACTION}
             data-testid={`workspace-show-${workspace.id}`}
             onClick={() => setWorkspaceHidden(workspace.id, false)}
           >
@@ -153,35 +178,35 @@ function WorktreeJobRows({ jobs }: { jobs: WorktreeJob[] }) {
         const failed = job.status === "failed";
         return (
           <div
-            className={"workspace-entry worktree-job" + (failed ? " worktree-job--failed" : "")}
+            className="workspace-entry relative border-l border-l-overlay-0"
             key={job.jobId}
             data-testid={`worktree-job-${job.branch}`}
             role="status"
           >
-            <div className="workspace-entry__button worktree-job__row" title={job.path}>
-              <span className="workspace-entry__dot" aria-hidden="true">{failed ? "✕" : "◌"}</span>
-              <span className="workspace-entry__body">
-                <strong>{job.branch}</strong>
-                <span data-testid={`worktree-job-phase-${job.branch}`}>{failed ? "Create failed" : `${job.phase}…`}</span>
+            <div className={cn(ENTRY_BTN, "cursor-default bg-transparent")} title={job.path}>
+              <span className={cn(DOT, failed && "text-red")} aria-hidden="true">{failed ? "✕" : "◌"}</span>
+              <span className={BODY}>
+                <strong className={STRONG}>{job.branch}</strong>
+                <span className={cn(SPAN, failed && "text-red")} data-testid={`worktree-job-phase-${job.branch}`}>{failed ? "Create failed" : `${job.phase}…`}</span>
               </span>
               {job.status === "running" && (
-                <button type="button" className="worktree-job__action" data-testid={`worktree-job-cancel-${job.branch}`} onClick={() => cancel(job.jobId)}>
+                <button type="button" className={JOB_ACTION} data-testid={`worktree-job-cancel-${job.branch}`} onClick={() => cancel(job.jobId)}>
                   Cancel
                 </button>
               )}
               {failed && (
                 <>
-                  <button type="button" className="worktree-job__action" data-testid={`worktree-job-retry-${job.branch}`} onClick={() => retry(job.jobId)}>
+                  <button type="button" className={JOB_ACTION} data-testid={`worktree-job-retry-${job.branch}`} onClick={() => retry(job.jobId)}>
                     Retry
                   </button>
-                  <button type="button" className="worktree-job__action" data-testid={`worktree-job-dismiss-${job.branch}`} onClick={() => dismiss(job.jobId)}>
+                  <button type="button" className={JOB_ACTION} data-testid={`worktree-job-dismiss-${job.branch}`} onClick={() => dismiss(job.jobId)}>
                     Dismiss
                   </button>
                 </>
               )}
             </div>
             {failed && (
-              <div className="worktree-job__error" data-testid={`worktree-job-error-${job.branch}`} title={job.error}>
+              <div className="mt-0 mr-[0.3rem] mb-[0.3rem] ml-[1.45rem] overflow-hidden text-[0.6rem] text-red [display:-webkit-box] [overflow-wrap:anywhere] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]" data-testid={`worktree-job-error-${job.branch}`} title={job.error}>
                 {job.error}
               </div>
             )}
@@ -366,11 +391,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         const chatsCollapsed = collapsed.includes(chatsProject.id);
         const chatsWorkspace = workspacesForProject(workspaces, chatsProject.id)[0];
         return (
-          <div className="workspace-chats" data-testid="workspace-chats">
-            <div className="workspace-project__header">
+          <div className="pb-1" data-testid="workspace-chats">
+            <div className="group/ph flex items-center pr-[0.35rem]">
               <button
                 type="button"
-                className="workspace-chats__title"
+                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-left text-[0.76rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
                 data-testid="workspace-chats-collapse"
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
@@ -380,7 +405,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               {chats.length > 0 && (
                 <button
                   type="button"
-                  className="workspace-project__icon"
+                  className={PROJECT_ICON}
                   data-testid="workspace-chats-menu"
                   title="Chats actions"
                   aria-label="Chats actions"
@@ -397,7 +422,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               )}
               <button
                 type="button"
-                className="workspace-chats__new"
+                className={`${GLYPH} text-subtext-0 focus-visible:bg-surface-1 focus-visible:text-fg`}
                 data-testid="workspace-chats-new"
                 title="New chat"
                 aria-label="New chat"
@@ -412,12 +437,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               </button>
             </div>
             {!chatsCollapsed && chats.length > 0 && (
-              <div className="workspace-chats__list">
+              <div className="pt-0 pr-[0.3rem] pb-1 pl-[0.4rem]">
                 {chats.map((session) => (
-                  <div className="workspace-entry__session-row" key={session.id}>
+                  <div className="group/row flex items-center" key={session.id}>
                     <button
                       type="button"
-                      className={"workspace-entry__session workspace-chats__chat" + (session.id === sessionId ? " workspace-entry__session--active" : "")}
+                      className={cn(SESSION, "px-[0.3rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
                       data-testid={`workspace-session-${session.id}`}
                       title={session.title || "New chat"}
                       onClick={() => {
@@ -426,11 +451,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       }}
                     >
                       <StatusDot session={session} />
-                      <span>{session.title || "New chat"}</span>
+                      <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
                     </button>
                     <button
                       type="button"
-                      className="workspace-entry__session-close"
+                      className={SESSION_CLOSE}
                       data-testid={`workspace-session-close-${session.id}`}
                       title="Close chat"
                       aria-label={`Close ${session.title || "chat"}`}
@@ -448,21 +473,25 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   return (
     <section
-      className={"workspace-overview" + (compact ? " workspace-overview--compact" : "")}
+      className={cn(
+        "workspace-overview flex flex-col overflow-hidden",
+        // compact = the phone switcher, where the panel owns the bottom edge
+        compact ? "min-h-full flex-1" : "min-h-0 flex-1 border-b border-b-overlay-0",
+      )}
       data-testid="workspace-overview"
       aria-label="Projects and workspaces"
     >
-      <div className="workspace-overview__heading">
-        <div>
-          <span className="workspace-overview__eyebrow">Projects</span>
-          <span className="workspace-overview__count">
+      <div className="flex shrink-0 items-center justify-between gap-[0.45rem] border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_72%,transparent)] pt-[0.55rem] pr-[0.55rem] pb-[0.45rem] pl-[0.65rem]">
+        <div className="flex min-w-0 items-baseline gap-[0.45rem]">
+          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase">Projects</span>
+          <span className="text-[0.65rem] whitespace-nowrap text-subtext-0">
             {visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
           </span>
         </div>
-        <div className="workspace-overview__heading-actions">
+        <div className="flex shrink-0 items-center gap-[0.2rem]">
           <button
             type="button"
-            className="workspace-overview__icon-button"
+            className={`h-[1.6rem] w-[1.6rem] cursor-pointer rounded-ui p-0 text-[0.95rem] leading-none text-subtext-0 [background:transparent] [border:1px_solid_transparent] [font-family:inherit] hover:border-overlay-0 hover:text-fg focus-visible:border-overlay-0 focus-visible:text-fg [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]`}
             title="Refresh projects"
             aria-label="Refresh projects"
             data-testid="workspace-refresh"
@@ -472,7 +501,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </button>
           <button
             type="button"
-            className="workspace-overview__add-button"
+            className={`cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-accent [font-family:inherit] hover:border-accent focus-visible:border-accent [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]`}
             data-testid="workspace-add-project"
             onClick={() => setAddOpen((open) => !open)}
           >
@@ -482,10 +511,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       </div>
 
       {addOpen && (
-        <div className="workspace-overview__add-form" data-testid="workspace-add-form">
-          <label>
-            <span>Name <em>optional</em></span>
+        <div className="workspace-overview__add-form grid shrink-0 gap-[0.42rem] border-b border-b-overlay-0 bg-surface-dim px-[0.65rem] py-[0.55rem]" data-testid="workspace-add-form">
+          <label className="grid gap-[0.16rem] text-[0.65rem] text-subtext-0">
+            <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
             <input
+              className="w-full min-w-0 rounded-ui border border-overlay-0 bg-panel-bg px-[0.42rem] py-[0.34rem] text-fg focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]"
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Project name"
@@ -494,39 +524,39 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </label>
           {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
           <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
-          <div className="workspace-overview__form-actions">
-            <button type="button" className="workspace-overview__quiet-button" disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
+          <div className="flex justify-end gap-[0.35rem] pt-[0.15rem]">
+            <button type="button" className={`cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.45rem] py-[0.3rem] text-[0.68rem] text-subtext-0 [font-family:inherit] disabled:cursor-not-allowed disabled:opacity-[0.45] ${FOCUS}`} disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
               Cancel
             </button>
           </div>
-          {createRequest?.status === "pending" && <span className="workspace-overview__form-status" role="status">Registering folder…</span>}
-          {createRequest?.status === "error" && <span className="workspace-overview__form-status workspace-overview__form-status--error" role="alert">{createRequest.error || "Could not register this folder."}</span>}
+          {createRequest?.status === "pending" && <span className="text-[0.64rem] text-subtext-0" role="status">Registering folder…</span>}
+          {createRequest?.status === "error" && <span className="text-[0.64rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
         </div>
       )}
 
       {snapshot?.state === "loading" && (
-        <div className="workspace-overview__state" role="status">Loading workspace…</div>
+        <div className="shrink-0 px-[0.65rem] py-[0.55rem] text-[0.7rem] text-subtext-0" role="status">Loading workspace…</div>
       )}
       {snapshot?.state === "error" && (
-        <div className="workspace-overview__state workspace-overview__state--error" role="alert">
+        <div className="flex shrink-0 items-center gap-[0.45rem] px-[0.65rem] py-[0.55rem] text-[0.7rem] text-red" role="alert">
           {snapshot.error || "Workspace could not be loaded."}
-          <button type="button" onClick={() => fetchWorkspaceSnapshot(activeHostId)}>Retry</button>
+          <button type="button" className={`ml-auto cursor-pointer rounded-ui border border-current bg-transparent px-[0.38rem] py-[0.2rem] text-inherit [font:inherit] ${FOCUS}`} onClick={() => fetchWorkspaceSnapshot(activeHostId)}>Retry</button>
         </div>
       )}
 
       {visibleProjects.length === 0 && snapshot?.state !== "loading" && (
-        <div className="workspace-overview__empty">
-          <span className="workspace-overview__empty-mark" aria-hidden="true">＋</span>
-          <strong>Register a project</strong>
+        <div className="grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0">
+          <span className="text-[1.3rem] leading-none text-accent" aria-hidden="true">＋</span>
+          <strong className="text-[0.77rem] text-fg">Register a project</strong>
           <span>Projects keep sessions, checkouts, and files together.</span>
           {!addOpen && (
-            <button type="button" onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
+            <button type="button" className="mt-[0.18rem] cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.45rem] py-[0.28rem] text-accent [font-family:inherit] hover:border-accent focus-visible:border-accent" onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
               Register folder
             </button>
           )}
         </div>
       )}
-      <div className="workspace-overview__list" data-testid="project-list">
+      <div className="min-h-0 flex-1 overflow-y-auto py-[0.28rem]" data-testid="project-list">
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
@@ -538,12 +568,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const projectCollapsed = collapsed.includes(project.id);
             return (
               <div
-                className={"workspace-project" + (projectActive ? " workspace-project--active" : "")}
+                className="workspace-project border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_45%,transparent)]"
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className="workspace-project__header"
+                  className="group/ph flex items-center pr-[0.35rem]"
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setMenu({ x: event.clientX, y: event.clientY, label: "Project actions", items: projectMenu(project) });
@@ -551,7 +581,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 >
                 {renamingProjectId === project.id ? (
                   <input
-                    className="workspace-entry__rename"
+                    className={RENAME}
                     data-testid={`workspace-project-rename-input-${project.id}`}
                     aria-label="Project name"
                     autoFocus
@@ -570,20 +600,25 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 ) : (
                 <button
                   type="button"
-                  className="workspace-project__button"
+                  className={cn(
+                    ROW_BTN,
+                    "flex-1 cursor-pointer gap-[0.45rem] pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg hover:bg-surface-1",
+                    FOCUS,
+                    projectActive ? "bg-surface-1 shadow-[inset_2px_0_0_var(--accent)]" : "bg-transparent",
+                  )}
                   aria-pressed={projectActive}
                   onClick={() => navigateToProject(project.id)}
                   title={project.path}
                 >
-                  <span className="workspace-project__marker" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
-                  <span className="workspace-project__body">
-                    <strong>{project.name || basename(project.path)}</strong>
+                  <span className="w-3 shrink-0 text-center text-[0.65rem] text-accent" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
+                  <span className={BODY}>
+                    <strong className={STRONG}>{project.name || basename(project.path)}</strong>
                   </span>
                 </button>
                 )}
                 <button
                   type="button"
-                  className="workspace-project__icon"
+                  className={PROJECT_ICON}
                   data-testid={`workspace-project-collapse-${project.id}`}
                   aria-expanded={!projectCollapsed}
                   title={projectCollapsed ? "Show workspaces and sessions" : "Collapse"}
@@ -594,7 +629,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 </button>
                 <button
                   type="button"
-                  className="workspace-project__icon"
+                  className={PROJECT_ICON}
                   data-testid={`workspace-project-menu-${project.id}`}
                   title="Project actions"
                   aria-label="Project actions"
@@ -606,10 +641,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 >
                   ⋯
                 </button>
-                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} /> : (
+                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} className={HEADER_PLUS} /> : (
                   <button
                     type="button"
-                    className={cn("worktree-menu__btn", ICON_BUTTON)}
+                    className={cn("worktree-menu__btn", ICON_BUTTON, HEADER_PLUS)}
                     data-testid={`workspace-project-new-session-${project.id}`}
                     title="New session in this folder"
                     aria-label="New session"
@@ -620,7 +655,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 )}
                 </div>
                 {!projectCollapsed && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
-                  <div className="workspace-project__workspaces">
+                  <div className="workspace-project__workspaces pt-0 pr-[0.35rem] pb-[0.35rem] pl-[1.15rem]">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
                       // linked worktree renders under it; children of the primary
@@ -639,7 +674,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       return (
                         <Fragment key={workspace.id}>
                         <div
-                          className="workspace-entry"
+                          className="workspace-entry group/entry relative border-l border-l-overlay-0"
                           data-testid={`workspace-entry-${workspace.id}`}
                           onContextMenu={(event) => {
                             if ((event.target as HTMLElement).closest(".workspace-entry__sessions")) return;
@@ -649,7 +684,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         >
                           {renamingId === workspace.id ? (
                             <input
-                              className="workspace-entry__rename"
+                              className={RENAME}
                               data-testid={`workspace-rename-${workspace.id}`}
                               aria-label="Workspace name"
                               autoFocus
@@ -668,14 +703,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           ) : (
                           <button
                             type="button"
-                            className={"workspace-entry__button" + (workspaceActive ? " workspace-entry__button--active" : "")}
+                            className={cn(
+                              ENTRY_BTN,
+                              workspaceActive ? "workspace-entry__button--active bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] shadow-[inset_2px_0_0_var(--teal)]" : "bg-transparent",
+                            )}
                             aria-pressed={workspaceActive}
                             onClick={() => navigateToWorkspace(workspace.id)}
                             title={workspace.path}
                           >
-                            <span className="workspace-entry__dot" aria-hidden="true">{workspace.dirty ? "●" : "○"}</span>
-                            <span className="workspace-entry__body">
+                            <span className={DOT} aria-hidden="true">{workspace.dirty ? "●" : "○"}</span>
+                            <span className={BODY}>
                               <strong
+                                className={STRONG}
                                 title="Double-click to rename"
                                 onDoubleClick={(event) => {
                                   event.stopPropagation();
@@ -684,11 +723,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               >
                                 {workspace.name || basename(workspace.path)}
                               </strong>
-                              <span>{workspace.branch || workspace.path}</span>
+                              <span className={SPAN}>{workspace.branch || workspace.path}</span>
                             </span>
                             {/* Only what needs attention; "ready" is the norm. */}
                             {(workspace.pinned || workspace.state === "sleeping" || workspace.dirty) && (
-                              <span className="workspace-entry__state">
+                              <span className="shrink-0 text-[0.58rem] text-subtext-0">
                                 {[workspace.pinned && "pinned", workspace.state === "sleeping" ? "sleeping" : workspace.dirty && "dirty"].filter(Boolean).join(" · ")}
                               </span>
                             )}
@@ -697,10 +736,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {/* Desktop uses the right-click menu; the phone has no
                               right-click, so it keeps these buttons. */}
                           {compact && (
-                          <div className="workspace-entry__actions">
+                          <div className="absolute top-[0.3rem] right-[0.3rem] flex gap-[0.2rem]">
                           <button
                             type="button"
-                            className="workspace-entry__files workspace-entry__icon"
+                            className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
                             data-testid={`workspace-pin-${workspace.id}`}
                             aria-pressed={workspace.pinned === true}
                             title={workspace.pinned ? "Unpin" : "Pin to the top of the project"}
@@ -715,7 +754,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {workspace.parentWorkspaceId && project.repoPath && (
                             <button
                               type="button"
-                              className="workspace-entry__files workspace-entry__icon"
+                              className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
                               data-testid={`workspace-delete-${workspace.id}`}
                               title="Delete this worktree and its branch"
                               aria-label="Delete worktree"
@@ -730,7 +769,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {workspace.parentWorkspaceId && (
                             <button
                               type="button"
-                              className="workspace-entry__files workspace-entry__icon"
+                              className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
                               data-testid={`workspace-hide-${workspace.id}`}
                               title="Hide from the sidebar (the checkout stays)"
                               aria-label="Hide worktree"
@@ -744,7 +783,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           )}
                           <button
                             type="button"
-                            className="workspace-entry__files"
+                            className={FILES_BTN}
                             data-testid={`workspace-files-${workspace.id}`}
                             title={`Open files for ${workspace.name || basename(workspace.path)}`}
                             onClick={(event) => {
@@ -758,7 +797,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           </button>
                           {(workspace.branch || project.repoPath) && <button
                             type="button"
-                            className="workspace-entry__files workspace-entry__git"
+                            className={FILES_BTN}
                             data-testid={`workspace-git-${workspace.id}`}
                             title={`Open Git and review for ${workspace.name || basename(workspace.path)}`}
                             onClick={(event) => {
@@ -775,19 +814,19 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {workspace.state === "sleeping" && (
                             <button
                               type="button"
-                              className="workspace-entry__restore"
+                              className={`mt-0 mr-[0.3rem] mb-[0.3rem] ml-[1.45rem] cursor-pointer rounded-ui border border-yellow bg-transparent px-[0.35rem] py-[0.18rem] text-[0.6rem] text-yellow [font-family:inherit] ${FOCUS}`}
                               onClick={() => restoreWorkspace(workspace.id)}
                             >
                               Restore
                             </button>
                           )}
                           {workspaceSessions.length > 0 && (
-                            <div className="workspace-entry__sessions">
+                            <div className="workspace-entry__sessions pt-0 pr-[0.3rem] pb-1 pl-[1.45rem]">
                               {workspaceSessions.map((session) => (
-                                <div className="workspace-entry__session-row" key={session.id}>
+                                <div className="group/row flex items-center" key={session.id}>
                                   <button
                                     type="button"
-                                    className={"workspace-entry__session" + (session.id === sessionId ? " workspace-entry__session--active" : "")}
+                                    className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
                                     data-testid={`workspace-session-${session.id}`}
                                     onClick={() => {
                                       switchSession(session.id);
@@ -795,11 +834,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                     }}
                                   >
                                     <StatusDot session={session} />
-                                    <span>{session.title || "New session"}</span>
+                                    <span className={SESSION_TITLE}>{session.title || "New session"}</span>
                                   </button>
                                   <button
                                     type="button"
-                                    className="workspace-entry__session-close"
+                                    className={SESSION_CLOSE}
                                     data-testid={`workspace-session-close-${session.id}`}
                                     title="Close session"
                                     aria-label={`Close ${session.title || "session"}`}
@@ -813,7 +852,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           )}
                         </div>
                         {(children.get(workspace.id) ?? []).length > 0 && depth < 8 && (
-                          <div className="workspace-entry__children" data-testid={`workspace-children-${workspace.id}`}>
+                          <div className="ml-[0.9rem]" data-testid={`workspace-children-${workspace.id}`}>
                             {(children.get(workspace.id) ?? []).map((child) => renderWorkspace(child, depth + 1))}
                           </div>
                         )}

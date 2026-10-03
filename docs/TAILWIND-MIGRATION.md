@@ -88,6 +88,14 @@ Done:
   `21b`-`21f` (Files/Git/Terminal tabs, the no-workspace placeholder, back to
   Chat) and `22a`/`22a2` (switcher in its sessions-by-project mode, with
   injected sessions). The freeze rule is now gated by an attribute on `<html>`.
+- **Slice 17: sidebar project list** (`WorkspaceOverview.tsx`, a `className` prop
+  on `WorktreeMenu`; `workspace-overview.css` deleted, plus the three phone
+  rules for it in `workspace-files.css` and the compact rule `mobile-switcher`
+  needed). Harness gained `16d`-`16o` (injected sleeping/pinned workspace,
+  nested worktree, running job, session and chat rows; hidden worktrees open;
+  collapsed project; load error / loading; empty list; add-form pending/error;
+  workspace and project rename) and `22a3` (phone switcher with a linked
+  worktree).
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -111,7 +119,7 @@ Done:
 | worktree-menu.css | – | **migrated and deleted** (WorktreeMenu popover + the shared `ui/icon-button` glyph button) |
 | mobile.css | – | **migrated and deleted** (MobileHeader/PaneShell/Switcher); the pane-fill child rule moved to `terminal.css`, the compact-overview rule to the end of `workspace-overview.css` |
 | pairing.css | – | **migrated and deleted** (`PairingGate`); 3 unrelated rules moved to the end of `settings.css`, `git-review.css`, `mobile.css` |
-| workspace-overview.css | 641 | not started |
+| workspace-overview.css | – | **migrated and deleted** (the sidebar project list, compact phone variant) |
 | composer.css | 500 | not started (Hosted chat is frozen: restyle only) |
 | chat.css | 536 | not started (frozen, same) |
 | workspace-files.css | 692 | not started (big; see font-mono gotcha) |
@@ -124,7 +132,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`workspace-overview.css` → … ; leave
+`workspace-files.css` / `composer.css` / `chat.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -284,6 +292,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 14 | CLI start + home | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit. 18 Chromium screenshot diffs of 1-18 px, all scattered anti-aliasing specks at sidebar/tab-edge corners (01a/04 crops checked: no visible change in the start card or picker). e2e after `npm run build`: nav, sessions, wave2.features, provider-config pass (10). |
 | 15 | settings modal | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08b`-`08d` and the modal screenshot fix): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit; no screenshot difference in any settings state (07, 08, 08b-08d, 20). 23 other Chromium screenshot diffs, all 1-29 px anti-aliasing specks at the sidebar/tab-edge corners. e2e after `npm run build`: settings, theme, provider-config, wave1, federation pass (15). `workspace-visual-qa` still fails at line 258 (pre-existing). |
 | 16 | phone chrome | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `21b`-`21f`, `22a` and the attribute-gated freeze): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit, except a WebKit-only `transition-property: all -> none` in `05d` that is a harness flake (the freeze leaving stale `none` on Dockview elements behind overlays; two isolated `--only 05d` runs, base and new, are identical, 0 differences). Chromium screenshot diffs of 1-14 px; the three in migrated regions (21d, 21e, 22) measured with a canvas pixel diff: max delta 1-2 levels, rounded-corner anti-aliasing of the pane tabs and switch button. e2e after `npm run build`: responsive, workspace-foundation, device-pairing, paired-phone-flows pass (8). |
+| 17 | sidebar project list | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `16d`-`16o`, `22a3`): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit (the first run caught the header `+` losing `leading-none` and the phone `min-h` classes never being generated; both fixed). 23 Chromium screenshot diffs of 2-19 px; those in the sidebar (16h, 16k, 16k2, 17b, 14) measured with a canvas pixel diff: max delta 1 level, corner anti-aliasing. e2e after `npm run build`: sidebar, worktrees, nav, sessions, workspace-foundation, workspace-tabs, workspace-git, responsive pass (30); `workspace-recovery` fails at its `perch.sessionId` assertion (pre-existing). |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -344,9 +353,23 @@ counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
 
-Slice 16 notes: `mobile-pane-shell__content`, `mobile-switcher__list--workspace`
-and `mobile-switcher__project` stay as tokens (two moved context rules and the
-harness select on them). The phone tab's `font: inherit` is
+Slice 17 notes: tokens kept for e2e: `workspace-project`, `workspace-entry`,
+`workspace-entry__button(--active)`, `workspace-entry__session--active`,
+`workspace-project__workspaces`, `workspace-entry__sessions`,
+`workspace-overview`, `workspace-overview__add-form`. Tailwind only sees
+literal class strings: `${PHONE}:min-h-…` is never generated, spell the
+`[@media(max-width:700px)]:` variant out. twMerge treats a `text-[…rem]` size as
+conflicting with `leading-*` and drops the earlier one, so re-append
+`leading-none` after any size override. The add-form input and the empty-state
+button had `font: 0.72rem/1.2 inherit`, which is invalid and was dropped, so
+they keep the browser's default font size; do not "fix" it here. Row-end glyph
+buttons show on `group-hover/ph` / `group-hover/row` (the header and session
+row carry the groups). Compact (phone) mode no longer needs
+`.mobile-switcher__list--workspace .workspace-overview`: it is `min-h-full`
+with no border class.
+
+Slice 16 notes: `mobile-pane-shell__content`, `mobile-switcher__project` stays as a token (the harness selects on it; slice 17
+removed the `--workspace` one with its context rule). The phone tab's `font: inherit` is
 `[font-family:inherit] [line-height:inherit]` only: an inherit-weight utility
 sorts after `font-bold` and flattens the active tab. An active tab still takes
 `hover:text-fg` (the old `:hover` rule out-ranked `--active`).

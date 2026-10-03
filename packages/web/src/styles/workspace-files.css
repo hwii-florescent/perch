@@ -550,27 +550,6 @@
     left: 0 !important;
     width: 100% !important;
   }
-
-  .workspace-overview__icon-button {
-    width: 2.75rem;
-    height: 2.75rem;
-    min-width: 2.75rem;
-  }
-
-  .workspace-overview__add-button {
-    min-height: 2.75rem;
-    padding-inline: 0.65rem;
-  }
-
-  .workspace-entry__files {
-    position: static;
-    min-height: 2.75rem;
-    margin: 0 0.3rem 0.35rem 1.45rem;
-    padding: 0.45rem 0.6rem;
-    opacity: 1;
-    border-color: var(--overlay-0);
-    text-align: left;
-  }
 }
 
 /* Dockview can hand the file pane a narrow width while the window is wide,

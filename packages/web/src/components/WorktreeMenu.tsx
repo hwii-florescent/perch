@@ -96,9 +96,11 @@ export interface WorktreeMenuProps {
   cwd: string;
   /** `${hostId}:${cwd}` — the shared project key (store cache + leader,W). */
   projectKey: string;
+  /** Extra classes for the + trigger (the sidebar project row hides it until hover). */
+  className?: string;
 }
 
-export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
+export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMenuProps) {
   const cached = usePerchStore((s) => s.worktrees[projectKey]);
   const listWorktrees = usePerchStore((s) => s.listWorktrees);
   const createWorktree = usePerchStore((s) => s.createWorktree);
@@ -540,7 +542,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     <>
       <button
         type="button"
-        className={cn("worktree-menu__btn", ICON_BUTTON)}
+        className={cn("worktree-menu__btn", ICON_BUTTON, className)}
         ref={btnRef}
         data-testid={`worktree-menu-${hostId}-${cwd}`}
         onClick={handleBtnClick}

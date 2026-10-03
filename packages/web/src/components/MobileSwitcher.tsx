@@ -115,7 +115,7 @@ export function MobileSwitcher({ open, onClose }: MobileSwitcherProps) {
         </div>
 
         {workspaceNavigationEnabled ? (
-          <div className="mobile-switcher__list--workspace flex-1 overflow-y-auto p-0">
+          <div className="flex-1 overflow-y-auto p-0">
             <WorkspaceOverview compact onNavigate={onClose} />
           </div>
         ) : (
