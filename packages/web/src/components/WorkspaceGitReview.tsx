@@ -43,6 +43,11 @@ const TB_INPUT = "min-w-0 max-w-full rounded-ui border border-[color:var(--git-b
 const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
 const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start";
 const DIFF_FILE = "flex min-w-0 flex-col items-start gap-[0.1rem] rounded-ui border px-[0.45rem] py-[0.42rem] text-left text-fg [background:none] hover:bg-surface-1";
+const COMMENT = "workspace-git__comment mt-[0.3rem] border-l-2 px-[0.55rem] py-[0.45rem] whitespace-normal [font-family:inherit]";
+// stale/orphaned keep their legacy yellow rules (no harness state); the class carries them.
+const COMMENT_TONE: Record<string, string> = { resolved: "border-l-green opacity-[0.72]", unresolved: "border-l-accent" };
+const PILL_TONE: Record<string, string> = { resolved: "text-green", unresolved: "text-accent" };
+const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui border border-[color:var(--git-border)] bg-surface-1 p-[0.4rem] text-fg";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
 export interface WorkspaceGitReviewProps {
@@ -229,7 +234,7 @@ function placementLabel(comment: ReviewComment, diff: GitDiffSnapshot | null): s
 
 function ReviewStatusPill({ comment }: { comment: ReviewComment }) {
   return (
-    <span className={`workspace-git__comment-status workspace-git__comment-status--${comment.status}`}>
+    <span className={`rounded-[999px] bg-surface-1 px-[0.3rem] py-[0.1rem] capitalize ${PILL_TONE[comment.status] ?? `text-subtext-0 workspace-git__comment-status--${comment.status}`}`}>
       {comment.status}
       {comment.anchorConfidence !== "exact" && ` · ${comment.anchorConfidence} anchor`}
     </span>
@@ -564,19 +569,19 @@ export function WorkspaceGitReview({
   function renderCommentCard(comment: ReviewComment, inline: boolean) {
     return (
       <article
-        className={`workspace-git__comment workspace-git__comment--${comment.status}`}
+        className={`${COMMENT} ${COMMENT_TONE[comment.status] ?? `border-l-accent workspace-git__comment--${comment.status}`}`}
         data-testid={inline ? "git-inline-comment" : "git-review-list-comment"}
         key={comment.id}
       >
-        <div className="workspace-git__comment-meta">
+        <div className="flex items-center justify-between gap-2 text-[0.66rem] text-subtext-0">
           <span>{inline ? `Lines ${comment.range.start}${comment.range.end !== comment.range.start ? `–${comment.range.end}` : ""}` : `${comment.path} · ${comment.side} · ${targetLabel(comment.base)}`}</span>
           <ReviewStatusPill comment={comment} />
         </div>
-        {!inline && <span className="workspace-git__comment-location">{placementLabel(comment, diff)}</span>}
+        {!inline && <span className="mt-[0.15rem] block text-[0.64rem] text-subtext-0">{placementLabel(comment, diff)}</span>}
         {editingCommentId === comment.id ? (
           <>
             <textarea
-              className="workspace-git__comment-edit"
+              className={COMMENT_FIELD}
               value={editingBody}
               onChange={(event) => setEditingBody(event.target.value)}
               aria-label="Edit review comment"
@@ -586,7 +591,7 @@ export function WorkspaceGitReview({
               <button type="button" className="workspace-git__button--quiet" onClick={() => setEditingCommentId(null)}>Cancel</button>
             </div>
           </>
-        ) : <p>{comment.body}</p>}
+        ) : <p className="mx-0 my-[0.28rem] whitespace-pre-wrap">{comment.body}</p>}
         {editingCommentId !== comment.id && (
           <div className="workspace-git__comment-actions">
             <button type="button" onClick={() => beginEdit(comment)}>Edit</button>
@@ -604,7 +609,7 @@ export function WorkspaceGitReview({
     const lineComments = comments.filter((comment) => isCommentOnLine(comment, path, side, line, diff));
     if (lineComments.length === 0) return null;
     return (
-      <div className="workspace-git__line-comments" data-testid="git-line-comments">
+      <div className="col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[7.5rem] [@container(max-width:700px)]:ml-[5.8rem]" data-testid="git-line-comments">
         {lineComments.map((comment) => renderCommentCard(comment, true))}
       </div>
     );
@@ -820,10 +825,10 @@ export function WorkspaceGitReview({
                     );
                   })}
                   {selection && (
-                    <div className="workspace-git__comment-composer" data-testid="git-comment-composer">
-                      <div className="workspace-git__comment-composer-heading"><strong>Comment on {selection.path}</strong><span>{selection.side} lines {selection.start}–{selection.end}</span></div>
-                      <textarea data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                      <div className="workspace-git__comment-actions"><button type="button" className="workspace-git__button workspace-git__button--primary" disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
+                    <div className="m-[0.7rem] rounded-ui border border-accent p-[0.65rem]" data-testid="git-comment-composer">
+                      <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
+                      <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
+                      <div className="workspace-git__comment-actions mt-[0.4rem]"><button type="button" className="workspace-git__button workspace-git__button--primary" disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className="workspace-git__button workspace-git__button--quiet" onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
                     </div>
                   )}
                 </>

@@ -564,6 +564,36 @@ const STATES = [
     await page.getByTestId("git-base-selector").waitFor({ state: "detached" });
     await sleep(500);
   } },
+  // A saved inline comment: card, edit, resolved, then deleted again so later states match.
+  { name: "14h-git-comment-saved", run: async (page) => {
+    await page.getByTestId("git-comment-composer").getByRole("button", { name: "Add comment" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14i-git-comment-editing", run: async (page) => {
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Edit review comment").fill("an edited review note");
+    await sleep(400);
+  } },
+  { name: "14j-git-comment-edited", run: async (page) => {
+    await page.getByRole("button", { name: "Save edit" }).click();
+    await page.getByText("an edited review note").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14k-git-comment-resolved", run: async (page) => {
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Resolve" }).click();
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Reopen" }).waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14l-git-comment-deleted", run: async (page) => {
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
   { name: "15-worktree-menu", run: async (page) => {
     await page.getByTestId("workspace-tools-toggle").click(); // close drawer
     await sleep(300);
