@@ -459,6 +459,13 @@ async function snapEngine(engine, dist, outDir, only) {
   let core = null, browser = null;
   try {
     if (!fs.existsSync(path.join(dist, "index.html"))) throw new Error(`no web build at ${dist} (index.html missing)`);
+    // Touch coverage: the harness pointer can hover, so it cannot see Tailwind's
+    // default `hover:` (wrapped in `@media (hover:hover)`) dropping touch hover.
+    // Legacy CSS used a bare :hover; fail closed if any build gates it.
+    const assets = path.join(dist, "assets");
+    const css = fs.existsSync(assets) ? fs.readdirSync(assets).filter((f) => f.endsWith(".css")) : [];
+    if (!css.length) throw new Error(`no built CSS in ${assets}`);
+    for (const f of css) if (/@media\s*\(\s*hover\s*:\s*hover\s*\)/.test(fs.readFileSync(path.join(assets, f), "utf8"))) throw new Error(`${f} gates :hover behind @media (hover:hover); touch devices lose hover styles`);
     core = await bootCore(dist);
     browser = await ENGINES[engine].launch();
     const ctx = {};
