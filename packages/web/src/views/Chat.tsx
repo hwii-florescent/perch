@@ -27,6 +27,12 @@ import { CliStartPanel } from "../components/CliStartPanel";
 import { NoSessionPanel } from "../components/NoSessionPanel";
 import type { AgentKind, CommandEntry, SessionMode } from "@perch/shared";
 import { cn } from "../lib/cn";
+import {
+  ACTION_BTN, ACTIONS_ASSISTANT, ACTIONS_USER, DIFF_GUTTER_CLASS, DIFF_LINE_CLASS, DIFF_TEXT, DIFF_VIEW, EDIT_BADGE,
+  EDIT_BADGE_PATH, EDIT_BADGES, GLYPH_THINKING, GLYPH_TOOL, MESSAGE_GROUP, PENDING, THINKING_BODY, TOOL_ARG, TOOL_BLOCK,
+  TOOL_BLOCK_BASH, TOOL_BLOCK_RESULT, TOOL_BODY, TOOL_CHEVRON, TOOL_DETAIL_NEXT, TOOL_NAME, TOOL_ROW, TOOL_SUMMARY,
+  TOOL_TIMELINE,
+} from "../components/ui/chat";
 import { CANCEL_BTN, INPUT_CONTROLS, PLAN_TOGGLE_OFF, PLAN_TOGGLE_ON, SEND_BTN } from "../components/ui/composer";
 
 // ---------------------------------------------------------------------------
@@ -186,11 +192,11 @@ function getEditDiffInfo(tool: ToolCallEntry): EditDiffInfo | null {
 
 function DiffView({ diff }: { diff: EditDiffInfo }) {
   return (
-    <div className="diff-view">
+    <div className={cn("diff-view", DIFF_VIEW)}>
       {diff.lines.map((line, i) => (
-        <div key={i} className={`diff-line diff-line--${line.type}`}>
-          <span className="diff-line__gutter">{line.type === "add" ? "+" : line.type === "remove" ? "−" : " "}</span>
-          <span className="diff-line__text">{line.text.length > 0 ? line.text : " "}</span>
+        <div key={i} className={cn("diff-line", `diff-line--${line.type}`, DIFF_LINE_CLASS[line.type])}>
+          <span className={cn("diff-line__gutter", DIFF_GUTTER_CLASS[line.type])}>{line.type === "add" ? "+" : line.type === "remove" ? "−" : " "}</span>
+          <span className={cn("diff-line__text", DIFF_TEXT)}>{line.text.length > 0 ? line.text : " "}</span>
         </div>
       ))}
     </div>
@@ -206,11 +212,12 @@ function DiffView({ diff }: { diff: EditDiffInfo }) {
  * calls, a command+output block for Bash, or a pretty-printed JSON
  * fallback for everything else (including Codex tool events whose shape
  * doesn't match any of the above). */
-function ToolCallDetail({ tool }: { tool: ToolCallEntry }) {
+function ToolCallDetail({ tool, next }: { tool: ToolCallEntry; next: boolean }) {
+  const detail = cn("tool-row__detail", next && TOOL_DETAIL_NEXT);
   const diffInfo = useMemo(() => getEditDiffInfo(tool), [tool]);
   if (diffInfo) {
     return (
-      <div className="tool-row__detail">
+      <div className={detail}>
         <DiffView diff={diffInfo} />
       </div>
     );
@@ -232,20 +239,20 @@ function ToolCallDetail({ tool }: { tool: ToolCallEntry }) {
           : JSON.stringify(tool.result, null, 2)
         : undefined;
     return (
-      <div className="tool-row__detail">
-        {command && <pre className="tool-call__block tool-call__block--bash">$ {command}</pre>}
-        {output !== undefined && <pre className="tool-call__block tool-call__block--result">{output}</pre>}
+      <div className={detail}>
+        {command && <pre className={cn("tool-call__block tool-call__block--bash", TOOL_BLOCK_BASH)}>$ {command}</pre>}
+        {output !== undefined && <pre className={cn("tool-call__block tool-call__block--result", TOOL_BLOCK_RESULT)}>{output}</pre>}
       </div>
     );
   }
 
   return (
-    <div className="tool-row__detail">
+    <div className={detail}>
       {tool.input !== undefined && (
-        <pre className="tool-call__block">{JSON.stringify(tool.input, null, 2)}</pre>
+        <pre className={cn("tool-call__block", TOOL_BLOCK)}>{JSON.stringify(tool.input, null, 2)}</pre>
       )}
       {tool.done && tool.result !== undefined && (
-        <pre className="tool-call__block tool-call__block--result">
+        <pre className={cn("tool-call__block tool-call__block--result", TOOL_BLOCK_RESULT)}>
           {typeof tool.result === "string" ? tool.result : JSON.stringify(tool.result, null, 2)}
         </pre>
       )}
@@ -287,20 +294,20 @@ function ToolRow({
   const argSummary = tools.length === 1 ? summarizeToolInput(primary.input) : undefined;
 
   return (
-    <details className="tool-row" data-testid={`tool-row-${rowIndex}`} ref={registerRef}>
-      <summary className="tool-row__summary">
-        <span className="tool-row__glyph tool-row__glyph--tool">{allDone ? "●" : "○"}</span>
-        <span className="tool-row__name">{label}</span>
+    <details className={cn("tool-row", TOOL_ROW)} data-testid={`tool-row-${rowIndex}`} ref={registerRef}>
+      <summary className={cn("tool-row__summary", TOOL_SUMMARY)}>
+        <span className={cn("tool-row__glyph tool-row__glyph--tool", GLYPH_TOOL)}>{allDone ? "●" : "○"}</span>
+        <span className={cn("tool-row__name", TOOL_NAME)}>{label}</span>
         {argSummary && (
-          <span className="tool-row__arg" title={argSummary}>
+          <span className={cn("tool-row__arg", TOOL_ARG)} title={argSummary}>
             {argSummary}
           </span>
         )}
-        <span className="tool-row__chevron" aria-hidden="true" />
+        <span className={cn("tool-row__chevron", TOOL_CHEVRON)} aria-hidden="true" />
       </summary>
-      <div className="tool-row__body">
+      <div className={cn("tool-row__body", TOOL_BODY)}>
         {tools.map((tool, i) => (
-          <ToolCallDetail key={i} tool={tool} />
+          <ToolCallDetail key={i} tool={tool} next={i > 0} />
         ))}
       </div>
     </details>
@@ -309,14 +316,14 @@ function ToolRow({
 
 function ThinkingRow({ text, rowIndex }: { text: string; rowIndex: number }) {
   return (
-    <details className="tool-row tool-row--thinking" data-testid={`tool-row-${rowIndex}`}>
-      <summary className="tool-row__summary">
-        <span className="tool-row__glyph">◆</span>
-        <span className="tool-row__name">Thinking</span>
-        <span className="tool-row__chevron" aria-hidden="true" />
+    <details className={cn("tool-row tool-row--thinking", TOOL_ROW)} data-testid={`tool-row-${rowIndex}`}>
+      <summary className={cn("tool-row__summary", TOOL_SUMMARY)}>
+        <span className={cn("tool-row__glyph", GLYPH_THINKING)}>◆</span>
+        <span className={cn("tool-row__name", TOOL_NAME)}>Thinking</span>
+        <span className={cn("tool-row__chevron", TOOL_CHEVRON)} aria-hidden="true" />
       </summary>
-      <div className="tool-row__body">
-        <div className="thinking__body">{text}</div>
+      <div className={cn("tool-row__body", TOOL_BODY)}>
+        <div className={cn("thinking__body", THINKING_BODY)}>{text}</div>
       </div>
     </details>
   );
@@ -470,12 +477,12 @@ const MessageBubble = memo(function MessageBubble({
   };
 
   return (
-    <div className={`message message--${message.role}`}>
-      <div className="message__actions">
+    <div className={cn("message", `message--${message.role}`, MESSAGE_GROUP)}>
+      <div className={cn("message__actions", message.role === "user" ? ACTIONS_USER : ACTIONS_ASSISTANT)}>
         {message.role === "user" ? (
           <button
             type="button"
-            className="message__action-btn"
+            className={cn("message__action-btn", ACTION_BTN)}
             data-testid="msg-copy-user"
             onClick={handleCopyUserToInput}
             title="Copy to input"
@@ -486,7 +493,7 @@ const MessageBubble = memo(function MessageBubble({
           message.text && (
             <button
               type="button"
-              className="message__action-btn"
+              className={cn("message__action-btn", ACTION_BTN)}
               data-testid="msg-copy-assistant"
               onClick={handleCopyAssistant}
               title="Copy response"
@@ -499,7 +506,7 @@ const MessageBubble = memo(function MessageBubble({
       {message.role === "assistant" && hasThinkingOrTools && (
         <details className="message__worked-for" open={isStreaming} ref={workedForRef}>
           <summary>{workedForSummary}</summary>
-          <div className="tool-timeline">
+          <div className={cn("tool-timeline", TOOL_TIMELINE)}>
             {message.thinking && <ThinkingRow text={message.thinking} rowIndex={0} />}
             {toolGroups.map((group, gi) => (
               <ToolRow
@@ -524,26 +531,26 @@ const MessageBubble = memo(function MessageBubble({
         <div className="message__text">{message.text}</div>
       ) : null}
       {message.role === "assistant" && editBadges.length > 0 && (
-        <div className="message__edit-badges">
+        <div className={cn("message__edit-badges", EDIT_BADGES)}>
           {editBadges.map((badge) => (
             <button
               key={badge.path}
               type="button"
-              className="edit-badge"
+              className={cn("edit-badge", EDIT_BADGE)}
               data-testid={`diff-badge-${badge.path}`}
               title={badge.path}
               onClick={() => scrollToRow(badge.rowIndex)}
             >
-              <span className="edit-badge__path">{badge.path}</span>
-              <span className="edit-badge__add">+{badge.added}</span>
-              <span className="edit-badge__del">−{badge.removed}</span>
+              <span className={cn("edit-badge__path", EDIT_BADGE_PATH)}>{badge.path}</span>
+              <span className="edit-badge__add text-green">+{badge.added}</span>
+              <span className="edit-badge__del text-red">−{badge.removed}</span>
             </button>
           ))}
         </div>
       )}
       {message.error && <div className="message__error">{message.error}</div>}
       {message.streaming && !message.text && !message.thinking && message.tools.length === 0 && (
-        <div className="message__pending">...</div>
+        <div className={cn("message__pending", PENDING)}>...</div>
       )}
     </div>
   );

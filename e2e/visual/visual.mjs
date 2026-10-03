@@ -1187,6 +1187,8 @@ const STATES = [
     await page.evaluate(() => window.usePerchStore.setState({ sessionCommands: { "hosted-vis": { claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] } } }));
     await box.fill("/re");
     await page.getByTestId("composer-slash-popover").waitFor();
+    await page.mouse.move(2, 2); // a pointer resting over an item would move the highlight (onMouseEnter)
+    await sleep(300);
     await page.keyboard.press("ArrowDown");
     await sleep(300);
   } },
