@@ -44,9 +44,8 @@ const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespac
 const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start";
 const DIFF_FILE = "flex min-w-0 flex-col items-start gap-[0.1rem] rounded-ui border px-[0.45rem] py-[0.42rem] text-left text-fg [background:none] hover:bg-surface-1";
 const COMMENT = "workspace-git__comment mt-[0.3rem] border-l-2 px-[0.55rem] py-[0.45rem] whitespace-normal [font-family:inherit]";
-// stale/orphaned keep their legacy yellow rules (no harness state); the class carries them.
-const COMMENT_TONE: Record<string, string> = { resolved: "border-l-green opacity-[0.72]", unresolved: "border-l-accent" };
-const PILL_TONE: Record<string, string> = { resolved: "text-green", unresolved: "text-accent" };
+const COMMENT_TONE: Record<string, string> = { resolved: "border-l-green opacity-[0.72]", unresolved: "border-l-accent", stale: "border-l-yellow", orphaned: "border-l-yellow" };
+const PILL_TONE: Record<string, string> = { resolved: "text-green", unresolved: "text-accent", stale: "text-yellow", orphaned: "text-yellow" };
 const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui border border-[color:var(--git-border)] bg-surface-1 p-[0.4rem] text-fg";
 // The legacy `.workspace-git button { font: inherit }` out-ranked `__button`'s font-size, so these keep the inherited size
 // (and `comment-actions` buttons need `!` to beat that unlayered reset, as the old later same-specificity rule did).
@@ -62,6 +61,15 @@ const CA_BTN_DANGER = `${CA_BTN_BASE} [&:hover:not(:disabled)]:text-red`;
 const CA_LINK = "[border:0] bg-transparent px-[0.3rem] py-[0.2rem] text-[0.66rem]! text-accent";
 const CA_LINK_DANGER = `${CA_LINK} [&:hover:not(:disabled)]:text-red`;
 const COMMENT_ACTIONS = "flex items-center justify-end gap-[0.3rem]";
+const SUMMARY = "text-[0.7rem] text-subtext-0";
+const EMPTY_BASE = "flex min-h-[10rem] flex-col items-center justify-center gap-[0.35rem] p-6 text-center";
+const EMPTY = `${EMPTY_BASE} text-subtext-0 [&_strong]:text-fg`;
+// The original `.empty--error` only turned the text red; a later selector edit had wrongly boxed it like a banner.
+const EMPTY_ERROR = `${EMPTY_BASE} text-red`;
+const BOXED_NOTE = "mx-[0.7rem] my-[0.55rem] rounded-ui border border-[color:var(--git-border)] px-2 py-[0.4rem] text-[0.7rem]";
+// `--warning` keeps its legacy colour rules in git-review.css (no harness state: the server's 2 MB patch cap).
+const BANNER_INFO = `${BOXED_NOTE} text-accent`;
+const BANNER_WARNING = `workspace-git__banner--warning ${BOXED_NOTE}`;
 const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
@@ -249,7 +257,7 @@ function placementLabel(comment: ReviewComment, diff: GitDiffSnapshot | null): s
 
 function ReviewStatusPill({ comment }: { comment: ReviewComment }) {
   return (
-    <span className={`rounded-[999px] bg-surface-1 px-[0.3rem] py-[0.1rem] capitalize ${PILL_TONE[comment.status] ?? `text-subtext-0 workspace-git__comment-status--${comment.status}`}`}>
+    <span className={`rounded-[999px] bg-surface-1 px-[0.3rem] py-[0.1rem] capitalize ${PILL_TONE[comment.status] ?? "text-subtext-0"}`}>
       {comment.status}
       {comment.anchorConfidence !== "exact" && ` · ${comment.anchorConfidence} anchor`}
     </span>
@@ -257,10 +265,10 @@ function ReviewStatusPill({ comment }: { comment: ReviewComment }) {
 }
 
 function EmptyDiffState({ state, error }: { state: WorkspaceGitReviewProps["diffState"]; error?: string }) {
-  if (state === "loading") return <div className="workspace-git__empty" role="status">Loading workspace diff…</div>;
-  if (state === "error") return <div className="workspace-git__empty workspace-git__empty--error" role="alert">{error || "Diff could not be loaded."}</div>;
+  if (state === "loading") return <div className={EMPTY} role="status">Loading workspace diff…</div>;
+  if (state === "error") return <div className={EMPTY_ERROR} role="alert">{error || "Diff could not be loaded."}</div>;
   return (
-    <div className="workspace-git__empty" data-testid="git-diff-empty">
+    <div className={EMPTY} data-testid="git-diff-empty">
       <strong>No changes in this comparison</strong>
       <span>Choose another base or make a workspace edit to review it here.</span>
     </div>
@@ -584,7 +592,7 @@ export function WorkspaceGitReview({
   function renderCommentCard(comment: ReviewComment, inline: boolean) {
     return (
       <article
-        className={`${COMMENT} ${COMMENT_TONE[comment.status] ?? `border-l-accent workspace-git__comment--${comment.status}`}`}
+        className={`${COMMENT} ${COMMENT_TONE[comment.status] ?? "border-l-accent"}`}
         data-testid={inline ? "git-inline-comment" : "git-review-list-comment"}
         key={comment.id}
       >
@@ -797,13 +805,13 @@ export function WorkspaceGitReview({
             <div className={`min-h-0 min-w-0 flex-1 overflow-auto [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
               {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
                 <>
-                  {diff?.truncated && <div className="workspace-git__banner workspace-git__banner--warning" role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
+                  {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
                   {displayedFiles.map((file) => {
                     const displayPath = filePath(file);
                     return (
                       <article className={`min-w-[min-content] [@container(max-width:700px)]:min-w-0`} key={displayPath}>
                         <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:monospace] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
-                        {file.isBinary ? <div className="workspace-git__binary">Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
+                        {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
                           <section className="border-b border-b-[color:var(--git-border)]" key={`${displayPath}:${hunkIndex}`}>
                             <div className={`px-[0.7rem] py-1 text-accent [font-family:monospace] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
                             {hunk.lines.map((line, lineIndex) => {
@@ -853,11 +861,11 @@ export function WorkspaceGitReview({
 
           <section className="shrink-0 max-h-[17rem] overflow-y-auto border-t border-t-[color:var(--git-border)]" data-testid="git-review-panel">
             <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
-            {comments.length > 0 && <div className="workspace-git__comment-summary">Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
+            {comments.length > 0 && <div className={`${SUMMARY} px-[0.7rem] pb-[0.45rem]`}>Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
             {unplacedComments.length > 0 && (
-              <div className="workspace-git__review-list" data-testid="git-review-list">
-                <div className="workspace-git__review-list-heading"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
-                <p className="workspace-git__comment-summary">These notes are kept with their server anchor and are not placed on the current diff.</p>
+              <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui border border-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_42%,transparent)] p-2" data-testid="git-review-list">
+                <div className="flex items-center justify-between gap-2"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
+                <p className={`${SUMMARY} pt-[0.2rem] pb-[0.25rem]`}>These notes are kept with their server anchor and are not placed on the current diff.</p>
                 {unplacedComments.map((comment) => renderCommentCard(comment, false))}
               </div>
             )}
@@ -870,12 +878,12 @@ export function WorkspaceGitReview({
             {batchPreview && (
               <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:monospace]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
-            {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className="workspace-git__banner workspace-git__banner--info" role="status" data-testid="git-review-delivery">
+            {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className={BANNER_INFO} role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."
                 : batchDelivery.delivery === "unconfirmed" ? "Delivery could not be confirmed. Check the agent conversation before starting another review."
                 : "Waiting for the agent to receive the review packet…"}
             </div>}
-            {batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && <div className="workspace-git__banner workspace-git__banner--info" role="status">Sending review packet… waiting for server confirmation.</div>}
+            {batchSending && (!batchDelivery || batchDelivery.packetId !== batchPreview?.packetId) && <div className={BANNER_INFO} role="status">Sending review packet… waiting for server confirmation.</div>}
           </section>
         </div>
       </div>

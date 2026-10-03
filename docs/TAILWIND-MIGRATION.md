@@ -18,7 +18,7 @@ that compose them: the structure Orca (`~/Github/orca`) and t3code
   tokens that `themes.ts` rewrites at runtime), and xterm / Dockview overrides.
   Do not force every rule into utilities.
 - **Extract a shared primitive only when real repetition warrants it** (rule of
-  three), not speculatively. Today: `components/ui/menu.ts` (context menu).
+  three), not speculatively. Today: `components/ui/menu.ts` (context menu), `icon-button.ts` (glyph button), `settings.ts` (settings rows, catalog buttons).
 - Preserve e2e hooks (see Rules).
 
 ## Status
@@ -88,6 +88,14 @@ Done:
   `21b`-`21f` (Files/Git/Terminal tabs, the no-workspace placeholder, back to
   Chat) and `22a`/`22a2` (switcher in its sessions-by-project mode, with
   injected sessions). The freeze rule is now gated by an attribute on `<html>`.
+- **Slice 28: git empty/binary/banner, review list, stale notes** (`empty`,
+  `empty--error`, `binary`, the info banner, `comment-summary`, `review-list`,
+  stale/orphaned tones in `WorkspaceGitReview.tsx`). Harness gained `14t`-`14v`
+  ("Other review notes" via a note whose file is deleted; stale/orphaned via a
+  stubbed `review.list`), `14w`/`14x` (binary file), `14y`-`14y3` (empty diff,
+  unknown base ref = diff error), `21c2`/`21c3` (a note on the phone: the
+  narrow-container batch form), and `14p` now answers the pending send and closes
+  the packet so `14q`/`14r` no longer show a stuck "Sending…" panel.
 - **Slice 27: git buttons, comment actions, toast, confirm, body/main**
   (`BTN_*` / `CA_*` / `COMMENT_ACTIONS` constants, toast, confirm card, the
   body/main flex and their two container-query blocks in
@@ -189,7 +197,7 @@ Done:
 | composer.css | 505 | not started (Hosted chat is frozen: restyle only) |
 | chat.css | 536 | not started (frozen, same) |
 | workspace-files.css | – | **migrated and deleted** (file explorer/editor; phone dv-view rules moved to `dockview.css`) |
-| git-review.css | 140 | partly migrated: the container resets/variables, `comment-summary`, `review-list`, stale/orphaned, `empty`/`banner`/`binary`, `file-state--conflict`, `turn-summary` and `.native-cli-chat*` remain |
+| git-review.css | 72 | partly migrated: the container resets/variables, `banner--warning`, `file-state--conflict`, `turn-summary` and `.native-cli-chat*` remain |
 | dockview.css | 118 | **keep as CSS** (Dockview theme overrides) |
 | terminal.css | 158 | **keep as CSS** (xterm surface; AGENTS.md invariants) |
 
@@ -197,14 +205,11 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 
 ## Next slice
 
-What is left, smallest first (line counts as of slice 27):
-- `git-review.css` (140): the resets/variables on `.workspace-git` (keep),
-  `empty`/`binary`/`banner` (the info banner has harness states `14n`-`14o2`;
-  `--warning` (truncated diff), `empty--error`, `empty` (loading/clean) and
-  `binary` have none), `review-list` / `comment-summary` / stale / orphaned (no
-  state: the server only re-anchors on a real packet preview, which the
-  fixture's Terminal session cannot get), `file-state--conflict`,
-  `turn-summary`.
+What is left, smallest first (line counts as of slice 28):
+- `git-review.css` (72): the resets/variables on `.workspace-git` (keep),
+  `banner--warning` (truncated diff: the server's 2 MB patch cap, no state),
+  `file-state--conflict` (no conflicted path in the fixture), `turn-summary`
+  (needs an agent turn).
 - `.native-cli-chat*` (needs a harness state; its `chat__input` /
   `terminal__toolbar` classes are in frozen CSS).
 - `composer.css` / `chat.css` (frozen Hosted UI, restyle only; need
@@ -214,9 +219,12 @@ Notes for the next ones:
 - **Not covered by the harness yet** (add a state in `visual.mjs` *before*
   migrating anything that renders there): Hosted chat + composer + slash/model
   popovers (`window.usePerchStore.setState` can inject messages, as the toast
-  state does), pairing gate, directory-browser modal, mobile file/git panes,
-  drag-reorder states, disabled/error states. (Terminal-search bar and the
-  status bar's reconnecting / ctx / cost states are covered by `05b`–`05d`.)
+  state does), the `.native-cli-chat*` view (an injected native snapshot), the
+  git panel's truncated-diff warning banner, a conflicted path and the turn
+  summary. Covered now: pairing gate (`22d`-`22f`), directory browser
+  (`03b`-`03e`), mobile file/git panes (`21b`-`21f`), drag-reorder (`05g`),
+  terminal search and status bar (`05b`-`05e`), git error/empty/binary/confirm/
+  review-send/stale states (`14b`-`14y2`).
 
 ## Rules for a migrated component
 
@@ -261,7 +269,7 @@ Notes for the next ones:
 
 `e2e/visual/visual.mjs` boots an isolated headless core on :7791 (state in
 `/tmp/perch-visual`, fixed fixture repo, fixed clock, serves any web build via
-`PERCH_WEB_DIST`), walks 110 UI states, and records per state a screenshot, the
+`PERCH_WEB_DIST`), walks 117 UI states, and records per state a screenshot, the
 computed style + box of **every** element, a hover dump and a keyboard-focus
 dump, in **Chromium and WebKit** (the Mac app is a WKWebView). It never touches
 `~/.perch`.
@@ -379,6 +387,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 14 | CLI start + home | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit. 18 Chromium screenshot diffs of 1-18 px, all scattered anti-aliasing specks at sidebar/tab-edge corners (01a/04 crops checked: no visible change in the start card or picker). e2e after `npm run build`: nav, sessions, wave2.features, provider-config pass (10). |
 | 15 | settings modal | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08b`-`08d` and the modal screenshot fix): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit; no screenshot difference in any settings state (07, 08, 08b-08d, 20). 23 other Chromium screenshot diffs, all 1-29 px anti-aliasing specks at the sidebar/tab-edge corners. e2e after `npm run build`: settings, theme, provider-config, wave1, federation pass (15). `workspace-visual-qa` still fails at line 258 (pre-existing). |
 | 16 | phone chrome | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `21b`-`21f`, `22a` and the attribute-gated freeze): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit, except a WebKit-only `transition-property: all -> none` in `05d` that is a harness flake (the freeze leaving stale `none` on Dockview elements behind overlays; two isolated `--only 05d` runs, base and new, are identical, 0 differences). Chromium screenshot diffs of 1-14 px; the three in migrated regions (21d, 21e, 22) measured with a canvas pixel diff: max delta 1-2 levels, rounded-corner anti-aliasing of the pane tabs and switch button. e2e after `npm run build`: responsive, workspace-foundation, device-pairing, paired-phone-flows pass (8). |
+| 28 | git empty/binary/banner, review list, stale notes | tsc clean; 215/215 unit tests; harness (baseline d743211 re-snapped with the new states, 117 states): the whole run is `IDENTICAL (25 screenshot difference(s) reviewed by name)` in Chromium and WebKit (no computed-style, box, text, hover, focus or pseudo-element difference anywhere); no screenshot difference in any git state; the 25 Chromium specks (1-20 px, sidebar/picker/dir-browser/file toolbar/phone chrome, none in the git panel; the largest, 21b3 and 16h, opened: single anti-aliased corner dots) were reviewed. **Caught: a regression from an earlier slice.** The original `.empty--error` only coloured the text red; a selector edit in an earlier git slice (22/25) had merged it into the banner rule, so the diff-error state had a border, margin and smaller padding and lost its red. The new `14y2` state found it (the pre-slice build differs from d743211 there); the migrated `EMPTY_ERROR` restores the original. e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive, workspace-foundation, workspace-tabs pass (22). Not covered: the truncated-diff warning banner, a conflicted path, the turn summary (and the stubbed stale/orphaned list is a page-level reply, not a real re-anchor). |
 | 27 | git buttons, comment actions, toast, confirm, body/main | tsc clean; 215/215 unit tests; harness (baseline d743211 re-snapped with `14q`-`14r`, 110 states): no computed-style, box, text, hover, focus or pseudo-element difference and no screenshot difference in any git state (13, 14-14r, 21c) in Chromium or WebKit; the only remaining differences are the known WebKit `05d` freeze flake (isolated rerun IDENTICAL) and 41 Chromium corner-speck screenshot diffs of 1-21 px in the sidebar, start picker, dir browser, tab edge and phone chrome, reviewed by name. Two false starts the harness caught: the review-panel `border-t` carried an all-sides colour (slice 26), and the first slice-27 CSS cut also deleted the unrelated `comment-summary` padding rule (found on re-diff: always re-diff a fresh snap). e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive, workspace-foundation, workspace-tabs pass (22). |
 | 26 | git review panel | tsc clean; 215/215 unit tests; harness (baseline d743211 re-snapped with `14m`-`14o2`, 108 states): no computed-style, box, text, hover, focus or pseudo-element difference and no screenshot difference in any git state (13, 14-14o2, 21c) in Chromium or WebKit. The first build gave the panel `border-t` plus an all-sides colour (`border-right-color` etc. differed in every git state; fixed with `border-t-[color:…]`). Outside the region the full run showed 27 Chromium sidebar/picker/dir-browser corner-speck screenshot diffs (1-22 px, none in a git state) reviewed by name, and sidebar race differences in `02`/`03` (both engines) and the known WebKit `05d` freeze flake; isolated reruns: `03` and `05d` IDENTICAL, `02` Chromium hover dump differs even between two snaps of the unmodified baseline and is IDENTICAL on a second new snap. e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive pass (14). Not covered: stale/orphaned notes and the "other review notes" list (the server re-anchors only on a real packet preview), the real send path (the page stubs it), `native-review` specs (real CLIs). |
 | 25 | git source-control strip | tsc clean; 215/215 unit tests; harness (baseline from slice 24): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit (except the known WebKit `05d` flake) and no screenshot difference in the git region (the Chromium `14l` diff is the sidebar, 1 level). The first build lost the review heading's flex column via a shared selector; fixed and re-snapped. e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive pass (14). |

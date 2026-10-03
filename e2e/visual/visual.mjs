@@ -35,7 +35,13 @@ const URL_ = `http://127.0.0.1:${PORT}`;
 const WORK = "/tmp/perch-visual";
 const REPO = `${WORK}/repo`;
 const pinGitScroll = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollTop > 0) el.scrollTop = 0; });
-const pinGitBottom = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight; });
+// Refresh only reloads status and notes; flipping a diff option reloads the diff.
+const reloadGitDiff = async (page) => {
+  await page.getByTestId("git-refresh").click();
+  await page.getByLabel("Ignore whitespace").check();
+  await page.getByLabel("Ignore whitespace").uncheck();
+};
+const pinGitBottom =(page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight; });
 
 const PROPS = [
   "display", "position", "top", "right", "bottom", "left", "z-index", "float",
@@ -628,6 +634,7 @@ const STATES = [
       WebSocket.prototype.send = function (data) {
         let msg = null;
         try { msg = JSON.parse(data); } catch {}
+        if (window.__reviewStub === false) return send.call(this, data);
         if (msg?.type === "review.batch.preview") {
           sockets.add(this);
           reply(this, { type: "review.batch.preview.result", requestId: msg.requestId, packet: {
@@ -664,8 +671,110 @@ const STATES = [
     await sleep(400);
   } },
   { name: "14p-git-review-cleanup", nocapture: true, run: async (page) => {
+    // answer the pending send so the packet closes, and stop answering for the page
+    await page.evaluate(() => { window.__reviewReply({ type: "review.batch.send.result", ...window.__pendingSend, delivery: "delivered" }); window.__reviewStub = false; });
+    await page.getByRole("button", { name: "Close preview" }).click();
     await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
     await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
+  } },
+  // A note whose file is gone leaves the diff and lands in "Other review notes"; the page then reports it stale
+  // (the server only re-anchors on a real packet send, which the fixture has no agent session for). 14v restores everything.
+  { name: "14t-git-review-other-notes", run: async (page) => {
+    await page.evaluate(() => {
+      const sockets = new Set();
+      const send = WebSocket.prototype.send;
+      window.__noteStub = null;
+      window.__noteSockets = sockets;
+      WebSocket.prototype.send = function (data) {
+        if (!sockets.has(this)) {
+          sockets.add(this);
+          this.addEventListener("message", (event) => {
+            let msg = null;
+            try { msg = JSON.parse(event.data); } catch {}
+            if (msg?.type === "review.comment.result" && msg.comment?.path === "untracked.txt") window.__noteComment = msg.comment;
+          });
+        }
+        let msg = null;
+        try { msg = JSON.parse(data); } catch {}
+        if (window.__noteStub && msg?.type === "review.list") {
+          this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "review.list.result", requestId: msg.requestId, workspaceId: msg.workspaceId, comments: [{ ...window.__noteComment, status: window.__noteStub }] }) }));
+          return;
+        }
+        return send.call(this, data);
+      };
+    });
+    const line = page.locator('[data-testid="git-diff-line"][data-side="new"]').last(); // untracked.txt is the last file
+    await line.hover();
+    await line.getByTestId("git-comment-add").click();
+    await page.getByTestId("git-comment-body").fill("a note on a file that goes away");
+    await page.getByTestId("git-comment-composer").getByRole("button", { name: "Add comment" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ timeout: 20000 });
+    await page.waitForFunction(() => !!window.__noteComment);
+    fs.unlinkSync(`${REPO}/untracked.txt`);
+    await reloadGitDiff(page);
+    await page.getByTestId("git-review-list").waitFor({ timeout: 20000 });
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "14u-git-review-note-stale", run: async (page) => {
+    await page.evaluate(() => { window.__noteStub = "stale"; });
+    await page.getByTestId("git-refresh").click();
+    await page.getByText(/stale/i).first().waitFor({ timeout: 20000 });
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "14u2-git-review-note-orphaned", run: async (page) => {
+    await page.evaluate(() => { window.__noteStub = "orphaned"; });
+    await page.getByTestId("git-refresh").click();
+    await page.getByText(/orphaned/i).first().waitFor({ timeout: 20000 });
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "14v-git-review-notes-cleanup", nocapture: true, run: async (page) => {
+    await page.evaluate(() => { window.__noteStub = null; });
+    fs.writeFileSync(`${REPO}/untracked.txt`, "new\n");
+    fs.utimesSync(`${REPO}/untracked.txt`, new Date("2026-01-01T12:00:00Z"), new Date("2026-01-01T12:00:00Z"));
+    await reloadGitDiff(page);
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
+  } },
+  // A binary file renders "Binary content is not rendered"; removed again in the next state.
+  { name: "14w-git-binary-file", run: async (page) => {
+    fs.writeFileSync(`${REPO}/blob.bin`, Buffer.from([0, 1, 2, 0, 255, 0]));
+    fs.utimesSync(`${REPO}/blob.bin`, new Date("2026-01-01T12:00:00Z"), new Date("2026-01-01T12:00:00Z"));
+    await reloadGitDiff(page);
+    await page.getByText("Binary content is not rendered").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await page.getByText("Binary content is not rendered").scrollIntoViewIfNeeded();
+    await sleep(500);
+  } },
+  { name: "14x-git-binary-removed", nocapture: true, run: async (page) => {
+    fs.unlinkSync(`${REPO}/blob.bin`);
+    await reloadGitDiff(page);
+    await page.getByText("Binary content is not rendered").waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
+  } },
+  // Comparing HEAD with itself is an empty diff; an unknown base ref is a diff error. Clear base restores the working tree.
+  { name: "14y-git-diff-empty", run: async (page) => {
+    await page.getByTestId("git-diff-target").selectOption("compare");
+    await page.getByTestId("git-base-selector").fill("HEAD");
+    await page.getByPlaceholder("HEAD").fill("HEAD");
+    await page.getByTestId("git-diff-empty").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14y2-git-diff-error", run: async (page) => {
+    await page.getByTestId("git-base-selector").fill("no-such-ref");
+    await page.getByRole("alert").first().waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14y3-git-diff-compare-cleared", nocapture: true, run: async (page) => {
+    await page.getByRole("button", { name: "Clear base" }).click();
+    await page.getByTestId("git-base-selector").waitFor({ state: "detached" });
+    await page.getByTestId("git-diff").waitFor({ timeout: 20000 });
     await sleep(500);
   } },
   // The confirm card (danger accept, quiet cancel) for a discard and for a commit; cleanup restores the index and selection.
@@ -912,6 +1021,23 @@ const STATES = [
     await page.getByTestId("mobile-pane-git").click();
     await page.getByTestId("mobile-active-pane-gitReview").waitFor();
     await sleep(800);
+  } },
+  // A note on the phone: the review panel's batch form stacks in the narrow container. 21c3 deletes the note again.
+  { name: "21c2-phone-git-note", viewport: { width: 390, height: 844 }, run: async (page) => {
+    const line = page.locator('[data-testid="git-diff-line"][data-side="new"]').first();
+    await line.scrollIntoViewIfNeeded();
+    await line.getByTestId("git-comment-add").click();
+    await page.getByTestId("git-comment-body").fill("a phone note");
+    await page.getByTestId("git-comment-composer").getByRole("button", { name: "Add comment" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ timeout: 20000 });
+    await page.getByLabel("Send to agent session").waitFor();
+    await pinGitBottom(page);
+    await sleep(500);
+  } },
+  { name: "21c3-phone-git-note-deleted", nocapture: true, viewport: { width: 390, height: 844 }, run: async (page) => {
+    await page.getByTestId("git-inline-comment").first().getByRole("button", { name: "Delete" }).click();
+    await page.getByTestId("git-inline-comment").first().waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
   } },
   { name: "21d-phone-pane-terminal", viewport: { width: 390, height: 844 }, run: async (page) => {
     await page.getByTestId("mobile-pane-terminal").click();
