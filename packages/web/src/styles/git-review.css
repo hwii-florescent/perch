@@ -67,7 +67,6 @@
 .workspace-git__body,
 .workspace-git__main,
 .workspace-git__diff-layout,
-.workspace-git__diff,
 .workspace-git__status {
   min-width: 0;
   min-height: 0;
@@ -399,124 +398,6 @@
 
 .workspace-git__diff-file small {
   color: var(--git-muted);
-}
-
-.workspace-git__diff {
-  flex: 1;
-  overflow: auto;
-  background: var(--base);
-}
-
-.workspace-git__file-diff {
-  min-width: min-content;
-}
-
-.workspace-git__file-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 0.7rem;
-  border-bottom: 1px solid var(--git-border);
-  background: color-mix(in srgb, var(--surface-1) 70%, var(--base));
-}
-
-.workspace-git__file-header strong {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.75rem;
-}
-
-.workspace-git__file-header span {
-  color: var(--git-muted);
-  font-size: 0.68rem;
-}
-
-.workspace-git__hunk {
-  border-bottom: 1px solid var(--git-border);
-}
-
-.workspace-git__hunk-header {
-  padding: 0.25rem 0.7rem;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--base));
-  font-family: var(--font-mono, monospace);
-  font-size: 0.68rem;
-}
-
-.workspace-git__diff-line {
-  position: relative;
-  display: grid;
-  grid-template-columns: 3.2rem 3.2rem 1.1rem minmax(30rem, 1fr) auto;
-  align-items: baseline;
-  min-width: 44rem;
-  color: var(--text);
-  font-family: var(--font-mono, monospace);
-  font-size: 0.72rem;
-  line-height: 1.45;
-  white-space: pre;
-}
-
-.workspace-git__diff-line:hover,
-.workspace-git__diff-line--selected {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.workspace-git__diff-line--addition {
-  background: color-mix(in srgb, var(--green) 9%, transparent);
-}
-
-.workspace-git__diff-line--deletion {
-  background: color-mix(in srgb, var(--red) 9%, transparent);
-}
-
-.workspace-git__diff-line--addition:hover,
-.workspace-git__diff-line--deletion:hover {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
-
-.workspace-git__line-gutter {
-  min-height: 1.45em;
-  padding-right: 0.45rem;
-  color: var(--overlay-0);
-  text-align: right;
-  user-select: none;
-}
-
-.workspace-git__line-marker {
-  color: var(--git-muted);
-  text-align: center;
-  user-select: none;
-}
-
-.workspace-git__diff-line--addition .workspace-git__line-marker {
-  color: var(--green);
-}
-
-.workspace-git__diff-line--deletion .workspace-git__line-marker {
-  color: var(--red);
-}
-
-.workspace-git__diff-line code {
-  min-width: 0;
-  overflow: visible;
-  color: inherit;
-  font: inherit;
-}
-
-.workspace-git__line-comment-button {
-  align-self: center;
-  min-width: 1.8rem;
-  min-height: 1.8rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: var(--accent);
-  background: transparent;
-  opacity: 0.7;
-}
-
-.workspace-git__line-comment-button:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  opacity: 1;
 }
 
 .workspace-git__line-comments {
@@ -855,10 +736,6 @@
     justify-content: flex-start;
   }
 
-  .workspace-git__diff {
-    min-height: 12rem;
-  }
-
   .workspace-git__line-comments {
     margin-left: 5.8rem;
   }
@@ -908,35 +785,6 @@
     flex: 0 1 clamp(7rem, 28%, 10rem);
   }
 
-  .workspace-git__diff {
-    min-width: 0;
-  }
-
-  .workspace-git__file-diff {
-    min-width: 0;
-  }
-
-  .workspace-git__file-header {
-    min-width: 0;
-  }
-
-  .workspace-git__file-header strong,
-  .workspace-git__file-header span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .workspace-git__diff-line {
-    grid-template-columns: 2.6rem 2.6rem 1rem minmax(0, 1fr) auto;
-    min-width: 0;
-  }
-
-  .workspace-git__diff-line code {
-    min-width: 0;
-    overflow-x: auto;
-  }
 }
 
 /* Structured view of the interactive CLI's native conversation. */

@@ -23,6 +23,16 @@ const CONNECTION = "rounded-[999px] border px-[0.42rem] py-[0.18rem] text-[0.7re
 const CONNECTION_READY = "text-green border-[color:color-mix(in_srgb,var(--green)_45%,transparent)]";
 const CONNECTION_ERROR = "text-red border-[color:color-mix(in_srgb,var(--red)_45%,transparent)]";
 const CONNECTION_IDLE = "text-subtext-0 border-[color:var(--git-border)]";
+const DIFF_LINE = `relative grid min-w-[44rem] grid-cols-[3.2rem_3.2rem_1.1rem_minmax(30rem,1fr)_auto] items-baseline text-fg [font-family:monospace] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
+// A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
+const DIFF_LINE_KIND: Record<string, string> = {
+  addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
+  deletion: "bg-[color-mix(in_srgb,var(--red)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
+};
+const DIFF_LINE_CONTEXT = "hover:bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
+const DIFF_LINE_SELECTED = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
+const LINE_MARKER_TONE: Record<string, string> = { addition: "text-green", deletion: "text-red" };
+const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
 export interface WorkspaceGitReviewProps {
   workspaceId: string;
@@ -752,18 +762,18 @@ export function WorkspaceGitReview({
               {diffState !== "loading" && diffFiles.length === 0 && <div className="workspace-git__status-note">No files in this diff.</div>}
             </nav>
 
-            <div className="workspace-git__diff" data-testid="git-diff">
+            <div className={`min-h-0 min-w-0 flex-1 overflow-auto [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
               {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
                 <>
                   {diff?.truncated && <div className="workspace-git__banner workspace-git__banner--warning" role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
                   {displayedFiles.map((file) => {
                     const displayPath = filePath(file);
                     return (
-                      <article className="workspace-git__file-diff" key={displayPath}>
-                        <header className="workspace-git__file-header"><strong>{displayPath}</strong><span>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
+                      <article className={`min-w-[min-content] [@container(max-width:700px)]:min-w-0`} key={displayPath}>
+                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:monospace] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
                         {file.isBinary ? <div className="workspace-git__binary">Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
-                          <section className="workspace-git__hunk" key={`${displayPath}:${hunkIndex}`}>
-                            <div className="workspace-git__hunk-header">{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
+                          <section className="border-b border-b-[color:var(--git-border)]" key={`${displayPath}:${hunkIndex}`}>
+                            <div className={`px-[0.7rem] py-1 text-accent [font-family:monospace] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
                             {hunk.lines.map((line, lineIndex) => {
                               const side = lineSide(line);
                               const path = filePathForSide(file, side);
@@ -771,7 +781,7 @@ export function WorkspaceGitReview({
                               const selected = number !== undefined && selection?.path === path && selection.side === side && number >= selection.start && number <= selection.end;
                               return (
                                 <div
-                                  className={`workspace-git__diff-line workspace-git__diff-line--${line.kind}${selected ? " workspace-git__diff-line--selected" : ""}`}
+                                  className={`${DIFF_LINE} ${DIFF_LINE_KIND[line.kind] ?? `${DIFF_LINE_CONTEXT}${selected ? ` ${DIFF_LINE_SELECTED}` : ""}`}`}
                                   data-testid="git-diff-line"
                                   data-path={path}
                                   data-side={side}
@@ -783,11 +793,11 @@ export function WorkspaceGitReview({
                                   onClick={(event) => selectLine(path, line, event.shiftKey)}
                                   onKeyDown={(event) => onLineKeyDown(event, path, line)}
                                 >
-                                  <span className="workspace-git__line-gutter" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
-                                  <span className="workspace-git__line-gutter" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
-                                  <span className="workspace-git__line-marker" aria-hidden="true">{statusSymbol(line.kind)}</span>
-                                  <code>{line.content || " "}</code>
-                                  {number !== undefined && <button type="button" className="workspace-git__line-comment-button" data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
+                                  <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
+                                  <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
+                                  <span className={`text-center select-none ${LINE_MARKER_TONE[line.kind] ?? "text-subtext-0"}`} aria-hidden="true">{statusSymbol(line.kind)}</span>
+                                  <code className={`min-w-0 overflow-visible text-inherit [font:inherit] [@container(max-width:700px)]:overflow-x-auto`}>{line.content || " "}</code>
+                                  {number !== undefined && <button type="button" className={LINE_COMMENT_BUTTON} data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
                                   {number !== undefined && renderCommentThread(path, side, number)}
                                 </div>
                               );

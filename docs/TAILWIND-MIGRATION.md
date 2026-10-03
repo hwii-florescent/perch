@@ -88,6 +88,12 @@ Done:
   `21b`-`21f` (Files/Git/Terminal tabs, the no-workspace placeholder, back to
   Chat) and `22a`/`22a2` (switcher in its sessions-by-project mode, with
   injected sessions). The freeze rule is now gated by an attribute on `<html>`.
+- **Slice 21: git diff viewer** (`__diff`, `__file-diff`, `__file-header`,
+  `__hunk`, `__hunk-header`, `__diff-line*`, `__line-gutter`, `__line-marker`,
+  `__line-comment-button` in `WorkspaceGitReview.tsx`, plus their 700px
+  container-query rules, removed from `git-review.css`). No new harness states:
+  13/14/21c already render additions, a deletion, a selected line, the comment
+  button and hunk headers. `__line-comments` and the `__comment*` cards stay CSS.
 - **Slice 20: git panel header** (the header, title block, workspace id,
   connection pill and the shared `EYEBROW` in `WorkspaceGitReview.tsx`; the
   matching rules, the header container-query rules and the group-selector
@@ -156,7 +162,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 Smallest leaves first so primitives take shape from real repetition:
 `composer.css` / `chat.css` (frozen Hosted UI; need store-injected harness
 states) → `git-review.css` last. What is left in it: `.workspace-git*` (the
-body, status/branch/commit forms, diff viewer, comments, review panel; the
+body, status/branch/commit forms, diff file rail and toolbar, comments, review panel; the
 container resets and `--git-border`/`--git-muted` stay until the end; needs
 harness states for line comments, resolved/stale notes, batch delivery) and `.native-cli-chat*` (needs a harness
 state; its `chat__input` / `terminal__toolbar` classes are in frozen CSS).
@@ -318,6 +324,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 14 | CLI start + home | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit. 18 Chromium screenshot diffs of 1-18 px, all scattered anti-aliasing specks at sidebar/tab-edge corners (01a/04 crops checked: no visible change in the start card or picker). e2e after `npm run build`: nav, sessions, wave2.features, provider-config pass (10). |
 | 15 | settings modal | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08b`-`08d` and the modal screenshot fix): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit; no screenshot difference in any settings state (07, 08, 08b-08d, 20). 23 other Chromium screenshot diffs, all 1-29 px anti-aliasing specks at the sidebar/tab-edge corners. e2e after `npm run build`: settings, theme, provider-config, wave1, federation pass (15). `workspace-visual-qa` still fails at line 258 (pre-existing). |
 | 16 | phone chrome | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `21b`-`21f`, `22a` and the attribute-gated freeze): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit, except a WebKit-only `transition-property: all -> none` in `05d` that is a harness flake (the freeze leaving stale `none` on Dockview elements behind overlays; two isolated `--only 05d` runs, base and new, are identical, 0 differences). Chromium screenshot diffs of 1-14 px; the three in migrated regions (21d, 21e, 22) measured with a canvas pixel diff: max delta 1-2 levels, rounded-corner anti-aliasing of the pane tabs and switch button. e2e after `npm run build`: responsive, workspace-foundation, device-pairing, paired-phone-flows pass (8). |
+| 21 | git diff viewer | tsc clean; 215/215 unit tests; harness (baseline from slice 20): no computed-style, box, text, hover, focus or pseudo-element difference and no screenshot difference in any git state (13, 14, 14b, 14c, 21c) in Chromium or WebKit; the other 21 Chromium screenshot diffs are outside the region (sidebar/dir browser/file panes, 1-2 levels of corner anti-aliasing from earlier slices). The first build lost its container-query classes to template interpolation and the harness failed it. e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive pass (14). |
 | 20 | git panel header | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `14b`, `14c`, pinned scroll): no computed-style, box, text, hover, focus or pseudo-element difference and no screenshot difference in the git states (13, 13b, 14, 14b, 14c, 21c) in Chromium or WebKit; the only difference is the known WebKit `05d` `transition-property` freeze flake (outside the region). e2e after `npm run build`: workspace-git, workspace-review, remote-git, responsive, workspace-tabs pass (18). |
 | 19 | agent catalog | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08c2`-`08c4`, `21b4`): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit except the known WebKit-only `05d` `transition-property` freeze flake (outside the region; cleared on earlier isolated reruns). Caught: the undefined `--surface-2` border, `text-base` line-height, flex on the toggle buttons, `[font:inherit]` beating the size, and the popover picker wrapper cap. Chromium screenshot diff in the region (01a) max delta 1 level. e2e after `npm run build`: sidebar, workspace-foundation, responsive pass (11); `provider-config.config.ts`: the catalog assertions pass, `provider-config` (sidebar `alpha_message` row) and `native-providers` fail identically on the pre-slice HEAD (pre-existing). |
 | 18 | workspace files | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `12b`-`12j`, `21b2`, `21b3`): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit (caught `border-0` computing solid, the reload-confirm actions losing `justify-end`, the iframe background, and the phone Editor button styling; all fixed). Chromium screenshot diffs in the migrated region (12, 12f, 21b2) measured with a canvas pixel diff: max delta 1-2 levels, corner anti-aliasing. WebKit `14-git-comment` showed a git-panel scroll offset in the unmigrated git region; identical on isolated reruns of both builds. e2e after `npm run build`: workspace-files-durable, workspace-tabs, responsive, device-pairing, workspace-foundation pass (12); `workspace-recovery` fails at its `perch.sessionId` assertion (pre-existing). |
@@ -381,6 +388,14 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 21 notes: the first migrated build silently lost every `[@container(...)]:`
+and `[font-family:monospace]` class because they were written as `${N}` /
+`${MONO}` template interpolations (the harness caught it: narrow rules not
+applied). They must be literal in the source. `--font-mono` is never defined, so
+the legacy `var(--font-mono, monospace)` is plain `monospace`. A selected
+addition/deletion line keeps its green/red tint (the `--addition` rule comes
+after `--selected`), so only context lines take the selected tint.
 
 Slice 20 notes: `.workspace-git` computes `background: var(--base)` and the
 header's `color-mix(... var(--base))` to nothing (`--base` is never defined), so
