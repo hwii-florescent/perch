@@ -1,3 +1,25 @@
+/* Moved from host-switcher.css; they stay first so they keep losing to the
+ * settings rules that follow, as they did when that file came earlier. */
+.settings-modal__host-mode {
+  flex-shrink: 0;
+  min-width: 5.5rem;
+}
+
+.settings-modal__host-error {
+  font-size: 0.72rem;
+  color: var(--red);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-modal__add-row--advanced {
+  margin-top: 0.35rem;
+  opacity: 0.75;
+}
+
 /* --- Settings modal (Stage D) -------------------------------------------- */
 
 .settings-modal__backdrop {

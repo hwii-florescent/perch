@@ -22,20 +22,7 @@ import { useAgentChoices } from "./AgentPicker";
 // `createPerchTerminal` actually clamps to cannot drift apart.
 import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
-
-// ---------------------------------------------------------------------------
-// HostStateDot (reusable in the modal host rows)
-// ---------------------------------------------------------------------------
-
-function hostStateDotClass(state: HostConnectionState): string {
-  switch (state) {
-    case "connected": return "host-state host-state--connected";
-    case "connecting": return "host-state host-state--connecting";
-    case "error": return "host-state host-state--error";
-    case "disabled": return "host-state host-state--disabled";
-    default: return "host-state host-state--disabled";
-  }
-}
+import { HostStateDot } from "./HostStateDot";
 
 // ---------------------------------------------------------------------------
 // ThemeSection
@@ -199,10 +186,7 @@ function SshHostsSection() {
               : h.enabled ? "connecting" : "disabled";
             return (
               <li key={h.id} className="settings-modal__host-row">
-                <span
-                  className={hostStateDotClass(state)}
-                  title={state === "error" && info?.error ? info.error : state}
-                />
+                <HostStateDot state={state} error={info?.error} />
                 <span className="settings-modal__host-name">{h.name}</span>
                 <span className="settings-modal__host-addr">
                   {h.sshHost}:{h.remotePort}

@@ -309,15 +309,3 @@
 .mobile-switcher__settings:hover {
   border-color: var(--accent);
 }
-
-/* Below the breakpoint, the desktop Sidebar+TabBar chrome is swapped for
- * MobileHeader+MobileSwitcher (see App.tsx / responsive.ts). Belt-and-braces
- * hide here too, in case a narrow window is reached without a React
- * re-render (e.g. print preview / non-JS contexts) — App.tsx already omits
- * these components from the tree at this width, so in the normal case this
- * media query never has anything to hide. */
-@media (max-width: 700px) {
-  .sidebar {
-    display: none;
-  }
-}

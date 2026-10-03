@@ -115,6 +115,26 @@ async function closeOverlays(page) { await page.keyboard.press("Escape"); await 
  * leaves the page in the state to capture. */
 const STATES = [
   { name: "01-home", run: async () => {} },
+  // Host switcher: popover (local connected, direct badge, disabled, an injected error row),
+  // a remote selected (HOST header, disabled + New session), then back to local.
+  { name: "01b-host-switcher", run: async (page) => {
+    await page.evaluate(() => window.usePerchStore.setState((st) => ({ hostStates: { ...st.hostStates, "vis-b": { type: "host.info", hostId: "vis-b", name: "vis-b", state: "error", error: "perch not installed on remote (vis-b.example.invalid)" } } })));
+    await page.getByTestId("host-switcher").click();
+    await page.getByTestId("host-switcher-popover").waitFor();
+    await page.getByTestId("host-error-vis-b").waitFor();
+    await sleep(300);
+  } },
+  { name: "01c-host-selected", run: async (page) => {
+    await page.getByTestId("host-option-vis-a").click();
+    await page.getByTestId("host-switcher-popover").waitFor({ state: "detached" });
+    await sleep(400);
+  } },
+  { name: "01d-host-local", nocapture: true, run: async (page) => {
+    await page.getByTestId("host-switcher").click();
+    await page.getByTestId("host-option-local").click();
+    await page.getByTestId("host-switcher-popover").waitFor({ state: "detached" });
+    await sleep(400);
+  } },
   { name: "02-project-added", run: async (page, ctx) => {
     await page.getByTestId("workspace-add-project").click();
     await page.getByTestId("workspace-add-form").getByTestId("dir-browser-mode-toggle").click();
@@ -422,7 +442,14 @@ async function bootCore(dist) {
   git('commit -q -m "initial"', REPO);
   fs.writeFileSync(`${REPO}/src/main.txt`, "modified sentinel with a fairly long line of content\n");
   fs.writeFileSync(`${REPO}/untracked.txt`, "new\n");
-  fs.writeFileSync(`${WORK}/hosts.json`, JSON.stringify({ hosts: [] }));
+  // Pin mtimes: the file view prints them, and "9:59 PM" vs "10:03 PM" differs by a character's width.
+  const PINNED = new Date("2026-01-01T12:00:00Z");
+  for (const f of ["src/main.txt", "README.md", "untracked.txt"]) fs.utimesSync(`${REPO}/${f}`, PINNED, PINNED);
+  // Two disabled remotes (never connected, so no ssh): a direct-mode one and a perch-mode one.
+  fs.writeFileSync(`${WORK}/hosts.json`, JSON.stringify({ hosts: [
+    { id: "vis-a", name: "vis-a", sshHost: "vis-a.example.invalid", remotePort: 7788, enabled: false, mode: "direct" },
+    { id: "vis-b", name: "vis-b", sshHost: "vis-b.example.invalid", remotePort: 7788, enabled: false, mode: "perch" },
+  ] }));
   const log = [];
   const core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(PORT), "--db-path", `${WORK}/h.sqlite`, "--hosts-path", `${WORK}/hosts.json`, "--cwd", REPO], {
     cwd: root,

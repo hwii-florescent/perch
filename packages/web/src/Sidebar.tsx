@@ -40,6 +40,8 @@ import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker } from "./components/AgentPicker";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
+import { HostStateDot } from "./components/HostStateDot";
+import { cn } from "./lib/cn";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
@@ -84,13 +86,22 @@ interface EnvHeaderProps {
   branch: string | undefined;
 }
 
+const ENV_BADGE = "sidebar__env-badge shrink-0 rounded-ui border px-[0.4rem] py-[0.15rem] text-[0.65rem] font-bold tracking-[0.06em] uppercase";
+const ENV_BADGE_LOCAL = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--accent)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] text-accent`;
+const ENV_BADGE_REMOTE = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--yellow)_30%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_15%,transparent)] text-yellow`;
+const ENV_BADGE_SSH = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--blue)_15%,transparent)] text-blue`;
+const ENV_ROW = "flex flex-wrap items-center gap-[0.4rem]";
+const ENV_HOST = "sidebar__env-host min-w-0 overflow-hidden text-[0.75rem] font-medium text-ellipsis whitespace-nowrap text-fg";
+const ENV_PLATFORM = "ml-auto text-[0.7rem] text-subtext-0";
+const ENV_CWD = "sidebar__env-cwd mt-[0.3rem] overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0";
+// Lives inside the host-switcher button, which owns the bottom border.
+const ENV = "min-w-0 flex-1 px-[0.65rem] pt-[0.6rem] pb-2";
+
 function envBadgeClass(isSsh: boolean | undefined): string {
-  if (isSsh) return "sidebar__env-badge sidebar__env-badge--ssh";
+  if (isSsh) return ENV_BADGE_SSH;
   const h = window.location.hostname;
-  if (h === "localhost" || h === "127.0.0.1") {
-    return "sidebar__env-badge sidebar__env-badge--local";
-  }
-  return "sidebar__env-badge sidebar__env-badge--remote";
+  if (h === "localhost" || h === "127.0.0.1") return ENV_BADGE_LOCAL;
+  return ENV_BADGE_REMOTE;
 }
 
 function envBadgeLabel(isSsh: boolean | undefined): string {
@@ -105,42 +116,19 @@ function EnvHeader({ hostname, isSsh, platform, cwd, branch }: EnvHeaderProps) {
   const badgeLabel = envBadgeLabel(isSsh);
 
   return (
-    <div className="sidebar__env">
-      <div className="sidebar__env-row">
+    <div className={ENV}>
+      <div className={ENV_ROW}>
         <span className={badgeClass}>{badgeLabel}</span>
-        {hostname && <span className="sidebar__env-host">{hostname}</span>}
-        {platform && <span className="sidebar__env-platform">{platform}</span>}
+        {hostname && <span className={ENV_HOST}>{hostname}</span>}
+        {platform && <span className={ENV_PLATFORM}>{platform}</span>}
       </div>
       {cwd && (
-        <div className="sidebar__env-cwd" title={cwd}>
+        <div className={ENV_CWD} title={cwd}>
           {cwd}
           {branch ? ` (${branch})` : ""}
         </div>
       )}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// HostStateDot — colored dot showing host connection state
-// ---------------------------------------------------------------------------
-
-function hostStateDotClass(state: HostConnectionState): string {
-  switch (state) {
-    case "connected": return "host-state host-state--connected";
-    case "connecting": return "host-state host-state--connecting";
-    case "error": return "host-state host-state--error";
-    case "disabled": return "host-state host-state--disabled";
-    default: return "host-state host-state--disabled";
-  }
-}
-
-function HostStateDot({ state, error }: { state: HostConnectionState; error?: string }) {
-  return (
-    <span
-      className={hostStateDotClass(state)}
-      title={state === "error" && error ? error : state}
-    />
   );
 }
 
@@ -163,6 +151,8 @@ interface HostChoice {
    *  very differently on disconnect. */
   direct?: boolean;
 }
+
+const POPOVER_ITEM = "flex min-w-0 flex-1 cursor-pointer items-center gap-[0.45rem] bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.8rem] text-fg [font-family:inherit] [border:none] hover:bg-surface-1";
 
 function HostSwitcherPopover({
   choices,
@@ -210,20 +200,17 @@ function HostSwitcherPopover({
   }, [onClose]);
 
   return createPortal(
-    <div className="host-switcher-popover" data-testid="host-switcher-popover" ref={popoverRef} style={style}>
-      <div className="host-switcher-popover__list">
+    <div className="flex max-w-[320px] min-w-[200px] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" data-testid="host-switcher-popover" ref={popoverRef} style={style}>
+      <div className="min-h-0 overflow-y-auto">
         {choices.map((choice) => (
           <div
             key={choice.id}
-            className={
-              "host-switcher-popover__row" +
-              (choice.id === activeHostId ? " host-switcher-popover__row--active" : "")
-            }
+            className={cn("host-switcher-popover__row flex flex-col", choice.id === activeHostId && "bg-surface-0")}
           >
-            <div className="host-switcher-popover__row-top">
+            <div className="flex items-center">
               <button
                 type="button"
-                className="host-switcher-popover__item"
+                className={POPOVER_ITEM}
                 data-testid={`host-option-${choice.id}`}
                 title={choice.detail ?? choice.name}
                 onClick={() => {
@@ -232,20 +219,20 @@ function HostSwitcherPopover({
                 }}
               >
                 <HostStateDot state={choice.state} error={choice.error} />
-                <span className="host-switcher-popover__name">{choice.name}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{choice.name}</span>
                 {choice.direct && (
                   <span
-                    className="host-switcher-popover__badge"
+                    className="shrink-0 rounded-[3px] px-[0.3rem] py-[0.05rem] text-[0.6rem] tracking-[0.04em] text-mauve uppercase"
                     data-testid={`host-direct-badge-${choice.id}`}
                     title="Direct mode: no perch on the remote — turns run detached over SSH and survive disconnects"
                   >
                     direct
                   </span>
                 )}
-                <span className="host-switcher-popover__state">{choice.state}</span>
+                <span className="shrink-0 text-[0.66rem] tracking-[0.04em] text-subtext-0 uppercase">{choice.state}</span>
               </button>
               {choice.entry && (
-                <label className="host-switcher-popover__enabled" title="Enabled">
+                <label className="flex cursor-pointer items-center pr-2" title="Enabled">
                   <input
                     type="checkbox"
                     data-testid={`host-toggle-${choice.id}`}
@@ -257,7 +244,7 @@ function HostSwitcherPopover({
             </div>
             {choice.state === "error" && choice.error && (
               <div
-                className="host-switcher-popover__error"
+                className="overflow-hidden pr-[0.6rem] pb-[0.4rem] pl-[1.55rem] text-[0.68rem] text-ellipsis whitespace-nowrap text-red"
                 data-testid={`host-error-${choice.id}`}
                 title={choice.error}
               >
@@ -267,10 +254,10 @@ function HostSwitcherPopover({
           </div>
         ))}
       </div>
-      <div className="host-switcher-popover__divider" />
+      <div className="h-px bg-overlay-0" />
       <button
         type="button"
-        className="host-switcher-popover__manage"
+        className="cursor-pointer bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.75rem] text-accent [font-family:inherit] [border:none] hover:bg-surface-1"
         data-testid="host-switcher-manage"
         onClick={() => {
           onManage();
@@ -730,11 +717,11 @@ export function Sidebar() {
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar__body">
+    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden border-r border-r-overlay-0 bg-surface-0 max-[700px]:hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <button
           type="button"
-          className="sidebar__host-switcher"
+          className="flex w-full shrink-0 cursor-pointer items-start gap-[0.3rem] border-current bg-transparent text-left text-fg [font-family:inherit] [border-style:none_none_solid] border-b border-b-overlay-0 [transition:background_0.12s_ease] hover:bg-surface-1"
           data-testid="host-switcher"
           title="Switch host"
           aria-haspopup="true"
@@ -750,14 +737,14 @@ export function Sidebar() {
               branch={status?.branch}
             />
           ) : (
-            <div className="sidebar__env">
-              <div className="sidebar__env-row">
-                <span className="sidebar__env-badge sidebar__env-badge--ssh">HOST</span>
-                <span className="sidebar__env-host">{activeHostEntry?.name ?? activeHostId}</span>
-                <span className="sidebar__env-platform">{activeHostState}</span>
+            <div className={ENV}>
+              <div className={ENV_ROW}>
+                <span className={ENV_BADGE_SSH}>HOST</span>
+                <span className={ENV_HOST}>{activeHostEntry?.name ?? activeHostId}</span>
+                <span className={ENV_PLATFORM}>{activeHostState}</span>
               </div>
               <div
-                className="sidebar__env-cwd"
+                className={ENV_CWD}
                 title={activeHostInfo?.error ?? activeHostEntry?.directUrl ?? activeHostEntry?.sshHost}
               >
                 {activeHostInfo?.error ??
@@ -766,13 +753,13 @@ export function Sidebar() {
               </div>
             </div>
           )}
-          <span className="sidebar__host-switcher-caret" aria-hidden="true">▾</span>
+          <span className="shrink-0 pt-[0.6rem] pr-2 text-[0.7rem] text-subtext-0" aria-hidden="true">▾</span>
         </button>
 
-        <div className="sidebar__local-actions">
+        <div className="shrink-0 px-2 pt-2 pb-[0.35rem]">
           <button
             type="button"
-            className="sidebar__new-btn"
+            className="w-full shrink-0 cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.6rem] py-[0.4rem] text-left text-[0.82rem] font-semibold text-accent [font-family:inherit] [transition:border-color_0.12s_ease] [&:hover:not(:disabled)]:border-accent disabled:cursor-not-allowed disabled:opacity-40"
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
@@ -784,7 +771,7 @@ export function Sidebar() {
         {workspaceNavigationEnabled ? (
           <WorkspaceOverview />
         ) : (
-          <div className="sidebar__list" data-testid="project-list">
+          <div className="min-h-0 flex-1 overflow-y-auto py-[0.2rem]" data-testid="project-list">
             {projects.length === 0 ? (
               <p className="sidebar__empty">No projects yet.</p>
             ) : (

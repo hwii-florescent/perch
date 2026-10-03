@@ -53,6 +53,10 @@ Done:
 - **Slice 8: toolbar + tab bar** (`App.tsx` top row, brand, toggles, `.dock-area`,
   file-tab view; `components/TabBar.tsx`; `toolbar-tabs.css` deleted; two
   `mobile.css` selectors moved). Harness gained `05f`–`05i`, `22b`, `22c`.
+- **Slice 9: sidebar shell + host switcher** (`Sidebar.tsx`, new shared
+  `components/HostStateDot.tsx` used by Sidebar and SettingsModal;
+  `sidebar.css`, `host-switcher.css` deleted). Harness gained `01b`–`01d`, two
+  disabled fixture hosts, pinned fixture mtimes.
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -66,9 +70,9 @@ Done:
 | navigator.css | – | **migrated and deleted** (Navigator + KeybindHelp) |
 | workspace-tools.css | – | **migrated and deleted** (drawer, `.app__body`, `ResizeHandle`) |
 | toolbar-tabs.css | – | **migrated and deleted** (top row, tab bar, `.dock-area`, file-tab view) |
-| sidebar.css | 126 | not started |
+| sidebar.css | – | **migrated and deleted** (sidebar shell, env header, + New session) |
 | sidebar-projects.css | 246 | not started |
-| host-switcher.css | 226 | not started |
+| host-switcher.css | – | **migrated and deleted** (switcher button, popover, `HostStateDot`); 3 `settings-modal__*` rules moved to the top of `settings.css` |
 | settings.css | 309 | not started |
 | session-picker.css | 157 | not started |
 | directory-browser.css | 274 | not started |
@@ -89,7 +93,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`sidebar.css` → … ; leave
+`session-picker.css` / `sidebar-projects.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -241,6 +245,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 6 | navigator + keybind help | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `09b`/`09c`/`10b`): no computed-style, box, text, hover or focus difference in any state in Chromium or WebKit; 09, 09b, 09c, 10, 10b pixel-identical. 10 Chromium corner-speck screenshot diffs (03, 13, 14, 16, 17, 17c, 18, 20, 20c, 22; 1-12 px, none in a modal) reviewed by name. e2e after `npm run build`: keybindings (5/5). |
 | 7 | workspace tools drawer | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `11b`): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 40 states in Chromium or WebKit, incl. the divider `::after` highlight and the drawer buttons' focus. 11 Chromium corner-speck screenshot diffs (04, 06, 12-17b, 20, 20c; 1-9 px; the drawer ones, 13/14 at x=759 y=41, are the same specks slice 6 showed before the drawer was migrated) reviewed by name. e2e after `npm run build`: workspace-tabs and the layout specs pass (4/4); `toasts` (TN1, TN2, real haiku turns) pass against the migrated build. `workspace-visual-qa` fails at line 258 on the committed tree too (see Pre-existing failures). |
 | 8 | toolbar + tab bar | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 46 states in Chromium or WebKit, including the new two-tab strip (`05f`), drag source/target (`05g`, opacity + accent edge), inline tab rename (`05h`), and the macOS-app brand padding, expanded and collapsed (`22b`, `22c`). 11 Chromium corner-speck screenshot diffs (03, 12, 13, 14, 16, 17b, 17c, 18, 20c, 22, 22b; 1-24 px, at the tab-edge x=272/479 and sidebar x=9 specks seen before this slice, and the start-picker box corners in 03/22b) reviewed by name; 05f/05g/05h/22c are pixel-identical. e2e after `npm run build`: wave2 (tab drag-reorder, rename), workspace-tabs, responsive, pane-splitting, keybindings pass; `workspace-files-durable` failed once at line 266 in the multi-spec run and passed 2/2 alone (timing flake under load). |
+| 9 | sidebar shell + host switcher | tsc clean; 215/215 unit tests; harness (baseline and new both re-snapped with `01b`-`01d` and pinned mtimes): no computed-style, box, text, hover, focus or pseudo-element difference in any of the 49 states in Chromium or WebKit. `01b` (popover: local connected, `direct` badge, disabled, injected error row), `01c` (remote selected: HOST header, disabled + New session) show 10-16 px of ±1-value specks, all at rounded corners of the start picker (x=554/967/968) and the sidebar's Register-folder button (x=13), none inside the popover or header (checked per pixel). 9 Chromium screenshot diffs reviewed by name. e2e after `npm run build`: sidebar, nav, federation (E1, E2, E4-E6: host dots connected/disabled/error), settings (host CRUD), responsive, theme, keybindings: 28/28. |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -300,6 +305,24 @@ output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
 counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
 `danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
 utilities compete.
+
+Slice 9 notes: **Tailwind `/15` colour modifiers mix in oklab**, so a legacy
+`color-mix(in srgb, var(--accent) 15%, transparent)` computes to
+`color(srgb …)` and the utility to `oklab(…)`: the harness flags it. Use
+`bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]` /
+`border-[color:color-mix(…)]` (the "identical" claim in the gotchas below holds
+for pixels, not computed strings). `--surface-2` is never defined, so the
+legacy `.host-switcher-popover__badge` `border: 1px solid var(--surface-2)` was
+invalid at computed-value time and the badge has **no border**; the migration
+reproduces that. The harness fixture file mtimes are now pinned: the file view
+prints the mtime, and a run before vs after 10:00 differed by one character of
+width. The two `host-state` call sites (Sidebar, SettingsModal) now share
+`HostStateDot`; `host-state`, `host-state--<state>`, `host-switcher-popover__row`,
+`sidebar`, `sidebar__env-host|badge|cwd` stay as hooks (federation, nav, sidebar,
+remote-git specs). `animate-host-pulse` (the connecting dot) is in `@theme`; the
+harness freezes animations, so only the built CSS shows it (`@keyframes
+host-connecting-pulse` present). The belt-and-braces `.sidebar{display:none}`
+media rule is `max-[700px]:hidden` on the aside.
 
 Slice 8 notes: the harness gained `tauri: true` states (a fresh context that
 defines `window.__TAURI_INTERNALS__`, as the macOS app does), the only way to
