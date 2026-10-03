@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DockviewController } from "../dockview/dockviewController";
 import { canStopAgent, stopAgent } from "../agentTerminals";
+import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 
 export interface PaneContextMenuProps {
   panelId: string;
@@ -73,16 +74,16 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
 
   return createPortal(
     <div
-      className="pane-context-menu"
+      className={menuPanel}
       data-testid="pane-context-menu"
       ref={menuRef}
       style={{ position: "fixed", top, left, zIndex: 9999, minWidth: MENU_W }}
     >
       {renaming ? (
-        <div className="pane-context-menu__rename">
+        <div className="flex items-center gap-[0.35rem] px-2 py-[0.4rem]">
           <input
             type="text"
-            className="pane-context-menu__rename-input"
+            className="min-w-0 flex-1 rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.8rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
             data-testid="pane-menu-rename-input"
             ref={renameInputRef}
             value={renameValue}
@@ -94,7 +95,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           />
           <button
             type="button"
-            className="pane-context-menu__rename-confirm"
+            className="shrink-0 cursor-pointer rounded-ui bg-accent px-[0.55rem] py-[0.3rem] text-[0.78rem] font-semibold text-panel-bg [border:none] [font-family:inherit]"
             data-testid="pane-menu-rename-confirm"
             onClick={commitRename}
           >
@@ -105,7 +106,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
         <>
           <button
             type="button"
-            className="pane-context-menu__item"
+            className={menuItem()}
             data-testid="pane-menu-split-right"
             onClick={() => {
               controller.setActivePanel(panelId);
@@ -117,7 +118,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           </button>
           <button
             type="button"
-            className="pane-context-menu__item"
+            className={menuItem()}
             data-testid="pane-menu-split-down"
             onClick={() => {
               controller.setActivePanel(panelId);
@@ -129,7 +130,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           </button>
           <button
             type="button"
-            className="pane-context-menu__item"
+            className={menuItem()}
             data-testid="pane-menu-split-session"
             onClick={() => {
               onSplitSession();
@@ -140,7 +141,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           </button>
           <button
             type="button"
-            className="pane-context-menu__item"
+            className={menuItem()}
             data-testid="pane-menu-zoom"
             onClick={() => {
               controller.setActivePanel(panelId);
@@ -152,7 +153,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           </button>
           <button
             type="button"
-            className="pane-context-menu__item"
+            className={menuItem()}
             data-testid="pane-menu-rename"
             onClick={() => {
               setRenameValue(title);
@@ -161,11 +162,11 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           >
             Rename
           </button>
-          <div className="pane-context-menu__divider" />
+          <div className={menuDivider} />
           {sessionId && canStopAgent(sessionId) && (
             <button
               type="button"
-              className="pane-context-menu__item pane-context-menu__item--danger"
+              className={menuItem({ danger: true })}
               data-testid="pane-menu-stop-agent"
               title="Kill the agent process. Restart resumes the conversation."
               onClick={() => {
@@ -178,7 +179,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           )}
           <button
             type="button"
-            className="pane-context-menu__item pane-context-menu__item--danger"
+            className={menuItem({ danger: true })}
             data-testid="pane-menu-close"
             disabled={!canClose}
             onClick={() => {

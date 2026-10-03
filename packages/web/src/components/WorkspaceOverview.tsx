@@ -3,6 +3,7 @@ import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
+import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryBrowser } from "./DirectoryBrowser";
@@ -34,7 +35,7 @@ function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label:
   const height = items.length * 30;
   return createPortal(
     <div
-      className="pane-context-menu"
+      className={menuPanel}
       role="menu"
       aria-label={label}
       data-testid="row-menu"
@@ -42,13 +43,13 @@ function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label:
       style={{ position: "fixed", zIndex: 9999, minWidth: 180, left: Math.min(x, window.innerWidth - 188), top: Math.max(8, Math.min(y, window.innerHeight - height - 8)) }}
     >
       {items.map((item, index) => item === "divider" ? (
-        <div key={index} className="pane-context-menu__divider" />
+        <div key={index} className={menuDivider} />
       ) : (
         <button
           key={item.testId}
           type="button"
           role="menuitem"
-          className={"pane-context-menu__item" + (item.danger ? " pane-context-menu__item--danger" : "")}
+          className={menuItem({ danger: !!item.danger })}
           data-testid={item.testId}
           onClick={() => { onClose(); item.onSelect(); }}
         >

@@ -12,6 +12,10 @@
 /* Runtime themes (themes.ts) set the :root vars, so every token is `inline`:
  * the utility reads var(--x) at use, never a value frozen at build time.
  * Never define a mono font token here (see the migration doc, gotchas). */
+/* Tailwind wraps `hover:` in @media (hover: hover); the legacy CSS used a plain
+ * :hover (so touch devices got hover styles too). Keep the legacy behaviour. */
+@custom-variant hover (&:hover);
+
 @theme inline {
   --color-*: initial;
   --font-*: initial;

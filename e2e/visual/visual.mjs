@@ -195,6 +195,14 @@ const STATES = [
     await page.getByTestId(`tab-${ctx.tabId}`).click({ button: "right" });
     await sleep(300);
   } },
+  // Pane menu in its inline-rename mode (input focused), then the plain menu again.
+  { name: "06b-pane-menu-rename", run: async (page) => {
+    await page.getByTestId("pane-menu-rename").click();
+    const input = page.getByTestId("pane-menu-rename-input");
+    await input.waitFor();
+    await input.fill("renamed pane");
+    await sleep(300);
+  } },
   { name: "07-settings", run: async (page) => {
     await closeOverlays(page);
     await page.getByTestId("settings-gear").click();

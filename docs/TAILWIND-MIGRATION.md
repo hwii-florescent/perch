@@ -18,7 +18,7 @@ that compose them: the structure Orca (`~/Github/orca`) and t3code
   tokens that `themes.ts` rewrites at runtime), and xterm / Dockview overrides.
   Do not force every rule into utilities.
 - **Extract a shared primitive only when real repetition warrants it** (rule of
-  three), not speculatively. Today there are none in `components/ui/`.
+  three), not speculatively. Today: `components/ui/menu.ts` (context menu).
 - Preserve e2e hooks (see Rules).
 
 ## Status
@@ -41,6 +41,10 @@ Done:
   states `05b`–`05e` first. See "Slice log".
 - **Slice 4: onboarding** (`components/Onboarding.tsx`, `onboarding.css`
   deleted). Harness gained `23b-onboarding-phone` first. See "Slice log".
+- **Slice 5: pane/row context menu** (`components/ui/menu.ts` = first shared
+  primitive; `PaneContextMenu.tsx`, `WorkspaceOverview.tsx` `RowMenu`;
+  `pane-menu.css` deleted) plus an infra fix: `hover:` is now a plain `:hover`
+  (see slice 5 notes). Harness gained `06b-pane-menu-rename`.
 
 | File in `styles/` | Lines | Status |
 |---|---|---|
@@ -50,7 +54,7 @@ Done:
 | status-dot.css | – | **migrated and deleted** |
 | status-bar.css | – | **migrated and deleted** (incl. terminal-search) |
 | onboarding.css | – | **migrated and deleted** |
-| pane-menu.css | 84 | not started |
+| pane-menu.css | – | **migrated and deleted** |
 | navigator.css | 255 | not started |
 | workspace-tools.css | 112 | not started |
 | toolbar-tabs.css | 251 | not started |
@@ -77,7 +81,7 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 ## Next slice
 
 Smallest leaves first so primitives take shape from real repetition:
-`pane-menu.css` → `navigator.css` → … ; leave
+`navigator.css` → … ; leave
 `workspace-files.css`, `chat.css`, `composer.css` and `git-review.css` for last.
 
 Notes for the next ones:
@@ -131,7 +135,7 @@ Notes for the next ones:
 
 `e2e/visual/visual.mjs` boots an isolated headless core on :7791 (state in
 `/tmp/perch-visual`, fixed fixture repo, fixed clock, serves any web build via
-`PERCH_WEB_DIST`), walks 33 UI states, and records per state a screenshot, the
+`PERCH_WEB_DIST`), walks 34 UI states, and records per state a screenshot, the
 computed style + box of **every** element, a hover dump and a keyboard-focus
 dump, in **Chromium and WebKit** (the Mac app is a WKWebView). It never touches
 `~/.perch`.
@@ -225,6 +229,7 @@ known failures), and `git grep` for dead e2e class locators (Rule 5).
 | 2 | status dot | tsc clean; 215/215 unit tests; harness: no computed-style, box, text, hover or focus differences in Chromium or WebKit. Screenshot differences (Chromium 03/04/15/20c/22, WebKit 13/14, incl. ~1800 px in the git drawer) all reappear when the unmodified baseline is snapped twice (`base` vs `base2`) and none is on a status dot. `e2e/status-glyphs.spec.ts` 3/3 passed (real haiku-4-5 turns). |
 | 3 | status bar + terminal search | tsc clean; 215/215 unit tests; harness vs a baseline re-snapped with the new states: no computed-style, box, text, hover or focus differences in Chromium or WebKit (the two it caught on the way, footer side-border colours and the input's `outline` computed width/colour, are fixed: `border-t-overlay-0`, `[outline:none]`). 7 Chromium corner-speck screenshot diffs reviewed by name (03, 12, 17, 17b, 17c, 20c, 22), none in the status bar or find bar, all in the baseline-vs-baseline noise set. e2e (against a fresh `npm run build`): status-glyphs, worktrees, wave1 (Cmd+F find bar) pass; `workspace-recovery` fails at its `perch.sessionId` assertion on the committed tree too (pre-existing, unrelated). |
 | 4 | onboarding | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new state): `23-onboarding` and `23b-onboarding-phone` (390x520, panel scrolls) identical in Chromium and WebKit including pixels, hover and focus; no computed-style, box, text, hover or focus difference in any of the 33 states. 10 Chromium corner-speck screenshot diffs (03, 04, 06, 13, 14, 16, 17b, 17c, 20c, 22; 1–14 px, none show the modal) reviewed by name. e2e after `npm run build`: wave2 X4 onboarding, workspace-foundation, workspace-review, workspace-files-durable pass (7/7). |
+| 5 | pane/row context menu | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `06b`): no computed-style, box, text, hover or focus difference in any of the 34 states in Chromium or WebKit; `06` (pane menu: normal, danger, disabled Close) and `06b` (inline rename) pixel-identical in both; 7 Chromium corner-speck screenshot diffs reviewed by name (03, 13, 14, 16, 17b, 20, 20c; the 17b menu region itself is clean). e2e after `npm run build`: pane-splitting (5/5), native-ui claude/codex/omp (exercise Stop agent) pass. |
 
 Process notes from slice 1: the harness had a false-positive (two runs with only
 capture failures printed IDENTICAL, exit 0) found by an independent review; it
@@ -272,6 +277,19 @@ a local `KBD` string in `Onboarding.tsx`; the `<li>` text styles are a
 `[&>li]:` variant on the `<ul>`. No e2e used a legacy onboarding class (only
 `data-testid="onboarding"` / `onboarding-dismiss`).
 
+Slice 5 notes: **`hover:` was a behaviour change.** Tailwind v4 emits `hover:`
+inside `@media (hover: hover)`, the legacy CSS used a bare `:hover`, so on touch
+devices slices 1, 3 and 4 had lost their hover styles. `tailwind.css` now has
+`@custom-variant hover (&:hover);` (built CSS checked: no `@media(hover:hover)`).
+The harness runs a hover-capable pointer, so it cannot see this; only the CSS
+output can. Rule 6 of the component rules stands (`hover:` = legacy `:hover`).
+`disabled:` sorts after `hover:` in the output, matching the legacy order
+(`:disabled` after `:hover`), and `06` proves it on the disabled Close item.
+`pane-context-menu__item` stays as an unstyled hook (`e2e/pane-splitting.spec.ts`
+counts the items); the other `pane-context-menu*` classes had no users. `cva`'s
+`danger` variant carries `text-red` / `text-fg` as an either/or so no two colour
+utilities compete.
+
 ## Pre-existing failures (not caused by the migration)
 
 Tracked here so they are not mistaken for regressions; do not fix inside a slice.
@@ -282,3 +300,12 @@ Tracked here so they are not mistaken for regressions; do not fix inside a slice
   restart). Verified on 2026-10-02 against the committed tree with the slice
   stashed (and a fresh `npm run build`): same failure, so it predates slice 3.
   Cause not investigated. Not listed in AGENTS.md's known failures yet.
+
+- `e2e/agent-terminal-ownership.spec.ts:6` fails at line 75 ("phone keeps
+  control after reload", `data-controlling`). This is the one AGENTS.md lists as
+  load-dependent, but it failed 3 of 3 runs here, including on the committed
+  tree with the slice stashed, so treat it as consistently failing now.
+- `e2e/native-ui.spec.ts` `pi:` fails at line 77: the pi CLI's startup banner
+  (`v1.0.0`, `[Context]` …) no longer matches the spec's text regex
+  (`/pi v|pi \(|pi coding|…/`). A pi version change, not CSS. Not run against
+  the committed tree. The `opencode:` case is the documented not-installed one.
