@@ -362,6 +362,20 @@ const STATES = [
     await page.getByTestId("worktree-name-input").fill("feature one");
     await sleep(400);
   } },
+  // Create on an existing branch name runs as a background job and fails: the popover closes and the
+  // sidebar shows the job row ("Create failed", Retry / Dismiss). 16c dismisses it again.
+  { name: "16b-worktree-job-failed", run: async (page) => {
+    await page.getByTestId("worktree-branch-input").fill("main");
+    await page.getByTestId("worktree-path-input").fill(`${WORK}/wt-err`);
+    await page.getByTestId("worktree-create-submit").click();
+    await page.getByText("Create failed").waitFor();
+    await sleep(300);
+  } },
+  { name: "16c-worktree-job-dismissed", nocapture: true, run: async (page) => {
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await page.getByText("Create failed").waitFor({ state: "detached" });
+    await sleep(300);
+  } },
   { name: "17-project-menu", run: async (page, ctx) => {
     await closeOverlays(page);
     await page.locator(`[data-testid="workspace-project-${ctx.projectId}"]`).hover();
@@ -472,6 +486,8 @@ async function bootCore(dist) {
   git("-c init.defaultBranch=main init -q", REPO);
   git("add -A", REPO);
   git('commit -q -m "initial"', REPO);
+  // A second checkout, so the worktree menu lists a non-primary entry (with its Delete action).
+  git(`worktree add -q -b wt-extra ${WORK}/wt-extra`, REPO);
   fs.writeFileSync(`${REPO}/src/main.txt`, "modified sentinel with a fairly long line of content\n");
   fs.writeFileSync(`${REPO}/untracked.txt`, "new\n");
   // Pin mtimes: the file view prints them, and "9:59 PM" vs "10:03 PM" differs by a character's width.

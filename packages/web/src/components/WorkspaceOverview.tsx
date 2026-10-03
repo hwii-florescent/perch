@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
+import { ICON_BUTTON } from "./ui/icon-button";
+import { cn } from "../lib/cn";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryBrowser } from "./DirectoryBrowser";
@@ -607,7 +609,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} /> : (
                   <button
                     type="button"
-                    className="worktree-menu__btn"
+                    className={cn("worktree-menu__btn", ICON_BUTTON)}
                     data-testid={`workspace-project-new-session-${project.id}`}
                     title="New session in this folder"
                     aria-label="New session"

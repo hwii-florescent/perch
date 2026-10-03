@@ -42,6 +42,7 @@ import { AgentPicker } from "./components/AgentPicker";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
+import { ICON_BUTTON } from "./components/ui/icon-button";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
@@ -386,7 +387,7 @@ function ProjectWorktrees({ projectKey, hostId, cwd }: { projectKey: string; hos
   if (!git || !git.branch)
     return (
       <span
-        className="worktree-menu__btn worktree-menu__btn--disabled"
+        className={cn("worktree-menu__btn", ICON_BUTTON, "cursor-default text-overlay-0 opacity-60 hover:bg-transparent hover:text-overlay-0")}
         data-testid={`worktree-menu-disabled-${hostId}-${cwd}`}
         title="Not a git repository — worktrees unavailable"
         aria-disabled="true"
@@ -428,7 +429,7 @@ function ProjectGitReviewButton({ hostId, sessions }: { hostId: string; sessions
   return (
     <button
       type="button"
-      className="worktree-menu__btn"
+      className={cn("worktree-menu__btn", ICON_BUTTON)}
       data-testid={`project-git-review-${hostId}`}
       title="Git & review"
       aria-label="Open Git and review"
@@ -505,7 +506,7 @@ function ProjectRow({
         <ProjectGitReviewButton hostId={hostId} sessions={group.sessions} />
         <button
           type="button"
-          className="shrink-0 cursor-pointer self-center rounded-ui bg-transparent px-[0.2rem] py-[0.1rem] text-[0.8rem] leading-none text-subtext-0 [font-family:inherit] [border:none] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-1 hover:text-accent"
+          className={cn(ICON_BUTTON, "self-center")}
           data-testid="project-close-all"
           title="Close all sessions in this project"
           aria-label="Close all sessions in this project"

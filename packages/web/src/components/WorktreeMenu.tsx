@@ -38,10 +38,16 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "../lib/cn";
+import { ICON_BUTTON } from "./ui/icon-button";
 import { usePerchStore } from "../store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { WorktreeEntry, WorktreePreservedBranch } from "@perch/shared";
 
+
+const INPUT = "rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:border-accent focus:[outline:none]";
+const BADGE = "shrink-0 rounded-ui border border-accent px-[0.28rem] py-0 text-[0.6rem] font-medium text-accent";
+const ACTION = "cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.4rem] py-[0.15rem] text-[0.7rem] text-fg [font-family:inherit] [transition:border-color_0.1s_ease,color_0.1s_ease] hover:border-accent hover:text-accent";
 /** Mirror of `branch_to_path_slug` in `crates/perch-core/src/worktree.rs`
  * (kept in sync by hand — it exists here only to *preview* the default
  * checkout path in the create form; the server always recomputes the real
@@ -308,7 +314,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
   const popover = open
     ? createPortal(
         <div
-          className="worktree-menu__popover"
+          className="w-[min(420px,calc(100vw_-_16px))] overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
           role="dialog"
           aria-label="Git worktrees"
           data-testid={`worktree-popover-${hostId}-${cwd}`}
@@ -317,31 +323,31 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
           // The form inputs stop key propagation, so Escape is caught here.
           onKeyDownCapture={(e) => { if (e.key === "Escape") setOpen(false); }}
         >
-          <div className="worktree-menu__header">
-            <span className="worktree-menu__title">{showCreateForm ? "New workspace" : "Worktrees"}</span>
-            <span className="worktree-menu__repo" title={cwd}>
+          <div className="flex items-baseline justify-between gap-2 border-b border-b-overlay-0 px-[0.65rem] pt-[0.4rem] pb-[0.3rem]">
+            <span className="text-[0.72rem] font-semibold tracking-[0.04em] text-subtext-0 uppercase">{showCreateForm ? "New workspace" : "Worktrees"}</span>
+            <span className="overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-accent" title={cwd}>
               {basename(cwd)}
             </span>
           </div>
 
-          <div className="worktree-menu__list">
+          <div className="max-h-[240px] overflow-y-auto py-[0.15rem]">
             {loading && entries.length === 0 ? (
-              <div className="worktree-menu__empty">Loading…</div>
+              <div className="px-[0.65rem] py-[0.45rem] text-[0.76rem] text-subtext-0">Loading…</div>
             ) : entries.length === 0 ? (
-              <div className="worktree-menu__empty">No worktrees</div>
+              <div className="px-[0.65rem] py-[0.45rem] text-[0.76rem] text-subtext-0">No worktrees</div>
             ) : (
               entries.map((entry) => (
                 <div
-                  className="worktree-menu__entry"
+                  className="worktree-menu__entry flex items-center justify-between gap-2 px-[0.65rem] py-[0.35rem] hover:bg-surface-1"
                   key={entry.path}
                   data-testid={`worktree-entry-${entry.path}`}
                 >
-                  <div className="worktree-menu__entry-body">
-                    <div className="worktree-menu__entry-branch">
+                  <div className="min-w-0 flex-1">
+                    <div className="worktree-menu__entry-branch flex items-center gap-[0.3rem] overflow-hidden text-[0.8rem] font-semibold text-ellipsis whitespace-nowrap text-fg">
                       {entry.branch ?? `(detached ${entry.head?.slice(0, 7) ?? "?"})`}
                       {entry.isPrimary && (
                         <span
-                          className="worktree-menu__badge"
+                          className={BADGE}
                           data-testid={`worktree-primary-${entry.path}`}
                         >
                           primary
@@ -349,7 +355,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                       )}
                       {entry.isDirty && (
                         <span
-                          className="worktree-menu__badge worktree-menu__badge--dirty"
+                          className={cn(BADGE, "border-yellow text-yellow")}
                           data-testid={`worktree-dirty-${entry.path}`}
                           title="Uncommitted or untracked changes"
                         >
@@ -357,14 +363,14 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                         </span>
                       )}
                     </div>
-                    <div className="worktree-menu__entry-path" title={entry.path}>
+                    <div className="worktree-menu__entry-path overflow-hidden text-[0.68rem] text-ellipsis whitespace-nowrap text-subtext-0" title={entry.path}>
                       {entry.path}
                     </div>
                   </div>
-                  <div className="worktree-menu__entry-actions">
+                  <div className="flex shrink-0 gap-1">
                     <button
                       type="button"
-                      className="worktree-menu__action"
+                      className={ACTION}
                       data-testid={`worktree-open-${entry.path}`}
                       onClick={() => handleOpenWorktree(entry)}
                       title="New CLI session in this worktree"
@@ -374,7 +380,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                     {!entry.isPrimary && (
                       <button
                         type="button"
-                        className="worktree-menu__action worktree-menu__action--danger"
+                        className={cn(ACTION, "hover:border-red hover:text-red")}
                         data-testid={`worktree-remove-${entry.path}`}
                         onClick={() => setPendingRemove({ path: entry.path, branch: entry.branch, force: false })}
                         title={deleteSupported ? "Delete this worktree and its branch" : "Remove this worktree"}
@@ -389,21 +395,21 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
           </div>
 
           {error && (
-            <div className="worktree-menu__error" data-testid="worktree-error">
+            <div className="border-t border-t-overlay-0 px-[0.65rem] py-[0.35rem] text-[0.72rem] whitespace-pre-wrap text-red" data-testid="worktree-error">
               {error}
             </div>
           )}
 
-          <div className="worktree-menu__divider" />
+          <div className="h-px bg-overlay-0" />
 
           {showCreateForm ? (
-            <div className="worktree-menu__form">
+            <div className="flex flex-col gap-[0.3rem] px-[0.65rem] py-[0.45rem]">
               {startFromSupported && (
                 <>
                   <input
                     type="text"
                     ref={nameInputRef}
-                    className="worktree-menu__input"
+                    className={INPUT}
                     data-testid="worktree-name-input"
                     placeholder="task name"
                     aria-label="Task name"
@@ -416,7 +422,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   />
                   <input
                     type="text"
-                    className="worktree-menu__input"
+                    className={INPUT}
                     data-testid="worktree-start-input"
                     list={`worktree-refs-${projectKey}`}
                     placeholder={`start from ${cached?.baseRef ?? "HEAD"} (base ref)`}
@@ -437,7 +443,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
               <input
                 type="text"
                 ref={branchInputRef}
-                className="worktree-menu__input"
+                className={INPUT}
                 data-testid="worktree-branch-input"
                 placeholder={startFromSupported
                   ? `branch: ${slugifyTaskName(taskName) || "derived from the task name"}`
@@ -452,7 +458,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
               />
               {parentChoices.length > 0 && (
                 <select
-                  className="worktree-menu__input"
+                  className={INPUT}
                   data-testid="worktree-parent-select"
                   aria-label="Parent workspace"
                   value={parentId}
@@ -465,7 +471,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                 </select>
               )}
               {!startFromSupported && (
-                <label className="worktree-menu__checkbox">
+                <label className="flex cursor-pointer items-center gap-[0.35rem] text-[0.74rem] text-subtext-0">
                   <input
                     type="checkbox"
                     data-testid="worktree-new-branch"
@@ -477,7 +483,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
               )}
               <input
                 type="text"
-                className="worktree-menu__input"
+                className={INPUT}
                 data-testid="worktree-path-input"
                 aria-label="Checkout path"
                 placeholder={defaultRoot ? `${defaultRoot}/<branch>` : "custom path (optional)"}
@@ -491,10 +497,10 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                   if (e.key === "Enter") void submitCreate();
                 }}
               />
-              <div className="worktree-menu__form-actions">
+              <div className="mt-[0.15rem] flex justify-end gap-[0.35rem]">
                 <button
                   type="button"
-                  className="worktree-menu__action"
+                  className={ACTION}
                   data-testid="worktree-create-cancel"
                   disabled={creating}
                   onClick={() => setShowCreateForm(false)}
@@ -503,7 +509,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
                 </button>
                 <button
                   type="button"
-                  className="worktree-menu__submit"
+                  className="cursor-pointer rounded-ui bg-accent px-[0.6rem] py-1 text-[0.75rem] font-semibold text-panel-bg [font-family:inherit] [border:none] disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="worktree-create-submit"
                   disabled={!effectiveBranch || creating}
                   onClick={() => void submitCreate()}
@@ -515,7 +521,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
           ) : (
             <button
               type="button"
-              className="worktree-menu__new-btn"
+              className="block w-full cursor-pointer bg-transparent px-[0.65rem] py-[0.45rem] text-left text-[0.78rem] text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-1"
               data-testid="worktree-new"
               onClick={() => {
                 setShowCreateForm(true);
@@ -534,7 +540,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey }: WorktreeMenuProps) {
     <>
       <button
         type="button"
-        className="worktree-menu__btn"
+        className={cn("worktree-menu__btn", ICON_BUTTON)}
         ref={btnRef}
         data-testid={`worktree-menu-${hostId}-${cwd}`}
         onClick={handleBtnClick}
