@@ -522,6 +522,35 @@ const STATES = [
     await pinGitScroll(page);
     await sleep(200);
   } },
+  // Staged paths, then a branch that is both ahead of and behind its upstream, then everything undone.
+  { name: "14d-git-staged-ahead-behind", run: async (page) => {
+    git("add src/main.txt", REPO);
+    const remote = `${WORK}/remote.git`, other = `${WORK}/other`;
+    git(`init -q --bare ${remote}`, WORK);
+    git(`remote add origin ${remote}`, REPO);
+    git("push -q -u origin HEAD", REPO);
+    git(`clone -q ${remote} ${other}`, WORK);
+    git("commit -q --allow-empty -m theirs", other);
+    git("push -q", other);
+    git("commit -q --allow-empty -m ours", REPO);
+    git("fetch -q", REPO);
+    await page.getByTestId("git-refresh").click();
+    await page.getByText("1 behind").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14e-git-restored", run: async (page) => {
+    git("reset -q --soft HEAD~1", REPO);
+    git("reset -q", REPO);
+    git("branch --unset-upstream", REPO);
+    git("remote remove origin", REPO);
+    fs.rmSync(`${WORK}/remote.git`, { recursive: true, force: true });
+    fs.rmSync(`${WORK}/other`, { recursive: true, force: true });
+    await page.getByTestId("git-refresh").click();
+    await page.getByText("No upstream configured").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
   { name: "15-worktree-menu", run: async (page) => {
     await page.getByTestId("workspace-tools-toggle").click(); // close drawer
     await sleep(300);

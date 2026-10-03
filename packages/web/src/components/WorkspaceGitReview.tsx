@@ -32,6 +32,12 @@ const DIFF_LINE_KIND: Record<string, string> = {
 const DIFF_LINE_CONTEXT = "hover:bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const DIFF_LINE_SELECTED = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const LINE_MARKER_TONE: Record<string, string> = { addition: "text-green", deletion: "text-red" };
+const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0";
+const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 flex-col items-start gap-[0.08rem] rounded-ui border px-[0.4rem] py-[0.3rem] text-left text-fg [background:none] hover:bg-surface-1";
+const PATH_BUTTON_IDLE = "border-transparent";
+const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
+// `conflict` keeps its legacy rule in git-review.css (no harness state yet).
+const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", untracked: "text-yellow", conflict: "workspace-git__file-state--conflict" };
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
 export interface WorkspaceGitReviewProps {
@@ -616,7 +622,7 @@ export function WorkspaceGitReview({
       </header>
 
       <div className="workspace-git__body">
-        <aside className="workspace-git__status" data-testid="git-status">
+        <aside className="flex min-h-0 w-[17rem] min-w-[14rem] flex-col overflow-y-auto border-r border-r-[color:var(--git-border)] [@container(max-width:700px)]:w-full [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:flex-[0_0_auto] [@container(max-width:700px)]:max-h-[12rem] [@container(max-width:700px)]:[border-right:none] [@container(max-width:700px)]:border-b [@container(max-width:700px)]:border-b-[color:var(--git-border)]" data-testid="git-status">
           <div className="workspace-git__section-heading">
             <div>
               <span className={EYEBROW}>Workspace status</span>
@@ -636,22 +642,23 @@ export function WorkspaceGitReview({
           {statusState === "loading" && <div className="workspace-git__status-note" role="status">Reading Git status…</div>}
           {statusState === "error" && <div className="workspace-git__status-note workspace-git__status-note--error" role="alert">{statusError || "Git status is unavailable."}</div>}
           {status && (
-            <div className="workspace-git__branch-card">
-              <div className="workspace-git__branch-line"><strong>{status.branch || "Detached HEAD"}</strong><span>{shortHash(status.head)}</span></div>
-              <div className="workspace-git__branch-detail">{status.upstream ? `tracks ${status.upstream}` : "No upstream configured"}</div>
+            <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui border border-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] px-[0.55rem] py-2">
+              <div className="flex items-center justify-between gap-2"><strong className="overflow-hidden text-ellipsis whitespace-nowrap">{status.branch || "Detached HEAD"}</strong><span className="text-yellow [font-family:monospace] text-[0.66rem]">{shortHash(status.head)}</span></div>
+              <div className={BRANCH_DETAIL}>{status.upstream ? `tracks ${status.upstream}` : "No upstream configured"}</div>
               {(status.ahead ?? 0) > 0 || (status.behind ?? 0) > 0 ? (
-                <div className="workspace-git__ahead-behind">
-                  {(status.ahead ?? 0) > 0 && <span className="workspace-git__ahead">↑ {status.ahead} ahead</span>}
-                  {(status.behind ?? 0) > 0 && <span className="workspace-git__behind">↓ {status.behind} behind</span>}
+                <div className="mt-[0.35rem] flex items-center gap-[0.65rem] text-[0.68rem]">
+                  {(status.ahead ?? 0) > 0 && <span className="text-green">↑ {status.ahead} ahead</span>}
+                  {(status.behind ?? 0) > 0 && <span className="text-yellow">↓ {status.behind} behind</span>}
                 </div>
-              ) : <span className="workspace-git__branch-detail">Up to date</span>}
+              ) : <span className={BRANCH_DETAIL}>Up to date</span>}
             </div>
           )}
 
-          <div className="workspace-git__path-list" role="list" aria-label="Changed paths">
+          <div className="flex flex-col gap-[0.12rem] px-[0.45rem] pt-0 pb-[0.55rem]" role="list" aria-label="Changed paths">
             {changedFiles.map((entry) => (
-              <div className="workspace-git__path-row" key={entry.path} role="listitem">
+              <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
                 <input
+                  className="shrink-0"
                   type="checkbox"
                   checked={selectedPaths.has(entry.path)}
                   onChange={() => selectPath(entry.path)}
@@ -659,12 +666,12 @@ export function WorkspaceGitReview({
                 />
                 <button
                   type="button"
-                  className={`workspace-git__path-button${activeFile === entry.path ? " workspace-git__path-button--active" : ""}`}
+                  className={`${PATH_BUTTON} ${activeFile === entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
                   onClick={() => { setActiveFile(entry.path); setSelection(null); }}
                   title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
                 >
-                  <span className={`workspace-git__file-state workspace-git__file-state--${statusTone(entry)}`}>{entryState(entry)}</span>
-                  <span className="workspace-git__path">{entry.path}</span>
+                  <span className={`text-[0.64rem] ${FILE_STATE_TONE[statusTone(entry)] ?? "text-subtext-0"}`}>{entryState(entry)}</span>
+                  <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{entry.path}</span>
                 </button>
               </div>
             ))}
