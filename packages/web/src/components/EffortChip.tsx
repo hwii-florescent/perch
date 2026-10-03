@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore, EFFORT_OPTIONS } from "../store";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./popoverPosition";
+import { cn } from "../lib/cn";
+import { CHIP, CHIP_CHECK, CHIP_MODEL_BTN_OFF, CHIP_MODEL_BTN_ON, CHIP_MODELS, CHIP_PILL, CHIP_POPOVER } from "./ui/composer";
 
 /**
  * EffortChip — compact pill selecting the reasoning-effort level applied to
@@ -46,23 +48,24 @@ export function EffortChip() {
   }
 
   const popover = open ? (
-    <div className="model-chip__popover" ref={popoverRef} style={popoverStyle}>
-      <div className="model-chip__models">
+    <div className={cn("model-chip__popover", CHIP_POPOVER)} ref={popoverRef} style={popoverStyle}>
+      <div className={cn("model-chip__models", CHIP_MODELS)}>
         {options.map((value) => (
           <button
             key={value}
             type="button"
-            className={
-              "model-chip__model-btn" +
-              (value === current ? " model-chip__model-btn--active" : "")
-            }
+            className={cn(
+              "model-chip__model-btn",
+              value === current ? "model-chip__model-btn--active" : "",
+              value === current ? CHIP_MODEL_BTN_ON : CHIP_MODEL_BTN_OFF,
+            )}
             data-testid={`effort-option-${value}`}
             onClick={() => {
               if (sessionId) setEffort(sessionId, value);
               setOpen(false);
             }}
           >
-            {value === current && <span className="model-chip__check">✓</span>}
+            {value === current && <span className={cn("model-chip__check", CHIP_CHECK)}>✓</span>}
             {value}
           </button>
         ))}
@@ -71,12 +74,10 @@ export function EffortChip() {
   ) : null;
 
   return (
-    <div className="model-chip effort-chip">
+    <div className={cn("model-chip effort-chip", CHIP)}>
       <button
         type="button"
-        className={
-          "model-chip__pill" + (current !== "default" ? " model-chip__pill--set" : "")
-        }
+        className={cn("model-chip__pill", current !== "default" && "model-chip__pill--set", CHIP_PILL)}
         data-testid="effort-chip"
         ref={pillRef}
         onClick={handlePillClick}

@@ -4,6 +4,11 @@ import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./popoverPosition";
 import type { AgentKind } from "@perch/shared";
+import { cn } from "../lib/cn";
+import {
+  CHIP, CHIP_AGENT_BTN_OFF, CHIP_AGENT_BTN_ON, CHIP_AGENTS, CHIP_CHECK, CHIP_EMPTY, CHIP_MODEL_BTN_OFF,
+  CHIP_MODEL_BTN_ON, CHIP_MODELS, CHIP_PILL, CHIP_POPOVER,
+} from "./ui/composer";
 
 /** Format helper: get agent display label */
 function agentLabel(agentId: AgentKind): string {
@@ -69,20 +74,21 @@ export function ModelChip() {
 
   const popover = open ? (
     <div
-      className="model-chip__popover"
+      className={cn("model-chip__popover", CHIP_POPOVER)}
       ref={popoverRef}
       style={popoverStyle}
     >
       {/* Agent row */}
-      <div className="model-chip__agents">
+      <div className={cn("model-chip__agents", CHIP_AGENTS)}>
         {AGENTS.map((a) => (
           <button
             key={a.id}
             type="button"
-            className={
-              "model-chip__agent-btn" +
-              (a.id === agent ? " model-chip__agent-btn--active" : "")
-            }
+            className={cn(
+              "model-chip__agent-btn",
+              a.id === agent ? "model-chip__agent-btn--active" : "",
+              a.id === agent ? CHIP_AGENT_BTN_ON : CHIP_AGENT_BTN_OFF,
+            )}
             data-testid={`agent-option-${a.id}`}
             onClick={() => setAgent(a.id as AgentKind)}
           >
@@ -92,37 +98,38 @@ export function ModelChip() {
       </div>
 
       {/* Model list for selected agent */}
-      <div className="model-chip__models">
+      <div className={cn("model-chip__models", CHIP_MODELS)}>
         {currentModels.map((m) => (
           <button
             key={m.id}
             type="button"
-            className={
-              "model-chip__model-btn" +
-              (m.id === model ? " model-chip__model-btn--active" : "")
-            }
+            className={cn(
+              "model-chip__model-btn",
+              m.id === model ? "model-chip__model-btn--active" : "",
+              m.id === model ? CHIP_MODEL_BTN_ON : CHIP_MODEL_BTN_OFF,
+            )}
             data-testid={`model-option-${m.id}`}
             onClick={() => {
               setModel(m.id);
               setOpen(false);
             }}
           >
-            {m.id === model && <span className="model-chip__check">✓</span>}
+            {m.id === model && <span className={cn("model-chip__check", CHIP_CHECK)}>✓</span>}
             {m.label}
           </button>
         ))}
         {currentModels.length === 0 && (
-          <div className="model-chip__empty">No models available</div>
+          <div className={cn("model-chip__empty", CHIP_EMPTY)}>No models available</div>
         )}
       </div>
     </div>
   ) : null;
 
   return (
-    <div className="model-chip">
+    <div className={cn("model-chip", CHIP)}>
       <button
         type="button"
-        className="model-chip__pill"
+        className={cn("model-chip__pill", CHIP_PILL)}
         data-testid="model-chip"
         ref={pillRef}
         onClick={handlePillClick}

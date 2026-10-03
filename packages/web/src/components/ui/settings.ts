@@ -9,8 +9,8 @@ export const SECTION = "border-b border-b-overlay-0 px-4 py-3 last:[border-botto
 export const SECTION_TITLE = "m-0 mb-[0.6rem] text-[0.88rem] font-semibold tracking-[0.04em] text-fg uppercase";
 export const MUTED = "m-0 mt-[0.4rem] text-[0.78rem] text-subtext-0";
 export const EMPTY = "m-0 mb-2 text-[0.82rem] text-subtext-0";
-/** `settings-modal__field-row` stays: composer.css zeroes `.mode-switch`'s auto margin inside it. */
-export const FIELD_ROW = "settings-modal__field-row flex items-center gap-[0.6rem] text-[0.82rem]";
+/** The Settings Chat Mode row sits the `.mode-switch` pill right after its label, not at the far edge. */
+export const FIELD_ROW = "settings-modal__field-row [&_.mode-switch]:ml-0 flex items-center gap-[0.6rem] text-[0.82rem]";
 export const CHECKBOX_ROW = "mb-[0.6rem] flex cursor-pointer items-center gap-2 text-[0.82rem] text-fg";
 
 const FIELD = "rounded-ui border border-overlay-0 bg-surface-1 text-fg [font-family:inherit]";

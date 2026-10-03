@@ -1,5 +1,7 @@
 import { useRef } from "react";
 import type { StagedAttachment } from "../attachments";
+import { cn } from "../lib/cn";
+import { ATTACH_BAR, ATTACH_BTN, ATTACH_CHIP, ATTACH_CHIPS, ATTACH_ERROR, ATTACH_NAME, ATTACH_REMOVE } from "./ui/composer";
 
 /**
  * AttachmentBar — presentation for the composer's staged-file row: the attach
@@ -49,10 +51,10 @@ export function AttachmentBar({
   }
 
   return (
-    <div className="attachment-bar">
+    <div className={cn("attachment-bar", ATTACH_BAR)}>
       <button
         type="button"
-        className="attachment-bar__attach"
+        className={cn("attachment-bar__attach", ATTACH_BTN)}
         data-testid="composer-attach"
         onClick={handleAttachClick}
         disabled={disabled}
@@ -64,19 +66,19 @@ export function AttachmentBar({
         ref={fileInputRef}
         type="file"
         multiple
-        className="attachment-bar__input"
+        className="attachment-bar__input hidden"
         onChange={handleFileInputChange}
       />
       {staged.length > 0 && (
-        <div className="attachment-bar__chips">
+        <div className={cn("attachment-bar__chips", ATTACH_CHIPS)}>
           {staged.map((a) => (
-            <span key={a.id} className="attachment-chip" data-testid={`attachment-chip-${a.name}`}>
-              <span className="attachment-chip__name" title={a.name}>
+            <span key={a.id} className={cn("attachment-chip", ATTACH_CHIP)} data-testid={`attachment-chip-${a.name}`}>
+              <span className={cn("attachment-chip__name", ATTACH_NAME)} title={a.name}>
                 {a.name}
               </span>
               <button
                 type="button"
-                className="attachment-chip__remove"
+                className={cn("attachment-chip__remove", ATTACH_REMOVE)}
                 data-testid={`attachment-remove-${a.name}`}
                 onClick={() => onRemove(a.id)}
                 title="Remove attachment"
@@ -87,7 +89,7 @@ export function AttachmentBar({
           ))}
         </div>
       )}
-      {error && <div className="attachment-bar__error">{error}</div>}
+      {error && <div className={cn("attachment-bar__error", ATTACH_ERROR)}>{error}</div>}
     </div>
   );
 }

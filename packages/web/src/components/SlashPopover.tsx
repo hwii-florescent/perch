@@ -1,4 +1,6 @@
 import type { CommandEntry } from "@perch/shared";
+import { cn } from "../lib/cn";
+import { SLASH_DESC, SLASH_ITEM_OFF, SLASH_ITEM_ON, SLASH_NAME_OFF, SLASH_NAME_ON, SLASH_POPOVER } from "./ui/composer";
 
 /**
  * SlashPopover — the floating suggestion list for the Hosted composer's
@@ -35,30 +37,35 @@ export function SlashPopover(props: {
   const { entries, sigil, highlightedIndex, style, onSelect, onHover, popoverRef } = props;
   return (
     <div
-      className="slash-popover"
+      className={cn("slash-popover", SLASH_POPOVER)}
       data-testid="composer-slash-popover"
       ref={popoverRef}
       style={style}
     >
-      {entries.map((entry, index) => (
-        <button
-          key={entry.name}
-          type="button"
-          className={
-            "slash-popover__item" + (index === highlightedIndex ? " slash-popover__item--active" : "")
-          }
-          data-testid={`composer-slash-item-${entry.name}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onMouseEnter={() => onHover(index)}
-          onClick={() => onSelect(entry)}
-        >
-          <span className="slash-popover__name">
-            {sigil}
-            {entry.name}
-          </span>
-          {entry.description && <span className="slash-popover__desc">{entry.description}</span>}
-        </button>
-      ))}
+      {entries.map((entry, index) => {
+        const active = index === highlightedIndex;
+        return (
+          <button
+            key={entry.name}
+            type="button"
+            className={cn(
+              "slash-popover__item",
+              active && "slash-popover__item--active",
+              active ? SLASH_ITEM_ON : SLASH_ITEM_OFF,
+            )}
+            data-testid={`composer-slash-item-${entry.name}`}
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => onHover(index)}
+            onClick={() => onSelect(entry)}
+          >
+            <span className={cn("slash-popover__name", active ? SLASH_NAME_ON : SLASH_NAME_OFF)}>
+              {sigil}
+              {entry.name}
+            </span>
+            {entry.description && <span className={cn("slash-popover__desc", SLASH_DESC)}>{entry.description}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

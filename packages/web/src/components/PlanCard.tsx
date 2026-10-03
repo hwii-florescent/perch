@@ -1,5 +1,7 @@
 import { usePerchStore, PLAN_APPROVAL_TEXT, type ChatMessage } from "../store";
 import { renderMarkdown } from "../markdown";
+import { cn } from "../lib/cn";
+import { PLAN_APPROVE, PLAN_BODY, PLAN_CARD, PLAN_FOOTER, PLAN_GLYPH, PLAN_HEADER } from "./ui/composer";
 
 /**
  * PlanCard — renders a `chat.plan` artifact (claude only; 2.1.x has no
@@ -31,21 +33,21 @@ export function PlanCard({ message }: { message: ChatMessage }) {
   };
 
   return (
-    <div className="plan-card" data-testid="plan-card">
-      <div className="plan-card__header">
-        <span className="plan-card__glyph" aria-hidden="true">
+    <div className={cn("plan-card", PLAN_CARD)} data-testid="plan-card">
+      <div className={cn("plan-card__header", PLAN_HEADER)}>
+        <span className={cn("plan-card__glyph", PLAN_GLYPH)} aria-hidden="true">
           ◇
         </span>
         <span className="plan-card__title">Plan</span>
       </div>
       <div
-        className="plan-card__body message__markdown"
+        className={cn("plan-card__body message__markdown", PLAN_BODY)}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text, false) }}
       />
-      <div className="plan-card__footer">
+      <div className={cn("plan-card__footer", PLAN_FOOTER)}>
         <button
           type="button"
-          className="plan-card__approve"
+          className={cn("plan-card__approve", PLAN_APPROVE)}
           data-testid="plan-approve"
           disabled={disabled}
           onClick={handleApprove}

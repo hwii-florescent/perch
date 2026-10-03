@@ -1,3 +1,6 @@
+import { cn } from "../lib/cn";
+import { MODE_LABEL_CLI, MODE_LABEL_HOSTED, MODE_SWITCH, MODE_THUMB, MODE_TRACK } from "./ui/composer";
+
 export function ModeSwitch({
   mode,
   onChange,
@@ -13,7 +16,7 @@ export function ModeSwitch({
   return (
     <button
       type="button"
-      className="mode-switch"
+      className={MODE_SWITCH}
       data-testid={testId}
       role="switch"
       aria-checked={isCli}
@@ -21,11 +24,11 @@ export function ModeSwitch({
       disabled={disabled}
       onClick={() => onChange(isCli ? "hosted" : "cli")}
     >
-      <span className="mode-switch__label mode-switch__label--hosted">UI</span>
-      <span className="mode-switch__track">
-        <span className="mode-switch__thumb" />
+      <span className={cn("mode-switch__label mode-switch__label--hosted", MODE_LABEL_HOSTED)}>UI</span>
+      <span className={cn("mode-switch__track", MODE_TRACK)}>
+        <span className={cn("mode-switch__thumb", MODE_THUMB)} />
       </span>
-      <span className="mode-switch__label mode-switch__label--cli">CLI</span>
+      <span className={cn("mode-switch__label mode-switch__label--cli", MODE_LABEL_CLI)}>CLI</span>
     </button>
   );
 }

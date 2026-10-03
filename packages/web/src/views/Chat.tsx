@@ -26,6 +26,8 @@ import { AgentCliTerminal } from "./AgentCliTerminal";
 import { CliStartPanel } from "../components/CliStartPanel";
 import { NoSessionPanel } from "../components/NoSessionPanel";
 import type { AgentKind, CommandEntry, SessionMode } from "@perch/shared";
+import { cn } from "../lib/cn";
+import { CANCEL_BTN, INPUT_CONTROLS, PLAN_TOGGLE_OFF, PLAN_TOGGLE_ON, SEND_BTN } from "../components/ui/composer";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -993,13 +995,13 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
                 }
               }}
             />
-            <div className="chat__input-controls">
+            <div className={cn("chat__input-controls", INPUT_CONTROLS)}>
               {/* ModelChip/EffortChip/plan toggle only visible in Hosted mode */}
               <ModelChip />
               <EffortChip />
               <button
                 type="button"
-                className={"composer-plan-toggle" + (planMode ? " composer-plan-toggle--active" : "")}
+                className={cn("composer-plan-toggle", planMode && "composer-plan-toggle--active", planMode ? PLAN_TOGGLE_ON : PLAN_TOGGLE_OFF)}
                 data-testid="composer-plan-toggle"
                 onClick={() => setPlanMode((v) => !v)}
                 title={
@@ -1011,12 +1013,12 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
                 Plan
               </button>
               {streamingMessageId ? (
-                <button className="chat__cancel" onClick={() => cancelChat(sessionId ?? undefined)}>
+                <button className={cn("chat__cancel", CANCEL_BTN)} onClick={() => cancelChat(sessionId ?? undefined)}>
                   Stop
                 </button>
               ) : (
                 <button
-                  className="chat__send"
+                  className={cn("chat__send", SEND_BTN)}
                   onClick={submit}
                   disabled={!sessionId || !text.trim() || uploading}
                 >
