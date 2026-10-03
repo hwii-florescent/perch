@@ -42,19 +42,6 @@
   border-color: var(--accent);
 }
 
-.workspace-git__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.65rem 0.85rem;
-  border-bottom: 1px solid var(--git-border);
-  background: color-mix(in srgb, var(--panel-bg) 90%, var(--base));
-  flex-shrink: 0;
-}
-
-.workspace-git__title-block,
-.workspace-git__header-actions,
 .workspace-git__section-heading,
 .workspace-git__review-heading,
 .workspace-git__branch-line,
@@ -69,61 +56,12 @@
   align-items: center;
 }
 
-.workspace-git__title-block {
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.08rem;
-}
-
-.workspace-git__title-block h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
-  overflow: hidden;
-  max-width: 100%;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-git__eyebrow {
-  color: var(--accent);
-  font-size: 0.63rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.workspace-git__workspace-id,
-.workspace-git__connection,
 .workspace-git__branch-detail,
 .workspace-git__status-note,
 .workspace-git__comment-summary,
 .workspace-git__packet-meta span {
   color: var(--git-muted);
   font-size: 0.7rem;
-}
-
-.workspace-git__header-actions {
-  gap: 0.55rem;
-  flex-shrink: 0;
-}
-
-.workspace-git__connection {
-  border: 1px solid var(--git-border);
-  border-radius: 999px;
-  padding: 0.18rem 0.42rem;
-  white-space: nowrap;
-}
-
-.workspace-git__connection--ready {
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
-}
-
-.workspace-git__connection--error {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, transparent);
 }
 
 .workspace-git__body,
@@ -889,17 +827,6 @@
  * below — a phone got the horizontal file rail *and* the narrow vertical
  * column at once, which is what made the file list render behind the diff. */
 @container (max-width: 700px) {
-  .workspace-git__header {
-    align-items: flex-start;
-    padding: 0.55rem;
-  }
-
-  .workspace-git__header-actions {
-    align-items: flex-end;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
   .workspace-git__body {
     display: block;
     overflow: auto;

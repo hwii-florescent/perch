@@ -16,6 +16,13 @@ import type {
   WorkspaceGitReviewActions,
 } from "./gitReviewModels";
 import { newId } from "../ids";
+import { cn } from "../lib/cn";
+
+const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
+const CONNECTION = "rounded-[999px] border px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
+const CONNECTION_READY = "text-green border-[color:color-mix(in_srgb,var(--green)_45%,transparent)]";
+const CONNECTION_ERROR = "text-red border-[color:color-mix(in_srgb,var(--red)_45%,transparent)]";
+const CONNECTION_IDLE = "text-subtext-0 border-[color:var(--git-border)]";
 
 export interface WorkspaceGitReviewProps {
   workspaceId: string;
@@ -584,15 +591,15 @@ export function WorkspaceGitReview({
 
   return (
     <section className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
-      <header className="workspace-git__header">
-        <div className="workspace-git__title-block">
-          <span className="workspace-git__eyebrow">Source control</span>
-          <h2>{workspaceName || "Workspace changes"}</h2>
-          <span className="workspace-git__workspace-id" title={workspaceId}>Workspace {workspaceId.slice(0, 8)}</span>
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-b-[color:var(--git-border)] px-[0.85rem] py-[0.65rem] [@container(max-width:700px)]:items-start [@container(max-width:700px)]:p-[0.55rem]">
+        <div className="flex min-w-0 flex-col items-start gap-[0.08rem]">
+          <span className={EYEBROW}>Source control</span>
+          <h2 className="m-0 max-w-full overflow-hidden text-[1rem] font-[650] text-ellipsis whitespace-nowrap">{workspaceName || "Workspace changes"}</h2>
+          <span className="text-[0.7rem] text-subtext-0" title={workspaceId}>Workspace {workspaceId.slice(0, 8)}</span>
         </div>
-        <div className="workspace-git__header-actions">
+        <div className="flex shrink-0 items-center gap-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-end [@container(max-width:700px)]:gap-[0.3rem]">
           <button type="button" className="workspace-git__button" data-testid="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }}>Refresh</button>
-          <span className={`workspace-git__connection workspace-git__connection--${statusState}`} role="status">
+          <span className={cn(CONNECTION, statusState === "ready" ? CONNECTION_READY : statusState === "error" ? CONNECTION_ERROR : CONNECTION_IDLE)} role="status">
             {statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"}
           </span>
         </div>
@@ -602,7 +609,7 @@ export function WorkspaceGitReview({
         <aside className="workspace-git__status" data-testid="git-status">
           <div className="workspace-git__section-heading">
             <div>
-              <span className="workspace-git__eyebrow">Workspace status</span>
+              <span className={EYEBROW}>Workspace status</span>
               <strong>{changedFiles.length ? `${changedFiles.length} changed path${changedFiles.length === 1 ? "" : "s"}` : "No changes"}</strong>
             </div>
             <label className="workspace-git__select-all">
@@ -737,7 +744,7 @@ export function WorkspaceGitReview({
 
           <div className="workspace-git__diff-layout">
             <nav className="workspace-git__diff-files" aria-label="Changed files">
-              <div className="workspace-git__section-heading"><span className="workspace-git__eyebrow">Diff files</span><strong>{diffFiles.length}</strong></div>
+              <div className="workspace-git__section-heading"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
               {diffFiles.map((file) => {
                 const path = filePath(file);
                 return <button type="button" className={`workspace-git__diff-file${activeFile === path ? " workspace-git__diff-file--active" : ""}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span>{file.status}</span><strong>{path}</strong><small>{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
@@ -803,11 +810,11 @@ export function WorkspaceGitReview({
           </div>
 
           <section className="workspace-git__review-panel" data-testid="git-review-panel">
-            <div className="workspace-git__review-heading"><div><span className="workspace-git__eyebrow">Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className="workspace-git__button" disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
+            <div className="workspace-git__review-heading"><div><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className="workspace-git__button" disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
             {comments.length > 0 && <div className="workspace-git__comment-summary">Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
             {unplacedComments.length > 0 && (
               <div className="workspace-git__review-list" data-testid="git-review-list">
-                <div className="workspace-git__review-list-heading"><span className="workspace-git__eyebrow">Other review notes</span><strong>{unplacedComments.length}</strong></div>
+                <div className="workspace-git__review-list-heading"><span className={EYEBROW}>Other review notes</span><strong>{unplacedComments.length}</strong></div>
                 <p className="workspace-git__comment-summary">These notes are kept with their server anchor and are not placed on the current diff.</p>
                 {unplacedComments.map((comment) => renderCommentCard(comment, false))}
               </div>
@@ -835,7 +842,7 @@ export function WorkspaceGitReview({
       {confirmAction && (
         <div className="workspace-git__confirm" role="dialog" aria-modal="true" aria-labelledby={confirmTitleId}>
           <div className="workspace-git__confirm-card" ref={confirmCardRef}>
-            <span className="workspace-git__eyebrow">Confirm {confirmAction.kind}</span>
+            <span className={EYEBROW}>Confirm {confirmAction.kind}</span>
             <h3 id={confirmTitleId}>{confirmAction.kind === "commit" ? "Commit staged changes?" : "Discard selected changes?"}</h3>
             <p>{confirmAction.kind === "commit" ? `This will create “${confirmAction.message}” in ${workspaceName || workspaceId}.` : `This permanently changes ${confirmAction.receipt.paths.length} selected path${confirmAction.receipt.paths.length === 1 ? "" : "s"}.`}</p>
             <ul>{confirmAction.receipt.paths.map((path) => <li key={path}>{path}</li>)}</ul>

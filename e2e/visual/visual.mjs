@@ -34,6 +34,7 @@ const PORT = 7791;
 const URL_ = `http://127.0.0.1:${PORT}`;
 const WORK = "/tmp/perch-visual";
 const REPO = `${WORK}/repo`;
+const pinGitScroll = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollTop > 0) el.scrollTop = 0; });
 
 const PROPS = [
   "display", "position", "top", "right", "bottom", "left", "z-index", "float",
@@ -501,7 +502,25 @@ const STATES = [
     await line.getByTestId("git-comment-add").click();
     await page.getByTestId("git-comment-composer").waitFor();
     await page.getByTestId("git-comment-body").fill("a review note");
+    // focusing the textarea scrolls the panel by an engine-dependent amount: pin the scrollers to the top
+    await pinGitScroll(page);
     await sleep(300);
+  } },
+  // Broken repo -> Refresh -> "Status unavailable" (connection --error, status note); restoring it -> ready again.
+  { name: "14b-git-status-error", run: async (page) => {
+    fs.renameSync(`${REPO}/.git`, `${REPO}/.git.off`);
+    await page.getByTestId("git-refresh").click();
+    await page.getByText("Status unavailable").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14c-git-status-restored", run: async (page) => {
+    fs.renameSync(`${REPO}/.git.off`, `${REPO}/.git`);
+    await page.getByTestId("git-refresh").click();
+    await page.getByText(/^(Clean|Dirty)$/).waitFor({ timeout: 20000 });
+    await sleep(500);
+    await pinGitScroll(page);
+    await sleep(200);
   } },
   { name: "15-worktree-menu", run: async (page) => {
     await page.getByTestId("workspace-tools-toggle").click(); // close drawer
