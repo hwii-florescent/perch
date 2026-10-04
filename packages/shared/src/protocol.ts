@@ -830,6 +830,8 @@ export interface ViewerPresentation {
   legacyLayouts?: Record<string, unknown>;
 }
 export interface PresentationUpdate {
+  /** The `revision` this was made against; a stale one fails with `surface_conflict`. */
+  baseRevision?: number;
   order: string[];
   activeResourceId?: string;
   layout?: unknown;

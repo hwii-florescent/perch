@@ -76,6 +76,8 @@ const WORKSPACE_TABLES: &[&str] = &[
     "file_save_operations",
     "git_previews",
     "workspace_terminals",
+    "surface_resources",
+    "viewer_presentations",
 ];
 
 impl HistoryDb {
@@ -349,6 +351,18 @@ impl HistoryDb {
                 result => {
                     result?;
                 }
+            }
+        }
+        // Import markers name their workspace after the colon (`files:<id>`).
+        let marker_cleanup = conn.execute(
+            "DELETE FROM surface_imports WHERE substr(source, instr(source, ':') + 1)
+                IN (SELECT id FROM workspaces WHERE project_id = ?1)",
+            params![id],
+        );
+        match marker_cleanup {
+            Err(error) if error.to_string().contains("no such table") => {}
+            result => {
+                result?;
             }
         }
         conn.execute("DELETE FROM workspaces WHERE project_id = ?1", params![id])?;

@@ -61,9 +61,14 @@ CREATE TABLE IF NOT EXISTS surface_imports (
     PRIMARY KEY (viewer_id, source)
 );";
 
-pub const MAX_PRESENTATION_ORDER: usize = 512;
+/// Bound on one `set` (terminals included; they are derived, never refused).
+pub const MAX_PRESENTATION_ORDER: usize = 4096;
+/// Files and diffs one viewer may hold open in a workspace. Open, import and
+/// set all enforce it; an import that would exceed it fails whole (nothing is
+/// truncated, the client keeps its legacy state).
+pub const MAX_OPEN_TABS: usize = 512;
 pub const MAX_LAYOUT_BYTES: usize = 256 * 1024;
-const MAX_IMPORT_FILES: usize = 512;
+const MAX_IMPORT_FILES: usize = MAX_OPEN_TABS;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -152,6 +157,10 @@ pub struct ViewerPresentation {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PresentationUpdate {
+    /// The revision this update was made against. When present and not the
+    /// current one (another tab of this viewer, an open or an import has
+    /// changed it since) the write is refused with `surface_conflict`.
+    pub base_revision: Option<u64>,
     pub order: Vec<String>,
     pub active_resource_id: Option<String>,
     pub layout: Option<Value>,
@@ -165,6 +174,8 @@ pub enum SurfaceError {
     Dirty,
     /// A live terminal is closed by closing its runtime, not its descriptor.
     Owned,
+    /// The presentation changed since the caller read it; re-read and retry.
+    Conflict,
     Storage(anyhow::Error),
 }
 
@@ -175,6 +186,7 @@ impl std::fmt::Display for SurfaceError {
             Self::NotFound => f.write_str("not found"),
             Self::Dirty => f.write_str("the file has unsaved changes"),
             Self::Owned => f.write_str("close the terminal itself; its process is still owned"),
+            Self::Conflict => f.write_str("the presentation changed; reload it and retry"),
             Self::Storage(error) => error.fmt(f),
         }
     }
@@ -189,6 +201,7 @@ impl SurfaceError {
             Self::NotFound => "surface_not_found",
             Self::Dirty => "surface_dirty",
             Self::Owned => "surface_owned",
+            Self::Conflict => "surface_conflict",
             Self::Storage(_) => "surface_storage",
         }
     }
@@ -448,41 +461,123 @@ fn open_locked(
     describe(row).ok_or(SurfaceError::NotFound)
 }
 
-/// Add ids to one viewer's order (appended, deduped), creating its row at
-/// revision 0 if it has none. Membership is how a file or diff becomes
-/// visible to a viewer: another viewer opening one never adds a tab here.
+/// The viewer's stored `(revision, order)`; `(0, [])` before it has a row.
+fn stored_order(
+    conn: &rusqlite::Connection,
+    viewer_id: &str,
+    workspace_id: &str,
+) -> Result<(u64, Vec<String>)> {
+    let stored: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT revision, order_json FROM viewer_presentations WHERE viewer_id = ?1 AND workspace_id = ?2",
+            params![viewer_id, workspace_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(stored
+        .map(|(revision, raw)| {
+            (
+                revision.max(0) as u64,
+                serde_json::from_str(&raw).unwrap_or_default(),
+            )
+        })
+        .unwrap_or_default())
+}
+
+/// Refuse an order holding more than [`MAX_OPEN_TABS`] files/diffs.
+fn check_tab_cap(conn: &rusqlite::Connection, workspace_id: &str, order: &[String]) -> Result<()> {
+    let tabs: HashSet<String> = conn
+        .prepare("SELECT id FROM surface_resources WHERE workspace_id = ?1 AND kind != 'terminal'")?
+        .query_map(params![workspace_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if order.iter().filter(|id| tabs.contains(*id)).count() > MAX_OPEN_TABS {
+        return invalid("too many open files and diffs; close some first");
+    }
+    Ok(())
+}
+
+/// Add ids to one viewer's order (appended, deduped). Membership is how a
+/// file or diff becomes visible to a viewer: another viewer opening one never
+/// adds a tab here. A real change advances the revision; a repeat does not.
 fn add_to_order(
     conn: &rusqlite::Connection,
     viewer_id: &str,
     workspace_id: &str,
     ids: &[String],
 ) -> Result<()> {
-    let stored: Option<String> = conn
-        .query_row(
-            "SELECT order_json FROM viewer_presentations WHERE viewer_id = ?1 AND workspace_id = ?2",
-            params![viewer_id, workspace_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let mut order: Vec<String> = stored
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
+    let (_, mut order) = stored_order(conn, viewer_id, workspace_id)?;
+    let before = order.len();
     for id in ids {
         if !order.contains(id) {
             order.push(id.clone());
         }
     }
+    if order.len() == before {
+        return Ok(());
+    }
+    check_tab_cap(conn, workspace_id, &order)?;
     conn.execute(
         "INSERT INTO viewer_presentations (viewer_id, workspace_id, revision, order_json, updated_at)
-         VALUES (?1, ?2, 0, ?3, ?4)
+         VALUES (?1, ?2, 1, ?3, ?4)
          ON CONFLICT(viewer_id, workspace_id) DO UPDATE SET
-            order_json = excluded.order_json, updated_at = excluded.updated_at",
+            revision = revision + 1, order_json = excluded.order_json, updated_at = excluded.updated_at",
         params![
             viewer_id,
             workspace_id,
             serde_json::to_string(&order).unwrap_or_default(),
             now_millis()
         ],
+    )?;
+    Ok(())
+}
+
+/// A file or diff leaves `viewer_id`'s tabs. The descriptor itself goes only
+/// when no other viewer shows it, and then a file with an unsaved draft
+/// refuses (Save or Discard first). Every path that removes membership
+/// (`close`, `set_presentation`) goes through this one guard.
+fn release_locked(
+    conn: &rusqlite::Connection,
+    viewer_id: &str,
+    workspace_id: &str,
+    resource_id: &str,
+) -> Result<()> {
+    let row = conn
+        .query_row(
+            &format!("{SELECT} WHERE id = ?1 AND workspace_id = ?2 AND kind != 'terminal'"),
+            params![resource_id, workspace_id],
+            read_row,
+        )
+        .optional()?;
+    let Some(descriptor) = row.and_then(describe) else {
+        return Ok(()); // already gone, or a terminal (never removed here)
+    };
+    let shown_elsewhere = conn
+        .prepare("SELECT order_json FROM viewer_presentations WHERE workspace_id = ?1 AND viewer_id != ?2")?
+        .query_map(params![workspace_id, viewer_id], |r| r.get::<_, String>(0))?
+        .filter_map(|raw| serde_json::from_str::<Vec<String>>(&raw.ok()?).ok())
+        .any(|order| order.iter().any(|id| id == resource_id));
+    if shown_elsewhere {
+        return Ok(());
+    }
+    if descriptor.kind == SurfaceKind::File {
+        let dirty: bool = conn
+            .query_row(
+                "SELECT dirty FROM file_buffers WHERE workspace_id = ?1 AND path = ?2",
+                params![
+                    workspace_id,
+                    descriptor.locator.path.as_deref().unwrap_or_default()
+                ],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if dirty {
+            return Err(SurfaceError::Dirty);
+        }
+    }
+    conn.execute(
+        "DELETE FROM surface_resources WHERE id = ?1",
+        params![resource_id],
     )?;
     Ok(())
 }
@@ -517,10 +612,9 @@ pub fn list(db: &HistoryDb, workspace_id: &str) -> Result<Vec<SurfaceDescriptor>
     Ok(db.with_connection(|conn| Ok(list_locked(conn, workspace_id)?))?)
 }
 
-/// Close a file or diff in one viewer. The descriptor itself goes only when
-/// no viewer still shows it, and then a file with an unsaved draft refuses
-/// (Save or Discard first). Terminals refuse: closing one means ending its
-/// process (`terminal.close`, tab ×), which removes its descriptor.
+/// Close a file or diff in one viewer (see [`release_locked`] for the guard).
+/// Terminals refuse: closing one means ending its process (`terminal.close`,
+/// tab ×), which removes its descriptor.
 pub fn close(db: &HistoryDb, viewer_id: &str, workspace_id: &str, resource_id: &str) -> Result<()> {
     check_id(viewer_id, "viewer id")?;
     Ok(db.with_connection(|conn| {
@@ -532,49 +626,14 @@ pub fn close(db: &HistoryDb, viewer_id: &str, workspace_id: &str, resource_id: &
         if descriptor.kind == SurfaceKind::Terminal {
             return Err(SurfaceError::Owned.into());
         }
-        let shown_elsewhere = tx
-            .prepare("SELECT order_json FROM viewer_presentations WHERE workspace_id = ?1 AND viewer_id != ?2")?
-            .query_map(params![workspace_id, viewer_id], |r| r.get::<_, String>(0))?
-            .filter_map(|raw| serde_json::from_str::<Vec<String>>(&raw.ok()?).ok())
-            .any(|order| order.iter().any(|id| id == resource_id));
-        if !shown_elsewhere {
-            if descriptor.kind == SurfaceKind::File {
-                let dirty: bool = tx
-                    .query_row(
-                        "SELECT dirty FROM file_buffers WHERE workspace_id = ?1 AND path = ?2",
-                        params![
-                            workspace_id,
-                            descriptor.locator.path.as_deref().unwrap_or_default()
-                        ],
-                        |r| r.get(0),
-                    )
-                    .optional()?
-                    .unwrap_or(false);
-                if dirty {
-                    return Err(SurfaceError::Dirty.into());
-                }
-            }
-            tx.execute("DELETE FROM surface_resources WHERE id = ?1", params![resource_id])?;
-        }
-        if let Some(raw) = tx
-            .query_row(
-                "SELECT order_json FROM viewer_presentations WHERE viewer_id = ?1 AND workspace_id = ?2",
-                params![viewer_id, workspace_id],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?
-        {
-            let mut order: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        release_locked(&tx, viewer_id, workspace_id, resource_id)?;
+        let (_, mut order) = stored_order(&tx, viewer_id, workspace_id)?;
+        if order.contains(&resource_id.to_string()) {
             order.retain(|id| id != resource_id);
             tx.execute(
                 "UPDATE viewer_presentations SET order_json = ?3, revision = revision + 1, updated_at = ?4
                  WHERE viewer_id = ?1 AND workspace_id = ?2",
-                params![
-                    viewer_id,
-                    workspace_id,
-                    serde_json::to_string(&order).unwrap_or_default(),
-                    now_millis()
-                ],
+                params![viewer_id, workspace_id, serde_json::to_string(&order).unwrap_or_default(), now_millis()],
             )?;
         }
         tx.commit()?;
@@ -653,8 +712,9 @@ pub fn get_presentation(
 
 /// Replace one viewer's presentation of one workspace and return it. Only the
 /// caller's own row is touched, which is what keeps viewers independent.
-/// Ids the viewer does not name leave its order; ids that do not exist are
-/// dropped on read.
+/// A file or diff the update drops from the order goes through the same
+/// guard as `close` (a last-shown dirty file refuses the whole write), and
+/// `base_revision`, when given, must be current.
 pub fn set_presentation(
     db: &HistoryDb,
     viewer_id: &str,
@@ -677,8 +737,17 @@ pub fn set_presentation(
     let order_json =
         serde_json::to_string(&update.order).map_err(|e| SurfaceError::Storage(e.into()))?;
     Ok(db.with_connection(|conn| {
-        workspace_host(conn, workspace_id)?;
-        conn.execute(
+        let tx = conn.transaction()?;
+        workspace_host(&tx, workspace_id)?;
+        let (revision, old_order) = stored_order(&tx, viewer_id, workspace_id)?;
+        if update.base_revision.is_some_and(|base| base != revision) {
+            return Err(SurfaceError::Conflict.into());
+        }
+        check_tab_cap(&tx, workspace_id, &update.order)?;
+        for id in old_order.iter().filter(|id| !update.order.contains(id)) {
+            release_locked(&tx, viewer_id, workspace_id, id)?;
+        }
+        tx.execute(
             "INSERT INTO viewer_presentations
                 (viewer_id, workspace_id, revision, order_json, active_resource_id, layout_json, updated_at)
              VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)
@@ -688,15 +757,9 @@ pub fn set_presentation(
                 active_resource_id = excluded.active_resource_id,
                 layout_json = excluded.layout_json,
                 updated_at = excluded.updated_at",
-            params![
-                viewer_id,
-                workspace_id,
-                order_json,
-                update.active_resource_id,
-                layout,
-                now_millis()
-            ],
+            params![viewer_id, workspace_id, order_json, update.active_resource_id, layout, now_millis()],
         )?;
+        tx.commit()?;
         Ok(presentation_locked(conn, viewer_id, workspace_id)?)
     })?)
 }
@@ -786,17 +849,15 @@ pub fn import_legacy(
                 )?;
                 ids.push(diff.id);
             }
-            add_to_order(&tx, viewer_id, workspace_id, &ids)?;
             tx.execute(
-                "UPDATE viewer_presentations
-                 SET legacy_layouts_json = COALESCE(legacy_layouts_json, ?3)
-                 WHERE viewer_id = ?1 AND workspace_id = ?2",
-                params![
-                    viewer_id,
-                    workspace_id,
-                    serde_json::to_string(&legacy).unwrap_or_default()
-                ],
+                "INSERT INTO viewer_presentations
+                    (viewer_id, workspace_id, revision, order_json, legacy_layouts_json, updated_at)
+                 VALUES (?1, ?2, 0, '[]', ?3, ?4)
+                 ON CONFLICT(viewer_id, workspace_id) DO UPDATE SET
+                    legacy_layouts_json = COALESCE(legacy_layouts_json, excluded.legacy_layouts_json)",
+                params![viewer_id, workspace_id, serde_json::to_string(&legacy).unwrap_or_default(), now_millis()],
             )?;
+            add_to_order(&tx, viewer_id, workspace_id, &ids)?;
         }
         if first(&format!("files:{workspace_id}"))? {
             let mut ids = Vec::new();
@@ -1015,11 +1076,12 @@ mod tests {
             order: vec![a.id.clone(), terminal.id.clone()],
             active_resource_id: Some(a.id.clone()),
             layout: Some(json!({"v": 1, "grid": "one"})),
+            ..Default::default()
         };
         let first = set_presentation(&db, "v1", &ws, &one).unwrap();
         assert_eq!(
             (first.revision, first.order.clone()),
-            (1, one.order.clone())
+            (2, one.order.clone()) // open (1), then set (2)
         );
         // v2 sees the global terminal only, with its own (empty) focus.
         let second = get_presentation(&db, "v2", &ws).unwrap();
@@ -1031,10 +1093,11 @@ mod tests {
             order: vec![terminal.id.clone()],
             active_resource_id: Some(terminal.id.clone()),
             layout: None,
+            ..Default::default()
         };
         set_presentation(&db, "v2", &ws, &two).unwrap();
         assert_eq!(get_presentation(&db, "v1", &ws).unwrap(), first);
-        assert_eq!(set_presentation(&db, "v1", &ws, &one).unwrap().revision, 2);
+        assert_eq!(set_presentation(&db, "v1", &ws, &one).unwrap().revision, 3);
         assert!(set_presentation(&db, "", &ws, &one).is_err());
         // The session ends: its tab and focus disappear from every viewer.
         db.delete_session("s1").unwrap();
@@ -1111,6 +1174,115 @@ mod tests {
     }
 
     #[test]
+    fn presentation_writes_cannot_bypass_the_close_guard_or_go_stale() {
+        let (db, ws) = db_with_workspace();
+        let f = open(&db, "v", &ws, SurfaceKind::File, &file("a.txt")).unwrap();
+        db.with_connection(|c| {
+            c.execute(
+                "INSERT INTO file_buffers (workspace_id, path, content, dirty, created_at, updated_at)
+                 VALUES (?1, 'a.txt', 'x', 1, 0, 0)",
+                params![ws],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        // Dropping the last tab of a dirty file through `set` is refused too.
+        let drop_it = PresentationUpdate::default();
+        assert!(matches!(
+            set_presentation(&db, "v", &ws, &drop_it),
+            Err(SurfaceError::Dirty)
+        ));
+        assert_eq!(
+            get_presentation(&db, "v", &ws).unwrap().order,
+            vec![f.id.clone()]
+        );
+
+        // An open advances the revision, so a stale write conflicts instead of
+        // silently dropping the new tab.
+        let seen = get_presentation(&db, "v", &ws).unwrap();
+        let g = open(&db, "v", &ws, SurfaceKind::File, &file("b.txt")).unwrap();
+        assert!(get_presentation(&db, "v", &ws).unwrap().revision > seen.revision);
+        let stale = PresentationUpdate {
+            base_revision: Some(seen.revision),
+            order: seen.order.clone(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            set_presentation(&db, "v", &ws, &stale),
+            Err(SurfaceError::Conflict)
+        ));
+        // A repeat open changes nothing; a current base revision is accepted.
+        let before = get_presentation(&db, "v", &ws).unwrap();
+        open(&db, "v", &ws, SurfaceKind::File, &file("b.txt")).unwrap();
+        assert_eq!(
+            get_presentation(&db, "v", &ws).unwrap().revision,
+            before.revision
+        );
+        let fresh = PresentationUpdate {
+            base_revision: Some(before.revision),
+            order: vec![g.id.clone(), f.id.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            set_presentation(&db, "v", &ws, &fresh).unwrap().order,
+            fresh.order
+        );
+    }
+
+    #[test]
+    fn one_capacity_policy_for_open_import_and_set() {
+        let (db, ws) = db_with_workspace();
+        let mut last = None;
+        for i in 0..MAX_OPEN_TABS {
+            last = Some(open(&db, "v", &ws, SurfaceKind::File, &file(&format!("f{i}"))).unwrap());
+        }
+        assert!(open(&db, "v", &ws, SurfaceKind::File, &file("one-too-many")).is_err());
+        // What was saved stays savable: the unchanged presentation round-trips.
+        let current = get_presentation(&db, "v", &ws).unwrap();
+        assert_eq!(current.order.len(), MAX_OPEN_TABS);
+        let same = PresentationUpdate {
+            order: current.order.clone(),
+            active_resource_id: last.map(|d| d.id),
+            ..Default::default()
+        };
+        set_presentation(&db, "v", &ws, &same).unwrap();
+        // An import that would not fit fails whole: no marker, nothing truncated.
+        let over: Vec<String> = (0..10).map(|i| format!("extra{i}")).collect();
+        assert!(import_legacy(&db, "v", &ws, &over, &[]).is_err());
+        assert_eq!(list(&db, &ws).unwrap().len(), MAX_OPEN_TABS);
+        close(&db, "v", &ws, &current.order[0]).unwrap();
+        assert!(import_legacy(&db, "v", &ws, &over[..1], &[]).is_ok());
+    }
+
+    #[test]
+    fn removing_a_project_removes_its_surface_state() {
+        let (db, ws) = db_with_workspace();
+        open(&db, "v", &ws, SurfaceKind::File, &file("a")).unwrap();
+        import_legacy(&db, "v", &ws, &["b".to_string()], &[]).unwrap();
+        let project: String = db
+            .with_connection(|c| {
+                Ok(c.query_row(
+                    "SELECT project_id FROM workspaces WHERE id = ?1",
+                    params![ws],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        db.delete_project(&project).unwrap();
+        let left: i64 = db
+            .with_connection(|c| {
+                Ok(c.query_row(
+                    "SELECT (SELECT COUNT(*) FROM surface_resources) + (SELECT COUNT(*) FROM viewer_presentations)
+                          + (SELECT COUNT(*) FROM surface_imports)",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
     fn survives_core_restart_and_speaks_the_wire_format() {
         let dir = std::env::temp_dir().join(format!("perch-surfaces-{}", uuid::Uuid::new_v4()));
         let path = dir.join("history.sqlite");
@@ -1125,6 +1297,7 @@ mod tests {
                 order: vec![f.id.clone()],
                 active_resource_id: Some(f.id.clone()),
                 layout: Some(json!({"v": 1})),
+                ..Default::default()
             };
             set_presentation(&db, "v1", &workspace.id, &update).unwrap();
             (workspace.id, f.id)
@@ -1134,6 +1307,7 @@ mod tests {
         ensure_schema(&db).unwrap();
         let restored = get_presentation(&db, "v1", &ws).unwrap();
         assert_eq!(restored.order, vec![file_id.clone()]);
+        assert_eq!(restored.revision, 2);
         assert_eq!(restored.active_resource_id, Some(file_id.clone()));
         assert_eq!(restored.layout, Some(json!({"v": 1})));
         assert_eq!(
