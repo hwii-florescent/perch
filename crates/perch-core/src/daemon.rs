@@ -66,8 +66,77 @@ fn connect() -> anyhow::Result<Client> {
     .display()
     .to_string();
     Ok(Client::connect_or_spawn(&dir, || {
-        perchd::spawn_command(&[exe, "__perchd".into()], &dir)
+        let command = perchd::spawn_command(&[exe, "__perchd".into()], &dir);
+        #[cfg(target_os = "macos")]
+        let command = launchd_job(&command, &dir);
+        command
     })?)
+}
+
+/// macOS keeps an app "running in the background" while anything it spawned
+/// is alive in its coalition, so a forked daemon (setsid or not) keeps a quit
+/// perch.app alive. Only launchd starts a process in a coalition of its own:
+/// run perchd as a per-user launchd job. Not a LaunchAgent (no plist in
+/// ~/Library), so like before it never starts at login. The label is per
+/// (exe, dir): a job already loaded under it has these exact arguments, and
+/// `kickstart` starts it again once it has exited.
+#[cfg(all(target_os = "macos", not(test)))]
+fn launchd_job(daemon: &std::process::Command, dir: &std::path::Path) -> std::process::Command {
+    use std::hash::{Hash, Hasher};
+    let argv: Vec<String> = std::iter::once(daemon.get_program())
+        .chain(daemon.get_args())
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    argv.hash(&mut hasher);
+    let label = format!("dev.hwii.perch.perchd.{:016x}", hasher.finish());
+    let plist = dir.join(format!("{label}.plist"));
+    let _ = std::fs::write(
+        &plist,
+        launchd_plist(&label, &argv, &dir.join("daemon.log")),
+    );
+    let domain = format!("gui/{}", unsafe { libc::getuid() });
+    let mut command = std::process::Command::new("/bin/sh");
+    command.args([
+        "-c",
+        r#"launchctl bootstrap "$1" "$2" 2>/dev/null || exec launchctl kickstart "$1/$3""#,
+        "sh",
+        &domain,
+        &plist.display().to_string(),
+        &label,
+    ]);
+    command
+}
+
+/// The job: started once on load and never restarted by launchd (perchd
+/// exits on its own terms), its children (the agents) never killed with it.
+#[cfg(any(target_os = "macos", test))]
+fn launchd_plist(label: &str, argv: &[String], log: &std::path::Path) -> String {
+    let xml = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let args: String = argv
+        .iter()
+        .map(|arg| format!("<string>{}</string>", xml(arg)))
+        .collect();
+    let log = xml(&log.display().to_string());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array>{args}</array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><false/>
+<key>AbandonProcessGroup</key><true/>
+<key>ProcessType</key><string>Interactive</string>
+<key>StandardOutPath</key><string>{log}</string>
+<key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>
+"#
+    )
 }
 
 /// Tests run the daemon on a thread of the test process, in a per-process
@@ -140,4 +209,26 @@ pub fn terminal_env() -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.extend(crate::terminal::terminal_env_overrides());
     env
+}
+
+#[cfg(test)]
+mod tests {
+    /// launchd silently refuses a malformed job, which would leave perch
+    /// with no daemon; `plutil` is the same parser launchctl uses.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launchd_plist_parses() {
+        let dir = std::env::temp_dir().join(format!("perch-plist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("job.plist");
+        let argv = ["/Apps/a & <b>.app/perch".to_string(), "__perchd".into()];
+        std::fs::write(&path, super::launchd_plist("x.y", &argv, &dir.join("log"))).unwrap();
+        let out = std::process::Command::new("plutil")
+            .args(["-extract", "ProgramArguments.0", "raw"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), argv[0]);
+    }
 }

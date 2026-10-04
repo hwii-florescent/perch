@@ -138,7 +138,9 @@ impl Client {
                 std::thread::spawn(move || child.wait());
                 return Ok(client);
             }
-            if let Ok(Some(status)) = child.try_wait() {
+            // A launcher (macOS: launchctl) exits 0 once it has handed the
+            // daemon off; keep waiting for the socket.
+            if let Ok(Some(status)) = child.try_wait().map(|s| s.filter(|s| !s.success())) {
                 // Lost a race with another starter? Its daemon may be up.
                 if let Ok(client) = Self::connect(&socket) {
                     return Ok(client);
