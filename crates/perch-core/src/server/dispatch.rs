@@ -199,6 +199,53 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session_id,
             terminal_id,
         } => terminal::handle_terminal_close(state, request_id, session_id, terminal_id),
+
+        ClientMessage::SurfaceOpen {
+            request_id,
+            workspace_id,
+            kind,
+            locator,
+        } => surfaces::handle_open(state, request_id, workspace_id, kind, locator),
+        ClientMessage::SurfaceList {
+            request_id,
+            workspace_id,
+        } => surfaces::handle_list(state, request_id, workspace_id),
+        ClientMessage::SurfaceClose {
+            request_id,
+            workspace_id,
+            resource_id,
+        } => surfaces::handle_close(state, request_id, workspace_id, resource_id),
+        ClientMessage::ViewerPresentationGet {
+            request_id,
+            viewer_id,
+            workspace_id,
+        } => surfaces::handle_presentation_get(state, request_id, viewer_id, workspace_id),
+        ClientMessage::ViewerPresentationSet {
+            request_id,
+            viewer_id,
+            workspace_id,
+            presentation,
+        } => surfaces::handle_presentation_set(
+            state,
+            request_id,
+            viewer_id,
+            workspace_id,
+            presentation,
+        ),
+        ClientMessage::SurfaceImport {
+            request_id,
+            viewer_id,
+            workspace_id,
+            files,
+            session_order,
+        } => surfaces::handle_import(
+            state,
+            request_id,
+            viewer_id,
+            workspace_id,
+            files,
+            session_order,
+        ),
         ClientMessage::AgentTerminalOpen {
             request_id,
             session_id,

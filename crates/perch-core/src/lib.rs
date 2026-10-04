@@ -29,6 +29,7 @@ pub mod settings;
 pub mod source_control;
 pub mod ssh;
 pub mod status;
+pub mod surfaces;
 pub mod terminal;
 pub mod terminal_profile;
 pub mod uploads;

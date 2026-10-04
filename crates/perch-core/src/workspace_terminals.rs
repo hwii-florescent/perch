@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 const MAX_VIEWERS: usize = 32;
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS workspace_terminals (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,

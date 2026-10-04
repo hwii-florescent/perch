@@ -67,6 +67,9 @@ there, not here.
 - **Terminals:**
   - `terminal.rs`: agent PTYs, now served by perchd.
   - `workspace_terminals.rs`: shell panes.
+  - `surfaces.rs`: canonical host-qualified Terminal/File/Diff resources and
+    per-viewer presentation (capability `surface.v1`); one-time idempotent
+    import of legacy session layouts and file tabs, originals kept.
   - `daemon.rs`: the runtime's perchd client. The daemon is the app binary
     re-run as `<exe> __perchd serve`.
   - `crates/perchd`: the socket protocol, history-log replay and vt100

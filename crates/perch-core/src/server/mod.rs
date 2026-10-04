@@ -87,6 +87,7 @@ mod agent_history;
 mod agents;
 mod native_ui;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
+mod surfaces;
 mod terminal;
 #[cfg(test)]
 use terminal::claude_conversation_exists_in;
@@ -600,6 +601,7 @@ pub async fn run(
     let workspace_terminals = Arc::new(crate::workspace_terminals::WorkspaceTerminals::new(
         db.clone(),
     )?);
+    crate::surfaces::ensure_schema(&db)?;
     let state = AppState {
         registry,
         db,
@@ -2267,6 +2269,7 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.list",
         "terminal.release",
         "terminal.close",
+        "surface.v1",
         "fs.tree",
         "fs.read",
         "fs.preview",

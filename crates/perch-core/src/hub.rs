@@ -1219,7 +1219,11 @@ impl HubManager {
             | ServerMessage::AgentUiResult { ref request_id, .. }
             | ServerMessage::TerminalOpened { ref request_id, .. }
             | ServerMessage::TerminalListResult { ref request_id, .. }
-            | ServerMessage::TerminalClosed { ref request_id, .. } => {
+            | ServerMessage::TerminalClosed { ref request_id, .. }
+            | ServerMessage::SurfaceOpened { ref request_id, .. }
+            | ServerMessage::SurfaceListResult { ref request_id, .. }
+            | ServerMessage::SurfaceClosed { ref request_id, .. }
+            | ServerMessage::ViewerPresentation { ref request_id, .. } => {
                 let key = PendingKey::Request(request_id.clone());
                 self.relay_unicast(&key, Arc::new(msg));
                 self.pending_unicast.lock().unwrap().remove(&key);
