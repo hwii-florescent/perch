@@ -939,7 +939,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
             )}
           </div>
           <div
-            className={"chat__input" + (dragActive ? " chat__input--drag-active" : "")}
+            className={cn("chat__input", dragActive && "outline-2 -outline-offset-2 outline-dashed outline-accent")}
             onDragOver={(e) => {
               e.preventDefault();
               if (sessionId) setDragActive(true);
