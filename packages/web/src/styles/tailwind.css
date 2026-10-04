@@ -2,6 +2,9 @@
  * the browser's defaults, so resetting them would change un-migrated screens.
  * Utilities are layered, so an unlayered legacy rule beats them: a migrated
  * element must carry no legacy class that styles it. */
+/* Order matters: `base` sits under `utilities`, so a utility (or an unlayered
+ * rule) that sets an outline always beats the focus baseline in base.css. */
+@layer theme, base, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 /* Scan TS/TSX only; the legacy .css files hold words that read as utilities. */

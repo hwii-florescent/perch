@@ -51,6 +51,17 @@
   box-sizing: border-box;
 }
 
+/* Keyboard focus baseline for every button-like control that doesn't style its
+ * own (the quiet chrome had none readable on the dark surfaces). Inside the
+ * box (-2px) because many strips scroll and clip outlines. xterm's hidden
+ * textarea and text fields keep their own treatment. */
+@layer base {
+  :where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+}
+
 html,
 body,
 #root {

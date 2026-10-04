@@ -11,12 +11,14 @@ import type { SessionSummary } from "@perch/shared";
 const MAX_TAB_LABEL = 24;
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
-const TAB = "shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-overlay-1 [font-family:inherit] hover:border-overlay-1 hover:text-fg";
+// Operational text uses subtext-0 (>= 4.5:1 on surface-0/1); overlay-1 is only 3.5:1 there.
+// The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
+const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
+const TAB = `shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [font-family:inherit] hover:border-overlay-1 hover:text-fg ${FOCUS}`;
 const TAB_ACTIVE = "border-overlay-1 bg-surface-1 text-fg";
-const CLOSE = "absolute top-1/2 right-[0.3rem] h-[1.1rem] w-[1.1rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-overlay-1 [border:0] [font-family:inherit] [transform:translateY(-50%)]";
-const closeButton = (active: boolean) => cn(CLOSE, active
-  ? "text-panel-bg hover:bg-[color-mix(in_srgb,var(--panel-bg)_25%,transparent)] hover:text-panel-bg"
-  : "hover:bg-surface-1 hover:text-fg");
+const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
+// The active tab is surface-1, so its x needs the hover fill one step lighter.
+const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-overlay-0" : "hover:bg-surface-1");
 
 /** Short pill label for a tab. Falls back to "New session" for a session
  * with no user messages yet (title is "" until the first chat.send). */
@@ -67,6 +69,7 @@ export function TabBar() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   // Bumped after every drop purely to trigger a re-render: `orderedTabs`
@@ -92,6 +95,11 @@ export function TabBar() {
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
   }, [renamingId]);
+
+  // The strip scrolls when tabs overflow: keep the active one in view.
+  useEffect(() => {
+    stripRef.current?.querySelector(".tab-bar__tab--active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [sessionId, activeFile, orderedTabs.length, workspaceFiles.length]);
 
   function commitRename() {
     if (renamingId) {
@@ -138,7 +146,7 @@ export function TabBar() {
   }
 
   return (
-    <div className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
+    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {orderedTabs.map((s) =>
         renamingId === s.id ? (
           <input
@@ -207,7 +215,7 @@ export function TabBar() {
 
       <button
         type="button"
-        className="h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:border-accent hover:text-fg"
+        className={`h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:border-accent hover:text-fg ${FOCUS}`}
         data-testid="tab-new"
         title="New session in this workspace"
         aria-label="New session in this workspace"
@@ -246,7 +254,8 @@ function FileTabButton({ tab, active }: { tab: FileTab; active: boolean }) {
         title={tab.path}
         onClick={() => open(tab.workspaceId, tab.path)}
       >
-        {name}{dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
+        <span className="inline-block max-w-[14rem] truncate align-bottom">{name}</span>
+        {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>
       <button
         type="button"
