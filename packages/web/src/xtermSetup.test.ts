@@ -102,10 +102,11 @@ describe("selectTerminalTheme", () => {
 
 describe("createPerchTerminal", () => {
   it("keeps an empty write's callback, and later writes, across a resize", async () => {
-    // jsdom has no canvas, matchMedia or ResizeObserver; xterm only uses them to measure.
+    // jsdom has no canvas, matchMedia, ResizeObserver or IntersectionObserver; xterm only uses them to measure and pause.
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
     window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
     globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
     const { createPerchTerminal } = await import("./xtermSetup");
     const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
     const fired: string[] = [];

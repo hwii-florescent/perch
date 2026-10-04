@@ -114,10 +114,13 @@ there, not here.
     WebKit ~10x less memory than with the DOM renderer. A lost context is
     replaced, never left on DOM. Automation (`navigator.webdriver`) keeps
     the DOM renderer, because the e2e specs read text from `.xterm-rows`
-    and a canvas leaves it empty. A terminal kept alive off screen drops its
-    WebGL context (`setVisible`). `node e2e/memory/memory.mjs` (after
-    `npm run build`) checks the footprint, the context replacement and
-    that closed or evicted terminals are freed.
+    and a canvas leaves it empty. Only a terminal with a box on screen
+    holds a WebGL context (an `IntersectionObserver` in
+    `createPerchTerminal`): parked ones and inactive Dockview tabs stay
+    mounted but detached. `node e2e/memory/memory.mjs` (after
+    `npm run build`) checks the peak footprint, context replacement and
+    release, and that closed or evicted terminals are freed;
+    workspace-tabs W6 checks tabs within a group.
   - Nothing cached past its view may close over it: a callback kept after
     a request settles (`agentTerminals.ts` `retired`) once held 128 dead
     xterms with their buffers. Cache plain data.

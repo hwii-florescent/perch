@@ -39,14 +39,12 @@ export abstract class KeptTerminal<S> {
   show(container: HTMLElement) {
     this.mounted = true;
     container.appendChild(this.host);
-    this.created.setVisible(true);
     this.created.fit();
   }
   park() {
     this.mounted = false;
+    // Detached, it frees its WebGL context (`createPerchTerminal`).
     this.host.remove();
-    // Browsers cap live WebGL contexts; a parked terminal frees its own.
-    this.created.setVisible(false);
   }
 
   dispose() {

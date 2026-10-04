@@ -14,6 +14,8 @@
  *        which is app-level, not part of a layout;
  *        the "+" action in a terminal group's own header adds a second
  *        terminal as a TAB in that SAME group, not a new split group.
+ *   W5/W6 — terminals kept alive across tab switches; only shown ones hold
+ *        a WebGL context.
  *
  * W1 starts two plain shell sessions in Chats; W2/W3 reuse them.
  *
@@ -204,5 +206,45 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
     await expect(agent.locator(".xterm")).toHaveClass(/enable-mouse-events/);
     await page.keyboard.press("Control+C");
+  });
+
+  // -------------------------------------------------------------------------
+  // W6 — an inactive tab in a Dockview group stays mounted (only detached),
+  // so it must still give up its WebGL context: browsers cap live ones.
+  // -------------------------------------------------------------------------
+  test("W6. only shown terminals hold a WebGL context, inactive group tabs included", async ({ page }) => {
+    test.setTimeout(60000);
+    await page.addInitScript(() => {
+      // The app's renderer, not automation's DOM one (xtermSetup.ts).
+      Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false });
+      const contexts: WebGL2RenderingContext[] = [];
+      (window as unknown as { liveContexts: () => number }).liveContexts = () => contexts.filter((gl) => !gl.isContextLost()).length;
+      const getContext = HTMLCanvasElement.prototype.getContext as (this: HTMLCanvasElement, type: string, options?: unknown) => RenderingContext | null;
+      HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, options?: unknown) {
+        const context = getContext.call(this, type, options);
+        if (type === "webgl2" && context) contexts.push(context as WebGL2RenderingContext);
+        return context;
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+    const live = () => page.evaluate(() => (window as unknown as { liveContexts: () => number }).liveContexts());
+    await freshPage(page);
+    await startChat(page);
+    await expect.poll(live).toBe(1);
+
+    // Three shells as tabs of one group: one shown, two only detached.
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
+    const group = page.locator('.dv-tabs-and-actions-container:has([data-testid="terminal-add-tab"])');
+    const tabs = group.locator('[data-testid^="pane-tab-"]');
+    await expect(tabs).toHaveCount(1, { timeout: 10000 });
+    for (const count of [2, 3]) {
+      await page.getByTestId("terminal-add-tab").click();
+      await expect(tabs).toHaveCount(count, { timeout: 10000 });
+    }
+    await expect.poll(live, { timeout: 15000 }).toBe(2);
+    for (const index of [0, 1, 2, 0]) {
+      await tabs.nth(index).click();
+      await expect.poll(live).toBe(2);
+    }
   });
 });

@@ -41,12 +41,13 @@
  * aligned to the cell grid, so TUI borders and tables join up instead of
  * showing the font's gaps. It is also the cheap one: the DOM renderer
  * rebuilds a span per styled cell on every repaint, and a colourful TUI
- * redrawing drove WebKit's physical footprint to ~940 MB where WebGL stayed
- * under 100 MB (`e2e/memory/memory.mjs`). A lost context is replaced, not
+ * redrawing peaked WebKit's physical footprint at ~625-940 MB where WebGL
+ * peaked under 210 MB (`e2e/memory/memory.mjs`). A lost context is replaced, not
  * left on DOM. A canvas leaves `.xterm-rows` empty, and the e2e specs
  * read terminal text from it, so automation (`navigator.webdriver`) keeps
  * the DOM renderer. Browsers cap live WebGL contexts (~16), so a terminal
- * kept alive off screen drops its renderer (`setVisible`).
+ * with no box on screen (parked, or an inactive Dockview tab) drops its
+ * context.
  */
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -130,8 +131,6 @@ export interface PerchTerminal {
   /** Take the PTY's size (a view that doesn't own it); the next `fit` then
    * reports any difference. */
   follow: (cols: number, rows: number) => void;
-  /** A terminal kept alive while off screen frees its GPU context. */
-  setVisible: (visible: boolean) => void;
   dispose: () => void;
 }
 
@@ -297,35 +296,51 @@ export function createPerchTerminal(
   }
 
   let webgl: WebglAddon | null = null;
-  let shown = false;
-  let losses = 0;
+  let onScreen = false;
+  let losses: number[] = [];
   const attachWebgl = (): void => {
-    if (webgl || !shown || disposed || navigator.webdriver) return;
+    if (webgl || !onScreen || disposed || navigator.webdriver) return;
+    const addon = new WebglAddon();
     try {
-      const addon = new WebglAddon();
       addon.onContextLoss(() => {
         addon.dispose();
         if (webgl !== addon) return;
         webgl = null;
         // A lost context (GPU reset, sleep/wake) gets a fresh one, not the
         // DOM renderer, whose per-cell spans cost WebKit ~10x the memory on
-        // a busy TUI. A GPU that keeps losing them stays on DOM until shown.
-        if (++losses <= 3) requestAnimationFrame(attachWebgl);
+        // a busy TUI. A GPU losing more than 3 a minute stays on DOM until
+        // the terminal is next shown.
+        const now = Date.now();
+        losses = [...losses.filter((at) => now - at < 60_000), now];
+        if (losses.length <= 3) requestAnimationFrame(attachWebgl);
       });
       term.loadAddon(addon);
       webgl = addon;
+      // A new canvas starts empty.
+      term.refresh(0, term.rows - 1);
     } catch {
-      // No WebGL2: xterm has no other renderer than DOM.
+      // No WebGL2: xterm has no other renderer than DOM. It registered the
+      // addon before activating it, so drop it or every retry leaves one.
+      try { addon.dispose(); } catch { /* half-activated */ }
     }
   };
-  const setVisible = (visible: boolean): void => {
-    shown = visible && !disposed;
-    losses = 0;
-    if (shown) return attachWebgl();
+  const dropWebgl = (): void => {
+    const gl = (webgl as unknown as { _renderer?: { _gl?: WebGL2RenderingContext } } | null)?._renderer?._gl;
     webgl?.dispose();
     webgl = null;
+    // xterm leaves the context to GC, and browsers cap live ones (~16).
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
   };
-  setVisible(true);
+  // Only a terminal with a box on screen holds a GPU context: a parked one
+  // (`terminalKeeper.ts`) and an inactive Dockview tab are detached, and
+  // stay mounted, so this can't follow React.
+  const visibility = new IntersectionObserver((entries) => {
+    onScreen = entries.at(-1)?.isIntersecting ?? false;
+    if (!onScreen) return dropWebgl();
+    losses = [];
+    attachWebgl();
+  });
+  visibility.observe(container);
 
   let lastCols = 0;
   let lastRows = 0;
@@ -448,12 +463,13 @@ export function createPerchTerminal(
       lastCols = cols;
       lastRows = rows;
     },
-    setVisible,
     dispose: () => {
       if (disposed) return;
       disposed = true;
       if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
+      visibility.disconnect();
+      dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);
       term.dispose();
     },
