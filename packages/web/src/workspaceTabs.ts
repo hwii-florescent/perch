@@ -2,6 +2,7 @@ import type { SessionSummary } from "@perch/shared";
 import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, usePerchStore, type ProjectNavState } from "./store";
 import { fileTabKey, useFileTabs, type FileTab } from "./fileTabs";
 import { applyStoredTabOrder } from "./tabOrder";
+import { useSplitSets } from "./splitSets";
 
 /** One entry of the strip: a session (a terminal or agent) or an open resource.
  * `id` is the session id or `fileTabKey`, so one stored order covers both. */
@@ -36,9 +37,29 @@ export function activeTabId(sessionId: string | null, activeFile: string | null)
   return activeFile ?? sessionId;
 }
 
+const MAX_TAB_LABEL = 24;
+
+/** Short pill label for a session. Falls back to "New session" for a session
+ * with no user messages yet (title is "" until the first chat.send). */
+export function sessionLabel(session: SessionSummary): string {
+  const title = session.title.trim();
+  if (!title) return "New session";
+  return title.length > MAX_TAB_LABEL ? `${title.slice(0, MAX_TAB_LABEL - 1)}…` : title;
+}
+
+export function entryLabel(entry: TabEntry): string {
+  if (entry.kind === "session") return sessionLabel(entry.session);
+  return entry.tab.kind === "review" ? "Changes" : entry.tab.path.split("/").pop() || entry.tab.path;
+}
+
 export function activateTab(entry: TabEntry): void {
   const files = useFileTabs.getState();
   if (entry.kind === "resource") {
+    // A split set shows its terminal beside the file: bring that session up first.
+    const set = useSplitSets.getState().sets.find((candidate) => candidate.ids.includes(entry.id));
+    const state = usePerchStore.getState();
+    const partner = set?.ids.find((id) => id !== entry.id && state.sessions.some((session) => session.id === id));
+    if (partner && partner !== state.sessionId) state.switchSession(partner);
     files.open(entry.tab.workspaceId, entry.tab.path, entry.tab.kind);
     return;
   }

@@ -240,8 +240,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
 
     const menu = page.locator('[data-testid="pane-context-menu"]');
     await expect(menu).toBeVisible({ timeout: 5000 });
-    // Split Right / Split Down / Split with Session / Zoom / Rename / Close.
-    await expect(page.locator(".pane-context-menu__item")).toHaveCount(6);
+    // Split Right / Split Down / Split with Session / Split with tab / Zoom / Rename / Close.
+    await expect(page.locator(".pane-context-menu__item")).toHaveCount(7);
 
     await page.screenshot({ path: "artifacts/p4-header-menu.png" });
 

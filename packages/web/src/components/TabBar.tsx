@@ -4,12 +4,11 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../st
 import { NewSessionPopover } from "../Sidebar";
 import { saveTabOrder } from "../tabOrder";
 import { useFileTabs, type FileTab } from "../fileTabs";
-import { activateTab, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
+import { activateTab, sessionLabel, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
+import { useSplitSets } from "../splitSets";
+import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { openSessionPaneMenu } from "../dockview/DockviewShell";
-import type { SessionSummary } from "@perch/shared";
-
-const MAX_TAB_LABEL = 24;
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
 // Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
@@ -18,18 +17,12 @@ const MAX_TAB_LABEL = 24;
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
 const TAB = `shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [font-family:inherit] hover:border-overlay-1 hover:text-fg ${FOCUS}`;
 const TAB_ACTIVE = "border-overlay-1 bg-surface-1 text-fg";
+// Members of a split set (shown side by side in the canvas) share a bottom rule.
+const TAB_SPLIT = "shadow-[inset_0_-2px_0_var(--overlay-1)]";
 const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
 // The active tab is surface-1, so its x hovers on panel-bg: fg is drawn against it in every theme
 // (overlay-0 is fg-coloured in the terminal theme and hid the x).
 const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
-
-/** Short pill label for a tab. Falls back to "New session" for a session
- * with no user messages yet (title is "" until the first chat.send). */
-function tabLabel(session: SessionSummary): string {
-  const title = session.title.trim();
-  if (!title) return "New session";
-  return title.length > MAX_TAB_LABEL ? `${title.slice(0, MAX_TAB_LABEL - 1)}…` : title;
-}
 
 /**
  * Tab strip for the sessions of the *current workspace*: a project checkout
@@ -92,6 +85,13 @@ export function TabBar() {
   // the visible strip can never disagree.
   const entries = workspaceTabs(navState, fileTabs);
   const fileShown = activeFile !== null && entries.some((entry) => entry.id === activeFile);
+  const sets = useSplitSets((s) => s.sets);
+  const splitMenu = useSplitSets((s) => s.menu);
+  const live = new Set(entries.map((entry) => entry.id));
+  const splitIds = new Set(sets.flatMap((set) => {
+    const members = set.ids.filter((id) => live.has(id));
+    return members.length >= 2 ? members : [];
+  }));
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
@@ -178,6 +178,7 @@ export function TabBar() {
             "tab-bar__tab",
             TAB,
             s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
+            splitIds.has(s.id) && TAB_SPLIT,
             s.id === draggingId && "opacity-50",
             s.id === dragOverId && "border-accent shadow-[-2px_0_0_var(--accent)]",
           )}
@@ -200,7 +201,7 @@ export function TabBar() {
             setRenameValue(s.title || "");
           }}
         >
-          {tabLabel(s)}
+          {sessionLabel(s)}
         </button>
         {/* Like closing a tab in Orca: the session, its agent and its shells
          * end (the agent's own transcript stays on disk). */}
@@ -209,7 +210,7 @@ export function TabBar() {
           className={closeButton(s.id === sessionId)}
           data-testid={`tab-close-${s.id}`}
           title="Close session"
-          aria-label={`Close ${tabLabel(s)}`}
+          aria-label={`Close ${sessionLabel(s)}`}
           onClick={() => deleteSession(s.id)}
         >
           ×
@@ -222,7 +223,7 @@ export function TabBar() {
   return (
     <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry) => entry.kind === "resource" ? (
-        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile}
+        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile} split={splitIds.has(entry.id)}
           dragging={entry.id === draggingId} dragOver={entry.id === dragOverId}
           onDragStart={() => handleTabDragStart(entry.id)} onDragOver={(e) => handleTabDragOver(e, entry.id)}
           onDrop={() => handleTabDrop(entry.id)} onDragEnd={handleTabDragEnd} />
@@ -238,6 +239,7 @@ export function TabBar() {
       >
         {"+"}
       </button>
+      {splitMenu && <TabSplitMenu entries={entries} menu={splitMenu} />}
       {popoverAnchor && (
         <NewSessionPopover
           hostId={hostId}
@@ -252,10 +254,11 @@ export function TabBar() {
 }
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
-function ResourceTabButton({ tab, id, active, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd }: {
+function ResourceTabButton({ tab, id, active, split, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd }: {
   tab: FileTab;
   id: string;
   active: boolean;
+  split: boolean;
   dragging: boolean;
   dragOver: boolean;
   onDragStart: () => void;
@@ -279,6 +282,7 @@ function ResourceTabButton({ tab, id, active, dragging, dragOver, onDragStart, o
           "tab-bar__tab",
           TAB,
           active && ["tab-bar__tab--active", TAB_ACTIVE],
+          split && TAB_SPLIT,
           dragging && "opacity-50",
           dragOver && "border-accent shadow-[-2px_0_0_var(--accent)]",
         )}
@@ -290,6 +294,10 @@ function ResourceTabButton({ tab, id, active, dragging, dragOver, onDragStart, o
         onDrop={onDrop}
         onDragEnd={onDragEnd}
         onClick={() => activateTab({ id, kind: "resource", tab })}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          useSplitSets.getState().openMenu(id, e.clientX, e.clientY);
+        }}
       >
         <span className="inline-block max-w-[14rem] truncate align-bottom">{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}

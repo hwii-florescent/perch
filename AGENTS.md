@@ -153,9 +153,13 @@ there, not here.
     only: no Terminal (terminals are tabs), and Git only for a git
     workspace. It is app-level, not part of a session's layout, and follows
     the clicked workspace. A clicked file opens as a top-row tab after the
-    workspace's sessions, before `+` (`fileTabs.ts`, per viewer); the active
-    file covers the main area while the session's panes stay mounted
-    underneath. The phone keeps the combined explorer+editor view. The
+    workspace's sessions (the Git drawer's "Open as tab" adds the review the
+    same way), in one order shared by the strip, drag and the Ctrl+Space
+    n/p/1-9 chords (`workspaceTabs.ts`, per viewer); the active file covers
+    the main area while the session's panes stay mounted underneath, unless it
+    is in a split set (`splitSets.ts`, `SplitCanvas.tsx`, per viewer): the
+    members then share the canvas side by side while the strip stays one row.
+    A set holds at most one terminal. The phone keeps the combined explorer+editor view. The
     `files`/`gitReview` panel kinds remain only so old saved layouts
     restore.
   - A tab is a terminal. Every CLI agent runs under
