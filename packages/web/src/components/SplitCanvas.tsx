@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
-import { usePerchStore } from "../store";
-import { fileTabKey, useFileTabs, type FileTab } from "../fileTabs";
+import { effectiveWorkspace, usePerchStore } from "../store";
+import { fileTabKey, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { MIN_PANE_PX, useSplitSets, visibleSplit } from "../splitSets";
-import { workspaceTabs } from "../workspaceTabs";
+import { activateTab, workspaceTabs } from "../workspaceTabs";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
@@ -32,6 +32,7 @@ export function SplitCanvas() {
   const activeKey = useFileTabs((s) => s.active);
   const sets = useSplitSets((s) => s.sets);
   const resize = useSplitSets((s) => s.resize);
+  const shownWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [live, setLive] = useState<number[] | null>(null);
 
@@ -49,6 +50,25 @@ export function SplitCanvas() {
     const i = split?.ids.indexOf(id) ?? -1;
     return i < 0 ? undefined : { left: `${lefts[i]! * 100}%`, width: `${sizes[i]! * 100}%` };
   };
+
+  // Coming back to a project: its selected file or review returns. The session the
+  // navigation lands on can arrive after the workspace does (the server confirms it),
+  // so this also runs when the session changes, but only when it comes from another
+  // workspace's: a click on a session of the same workspace shows that session.
+  const previousSession = useRef<string | null>(null);
+  useEffect(() => {
+    const belongs = (id: string | null) => usePerchStore.getState().sessions.find((session) => session.id === id)?.workspaceId === shownWorkspaceId;
+    if (shownWorkspaceId && !belongs(previousSession.current)) restoreSelection(shownWorkspaceId);
+    previousSession.current = sessionId;
+  }, [shownWorkspaceId, sessionId]);
+
+  // A split set shows its terminal beside the file: if another session is current, bring the set's up.
+  const partner = fileShown ? sets.find((set) => set.ids.includes(activeKey))?.ids.find((id) => id !== activeKey && entries.some((entry) => entry.id === id && entry.kind === "session")) : undefined;
+  useEffect(() => {
+    const entry = entries.find((candidate) => candidate.id === activeKey);
+    if (partner && partner !== sessionId && entry) activateTab(entry);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `entries` is rebuilt each render
+  }, [partner, sessionId, activeKey]);
 
   const focusSession = () => { if (useFileTabs.getState().active) useFileTabs.getState().showSession(); };
   const focusResource = (tab: FileTab) => { if (fileTabKey(tab) !== useFileTabs.getState().active) useFileTabs.getState().open(tab.workspaceId, tab.path, tab.kind); };

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { usePerchStore } from "./store";
+import { effectiveWorkspace, usePerchStore } from "./store";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
  * a file, or (`kind: "review"`) the workspace's change review. */
@@ -58,7 +58,32 @@ useFileTabs.subscribe((state, previous) => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tabs)); } catch { /* convenience only */ }
 });
 
-// Any session switch (tab, sidebar, Navigator, keybinding) shows that session.
+// What each workspace has selected: an open file or review, or null for its
+// session. Per page load. It records the user's choices only (open, close, a
+// click on a session tab), never the resets below, which run before a
+// navigation has finished changing the workspace.
+const selected = new Map<string, string | null>();
+let resetting = false;
+
+useFileTabs.subscribe((state, previous) => {
+  if (state.active === previous.active || resetting) return;
+  const workspaceId = effectiveWorkspace(usePerchStore.getState())?.id;
+  if (workspaceId) selected.set(workspaceId, state.active);
+});
+
+/** Reselect what `workspaceId` had on screen when it was left (if still open). */
+export function restoreSelection(workspaceId: string): void {
+  const key = selected.get(workspaceId);
+  const { tabs, active } = useFileTabs.getState();
+  if (key && key !== active && tabs.some((tab) => fileTabKey(tab) === key)) useFileTabs.setState({ active: key });
+}
+
+// Any session or workspace switch (tab, sidebar, Navigator, keybinding) shows that session.
 usePerchStore.subscribe((state, previous) => {
-  if (state.sessionId !== previous.sessionId && useFileTabs.getState().active) useFileTabs.getState().showSession();
+  const files = useFileTabs.getState();
+  if (!files.active) return;
+  if (state.sessionId === previous.sessionId && effectiveWorkspace(state)?.id === effectiveWorkspace(previous)?.id) return;
+  resetting = true;
+  files.showSession();
+  resetting = false;
 });

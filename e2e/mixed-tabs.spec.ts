@@ -14,13 +14,15 @@ import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { startChat } from "./projects";
 
 const RUN_ID = `${Date.now()}-${process.pid}`;
-// One folder per test: the core remembers a project by path, so a deleted and
-// recreated folder would reuse the first test's stale project.
-let ROOT = "";
+// One folder per project: the core remembers a project by path, so a deleted and
+// recreated folder would reuse an earlier test's stale project.
+const roots: string[] = [];
 let fixtures = 0;
 
-function prepareFixture(): void {
-  ROOT = path.join(os.tmpdir(), `perch-e2e-mixed-tabs-${RUN_ID}-${++fixtures}`);
+/** A git repo with a README; removed by `cleanup`. */
+function prepareFixture(): string {
+  const ROOT = path.join(os.tmpdir(), `perch-e2e-mixed-tabs-${RUN_ID}-${++fixtures}`);
+  roots.push(ROOT);
   fs.rmSync(ROOT, { recursive: true, force: true });
   fs.mkdirSync(ROOT, { recursive: true });
   fs.writeFileSync(path.join(ROOT, "README.md"), "mixed tabs fixture\n");
@@ -32,6 +34,11 @@ function prepareFixture(): void {
   run("-c init.defaultBranch=main init -q");
   run("add -A");
   run('commit -q -m "initial"');
+  return ROOT;
+}
+
+function cleanup(): void {
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 }
 
 /** data-testids of the strip's tabs, left to right. */
@@ -44,8 +51,8 @@ async function chord(page: Page, key: string): Promise<void> {
   await page.keyboard.press(key);
 }
 
-/** A project with a terminal session, README.md and the review open as tabs. */
-async function openAll(page: Page) {
+/** `ROOT` as a project with a terminal session, README.md and the review open as tabs. */
+async function openAll(page: Page, ROOT: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const sessionId = await startChat(page, "terminal", ROOT);
   const project = page.locator(".workspace-project").filter({ hasText: path.basename(ROOT) });
@@ -63,9 +70,9 @@ async function openAll(page: Page) {
 }
 
 test("a terminal, a file and the review share one ordered strip", async ({ page }) => {
-  prepareFixture();
+  const root = prepareFixture();
   try {
-    const { workspaceId, terminalTab, fileTab, reviewTab } = await openAll(page);
+    const { workspaceId, terminalTab, fileTab, reviewTab } = await openAll(page, root);
 
     // A file and the review open as tabs after the terminal, with no agent started.
     await expect(page.getByTestId("workspace-git-review").last()).toBeVisible({ timeout: 20000 });
@@ -96,16 +103,16 @@ test("a terminal, a file and the review share one ordered strip", async ({ page 
     await page.getByTestId(`review-tab-close-${workspaceId}`).click();
     await expect.poll(() => strip(page)).toEqual([terminalTab, fileTab]);
   } finally {
-    fs.rmSync(ROOT, { recursive: true, force: true });
+    cleanup();
   }
 });
 
 const box = async (page: Page, testId: string) => (await page.getByTestId(testId).boundingBox())!;
 
 test("tabs split side by side under one strip", async ({ page }, testInfo) => {
-  prepareFixture();
+  const root = prepareFixture();
   try {
-    const { sessionId, terminalTab, fileTab, reviewTab } = await openAll(page);
+    const { sessionId, terminalTab, fileTab, reviewTab } = await openAll(page, root);
     const session = "split-pane-session";
     const readme = "split-pane-file-README.md";
     const canvas = page.getByTestId("split-canvas");
@@ -171,6 +178,39 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
     await expect(canvas).toHaveAttribute("data-split", "0");
     expect(await strip(page)).toEqual([terminalTab, fileTab, reviewTab]);
   } finally {
-    fs.rmSync(ROOT, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+test("returning to a project restores its selected resource and split", async ({ page }) => {
+  const rootA = prepareFixture();
+  const rootB = prepareFixture();
+  try {
+    const a = await openAll(page, rootA);
+    const canvas = page.getByTestId("split-canvas");
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    expect(await activeTab(page)).toBe(a.fileTab);
+
+    // Another project has its own strip.
+    const sessionB = await startChat(page, "terminal", rootB);
+    await expect.poll(() => strip(page)).toEqual([`tab-${sessionB}`]);
+    await expect(canvas).toHaveAttribute("data-split", "0");
+
+    // Back by the workspace row: the same file is selected and the split is back.
+    await page.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
+    await expect.poll(() => strip(page)).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+    await expect(canvas).toHaveAttribute("data-split", "2");
+
+    // Back by the session row too (a plain session switch across projects).
+    await page.getByTestId(`workspace-session-${sessionB}`).click();
+    await expect.poll(() => strip(page)).toEqual([`tab-${sessionB}`]);
+    await page.getByTestId(`workspace-session-${a.sessionId}`).click();
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+    await expect(canvas).toHaveAttribute("data-split", "2");
+  } finally {
+    cleanup();
   }
 });
