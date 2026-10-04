@@ -60,6 +60,11 @@ export function WorkspaceTools({ requestedWorkspaceId, tab, onTabChange, onClose
         <span className="min-w-0 flex-1 overflow-hidden text-right text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
+        {tab === "gitReview" && workspaceId && (
+          <button type="button" className={BTN} data-testid="workspace-tools-open-review" title="Open the review as a tab" onClick={() => useFileTabs.getState().open(workspaceId, "", "review")}>
+            Open as tab
+          </button>
+        )}
         <button type="button" className={BTN} aria-label="Close Files and Git" onClick={onClose}>×</button>
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden [&>*]:min-h-0 [&>*]:min-w-0 [&>*]:flex-1">

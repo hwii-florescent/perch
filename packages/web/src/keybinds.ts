@@ -27,7 +27,8 @@
  * (NUL) and the chord's follow-up letter to the PTY.
  */
 import { useEffect, useRef } from "react";
-import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject } from "./store";
+import { usePerchStore, effectiveActiveProject } from "./store";
+import { activateTab, currentTabs } from "./workspaceTabs";
 import { getDockviewController } from "./dockview/dockviewController";
 
 const LEADER_TIMEOUT_MS = 1500;
@@ -115,12 +116,21 @@ export function terminalKeyHandler(e: KeyboardEvent): boolean {
 // component of its own, so there's nothing to subscribe/re-render)
 // ---------------------------------------------------------------------------
 
-/** Jump to the Nth (1-indexed) session within the active workspace's session
- * list (same ordering as `TabBar`: created-at ascending). No-op out of range. */
-function jumpToNthWorkspaceSession(n: number): void {
-  const state = usePerchStore.getState();
-  const target = activeWorkspaceSessions(state)[n - 1];
-  if (target && target.id !== state.sessionId) state.switchSession(target.id);
+/** Jump to the Nth (1-indexed) tab of the strip, in the order it shows (sessions
+ * and open files alike). No-op out of range. */
+function jumpToNthWorkspaceTab(n: number): void {
+  const { tabs, activeId } = currentTabs();
+  const target = tabs[n - 1];
+  if (target && target.id !== activeId) activateTab(target);
+}
+
+/** Next/previous tab of the strip, wrapping. */
+function switchTabRelative(dir: 1 | -1): void {
+  const { tabs, activeId } = currentTabs();
+  if (tabs.length < 2) return;
+  const idx = tabs.findIndex((tab) => tab.id === activeId);
+  const next = tabs[((idx === -1 ? 0 : idx) + dir + tabs.length) % tabs.length];
+  if (next && next.id !== activeId) activateTab(next);
 }
 
 /**
@@ -200,8 +210,8 @@ export interface LeaderKeyHandlers {
 const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   g: (h) => h.openNavigator(),
   c: () => newSessionInCurrentProject(),
-  n: () => usePerchStore.getState().switchSessionRelative(1),
-  p: () => usePerchStore.getState().switchSessionRelative(-1),
+  n: () => switchTabRelative(1),
+  p: () => switchTabRelative(-1),
   x: () => getDockviewController()?.closeActiveTerminalPanel(),
   v: () => getDockviewController()?.addTerminalPanel("right"),
   // Wave 2 item 8: split-horizontal moved from leader,- to leader,_ (shift+-)
@@ -238,7 +248,7 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   L: () => getDockviewController()?.swapPaneDirection("right"),
 };
 for (let i = 1; i <= 9; i++) {
-  CHORD_ACTIONS[String(i)] = () => jumpToNthWorkspaceSession(i);
+  CHORD_ACTIONS[String(i)] = () => jumpToNthWorkspaceTab(i);
 }
 
 // ---------------------------------------------------------------------------

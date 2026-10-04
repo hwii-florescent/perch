@@ -571,7 +571,6 @@ export interface PerchState {
    * *active workspace* — the same list `TabBar` shows. Wraps
    * around; no-op if the active workspace has no other sessions. Used by
    * leader,n / leader,p (Phase 4). */
-  switchSessionRelative: (dir: 1 | -1) => void;
   createTerminal: (
     cols: number,
     rows: number,
@@ -1799,16 +1798,6 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   toggleSidebar: () => {
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
-  },
-
-  switchSessionRelative: (dir) => {
-    const state = get();
-    const projectSessions = activeWorkspaceSessions(state);
-    if (projectSessions.length < 2) return;
-    const idx = projectSessions.findIndex((s) => s.id === state.sessionId);
-    const base = idx === -1 ? 0 : idx;
-    const next = projectSessions[(base + dir + projectSessions.length) % projectSessions.length];
-    if (next && next.id !== state.sessionId) get().switchSession(next.id);
   },
 
   createTerminal: (cols, rows, options) => {

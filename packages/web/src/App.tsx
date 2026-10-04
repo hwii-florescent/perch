@@ -15,6 +15,7 @@ import { useIsMobileWidth } from "./responsive";
 import { useLeaderKey } from "./keybinds";
 import { usePerchStore, effectiveWorkspace } from "./store";
 import { fileTabKey, useFileTabs } from "./fileTabs";
+import { WorkspaceGitReviewPane } from "./components/WorkspaceGitReviewPane";
 import { WorkspaceFilesView } from "./components/WorkspaceFiles";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { PairingGate } from "./components/PairingGate";
@@ -278,12 +279,16 @@ export default function App() {
               <DockviewShell />
               {activeFile && (
                 <div className="absolute inset-0 z-10 flex bg-panel-bg">
-                  <WorkspaceFilesView
-                    key={fileTabKey(activeFile)}
-                    layout="editor"
-                    workspaceId={activeFile.workspaceId}
-                    initialPath={activeFile.path}
-                  />
+                  {activeFile.kind === "review" ? (
+                    <WorkspaceGitReviewPane key={fileTabKey(activeFile)} workspaceId={activeFile.workspaceId} />
+                  ) : (
+                    <WorkspaceFilesView
+                      key={fileTabKey(activeFile)}
+                      layout="editor"
+                      workspaceId={activeFile.workspaceId}
+                      initialPath={activeFile.path}
+                    />
+                  )}
                 </div>
               )}
             </>

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
-import { usePerchStore, activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace } from "../store";
+import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
-import { applyStoredTabOrder, saveTabOrder } from "../tabOrder";
-import { fileTabKey, useFileTabs, type FileTab } from "../fileTabs";
+import { saveTabOrder } from "../tabOrder";
+import { useFileTabs, type FileTab } from "../fileTabs";
+import { activateTab, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import type { SessionSummary } from "@perch/shared";
@@ -84,15 +85,13 @@ export function TabBar() {
   const project = effectiveActiveProject(navState);
   const hostId = ws?.hostId ?? project?.hostId ?? activeHostId;
   const cwd = ws?.path ?? project?.cwd ?? null;
-  const projectKey = ws ? `${ws.hostId}:ws:${ws.id}` : cwd ? `${hostId}:${cwd}` : null;
+  const projectKey = tabOrderKey(navState);
 
-  // `activeWorkspaceSessions` already scopes + orders (createdAt ascending) —
-  // the same list `keybinds.ts` cycles through, so
-  // leader,n/p and the visible strip can never disagree.
-  const tabs = activeWorkspaceSessions(navState);
-  const orderedTabs = projectKey ? applyStoredTabOrder(projectKey, tabs) : tabs;
-  const workspaceFiles = ws ? fileTabs.filter((tab) => tab.workspaceId === ws.id) : [];
-  const fileShown = activeFile !== null && workspaceFiles.some((tab) => fileTabKey(tab) === activeFile);
+  // `workspaceTabs` scopes and orders the strip (sessions and open resources
+  // alike); `keybinds.ts` cycles through the same list, so leader,n/p/1-9 and
+  // the visible strip can never disagree.
+  const entries = workspaceTabs(navState, fileTabs);
+  const fileShown = activeFile !== null && entries.some((entry) => entry.id === activeFile);
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
@@ -107,7 +106,7 @@ export function TabBar() {
     const observer = new ResizeObserver(reveal);
     observer.observe(strip);
     return () => observer.disconnect();
-  }, [sessionId, activeFile, orderedTabs.length, workspaceFiles.length]);
+  }, [sessionId, activeFile, entries.length]);
 
   function commitRename() {
     if (renamingId) {
@@ -126,7 +125,7 @@ export function TabBar() {
     setDraggingId(id);
   }
 
-  function handleTabDragOver(e: React.DragEvent<HTMLButtonElement>, id: string) {
+  function handleTabDragOver(e: React.DragEvent<HTMLElement>, id: string) {
     e.preventDefault();
     if (!draggingId || draggingId === id) return;
     if (dragOverId !== id) setDragOverId(id);
@@ -134,7 +133,7 @@ export function TabBar() {
 
   function handleTabDrop(id: string) {
     if (projectKey && draggingId && draggingId !== id) {
-      const ids = orderedTabs.map((s) => s.id);
+      const ids = entries.map((entry) => entry.id);
       const fromIdx = ids.indexOf(draggingId);
       const toIdx = ids.indexOf(id);
       if (fromIdx !== -1 && toIdx !== -1) {
@@ -153,73 +152,81 @@ export function TabBar() {
     setDragOverId(null);
   }
 
+  function sessionTab(entry: Extract<TabEntry, { kind: "session" }>) {
+    const s = entry.session;
+    return (
+      renamingId === s.id ? (
+        <input
+          key={s.id}
+          ref={renameInputRef}
+          type="text"
+          className="w-40 shrink-0 rounded-ui border border-accent bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] [outline:none]"
+          data-testid="rename-input"
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setRenamingId(null);
+          }}
+        />
+      ) : (
+        <span key={s.id} className="relative inline-flex shrink-0">
+        <button
+          type="button"
+          className={cn(
+            "tab-bar__tab",
+            TAB,
+            s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
+            s.id === draggingId && "opacity-50",
+            s.id === dragOverId && "border-accent shadow-[-2px_0_0_var(--accent)]",
+          )}
+          data-testid={`tab-${s.id}`}
+          title={s.title || "New session"}
+          draggable
+          onDragStart={() => handleTabDragStart(s.id)}
+          onDragOver={(e) => handleTabDragOver(e, s.id)}
+          onDrop={() => handleTabDrop(s.id)}
+          onDragEnd={handleTabDragEnd}
+          onClick={() => activateTab(entry)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            showSession();
+            if (s.id !== sessionId) switchSession(s.id);
+            openSessionPaneMenu(e.clientX, e.clientY);
+          }}
+          onDoubleClick={() => {
+            setRenamingId(s.id);
+            setRenameValue(s.title || "");
+          }}
+        >
+          {tabLabel(s)}
+        </button>
+        {/* Like closing a tab in Orca: the session, its agent and its shells
+         * end (the agent's own transcript stays on disk). */}
+        <button
+          type="button"
+          className={closeButton(s.id === sessionId)}
+          data-testid={`tab-close-${s.id}`}
+          title="Close session"
+          aria-label={`Close ${tabLabel(s)}`}
+          onClick={() => deleteSession(s.id)}
+        >
+          ×
+        </button>
+        </span>
+      )
+    );
+  }
+
   return (
     <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
-      {orderedTabs.map((s) =>
-        renamingId === s.id ? (
-          <input
-            key={s.id}
-            ref={renameInputRef}
-            type="text"
-            className="w-40 shrink-0 rounded-ui border border-accent bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] [outline:none]"
-            data-testid="rename-input"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitRename();
-              if (e.key === "Escape") setRenamingId(null);
-            }}
-          />
-        ) : (
-          <span key={s.id} className="relative inline-flex shrink-0">
-          <button
-            type="button"
-            className={cn(
-              "tab-bar__tab",
-              TAB,
-              s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
-              s.id === draggingId && "opacity-50",
-              s.id === dragOverId && "border-accent shadow-[-2px_0_0_var(--accent)]",
-            )}
-            data-testid={`tab-${s.id}`}
-            title={s.title || "New session"}
-            draggable
-            onDragStart={() => handleTabDragStart(s.id)}
-            onDragOver={(e) => handleTabDragOver(e, s.id)}
-            onDrop={() => handleTabDrop(s.id)}
-            onDragEnd={handleTabDragEnd}
-            onClick={() => { showSession(); switchSession(s.id); }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              showSession();
-              if (s.id !== sessionId) switchSession(s.id);
-              openSessionPaneMenu(e.clientX, e.clientY);
-            }}
-            onDoubleClick={() => {
-              setRenamingId(s.id);
-              setRenameValue(s.title || "");
-            }}
-          >
-            {tabLabel(s)}
-          </button>
-          {/* Like closing a tab in Orca: the session, its agent and its shells
-           * end (the agent's own transcript stays on disk). */}
-          <button
-            type="button"
-            className={closeButton(s.id === sessionId)}
-            data-testid={`tab-close-${s.id}`}
-            title="Close session"
-            aria-label={`Close ${tabLabel(s)}`}
-            onClick={() => deleteSession(s.id)}
-          >
-            ×
-          </button>
-          </span>
-        )
-      )}
-
-      {workspaceFiles.map((tab) => <FileTabButton key={fileTabKey(tab)} tab={tab} active={fileTabKey(tab) === activeFile} />)}
+      {entries.map((entry) => entry.kind === "resource" ? (
+        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile}
+          dragging={entry.id === draggingId} dragOver={entry.id === dragOverId}
+          onDragStart={() => handleTabDragStart(entry.id)} onDragOver={(e) => handleTabDragOver(e, entry.id)}
+          onDrop={() => handleTabDrop(entry.id)} onDragEnd={handleTabDragEnd} />
+      ) : sessionTab(entry))}
 
       <button
         type="button"
@@ -244,23 +251,45 @@ export function TabBar() {
   );
 }
 
-/** A file's tab: its name, a ● while it has unsaved changes, and ×. */
-function FileTabButton({ tab, active }: { tab: FileTab; active: boolean }) {
-  const open = useFileTabs((s) => s.open);
+/** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
+function ResourceTabButton({ tab, id, active, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd }: {
+  tab: FileTab;
+  id: string;
+  active: boolean;
+  dragging: boolean;
+  dragOver: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent<HTMLElement>) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+}) {
   const close = useFileTabs((s) => s.close);
+  const review = tab.kind === "review";
   const dirty = useWorkspaceFilesStore((s) => {
     const document = s.documents[tab.workspaceId]?.[tab.path];
-    return document != null && document.content !== document.savedContent;
+    return !review && document != null && document.content !== document.savedContent;
   });
-  const name = tab.path.split("/").pop() || tab.path;
+  const name = review ? "Changes" : tab.path.split("/").pop() || tab.path;
+  const testId = review ? `review-tab-${tab.workspaceId}` : `file-tab-${tab.path}`;
   return (
     <span className="relative inline-flex shrink-0">
       <button
         type="button"
-        className={cn("tab-bar__tab", TAB, active && ["tab-bar__tab--active", TAB_ACTIVE])}
-        data-testid={`file-tab-${tab.path}`}
-        title={tab.path}
-        onClick={() => open(tab.workspaceId, tab.path)}
+        className={cn(
+          "tab-bar__tab",
+          TAB,
+          active && ["tab-bar__tab--active", TAB_ACTIVE],
+          dragging && "opacity-50",
+          dragOver && "border-accent shadow-[-2px_0_0_var(--accent)]",
+        )}
+        data-testid={testId}
+        title={review ? "Changes" : tab.path}
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+        onClick={() => activateTab({ id, kind: "resource", tab })}
       >
         <span className="inline-block max-w-[14rem] truncate align-bottom">{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
@@ -268,9 +297,9 @@ function FileTabButton({ tab, active }: { tab: FileTab; active: boolean }) {
       <button
         type="button"
         className={closeButton(active)}
-        data-testid={`file-tab-close-${tab.path}`}
+        data-testid={review ? `review-tab-close-${tab.workspaceId}` : `file-tab-close-${tab.path}`}
         aria-label={`Close ${name}`}
-        onClick={() => close(fileTabKey(tab))}
+        onClick={() => close(id)}
       >
         ×
       </button>
