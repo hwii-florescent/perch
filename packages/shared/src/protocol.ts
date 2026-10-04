@@ -793,7 +793,9 @@ export interface TerminalClosedMessage {
 
 /** Canonical open resources (capability `surface.v1`). Identity is
  * host + workspace + kind + locator; files and diffs need no chat session.
- * Opening never starts a process, closing never stops one or drops a draft. */
+ * Opening a file/diff adds a tab only for the opening viewer; terminals are
+ * global runtimes that exist by being started (and are closed with
+ * `terminal.close`). Nothing here starts a process or drops a draft. */
 export type SurfaceKind = "terminal" | "file" | "diff";
 /** File: `path` (workspace-relative). Diff: `diff`. Terminal: `sessionId`,
  * plus `paneId` for a shell pane (absent = the session's agent terminal). */
@@ -809,9 +811,9 @@ export interface SurfaceDescriptor {
   workspaceId: string;
   kind: SurfaceKind;
   locator: SurfaceLocator;
-  /** `stale`: what it referred to is gone; show a placeholder, never relaunch. */
-  status: "ok" | "stale";
-  /** The runtime a terminal refers to; liveness of agent runtimes is `unknown` here. */
+  /** Shell panes only: the pane's runtime and lifecycle (`starting`, `running`,
+   * `exited`, `lost`). A view shows exited/lost as such and never relaunches.
+   * An agent terminal carries none: its liveness is the lifecycle registry's. */
   runtime?: { id: string; state: string };
   createdAt: number;
 }
@@ -835,6 +837,7 @@ export interface PresentationUpdate {
 export interface SurfaceOpenMessage {
   type: "surface.open";
   requestId: string;
+  viewerId: string;
   workspaceId: string;
   kind: SurfaceKind;
   locator?: SurfaceLocator;
@@ -847,6 +850,7 @@ export interface SurfaceListMessage {
 export interface SurfaceCloseMessage {
   type: "surface.close";
   requestId: string;
+  viewerId: string;
   workspaceId: string;
   resourceId: string;
 }

@@ -26,11 +26,12 @@ fn reply<T>(
 pub(super) fn handle_open(
     state: &Arc<ConnState>,
     request_id: String,
+    viewer_id: String,
     workspace_id: String,
     kind: SurfaceKind,
     locator: SurfaceLocator,
 ) {
-    let result = store::open(&state.app.db, &workspace_id, kind, &locator);
+    let result = store::open(&state.app.db, &viewer_id, &workspace_id, kind, &locator);
     reply(state, request_id, result, |request_id, surface| {
         ServerMessage::SurfaceOpened {
             request_id,
@@ -53,10 +54,11 @@ pub(super) fn handle_list(state: &Arc<ConnState>, request_id: String, workspace_
 pub(super) fn handle_close(
     state: &Arc<ConnState>,
     request_id: String,
+    viewer_id: String,
     workspace_id: String,
     resource_id: String,
 ) {
-    let result = store::close(&state.app.db, &workspace_id, &resource_id);
+    let result = store::close(&state.app.db, &viewer_id, &workspace_id, &resource_id);
     reply(state, request_id, result, |request_id, ()| {
         ServerMessage::SurfaceClosed {
             request_id,

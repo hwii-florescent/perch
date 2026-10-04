@@ -866,11 +866,14 @@ pub enum ClientMessage {
     },
 
     /// Canonical open resources and per-viewer presentation (capability
-    /// `surface.v1`). Opening a surface never starts a process; closing one
-    /// never stops a live process or discards a draft.
+    /// `surface.v1`). Opening a file/diff never starts a process and adds a
+    /// tab only for `viewer_id`; closing never stops a process or discards a
+    /// draft. Terminals exist by being started and are closed with
+    /// `terminal.close` / the session's close.
     #[serde(rename = "surface.open", rename_all = "camelCase")]
     SurfaceOpen {
         request_id: String,
+        viewer_id: String,
         workspace_id: String,
         kind: crate::surfaces::SurfaceKind,
         #[serde(default)]
@@ -884,6 +887,7 @@ pub enum ClientMessage {
     #[serde(rename = "surface.close", rename_all = "camelCase")]
     SurfaceClose {
         request_id: String,
+        viewer_id: String,
         workspace_id: String,
         resource_id: String,
     },

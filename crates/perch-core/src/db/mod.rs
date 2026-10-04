@@ -35,6 +35,7 @@ pub use file_buffers::{
 mod projects;
 pub use projects::{ProjectRow, WorkspaceRow, WorkspaceSnapshot};
 mod sessions;
+pub(crate) use sessions::SESSION_VISIBILITY_FILTER;
 pub use sessions::{MessageRow, SessionListRow, SessionRow};
 mod providers;
 pub use providers::ProviderPreference;

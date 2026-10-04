@@ -202,19 +202,21 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
 
         ClientMessage::SurfaceOpen {
             request_id,
+            viewer_id,
             workspace_id,
             kind,
             locator,
-        } => surfaces::handle_open(state, request_id, workspace_id, kind, locator),
+        } => surfaces::handle_open(state, request_id, viewer_id, workspace_id, kind, locator),
         ClientMessage::SurfaceList {
             request_id,
             workspace_id,
         } => surfaces::handle_list(state, request_id, workspace_id),
         ClientMessage::SurfaceClose {
             request_id,
+            viewer_id,
             workspace_id,
             resource_id,
-        } => surfaces::handle_close(state, request_id, workspace_id, resource_id),
+        } => surfaces::handle_close(state, request_id, viewer_id, workspace_id, resource_id),
         ClientMessage::ViewerPresentationGet {
             request_id,
             viewer_id,

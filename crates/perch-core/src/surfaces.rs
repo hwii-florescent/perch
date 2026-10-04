@@ -1,25 +1,28 @@
 //! Canonical, host-qualified open resources (Terminal / File / Diff) and
 //! per-viewer presentation (order, focus, split geometry).
 //!
-//! Two kinds of state, deliberately separate:
 //! - `surface_resources`: what exists in a workspace. Identity is
 //!   `(host, workspace, kind, locator)`, so opening the same thing twice
-//!   returns the same id and files/diffs need no chat session parent. A
-//!   terminal descriptor *refers* to a runtime (agent session or shell pane);
-//!   it never starts or stops one.
-//! - `viewer_presentations`: how one viewer arranges a workspace's resources.
-//!   Keyed by the viewer's stable id, so two viewers never write the same row
-//!   and cannot fight over focus or layout. The layout blob is opaque to Rust
-//!   (the client's versioned Dockview adapter owns its shape).
+//!   returns the same id and files/diffs need no chat session parent.
+//!   Terminal descriptors are derived from the sessions and shell panes the
+//!   existing lifecycle already owns (see `sync_terminals`): a descriptor
+//!   refers to a runtime, it never starts or stops one.
+//! - `viewer_presentations`: how one viewer arranges a workspace. Keyed by
+//!   the viewer's stable id, so viewers never write the same row and cannot
+//!   fight over focus or layout. A file or diff is in a viewer's tab order
+//!   only because that viewer opened or imported it; terminals are global
+//!   runtimes and appear for every viewer. The layout blob is opaque to
+//!   Rust (the client's versioned Dockview adapter owns its shape).
 //!
 //! Legacy state (per-session `pane_layout`, the web's localStorage file tabs)
 //! is imported once per viewer by [`import_legacy`]. Originals are never
 //! modified or deleted: `sessions.pane_layout` stays in place and a verbatim
-//! copy is kept in `legacy_layouts_json` until a later slice verifies the
+//! copy is kept in the presentation until a later slice verifies the
 //! translated layout. Importing again is a no-op.
 //!
-//! Resources whose workspace, session or shell pane has gone are reported as
-//! `stale` placeholders; nothing here ever launches a command.
+//! Nothing here launches a command. A shell that is `exited` or `lost` keeps
+//! its descriptor and says so; ending a terminal is `terminal.close` / the
+//! session's own close.
 
 use crate::agent_persistence::SqliteConnectionAdapter;
 use crate::db::HistoryDb;
@@ -28,7 +31,6 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Component, Path};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS surface_resources (
@@ -61,7 +63,6 @@ CREATE TABLE IF NOT EXISTS surface_imports (
 
 pub const MAX_PRESENTATION_ORDER: usize = 512;
 pub const MAX_LAYOUT_BYTES: usize = 256 * 1024;
-const MAX_PATH_BYTES: usize = 4096;
 const MAX_IMPORT_FILES: usize = 512;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,22 +109,13 @@ pub struct SurfaceLocator {
     pub diff: Option<DiffTarget>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SurfaceStatus {
-    Ok,
-    /// What it referred to is gone. Shown as a placeholder, never relaunched.
-    Stale,
-}
-
-/// The runtime a terminal descriptor refers to (never owned by the view).
+/// The runtime a shell descriptor refers to (never owned by the view).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SurfaceRuntime {
     pub id: String,
-    /// Shell panes: the row's lifecycle (`running`, `exited`, `lost`, ...).
-    /// Agent terminals report `unknown`: liveness is the lifecycle
-    /// registry's, not this table's.
+    /// The pane's lifecycle: `starting`, `running`, `exited` or `lost`. An
+    /// exited/lost shell is shown as such and is never relaunched by a view.
     pub state: String,
 }
 
@@ -135,7 +127,6 @@ pub struct SurfaceDescriptor {
     pub workspace_id: String,
     pub kind: SurfaceKind,
     pub locator: SurfaceLocator,
-    pub status: SurfaceStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SurfaceRuntime>,
     pub created_at: i64,
@@ -241,23 +232,8 @@ fn now_millis() -> i64 {
 }
 
 fn check_id(value: &str, what: &str) -> Result<()> {
-    if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
+    if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         return invalid(&format!("invalid {what}"));
-    }
-    Ok(())
-}
-
-/// Workspace-relative, no traversal: the filesystem service re-confines it,
-/// this only keeps nonsense out of durable identity.
-fn check_relative_path(path: &str) -> Result<()> {
-    if path.is_empty() || path.len() > MAX_PATH_BYTES || path.contains('\0') {
-        return invalid("invalid file path");
-    }
-    if Path::new(path)
-        .components()
-        .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
-    {
-        return invalid("file path must stay inside its workspace");
     }
     Ok(())
 }
@@ -265,14 +241,13 @@ fn check_relative_path(path: &str) -> Result<()> {
 /// Validate a locator for its kind and return its canonical key.
 fn locator_key(kind: SurfaceKind, locator: &SurfaceLocator) -> Result<String> {
     let canonical = match kind {
-        SurfaceKind::File => {
-            let path = locator.path.as_deref().unwrap_or_default();
-            check_relative_path(path)?;
-            SurfaceLocator {
-                path: Some(path.trim_start_matches("./").to_string()),
-                ..Default::default()
-            }
-        }
+        SurfaceKind::File => SurfaceLocator {
+            path: Some(
+                crate::filesystem::canonical_file_path(locator.path.as_deref().unwrap_or_default())
+                    .map_err(|e| SurfaceError::Invalid(e.to_string()))?,
+            ),
+            ..Default::default()
+        },
         SurfaceKind::Diff => SurfaceLocator {
             diff: Some(locator.diff.clone().unwrap_or(DiffTarget::WorkingTree)),
             ..Default::default()
@@ -306,88 +281,9 @@ fn workspace_host(conn: &rusqlite::Connection, workspace_id: &str) -> Result<Str
 const SELECT: &str =
     "SELECT id, host_id, workspace_id, kind, locator, created_at FROM surface_resources";
 
-/// Resolve a stored row to a descriptor, marking dangling terminal references
-/// stale. Rows of an unknown kind (written by a newer core) are skipped.
-fn describe(
-    conn: &rusqlite::Connection,
-    row: (String, String, String, String, String, i64),
-) -> Result<Option<SurfaceDescriptor>> {
-    let (id, host_id, workspace_id, kind, locator, created_at) = row;
-    let Some(kind) = SurfaceKind::parse(&kind) else {
-        return Ok(None);
-    };
-    let Ok(locator) = serde_json::from_str::<SurfaceLocator>(&locator) else {
-        return Ok(None);
-    };
-    let (status, runtime) = match kind {
-        SurfaceKind::Terminal => {
-            let session_id = locator.session_id.as_deref().unwrap_or_default();
-            let session_live: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
-                params![session_id],
-                |r| r.get(0),
-            )?;
-            match &locator.pane_id {
-                Some(pane_id) => {
-                    let shell = conn
-                        .query_row(
-                            "SELECT id, state FROM workspace_terminals
-                             WHERE session_id = ?1 AND pane_id = ?2",
-                            params![session_id, pane_id],
-                            |r| {
-                                Ok(SurfaceRuntime {
-                                    id: r.get(0)?,
-                                    state: r.get(1)?,
-                                })
-                            },
-                        )
-                        .optional()?;
-                    match shell {
-                        Some(runtime) => (SurfaceStatus::Ok, Some(runtime)),
-                        None => (SurfaceStatus::Stale, None),
-                    }
-                }
-                None if session_live => (
-                    SurfaceStatus::Ok,
-                    Some(SurfaceRuntime {
-                        id: session_id.to_string(),
-                        state: "unknown".into(),
-                    }),
-                ),
-                None => (SurfaceStatus::Stale, None),
-            }
-        }
-        SurfaceKind::File | SurfaceKind::Diff => {
-            let live: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1)",
-                params![workspace_id],
-                |r| r.get(0),
-            )?;
-            (
-                if live {
-                    SurfaceStatus::Ok
-                } else {
-                    SurfaceStatus::Stale
-                },
-                None,
-            )
-        }
-    };
-    Ok(Some(SurfaceDescriptor {
-        id,
-        host_id,
-        workspace_id,
-        kind,
-        locator,
-        status,
-        runtime,
-        created_at,
-    }))
-}
+type Row = (String, String, String, String, String, i64);
 
-fn read_row(
-    r: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(String, String, String, String, String, i64)> {
+fn read_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
     Ok((
         r.get(0)?,
         r.get(1)?,
@@ -398,21 +294,122 @@ fn read_row(
     ))
 }
 
+fn describe(row: Row) -> Option<SurfaceDescriptor> {
+    let (id, host_id, workspace_id, kind, locator, created_at) = row;
+    let kind = SurfaceKind::parse(&kind)?; // a newer core's kind: skip, don't fail
+    let locator = serde_json::from_str::<SurfaceLocator>(&locator).ok()?;
+    Some(SurfaceDescriptor {
+        id,
+        host_id,
+        workspace_id,
+        kind,
+        locator,
+        runtime: None,
+        created_at,
+    })
+}
+
+/// Terminal descriptors are derived, not opened: every visible CLI session
+/// and every shell pane of a workspace has one, and one whose session or
+/// pane is gone is dropped. Doing this where descriptors are read leaves
+/// every existing create/close path (tab ×, `terminal.close`, session
+/// delete, project removal) the single owner of lifecycle. Never launches
+/// anything.
+fn sync_terminals(conn: &rusqlite::Connection, workspace_id: &str) -> Result<()> {
+    let host_id = workspace_host(conn, workspace_id)?;
+    if host_id != "local" {
+        return Ok(());
+    }
+    let mut keys = Vec::new();
+    let sessions = conn
+        .prepare(&format!(
+            "SELECT s.id FROM sessions s
+             WHERE s.workspace_id = ?1 AND s.archived = 0 AND s.cli_provider_id IS NOT NULL
+               AND {}
+             ORDER BY s.created_at, s.rowid",
+            crate::db::SESSION_VISIBILITY_FILTER
+        ))?
+        .query_map(params![workspace_id], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    keys.extend(sessions.into_iter().map(|id| SurfaceLocator {
+        session_id: Some(id),
+        ..Default::default()
+    }));
+    let shells = conn
+        .prepare("SELECT session_id, pane_id FROM workspace_terminals WHERE workspace_id = ?1 ORDER BY rowid")?
+        .query_map(params![workspace_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    keys.extend(
+        shells
+            .into_iter()
+            .map(|(session_id, pane_id)| SurfaceLocator {
+                session_id: Some(session_id),
+                pane_id: Some(pane_id),
+                ..Default::default()
+            }),
+    );
+    let mut live = HashSet::new();
+    for locator in &keys {
+        let key = locator_key(SurfaceKind::Terminal, locator)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO surface_resources (id, host_id, workspace_id, kind, locator, created_at)
+             VALUES (?1, ?2, ?3, 'terminal', ?4, ?5)",
+            params![uuid::Uuid::new_v4().to_string(), host_id, workspace_id, key, now_millis()],
+        )?;
+        live.insert(key);
+    }
+    let stored = conn
+        .prepare("SELECT id, locator FROM surface_resources WHERE workspace_id = ?1 AND kind = 'terminal'")?
+        .query_map(params![workspace_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (id, key) in stored {
+        if !live.contains(&key) {
+            conn.execute("DELETE FROM surface_resources WHERE id = ?1", params![id])?;
+        }
+    }
+    Ok(())
+}
+
+/// Everything in the workspace. A shell descriptor carries its runtime
+/// (the pane's row id and lifecycle state); an agent terminal claims none,
+/// because agent liveness belongs to the lifecycle registry.
 fn list_locked(conn: &rusqlite::Connection, workspace_id: &str) -> Result<Vec<SurfaceDescriptor>> {
-    let mut statement =
-        conn.prepare(&format!("{SELECT} WHERE workspace_id = ?1 ORDER BY rowid"))?;
-    let rows = statement
+    sync_terminals(conn, workspace_id)?;
+    let rows = conn
+        .prepare(&format!("{SELECT} WHERE workspace_id = ?1 ORDER BY rowid"))?
         .query_map(params![workspace_id], read_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        out.extend(describe(conn, row)?);
+    for mut descriptor in rows.into_iter().filter_map(describe) {
+        if let (SurfaceKind::Terminal, Some(session_id), Some(pane_id)) = (
+            descriptor.kind,
+            &descriptor.locator.session_id,
+            &descriptor.locator.pane_id,
+        ) {
+            descriptor.runtime = conn
+                .query_row(
+                    "SELECT id, state FROM workspace_terminals WHERE session_id = ?1 AND pane_id = ?2",
+                    params![session_id, pane_id],
+                    |r| {
+                        Ok(SurfaceRuntime {
+                            id: r.get(0)?,
+                            state: r.get(1)?,
+                        })
+                    },
+                )
+                .optional()?;
+        }
+        out.push(descriptor);
     }
     Ok(out)
 }
 
-/// Insert-or-find. Opening never creates a process: a terminal descriptor
-/// must name a session (and shell pane) that already exists.
+/// Insert-or-find a file or diff descriptor. Terminals are derived
+/// ([`sync_terminals`]); opening one never creates a process.
 fn open_locked(
     conn: &rusqlite::Connection,
     workspace_id: &str,
@@ -425,37 +422,21 @@ fn open_locked(
     if host_id != "local" {
         return invalid("open this resource on its owning host");
     }
-    let key = locator_key(kind, locator)?;
     if kind == SurfaceKind::Terminal {
-        let canonical: SurfaceLocator =
-            serde_json::from_str(&key).map_err(|e| SurfaceError::Storage(e.into()))?;
-        let session_workspace: Option<Option<String>> = conn
-            .query_row(
-                "SELECT workspace_id FROM sessions WHERE id = ?1",
-                params![canonical.session_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        match session_workspace {
-            Some(Some(owner)) if owner == workspace_id => {}
-            Some(_) => return invalid("session belongs to another workspace"),
-            None => return Err(SurfaceError::NotFound),
-        }
-        if let Some(pane_id) = &canonical.pane_id {
-            let exists: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM workspace_terminals WHERE session_id = ?1 AND pane_id = ?2)",
-                params![canonical.session_id, pane_id],
-                |r| r.get(0),
-            )?;
-            if !exists {
-                return Err(SurfaceError::NotFound);
-            }
-        }
+        return invalid("a terminal exists by being started, not by being opened here");
     }
+    let key = locator_key(kind, locator)?;
     conn.execute(
         "INSERT OR IGNORE INTO surface_resources (id, host_id, workspace_id, kind, locator, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![uuid::Uuid::new_v4().to_string(), host_id, workspace_id, kind.as_str(), key, now_millis()],
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            host_id,
+            workspace_id,
+            kind.as_str(),
+            key,
+            now_millis()
+        ],
     )?;
     let row = conn.query_row(
         &format!(
@@ -464,45 +445,101 @@ fn open_locked(
         params![host_id, workspace_id, kind.as_str(), key],
         read_row,
     )?;
-    describe(conn, row)?.ok_or(SurfaceError::NotFound)
+    describe(row).ok_or(SurfaceError::NotFound)
 }
 
+/// Add ids to one viewer's order (appended, deduped), creating its row at
+/// revision 0 if it has none. Membership is how a file or diff becomes
+/// visible to a viewer: another viewer opening one never adds a tab here.
+fn add_to_order(
+    conn: &rusqlite::Connection,
+    viewer_id: &str,
+    workspace_id: &str,
+    ids: &[String],
+) -> Result<()> {
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT order_json FROM viewer_presentations WHERE viewer_id = ?1 AND workspace_id = ?2",
+            params![viewer_id, workspace_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let mut order: Vec<String> = stored
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    for id in ids {
+        if !order.contains(id) {
+            order.push(id.clone());
+        }
+    }
+    conn.execute(
+        "INSERT INTO viewer_presentations (viewer_id, workspace_id, revision, order_json, updated_at)
+         VALUES (?1, ?2, 0, ?3, ?4)
+         ON CONFLICT(viewer_id, workspace_id) DO UPDATE SET
+            order_json = excluded.order_json, updated_at = excluded.updated_at",
+        params![
+            viewer_id,
+            workspace_id,
+            serde_json::to_string(&order).unwrap_or_default(),
+            now_millis()
+        ],
+    )?;
+    Ok(())
+}
+
+/// Open a file or diff for `viewer_id`: idempotent per resource, and only
+/// that viewer gains the tab.
 pub fn open(
     db: &HistoryDb,
+    viewer_id: &str,
     workspace_id: &str,
     kind: SurfaceKind,
     locator: &SurfaceLocator,
 ) -> Result<SurfaceDescriptor> {
-    Ok(db.with_connection(|conn| Ok(open_locked(conn, workspace_id, kind, locator)?))?)
+    check_id(viewer_id, "viewer id")?;
+    Ok(db.with_connection(|conn| {
+        let tx = conn.transaction()?;
+        let descriptor = open_locked(&tx, workspace_id, kind, locator)?;
+        add_to_order(
+            &tx,
+            viewer_id,
+            workspace_id,
+            std::slice::from_ref(&descriptor.id),
+        )?;
+        tx.commit()?;
+        Ok(descriptor)
+    })?)
 }
 
+/// Everything that exists in the workspace, for browsing; a viewer's tabs
+/// are its presentation's `order`.
 pub fn list(db: &HistoryDb, workspace_id: &str) -> Result<Vec<SurfaceDescriptor>> {
     Ok(db.with_connection(|conn| Ok(list_locked(conn, workspace_id)?))?)
 }
 
-/// Drop a descriptor. Never touches a process or a draft: a live terminal
-/// refuses (close the terminal), a file with an unsaved draft refuses (Save
-/// or Discard first). Viewers drop the id from their order on next read.
-pub fn close(db: &HistoryDb, workspace_id: &str, resource_id: &str) -> Result<()> {
-    Ok(db.with_connection(|conn| Ok(close_locked(conn, workspace_id, resource_id)?))?)
-}
-
-fn close_locked(conn: &rusqlite::Connection, workspace_id: &str, resource_id: &str) -> Result<()> {
-    let row = conn
-        .query_row(
-            &format!("{SELECT} WHERE id = ?1 AND workspace_id = ?2"),
-            params![resource_id, workspace_id],
-            read_row,
-        )
-        .optional()?
-        .ok_or(SurfaceError::NotFound)?;
-    if let Some(descriptor) = describe(conn, row)? {
-        match descriptor.kind {
-            SurfaceKind::Terminal if descriptor.status == SurfaceStatus::Ok => {
-                return Err(SurfaceError::Owned);
-            }
-            SurfaceKind::File => {
-                let dirty: bool = conn
+/// Close a file or diff in one viewer. The descriptor itself goes only when
+/// no viewer still shows it, and then a file with an unsaved draft refuses
+/// (Save or Discard first). Terminals refuse: closing one means ending its
+/// process (`terminal.close`, tab ×), which removes its descriptor.
+pub fn close(db: &HistoryDb, viewer_id: &str, workspace_id: &str, resource_id: &str) -> Result<()> {
+    check_id(viewer_id, "viewer id")?;
+    Ok(db.with_connection(|conn| {
+        let tx = conn.transaction()?;
+        let descriptor = list_locked(&tx, workspace_id)?
+            .into_iter()
+            .find(|d| d.id == resource_id)
+            .ok_or(SurfaceError::NotFound)?;
+        if descriptor.kind == SurfaceKind::Terminal {
+            return Err(SurfaceError::Owned.into());
+        }
+        let shown_elsewhere = tx
+            .prepare("SELECT order_json FROM viewer_presentations WHERE workspace_id = ?1 AND viewer_id != ?2")?
+            .query_map(params![workspace_id, viewer_id], |r| r.get::<_, String>(0))?
+            .filter_map(|raw| serde_json::from_str::<Vec<String>>(&raw.ok()?).ok())
+            .any(|order| order.iter().any(|id| id == resource_id));
+        if !shown_elsewhere {
+            if descriptor.kind == SurfaceKind::File {
+                let dirty: bool = tx
                     .query_row(
                         "SELECT dirty FROM file_buffers WHERE workspace_id = ?1 AND path = ?2",
                         params![
@@ -514,17 +551,35 @@ fn close_locked(conn: &rusqlite::Connection, workspace_id: &str, resource_id: &s
                     .optional()?
                     .unwrap_or(false);
                 if dirty {
-                    return Err(SurfaceError::Dirty);
+                    return Err(SurfaceError::Dirty.into());
                 }
             }
-            _ => {}
+            tx.execute("DELETE FROM surface_resources WHERE id = ?1", params![resource_id])?;
         }
-    }
-    conn.execute(
-        "DELETE FROM surface_resources WHERE id = ?1",
-        params![resource_id],
-    )?;
-    Ok(())
+        if let Some(raw) = tx
+            .query_row(
+                "SELECT order_json FROM viewer_presentations WHERE viewer_id = ?1 AND workspace_id = ?2",
+                params![viewer_id, workspace_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            let mut order: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+            order.retain(|id| id != resource_id);
+            tx.execute(
+                "UPDATE viewer_presentations SET order_json = ?3, revision = revision + 1, updated_at = ?4
+                 WHERE viewer_id = ?1 AND workspace_id = ?2",
+                params![
+                    viewer_id,
+                    workspace_id,
+                    serde_json::to_string(&order).unwrap_or_default(),
+                    now_millis()
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })?)
 }
 
 fn presentation_locked(
@@ -563,8 +618,9 @@ fn presentation_locked(
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
     }
-    // Reconcile against what exists: closed resources drop out, resources
-    // this viewer has not placed yet follow in creation order.
+    // Reconcile against what exists: vanished resources drop out, and
+    // terminals (global runtimes, always listed) this viewer has not placed
+    // follow in creation order. Files and diffs are never added here.
     let resources = list_locked(conn, workspace_id)?;
     let existing: HashSet<&str> = resources.iter().map(|d| d.id.as_str()).collect();
     let mut seen = HashSet::new();
@@ -572,13 +628,13 @@ fn presentation_locked(
     order.extend(
         resources
             .iter()
-            .filter(|d| !seen.contains(&d.id))
+            .filter(|d| d.kind == SurfaceKind::Terminal && !seen.contains(&d.id))
             .map(|d| d.id.clone()),
     );
     if presentation
         .active_resource_id
         .as_deref()
-        .is_some_and(|id| !existing.contains(id))
+        .is_some_and(|id| !order.iter().any(|o| o == id))
     {
         presentation.active_resource_id = None;
     }
@@ -597,6 +653,8 @@ pub fn get_presentation(
 
 /// Replace one viewer's presentation of one workspace and return it. Only the
 /// caller's own row is touched, which is what keeps viewers independent.
+/// Ids the viewer does not name leave its order; ids that do not exist are
+/// dropped on read.
 pub fn set_presentation(
     db: &HistoryDb,
     viewer_id: &str,
@@ -630,7 +688,14 @@ pub fn set_presentation(
                 active_resource_id = excluded.active_resource_id,
                 layout_json = excluded.layout_json,
                 updated_at = excluded.updated_at",
-            params![viewer_id, workspace_id, order_json, update.active_resource_id, layout, now_millis()],
+            params![
+                viewer_id,
+                workspace_id,
+                order_json,
+                update.active_resource_id,
+                layout,
+                now_millis()
+            ],
         )?;
         Ok(presentation_locked(conn, viewer_id, workspace_id)?)
     })?)
@@ -638,12 +703,14 @@ pub fn set_presentation(
 
 /// One-time, idempotent import of a viewer's legacy state into a workspace.
 ///
-/// - `files`: the viewer's localStorage file tabs for this workspace (once
-///   per viewer; a later call is a no-op so a tab closed since stays closed).
-/// - Sessions (once per viewer and workspace): each CLI session and each
-///   shell pane becomes a terminal descriptor in place, `session_order`
-///   (the viewer's old tab order) first. Their `pane_layout` blobs are
-///   copied verbatim into the presentation; nothing is restarted or deleted.
+/// - Sessions (once per viewer and workspace): the workspace's terminals
+///   enter the order with `session_order` (the viewer's old tab order)
+///   first, each session's agent terminal before its shells. A session
+///   layout holding a Git review panel adds the working-tree diff. Their
+///   `pane_layout` blobs are copied verbatim; nothing is restarted/deleted.
+/// - `files`: the viewer's localStorage file tabs (once per viewer and
+///   workspace; a later call is a no-op, so a tab closed since stays
+///   closed). An unusable entry is skipped, never blocking the rest.
 pub fn import_legacy(
     db: &HistoryDb,
     viewer_id: &str,
@@ -665,59 +732,86 @@ pub fn import_legacy(
             )? == 1)
         };
         if first(&format!("sessions:{workspace_id}"))? {
-            let mut statement = tx.prepare(
-                "SELECT id, pane_layout, cli_provider_id IS NOT NULL FROM sessions
-                 WHERE workspace_id = ?1 AND archived = 0 ORDER BY created_at, rowid",
-            )?;
-            let mut sessions = statement
+            let terminals = list_locked(&tx, workspace_id)?
+                .into_iter()
+                .filter(|d| d.kind == SurfaceKind::Terminal)
+                .collect::<Vec<_>>();
+            let mut sessions = tx
+                .prepare(
+                    "SELECT id, pane_layout FROM sessions
+                     WHERE workspace_id = ?1 AND archived = 0 ORDER BY created_at, rowid",
+                )?
                 .query_map(params![workspace_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, bool>(2)?))
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            drop(statement);
             // Stable sort: ids the viewer ordered first, the rest unchanged.
-            sessions.sort_by_key(|(id, _, _)| session_order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+            sessions.sort_by_key(|(id, _)| {
+                session_order
+                    .iter()
+                    .position(|o| o == id)
+                    .unwrap_or(usize::MAX)
+            });
+            let mut ids = Vec::new();
             let mut legacy = BTreeMap::new();
-            for (session_id, layout, is_cli) in sessions {
-                let agent = SurfaceLocator { session_id: Some(session_id.clone()), ..Default::default() };
-                if is_cli {
-                    open_locked(&tx, workspace_id, SurfaceKind::Terminal, &agent)?;
-                }
-                let panes = {
-                    let mut statement = tx.prepare(
-                        "SELECT pane_id FROM workspace_terminals WHERE session_id = ?1 ORDER BY rowid",
-                    )?;
-                    let rows = statement.query_map(params![session_id], |r| r.get::<_, String>(0))?;
-                    rows.collect::<rusqlite::Result<Vec<_>>>()?
-                };
-                for pane_id in panes {
-                    let shell = SurfaceLocator { pane_id: Some(pane_id), ..agent.clone() };
-                    open_locked(&tx, workspace_id, SurfaceKind::Terminal, &shell)?;
-                }
-                if let Some(value) = layout.and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+            let mut wants_diff = false;
+            for (session_id, layout) in sessions {
+                // Agent terminal first, then its shells (creation order).
+                let (agent, shells): (Vec<_>, Vec<_>) = terminals
+                    .iter()
+                    .filter(|d| d.locator.session_id.as_deref() == Some(session_id.as_str()))
+                    .partition(|d| d.locator.pane_id.is_none());
+                ids.extend(agent.iter().chain(shells.iter()).map(|d| d.id.clone()));
+                if let Some(value) = layout.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                {
+                    wants_diff |=
+                        value
+                            .get("panels")
+                            .and_then(Value::as_object)
+                            .is_some_and(|panels| {
+                                panels.values().any(|panel| {
+                                    panel.get("contentComponent").and_then(Value::as_str)
+                                        == Some("gitReview")
+                                })
+                            });
                     legacy.insert(session_id, value);
                 }
             }
+            if wants_diff {
+                let diff = open_locked(
+                    &tx,
+                    workspace_id,
+                    SurfaceKind::Diff,
+                    &SurfaceLocator::default(),
+                )?;
+                ids.push(diff.id);
+            }
+            add_to_order(&tx, viewer_id, workspace_id, &ids)?;
             tx.execute(
-                "INSERT INTO viewer_presentations
-                    (viewer_id, workspace_id, revision, order_json, legacy_layouts_json, updated_at)
-                 VALUES (?1, ?2, 0, '[]', ?3, ?4)
-                 ON CONFLICT(viewer_id, workspace_id) DO UPDATE SET
-                    legacy_layouts_json = COALESCE(legacy_layouts_json, excluded.legacy_layouts_json)",
-                params![viewer_id, workspace_id, serde_json::to_string(&legacy).unwrap_or_default(), now_millis()],
+                "UPDATE viewer_presentations
+                 SET legacy_layouts_json = COALESCE(legacy_layouts_json, ?3)
+                 WHERE viewer_id = ?1 AND workspace_id = ?2",
+                params![
+                    viewer_id,
+                    workspace_id,
+                    serde_json::to_string(&legacy).unwrap_or_default()
+                ],
             )?;
         }
         if first(&format!("files:{workspace_id}"))? {
+            let mut ids = Vec::new();
             for path in files {
-                // One bad entry (stale or hand-edited storage) must not
-                // block the rest.
-                let locator = SurfaceLocator { path: Some(path.clone()), ..Default::default() };
-                if let Err(error @ SurfaceError::Storage(_)) =
-                    open_locked(&tx, workspace_id, SurfaceKind::File, &locator)
-                {
-                    return Err(error.into());
+                let locator = SurfaceLocator {
+                    path: Some(path.clone()),
+                    ..Default::default()
+                };
+                match open_locked(&tx, workspace_id, SurfaceKind::File, &locator) {
+                    Ok(descriptor) => ids.push(descriptor.id),
+                    Err(SurfaceError::Storage(error)) => return Err(error),
+                    Err(_) => {}
                 }
             }
+            add_to_order(&tx, viewer_id, workspace_id, &ids)?;
         }
         tx.commit()?;
         Ok(presentation_locked(conn, viewer_id, workspace_id)?)
@@ -745,28 +839,134 @@ mod tests {
         }
     }
 
+    fn agent(session_id: &str) -> SurfaceLocator {
+        SurfaceLocator {
+            session_id: Some(session_id.into()),
+            ..Default::default()
+        }
+    }
+
+    /// A visible CLI session in `ws`.
+    fn cli_session(db: &HistoryDb, ws: &str, id: &str, layout: Option<&Value>) {
+        db.create_session(id, "/tmp/demo").unwrap();
+        db.with_connection(|c| {
+            c.execute(
+                "UPDATE sessions SET workspace_id = ?1, cli_provider_id = 'claude', cli_activity = 1,
+                        pane_layout = ?3 WHERE id = ?2",
+                params![ws, id, layout.map(Value::to_string)],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn shell(db: &HistoryDb, ws: &str, session: &str, pane: &str, state: &str) {
+        db.with_connection(|c| {
+            c.execute(
+                "INSERT INTO workspace_terminals (id, session_id, workspace_id, pane_id, cwd, cols, rows, backend, state)
+                 VALUES (?1, ?2, ?3, ?4, '/tmp', 80, 24, 'daemon', ?5)",
+                params![format!("sh-{pane}"), session, ws, pane, state],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
-    fn open_is_idempotent_and_needs_no_session() {
+    fn open_is_idempotent_canonical_and_needs_no_session() {
         let (db, ws) = db_with_workspace();
-        let a = open(&db, &ws, SurfaceKind::File, &file("src/a.rs")).unwrap();
-        let b = open(&db, &ws, SurfaceKind::File, &file("./src/a.rs")).unwrap();
-        assert_eq!(a.id, b.id);
+        let a = open(&db, "v", &ws, SurfaceKind::File, &file("src/a.rs")).unwrap();
+        for same in ["./src/a.rs", "src//a.rs", "src/./a.rs"] {
+            assert_eq!(
+                open(&db, "v", &ws, SurfaceKind::File, &file(same))
+                    .unwrap()
+                    .id,
+                a.id
+            );
+        }
         assert_eq!(a.host_id, "local");
-        let d = open(&db, &ws, SurfaceKind::Diff, &SurfaceLocator::default()).unwrap();
+        let d = open(&db, "v", &ws, SurfaceKind::Diff, &SurfaceLocator::default()).unwrap();
         assert_eq!(d.locator.diff, Some(DiffTarget::WorkingTree));
         assert_eq!(list(&db, &ws).unwrap().len(), 2);
-        assert!(open(&db, &ws, SurfaceKind::File, &file("../etc/passwd")).is_err());
-        assert!(open(&db, &ws, SurfaceKind::File, &file("/etc/passwd")).is_err());
+        for bad in ["../etc/passwd", "/etc/passwd", "", ".", "a\\b"] {
+            assert!(
+                open(&db, "v", &ws, SurfaceKind::File, &file(bad)).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(open(&db, "v", &ws, SurfaceKind::Terminal, &agent("s")).is_err());
         assert!(matches!(
-            open(&db, "nope", SurfaceKind::File, &file("a")),
+            open(&db, "v", "nope", SurfaceKind::File, &file("a")),
             Err(SurfaceError::NotFound)
         ));
     }
 
     #[test]
-    fn closing_refuses_dirty_drafts_and_live_terminals() {
+    fn terminals_follow_the_existing_lifecycle_and_never_relaunch() {
         let (db, ws) = db_with_workspace();
-        let f = open(&db, &ws, SurfaceKind::File, &file("a.txt")).unwrap();
+        assert!(list(&db, &ws).unwrap().is_empty());
+        cli_session(&db, &ws, "s1", None);
+        shell(&db, &ws, "s1", "pane-a", "running");
+        let found = list(&db, &ws).unwrap();
+        assert_eq!(found.len(), 2);
+        let agent_terminal = found.iter().find(|d| d.locator.pane_id.is_none()).unwrap();
+        assert_eq!(agent_terminal.runtime, None); // liveness is the registry's
+        let pane = found.iter().find(|d| d.locator.pane_id.is_some()).unwrap();
+        assert_eq!(
+            pane.runtime,
+            Some(SurfaceRuntime {
+                id: "sh-pane-a".into(),
+                state: "running".into()
+            })
+        );
+        // A hidden (never-used) session and a hosted one get no descriptor.
+        db.create_session("quiet", "/tmp/demo").unwrap();
+        assert_eq!(list(&db, &ws).unwrap().len(), 2);
+        // A lost shell keeps an honest placeholder; the id is stable.
+        db.with_connection(|c| {
+            c.execute("UPDATE workspace_terminals SET state = 'lost'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let lost = list(&db, &ws).unwrap();
+        let again = lost.iter().find(|d| d.locator.pane_id.is_some()).unwrap();
+        assert_eq!(
+            (
+                again.id.as_str(),
+                again.runtime.as_ref().unwrap().state.as_str()
+            ),
+            (pane.id.as_str(), "lost")
+        );
+        // Terminals refuse surface.close; the session's own delete removes them.
+        assert!(matches!(
+            close(&db, "v", &ws, &pane.id),
+            Err(SurfaceError::Owned)
+        ));
+        db.delete_session("s1").unwrap();
+        db.with_connection(|c| {
+            c.execute("DELETE FROM workspace_terminals", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(list(&db, &ws).unwrap().is_empty());
+    }
+
+    #[test]
+    fn file_tabs_are_per_viewer_and_dirty_drafts_block_the_last_close() {
+        let (db, ws) = db_with_workspace();
+        let one = open(&db, "v1", &ws, SurfaceKind::File, &file("a.txt")).unwrap();
+        let two = open(&db, "v2", &ws, SurfaceKind::File, &file("a.txt")).unwrap();
+        assert_eq!(one.id, two.id); // one resource, two viewers
+        let other = open(&db, "v1", &ws, SurfaceKind::File, &file("only-v1")).unwrap();
+        assert_eq!(
+            get_presentation(&db, "v1", &ws).unwrap().order,
+            vec![one.id.clone(), other.id.clone()]
+        );
+        // v2 never opened `only-v1`: it must not gain that tab.
+        assert_eq!(
+            get_presentation(&db, "v2", &ws).unwrap().order,
+            vec![one.id.clone()]
+        );
         db.with_connection(|c| {
             c.execute(
                 "INSERT INTO file_buffers (workspace_id, path, content, dirty, created_at, updated_at)
@@ -776,109 +976,83 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert!(matches!(close(&db, &ws, &f.id), Err(SurfaceError::Dirty)));
+        // v1 closing while v2 still shows it only removes v1's tab.
+        close(&db, "v1", &ws, &one.id).unwrap();
+        assert_eq!(
+            get_presentation(&db, "v1", &ws).unwrap().order,
+            vec![other.id.clone()]
+        );
+        assert_eq!(
+            get_presentation(&db, "v2", &ws).unwrap().order,
+            vec![one.id.clone()]
+        );
+        // The last viewer cannot drop a dirty draft's tab...
+        assert!(matches!(
+            close(&db, "v2", &ws, &one.id),
+            Err(SurfaceError::Dirty)
+        ));
         db.with_connection(|c| {
             c.execute("UPDATE file_buffers SET dirty = 0", [])?;
             Ok(())
         })
         .unwrap();
-        close(&db, &ws, &f.id).unwrap();
-        assert!(list(&db, &ws).unwrap().is_empty());
-
-        db.create_session("s1", "/tmp/demo").unwrap();
-        db.with_connection(|c| {
-            c.execute(
-                "UPDATE sessions SET workspace_id = ?1 WHERE id = 's1'",
-                params![ws],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-        let t = open(
-            &db,
-            &ws,
-            SurfaceKind::Terminal,
-            &SurfaceLocator {
-                session_id: Some("s1".into()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(t.status, SurfaceStatus::Ok);
-        assert!(matches!(close(&db, &ws, &t.id), Err(SurfaceError::Owned)));
-        // The session goes away: an honest stale placeholder, closable.
-        db.with_connection(|c| {
-            c.execute("DELETE FROM sessions WHERE id = 's1'", [])?;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(list(&db, &ws).unwrap()[0].status, SurfaceStatus::Stale);
-        close(&db, &ws, &t.id).unwrap();
+        // ...but may once it is saved or discarded; then the descriptor goes.
+        close(&db, "v2", &ws, &one.id).unwrap();
+        assert!(list(&db, &ws).unwrap().iter().all(|d| d.id != one.id));
     }
 
     #[test]
     fn viewers_keep_independent_presentation() {
         let (db, ws) = db_with_workspace();
-        let a = open(&db, &ws, SurfaceKind::File, &file("a")).unwrap();
-        let b = open(&db, &ws, SurfaceKind::File, &file("b")).unwrap();
+        cli_session(&db, &ws, "s1", None);
+        let a = open(&db, "v1", &ws, SurfaceKind::File, &file("a")).unwrap();
+        let terminal = list(&db, &ws)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.kind == SurfaceKind::Terminal)
+            .unwrap();
         let one = PresentationUpdate {
-            order: vec![b.id.clone(), a.id.clone()],
-            active_resource_id: Some(b.id.clone()),
+            order: vec![a.id.clone(), terminal.id.clone()],
+            active_resource_id: Some(a.id.clone()),
             layout: Some(json!({"v": 1, "grid": "one"})),
         };
+        let first = set_presentation(&db, "v1", &ws, &one).unwrap();
+        assert_eq!(
+            (first.revision, first.order.clone()),
+            (1, one.order.clone())
+        );
+        // v2 sees the global terminal only, with its own (empty) focus.
+        let second = get_presentation(&db, "v2", &ws).unwrap();
+        assert_eq!(second.order, vec![terminal.id.clone()]);
+        assert_eq!(second.active_resource_id, None);
+        assert_eq!(second.layout, None);
+        // v2 moving focus leaves v1 untouched.
         let two = PresentationUpdate {
-            order: vec![a.id.clone()],
-            active_resource_id: Some(a.id.clone()),
+            order: vec![terminal.id.clone()],
+            active_resource_id: Some(terminal.id.clone()),
             layout: None,
         };
-        set_presentation(&db, "viewer-1", &ws, &one).unwrap();
-        let second = set_presentation(&db, "viewer-2", &ws, &two).unwrap();
-        let first = get_presentation(&db, "viewer-1", &ws).unwrap();
-        assert_eq!(first.order, vec![b.id.clone(), a.id.clone()]);
-        assert_eq!(first.active_resource_id, Some(b.id.clone()));
-        assert_eq!(first.layout, one.layout);
-        assert_eq!(first.revision, 1);
-        // Viewer 2 never placed `b`: it follows, and focus is its own.
-        assert_eq!(second.order, vec![a.id.clone(), b.id.clone()]);
-        assert_eq!(second.active_resource_id, Some(a.id.clone()));
-        assert_eq!(
-            set_presentation(&db, "viewer-1", &ws, &one)
-                .unwrap()
-                .revision,
-            2
-        );
-        // A closed resource drops out of every viewer's order and focus.
-        close(&db, &ws, &b.id).unwrap();
-        let after = get_presentation(&db, "viewer-1", &ws).unwrap();
-        assert_eq!(after.order, vec![a.id]);
-        assert_eq!(after.active_resource_id, None);
+        set_presentation(&db, "v2", &ws, &two).unwrap();
+        assert_eq!(get_presentation(&db, "v1", &ws).unwrap(), first);
+        assert_eq!(set_presentation(&db, "v1", &ws, &one).unwrap().revision, 2);
         assert!(set_presentation(&db, "", &ws, &one).is_err());
+        // The session ends: its tab and focus disappear from every viewer.
+        db.delete_session("s1").unwrap();
+        let after = get_presentation(&db, "v2", &ws).unwrap();
+        assert_eq!((after.order, after.active_resource_id), (vec![], None));
     }
 
     #[test]
     fn legacy_import_is_idempotent_and_keeps_originals() {
         let (db, ws) = db_with_workspace();
-        let layout = json!({"grid": {"root": "complex"}, "panels": {"p1": {}, "p2": {}}});
-        for id in ["old", "newer"] {
-            db.create_session(id, "/tmp/demo").unwrap();
-        }
-        db.with_connection(|c| {
-            c.execute(
-                "UPDATE sessions SET workspace_id = ?1, cli_provider_id = 'claude', pane_layout = ?2 WHERE id = 'old'",
-                params![ws, layout.to_string()],
-            )?;
-            c.execute(
-                "UPDATE sessions SET workspace_id = ?1, cli_provider_id = 'claude' WHERE id = 'newer'",
-                params![ws],
-            )?;
-            c.execute(
-                "INSERT INTO workspace_terminals (id, session_id, workspace_id, pane_id, cwd, cols, rows, backend, state)
-                 VALUES ('sh1', 'old', ?1, 'pane-a', '/tmp', 80, 24, 'daemon', 'running')",
-                params![ws],
-            )?;
-            Ok(())
-        })
-        .unwrap();
+        let layout = json!({
+            "grid": {"root": "complex"},
+            "panels": {"p1": {"contentComponent": "terminal"}, "p2": {"contentComponent": "gitReview"}}
+        });
+        cli_session(&db, &ws, "old", Some(&layout));
+        cli_session(&db, &ws, "newer", None);
+        let long_pane = "p".repeat(200); // legal for `terminal.open`
+        shell(&db, &ws, "old", &long_pane, "running");
 
         let files = vec![
             "src/a.rs".to_string(),
@@ -889,33 +1063,51 @@ mod tests {
         let first = import_legacy(&db, "v1", &ws, &files, &order).unwrap();
         let again = import_legacy(&db, "v1", &ws, &files, &order).unwrap();
         assert_eq!(first, again);
-        assert_eq!(list(&db, &ws).unwrap().len(), 5); // 2 agents + 1 shell + 2 files; bad path skipped
-        assert_eq!(first.legacy_layouts.get("old"), Some(&layout));
-        // The viewer's old order leads; the running shell keeps its runtime.
         let resources = list(&db, &ws).unwrap();
-        let first_resource = resources.iter().find(|d| d.id == first.order[0]).unwrap();
-        assert_eq!(first_resource.locator.session_id.as_deref(), Some("newer"));
+        // 2 agents + 1 shell + 2 files (bad path skipped) + the review panel's diff.
+        assert_eq!(resources.len(), 6);
+        assert_eq!(first.order.len(), 6);
+        assert_eq!(first.legacy_layouts.get("old"), Some(&layout));
+        // The viewer's old order leads; the shell keeps its runtime, unrestarted.
+        let by_id = |id: &String| resources.iter().find(|d| &d.id == id).unwrap();
+        assert_eq!(
+            by_id(&first.order[0]).locator.session_id.as_deref(),
+            Some("newer")
+        );
         assert!(resources.iter().any(|d| d.runtime
             == Some(SurfaceRuntime {
-                id: "sh1".into(),
+                id: format!("sh-{long_pane}"),
                 state: "running".into()
             })));
+        assert_eq!(
+            by_id(&first.order[4]).locator.path.as_deref(),
+            Some("src/a.rs")
+        );
         // The original layout column is untouched.
         assert_eq!(
             db.get_session_layout("old").unwrap().unwrap(),
             layout.to_string()
         );
         // A tab closed after migration is not resurrected by a retry.
-        let a = resources
-            .iter()
-            .find(|d| d.locator.path.as_deref() == Some("src/a.rs"))
-            .unwrap();
-        close(&db, &ws, &a.id).unwrap();
-        import_legacy(&db, "v1", &ws, &files, &order).unwrap();
-        assert_eq!(list(&db, &ws).unwrap().len(), 4);
+        close(&db, "v1", &ws, &first.order[4]).unwrap();
+        let retried = import_legacy(&db, "v1", &ws, &files, &order).unwrap();
+        assert_eq!(retried.order.len(), 5);
         // Another viewer imports its own files without duplicating resources.
-        import_legacy(&db, "v2", &ws, &["b.md".to_string()], &[]).unwrap();
-        assert_eq!(list(&db, &ws).unwrap().len(), 4);
+        let other = import_legacy(&db, "v2", &ws, &["b.md".to_string()], &[]).unwrap();
+        assert_eq!(list(&db, &ws).unwrap().len(), 5);
+        assert!(other
+            .order
+            .iter()
+            .any(|id| by_id_path(&resources, id) == Some("b.md")));
+    }
+
+    fn by_id_path<'a>(resources: &'a [SurfaceDescriptor], id: &str) -> Option<&'a str> {
+        resources
+            .iter()
+            .find(|d| d.id == id)?
+            .locator
+            .path
+            .as_deref()
     }
 
     #[test]
@@ -928,7 +1120,7 @@ mod tests {
             let (_, workspace) = db
                 .create_project("local", "/tmp/demo", Some("demo"), None)
                 .unwrap();
-            let f = open(&db, &workspace.id, SurfaceKind::File, &file("a.rs")).unwrap();
+            let f = open(&db, "v1", &workspace.id, SurfaceKind::File, &file("a.rs")).unwrap();
             let update = PresentationUpdate {
                 order: vec![f.id.clone()],
                 active_resource_id: Some(f.id.clone()),
@@ -945,14 +1137,16 @@ mod tests {
         assert_eq!(restored.active_resource_id, Some(file_id.clone()));
         assert_eq!(restored.layout, Some(json!({"v": 1})));
         assert_eq!(
-            open(&db, &ws, SurfaceKind::File, &file("a.rs")).unwrap().id,
+            open(&db, "v1", &ws, SurfaceKind::File, &file("a.rs"))
+                .unwrap()
+                .id,
             file_id
         );
         std::fs::remove_dir_all(dir).ok();
 
         // Optional fields may be absent (older peers); output omits empties.
         let message: crate::protocol::ClientMessage = serde_json::from_value(json!({
-            "type": "surface.open", "requestId": "r", "workspaceId": "w", "kind": "diff"
+            "type": "surface.open", "requestId": "r", "viewerId": "v", "workspaceId": "w", "kind": "diff"
         }))
         .unwrap();
         assert!(matches!(
