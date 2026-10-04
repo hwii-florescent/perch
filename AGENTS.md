@@ -159,7 +159,11 @@ there, not here.
     the main area while the session's panes stay mounted underneath, unless it
     is in a split set (`splitSets.ts`, `SplitCanvas.tsx`, per viewer): the
     members then share the canvas side by side while the strip stays one row.
-    A set holds at most one terminal. The phone keeps the combined explorer+editor view. The
+    A set holds at most one terminal. `surfaceSync.ts` mirrors the strip,
+    sets and open files/reviews to the core's surfaces (`surface.v1`, local
+    workspaces only): the local stores stay live, a file with an unsaved draft
+    gets its tab back when closed, and a viewer with no local tabs is
+    restored from the core. The phone keeps the combined explorer+editor view. The
     `files`/`gitReview` panel kinds remain only so old saved layouts
     restore.
   - A tab is a terminal. Every CLI agent runs under

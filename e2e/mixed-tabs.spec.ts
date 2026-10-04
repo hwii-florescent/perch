@@ -236,3 +236,46 @@ test("closing the last tab shows the home screen, never another project's tab", 
     cleanup();
   }
 });
+
+test("a viewer with no local tabs gets its strip and split back from the core", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    const canvas = page.getByTestId("split-canvas");
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    await page.getByTestId(a.reviewTab).dragTo(page.getByTestId(a.terminalTab));
+    await expect.poll(() => strip(page)).toEqual([a.reviewTab, a.terminalTab, a.fileTab]);
+    await page.waitForTimeout(1500); // the presentation is saved shortly after the last change
+
+    // Lose this browser's tab state but keep its viewer identity, as a cleared cache would.
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key === "perch.fileTabs" || key === "perch.splitSets" || key.startsWith("perch.tabOrder.")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => strip(page), { timeout: 20000 }).toEqual([a.reviewTab, a.terminalTab, a.fileTab]);
+    await expect(canvas).toHaveAttribute("data-split", "2");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a file with an unsaved draft keeps its tab when closed", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(a.fileTab).click();
+    await page.getByTestId("workspace-file-editor").fill("an unsaved draft\n");
+    await page.waitForTimeout(1500); // the draft reaches the core
+    await page.getByTestId("file-tab-close-README.md").click();
+    await page.waitForTimeout(1000);
+    expect(await strip(page)).toContain(a.fileTab);
+    await page.getByTestId(a.fileTab).click();
+    await expect(page.getByTestId("workspace-file-editor")).toHaveValue("an unsaved draft\n");
+  } finally {
+    cleanup();
+  }
+});

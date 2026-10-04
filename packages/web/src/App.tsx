@@ -20,6 +20,7 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
+import "./surfaceSync";
 
 const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 // The Tauri app on macOS draws its traffic lights over the web view's top row.

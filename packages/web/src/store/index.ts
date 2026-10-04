@@ -8,7 +8,7 @@ import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { defaultModel } from "../models";
 import { applyTheme } from "../themes";
 import { playBlockedTone, playDoneTone } from "../sound";
-import { ownsAgentRuntimeRequest, ownsGitReviewRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
+import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
   ACTIVE_PROJECT_ID_STORAGE_KEY,
   ACTIVE_WORKSPACE_ID_STORAGE_KEY,
@@ -2970,6 +2970,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         // its opaque request ids in a dependency-free registry so a
         // correlated failure is rendered by that pane instead of becoming a
         // misleading assistant error in the active chat transcript.
+        if (ownsSurfaceRequest(msg.requestId)) break;
         if (ownsGitReviewRequest(msg.requestId) || ownsAgentRuntimeRequest(msg.requestId)) {
           const runtime = pendingAgentRuntimeRequests.get(msg.requestId);
           if (runtime) {

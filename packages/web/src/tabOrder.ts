@@ -61,4 +61,13 @@ export function applyStoredTabOrder<T extends { id: string }>(projectKey: string
 /** Persist a new drag-resolved tab order for `projectKey`. */
 export function saveTabOrder(projectKey: string, orderedIds: string[]): void {
   writeOrder(projectKey, orderedIds);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(TAB_ORDER_EVENT));
 }
+
+/** The stored drag order for `projectKey` (empty when never customized). */
+export function storedTabOrder(projectKey: string): string[] {
+  return readOrder(projectKey);
+}
+
+/** Fired on `window` whenever a drag order is saved. */
+export const TAB_ORDER_EVENT = "perch:tabOrder";
