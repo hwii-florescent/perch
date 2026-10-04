@@ -689,7 +689,7 @@ function DevicesSection() {
       </p>
       {code ? (
         <div className="my-2 flex flex-wrap items-center gap-[0.6rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
-          <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono,monospace)]">{code}</strong>
+          <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono)]">{code}</strong>
           <span className={MUTED}>
             Enter it on the other device. Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
           </span>

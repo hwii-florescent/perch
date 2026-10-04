@@ -283,8 +283,9 @@ there, not here.
   in `styles/base.css` (rewritten at runtime by `themes.ts`). `styles/*.css`
   only keeps the xterm and Dockview overrides, the markdown descendants and
   the git panel's resets. Utilities are layered, so an unlayered CSS rule beats
-  them: never give an element both. Visual changes are checked with
-  `e2e/visual/visual.mjs` (headless Chromium + WebKit, fails closed).
+  them: never give an element both. `e2e/visual/visual.mjs` (headless Chromium + WebKit, fails closed) proves a
+  refactor changed nothing; it is slow, so use it for style-only refactors, not
+  for intentional UI changes.
 - **UI builds:** after `npm run build`, open tabs update themselves within
   about a minute (a PWA service worker); no restart is needed.
 - **Desktop notifications:** the web view doesn't deliver

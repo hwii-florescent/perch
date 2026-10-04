@@ -9,9 +9,7 @@
 import { useState } from "react";
 import { claimPairing } from "../pairing";
 
-// The legacy rules read `var(--base)`, which no stylesheet defines, so the page
-// background was never set and the button label inherits (`text-inherit`).
-const INPUT = "min-h-11 min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_monospace] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
+const INPUT = "min-h-11 min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_var(--font-mono)] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
 
 export function PairingGate({ onPaired }: { onPaired: () => void }) {
   const [code, setCode] = useState("");
@@ -67,7 +65,7 @@ export function PairingGate({ onPaired }: { onPaired: () => void }) {
           />
         </label>
         {error && <p className="m-0 text-[0.78rem] text-red" role="alert" data-testid="pairing-error">{error}</p>}
-        <button type="submit" className="min-h-11 cursor-pointer rounded-ui bg-accent text-inherit [border:0] disabled:cursor-not-allowed disabled:opacity-[0.55]" data-testid="pairing-submit" disabled={pending || !code.trim()}>
+        <button type="submit" className="min-h-11 cursor-pointer rounded-ui bg-accent text-panel-bg [border:0] disabled:cursor-not-allowed disabled:opacity-[0.55]" data-testid="pairing-submit" disabled={pending || !code.trim()}>
           {pending ? "Pairing…" : "Pair device"}
         </button>
       </form>

@@ -41,9 +41,10 @@
    * is a monospace stack rather than the system sans-serif perch used
    * before. Falls through to the platform's default monospace if none of
    * the named faces are installed. */
-  font-family:
+  --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
+  font-family: var(--font-mono);
 }
 
 * {

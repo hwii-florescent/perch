@@ -23,7 +23,7 @@ const CONNECTION = "rounded-[999px] border px-[0.42rem] py-[0.18rem] text-[0.7re
 const CONNECTION_READY = "text-green border-[color:color-mix(in_srgb,var(--green)_45%,transparent)]";
 const CONNECTION_ERROR = "text-red border-[color:color-mix(in_srgb,var(--red)_45%,transparent)]";
 const CONNECTION_IDLE = "text-subtext-0 border-[color:var(--git-border)]";
-const DIFF_LINE = `relative grid min-w-[44rem] grid-cols-[3.2rem_3.2rem_1.1rem_minmax(30rem,1fr)_auto] items-baseline text-fg [font-family:monospace] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
+const DIFF_LINE = `relative grid min-w-[44rem] grid-cols-[3.2rem_3.2rem_1.1rem_minmax(30rem,1fr)_auto] items-baseline text-fg [font-family:var(--font-mono)] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
 // A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
 const DIFF_LINE_KIND: Record<string, string> = {
   addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
@@ -675,7 +675,7 @@ export function WorkspaceGitReview({
           {statusState === "error" && <div className={cn(STATUS_NOTE, "text-red")} role="alert">{statusError || "Git status is unavailable."}</div>}
           {status && (
             <div className="mx-[0.7rem] mb-[0.55rem] rounded-ui border border-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] px-[0.55rem] py-2">
-              <div className="flex items-center justify-between gap-2"><strong className="overflow-hidden text-ellipsis whitespace-nowrap">{status.branch || "Detached HEAD"}</strong><span className="text-yellow [font-family:monospace] text-[0.66rem]">{shortHash(status.head)}</span></div>
+              <div className="flex items-center justify-between gap-2"><strong className="overflow-hidden text-ellipsis whitespace-nowrap">{status.branch || "Detached HEAD"}</strong><span className="text-yellow [font-family:var(--font-mono)] text-[0.66rem]">{shortHash(status.head)}</span></div>
               <div className={BRANCH_DETAIL}>{status.upstream ? `tracks ${status.upstream}` : "No upstream configured"}</div>
               {(status.ahead ?? 0) > 0 || (status.behind ?? 0) > 0 ? (
                 <div className="mt-[0.35rem] flex items-center gap-[0.65rem] text-[0.68rem]">
@@ -809,10 +809,10 @@ export function WorkspaceGitReview({
                     const displayPath = filePath(file);
                     return (
                       <article className={`min-w-[min-content] [@container(max-width:700px)]:min-w-0`} key={displayPath}>
-                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:monospace] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
+                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
                         {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
                           <section className="border-b border-b-[color:var(--git-border)]" key={`${displayPath}:${hunkIndex}`}>
-                            <div className={`px-[0.7rem] py-1 text-accent [font-family:monospace] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
+                            <div className={`px-[0.7rem] py-1 text-accent [font-family:var(--font-mono)] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
                             {hunk.lines.map((line, lineIndex) => {
                               const side = lineSide(line);
                               const path = filePathForSide(file, side);
@@ -875,7 +875,7 @@ export function WorkspaceGitReview({
               </div>
             )}
             {batchPreview && (
-              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:monospace]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
+              <div className="mx-[0.7rem] mb-[0.7rem] rounded-ui border border-accent p-[0.55rem]" data-testid="git-review-packet"><div className="flex flex-wrap items-center gap-[0.55rem]"><strong>Packet ready</strong><span className="text-[0.7rem] text-subtext-0">{batchPreview.comments.length} anchored note{batchPreview.comments.length === 1 ? "" : "s"}</span><code className="ml-auto text-[0.62rem] text-subtext-0">{batchPreview.packetId}</code></div><pre className="my-[0.45rem] max-h-[8rem] overflow-auto border border-[color:var(--git-border)] p-[0.45rem] text-[0.68rem] text-fg whitespace-pre-wrap [font-family:var(--font-mono)]">{batchPreview.markdown}</pre><div className={COMMENT_ACTIONS}><button type="button" className={CA_BTN} onClick={sendBatch} disabled={batchSending} data-testid="git-review-send">{batchSending ? "Sending…" : "Send one packet"}</button><button type="button" className={CA_BTN} onClick={() => setBatchPreview(null)} disabled={batchSending}>Close preview</button></div></div>
             )}
             {batchDelivery && batchDelivery.packetId === batchPreview?.packetId && <div className={BANNER_INFO} role="status" data-testid="git-review-delivery">
               {batchDelivery.delivery === "delivered" ? "Agent received the review packet."
@@ -894,7 +894,7 @@ export function WorkspaceGitReview({
             <span className={EYEBROW}>Confirm {confirmAction.kind}</span>
             <h3 className="my-[0.3rem]" id={confirmTitleId}>{confirmAction.kind === "commit" ? "Commit staged changes?" : "Discard selected changes?"}</h3>
             <p className="text-subtext-0">{confirmAction.kind === "commit" ? `This will create “${confirmAction.message}” in ${workspaceName || workspaceId}.` : `This permanently changes ${confirmAction.receipt.paths.length} selected path${confirmAction.receipt.paths.length === 1 ? "" : "s"}.`}</p>
-            <ul className="my-[0.55rem] max-h-[8rem] overflow-auto pl-[1.2rem] text-[0.7rem] [font-family:monospace]">{confirmAction.receipt.paths.map((path) => <li key={path}>{path}</li>)}</ul>
+            <ul className="my-[0.55rem] max-h-[8rem] overflow-auto pl-[1.2rem] text-[0.7rem] [font-family:var(--font-mono)]">{confirmAction.receipt.paths.map((path) => <li key={path}>{path}</li>)}</ul>
             <div className={COMMENT_ACTIONS}><button ref={confirmButtonRef} type="button" className={CA_BTN_DANGER} data-testid="git-confirm-action" onClick={() => { if (confirmAction.kind === "commit") actions.commit(confirmAction.receipt.previewId, confirmAction.message); else actions.discard(confirmAction.receipt.previewId); setConfirmAction(null); }}>Confirm {confirmAction.kind}</button><button type="button" className={CA_BTN} data-testid="git-cancel-action" onClick={() => setConfirmAction(null)}>Cancel</button></div>
           </div>
         </div>
