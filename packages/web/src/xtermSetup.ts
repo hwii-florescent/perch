@@ -35,14 +35,21 @@
  * — the pane gets smaller text showing the same layout, instead of a
  * correctly-sized but broken one. See `fitWithScaling`.
  *
- * Deliberately staying on xterm's DOM renderer rather than adding the WebGL
- * one: canvas renderers leave `.xterm-rows` empty, which would silently blind
- * every e2e assertion that reads terminal text out of the DOM.
+ * ## WebGL, as Orca does
+ *
+ * The WebGL renderer draws box-drawing and block characters itself, pixel-
+ * aligned to the cell grid, so TUI borders and tables join up instead of
+ * showing the font's gaps. It falls back to the DOM renderer when the GPU
+ * context is lost. A canvas leaves `.xterm-rows` empty, and the e2e specs
+ * read terminal text from it, so automation (`navigator.webdriver`) keeps
+ * the DOM renderer. Browsers cap live WebGL contexts (~16), so a terminal
+ * kept alive off screen drops its renderer (`setVisible`).
  */
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import type { TerminalProfile } from "@perch/shared";
 import { parseOsc52 } from "./osc52";
 import { usePerchStore } from "./store";
@@ -120,6 +127,8 @@ export interface PerchTerminal {
   /** Take the PTY's size (a view that doesn't own it); the next `fit` then
    * reports any difference. */
   follow: (cols: number, rows: number) => void;
+  /** A terminal kept alive while off screen frees its GPU context. */
+  setVisible: (visible: boolean) => void;
   dispose: () => void;
 }
 
@@ -284,6 +293,28 @@ export function createPerchTerminal(
     viewport.syncScrollArea = (immediate) => { if (!disposed) sync(immediate); };
   }
 
+  let webgl: WebglAddon | null = null;
+  const setVisible = (visible: boolean): void => {
+    if (!visible || disposed) {
+      webgl?.dispose();
+      webgl = null;
+      return;
+    }
+    if (webgl || navigator.webdriver) return;
+    try {
+      const addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        addon.dispose();
+        if (webgl === addon) webgl = null;
+      });
+      term.loadAddon(addon);
+      webgl = addon;
+    } catch {
+      // No WebGL2: the DOM renderer stays.
+    }
+  };
+  setVisible(true);
+
   let lastCols = 0;
   let lastRows = 0;
 
@@ -405,6 +436,7 @@ export function createPerchTerminal(
       lastCols = cols;
       lastRows = rows;
     },
+    setVisible,
     dispose: () => {
       if (disposed) return;
       disposed = true;

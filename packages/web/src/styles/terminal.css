@@ -156,3 +156,7 @@
   width: 100%;
   height: 100%;
 }
+
+/* A kept-alive terminal's own box (`PersistentAgentTerminal.tsx`), moved
+ * between surfaces as its session is shown and hidden. */
+.terminal__host { width: 100%; height: 100%; overflow: hidden; }

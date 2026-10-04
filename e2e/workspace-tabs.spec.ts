@@ -177,9 +177,10 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await page.screenshot({ path: "artifacts/w4-03-second-tab-same-group.png" });
   });
   // -------------------------------------------------------------------------
-  // W5 — a full-screen TUI survives a tab switch: pi/omp paint once, then
-  // redraw only changed rows, so the replay's byte tail soon holds just its
-  // status line, and its startup modes (mouse reporting) are long gone.
+  // W5 — a full-screen TUI survives a tab switch: the terminal is kept alive
+  // (terminalKeeper.ts). pi/omp paint once, then redraw only changed rows,
+  // so a view rebuilt from the replay's byte tail alone would hold just its
+  // status line, without the modes (mouse reporting) it set at startup.
   // -------------------------------------------------------------------------
   test("W5. a full-screen TUI's screen and mouse mode survive a tab switch", async ({ page }) => {
     test.setTimeout(90000);
@@ -194,8 +195,11 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 30000 });
     await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
 
+    // The terminal is kept, not rebuilt: the same xterm comes back.
+    await agent.locator(".xterm").evaluate((el) => { (el as HTMLElement).dataset.keptProbe = "1"; });
     await switchViaTabBar(page, other);
     await switchViaTabBar(page, tui);
+    await expect(agent.locator(".xterm")).toHaveAttribute("data-kept-probe", "1");
     await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 15000 });
     await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
     await expect(agent.locator(".xterm")).toHaveClass(/enable-mouse-events/);

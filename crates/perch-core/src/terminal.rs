@@ -19,7 +19,12 @@ use uuid::Uuid;
 pub type TerminalDataListener = Arc<dyn Fn(String, String) + Send + Sync>;
 pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
 
-pub const MAX_TERMINAL_REPLAY_BYTES: usize = 128 * 1024;
+/// The scrollback a newly opened view gets: what perchd hands a reattaching
+/// runtime (`perchd::proto::DEFAULT_REPLAY`). Views kept alive across tab
+/// switches (`terminalKeeper.ts`) replay only when first opened.
+// ponytail: held in memory per live terminal; a phone opening one pays the
+// whole transfer. Page the scrollback in on demand if either bites.
+pub const MAX_TERMINAL_REPLAY_BYTES: usize = perchd::proto::DEFAULT_REPLAY as usize;
 
 /// Bounded UTF-8 replay shared by shell and provider runtimes: the recent
 /// output (for scrollback), then a repaint of the current screen and its

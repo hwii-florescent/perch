@@ -109,8 +109,16 @@ there, not here.
   - `convertEol` stays `false`.
   - The theme and font come from the server's `terminalProfile` (the user's
     real terminal), never from perch's UI tokens.
-  - Never add `@xterm/addon-webgl`: canvas rendering empties `.xterm-rows`,
-    which the e2e specs read.
+  - Terminals render with WebGL, as Orca's do (decided with the user
+    2026-10-04): box drawing joins up pixel-aligned. Automation
+    (`navigator.webdriver`) keeps the DOM renderer, because the e2e specs
+    read text from `.xterm-rows` and a canvas leaves it empty. A terminal
+    kept alive off screen drops its WebGL context (`setVisible`).
+  - Terminals outlive their pane, like a native terminal's tabs
+    (`terminalKeeper.ts`): switching sessions parks them with their full
+    scrollback instead of rebuilding from the replay. The replay (perchd's
+    default window, then an exact repaint of the screen and modes from
+    `perchd::screen`) serves only a view's first open.
   - An agent PTY has one size, owned by the view holding the resize lease.
     The server sends it in-band (`terminal::pty_size_marker`, at each resize
     and at the head of every replay); other views follow it and never fit

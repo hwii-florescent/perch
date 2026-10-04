@@ -16,6 +16,8 @@ import { ChatView } from "../views/Chat";
 import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
 import { closeWorkspaceTerminal, listWorkspaceTerminals } from "../workspaceTerminals";
+import { forgetTerminal } from "../terminalKeeper";
+import { shellTerminalKey } from "../views/PersistentTerminal";
 import {
   createDockviewController,
   getDockviewController,
@@ -290,6 +292,7 @@ function applyDefaultLayout(api: DockviewApi) {
 function endPaneShell(paneId: string): void {
   const sessionId = usePerchStore.getState().sessionId;
   if (!sessionId) return;
+  forgetTerminal(shellTerminalKey(sessionId, paneId));
   listWorkspaceTerminals(sessionId)
     .then((rows) => {
       const row = rows.find((candidate) => candidate.paneId === paneId);

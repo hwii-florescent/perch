@@ -35,10 +35,15 @@ fn collector(mut reader: AttachReader) -> mpsc::Receiver<Vec<u8>> {
 
 fn wait_for(rx: &mpsc::Receiver<Vec<u8>>, seen: &mut Vec<u8>, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !String::from_utf8_lossy(seen).contains(needle) {
+    // Only the new bytes (plus a needle's overlap) need searching each time.
+    let mut from = 0;
+    while !String::from_utf8_lossy(&seen[from..]).contains(needle) {
         let left = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(left) {
-            Ok(chunk) => seen.extend(chunk),
+            Ok(chunk) => {
+                from = seen.len().saturating_sub(needle.len() + 3);
+                seen.extend(chunk);
+            }
             Err(_) => panic!(
                 "never saw {needle:?}; got {:?}",
                 String::from_utf8_lossy(seen)
@@ -225,18 +230,25 @@ fn a_client_over_connect_stdio_drives_sessions() {
 fn a_default_attach_ends_with_the_exact_screen() {
     let dir = test_dir("restore");
     let a = connect(&dir);
-    let script = r#"printf '\033[?1049h\033[?1000h\033[1;1HTUI_''HEADER'; i=0; while [ $i -lt 9000 ]; do printf '\033[3;1H\033[2Kstatus %s ________________________________________________' $i; i=$((i+1)); done; printf '\033[3;1HTUI_''DONE'; sleep 30"#;
+    // Single-row redraws, well past the default replay window.
+    let redraws = perchd::proto::DEFAULT_REPLAY / 40 + 1000;
+    let script = format!(
+        r#"printf '\033[?1049h\033[?1000h\033[1;1HTUI_''HEADER'; awk 'BEGIN {{ for (i = 0; i < {redraws}; i++) printf "\033[3;1H\033[2Kstatus %d ______________________", i }}'; printf '\033[3;1HTUI_''DONE'; sleep 30"#
+    );
     a.create(
         "tui",
-        vec!["/bin/sh".into(), "-c".into(), script.into()],
+        vec!["/bin/sh".into(), "-c".into(), script],
         None,
         vec![],
         100,
         30,
     )
     .unwrap();
-    let (_, reader, _) = a.attach("tui", None).unwrap();
-    wait_for(&collector(reader), &mut Vec::new(), "TUI_DONE");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !a.snapshot("tui").unwrap().text.contains("TUI_DONE") {
+        assert!(Instant::now() < deadline, "the TUI never finished drawing");
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert!(a.session("tui").unwrap().unwrap().alive);
 
     let b = connect(&dir);
