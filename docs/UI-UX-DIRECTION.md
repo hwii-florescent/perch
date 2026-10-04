@@ -4,6 +4,13 @@
 
 **Opinionated design specification for approval. Not an implementation change.**
 
+For the full product/technical proposal, read [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md).
+For what must actually ship before the differentiated public alpha, read
+[PUBLIC-ALPHA.md](PUBLIC-ALPHA.md). This document supplies interaction detail;
+not every viewer, visual change or later UX feature here is an alpha requirement.
+The owner has directed that differentiation precede launch, not that every
+specific interaction proposal below is already approved.
+
 Research baseline: Perch commit `82eb210a438932f54fd3445fb2364fb0e1541b6b`, inspected on 2026-10-03. Orca reference checkout: `564f1352`. External documentation describes the versions available during this research; it is not a version-pinned compatibility guarantee.
 
 This specification covers the desktop product, with constraints for the existing headless/browser client and phone. It does not reopen Hosted chat development. It proposes deliberate changes to some current UX invariants; those must be approved and reconciled with `AGENTS.md` before implementation.

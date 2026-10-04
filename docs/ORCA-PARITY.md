@@ -1,5 +1,11 @@
 # Orca parity: CLI mode
 
+**Reference inventory, not the release plan.** See
+[PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md) for Perch's own direction and
+[PUBLIC-ALPHA.md](PUBLIC-ALPHA.md) for differentiated launch requirements.
+Missing Orca features are not automatically Perch work items; the tier numbers
+below do not set implementation priority.
+
 Which of [Orca](https://github.com/stablyai/orca)'s features perch has. This
 is a reference list for learning from Orca, not a spec to match: skip what
 doesn't fit perch, and features perch has that Orca lacks aren't listed

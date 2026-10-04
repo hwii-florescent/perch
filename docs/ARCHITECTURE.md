@@ -1,5 +1,30 @@
 # perch architecture
 
+## Document scope and current planning direction
+
+This file describes the implementation baseline and its earlier build plan.
+For the next implementation phase, start with:
+
+- [Product and technical strategy](PRODUCT-STRATEGY.md): full target architecture,
+  research evidence, ownership contracts, risks and performance targets.
+- [Differentiated public alpha](PUBLIC-ALPHA.md): bounded release scope,
+  implementation order, acceptance scenarios and launch gates.
+- [UI/UX direction](UI-UX-DIRECTION.md): detailed proposed interaction design.
+
+The goal is the earliest **differentiated** release, not simply publishing the
+current terminal application. The older build order below (including Cmd-J,
+floating terminal, dashboard and parity tiers) is historical, not the new
+roadmap. The new strategy also recommends a managed remote core for the complete
+remote workspace, rather than treating remote perchd alone as sufficient.
+
+These are target designs, not claims of completed implementation or automatic
+changes to [AGENTS.md](../AGENTS.md). Ratify affected invariants before changing
+behavior. See the strategy's source audit for limitations in current liveness,
+replay, flow control and remote support; durability is not unlimited history or
+complete emulator-state restoration.
+
+## Implementation baseline
+
 perch is a Rust agent IDE, CLI mode first. It is not a port of
 [Orca](https://github.com/stablyai/orca) (MIT): Orca is the reference we learn
 from, and perch also builds what Orca lacks (for example `direct` hosts,
@@ -68,7 +93,7 @@ perchd: PTYs · history logs · vt100     remote perch / direct host
   socket, starting the daemon if needed. It's built and tested locally but
   not wired to ssh yet.
 
-**Remote plan (1b, backlog).** Upload `perchd-linux-<arch>` (from the release
+**Historical remote plan (1b, backlog; see the new strategy above).** Upload `perchd-linux-<arch>` (from the release
 workflow) to `~/.perch/bin/perchd-v<N>` and run `ssh host … connect` through
 the existing ControlMaster. CLI panes and Hosted turns on direct hosts then
 become daemon sessions, and the tmux/`nohup`/`tail -F` code in `detached.rs`
@@ -172,7 +197,7 @@ Each phase records:
 - Keystroke-to-echo latency.
 - Output throughput (`yes | head -c 100M`) with no dropped bytes.
 
-## Build order
+## Historical build order
 
 Each phase ends with `cargo test` + `npm test`, one real probe, and a
 checkpoint commit.
