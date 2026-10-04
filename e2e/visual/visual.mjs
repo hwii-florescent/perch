@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Visual-parity harness for the Tailwind migration (docs/TAILWIND-MIGRATION.md).
+ * Visual-parity harness.
  *
  *   node e2e/visual/visual.mjs snap <web-dist-dir> <out-root> [--engines chromium,webkit] [--only <state-substring>]
  *   node e2e/visual/visual.mjs diff <out-root-a> <out-root-b> [--engines chromium,webkit] [--only <s>] [--reviewed <state,state>]
