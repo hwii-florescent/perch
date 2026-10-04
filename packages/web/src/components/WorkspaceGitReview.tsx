@@ -36,8 +36,7 @@ const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitesp
 const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 flex-col items-start gap-[0.08rem] rounded-ui border px-[0.4rem] py-[0.3rem] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "border-transparent";
 const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-// `conflict` keeps its legacy rule in git-review.css (no harness state yet).
-const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", untracked: "text-yellow", conflict: "workspace-git__file-state--conflict" };
+const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", untracked: "text-yellow", conflict: "text-red" };
 const TB_FIELD = "flex min-w-0 max-w-full flex-col items-start gap-[0.35rem] text-[0.68rem] text-subtext-0";
 const TB_INPUT = "min-w-0 max-w-full rounded-ui border border-[color:var(--git-border)] bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
 const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
@@ -66,10 +65,10 @@ const EMPTY_BASE = "flex min-h-[10rem] flex-col items-center justify-center gap-
 const EMPTY = `${EMPTY_BASE} text-subtext-0 [&_strong]:text-fg`;
 // The original `.empty--error` only turned the text red; a later selector edit had wrongly boxed it like a banner.
 const EMPTY_ERROR = `${EMPTY_BASE} text-red`;
-const BOXED_NOTE = "mx-[0.7rem] my-[0.55rem] rounded-ui border border-[color:var(--git-border)] px-2 py-[0.4rem] text-[0.7rem]";
-// `--warning` keeps its legacy colour rules in git-review.css (no harness state: the server's 2 MB patch cap).
-const BANNER_INFO = `${BOXED_NOTE} text-accent`;
-const BANNER_WARNING = `workspace-git__banner--warning ${BOXED_NOTE}`;
+const BOXED_NOTE = "mx-[0.7rem] my-[0.55rem] rounded-ui border px-2 py-[0.4rem] text-[0.7rem]";
+const BANNER_INFO = `${BOXED_NOTE} border-[color:var(--git-border)] text-accent`;
+const BANNER_WARNING = `${BOXED_NOTE} border-[color:color-mix(in_srgb,var(--yellow)_45%,transparent)] text-yellow`;
+const TURN_SUMMARY = "m-0 border-b border-b-[color:var(--git-border)] px-[0.7rem] py-[0.4rem] text-[0.72rem] text-[color:var(--git-muted)]";
 const STATUS_NOTE = "px-[0.7rem] py-[0.55rem] text-[0.7rem] text-subtext-0";
 const LINE_COMMENT_BUTTON = "min-h-[1.8rem] min-w-[1.8rem] self-center rounded-[999px] border border-transparent bg-transparent text-accent opacity-70 hover:border-accent hover:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:opacity-100";
 
@@ -772,7 +771,7 @@ export function WorkspaceGitReview({
           {preset === "lastAgentTurn" && lastAgentTurn && (
             /* The gate asks for the *agent's* changes, so say whose turn this
                is and how much it touched — a diff alone does not answer that. */
-            <p className="workspace-git__turn-summary" data-testid="git-turn-summary">
+            <p className={TURN_SUMMARY} data-testid="git-turn-summary">
               <strong>{lastAgentTurn.agent}</strong>
               {lastAgentTurn.state === "running"
                 ? " · turn in progress, comparing against the working tree"

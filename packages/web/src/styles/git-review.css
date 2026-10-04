@@ -42,15 +42,6 @@
   border-color: var(--accent);
 }
 
-.workspace-git__file-state--conflict {
-  color: var(--red);
-}
-
-.workspace-git__banner--warning {
-  color: var(--yellow);
-  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
-}
-
 /* Structured view of the interactive CLI's native conversation. */
 .native-cli-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .native-cli-chat__toolbar { flex-wrap: wrap; }
@@ -61,12 +52,3 @@
 .native-cli-chat__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; }
 .native-cli-chat__actions .native-cli-chat__hint { flex: 1; }
 .native-cli-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/* Moved from pairing.css (it was imported last, so these stay last here). */
-.workspace-git__turn-summary {
-  margin: 0;
-  padding: 0.4rem 0.7rem;
-  border-bottom: 1px solid var(--git-border);
-  color: var(--git-muted);
-  font-size: 0.72rem;
-}
