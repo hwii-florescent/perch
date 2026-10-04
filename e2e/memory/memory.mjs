@@ -19,6 +19,8 @@
  * `--renderer dom` keeps automation's DOM renderer, for comparison: it
  * only reports the footprint. Exits nonzero on any failure, page error or
  * missing measurement. Hidden Dockview tabs: workspace-tabs.spec.ts W6.
+ * It refuses to start while anything answers on :7792 (a leftover run's
+ * core owns /tmp/perch-memory), and runs only against the core it spawned.
  *
  * Headless only; never touches ~/.perch.
  */
@@ -38,6 +40,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const failures = [];
 const check = (ok, message) => { console.log(`${ok ? "ok  " : "FAIL"} ${message}`); if (!ok) failures.push(message); };
 
+// Another core on the port would answer for ours, and its scratch state is
+// what the next line deletes.
+if (await fetch(URL_, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false)) {
+  console.log(`FAIL :${PORT} is already serving; stop that core first`);
+  process.exit(1);
+}
 fs.rmSync(WORK, { recursive: true, force: true });
 fs.mkdirSync(WORK, { recursive: true });
 const logFile = fs.openSync(`${WORK}/core.log`, "a");
@@ -140,9 +148,14 @@ async function waitFor(condition, ms = 10_000) {
 
 let browser;
 try {
-  for (let i = 0; i < 200; i++) {
-    try { if ((await fetch(URL_)).ok) break; } catch {}
+  // Ready only when the core this run spawned is the one listening.
+  const listening = () => {
+    try { return execFileSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" }).split("\n").includes(String(core.pid)); } catch { return false; }
+  };
+  for (let i = 0; ; i++) {
     if (core.exitCode !== null) throw new Error(`core exited; see ${WORK}/core.log`);
+    if (listening() && await fetch(URL_).then((response) => response.ok, () => false)) break;
+    if (i === 200) throw new Error(`core never listened on :${PORT}; see ${WORK}/core.log`);
     await sleep(100);
   }
   const before = contentPids();
