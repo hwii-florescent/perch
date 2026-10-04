@@ -8,7 +8,7 @@ interface Pending {
   accept: (message: Reply) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
-  releaseLate?: () => void;
+  releaseLate?: ClientMessage;
 }
 interface View {
   status: AgentLifecycleStatus;
@@ -16,20 +16,23 @@ interface View {
   listeners: Map<string, (status: AgentLifecycleStatus, controlling: boolean) => void>;
 }
 const pending = new Map<string, Pending>();
-const retired = new Map<string, (() => void) | undefined>();
+// Request ids that already settled, so their late replies are swallowed; one
+// that never got its reply keeps the message that releases what it opened.
+// Only that plain message: a callback would keep its view's xterm alive.
+const retired = new Map<string, ClientMessage | undefined>();
 const views = new Map<string, View>();
 
-function retire(id: string, releaseLate?: () => void) {
+function retire(id: string, releaseLate?: ClientMessage) {
   retired.set(id, releaseLate);
   if (retired.size > 128) retired.delete(retired.keys().next().value!);
 }
-function request(message: ClientMessage & { requestId: string }, accept: (reply: Reply) => void, releaseLate?: () => void): Promise<void> {
+function request(message: ClientMessage & { requestId: string }, accept: (reply: Reply) => void, releaseLate?: ClientMessage): Promise<void> {
   if (pending.size >= 64) return Promise.reject(new Error("Too many agent requests. Try again shortly."));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(message.requestId);
       retire(message.requestId, releaseLate);
-      releaseLate?.();
+      if (releaseLate) socket.send(releaseLate);
       reject(new Error("Agent request timed out. Reconnect to check its state."));
     }, 15_000);
     pending.set(message.requestId, { timer, reject, releaseLate, accept: (reply) => {
@@ -60,13 +63,14 @@ export function handleAgentTerminalMessage(message: ServerMessage): boolean {
   if (!("requestId" in message) || !message.requestId) return false;
   const item = pending.get(message.requestId);
   if (!item) {
-    if (message.type === "agent.terminal.opened") retired.get(message.requestId)?.();
+    const releaseLate = retired.get(message.requestId);
+    if (message.type === "agent.terminal.opened" && releaseLate) socket.send(releaseLate);
     return retired.has(message.requestId);
   }
   if (message.type !== "error" && message.type !== "agent.terminal.opened" && message.type !== "agent.control") return false;
   pending.delete(message.requestId);
   clearTimeout(item.timer);
-  retire(message.requestId, item.releaseLate);
+  retire(message.requestId);
   if (message.type === "error") item.reject(new Error(message.message));
   else item.accept(message);
   return true;
@@ -126,7 +130,8 @@ export function openAgentTerminal(
   let terminalId: string | undefined;
   let unsubscribe: (() => void) | undefined;
   let released = false;
-  const releaseRemote = () => socket.send({ type: "agent.terminal.release", sessionId, providerId, viewId });
+  const releaseMessage: ClientMessage = { type: "agent.terminal.release", sessionId, providerId, viewId };
+  const releaseRemote = () => socket.send(releaseMessage);
   const release = () => {
     released = true;
     unsubscribe?.();
@@ -165,7 +170,7 @@ export function openAgentTerminal(
     unsubscribe = onTerminalData(terminalId, onData);
     onReady(terminalId, reply.status, reply.replay);
     notify(view);
-  }, releaseRemote);
+  }, releaseMessage);
   return {
     ready, release,
     takeControl: async () => {

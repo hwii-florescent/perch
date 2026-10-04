@@ -110,10 +110,17 @@ there, not here.
   - The theme and font come from the server's `terminalProfile` (the user's
     real terminal), never from perch's UI tokens.
   - Terminals render with WebGL, as Orca's do (decided with the user
-    2026-10-04): box drawing joins up pixel-aligned. Automation
-    (`navigator.webdriver`) keeps the DOM renderer, because the e2e specs
-    read text from `.xterm-rows` and a canvas leaves it empty. A terminal
-    kept alive off screen drops its WebGL context (`setVisible`).
+    2026-10-04): box drawing joins up pixel-aligned, and a busy TUI costs
+    WebKit ~10x less memory than with the DOM renderer. A lost context is
+    replaced, never left on DOM. Automation (`navigator.webdriver`) keeps
+    the DOM renderer, because the e2e specs read text from `.xterm-rows`
+    and a canvas leaves it empty. A terminal kept alive off screen drops its
+    WebGL context (`setVisible`). `node e2e/memory/memory.mjs` (after
+    `npm run build`) checks the footprint, the context replacement and
+    that closed or evicted terminals are freed.
+  - Nothing cached past its view may close over it: a callback kept after
+    a request settles (`agentTerminals.ts` `retired`) once held 128 dead
+    xterms with their buffers. Cache plain data.
   - Terminals outlive their pane, like a native terminal's tabs
     (`terminalKeeper.ts`): switching sessions parks them with their full
     scrollback instead of rebuilding from the replay. The replay (perchd's

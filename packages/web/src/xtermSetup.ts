@@ -39,8 +39,11 @@
  *
  * The WebGL renderer draws box-drawing and block characters itself, pixel-
  * aligned to the cell grid, so TUI borders and tables join up instead of
- * showing the font's gaps. It falls back to the DOM renderer when the GPU
- * context is lost. A canvas leaves `.xterm-rows` empty, and the e2e specs
+ * showing the font's gaps. It is also the cheap one: the DOM renderer
+ * rebuilds a span per styled cell on every repaint, and a colourful TUI
+ * redrawing drove WebKit's physical footprint to ~940 MB where WebGL stayed
+ * under 100 MB (`e2e/memory/memory.mjs`). A lost context is replaced, not
+ * left on DOM. A canvas leaves `.xterm-rows` empty, and the e2e specs
  * read terminal text from it, so automation (`navigator.webdriver`) keeps
  * the DOM renderer. Browsers cap live WebGL contexts (~16), so a terminal
  * kept alive off screen drops its renderer (`setVisible`).
@@ -294,24 +297,33 @@ export function createPerchTerminal(
   }
 
   let webgl: WebglAddon | null = null;
-  const setVisible = (visible: boolean): void => {
-    if (!visible || disposed) {
-      webgl?.dispose();
-      webgl = null;
-      return;
-    }
-    if (webgl || navigator.webdriver) return;
+  let shown = false;
+  let losses = 0;
+  const attachWebgl = (): void => {
+    if (webgl || !shown || disposed || navigator.webdriver) return;
     try {
       const addon = new WebglAddon();
       addon.onContextLoss(() => {
         addon.dispose();
-        if (webgl === addon) webgl = null;
+        if (webgl !== addon) return;
+        webgl = null;
+        // A lost context (GPU reset, sleep/wake) gets a fresh one, not the
+        // DOM renderer, whose per-cell spans cost WebKit ~10x the memory on
+        // a busy TUI. A GPU that keeps losing them stays on DOM until shown.
+        if (++losses <= 3) requestAnimationFrame(attachWebgl);
       });
       term.loadAddon(addon);
       webgl = addon;
     } catch {
-      // No WebGL2: the DOM renderer stays.
+      // No WebGL2: xterm has no other renderer than DOM.
     }
+  };
+  const setVisible = (visible: boolean): void => {
+    shown = visible && !disposed;
+    losses = 0;
+    if (shown) return attachWebgl();
+    webgl?.dispose();
+    webgl = null;
   };
   setVisible(true);
 
