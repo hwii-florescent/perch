@@ -16,20 +16,20 @@ Decided with the owner.
 | Area | Decision | Replaces in AGENTS.md |
 |---|---|---|
 | Roles | Sidebar answers *where*, tabs *what is open*, canvas *the work*, drawer *browses files/changes*. | Workspace UX: "A tab is a terminal"; drawer holds explorer and Git only (drawer unchanged; tabs generalize to files/diffs, PER-7). |
-| Vocabulary | **Workspace → Context** in user-facing copy: the original folder or a linked Git worktree. The original is labelled **Original** only when there are several contexts. Internal records, protocol and database keep `workspace`. | "Naming: Projects are folders; Workspaces are…" |
+| Vocabulary | **Workspace → Nest** and **Project → Birdhouse** in user-facing copy (renamed by the owner after the first draft, which said Context and kept Project). A Birdhouse is an added folder on a host; a Nest is its original folder or a linked Git worktree. The original is labelled **Original** only when a Birdhouse has several Nests. Internal records, protocol, database and docs prose keep `project` / `workspace`. | "Naming: Projects are folders; Workspaces are…" |
 | Vocabulary | **Chats → Scratchpad** (same `~/.perch/scratch`, no new store). | "Chats … is listed after the projects…" |
-| Sidebar | Projects, plus one flat level of contexts when a project has more than one. No repeated session/tab list. Original row and local-only host block hidden when there is nothing to disambiguate. | "Sidebar … Projects → Workspaces → sessions" |
+| Sidebar | Birdhouses, plus one flat level of Nests when a Birdhouse has more than one. No repeated session/tab list. Original row and local-only host block hidden when there is nothing to disambiguate. | "Sidebar … Projects → Workspaces → sessions" |
 | Close: idle shell | Closing an idle shell still ends it immediately. | none |
 | Close: running work | Closing a working agent, job or server asks first, naming the work. Uncertain state uses the same guard. | "closing is deleting" (immediate for everything) |
 | Close: watcher | A viewer that does not own the runtime only detaches. **Stop runtime for everyone…** is a separate action. The UI labels the two differently. | "Closing a terminal pane ends its shell" |
-| Reopen | Cmd-Shift-T reopens from a per-viewer list: 20 descriptors, 7 days, no terminal contents, prompt text or command history; cleared on Remove project. A closed runtime returns as a **stopped tab** with *Start new shell* and, only with a valid provider token, *Resume agent conversation*. Never re-run a command or imply the old process survived. | "perch never archives" (this is navigation undo of descriptors, not an archive of sessions) |
-| Empty context | Closing the last tab shows that context's New Tab / home state. Never another project's or context's session, never quitting. | already an invariant; kept |
-| Per-viewer focus | Selected context/tab, split geometry and sidebar/drawer state are per viewer. Viewers never fight over focus or the PTY resize lease. | already an invariant; kept |
+| Reopen | Cmd-Shift-T reopens from a per-viewer list: 20 descriptors, 7 days, no terminal contents, prompt text or command history; cleared on Remove birdhouse. A closed runtime returns as a **stopped tab** with *Start new shell* and, only with a valid provider token, *Resume agent conversation*. Never re-run a command or imply the old process survived. | "perch never archives" (this is navigation undo of descriptors, not an archive of sessions) |
+| Empty Nest | Closing the last tab shows that Nest's New Tab / home state. Never another Birdhouse's or Nest's session, never quitting. | already an invariant; kept |
+| Per-viewer focus | Selected Nest/tab, split geometry and sidebar/drawer state are per viewer. Viewers never fight over focus or the PTY resize lease. | already an invariant; kept |
 | Restored resources | A resource whose runtime or file is gone restores as a placeholder with a recoverable error and an explicit action, never an empty substitute. | new |
 
 ### Kept as is (must survive every slice)
 
-- No implicit project registration; `+ Add` is the only way a folder becomes a project.
+- No implicit project registration; `+ Add` is the only way a folder becomes a Birdhouse.
 - No process starts when a picker is cancelled.
 - No unrelated fallback after the last tab closes.
 - Hosted chat stays frozen. Terminals keep the user's terminal profile and native key encoding.

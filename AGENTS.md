@@ -123,7 +123,7 @@ there, not here.
 - **Workspace UX (decided with the user 2026-10-01, Orca-style; don't
   revert):**
   - **Pending replacement:** `docs/DECISIONS.md` (2026-10-04) approves
-    Workspace→Context copy, Chats→Scratchpad, a sessionless sidebar, guarded
+    Workspace→Nest and Project→Birdhouse copy, Chats→Scratchpad, a sessionless sidebar, guarded
     close of running work and Cmd-Shift-T reopen. Until a slice implements one,
     the rule below still holds; that slice rewrites it in the same commit.
   - Naming: Projects are folders; Workspaces are a project's checkout and
