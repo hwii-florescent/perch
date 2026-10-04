@@ -564,17 +564,12 @@ pub struct CommandEntry {
 
 /// Which backend a `chat.send` should be routed to. Mirrors the TS union
 /// `"claude" | "codex"`; defaults to `Claude` when the field is omitted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
+    #[default]
     Claude,
     Codex,
-}
-
-impl Default for AgentKind {
-    fn default() -> Self {
-        AgentKind::Claude
-    }
 }
 
 /// Structured Chat/UI versus interactive CLI view.  This wire enum is kept

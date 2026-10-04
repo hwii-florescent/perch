@@ -847,9 +847,7 @@ impl HubManager {
         //      ssh -A -L <lp>:127.0.0.1:<rp> \
         //          -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -o BatchMode=yes <host> \
         //          "mkdir -p ~/.ssh; ln -sf \"$SSH_AUTH_SOCK\" ~/.ssh/perch_auth_sock; exec sleep infinity"
-        let tunnel_remote_cmd = format!(
-            r#"mkdir -p ~/.ssh; ln -sf "$SSH_AUTH_SOCK" ~/.ssh/perch_auth_sock; exec sleep infinity"#
-        );
+        let tunnel_remote_cmd = r#"mkdir -p ~/.ssh; ln -sf "$SSH_AUTH_SOCK" ~/.ssh/perch_auth_sock; exec sleep infinity"#.to_string();
         tracing::info!(
             "[hub] {}: starting SSH tunnel (agent-forwarded) :{}→{}:{}",
             host.id,
@@ -903,14 +901,11 @@ impl HubManager {
             let mut tunnel_ready = false;
             for _ in 0..25 {
                 // Check for early exit first.
-                match tunnel_child.get_mut().try_wait() {
-                    Ok(Some(status)) => {
-                        let err = format!("SSH tunnel exited early ({})", status);
-                        tracing::warn!("[hub] {}: {err}", host.id);
-                        self.set_host_state(&host.id, &host.name, HostState::Error(err));
-                        return None;
-                    }
-                    _ => {}
+                if let Ok(Some(status)) = tunnel_child.get_mut().try_wait() {
+                    let err = format!("SSH tunnel exited early ({})", status);
+                    tracing::warn!("[hub] {}: {err}", host.id);
+                    self.set_host_state(&host.id, &host.name, HostState::Error(err));
+                    return None;
                 }
                 // Try a non-blocking TCP connect to the local forwarded port.
                 if std::net::TcpStream::connect(format!("127.0.0.1:{local_port}")).is_ok() {
