@@ -52,6 +52,8 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    // The Mac app is a WKWebView: PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
+    ...(process.env.PERCH_E2E_WEBKIT ? [{ name: "webkit", use: { ...devices["Desktop Safari"] } }] : []),
   ],
   workers: 1,
   webServer: [

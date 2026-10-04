@@ -142,6 +142,16 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
     expect((await box(page, session)).width).toBeGreaterThan(before + 60);
     await page.screenshot({ path: testInfo.outputPath("split-three-panes.png") });
 
+    // A divider dragged all the way over leaves the pane barely visible, not gone.
+    const edge = await box(page, "split-divider-0");
+    await page.mouse.move(edge.x + 2, edge.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(0, edge.y + 40, { steps: 8 });
+    await page.mouse.up();
+    const squeezed = (await box(page, session)).width;
+    expect(squeezed).toBeGreaterThanOrEqual(47);
+    expect(squeezed).toBeLessThan(60);
+
     // Members are marked in the strip; clicking any one keeps the set; focus follows a click in a pane.
     await page.getByTestId(terminalTab).click();
     await expect(canvas).toHaveAttribute("data-split", "3");

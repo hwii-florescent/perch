@@ -3,7 +3,7 @@ import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
 import { usePerchStore } from "../store";
 import { fileTabKey, useFileTabs, type FileTab } from "../fileTabs";
-import { MIN_PANE, useSplitSets, visibleSplit } from "../splitSets";
+import { MIN_PANE_PX, useSplitSets, visibleSplit } from "../splitSets";
 import { workspaceTabs } from "../workspaceTabs";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
@@ -61,12 +61,13 @@ export function SplitCanvas() {
     if (!host || !split) return;
     e.preventDefault();
     const rect = host.getBoundingClientRect();
+    const min = MIN_PANE_PX / rect.width;
     const start = sizes.slice();
     const from = lefts[i]!;
     const to = lefts[i + 1]! + start[i + 1]!;
     let latest = start;
     const move = (ev: PointerEvent) => {
-      const boundary = Math.min(to - MIN_PANE, Math.max(from + MIN_PANE, (ev.clientX - rect.left) / rect.width));
+      const boundary = Math.min(to - min, Math.max(from + min, (ev.clientX - rect.left) / rect.width));
       latest = start.slice();
       latest[i] = boundary - from;
       latest[i + 1] = to - boundary;
@@ -86,10 +87,11 @@ export function SplitCanvas() {
     if (!split || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
     e.preventDefault();
     const delta = e.key === "ArrowRight" ? STEP : -STEP;
+    const min = MIN_PANE_PX / (hostRef.current?.getBoundingClientRect().width || 1);
     const next = sizes.slice();
-    const a = Math.max(MIN_PANE, next[i]! + delta);
+    const a = Math.max(min, next[i]! + delta);
     const b = next[i]! + next[i + 1]! - a;
-    if (b < MIN_PANE) return;
+    if (b < min) return;
     next[i] = a;
     next[i + 1] = b;
     resize(split.ids, next);

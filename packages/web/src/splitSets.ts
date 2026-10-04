@@ -14,8 +14,8 @@ export interface SplitSet {
 }
 
 export const MAX_SPLIT = 4;
-/** A pane never shrinks below this share of the canvas. */
-export const MIN_PANE = 0.15;
+/** A dragged divider never leaves a pane narrower than this: barely visible, still grabbable. */
+export const MIN_PANE_PX = 48;
 
 const equal = (n: number) => Array.from({ length: n }, () => 1 / n);
 const settle = (sets: SplitSet[]): SplitSet[] =>
