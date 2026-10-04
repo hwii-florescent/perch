@@ -176,7 +176,7 @@ struct Inner {
     /// Seq of the first byte still in the log file.
     log_start: u64,
     log: Option<File>,
-    screen: vt100::Parser,
+    screen: crate::screen::Screen,
     cols: u16,
     rows: u16,
     alive: bool,
@@ -309,7 +309,7 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
                 seq: meta.log_start + len,
                 log_start: meta.log_start,
                 log: None,
-                screen: vt100::Parser::new(meta.rows.max(1), meta.cols.max(1), 0),
+                screen: crate::screen::Screen::new(meta.cols, meta.rows),
                 cols: meta.cols,
                 rows: meta.rows,
                 alive: false,
@@ -446,7 +446,7 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
                 let mut inner = s.inner.lock().unwrap();
                 inner.cols = cols;
                 inner.rows = rows;
-                inner.screen.set_size(rows.max(1), cols.max(1));
+                inner.screen.set_size(cols, rows);
                 reply(Ok(serde_json::Value::Null))
             }
             None => reply(not_found()),
@@ -577,7 +577,7 @@ fn create(
             seq: 0,
             log_start: 0,
             log: Some(log),
-            screen: vt100::Parser::new(rows, cols, 0),
+            screen: crate::screen::Screen::new(cols, rows),
             cols,
             rows,
             alive: true,
@@ -743,6 +743,18 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
             bytes: chunk.to_vec(),
         });
         seq += chunk.len() as u64;
+    }
+    // A default window starts mid-stream: end it with the exact screen and
+    // modes (see `screen.rs`). It isn't part of the stream, so its seq is
+    // whatever makes a client's next seq land back on `end`; an attach
+    // `since` a seq resumes the stream itself and never gets it.
+    if since.is_none() && end > 0 {
+        let restore = inner.screen.restore().into_bytes();
+        out.send(&Frame::Data {
+            id: s.id.clone(),
+            seq: end.saturating_sub(restore.len() as u64),
+            bytes: restore,
+        });
     }
     if inner.alive {
         inner.subscribers.insert(conn, out.clone());
