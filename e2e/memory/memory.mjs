@@ -43,7 +43,14 @@ const check = (ok, message) => { console.log(`${ok ? "ok  " : "FAIL"} ${message}
 
 /** Pids listening on the port, any address. */
 const listeners = () => {
-  try { return execFileSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" }).split("\n").filter(Boolean); } catch { return []; }
+  try {
+    return execFileSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).split("\n").filter(Boolean);
+  } catch (error) {
+    // lsof exits 1, silently, when nothing matches. Anything else left the
+    // port unchecked, and an unchecked port must not clear scratch state.
+    if (error.status === 1 && !error.stdout && !error.stderr) return [];
+    throw new Error(`could not check :${PORT} for listeners: ${error.message}`);
+  }
 };
 // Any listener could take our requests (one on 127.0.0.1 coexists with the
 // core's wildcard bind), and a leftover core owns the scratch state the next
