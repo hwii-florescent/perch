@@ -95,6 +95,14 @@ check("a screenshot change passes only when that state was reviewed by name",
   diff(fresh(), fresh(["chromium"], { shade: 200 }), "--reviewed", states.join(",")), { exit: 0, shows: "reviewed" });
 check("an unknown --only filter fails", diff(fresh(), fresh(), "--only", "no-such-state"), { exit: 1, hides: "IDENTICAL" });
 
+// States that cover frozen-UI and git leftovers: each must stay registered (each throws when its target is absent).
+const required = ["14z-git-diff-truncated", "14z3-git-turn-summary", "14z5-git-conflicted-path", "24n-composer-drag-active",
+  "25-native-viewer", "25b-native-controller-typed", "25c-native-running", "25d-native-empty-truncated", "25e-native-rows-expanded",
+  "25f-native-lease-refused", "25g-native-sending", "25h-native-scroll-follows", "25i-native-scroll-pill", "25j-native-scroll-pill-hover", "25k-native-scroll-pill-click"];
+const lost = required.filter((name) => !states.includes(name));
+console.log(`${lost.length ? "✗" : "✓"} the new git / drag / native states are registered${lost.length ? `\n    missing: ${lost.join(", ")}` : ""}`);
+if (lost.length) failed++;
+
 if (process.argv.includes("--with-snap")) {
   const snapOnly = (dist, tag) => spawnSync("node", [visual, "snap", dist, path.join(tmp, tag), "--engines", "chromium", "--only", "01-home"], { encoding: "utf8", timeout: 60_000 });
   // No web build at all: must fail before booting anything.
@@ -106,6 +114,8 @@ if (process.argv.includes("--with-snap")) {
   const junk = path.join(tmp, "junk-dist");
   fs.mkdirSync(junk);
   fs.writeFileSync(path.join(junk, "index.html"), "<!doctype html><title>x</title>");
+  fs.mkdirSync(path.join(junk, "assets")); // the built-CSS check runs first; an empty sheet gets past it to the capture
+  fs.writeFileSync(path.join(junk, "assets/x.css"), "");
   const blank = snapOnly(junk, "snap-blank");
   check("snap exits nonzero when the app renders nothing", blank, { exit: 1, shows: "empty capture" });
   check("diff rejects that failed snap even against itself", run("diff", path.join(tmp, "snap-blank"), path.join(tmp, "snap-blank"), "--engines", "chromium", "--only", "01-home"), { exit: 1, shows: "INVALID RUN", hides: "IDENTICAL" });

@@ -1,8 +1,7 @@
 /* Tailwind v4 without preflight: the legacy CSS in this folder still depends on
  * the browser's defaults, so resetting them would change un-migrated screens.
  * Utilities are layered, so an unlayered legacy rule beats them: a migrated
- * element must carry no legacy class that styles it.
- * Plan and progress: docs/TAILWIND-MIGRATION.md */
+ * element must carry no legacy class that styles it. */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 /* Scan TS/TSX only; the legacy .css files hold words that read as utilities. */
@@ -43,6 +42,18 @@
 @theme {
   --animate-toast-in: toast-in 0.15s ease-out;
   --animate-host-pulse: host-connecting-pulse 1.4s ease-in-out infinite;
+  --animate-scroll-pill: scroll-pill-pulse 1s ease-in-out infinite;
+  @keyframes scroll-pill-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.35;
+      transform: scale(1.6);
+    }
+  }
   @keyframes host-connecting-pulse {
     0%,
     100% {

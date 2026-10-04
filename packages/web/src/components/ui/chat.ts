@@ -1,6 +1,34 @@
-/** Hosted transcript chrome used by `Chat.tsx` only. The shared message shell (`.message*`, `.message__worked-for`,
- * markdown, scroll pill, `.chat__list`) stays in chat.css because `NativeCliChat` renders it too. The legacy
+import { cn } from "../../lib/cn";
+
+/** Chat chrome shared by `Chat.tsx` (Hosted) and `NativeCliChat.tsx`: the list, the scroll pill, the message shell, the
+ * worked-for summary, the error line and the composer shell. What stays in chat.css is `.chat`, the markdown
+ * descendants (`.message__markdown *`, from `dangerouslySetInnerHTML`) and `.codeblock-copy` (injected DOM). The legacy
  * `tool-row__*`, `diff-line--*`, `edit-badge__*` tokens stay in the markup as unstyled hooks. */
+export const CHAT_LIST_CONTAINER = "relative flex min-h-0 flex-1 flex-col";
+export const CHAT_LIST = "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3";
+export const SCROLL_PILL = "absolute right-4 bottom-3 z-5 flex cursor-pointer items-center gap-[0.4rem] rounded-ui [border:none] bg-accent px-3 py-[0.35rem] text-[0.8rem] font-semibold text-panel-bg [font-family:inherit] [box-shadow:0_4px_14px_rgba(0,0,0,0.35)] hover:[filter:brightness(1.08)]";
+export const SCROLL_PILL_DOT = "h-[6px] w-[6px] rounded-[50%] bg-panel-bg animate-scroll-pill";
+
+const MESSAGE = "relative max-w-[85%] text-[0.95rem] leading-[1.45] [word-break:break-word]";
+const MESSAGE_USER = "self-end whitespace-pre-wrap rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.55rem] text-fg";
+// Assistant text is full width and unboxed; the bottom padding leaves room for the hover "copy" action.
+const MESSAGE_ASSISTANT = "max-w-full self-stretch p-0 pb-[1.15rem] text-subtext-0 [background:none] [border:none]";
+/** `message` and `message--<role>` stay as hooks (e2e, harness). */
+export const messageClass = (role: string, extra?: string) =>
+  cn("message", `message--${role}`, MESSAGE, role === "user" ? MESSAGE_USER : MESSAGE_ASSISTANT, extra);
+export const MESSAGE_ERROR = "mt-[0.35rem] text-red";
+export const MESSAGE_MARKDOWN = "whitespace-normal";
+export const WORKED_FOR =
+  "mb-[0.4rem] overflow-hidden rounded-[0.4rem] border border-overlay-0 bg-panel-bg text-[0.83rem] text-subtext-0 " +
+  "[&>summary]:flex [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:items-center [&>summary]:gap-[0.4rem] [&>summary]:px-[0.55rem] [&>summary]:py-[0.3rem] [&>summary]:select-none " +
+  "[&>summary]:before:inline-block [&>summary]:before:text-[0.9em] [&>summary]:before:content-['›'] [&>summary]:before:[transition:transform_0.15s_ease] " +
+  "[&[open]>summary]:before:[transform:rotate(90deg)]";
+/** The composer shell, shared with `NativeCliChat`. */
+export const HOSTED_TEXTAREA = "max-h-32 w-full resize-none rounded-ui border border-overlay-0 bg-surface-1 px-[0.7rem] py-[0.55rem] text-[1rem] text-fg [font-family:inherit] focus:outline-1 focus:outline-solid focus:outline-accent";
+/** `NativeCliChat`'s composer textarea: borderless, inherits the font, marks keyboard focus inside its box. */
+export const NATIVE_TEXTAREA = "box-border max-h-[30vh] min-h-[64px] w-full resize-y rounded-ui bg-transparent p-2 text-inherit [border:0] [font:inherit] focus:outline-1 focus:outline-solid focus:outline-accent focus-visible:outline-2 focus-visible:-outline-offset-2";
+export const CHAT_INPUT = "flex shrink-0 flex-col gap-[0.35rem] border-t border-t-overlay-0 bg-surface-0 p-[0.6rem]";
+
 export const MESSAGE_GROUP = "group/msg";
 const ACTIONS = "absolute flex gap-1 opacity-0 [transition:opacity_0.12s_ease] group-hover/msg:opacity-100 focus-within:opacity-100";
 export const ACTIONS_USER = `${ACTIONS} top-1 right-[0.35rem]`;

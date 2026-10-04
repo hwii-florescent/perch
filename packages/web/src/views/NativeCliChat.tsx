@@ -6,19 +6,23 @@ import { requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
+import { CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, WORKED_FOR, messageClass } from "../components/ui/chat";
+import { cn } from "../lib/cn";
+
+const HINT = "text-[12px] text-subtext-0";
 
 // Keep drafts and retry identities across UI/CLI switches, bounded like the
 // transcript. A lost acknowledgement never turns Retry into a new operation.
 const drafts = new Map<string, { text: string; operationId: string }>();
 const NativeMessage = memo(function NativeMessage({ message, streaming }: { message: NativeUiMessage; streaming: boolean }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
-  return <article className={`message message--${message.role === "user" ? "user" : "assistant"}`} data-native-role={message.role}>
-    {message.thinking && <details className="message__worked-for"><summary>Thinking</summary><pre>{message.thinking}</pre></details>}
-    {message.tools.map((tool, index) => <details className="message__worked-for" key={`${index}-${tool.name}`}><summary>{tool.name}</summary><pre>{tool.input}</pre></details>)}
-    {message.role === "toolResult" ? <details className="message__worked-for"><summary>{message.toolName ?? "Tool"} result</summary><pre>{message.text}</pre></details>
-      : message.role === "assistant" ? <div className="message__markdown" dangerouslySetInnerHTML={{ __html: html }} />
+  return <article className={messageClass(message.role === "user" ? "user" : "assistant")} data-native-role={message.role}>
+    {message.thinking && <details className={cn("message__worked-for", WORKED_FOR)}><summary>Thinking</summary><pre>{message.thinking}</pre></details>}
+    {message.tools.map((tool, index) => <details className={cn("message__worked-for", WORKED_FOR)} key={`${index}-${tool.name}`}><summary>{tool.name}</summary><pre>{tool.input}</pre></details>)}
+    {message.role === "toolResult" ? <details className={cn("message__worked-for", WORKED_FOR)}><summary>{message.toolName ?? "Tool"} result</summary><pre>{message.text}</pre></details>
+      : message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
-    {message.error && <div className="message__error" role="alert">{message.error}</div>}
+    {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
   </article>;
 }, (before, after) => before.streaming === after.streaming && JSON.stringify(before.message) === JSON.stringify(after.message));
 
@@ -93,25 +97,25 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     finally { setPending(false); }
   }
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : snapshot.running ? "Working" : "Ready";
-  return <div className="native-cli-chat" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
-    <div className="terminal__toolbar native-cli-chat__toolbar">
+  return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
+    <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
-      {snapshot?.model && <span className="native-cli-chat__model" title={snapshot.model}>{snapshot.model}</span>}
+      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model}>{snapshot.model}</span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
-    <div className="chat__list-container">
-      <div className="chat__list" ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
-        {snapshot?.truncated && <p className="native-cli-chat__hint">Showing recent messages. The complete conversation remains in the CLI.</p>}
-        {snapshot && !snapshot.messages.length && <p className="native-cli-chat__hint">Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
+    <div className={cn("chat__list-container", CHAT_LIST_CONTAINER)}>
+      <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
+        {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
+        {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {snapshot?.messages.map((message, index) => <NativeMessage key={message.id} message={message} streaming={snapshot.running && index === snapshot.messages.length - 1} />)}
       </div>
-      {showBottom && <button className="scroll-bottom-pill" type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
+      {showBottom && <button className={cn("scroll-bottom-pill", SCROLL_PILL)} type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
     </div>
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
-    <form className="chat__input native-cli-chat__input" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-      <textarea aria-label="Message CLI" data-testid="native-cli-composer" value={text} disabled={!connected || !controlling || !snapshot} placeholder={controlling ? "Message this CLI…" : "Take control to send a message"} rows={3} onChange={(event) => updateDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
-      <div className="native-cli-chat__actions">
-        <span className="native-cli-chat__hint">{controlling ? "" : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
+    <form className={cn("chat__input", CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); void send(); }}>
+      <textarea className={NATIVE_TEXTAREA} aria-label="Message CLI" data-testid="native-cli-composer" value={text} disabled={!connected || !controlling || !snapshot} placeholder={controlling ? "Message this CLI…" : "Take control to send a message"} rows={3} onChange={(event) => updateDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+      <div className="flex flex-wrap items-center gap-2 px-2 py-1">
+        <span className={cn(HINT, "flex-1")}>{controlling ? "" : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
         {snapshot?.running && <button type="button" disabled={!controlling || !connected || pending} onClick={() => void send(true)}>Cancel turn</button>}
         <button type="submit" disabled={!controlling || !connected || !snapshot || !text.trim() || pending}>{pending ? "Sending…" : snapshot?.running ? "Queue message" : "Send"}</button>
       </div>

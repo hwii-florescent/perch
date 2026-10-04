@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Visual-parity harness for the Tailwind migration (docs/TAILWIND-MIGRATION.md).
+ * Visual-parity harness.
  *
  *   node e2e/visual/visual.mjs snap <web-dist-dir> <out-root> [--engines chromium,webkit] [--only <state-substring>]
  *   node e2e/visual/visual.mjs diff <out-root-a> <out-root-b> [--engines chromium,webkit] [--only <s>] [--reviewed <state,state>]
@@ -88,11 +88,135 @@ const hostedPage = async (page, transcript = []) => {
   await inject(transcript); // the session switch and command fetch land first; put the fixtures back
   await sleep(500);
 };
+// --- NativeCliChat (UI mode over a CLI session) -----------------------------------------------------------------
+// No agent is started. A page-level WebSocket hook answers every agent.* request for the page-only session
+// "native-vis" itself (terminal open, control lease, ui get/prompt/cancel) and swallows the terminal frames, so
+// nothing reaches the real core (whose HOME is the user's). A request it does not know is counted in
+// window.__native.unhandled and fails the state. `push` delivers an unsolicited snapshot, as a running CLI would.
+const NATIVE_LONG = `${"/very/long/unbroken/path/".repeat(1)}${"x".repeat(240)}`;
+const NATIVE_MESSAGES = [
+  { id: "n1", role: "user", text: "Please fix the login bug and add a test.", thinking: "", tools: [] },
+  { id: "n2", role: "assistant", thinking: "Considering the options carefully before editing.",
+    text: "Here is what I did:\n\n## Fix\n\n1. Read the **handler**\n2. Patched `auth.ts`\n\n```ts\nconst ok = check(user);\n```\n\n> The test now passes.\n\nSee [the docs](https://example.com).",
+    tools: [{ name: "Bash", input: "npm test" }, { name: "Edit", input: NATIVE_LONG }] },
+  { id: "n3", role: "toolResult", toolName: "Bash", text: `3 passed ${NATIVE_LONG}`, thinking: "", tools: [] },
+  { id: "n4", role: "assistant", text: "Done.", thinking: "", tools: [], error: "The agent exited unexpectedly." },
+];
+// no break opportunities (hyphens would wrap the name instead of cutting it with an ellipsis)
+const NATIVE_MODEL = "claude_haiku_4_5_with_a_deliberately_long_model_name_that_has_to_be_cut_off_by_the_toolbar_0123456789";
+const nativeSnapshot = (over = {}) => ({ version: 1, revision: 1, pid: 4242, providerSessionId: "/native.jsonl", cwd: "/private/tmp/perch-visual/repo", model: NATIVE_MODEL, running: false, messages: NATIVE_MESSAGES, truncated: false, ...over });
+// `owner`: another view holds the input lease (we watch); otherwise the view takes control by itself.
+// `denyControl`: the lease request is answered with an error. `holdPrompt`: agent.ui.prompt is never answered.
+const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, denyControl = false, holdPrompt = false } = {}) => {
+  await page.getByTestId("onboarding-dismiss").click();
+  await page.waitForFunction(() => !!window.usePerchStore.getState().settings);
+  await page.evaluate(({ snapshot, owner, denyControl, holdPrompt }) => {
+    const sid = "native-vis", now = 1767268800000;
+    const lease = (clientId, generation) => ({ clientId, deviceId: `${clientId}-device`, generation, acquiredAtMs: now, lastActivityMs: now });
+    const N = window.__native = { snapshot, unhandled: [], prompts: 0, cancels: 0, owner: owner ? lease("other-view", 1) : null, ws: null };
+    const status = (inputOwner) => ({ key: { workspaceId: "ws-vis", sessionId: sid, agentId: "claude" }, providerId: "claude", resumable: true, state: "idle", reason: "", lastTransitionMs: now, lastActivityMs: now, revision: inputOwner && inputOwner.clientId === "me" ? 2 : 1, transitionSequence: 1, ...(inputOwner ? { inputOwner } : {}) });
+    N.push = (next) => { N.snapshot = { ...N.snapshot, ...next, revision: N.snapshot.revision + 1 }; N.reply({ type: "agent.ui.snapshot", requestId: `push-${N.snapshot.revision}`, sessionId: sid, providerId: "claude", snapshot: N.snapshot }); };
+    N.reply = (m) => N.ws.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(m) }));
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      let m = null;
+      try { m = JSON.parse(data); } catch {}
+      const mine = m && (m.sessionId === sid || m.terminalId === "native-term") && /^(agent\.|terminal\.)/.test(m.type);
+      if (!mine) return send.call(this, data);
+      N.ws = this;
+      const r = (x) => setTimeout(() => N.reply({ requestId: m.requestId, ...x }), 0);
+      switch (m.type) {
+        case "agent.terminal.open": r({ type: "agent.terminal.opened", terminalId: "native-term", status: status(N.owner), replay: "" }); break;
+        case "agent.control.acquire":
+          if (denyControl) r({ type: "error", message: "Another view holds the input lease." });
+          else { N.owner = lease("me", 1); r({ type: "agent.control", sessionId: sid, agentId: "claude", channel: m.channel, lease: N.owner, status: status(N.owner) }); }
+          break;
+        case "agent.ui.get": r({ type: "agent.ui.snapshot", sessionId: sid, providerId: "claude", snapshot: N.snapshot }); break;
+        case "agent.ui.prompt": N.prompts++; if (!holdPrompt) r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
+        case "agent.ui.cancel": N.cancels++; r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
+        case "agent.terminal.release": case "terminal.resize": case "terminal.input": case "terminal.kill": break;
+        default: N.unhandled.push(m.type);
+      }
+    };
+  }, { snapshot, owner, denyControl, holdPrompt });
+  // the real manifests (claude has a native UI) and capabilities must have arrived before the session mounts the view
+  await page.waitForFunction(() => {
+    const st = window.usePerchStore.getState();
+    return st.serverInfo?.capabilities?.includes("agent.ui.get") && st.agentManifestsByHost?.local?.manifests?.some((e) => e.id === "claude" && e.nativeUi);
+  }, null, { timeout: 20000 });
+  const inject = () => page.evaluate(() => {
+    const st = window.usePerchStore.getState();
+    const sid = "native-vis";
+    window.usePerchStore.setState({
+      settings: { ...st.settings, chatMode: "hosted" },
+      sessions: [{ id: sid, title: "Native chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, lastAgent: "claude", status: "idle", cliStarted: true }],
+      sessionId: sid,
+      cliAgentBySession: { ...st.cliAgentBySession, [sid]: "claude" },
+    });
+  });
+  await inject();
+  await page.getByTestId("native-cli-chat").waitFor();
+  await sleep(1200);
+  await inject(); // the session switch lands first; put the fixtures back
+  await page.getByTestId("native-cli-chat").waitFor();
+  await page.locator("article[data-native-role]").first().waitFor({ timeout: 15000 }).catch(() => {});
+  await sleep(400);
+};
+const nativeClean = async (page, what) => {
+  const unhandled = await page.evaluate(() => window.__native.unhandled);
+  if (unhandled.length) throw new Error(`${what}: unanswered native requests ${JSON.stringify(unhandled)}`);
+  if ((await page.getByTestId("native-cli-chat").count()) !== 1) throw new Error(`${what}: the native chat view is not mounted`);
+};
+const nativeMetrics = (page) => page.locator(".chat__list").evaluate((el) => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight, client: el.clientHeight, height: el.scrollHeight }));
+// Many messages, so the list overflows and has somewhere to scroll.
+const nativeLong = () => nativeSnapshot({ messages: Array.from({ length: 14 }, (_, i) => ({ id: `l${i}`, role: i % 2 ? "assistant" : "user", text: `Message ${i}: ${"a line of conversation ".repeat(6)}`, thinking: "", tools: [] })) });
+const nativeMoreMessage = (id) => ({ id, role: "assistant", text: "A new message arrives.", thinking: "", tools: [] });
 // Refresh only reloads status and notes; flipping a diff option reloads the diff.
 const reloadGitDiff = async (page) => {
   await page.getByTestId("git-refresh").click();
   await page.getByLabel("Ignore whitespace").check();
   await page.getByLabel("Ignore whitespace").uncheck();
+};
+let conflictBefore = null;
+// True when the element's computed colour is the current value of the :root token (e.g. "--red").
+const tokenColorIs = (locator, token) => locator.evaluate((el, token) => {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${token})`;
+  document.body.appendChild(probe);
+  const want = getComputedStyle(probe).color;
+  probe.remove();
+  return getComputedStyle(el).color === want;
+}, token);
+// A page-level WebSocket hook for git replies the fixture cannot produce (chains with the 14t hook; each branch is gated
+// by its own flag in window.__gitStub and passes through otherwise): replays the last real `git.diff.result` /
+// `git.status.result` for a new request with `truncated` / `lastAgentTurn` added.
+const installGitStub = async (page) => {
+  if (await page.evaluate(() => !!window.__gitStub)) return;
+  await page.evaluate(() => {
+  window.__gitStub = { truncated: false, turn: null };
+  const seen = new Set(), last = {};
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    if (!seen.has(this)) {
+      seen.add(this);
+      this.addEventListener("message", (event) => {
+        let msg = null;
+        try { msg = JSON.parse(event.data); } catch {}
+        if (msg?.type === "git.diff.result" && !msg.truncated) last.diff = msg;
+        if (msg?.type === "git.status.result") last.status = { ...msg, lastAgentTurn: undefined };
+      });
+    }
+    let msg = null;
+    try { msg = JSON.parse(data); } catch {}
+    const reply = (m) => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(m) }));
+    if (window.__gitStub.truncated && msg?.type === "git.diff" && last.diff) { reply({ ...last.diff, requestId: msg.requestId, workspaceId: msg.workspaceId, target: msg.target, truncated: true }); return; }
+    if (window.__gitStub.turn && msg?.type === "git.status" && last.status) { reply({ ...last.status, requestId: msg.requestId, workspaceId: msg.workspaceId, lastAgentTurn: window.__gitStub.turn }); return; }
+    return send.call(this, data);
+  };
+  });
+  // prime: the hook records the first real status and diff replies it sees
+  await reloadGitDiff(page);
+  await sleep(1000);
 };
 const pinGitBottom =(page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight; });
 
@@ -830,6 +954,73 @@ const STATES = [
     await page.getByTestId("git-diff").waitFor({ timeout: 20000 });
     await sleep(500);
   } },
+  // Three git-panel states with no real trigger in the fixture. The truncated banner (the server's 2 MB patch cap) and
+  // the agent-turn summary (needs a recorded turn) are answered by a page-level WebSocket hook that replays the last
+  // real reply with `truncated` / `lastAgentTurn` added; the conflicted path is real (index stages, HEAD untouched).
+  // Each state asserts its target by text and by a computed token colour, never by a legacy class.
+  { name: "14z-git-diff-truncated", run: async (page) => {
+    await installGitStub(page);
+    await page.evaluate(() => { window.__gitStub.truncated = true; });
+    await reloadGitDiff(page);
+    const banner = page.getByText("This diff is truncated. Narrow the path or comparison before commenting.");
+    await banner.waitFor({ timeout: 20000 });
+    if (!(await tokenColorIs(banner, "--yellow"))) throw new Error("14z: the truncated banner is not in the yellow token colour");
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14z2-git-diff-truncated-cleared", nocapture: true, run: async (page) => {
+    await page.evaluate(() => { window.__gitStub.truncated = false; });
+    await reloadGitDiff(page);
+    await page.getByText("This diff is truncated").waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
+  } },
+  { name: "14z3-git-turn-summary", run: async (page) => {
+    const head = git("rev-parse HEAD", REPO).toString().trim();
+    await installGitStub(page);
+    await page.evaluate((beforeRef) => { window.__gitStub.turn = { snapshotId: "snap-vis", sessionId: "sess-vis", agent: "claude", beforeRef, changedPaths: ["src/main.txt", "untracked.txt"], changedPathCount: 2, state: "complete" }; }, head);
+    await page.getByTestId("git-refresh").click();
+    await page.locator('[data-testid="git-diff-target"] option[value="lastAgentTurn"]:not([disabled])').waitFor({ state: "attached", timeout: 20000 });
+    await page.getByTestId("git-diff-target").selectOption("lastAgentTurn");
+    const summary = page.getByTestId("git-turn-summary");
+    await summary.waitFor({ timeout: 20000 });
+    const text = ((await summary.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    if (text !== "claude changed 2 paths") throw new Error(`14z3: unexpected turn summary ${JSON.stringify(text)}`);
+    await page.getByTestId("git-diff").waitFor({ timeout: 20000 });
+    await pinGitScroll(page);
+    await sleep(500);
+  } },
+  { name: "14z4-git-turn-summary-cleared", nocapture: true, run: async (page) => {
+    await page.evaluate(() => { window.__gitStub.turn = null; });
+    await page.getByTestId("git-diff-target").selectOption("workingTree");
+    await page.getByTestId("git-refresh").click();
+    await page.getByTestId("git-turn-summary").waitFor({ state: "detached", timeout: 20000 });
+    await sleep(500);
+  } },
+  { name: "14z5-git-conflicted-path", run: async (page) => {
+    const before = { head: git("rev-parse HEAD", REPO).toString(), status: git("status --porcelain", REPO).toString() };
+    const blob = (text) => { fs.writeFileSync(`${WORK}/blob.tmp`, text); return git(`hash-object -w ${WORK}/blob.tmp`, REPO).toString().trim(); };
+    const [base, ours, theirs] = [blob("base\n"), blob("ours\n"), blob("theirs\n")];
+    execSync("git update-index --index-info", { cwd: REPO, stdio: "pipe", input: `100644 ${base} 1\tconflict.txt\n100644 ${ours} 2\tconflict.txt\n100644 ${theirs} 3\tconflict.txt\n` });
+    fs.writeFileSync(`${REPO}/conflict.txt`, "<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n");
+    fs.utimesSync(`${REPO}/conflict.txt`, new Date("2026-01-01T12:00:00Z"), new Date("2026-01-01T12:00:00Z"));
+    if (!/^UU conflict\.txt$/m.test(git("status --porcelain", REPO).toString())) throw new Error("14z5: git does not report conflict.txt as UU");
+    await page.getByTestId("git-refresh").click();
+    const state = page.getByTestId("workspace-git-review").getByText("conflicted", { exact: true }).first();
+    await state.waitFor({ timeout: 20000 });
+    if (!(await tokenColorIs(state, "--red"))) throw new Error("14z5: the conflicted state is not in the red token colour");
+    await pinGitScroll(page);
+    await sleep(500);
+    git("update-index --force-remove conflict.txt", REPO);
+    fs.rmSync(`${REPO}/conflict.txt`);
+    conflictBefore = before;
+  } },
+  { name: "14z6-git-conflict-cleared", nocapture: true, run: async (page) => {
+    await page.getByTestId("git-refresh").click();
+    await page.getByText("conflicted", { exact: true }).waitFor({ state: "detached", timeout: 20000 });
+    const b = conflictBefore;
+    if (git("rev-parse HEAD", REPO).toString() !== b.head || git("status --porcelain", REPO).toString() !== b.status) throw new Error("14z6: the conflict fixture left the repo changed");
+    await sleep(500);
+  } },
   // The confirm card (danger accept, quiet cancel) for a discard and for a commit; cleanup restores the index and selection.
   { name: "14q-git-discard-confirm", run: async (page) => {
     await page.getByLabel("Select src/main.txt").check();
@@ -1288,6 +1479,137 @@ const STATES = [
     await sleep(300);
     if ((await opacity("msg-copy-assistant")) !== "1") throw new Error("24m: keyboard focus did not reveal the assistant actions");
     if ((await opacity("msg-copy-user")) !== "0") throw new Error("24m: the user actions stayed visible after focus moved away");
+  } },
+  // `.chat__input--drag-active`: dragging a file over the composer. The state fires dragover only (never drop), so
+  // nothing is uploaded; the upload stub is installed anyway and its hit count asserted to stay at zero.
+  { name: "24n-composer-drag-active", fresh: true, run: async (page) => {
+    await hostedPage(page);
+    await stubUpload(page, 200, JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }));
+    const form = page.locator("div.chat__input");
+    await form.evaluate((el) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File(["hello"], "notes.txt", { type: "text/plain" }));
+      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+    await sleep(300);
+    const outline = await form.evaluate((el) => { const cs = getComputedStyle(el); return `${cs.outlineStyle} ${cs.outlineWidth}`; });
+    if (outline !== "dashed 2px") throw new Error(`24n: the composer outline is ${JSON.stringify(outline)}, not dashed 2px`);
+    if ((await uploadHits(page)) !== 0) throw new Error("24n: the drag started an upload");
+    await page.mouse.move(2, 2);
+  } },
+  // NativeCliChat: viewing (another view holds the lease), controlling, running, empty/truncated, expanded rows,
+  // a refused lease, a send in flight, and the scroll behaviour (stick to the bottom, pill, back to the bottom).
+  { name: "25-native-viewer", fresh: true, run: async (page) => {
+    await nativePage(page, { owner: true });
+    if ((await page.locator("article[data-native-role]").count()) !== 4) throw new Error("25: the transcript does not show its 4 messages");
+    if ((await page.getByRole("button", { name: "Take control" }).count()) !== 1) throw new Error("25: no Take control button");
+    if (!(await page.getByTestId("native-cli-composer").isDisabled())) throw new Error("25: the composer is enabled while another view types");
+    await page.getByText("Another view is typing in this agent").waitFor();
+    await page.locator("article [role=alert]").getByText("The agent exited unexpectedly.").waitFor();
+    const model = await page.locator("[data-testid=native-cli-chat] [title^=claude_haiku]").evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth, os: getComputedStyle(el).overflow }));
+    if (!(model.sw > model.cw)) throw new Error(`25: the long model name is not cut off ${JSON.stringify(model)}`);
+    await nativeClean(page, "25");
+  } },
+  { name: "25b-native-controller-typed", fresh: true, run: async (page) => {
+    await nativePage(page);
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    const box = page.getByTestId("native-cli-composer");
+    await box.fill("Please continue with the next step");
+    await box.focus();
+    if (await page.getByRole("button", { name: "Send" }).isDisabled()) throw new Error("25b: Send is disabled with text and the lease");
+    await sleep(300);
+    await nativeClean(page, "25b");
+  } },
+  { name: "25c-native-running", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeSnapshot({ running: true }) });
+    await page.getByRole("button", { name: "Cancel turn" }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Queue message" }).waitFor();
+    if (((await page.getByRole("status").first().textContent()) ?? "").trim() !== "Working") throw new Error("25c: the toolbar does not say Working");
+    await nativeClean(page, "25c");
+  } },
+  { name: "25d-native-empty-truncated", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeSnapshot({ messages: [], truncated: true }), owner: true });
+    await page.getByText("Showing recent messages. The complete conversation remains in the CLI.").waitFor();
+    await page.getByText(/^Start a conversation with Claude Code\./).waitFor();
+    await nativeClean(page, "25d");
+  } },
+  { name: "25e-native-rows-expanded", fresh: true, run: async (page) => {
+    await nativePage(page, { owner: true });
+    await page.locator("article[data-native-role] details").evaluateAll((els) => els.forEach((el) => { el.open = true; }));
+    await sleep(300);
+    const n = await page.locator("article[data-native-role] details[open]").count();
+    if (n !== 4) throw new Error(`25e: ${n} rows are open, wanted 4 (thinking, 2 tool calls, 1 tool result)`);
+    const wraps = await page.locator("article[data-native-role] details pre").evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth));
+    if (!wraps) throw new Error("25e: a long unbroken line overflows its pre instead of wrapping");
+    await nativeClean(page, "25e");
+  } },
+  { name: "25f-native-lease-refused", fresh: true, run: async (page) => {
+    await nativePage(page, { owner: true, denyControl: true });
+    await page.getByRole("button", { name: "Take control" }).click();
+    await page.getByText("Another view holds the input lease.").waitFor({ timeout: 15000 });
+    await sleep(300);
+    await nativeClean(page, "25f");
+  } },
+  { name: "25g-native-sending", fresh: true, run: async (page) => {
+    await nativePage(page, { holdPrompt: true });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.getByTestId("native-cli-composer").fill("Please continue");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "Sending…" }).waitFor();
+    if ((await page.evaluate(() => window.__native.prompts)) !== 1) throw new Error("25g: the prompt did not reach the stub exactly once");
+    await nativeClean(page, "25g");
+  } },
+  // Scroll: pinned at the bottom a pushed message follows; scrolled up it does not (the pill shows); the pill returns.
+  { name: "25h-native-scroll-follows", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeLong() });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    let m = await nativeMetrics(page);
+    if (m.max < 100) throw new Error(`25h: the list does not overflow (${m.max}px)`);
+    if (m.max - m.top > 2) throw new Error(`25h: the list did not open at the bottom (${m.top}/${m.max})`);
+    await page.evaluate((msg) => window.__native.push({ messages: [...window.__native.snapshot.messages, msg] }), nativeMoreMessage("l-new1"));
+    await page.getByText("A new message arrives.").waitFor();
+    await sleep(300);
+    const after = await nativeMetrics(page);
+    if (after.height <= m.height) throw new Error("25h: the pushed message did not grow the list");
+    if (after.max - after.top > 2) throw new Error(`25h: the list did not follow the new message (${after.top}/${after.max})`);
+    if ((await page.getByRole("button", { name: "↓ Bottom" }).count()) !== 0) throw new Error("25h: the pill shows while pinned to the bottom");
+    await nativeClean(page, "25h");
+  } },
+  { name: "25i-native-scroll-pill", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeLong() });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.locator(".chat__list").evaluate((el) => { el.scrollTop = 0; });
+    await page.getByRole("button", { name: "↓ Bottom" }).waitFor();
+    await page.evaluate((msg) => window.__native.push({ messages: [...window.__native.snapshot.messages, msg] }), nativeMoreMessage("l-new2"));
+    await page.getByText("A new message arrives.").waitFor({ state: "attached" });
+    await sleep(300);
+    const m = await nativeMetrics(page);
+    if (m.top > 2) throw new Error(`25i: a pushed message moved a list scrolled up (top ${m.top})`);
+    await page.getByRole("button", { name: "↓ Bottom" }).waitFor();
+    await nativeClean(page, "25i");
+  } },
+  { name: "25j-native-scroll-pill-hover", fresh: true, holdHover: ".scroll-bottom-pill", run: async (page) => {
+    await nativePage(page, { snapshot: nativeLong() });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.locator(".chat__list").evaluate((el) => { el.scrollTop = 0; });
+    await page.getByRole("button", { name: "↓ Bottom" }).waitFor();
+    await sleep(300);
+    await nativeClean(page, "25j");
+  } },
+  { name: "25k-native-scroll-pill-click", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeLong() });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.locator(".chat__list").evaluate((el) => { el.scrollTop = 0; });
+    await page.getByRole("button", { name: "↓ Bottom" }).click();
+    await page.getByRole("button", { name: "↓ Bottom" }).waitFor({ state: "detached" });
+    await sleep(300);
+    const m = await nativeMetrics(page);
+    if (m.max - m.top > 2) throw new Error(`25k: the pill did not return to the bottom (${m.top}/${m.max})`);
+    await page.evaluate((msg) => window.__native.push({ messages: [...window.__native.snapshot.messages, msg] }), nativeMoreMessage("l-new3"));
+    await sleep(300);
+    const after = await nativeMetrics(page);
+    if (after.max - after.top > 2) throw new Error("25k: after the pill, the list stopped following new messages");
+    await nativeClean(page, "25k");
   } },
   { name: "23-onboarding", fresh: true, run: async () => {} },
   // Narrow and short: width is min(480px, 100vw - 2rem), height capped and scrolling.
