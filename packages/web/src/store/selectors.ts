@@ -104,6 +104,9 @@ export function activeWorkspaceSessions(state: ProjectNavState): SessionSummary[
       )
       .sort((a, b) => a.createdAt - b.createdAt);
   }
+  // The home screen (no session, no workspace) has no tabs; the project fallback below
+  // would show the first project's sessions instead.
+  if (state.sessionId == null && state.workspaces?.length) return [];
   const project = effectiveActiveProject(state);
   if (!project) {
     const current = state.sessions.find((s) => s.id === state.sessionId);

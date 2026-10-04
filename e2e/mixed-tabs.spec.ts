@@ -214,3 +214,25 @@ test("returning to a project restores its selected resource and split", async ({
     cleanup();
   }
 });
+
+test("closing the last tab shows the home screen, never another project's tab", async ({ page }) => {
+  const rootA = prepareFixture();
+  const rootB = prepareFixture();
+  try {
+    const a = await openAll(page, rootA);
+    const sessionB = await startChat(page, "terminal", rootB);
+    await page.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
+    await expect.poll(() => strip(page)).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
+
+    await page.getByTestId(`review-tab-close-${a.workspaceId}`).click();
+    await page.getByTestId(`file-tab-close-README.md`).click();
+    await page.getByTestId(`tab-close-${a.sessionId}`).click();
+
+    // No tabs left in A, and B's session was not shown instead.
+    await expect.poll(() => strip(page)).toEqual([]);
+    await expect(page.getByTestId("no-session-panel")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId(`workspace-session-${sessionB}`)).toBeVisible();
+  } finally {
+    cleanup();
+  }
+});
