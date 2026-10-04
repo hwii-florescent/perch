@@ -176,4 +176,29 @@ test.describe("Workspace tabs (Phase 3)", () => {
 
     await page.screenshot({ path: "artifacts/w4-03-second-tab-same-group.png" });
   });
+  // -------------------------------------------------------------------------
+  // W5 — a full-screen TUI survives a tab switch: pi/omp paint once, then
+  // redraw only changed rows, so the replay's byte tail soon holds just its
+  // status line, and its startup modes (mouse reporting) are long gone.
+  // -------------------------------------------------------------------------
+  test("W5. a full-screen TUI's screen and mouse mode survive a tab switch", async ({ page }) => {
+    test.setTimeout(90000);
+    await freshPage(page);
+    const tui = await startChat(page);
+    const other = await startChat(page);
+    await switchViaTabBar(page, tui);
+    const agent = page.getByTestId("persistent-agent-terminal");
+    await agent.locator(".xterm-helper-textarea").focus();
+    // Split strings keep the shell's echo of this line from matching.
+    await page.keyboard.type(`printf '\\033[?1049h\\033[?1000h\\033[1;1HTUI_''HEADER'; i=0; while [ $i -lt 4000 ]; do printf '\\033[3;1H\\033[2Kstatus %s ________________________________________' $i; i=$((i+1)); done; printf '\\033[3;1HTUI_''DONE'; sleep 600\n`);
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 30000 });
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
+
+    await switchViaTabBar(page, other);
+    await switchViaTabBar(page, tui);
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 15000 });
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
+    await expect(agent.locator(".xterm")).toHaveClass(/enable-mouse-events/);
+    await page.keyboard.press("Control+C");
+  });
 });

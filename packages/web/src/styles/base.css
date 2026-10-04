@@ -58,6 +58,12 @@ body,
   margin: 0;
 }
 
+/* No rubber-band: an unconsumed trackpad scroll would drag the whole app
+   like a web page. WebKit's root bounce follows `html`, not `body`. */
+html {
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--panel-bg);
   color: var(--text);

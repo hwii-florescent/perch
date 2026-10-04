@@ -21,17 +21,141 @@ pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
 
 pub const MAX_TERMINAL_REPLAY_BYTES: usize = 128 * 1024;
 
-/// Bounded UTF-8 replay shared by shell and provider runtimes.
-#[derive(Default)]
+/// Bounded UTF-8 replay shared by shell and provider runtimes: the recent
+/// output (for scrollback), then a repaint of the current screen. The tail
+/// alone is not enough: a TUI that paints with cursor moves and then redraws
+/// only what changed (pi's status line ticks every second) pushes its last
+/// full paint out of the tail within minutes, and replaying the tail then
+/// rebuilds a screen holding only the rows it touched since.
+/// The repaint must restore modes too: omp sets mouse reporting once, at
+/// startup, and a view that missed it never reports the wheel (the page
+/// rubber-bands instead).
 pub(crate) struct TerminalReplay {
     chunks: VecDeque<String>,
     bytes: usize,
+    screen: vt100::Parser,
+    modes: Modes,
+}
+
+/// Modes vt100 0.15 doesn't keep. The kitty keyboard flags and their stack
+/// are per screen (main, alternate), as in xterm.
+#[derive(Default)]
+struct Modes {
+    no_autowrap: bool,
+    focus_events: bool,
+    alternate: bool,
+    kitty: [u32; 2],
+    kitty_stack: [Vec<u32>; 2],
+}
+
+impl Modes {
+    // ponytail: misses a sequence split across two reads; the CLIs send
+    // these in one write at startup. A vte-based tracker would close that.
+    fn track(&mut self, data: &str) {
+        for (at, _) in data.match_indices("\x1b[") {
+            let rest = &data[at + 2..];
+            let Some(end) = rest.find(|c: char| !('\x20'..='\x3f').contains(&c)) else {
+                continue;
+            };
+            let (params, kind) = (&rest[..end], rest[end..].chars().next());
+            let screen = usize::from(self.alternate);
+            let number = |p: &str| p.split(';').next().and_then(|n| n.parse::<u32>().ok());
+            match (params, kind) {
+                ("?7", Some(c @ ('h' | 'l'))) => self.no_autowrap = c == 'l',
+                ("?1004", Some(c @ ('h' | 'l'))) => self.focus_events = c == 'h',
+                ("?1049" | "?1047" | "?47", Some(c @ ('h' | 'l'))) => self.alternate = c == 'h',
+                (p, Some('u')) if p.starts_with('>') => {
+                    let stack = &mut self.kitty_stack[screen];
+                    if stack.len() >= 16 {
+                        stack.remove(0);
+                    }
+                    stack.push(self.kitty[screen]);
+                    self.kitty[screen] = number(&p[1..]).unwrap_or(0);
+                }
+                (p, Some('u')) if p.starts_with('<') => {
+                    let stack = &mut self.kitty_stack[screen];
+                    for _ in 0..number(&p[1..]).unwrap_or(1).max(1) {
+                        let Some(flags) = stack.pop() else { break };
+                        self.kitty[screen] = flags;
+                    }
+                    if stack.is_empty() {
+                        self.kitty[screen] = 0;
+                    }
+                }
+                (p, Some('u')) if p.starts_with('=') => {
+                    let flags = number(&p[1..]).unwrap_or(0);
+                    let current = &mut self.kitty[screen];
+                    match p
+                        .split(';')
+                        .nth(1)
+                        .and_then(|m| m.parse().ok())
+                        .unwrap_or(1)
+                    {
+                        2 => *current |= flags,
+                        3 => *current &= !flags,
+                        _ => *current = flags,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Restores these on the screen the repaint left active.
+    fn formatted(&self) -> String {
+        let mut out = String::new();
+        if self.no_autowrap {
+            out += "\x1b[?7l";
+        }
+        if self.focus_events {
+            out += "\x1b[?1004h";
+        }
+        let flags = self.kitty[usize::from(self.alternate)];
+        if flags != 0 {
+            out += &format!("\x1b[={flags}u");
+        }
+        out
+    }
+}
+
+impl Default for TerminalReplay {
+    fn default() -> Self {
+        Self::new(80, 24)
+    }
+}
+
+/// `(cols, rows)` of a whole chunk that is a [`pty_size_marker`].
+fn parse_size_marker(data: &str) -> Option<(u16, u16)> {
+    let (rows, cols) = data
+        .strip_prefix("\x1b[8;")?
+        .strip_suffix('t')?
+        .split_once(';')?;
+    Some((cols.parse().ok()?, rows.parse().ok()?))
 }
 
 impl TerminalReplay {
+    /// `cols`/`rows`: the PTY's size when its output starts; later resizes
+    /// arrive in-band as size markers.
+    pub(crate) fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            chunks: VecDeque::new(),
+            bytes: 0,
+            // vt100 underflows on a 1-row grid (see `agent_title.rs`).
+            screen: vt100::Parser::new(rows.max(2), cols.max(2), 0),
+            modes: Modes::default(),
+        }
+    }
+
     pub(crate) fn push(&mut self, data: &str) {
         if data.is_empty() {
             return;
+        }
+        match parse_size_marker(data) {
+            Some((cols, rows)) => self.screen.set_size(rows.max(2), cols.max(2)),
+            None => {
+                self.screen.process(data.as_bytes());
+                self.modes.track(data);
+            }
         }
         let mut start = data.len().saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
         while !data.is_char_boundary(start) {
@@ -48,7 +172,30 @@ impl TerminalReplay {
     }
 
     pub(crate) fn text(&self) -> String {
-        self.chunks.iter().map(String::as_str).collect()
+        if self.chunks.is_empty() {
+            return String::new();
+        }
+        // Only entering the alternate screen needs saying: had the program
+        // left it, the tail would hold its `?1049l`. vt100's rows assume
+        // autowrap, so the program's own setting comes after them.
+        let screen = self.screen.screen();
+        let mut repaint = String::from("\x1b[?7h");
+        if screen.alternate_screen() {
+            repaint += "\x1b[?1049h";
+        }
+        repaint += &String::from_utf8_lossy(&screen.state_formatted());
+        repaint += &self.modes.formatted();
+        // Older chunks make room for the repaint, keeping the replay bounded.
+        let mut excess = (self.bytes + repaint.len()).saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
+        let mut text = String::new();
+        for chunk in &self.chunks {
+            if excess > 0 {
+                excess = excess.saturating_sub(chunk.len());
+                continue;
+            }
+            text += chunk;
+        }
+        text + &repaint
     }
 }
 
@@ -1423,7 +1570,45 @@ impl AgentTerminalRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_argv, split_utf8_tail};
+    use super::{
+        pty_size_marker, shell_argv, split_utf8_tail, TerminalReplay, MAX_TERMINAL_REPLAY_BYTES,
+    };
+
+    /// A TUI's full paint long since pushed out of the byte tail by one-row
+    /// updates (pi's status line) must still be on a reattached screen.
+    #[test]
+    fn replay_repaints_rows_older_than_the_tail() {
+        let mut replay = TerminalReplay::new(80, 24);
+        replay.push(
+            "\x1b[?1049h\x1b[?7l\x1b[?1000h\x1b[?1006h\x1b[>7u\x1b[1;1HHEADER\x1b[20;1H> prompt",
+        );
+        replay.push(&pty_size_marker(100, 30));
+        for tick in 0..20_000 {
+            replay.push(&format!("\x1b[30;1H\x1b[2Kstatus {tick}"));
+        }
+        let text = replay.text();
+        assert!(text.len() <= MAX_TERMINAL_REPLAY_BYTES);
+        let mut view = vt100::Parser::new(30, 100, 0);
+        view.process(text.as_bytes());
+        let screen = view.screen().contents();
+        assert!(view.screen().alternate_screen());
+        assert!(screen.starts_with("HEADER"), "{screen}");
+        assert!(
+            screen.contains("> prompt") && screen.contains("status 19999"),
+            "{screen}"
+        );
+        // Mouse reporting (the wheel), autowrap and the kitty keyboard flags
+        // were set once, at startup, long before the tail.
+        assert_eq!(
+            view.screen().mouse_protocol_mode(),
+            vt100::MouseProtocolMode::PressRelease
+        );
+        assert!(
+            text.ends_with("\x1b[?7l\x1b[=7u"),
+            "{:?}",
+            &text[text.len() - 40..]
+        );
+    }
 
     /// Off by default is the whole safety story for this setting: a login
     /// shell runs different rc files, so the pre-existing behaviour has to be

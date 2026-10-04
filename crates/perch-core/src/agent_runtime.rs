@@ -634,7 +634,7 @@ impl AgentRuntimeAdapter {
         let title_status = Arc::new(AtomicBool::new(false));
         let data_title_status = title_status.clone();
         let title = Mutex::new(crate::agent_title::TitleTracker::default());
-        let replay = Arc::new(Mutex::new(TerminalReplay::default()));
+        let replay = Arc::new(Mutex::new(TerminalReplay::new(cols, rows)));
         let replay_for_output = replay.clone();
         let status_detection = manifest.status_detection.clone();
         let status_tail = Mutex::new(String::new());

@@ -185,7 +185,10 @@ impl WorkspaceTerminals {
                     .lock()
                     .unwrap()
                     .entry(row.id.clone())
-                    .or_default();
+                    .or_insert_with(|| Stream {
+                        replay: Replay::new(row.cols, row.rows),
+                        viewers: HashMap::new(),
+                    });
                 let streams = self.streams.clone();
                 let id = row.id.clone();
                 let data = Arc::new(move |_: String, text: String| {
