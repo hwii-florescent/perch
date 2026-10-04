@@ -41,14 +41,3 @@
   outline: none;
   border-color: var(--accent);
 }
-
-/* Structured view of the interactive CLI's native conversation. */
-.native-cli-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.native-cli-chat__toolbar { flex-wrap: wrap; }
-.native-cli-chat__model { margin-left: auto; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
-.native-cli-chat__hint { color: var(--subtext-0); font-size: 12px; }
-.native-cli-chat__input textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; max-height: 30vh; background: transparent; color: inherit; border: 0; font: inherit; padding: 8px; }
-.native-cli-chat__input textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.native-cli-chat__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 8px; }
-.native-cli-chat__actions .native-cli-chat__hint { flex: 1; }
-.native-cli-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -88,6 +88,10 @@ Done:
   `21b`-`21f` (Files/Git/Terminal tabs, the no-workspace placeholder, back to
   Chat) and `22a`/`22a2` (switcher in its sessions-by-project mode, with
   injected sessions). The freeze rule is now gated by an attribute on `<html>`.
+- **Slice 34: NativeCliChat + the shared chat shell** (`NativeCliChat.tsx` and `Chat.tsx` share
+  `components/ui/chat.ts`: `CHAT_LIST*`, `SCROLL_PILL`, `messageClass`, `WORKED_FOR`, `MESSAGE_ERROR`,
+  `CHAT_INPUT`, the two textareas; `--animate-scroll-pill` in `tailwind.css`; `composer.css` deleted; the
+  `.native-cli-chat*` block removed from `git-review.css`; `chat.css` 281 -> 139 lines). Covered by `25`-`25k`.
 - **Slice 33: composer drag-over** (`chat__input--drag-active` -> `outline-2 -outline-offset-2 outline-dashed outline-accent` in `Chat.tsx`; rule deleted from `composer.css`). `provider-config.spec.ts` added to `testMatch`.
 - **Slice 32: git leftovers** (`BANNER_WARNING`, `conflict: text-red`, `TURN_SUMMARY` in
   `WorkspaceGitReview.tsx`; three rules deleted from `git-review.css`). The harness
@@ -221,10 +225,10 @@ Done:
 | mobile.css | – | **migrated and deleted** (MobileHeader/PaneShell/Switcher); the pane-fill child rule moved to `terminal.css`, the compact-overview rule to the end of `workspace-overview.css` |
 | pairing.css | – | **migrated and deleted** (`PairingGate`); 3 unrelated rules moved to the end of `settings.css`, `git-review.css`, `mobile.css` |
 | workspace-overview.css | – | **migrated and deleted** (the sidebar project list, compact phone variant) |
-| composer.css | 31 | partly migrated: the `.chat__input` shell and its textarea remain (`NativeCliChat` shares the shell); `--drag-active` (slice 33) and everything inside the shell are utilities |
-| chat.css | 281 | partly migrated: what `NativeCliChat` shares (message shell, worked-for summary, error, `.chat__list*`, scroll pill), `.chat`, the markdown descendants and `.codeblock-copy` remain; the Hosted-only rows are in `components/ui/chat.ts` |
+| composer.css | – | **migrated and deleted** (the `.chat__input` shell is `CHAT_INPUT` in `components/ui/chat.ts`, shared by Hosted and `NativeCliChat`; both textareas are `HOSTED_TEXTAREA` / `NATIVE_TEXTAREA`) |
+| chat.css | 139 | **keep as CSS**: `.chat` (the dockview height/stacking story), the markdown descendants (`.message__markdown *`, from `dangerouslySetInnerHTML`) and `.codeblock-copy` (injected DOM). The shared list, pill, message shell, worked-for and error are in `components/ui/chat.ts` |
 | workspace-files.css | – | **migrated and deleted** (file explorer/editor; phone dv-view rules moved to `dockview.css`) |
-| git-review.css | 52 | partly migrated: the container resets/variables and `.native-cli-chat*` remain (`banner--warning`, `file-state--conflict`, `turn-summary` migrated in slice 32) |
+| git-review.css | 43 | **keep as CSS**: the `.workspace-git` container variables, `container-type` and the unlayered button/input/select resets and focus rings (their precedence is relied on, see Gotchas) |
 | dockview.css | 118 | **keep as CSS** (Dockview theme overrides) |
 | terminal.css | 158 | **keep as CSS** (xterm surface; AGENTS.md invariants) |
 
@@ -232,27 +236,18 @@ A file is done only when it is deleted from `styles/` and from `styles/index.css
 
 ## Next slice
 
-What is left, smallest first (line counts as of slice 30):
-- `git-review.css` (72): the resets/variables on `.workspace-git` (keep),
-  `banner--warning` (truncated diff: the server's 2 MB patch cap, no state),
-  `file-state--conflict` (no conflicted path in the fixture), `turn-summary`
-  (needs an agent turn).
-- `.native-cli-chat*` (needs a harness state; its `chat__input` /
-  `terminal__toolbar` classes are in frozen CSS).
-- `chat.css` (281): what is left is shared with `NativeCliChat` (migrate it
-  together with a native-snapshot harness state), `.chat`, `.codeblock-copy`
-  (DOM injected after sanitising) and the markdown descendants
-  (`.message__markdown *`, from `dangerouslySetInnerHTML`), which legitimately
-  stay CSS.
-
-Notes for the next ones:
-- **Not covered by the harness yet** (add a state in `visual.mjs` *before*
-  migrating anything that renders there): the `.native-cli-chat*` view (an injected native snapshot), the
-  git panel's truncated-diff warning banner, a conflicted path and the turn
-  summary. Covered now: Hosted composer and transcript (`24`-`24k`, injected through the store: mode `hosted`, session `hosted-vis`, `sessionId`, `cliAgentBySession`, `sessionCommands`, `messagesBySession`; the server's session switch and command fetch overwrite them, so the helper injects twice and `24e` re-injects after typing `/`), pairing gate (`22d`-`22f`), directory browser
-  (`03b`-`03e`), mobile file/git panes (`21b`-`21f`), drag-reorder (`05g`),
-  terminal search and status bar (`05b`-`05e`), git error/empty/binary/confirm/
-  review-send/stale states (`14b`-`14y2`).
+No migration slice is queued: every file in `styles/` is either deleted or deliberately kept
+(`base.css`, `chat.css`, `dockview.css`, `git-review.css`, `terminal.css`, `tailwind.css`).
+Open follow-ups, none of them a parity task:
+- `terminal__toolbar` / `terminal__cli-error` (terminal.css) still style `NativeCliChat`'s toolbar and
+  error line; they stay with the xterm surface CSS.
+- Not covered by any harness state: the real send path (the harness answers `agent.ui.prompt`), the
+  server re-anchoring review notes on a real packet preview (the stale/orphaned states are a page-level
+  reply), the scroll pill's pulsing dot (the harness freezes animations; the built CSS was checked for
+  `scroll-pill-pulse`), `message:focus-within` on `NativeCliChat`, a real agent turn.
+- Fixing the undefined `--font-mono` / `--base` / `--surface-2` tokens, and rounding values to the Tailwind
+  scale, are deliberate design passes for after the migration.
+- `e2e/provider-config.spec.ts` fails at line 142 on the ORIGINAL build too (see Pre-existing failures).
 
 ## Rules for a migrated component
 
@@ -442,6 +437,7 @@ artifacts in `~/perch-visual-review/`.
 | 14 | CLI start + home | tsc clean; 215/215 unit tests; harness (baseline re-snapped with the new states): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit. 18 Chromium screenshot diffs of 1-18 px, all scattered anti-aliasing specks at sidebar/tab-edge corners (01a/04 crops checked: no visible change in the start card or picker). e2e after `npm run build`: nav, sessions, wave2.features, provider-config pass (10). |
 | 15 | settings modal | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `08b`-`08d` and the modal screenshot fix): no computed-style, box, text, hover, focus or pseudo-element difference in any state in Chromium or WebKit; no screenshot difference in any settings state (07, 08, 08b-08d, 20). 23 other Chromium screenshot diffs, all 1-29 px anti-aliasing specks at the sidebar/tab-edge corners. e2e after `npm run build`: settings, theme, provider-config, wave1, federation pass (15). `workspace-visual-qa` still fails at line 258 (pre-existing). |
 | 16 | phone chrome | tsc clean; 215/215 unit tests; harness (baseline re-snapped with `21b`-`21f`, `22a` and the attribute-gated freeze): no computed-style, box, text, hover, focus or pseudo-element difference in Chromium or WebKit, except a WebKit-only `transition-property: all -> none` in `05d` that is a harness flake (the freeze leaving stale `none` on Dockview elements behind overlays; two isolated `--only 05d` runs, base and new, are identical, 0 differences). Chromium screenshot diffs of 1-14 px; the three in migrated regions (21d, 21e, 22) measured with a canvas pixel diff: max delta 1-2 levels, rounded-corner anti-aliasing of the pane tabs and switch button. e2e after `npm run build`: responsive, workspace-foundation, device-pairing, paired-phone-flows pass (8). |
+| 34 | NativeCliChat + shared chat shell | tsc, 215/215 unit tests, harness vs the rebuilt original (145 states): **WebKit: all 145 identical, no `05d` flake**; Chromium: all of `25`-`25k` (viewer, controller typed with textarea focus, running, empty + truncated hints, rows expanded, refused lease, send in flight, scroll follows / pill / pill hover / pill click), `24`-`24n` and `14z`-`14z5` identical in pixels, styles, boxes, hover, focus and pseudo-elements; 23 Chromium screenshot-only states elsewhere, 2721 px (incl. the `02` sidebar race 2473 px), 0 stable after 5 captures per build; `02` same-outcome pairs IDENTICAL; two isolated WebKit `05d` base/new reruns IDENTICAL. The first build was identical on the first run (computed values read from the baseline dump: `rounded-ui` on the native textarea, `focus` + `focus-visible` outline pair, `[border:0] [font:inherit]`). e2e after a fresh build (haiku-4-5): workspace-git, workspace-review, remote-git, settings, theme, responsive, pane-splitting, wave1, wave2.features, sessions, cli-sync, workspace-foundation, workspace-tabs: 43/43; native-ui pi, omp, claude, codex and agent-turn-review (turnbot, claude): 7/7; opencode fails (not installed); `provider-config` fails at line 142 as on the original build. |
 | 33 | composer drag-over | tsc, 215/215 unit tests, harness vs the rebuilt original: `24n` (dragover on the composer, dashed 2px outline asserted) identical in both engines (pixels, styles, hover, focus); WebKit identical except the `05d` freeze flake (two isolated base/new reruns IDENTICAL); Chromium 25 screenshot-only states elsewhere, 2702 px (incl. the `02` sidebar race, 2473 px), 0 stable after 5 captures per build; `02` same-outcome pairs IDENTICAL. e2e after a fresh build (haiku-4-5): wave1, wave2.features, settings, theme, responsive, sessions pass (23); `provider-config.spec.ts` (now in `testMatch`) fails at line 142 (the sidebar `alpha_message` row), **reproduced on the ORIGINAL build** (`PERCH_WEB_DIST` = rebuilt d743211, 2 of 2 runs, same line; 2 of 2 on the migrated build): pre-existing, not a migration regression. |
 | 32 | git leftovers (+ harness coverage) | Harness (commit 2c3081e, 145 states) first: `14z` truncated banner (page-level WebSocket hook replays the last real `git.diff.result` with `truncated`), `14z3` turn summary (same hook adds `lastAgentTurn` to `git.status.result`), `14z5` a real conflicted path (index stages 1-3, HEAD and status restored and asserted), `24n` composer drag-over (dragover only, upload stub asserts 0 hits), `25`-`25k` NativeCliChat (a page-level hook answers every `agent.*` request for a page-only session, swallows terminal frames, counts unanswered requests; states: viewer, controller typed + focus, running, empty + truncated hints, rows expanded with a long unbroken line, refused lease, send in flight, scroll follows / pill / pill hover / pill click). Each asserts its target by text, role or computed token colour, never a legacy class; flipping each stub (`truncated:false`, no `lastAgentTurn`, no conflict stages, empty snapshot, `dragenter` instead of `dragover`) makes its state fail (mutation runs, chromium). Selftest (also fixed: its blank-build case predated the built-CSS check) registers the new states. Original = `git archive d743211` rebuilt, byte-identical to the cached baseline. Before migrating: WebKit all 145 identical; Chromium 23 screenshot-only states (211 px) all noise-confirmed (5 captures per build: every pixel produced by the other build in some capture), the first crop of every state opened (single anti-aliased corner pixels); `02` is the sidebar race (original: 133 elements 4 of 5, 136 once; same-outcome pairs identical). Migrated: tsc, 215/215 unit tests, harness: all new states identical, WebKit identical except `05d` freeze flake (two isolated base/new reruns IDENTICAL), Chromium 208 px in states outside the region, 0 stable after 5 captures each. |
 | 31 | Verification of slices 1-30 against ORIGINAL d743211 | Baseline rebuilt from `git archive d743211` (byte-identical to the cached one), same final harness (130 states, self-test ok) on both builds, headless Chromium and WebKit, independent per engine. **WebKit: all 130 states identical** (screenshot, computed style, box, text, hover, focus, pseudo-elements), including `05d` (not waived: it was identical in this run, not assumed to be the freeze flake) and the new `24g`/`24g2`/`24l`/`24m`. **Chromium: no computed-style, box, text, hover, focus or pseudo-element difference in any state; 24 states with screenshot differences, 206 pixels, max channel delta 1-2 (one 7).** Each state's crops (original | migrated | difference at 10x) were opened; each is one or two pixels on an anti-aliased rounded corner or edge, and then checked against 5 captures of each build: for all 206 pixels the unmodified original produced the migrated value (or the other way round) in some capture, so none is a stable difference (with a single repeat, 21 pixels had looked stable). The elements under the specks are in earlier-migrated regions (start picker, new-tab and register buttons, env badge, files toolbar, dir-browser filter, phone pane buttons), so the evidence is the reproduction on the original, not the location. Two harness bugs found on the way: a real upload had written fixtures into `~/.perch/uploads` (the harness core uses the real HOME; now answered by a page-level fetch stub, the leaked files removed) and WebKit's Tab skips buttons (Option-Tab). e2e after a fresh build with `ANTHROPIC_MODEL=claude-haiku-4-5`: tsc and 215/215 unit tests pass; settings, theme, responsive, cli-sync, pane-splitting, workspace-tabs, workspace-foundation, sessions, keybindings, nav pass; `native-ui` claude passes; pi and codex fail with the account's Codex usage limit ("You've hit your usage limit ... try again at 7:28 PM"), omp fails its `/OMP|oh.my.pi|omp v/i` banner regex (also with `PERCH_WEB_DIST` pointing at the original build), opencode is not installed; `provider-config.spec.ts` is not in `testMatch` so Playwright finds no tests (a config gap, not run). Evidence and notes kept outside the repo in `~/perch-visual-review/` (`review-notes.md`). Not covered by any state: `NativeCliChat` and what it shares (message shell, `.chat__list*`, scroll pill), `chat__input--drag-active`, the git truncated-diff banner, a conflicted path, the turn summary, the real send path and a real re-anchor. |

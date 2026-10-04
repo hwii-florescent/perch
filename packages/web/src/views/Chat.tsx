@@ -31,7 +31,8 @@ import {
   ACTION_BTN, ACTIONS_ASSISTANT, ACTIONS_USER, DIFF_GUTTER_CLASS, DIFF_LINE_CLASS, DIFF_TEXT, DIFF_VIEW, EDIT_BADGE,
   EDIT_BADGE_PATH, EDIT_BADGES, GLYPH_THINKING, GLYPH_TOOL, MESSAGE_GROUP, PENDING, THINKING_BODY, TOOL_ARG, TOOL_BLOCK,
   TOOL_BLOCK_BASH, TOOL_BLOCK_RESULT, TOOL_BODY, TOOL_CHEVRON, TOOL_DETAIL_NEXT, TOOL_NAME, TOOL_ROW, TOOL_SUMMARY,
-  TOOL_TIMELINE,
+  TOOL_TIMELINE, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, HOSTED_TEXTAREA, MESSAGE_ERROR, MESSAGE_MARKDOWN, SCROLL_PILL,
+  SCROLL_PILL_DOT, WORKED_FOR, messageClass,
 } from "../components/ui/chat";
 import { CANCEL_BTN, INPUT_CONTROLS, PLAN_TOGGLE_OFF, PLAN_TOGGLE_ON, SEND_BTN } from "../components/ui/composer";
 
@@ -477,7 +478,7 @@ const MessageBubble = memo(function MessageBubble({
   };
 
   return (
-    <div className={cn("message", `message--${message.role}`, MESSAGE_GROUP)}>
+    <div className={messageClass(message.role, MESSAGE_GROUP)}>
       <div className={cn("message__actions", message.role === "user" ? ACTIONS_USER : ACTIONS_ASSISTANT)}>
         {message.role === "user" ? (
           <button
@@ -504,7 +505,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
       </div>
       {message.role === "assistant" && hasThinkingOrTools && (
-        <details className="message__worked-for" open={isStreaming} ref={workedForRef}>
+        <details className={cn("message__worked-for", WORKED_FOR)} open={isStreaming} ref={workedForRef}>
           <summary>{workedForSummary}</summary>
           <div className={cn("tool-timeline", TOOL_TIMELINE)}>
             {message.thinking && <ThinkingRow text={message.thinking} rowIndex={0} />}
@@ -524,7 +525,7 @@ const MessageBubble = memo(function MessageBubble({
       {message.text && message.role === "assistant" ? (
         <div
           ref={markdownRef}
-          className="message__markdown"
+          className={cn("message__markdown", MESSAGE_MARKDOWN)}
           dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
         />
       ) : message.text ? (
@@ -548,7 +549,7 @@ const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       )}
-      {message.error && <div className="message__error">{message.error}</div>}
+      {message.error && <div className={cn("message__error", MESSAGE_ERROR)}>{message.error}</div>}
       {message.streaming && !message.text && !message.thinking && message.tools.length === 0 && (
         <div className={cn("message__pending", PENDING)}>...</div>
       )}
@@ -916,8 +917,8 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
         <InactiveSessionPane sessionId={sessionId} />
       ) : (
         <>
-          <div className="chat__list-container">
-            <div className="chat__list" ref={listRef} onScroll={handleScroll}>
+          <div className={cn("chat__list-container", CHAT_LIST_CONTAINER)}>
+            <div className={cn("chat__list", CHAT_LIST)} ref={listRef} onScroll={handleScroll}>
               {messages.map((m) =>
                 m.kind === "plan" ? (
                   <PlanCard key={m.id} message={m} />
@@ -929,17 +930,17 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
             {!isAtBottom && (
               <button
                 type="button"
-                className="scroll-bottom-pill"
+                className={cn("scroll-bottom-pill", SCROLL_PILL)}
                 data-testid="scroll-bottom-pill"
                 onClick={scrollToBottom}
               >
-                {streamingMessageId && <span className="scroll-bottom-pill__dot" />}
+                {streamingMessageId && <span className={cn("scroll-bottom-pill__dot", SCROLL_PILL_DOT)} />}
                 ↓ Bottom
               </button>
             )}
           </div>
           <div
-            className={cn("chat__input", dragActive && "outline-2 -outline-offset-2 outline-dashed outline-accent")}
+            className={cn("chat__input", CHAT_INPUT, dragActive && "outline-2 -outline-offset-2 outline-dashed outline-accent")}
             onDragOver={(e) => {
               e.preventDefault();
               if (sessionId) setDragActive(true);
@@ -960,6 +961,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
             />
             <textarea
               ref={textareaRef}
+              className={HOSTED_TEXTAREA}
               value={text}
               placeholder="Message perch..."
               rows={1}
