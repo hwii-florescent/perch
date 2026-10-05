@@ -675,7 +675,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                     "flex-1 cursor-pointer gap-[0.45rem] bg-transparent pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg",
                     FOCUS,
                   )}
-                  data-testid={`workspace-project-collapse-${project.id}`}
+                  data-testid={`project-toggle-${project.id}`}
                   aria-expanded={!projectCollapsed}
                   onClick={() => toggleCollapsed(project.id)}
                   title={project.path}
