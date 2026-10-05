@@ -6,6 +6,7 @@ import { StatusDot } from "./StatusDot";
 import { sessionDotState } from "../statusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { GHOST_BUTTON, ICON_BUTTON } from "./ui/icon-button";
+import { segment } from "./ui/segment";
 import { Chevron } from "./ui/chevron";
 import { Dialog } from "./ui/dialog";
 import { SELECT } from "./ui/settings";
@@ -22,11 +23,11 @@ import type { SessionSummary, WorktreeJob } from "@perch/shared";
 const FOCUS = "focus-visible:[outline:1px_solid_var(--overlay-1)] focus-visible:[outline-offset:-1px]";
 const FONT = "[font-family:inherit] [font-size:inherit] [font-weight:inherit]";
 const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
-const SESSION = `${ROW_BTN} cursor-pointer gap-[0.4rem] rounded-ui bg-transparent px-[0.4rem] py-[0.25rem] text-[0.7rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
+const SESSION = `${ROW_BTN} cursor-pointer gap-[0.4rem] rounded-none bg-transparent px-[0.65rem] py-[0.3rem] text-[0.7rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
 const SESSION_TITLE = "overflow-hidden text-ellipsis whitespace-nowrap";
 const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
 const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
-const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] rounded-ui py-[0.3rem] pr-[0.3rem] pl-[0.5rem] text-fg ${FOCUS}`;
+const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] rounded-none py-[0.4rem] pr-[0.3rem] pl-[1.5rem] text-fg ${FOCUS}`;
 const STRONG = "overflow-hidden text-[0.76rem] font-bold text-ellipsis whitespace-nowrap text-fg";
 const SPAN = "overflow-hidden text-[0.63rem] text-ellipsis whitespace-nowrap text-subtext-0";
 const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
@@ -35,10 +36,10 @@ const JOB_ACTION = `${SMALL_BTN} border-overlay-0 bg-transparent text-subtext-0 
 // Glyph buttons at the end of a row: shown on hover of the row (`group/ph`, `group/row`),
 // on keyboard focus, always on touch.
 const REVEAL = "opacity-0 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
-const GLYPH = `h-[1.3rem] w-[1.3rem] shrink-0 cursor-pointer rounded-ui p-0 leading-none [background:none] [border:0] ${FONT} hover:bg-surface-1 hover:text-fg`;
+const GLYPH = `w-[1.7rem] shrink-0 self-stretch cursor-pointer rounded-none p-0 leading-none [background:none] [border:0] ${FONT} hover:bg-surface-1 hover:text-fg`;
 const PROJECT_ICON = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/ph:opacity-100 aria-[expanded=false]:opacity-100`;
 const SESSION_CLOSE = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/row:opacity-100`;
-const HEADER_PLUS = "h-[1.3rem] w-[1.3rem] p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
+const HEADER_PLUS = "h-auto w-[1.7rem] self-stretch rounded-none p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
 const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:mr-[0.3rem] [@media(max-width:700px)]:mb-[0.35rem] [@media(max-width:700px)]:ml-[1.45rem] [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
 
 function basename(path: string): string {
@@ -116,12 +117,12 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   onMenu: (session: SessionSummary, x: number, y: number) => void;
 }) {
   return (
-    <span className="flex min-w-0 shrink items-center gap-[0.1rem] overflow-hidden px-1" data-testid="session-dots">
+    <span className="flex min-w-0 shrink items-stretch gap-0 self-stretch overflow-hidden" data-testid="session-dots">
       {sessions.map((session) => (
         <button
           key={session.id}
           type="button"
-          className={cn("grid h-[1.4rem] w-[1.4rem] shrink-0 cursor-pointer place-items-center rounded-ui bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
+          className={cn("grid w-[1.6rem] shrink-0 self-stretch cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -382,12 +383,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   function sessionRows(list: SessionSummary[]): ReactElement {
     return (
-      <div className="workspace-entry__sessions pt-0 pb-1 pl-[1.1rem]">
+      <div className="workspace-entry__sessions pt-0 pb-1">
         {list.map((session) => (
-          <div className="group/row flex items-center" key={session.id}>
+          <div className="group/row flex items-stretch" key={session.id}>
             <button
               type="button"
-              className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active bg-surface-1 font-semibold text-fg" : "text-subtext-0")}
+              className={cn(SESSION, "pl-[1.9rem]", session.id === sessionId ? "workspace-entry__session--active bg-surface-1 font-semibold text-fg" : "text-subtext-0")}
               data-testid={`workspace-session-${session.id}`}
               onClick={() => pickSession(session.id)}
             >
@@ -514,15 +515,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     [sessions, activeHostId],
   );
   const listView = (
-    <div className="px-[0.4rem] py-[0.2rem]" data-testid="workspace-session-list">
+    <div className="py-[0.2rem]" data-testid="workspace-session-list">
       {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
-          <div className="group/row flex items-center" key={session.id}>
+          <div className="group/row flex items-stretch" key={session.id}>
             <button
               type="button"
-              className={cn(SESSION, "px-[0.3rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
+              className={cn(SESSION, "px-[0.65rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
               data-testid={`workspace-session-${session.id}`}
               title={session.cwd}
               onClick={() => {
@@ -557,10 +558,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         const chatsWorkspace = workspacesForProject(workspaces, chatsProject.id)[0];
         return (
           <div className="pb-1" data-testid="workspace-chats">
-            <div className="group/ph flex items-center pr-[0.35rem]">
+            <div className="group/ph flex items-stretch hover:bg-surface-1">
               <button
                 type="button"
-                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] py-[0.4rem] pr-[0.55rem] pl-[0.65rem] text-left text-[0.76rem] leading-[1.3rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
+                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] py-[0.5rem] pr-[0.55rem] pl-[0.75rem] text-left text-[0.76rem] leading-[1.3rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
                 data-testid="workspace-chats-collapse"
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
@@ -607,10 +608,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             {!chatsCollapsed && chats.length > 0 && (
               <div className="pt-0 pr-[0.3rem] pb-1 pl-[0.4rem]">
                 {chats.map((session) => (
-                  <div className="group/row flex items-center" key={session.id}>
+                  <div className="group/row flex items-stretch" key={session.id}>
                     <button
                       type="button"
-                      className={cn(SESSION, "px-[0.3rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
+                      className={cn(SESSION, "px-[0.65rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
                       data-testid={`workspace-session-${session.id}`}
                       title={session.title || "New chat"}
                       onClick={() => {
@@ -649,8 +650,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       data-testid="workspace-overview"
       aria-label="Projects and workspaces"
     >
-      <div className="flex shrink-0 items-center justify-between gap-[0.45rem] border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_72%,transparent)] pt-[0.55rem] pr-[0.55rem] pb-[0.45rem] pl-[0.65rem]">
-        <div className="flex min-w-0 items-baseline gap-[0.45rem]">
+      <div className="flex shrink-0 items-stretch justify-between gap-[0.45rem] border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_72%,transparent)] pl-[0.75rem]">
+        <div className="flex min-w-0 items-center gap-[0.45rem] py-[0.55rem]">
           <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase">{organize === "list" ? "Chats" : "Projects"}</span>
           <span className="text-[0.65rem] whitespace-nowrap text-subtext-0">
             {organize === "list"
@@ -658,10 +659,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               : visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-[0.2rem]">
+        <div className="flex shrink-0 items-stretch">
           <button
             type="button"
-            className={cn(GHOST_BUTTON, "grid h-[1.6rem] w-[1.6rem] place-items-center p-0 [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
+            className={cn(segment(), "grid w-9 place-items-center p-0 [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
             title="Organize sidebar"
             aria-label="Organize sidebar"
             aria-haspopup="menu"
@@ -684,7 +685,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </button>
           <button
             type="button"
-            className={cn(GHOST_BUTTON, "px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-fg [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
+            className={cn(segment(), "px-[0.8rem] text-[0.68rem] font-bold text-fg [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
             onClick={() => { setAddHostId(activeHostId); setAddOpen((open) => !open); }}
           >
@@ -774,12 +775,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const onHeaderClick = () => (collapsible || !single ? toggleCollapsed(project.id) : navigateToWorkspace(single.id));
             return (
               <div
-                className="workspace-project px-[0.35rem] pb-[0.2rem]"
+                className="workspace-project pb-[0.2rem]"
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex items-center rounded-ui pr-[0.2rem] hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  className={cn("group/ph flex items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -809,7 +810,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={cn(
                     ROW_BTN,
-                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent py-[0.4rem] pr-[0.4rem] pl-[0.55rem] text-fg",
+                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent py-[0.5rem] pr-[0.4rem] pl-[0.75rem] text-fg",
                     single && "workspace-entry__button",
                     single && single.id === activeWorkspaceId && "workspace-entry__button--active",
                     FOCUS,
@@ -859,7 +860,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 )}
                 </div>
                 {(!projectCollapsed || (single && !collapsible)) && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
-                  <div className="workspace-project__workspaces pt-0 pb-[0.2rem] pl-[0.9rem]">
+                  <div className="workspace-project__workspaces pt-0 pb-[0.2rem]">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
                       // linked worktree renders under it; children of the primary
@@ -905,7 +906,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               onBlur={() => setRenamingId(null)}
                             />
                           ) : (
-                          <div className={cn("flex items-center rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
+                          <div className={cn("flex items-stretch hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
                           <button
                             type="button"
                             className={cn(

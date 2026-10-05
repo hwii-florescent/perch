@@ -57,6 +57,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import type { TerminalProfile } from "@perch/shared";
 import { parseOsc52 } from "./osc52";
 import { usePerchStore } from "./store";
+import { scrollbarWidth } from "./components/ui/scrollbar";
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the
  * agent CLIs (and essentially every TUI) treat as the minimum sane width. */
@@ -184,8 +185,8 @@ export function createPerchTerminal(
     // Shells that never opt in still get plain `\r`.
     vtExtensions: { kittyKeyboard: true },
     // A thin scrollbar: xterm's default is 14px, which is also the gutter
-    // FitAddon takes out of the grid.
-    scrollbar: { width: 6 },
+    // FitAddon takes out of the grid. Same width as every other scrollbar.
+    scrollbar: { width: scrollbarWidth() },
   };
   // Cursor shape/blink: same discipline as the palette below. Only set when
   // the profile actually says something; absent means "leave xterm's own

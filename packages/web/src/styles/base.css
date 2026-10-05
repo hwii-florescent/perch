@@ -1,5 +1,8 @@
 :root {
   color-scheme: dark;
+  /* The one scrollbar: this thin overlay-style thumb everywhere (see
+   * `@layer base` below) and in terminals (`scrollbarWidth()`, xtermSetup.ts). */
+  --scrollbar-size: 6px;
   /* --- semantic tokens (16) -----------------------------------------------
    * The default look is perch's own monotone palette (`PERCH_DEFAULT` in
    * `themes.ts`, identical values): neutral greys like a plain terminal
@@ -59,6 +62,20 @@
   :where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
+  }
+}
+
+/* Every scrollable element, not a per-component class: a thin thumb on a
+ * transparent track, like the terminal's. WebKit/Blink get the exact size from
+ * ::-webkit-scrollbar; engines without it (Firefox) fall back to the standard
+ * properties, which can't set a pixel width. */
+@layer base {
+  ::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 20%, transparent); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text) 40%, transparent); }
+  @supports not selector(::-webkit-scrollbar) {
+    * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 25%, transparent) transparent; }
   }
 }
 
