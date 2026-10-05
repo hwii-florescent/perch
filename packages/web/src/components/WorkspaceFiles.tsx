@@ -92,41 +92,43 @@ function FileTree({
             <button
               type="button"
               className={cn(
-                "flex min-h-[1.5rem] w-full cursor-pointer items-center gap-[0.2rem] text-left [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
+                "flex min-h-[1.4rem] w-full cursor-pointer items-center gap-[0.15rem] pr-2 text-left text-[0.8rem] [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
                 selected ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
               )}
-              style={{ paddingLeft: `${0.35 + level * 0.85}rem` }}
+              style={{ paddingLeft: "0.25rem" }}
               data-testid={`workspace-file-entry-${entry.path}`}
               title={entry.path}
               onClick={() => (isDirectory ? onToggle(entry) : onOpenFile(entry))}
             >
-              <span className="w-[0.65rem] shrink-0 text-center text-overlay-1" aria-hidden="true">
-                {isDirectory ? (isOpen ? "▾" : "▸") : ""}
-              </span>
+              <svg className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d={isOpen ? "M4.5 6.5 8 10l3.5-3.5" : "M6.5 4.5 10 8l-3.5 3.5"} />
+              </svg>
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
               {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" aria-label="symlink">↗</span>}
               {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}
             </button>
-            {isDirectory && isOpen && childTree?.state === "loading" && (
-              <div className={TREE_STATE} style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>Loading…</div>
-            )}
-            {isDirectory && isOpen && childTree?.state === "error" && (
-              <div className={cn(TREE_STATE, "text-red")} style={{ paddingLeft: `${1.7 + (level + 1) * 0.85}rem` }}>
-                {childTree.error || "Could not load folder."}
-                <button type="button" className={TREE_BUTTON} onClick={() => onToggle(entry)}>Retry</button>
+            {isDirectory && isOpen && childTree && (
+              <div className="ml-[0.75rem] border-l border-l-overlay-0">
+                {childTree.state === "loading" && <div className={TREE_STATE}>Loading…</div>}
+                {childTree.state === "error" && (
+                  <div className={cn(TREE_STATE, "text-red")}>
+                    {childTree.error || "Could not load folder."}
+                    <button type="button" className={TREE_BUTTON} onClick={() => onToggle(entry)}>Retry</button>
+                  </div>
+                )}
+                {childTree.state === "ready" && (
+                  <FileTree
+                    workspaceId={workspaceId}
+                    path={entry.path}
+                    level={level + 1}
+                    expanded={expanded}
+                    selectedPath={selectedPath}
+                    trees={trees}
+                    onToggle={onToggle}
+                    onOpenFile={onOpenFile}
+                  />
+                )}
               </div>
-            )}
-            {isDirectory && isOpen && childTree?.state === "ready" && (
-              <FileTree
-                workspaceId={workspaceId}
-                path={entry.path}
-                level={level + 1}
-                expanded={expanded}
-                selectedPath={selectedPath}
-                trees={trees}
-                onToggle={onToggle}
-                onOpenFile={onOpenFile}
-              />
             )}
           </div>
         );
@@ -418,7 +420,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           )}
           aria-label="Workspace file tree"
         >
-          <div className="flex shrink-0 items-center justify-between border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_70%,transparent)] pt-[0.42rem] pr-[0.55rem] pb-[0.35rem] pl-[0.65rem] tracking-[0.07em] text-subtext-0 uppercase">
+          <div className="flex shrink-0 items-center justify-between py-[0.3rem] pr-[0.55rem] pl-[0.65rem] text-[0.68rem] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
             <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
               {!layout && (
