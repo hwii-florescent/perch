@@ -252,7 +252,7 @@ test("a viewer with no local tabs gets its strip and split back from the core", 
     // Lose this browser's tab state but keep its viewer identity, as a cleared cache would.
     await page.evaluate(() => {
       for (const key of Object.keys(localStorage)) {
-        if (key === "perch.fileTabs" || key === "perch.splitSets" || key.startsWith("perch.tabOrder.")) localStorage.removeItem(key);
+        if (/^perch\.(fileTabs|splitSets|tabOrder\.)/.test(key)) localStorage.removeItem(key);
       }
     });
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -313,7 +313,7 @@ test("switching workspace inside the save delay still saves the split left behin
 
     await page.evaluate(() => {
       for (const key of Object.keys(localStorage)) {
-        if (key === "perch.fileTabs" || key === "perch.splitSets" || key.startsWith("perch.tabOrder.")) localStorage.removeItem(key);
+        if (/^perch\.(fileTabs|splitSets|tabOrder\.)/.test(key)) localStorage.removeItem(key);
       }
     });
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -324,18 +324,67 @@ test("switching workspace inside the save delay still saves the split left behin
   }
 });
 
-test("two windows of one browser are two viewers", async ({ page, context }) => {
+const viewerOf = (p: Page) => p.evaluate(() => sessionStorage.getItem("perch.viewerId"));
+
+test("two windows of one browser are two viewers with their own layouts", async ({ page, context }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+    await page.waitForTimeout(1500);
+
+    const second = await context.newPage();
+    await second.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => viewerOf(second)).toBeTruthy();
+    expect(await viewerOf(second)).not.toBe(await viewerOf(page));
+    // The other window has none of A's tabs or splits, and what it does leaves A alone.
+    await expect(second.getByTestId(a.fileTab)).toHaveCount(0);
+    await expect(second.getByTestId("split-canvas")).toHaveAttribute("data-split", "0");
+
+    const before = await viewerOf(page);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 20000 });
+    await expect(page.getByTestId(a.fileTab)).toBeVisible();
+    expect(await viewerOf(page)).toBe(before); // a reload keeps the window's viewer
+  } finally {
+    cleanup();
+  }
+});
+
+test("a window opened by another window is its own viewer", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  const second = await context.newPage();
-  await second.goto("/", { waitUntil: "domcontentloaded" });
-  const id = (p: Page) => p.evaluate(() => sessionStorage.getItem("perch.viewerId"));
-  await expect.poll(() => id(page)).toBeTruthy();
-  await expect.poll(() => id(second)).toBeTruthy();
-  expect(await id(page)).not.toBe(await id(second));
-  // A reload keeps the window's viewer.
-  const before = await id(page);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  expect(await id(page)).toBe(before);
+  await expect.poll(() => viewerOf(page)).toBeTruthy();
+  const [popup] = await Promise.all([page.waitForEvent("popup"), page.evaluate(() => { window.open("/", "_blank"); })]);
+  await popup.waitForLoadState("domcontentloaded");
+  // The popup starts with a copy of the opener's sessionStorage; it must move off that id.
+  await expect.poll(() => viewerOf(popup), { timeout: 10000 }).not.toBe(await viewerOf(page));
+  expect(await viewerOf(popup)).toBeTruthy();
+});
+
+test("a restart without sessionStorage gets the selected file back", async ({ page, browser }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(a.fileTab).click();
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+    await page.waitForTimeout(1500);
+    const state = await page.context().storageState(); // localStorage only, as after quitting the app
+    await page.close();
+
+    const restarted = await browser.newContext({ storageState: state });
+    try {
+      const again = await restarted.newPage();
+      await again.goto("/", { waitUntil: "domcontentloaded" });
+      await expect.poll(() => strip(again), { timeout: 20000 }).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
+      await expect.poll(() => activeTab(again), { timeout: 20000 }).toBe(a.fileTab);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    cleanup();
+  }
 });
 
 test("a reload restores the selected file, and keyboard focus selects a split pane", async ({ page }) => {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { readViewerStored, viewerKey } from "./viewer";
 
 /**
  * Split sets: tabs shown side by side in the canvas while the strip stays one
@@ -79,7 +80,7 @@ const STORAGE_KEY = "perch.splitSets";
 
 function load(): SplitSet[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    const parsed: unknown = JSON.parse(readViewerStored(STORAGE_KEY) ?? "[]");
     if (!Array.isArray(parsed)) return [];
     return settle(parsed.filter((set): set is SplitSet =>
       Array.isArray(set?.ids) && set.ids.every((id: unknown) => typeof id === "string")
@@ -112,5 +113,5 @@ export const useSplitSets = create<SplitSetsState>((set) => ({
 
 useSplitSets.subscribe((state, previous) => {
   if (state.sets === previous.sets) return;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.sets)); } catch { /* convenience only */ }
+  try { localStorage.setItem(viewerKey(STORAGE_KEY), JSON.stringify(state.sets)); } catch { /* convenience only */ }
 });

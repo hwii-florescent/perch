@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { effectiveWorkspace, usePerchStore } from "./store";
+import { readViewerStored, viewerKey } from "./viewer";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
  * a file, or (`kind: "review"`) the workspace's change review. */
@@ -23,12 +24,12 @@ interface FileTabsState {
   showSession: () => void;
 }
 
-// Open tabs survive a reload, per viewer; the session view is what reopens.
+// Open tabs survive a reload, per viewer (window); the session view is what reopens.
 const STORAGE_KEY = "perch.fileTabs";
 
 function loadTabs(): FileTab[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    const parsed: unknown = JSON.parse(readViewerStored(STORAGE_KEY) ?? "[]");
     return Array.isArray(parsed)
       ? parsed.filter((tab): tab is FileTab => typeof tab?.workspaceId === "string" && typeof tab?.path === "string" && (tab.kind === undefined || tab.kind === "review"))
       : [];
@@ -55,7 +56,7 @@ export const useFileTabs = create<FileTabsState>((set) => ({
 
 useFileTabs.subscribe((state, previous) => {
   if (state.tabs === previous.tabs) return;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tabs)); } catch { /* convenience only */ }
+  try { localStorage.setItem(viewerKey(STORAGE_KEY), JSON.stringify(state.tabs)); } catch { /* convenience only */ }
 });
 
 // What each workspace has selected: an open file or review, or null for its

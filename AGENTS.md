@@ -95,6 +95,8 @@ there, not here.
   - `xtermSetup.ts`: builds every terminal.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
+  - `viewer.ts`: a window's viewer id (Web Lock per window, restart reclaims
+    the last free one); local tab/split/order keys carry `@<viewerId>`.
   - `components/WorkspaceTools.tsx`: the right drawer (file explorer / Git
     for the active workspace); `fileTabs.ts`: files open as top-row tabs.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
