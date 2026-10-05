@@ -16,6 +16,7 @@
  *        terminal as a TAB in that SAME group, not a new split group.
  *   W5/W6 — terminals kept alive across tab switches; only shown ones hold
  *        a WebGL context.
+ *   W7 — narrowing the window keeps the active tab inside the tab strip.
  *
  * W1 starts two plain shell sessions in Chats; W2/W3 reuse them.
  *
@@ -246,5 +247,27 @@ test.describe("Workspace tabs (Phase 3)", () => {
       await tabs.nth(index).click();
       await expect.poll(live).toBe(2);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // W7 — the active tab stays in view when the strip narrows.
+  // -------------------------------------------------------------------------
+  test("W7. narrowing the window keeps the active tab inside the strip", async ({ page }) => {
+    test.setTimeout(90000);
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await freshPage(page);
+    let last = "";
+    for (let i = 0; i < 12; i++) last = await startChat(page);
+    const tab = page.locator(`[data-testid="tab-${last}"]`);
+    await expectActive(page, last);
+    const inStrip = () => page.evaluate((id) => {
+      const strip = document.querySelector('[data-testid="tab-bar"]')!.getBoundingClientRect();
+      const t = document.querySelector(`[data-testid="tab-${id}"]`)!.getBoundingClientRect();
+      return t.left >= strip.left - 1 && t.right <= strip.right + 1;
+    }, last);
+    await expect.poll(inStrip).toBe(true);
+    await page.setViewportSize({ width: 800, height: 800 });
+    await expect(tab).toBeVisible();
+    await expect.poll(inStrip).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import { useFileTabs } from "../fileTabs";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
-const BTN = "cursor-pointer rounded-ui border border-transparent bg-transparent px-[0.55rem] py-[0.2rem] text-[0.75rem] text-overlay-1 [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:text-fg";
+const BTN = "cursor-pointer rounded-ui border border-transparent bg-transparent px-[0.55rem] py-[0.2rem] text-[0.75rem] text-subtext-0 [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:text-fg";
 
 export type WorkspaceToolsTab = "files" | "gitReview";
 
@@ -57,7 +57,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab, onTabChange, onClose
             </button>
           ))}
         </nav>
-        <span className="min-w-0 flex-1 overflow-hidden text-right text-[0.72rem] text-ellipsis whitespace-nowrap text-overlay-1" title={row?.path}>
+        <span className="min-w-0 flex-1 overflow-hidden text-right text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
         <button type="button" className={BTN} aria-label="Close Files and Git" onClick={onClose}>×</button>
