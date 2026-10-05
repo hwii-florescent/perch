@@ -434,6 +434,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={() => requestTree(workspaceId, "")} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
             </div>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto" data-testid="workspace-file-tree-scroll">
           {rootTree?.state === "loading" && <div className={TREE_STATE} role="status">Loading tree…</div>}
           {rootTree?.state === "error" && (
             <div className={cn(TREE_STATE, "text-red")} role="alert">
@@ -453,6 +454,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               onOpenFile={handleOpenFile}
             />
           )}
+          </div>
         </aside>}
 
         {layout !== "explorer" && <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-panel-bg", explorerOpen && "[@container(max-width:460px)]:hidden", !explorerOpen && "[@container(max-width:460px)]:flex-[1_1_100%]")}>
