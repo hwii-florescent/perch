@@ -96,7 +96,9 @@ there, not here.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
   - `viewer.ts`: a window's viewer id (Web Lock per window, restart reclaims
-    the last free one); local tab/split/order keys carry `@<viewerId>`.
+    the last free one); local tab/split/order keys and the window's session and
+    project/workspace ids carry `@<viewerId>` (`perch.sessionId` stays a shared
+    last-chosen hint for windows with none).
   - `components/WorkspaceTools.tsx`: the right drawer (file explorer / Git
     for the active workspace); `fileTabs.ts`: files open as top-row tabs.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode

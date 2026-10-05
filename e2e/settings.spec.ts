@@ -87,7 +87,7 @@ function cleanTestModels(): void {
 /** Navigate to the app with a fresh session (localStorage cleared). */
 async function freshSession(page: Page): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("perch.sessionId")).forEach((k) => localStorage.removeItem(k)));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }

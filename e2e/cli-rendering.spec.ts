@@ -111,7 +111,7 @@ async function openCliSession(page: Page): Promise<void> {
   }));
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.evaluate(() => {
-    localStorage.removeItem("perch.sessionId");
+    Object.keys(localStorage).filter((k) => k.startsWith("perch.sessionId")).forEach((k) => localStorage.removeItem(k));
     localStorage.setItem("perch.onboarding.seen", "1");
   });
   await page.reload({ waitUntil: "domcontentloaded" });

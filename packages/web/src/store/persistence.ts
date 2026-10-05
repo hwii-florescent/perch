@@ -12,6 +12,7 @@
 import type { AgentKind } from "@perch/shared";
 import type { ActiveProject } from "./index";
 import { newId } from "./index";
+import { readViewerStored, viewerKey } from "../viewer";
 
 /** localStorage keys backing `activeHostId` / `activeProject`. These are
  * client-only preferences: the navigation scope is pure view state, so it
@@ -23,7 +24,7 @@ export const ACTIVE_WORKSPACE_ID_STORAGE_KEY = "perch.activeWorkspaceId";
 
 export function readActiveHostStored(): string {
   try {
-    return localStorage.getItem(ACTIVE_HOST_STORAGE_KEY) || "local";
+    return readViewerStored(ACTIVE_HOST_STORAGE_KEY) || "local";
   } catch {
     return "local";
   }
@@ -44,8 +45,8 @@ export function readActiveHostStored(): string {
 export let navSeedPending = (() => {
   try {
     return (
-      localStorage.getItem(ACTIVE_HOST_STORAGE_KEY) == null &&
-      localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) == null
+      readViewerStored(ACTIVE_HOST_STORAGE_KEY) == null &&
+      readViewerStored(ACTIVE_PROJECT_STORAGE_KEY) == null
     );
   } catch {
     return false;
@@ -55,7 +56,7 @@ export let navSeedPending = (() => {
 export function writeActiveHostStored(hostId: string): void {
   navSeedPending = false;
   try {
-    localStorage.setItem(ACTIVE_HOST_STORAGE_KEY, hostId);
+    localStorage.setItem(viewerKey(ACTIVE_HOST_STORAGE_KEY), hostId);
   } catch {
     // ignore — worst case the scope doesn't survive a reload
   }
@@ -63,7 +64,7 @@ export function writeActiveHostStored(hostId: string): void {
 
 export function readActiveProjectStored(): ActiveProject | null {
   try {
-    const raw = localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+    const raw = readViewerStored(ACTIVE_PROJECT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
@@ -78,16 +79,17 @@ export function readActiveProjectStored(): ActiveProject | null {
 
 export function writeActiveProjectStored(project: ActiveProject | null): void {
   try {
-    if (project) localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, JSON.stringify(project));
-    else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    if (project) localStorage.setItem(viewerKey(ACTIVE_PROJECT_STORAGE_KEY), JSON.stringify(project));
+    else localStorage.removeItem(viewerKey(ACTIVE_PROJECT_STORAGE_KEY));
   } catch {
     // ignore
   }
 }
 
+/** The window's own stored id (the active project and workspace are per viewer). */
 export function readStoredId(key: string): string | null {
   try {
-    const value = localStorage.getItem(key);
+    const value = readViewerStored(key);
     return value && value.trim() ? value : null;
   } catch {
     return null;
@@ -96,8 +98,8 @@ export function readStoredId(key: string): string | null {
 
 export function writeStoredId(key: string, value: string | null): void {
   try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
+    if (value) localStorage.setItem(viewerKey(key), value);
+    else localStorage.removeItem(viewerKey(key));
   } catch {
     // ignore — the legacy host/project scope remains available in memory
   }
@@ -109,8 +111,10 @@ export function writeStoredId(key: string, value: string | null): void {
 const DEVICE_ID_STORAGE_KEY = "perch.deviceId";
 
 export function readDeviceIdStored(): string {
-  const existing = readStoredId(DEVICE_ID_STORAGE_KEY);
-  if (existing) return existing;
+  try {
+    const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY); // the browser's, not a window's
+    if (existing?.trim()) return existing;
+  } catch { /* in-memory id below */ }
   const created = newId();
   try {
     localStorage.setItem(DEVICE_ID_STORAGE_KEY, created);

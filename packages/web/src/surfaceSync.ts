@@ -21,7 +21,7 @@ import type { ClientMessage, ServerMessage, SurfaceDescriptor, ViewerPresentatio
 import { socket } from "./ws";
 import { newId } from "./ids";
 import { viewerId } from "./viewer";
-import { effectiveWorkspace, usePerchStore } from "./store";
+import { activeWorkspaceSessions, effectiveWorkspace, usePerchStore } from "./store";
 import { fileTabKey, selectedKey, selectResource, useFileTabs, type FileTab } from "./fileTabs";
 import { useSplitSets, type SplitSet } from "./splitSets";
 import { saveTabOrder, storedTabOrder, TAB_ORDER_EVENT } from "./tabOrder";
@@ -37,6 +37,8 @@ interface Layout {
   /** The whole strip, sessions and resources, by entry id. */
   strip: string[];
   sets: SplitSet[];
+  /** The session (terminal) this viewer had selected in the workspace. */
+  session?: string;
 }
 
 const waiting = new Map<string, (msg: ServerMessage) => void>();
@@ -122,6 +124,17 @@ useFileTabs.subscribe((state, previous) => {
   for (const tab of previous.tabs) if (!state.tabs.includes(tab)) void closeTab(tab);
 });
 
+/** The session each workspace last showed in this window, for workspaces no longer on screen. */
+const lastSession = new Map<string, string>();
+
+function trackSession(state: ReturnType<typeof usePerchStore.getState>): void {
+  const workspace = effectiveWorkspace(state);
+  if (!workspace || !state.sessionId || lastSession.get(workspace.id) === state.sessionId) return;
+  if (state.sessions.find((session) => session.id === state.sessionId)?.workspaceId !== workspace.id) return;
+  lastSession.set(workspace.id, state.sessionId);
+  scheduleMirror(workspace.id);
+}
+
 /** `workspaceId`'s presentation, whether or not it is the workspace on screen. */
 function buildLayout(workspaceId: string): { order: string[]; layout: Layout; active?: string } | null {
   const state = { ...usePerchStore.getState(), activeWorkspaceId: workspaceId };
@@ -129,6 +142,7 @@ function buildLayout(workspaceId: string): { order: string[]; layout: Layout; ac
   const entries = workspaceTabs(state, useFileTabs.getState().tabs);
   const ids = new Set(entries.map((entry) => entry.id));
   const selected = selectedKey(workspaceId);
+  const session = lastSession.get(workspaceId);
   return {
     active: selected && ids.has(selected) ? resourceIds.get(selected) : undefined,
     order: entries.flatMap((entry) => (entry.kind === "resource" ? resourceIds.get(entry.id) ?? [] : [])),
@@ -136,6 +150,7 @@ function buildLayout(workspaceId: string): { order: string[]; layout: Layout; ac
       v: LAYOUT_VERSION,
       strip: entries.map((entry) => entry.id),
       sets: useSplitSets.getState().sets.filter((set) => set.ids.some((id) => ids.has(id))),
+      session: session && ids.has(session) ? session : undefined,
     },
   };
 }
@@ -156,7 +171,8 @@ function scheduleMirror(workspaceId = effectiveWorkspace(usePerchStore.getState(
 }
 
 function mirror(workspaceId: string): void {
-  if (!synced.has(workspaceId)) return;
+  // Until the saved presentation is back, local state may be incomplete and must not replace it.
+  if (!synced.has(workspaceId) || !restored.has(workspaceId)) return;
   const built = buildLayout(workspaceId);
   if (!built) return;
   const json = JSON.stringify(built);
@@ -190,11 +206,12 @@ if (typeof window !== "undefined") {
 const restored = new Set<string>();
 
 /** Put the saved tabs, strip order and split sets back; what exists only locally is kept. */
-async function hydrate(workspaceId: string, presentation: ViewerPresentation): Promise<void> {
+/** False when it could not finish (a dropped connection), so a later sync tries again. */
+async function hydrate(workspaceId: string, presentation: ViewerPresentation): Promise<boolean> {
   const layout = presentation.layout as Layout | undefined;
-  if (!layout || layout.v !== LAYOUT_VERSION || presentation.order.length === 0) return;
+  if (!layout || layout.v !== LAYOUT_VERSION || presentation.order.length === 0) return true;
   const listed = await ask((requestId) => ({ type: "surface.list", requestId, workspaceId }));
-  if (listed.type !== "surface.list.result") return;
+  if (listed.type !== "surface.list.result") return false;
   const byId = new Map<string, SurfaceDescriptor>(listed.surfaces.map((surface) => [surface.id, surface]));
   const tabs: FileTab[] = presentation.order.flatMap((id): FileTab[] => {
     const surface = byId.get(id);
@@ -214,6 +231,15 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
   useSplitSets.setState((state) => ({
     sets: [...state.sets.filter((set) => !set.ids.some((id) => saved.has(id))), ...layout.sets],
   }));
+  return true;
+}
+
+/** Show the session this viewer had selected, if it is still in the workspace on screen. */
+function restoreSession(workspaceId: string, presentation: ViewerPresentation): void {
+  const id = (presentation.layout as Layout | undefined)?.session;
+  const state = usePerchStore.getState();
+  if (!id || state.sessionId === id || effectiveWorkspace(state)?.id !== workspaceId) return;
+  if (activeWorkspaceSessions(state).some((session) => session.id === id)) state.switchSession(id);
 }
 
 /** Reselect the file or review this viewer had selected, unless it has already chosen this load. */
@@ -239,9 +265,11 @@ async function sync(workspaceId: string): Promise<void> {
   }));
   await Promise.all(tabs.map(openTab));
   if (imported.type === "viewer.presentation" && !restored.has(workspaceId)) {
-    restored.add(workspaceId);
-    await hydrate(workspaceId, imported.presentation);
-    restoreSelected(workspaceId, imported.presentation);
+    if (await hydrate(workspaceId, imported.presentation)) {
+      restored.add(workspaceId);
+      restoreSession(workspaceId, imported.presentation);
+      restoreSelected(workspaceId, imported.presentation);
+    }
   }
   scheduleMirror();
 }
@@ -252,8 +280,10 @@ function syncShown(state = usePerchStore.getState()): void {
 }
 
 usePerchStore.subscribe((state, previous) => {
+  if (state.sessions !== previous.sessions || state.sessionId !== previous.sessionId) trackSession(state);
   if (state.activeWorkspaceId === previous.activeWorkspaceId && state.sessionId === previous.sessionId
     && state.serverInfo === previous.serverInfo && state.workspaces === previous.workspaces) return;
   syncShown(state);
 });
+trackSession(usePerchStore.getState());
 syncShown(); // state that arrived before this module loaded changes nothing to subscribe to

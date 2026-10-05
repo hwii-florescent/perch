@@ -1,5 +1,6 @@
 import type { ClientMessage, ServerMessage } from "@perch/shared";
 import { getWsUrl } from "./base";
+import { readSessionId, writeSessionId } from "./viewer";
 
 export type ServerMessageHandler = (msg: ServerMessage) => void;
 export type ConnectionHandler = (connected: boolean) => void;
@@ -7,24 +8,12 @@ export type ConnectionHandler = (connected: boolean) => void;
 const MAX_BACKOFF_MS = 10_000;
 const INITIAL_BACKOFF_MS = 500;
 
-/** localStorage key holding the last known session id, so a page reload or
- * PWA reopen resumes the same session instead of starting a blank one. */
-const SESSION_ID_STORAGE_KEY = "perch.sessionId";
-
 function loadStoredSessionId(): string | null {
-  try {
-    return localStorage.getItem(SESSION_ID_STORAGE_KEY);
-  } catch {
-    return null; // localStorage unavailable (private mode, SSR, etc.)
-  }
+  return readSessionId(); // so a page reload or PWA reopen resumes this window's session, not a blank one
 }
 
 function storeSessionId(sessionId: string): void {
-  try {
-    localStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId);
-  } catch {
-    // ignore — worst case we just start fresh next time
-  }
+  writeSessionId(sessionId);
 }
 
 /**
@@ -126,7 +115,7 @@ class PerchSocket {
   newSession(): void {
     this.sessionId = null;
     try {
-      localStorage.removeItem("perch.sessionId");
+      writeSessionId(null);
     } catch {
       // ignore
     }

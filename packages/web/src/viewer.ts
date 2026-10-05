@@ -1,7 +1,7 @@
 /**
  * This window's viewer identity: the owner of its presentation rows in the core
- * (`surfaceSync.ts`) and of its local tab state (`fileTabs`, `splitSets`, `tabOrder`
- * keys carry `@<viewerId>`), so two windows never overwrite each other.
+ * (`surfaceSync.ts`) and of its local tab and navigation state (`fileTabs`, `splitSets`,
+ * `tabOrder`, the session and workspace it shows: keys carry `@<viewerId>`), so two windows never overwrite each other.
  *
  * A window holds a Web Lock on its id for as long as the page lives (released by the
  * browser on close or crash), which is what tells a live owner from a gone one:
@@ -43,6 +43,27 @@ export function readViewerStored(base: string): string | null {
     localStorage.removeItem(base);
   }
   return legacy;
+}
+
+const SESSION_ID_KEY = "perch.sessionId";
+
+/** The session this window resumes. A window with none of its own starts at the shared key, the last session any window chose. */
+export function readSessionId(): string | null {
+  try {
+    const own = localStorage.getItem(viewerKey(SESSION_ID_KEY));
+    return own !== null ? own || null : localStorage.getItem(SESSION_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Remember this window's session (null = none, which a reconnect must not undo from the shared key). */
+export function writeSessionId(id: string | null): void {
+  try {
+    localStorage.setItem(viewerKey(SESSION_ID_KEY), id ?? "");
+    if (id) localStorage.setItem(SESSION_ID_KEY, id);
+    else localStorage.removeItem(SESSION_ID_KEY);
+  } catch { /* worst case the next load starts fresh */ }
 }
 
 function registry(): Record<string, number> {

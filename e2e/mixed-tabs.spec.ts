@@ -333,6 +333,8 @@ test("two windows of one browser are two viewers with their own layouts", async 
     await page.getByTestId(a.fileTab).click({ button: "right" });
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+    await page.getByTestId(a.terminalTab).click(); // the terminal, not the file, is what is selected
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
     await page.waitForTimeout(1500);
 
     const second = await context.newPage();
@@ -406,6 +408,64 @@ test("a reload restores the selected file, and keyboard focus selects a split pa
     await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
     await page.getByTestId("workspace-file-editor").focus();
     await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a restore interrupted by a dropped connection finishes after the reconnect", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(a.fileTab).click();
+    await page.waitForTimeout(1500); // the presentation is saved
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) if (/^perch\.(fileTabs|splitSets|tabOrder\.)/.test(key)) localStorage.removeItem(key);
+      sessionStorage.setItem("dropFirstList", "1");
+    });
+    // The next load loses its connection on the first surface.list.
+    await page.addInitScript(() => {
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === "string" && data.includes('"surface.list"') && sessionStorage.getItem("dropFirstList") === "1") {
+          sessionStorage.removeItem("dropFirstList");
+          this.close();
+          return;
+        }
+        return send.call(this, data);
+      };
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => strip(page), { timeout: 20000 }).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
+    await expect.poll(() => activeTab(page), { timeout: 20000 }).toBe(a.fileTab);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a window resumes its own terminal, not the one another window chose last", async ({ page, context }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    const other = await startChat(page, "terminal", root);
+    await page.getByTestId(a.terminalTab).click();
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+    await page.getByTestId(a.terminalTab).click(); // the terminal, not the file, is what is selected
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
+    await page.waitForTimeout(1500);
+
+    const second = await context.newPage();
+    await second.goto("/", { waitUntil: "domcontentloaded" });
+    await second.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
+    await second.getByTestId(`workspace-session-${other}`).click();
+    await expect.poll(() => second.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(other);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 20000 });
+    expect(await page.evaluate(() => window.usePerchStore.getState().sessionId)).toBe(a.sessionId);
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
   } finally {
     cleanup();
   }

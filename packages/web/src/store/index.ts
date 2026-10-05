@@ -37,6 +37,7 @@ export {
 } from "./selectors";
 export type { ProjectGroup, ProjectNavState } from "./selectors";
 import { newId } from "../ids";
+import { writeSessionId } from "../viewer";
 
 export interface ToolCallEntry {
   name: string;
@@ -1667,14 +1668,14 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (hostId === "local") {
       // Clear stored session id so a mid-flight reconnect doesn't resume the
       // old session before session.created arrives (same as socket.newSession()).
-      try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
+      writeSessionId(null);
       const msg: { type: "session.create"; cwd?: string } = { type: "session.create" };
       if (cwd) msg.cwd = cwd;
       socket.send(msg);
     } else {
       // Clear the stored sessionId so a mid-flight reconnect doesn't try
       // to resume the old session before session.created arrives.
-      try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
+      writeSessionId(null);
       const msg: { type: "session.create"; hostId: string; cwd?: string } = {
         type: "session.create",
         hostId,
@@ -1685,11 +1686,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   showWorkspaceHome: () => {
-    try {
-      localStorage.removeItem("perch.sessionId");
-    } catch {
-      // ignore
-    }
+    writeSessionId(null);
     flushChunkBuffer();
     set({ sessionId: null, messages: [], streamingMessageId: null, cliError: null });
   },
