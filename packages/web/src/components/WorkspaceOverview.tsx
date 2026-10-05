@@ -618,7 +618,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className="group/ph flex items-center pr-[0.35rem]"
+                  className={cn("group/ph flex items-center pr-[0.35rem]", projectActive && "bg-surface-1")}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setMenu({ x: event.clientX, y: event.clientY, label: "Project actions", items: projectMenu(project) });
@@ -647,15 +647,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={cn(
                     ROW_BTN,
-                    "flex-1 cursor-pointer gap-[0.45rem] pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg hover:bg-surface-1",
+                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg",
                     FOCUS,
-                    projectActive ? "bg-surface-1 shadow-[inset_2px_0_0_var(--accent)]" : "bg-transparent",
                   )}
                   aria-pressed={projectActive}
                   onClick={() => navigateToProject(project.id)}
                   title={project.path}
                 >
-                  <span className="w-3 shrink-0 text-center text-[0.65rem] text-accent" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
+                  <span className="w-3 shrink-0 text-center text-[0.65rem] text-subtext-0" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
                   <span className={BODY}>
                     <strong className={STRONG}>{project.name || basename(project.path)}</strong>
                   </span>
@@ -750,7 +749,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             type="button"
                             className={cn(
                               ENTRY_BTN,
-                              workspaceActive ? "workspace-entry__button--active bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] shadow-[inset_2px_0_0_var(--teal)]" : "bg-transparent",
+                              workspaceActive ? "workspace-entry__button--active bg-surface-1" : "bg-transparent",
                             )}
                             aria-pressed={workspaceActive}
                             onClick={() => navigateToWorkspace(workspace.id)}
@@ -768,12 +767,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               >
                                 {workspace.name || basename(workspace.path)}
                               </strong>
-                              <span className={SPAN}>{workspace.branch || workspace.path}</span>
+                              {/* A branch only when it tells checkouts apart; the path is in the tooltip. */}
+                              {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={SPAN}>{workspace.branch}</span>}
                             </span>
                             {/* Only what needs attention; "ready" is the norm. */}
-                            {(workspace.pinned || workspace.state === "sleeping" || workspace.dirty) && (
+                            {(workspace.pinned || workspace.state === "sleeping") && (
                               <span className="shrink-0 text-[0.58rem] text-subtext-0">
-                                {[workspace.pinned && "pinned", workspace.state === "sleeping" ? "sleeping" : workspace.dirty && "dirty"].filter(Boolean).join(" · ")}
+                                {[workspace.pinned && "pinned", workspace.state === "sleeping" && "sleeping"].filter(Boolean).join(" · ")}
                               </span>
                             )}
                           </button>

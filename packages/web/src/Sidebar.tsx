@@ -728,7 +728,8 @@ export function Sidebar() {
   return (
     <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden border-r border-r-overlay-0 bg-surface-0 max-[700px]:hidden">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <button
+        {/* A local-only install has nothing to switch between (UI-UX-DIRECTION.md §11). */}
+        {(hosts.length > 0 || activeHostId !== "local") && <button
           type="button"
           className="flex w-full shrink-0 cursor-pointer items-start gap-[0.3rem] border-current bg-transparent text-left text-fg [font-family:inherit] [border-style:none_none_solid] border-b border-b-overlay-0 [transition:background_0.12s_ease] hover:bg-surface-1"
           data-testid="host-switcher"
@@ -763,12 +764,12 @@ export function Sidebar() {
             </div>
           )}
           <span className="shrink-0 pt-[0.6rem] pr-2 text-[0.7rem] text-subtext-0" aria-hidden="true">▾</span>
-        </button>
+        </button>}
 
         <div className="shrink-0 px-2 pt-2 pb-[0.35rem]">
           <button
             type="button"
-            className="w-full shrink-0 cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.6rem] py-[0.4rem] text-left text-[0.82rem] font-semibold text-accent [font-family:inherit] [transition:border-color_0.12s_ease] [&:hover:not(:disabled)]:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-full shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.6rem] py-[0.4rem] text-left text-[0.82rem] font-semibold text-fg [border:0] [font-family:inherit] [&:hover:not(:disabled)]:bg-surface-1 disabled:cursor-not-allowed disabled:opacity-40"
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
