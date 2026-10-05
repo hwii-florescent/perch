@@ -535,28 +535,36 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       </div>
 
-      {addOpen && (
-        <div className="workspace-overview__add-form grid shrink-0 gap-[0.42rem] border-b border-b-overlay-0 bg-surface-dim px-[0.65rem] py-[0.55rem]" data-testid="workspace-add-form">
-          <label className="grid gap-[0.16rem] text-[0.65rem] text-subtext-0">
-            <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
-            <input
-              className="w-full min-w-0 rounded-ui border border-overlay-0 bg-panel-bg px-[0.42rem] py-[0.34rem] text-fg focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Project name"
-              data-testid="workspace-project-name"
-            />
-          </label>
-          {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
-          <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
-          <div className="flex justify-end gap-[0.35rem] pt-[0.15rem]">
-            <button type="button" className={`cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.45rem] py-[0.3rem] text-[0.68rem] text-subtext-0 [font-family:inherit] disabled:cursor-not-allowed disabled:opacity-[0.45] ${FOCUS}`} disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
-              Cancel
-            </button>
+      {addOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[2100] flex items-center justify-center bg-[rgba(0,0,0,0.55)]"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setAddOpen(false); }}
+          onKeyDown={(event) => { if (event.key === "Escape") setAddOpen(false); }}
+        >
+          <div className="workspace-overview__add-form grid max-h-[85vh] w-[min(30rem,92vw)] gap-[0.6rem] overflow-y-auto rounded-ui bg-panel-bg p-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]" role="dialog" aria-modal="true" aria-label="Add project" data-testid="workspace-add-form">
+            <h2 className="m-0 text-[0.9rem] font-semibold text-fg">Add project</h2>
+            <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
+              <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
+              <input
+                className="w-full min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Project name"
+                data-testid="workspace-project-name"
+              />
+            </label>
+            {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
+            <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
+            {createRequest?.status === "pending" && <span className="text-[0.7rem] text-subtext-0" role="status">Registering folder…</span>}
+            {createRequest?.status === "error" && <span className="text-[0.7rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
+            <div className="flex justify-end">
+              <button type="button" className={`cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.6rem] py-[0.3rem] text-[0.75rem] text-subtext-0 [font-family:inherit] hover:text-fg disabled:cursor-not-allowed disabled:opacity-[0.45] ${FOCUS}`} disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
-          {createRequest?.status === "pending" && <span className="text-[0.64rem] text-subtext-0" role="status">Registering folder…</span>}
-          {createRequest?.status === "error" && <span className="text-[0.64rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
-        </div>
+        </div>,
+        document.body,
       )}
 
       {snapshot?.state === "loading" && (
