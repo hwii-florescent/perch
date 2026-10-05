@@ -5,6 +5,9 @@
  * connection.
  */
 import { test, expect, type Page } from "@playwright/test";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { startChat } from "./projects";
 
 async function open(page: Page): Promise<void> {
@@ -24,6 +27,26 @@ test.describe("Perch sidebar", () => {
     await open(page);
     const id = await startChat(page);
     await expect(page.getByTestId(`workspace-session-${id}`)).toHaveClass(/workspace-entry__session--active/);
+  });
+
+  test("2a. Compact sessions are dots on the row; Session list brings the rows back", async ({ page }) => {
+    await open(page);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-dots-"));
+    try {
+    const id = await startChat(page, "terminal", dir);
+    const dot = page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`);
+    await expect(dot).toHaveClass(/workspace-entry__session--active/);
+    await expect(page.locator(".workspace-entry__sessions")).toHaveCount(0);
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-sessions-list").click();
+    await expect(page.getByTestId("session-dots")).toHaveCount(0);
+    await expect(page.locator(".workspace-entry__sessions").getByTestId(`workspace-session-${id}`)).toBeVisible();
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-sessions-compact").click();
+    await expect(page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`)).toBeVisible();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("2b. Organize sidebar: in one list shows every session flat", async ({ page }) => {

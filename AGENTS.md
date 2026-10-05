@@ -245,6 +245,13 @@ there, not here.
     no footer button). The sidebar and drawer widths are user-resizable by
     dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
     `perch.layout.*`).
+  - Sessions sit under their project (`workspace-entry__sessions`). The Organize menu picks **Compact sessions** (default; `SessionDots`: one
+    status dot per session on the row, click switches, right-click closes) or
+    **Session list** (`perch.sidebar.sessionView`); the phone always lists. A
+    project with one checkout shows no workspace row: its header carries the
+    `workspace-entry` testid/`workspace-entry__button` class, and Files/Git
+    are on the project menu. Rows are rounded, filled on hover/active
+    (`surface-1`), focus is a 1px neutral ring, never an accent outline.
   - Sidebar rows stay quiet: a project header is its name plus a `Chevron`
     (the whole row collapses it, per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,

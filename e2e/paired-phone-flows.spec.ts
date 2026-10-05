@@ -192,6 +192,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await expect(page.locator(".workspace-project").filter({ hasText: repoName })).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId("settings-gear").click();
+    await page.getByTestId("settings-nav-devices").click();
     const devices = page.getByTestId("settings-devices");
     await expect(devices).toBeVisible({ timeout: 10_000 });
     await devices.getByTestId("pair-start").click();
@@ -292,6 +293,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     // 10. Revoking from the host takes the access back, mid-session.
     await page.goto(hostUrl, { waitUntil: "networkidle" });
     await page.getByTestId("settings-gear").click();
+    await page.getByTestId("settings-nav-devices").click();
     await expect(page.getByTestId("paired-devices")).toBeVisible({ timeout: 10_000 });
     await page.locator('[data-testid^="device-revoke-"]').first().click();
     await expect(phone.getByTestId("pairing-gate")).toBeVisible({ timeout: 30_000 });

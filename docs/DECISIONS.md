@@ -24,6 +24,14 @@ Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md
 - **Organize sidebar** (header menu): By project (default) or In one list
   (every session, projects and Chats alike, as a flat list, newest first). This
   is a view choice, not a new data model: sessions stay under their projects.
+- **Sessions stay under their projects, compact by default** (owner,
+  2026-10-05). This amends the 2026-10-04 "sessionless sidebar". Organize menu
+  also picks **Compact sessions** (default: one status dot per session on the
+  project/workspace row; blocked / working / done) or **Session list** (the
+  original rows). A project with one checkout has no workspace row of its own
+  (the project row stands in; Files/Git move to the project menu). The phone
+  keeps full rows. Strip states are neutral: hover and active are a rounded
+  `surface-1` fill, focus is a 1px neutral ring; no hairlines between rows.
 - **Backlog:** "Sort chats by" (Last updated / Manual order). Needs a
   last-updated field on `SessionSummary` and drag-and-drop.
 

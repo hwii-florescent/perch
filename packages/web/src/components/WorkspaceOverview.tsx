@@ -3,6 +3,7 @@ import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
+import { sessionDotState } from "../statusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { GHOST_BUTTON, ICON_BUTTON } from "./ui/icon-button";
 import { Chevron } from "./ui/chevron";
@@ -18,14 +19,14 @@ import type { SessionSummary, WorktreeJob } from "@perch/shared";
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
 // `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
 // `workspace-project__workspaces`, `workspace-entry__sessions` and `workspace-overview__add-form`.
-const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
+const FOCUS = "focus-visible:[outline:1px_solid_var(--overlay-1)] focus-visible:[outline-offset:-1px]";
 const FONT = "[font-family:inherit] [font-size:inherit] [font-weight:inherit]";
 const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
-const SESSION = `${ROW_BTN} cursor-pointer gap-[0.35rem] bg-transparent px-[0.25rem] py-[0.23rem] text-[0.64rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
+const SESSION = `${ROW_BTN} cursor-pointer gap-[0.4rem] rounded-ui bg-transparent px-[0.4rem] py-[0.25rem] text-[0.7rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
 const SESSION_TITLE = "overflow-hidden text-ellipsis whitespace-nowrap";
 const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
-const DOT = "w-[0.7rem] shrink-0 text-center text-[0.58rem] text-teal";
-const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] pt-[0.35rem] pr-[0.3rem] pb-[0.32rem] pl-[0.45rem] text-fg hover:bg-[color-mix(in_srgb,var(--surface-1)_75%,transparent)] ${FOCUS}`;
+const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
+const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] rounded-ui py-[0.3rem] pr-[0.3rem] pl-[0.5rem] text-fg ${FOCUS}`;
 const STRONG = "overflow-hidden text-[0.76rem] font-bold text-ellipsis whitespace-nowrap text-fg";
 const SPAN = "overflow-hidden text-[0.63rem] text-ellipsis whitespace-nowrap text-subtext-0";
 const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
@@ -98,6 +99,41 @@ function copyText(text: string) {
 const COLLAPSED_KEY = "perch.sidebar.collapsedProjects";
 function readCollapsed(): string[] {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
+}
+
+type SessionView = "compact" | "list";
+const SESSION_VIEW_KEY = "perch.sidebar.sessionView";
+function readSessionView(): SessionView {
+  try { return localStorage.getItem(SESSION_VIEW_KEY) === "list" ? "list" : "compact"; } catch { return "compact"; }
+}
+
+/** Compact sessions: one status dot per session on the row's own line. Click
+ * switches to it, right-click closes it; the tooltip names it and its state. */
+function SessionDots({ sessions, activeId, onPick, onMenu }: {
+  sessions: SessionSummary[];
+  activeId: string | null;
+  onPick: (id: string) => void;
+  onMenu: (session: SessionSummary, x: number, y: number) => void;
+}) {
+  return (
+    <span className="flex min-w-0 shrink items-center gap-[0.1rem] overflow-hidden px-1" data-testid="session-dots">
+      {sessions.map((session) => (
+        <button
+          key={session.id}
+          type="button"
+          className={cn("grid h-[1.4rem] w-[1.4rem] shrink-0 cursor-pointer place-items-center rounded-ui bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
+          data-testid={`workspace-session-${session.id}`}
+          title={`${session.title || "New session"} · ${sessionDotState(session)}`}
+          aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
+          aria-current={session.id === activeId ? "true" : undefined}
+          onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
+          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
+        >
+          <StatusDot session={session} className="mt-0 text-[0.8rem]" />
+        </button>
+      ))}
+    </span>
+  );
 }
 
 type Organize = "project" | "list";
@@ -293,8 +329,32 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       ...(projectSessions.length > 0
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
         : []),
+      ...singleExtras(project),
       "divider",
       { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
+    ];
+  }
+
+  /** A project with one checkout has no row of its own for it (the project row
+   * stands in), so Files and Git for that checkout live on the project menu. */
+  function singleWorkspaceOf(project: WorkspaceProject): WorkspaceRecord | undefined {
+    if (compact) return undefined;
+    const visible = workspacesForProject(workspaces, project.id).filter((w) => !w.hidden);
+    const [only] = visible;
+    return only && visible.length === 1 && !only.parentWorkspaceId ? only : undefined;
+  }
+  function singleExtras(project: WorkspaceProject): MenuItem[] {
+    const workspace = singleWorkspaceOf(project);
+    if (!workspace) return [];
+    const open = (tool: "files" | "git") => {
+      focusWorkspace(workspace.id);
+      if (tool === "files") openWorkspaceFiles(workspace.id);
+      else openWorkspaceGitReview(workspace.id);
+    };
+    return [
+      "divider",
+      { label: "Files", testId: `workspace-menu-files-${workspace.id}`, onSelect: () => open("files") },
+      ...(workspace.branch || project.repoPath ? [{ label: "Git", testId: `workspace-menu-git-${workspace.id}`, onSelect: () => open("git") }] : []),
     ];
   }
 
@@ -320,7 +380,53 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     ];
   }
 
+  function sessionRows(list: SessionSummary[]): ReactElement {
+    return (
+      <div className="workspace-entry__sessions pt-0 pb-1 pl-[1.1rem]">
+        {list.map((session) => (
+          <div className="group/row flex items-center" key={session.id}>
+            <button
+              type="button"
+              className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active bg-surface-1 font-semibold text-fg" : "text-subtext-0")}
+              data-testid={`workspace-session-${session.id}`}
+              onClick={() => pickSession(session.id)}
+            >
+              <StatusDot session={session} />
+              <span className={SESSION_TITLE}>{session.title || "New session"}</span>
+            </button>
+            <button
+              type="button"
+              className={SESSION_CLOSE}
+              data-testid={`workspace-session-close-${session.id}`}
+              title="Close session"
+              aria-label={`Close ${session.title || "session"}`}
+              onClick={() => deleteSession(session.id)}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   const [organize, setOrganize] = useState<Organize>(readOrganize);
+  const [sessionViewStored, setSessionView] = useState<SessionView>(readSessionView);
+  // The phone keeps full rows: dots are too small a touch target.
+  const sessionView: SessionView = compact ? "list" : sessionViewStored;
+  function chooseSessionView(next: SessionView) {
+    setSessionView(next);
+    try { localStorage.setItem(SESSION_VIEW_KEY, next); } catch { /* per-viewer convenience */ }
+  }
+  function sessionMenu(session: SessionSummary, x: number, y: number) {
+    setMenu({ x, y, label: "Session actions", items: [
+      { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => deleteSession(session.id) },
+    ] });
+  }
+  function pickSession(id: string) {
+    switchSession(id);
+    onNavigate?.();
+  }
   function chooseOrganize(next: Organize) {
     setOrganize(next);
     try { localStorage.setItem(ORGANIZE_KEY, next); } catch { /* per-viewer convenience */ }
@@ -562,9 +668,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             data-testid="workspace-organize"
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
-              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Organize sidebar", items: (Object.keys(ORGANIZE_LABELS) as Organize[]).map((key) => (
-                { label: `${organize === key ? "✓ " : "   "}${ORGANIZE_LABELS[key]}`, testId: `workspace-organize-${key}`, onSelect: () => chooseOrganize(key) }
-              )) });
+              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Organize sidebar", items: [
+                ...(Object.keys(ORGANIZE_LABELS) as Organize[]).map((key) => (
+                  { label: `${organize === key ? "✓ " : "   "}${ORGANIZE_LABELS[key]}`, testId: `workspace-organize-${key}`, onSelect: () => chooseOrganize(key) }
+                )),
+                "divider" as const,
+                { label: `${sessionViewStored === "compact" ? "✓ " : "   "}Compact sessions`, testId: "workspace-sessions-compact", onSelect: () => chooseSessionView("compact") },
+                { label: `${sessionViewStored === "list" ? "✓ " : "   "}Session list`, testId: "workspace-sessions-list", onSelect: () => chooseSessionView("list") },
+              ] });
             }}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -654,16 +765,22 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const projectJobs = project.hostId === "local"
               ? worktreeJobs.filter((job) => job.repoPath === project.repoPath || job.repoPath === project.path)
               : [];
-            const projectActive = project.id === activeProjectId;
             const projectCollapsed = collapsed.includes(project.id);
+            const single = singleWorkspaceOf(project);
+            const projectSessions = sessionsForProject(project.id);
+            // With nothing to fold away, the header opens the checkout instead.
+            const collapsible = single ? sessionView === "list" && projectSessions.length > 0 : true;
+            const showHeaderDots = projectSessions.length > 0 && (projectCollapsed || (single && sessionView === "compact"));
+            const onHeaderClick = () => (collapsible || !single ? toggleCollapsed(project.id) : navigateToWorkspace(single.id));
             return (
               <div
-                className="workspace-project border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_45%,transparent)]"
+                className="workspace-project px-[0.35rem] pb-[0.2rem]"
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex items-center pr-[0.35rem]", projectActive && "bg-surface-1")}
+                  className={cn("group/ph flex items-center rounded-ui pr-[0.2rem] hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setMenu({ x: event.clientX, y: event.clientY, label: "Project actions", items: projectMenu(project) });
@@ -692,20 +809,27 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={cn(
                     ROW_BTN,
-                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg",
+                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent py-[0.4rem] pr-[0.4rem] pl-[0.55rem] text-fg",
+                    single && "workspace-entry__button",
+                    single && single.id === activeWorkspaceId && "workspace-entry__button--active",
                     FOCUS,
                   )}
                   data-testid={`project-toggle-${project.id}`}
-                  aria-expanded={!projectCollapsed}
-                  onClick={() => toggleCollapsed(project.id)}
+                  aria-expanded={collapsible ? !projectCollapsed : undefined}
+                  onClick={onHeaderClick}
                   title={project.path}
                 >
                   <span className="w-3 shrink-0 text-center text-[0.65rem] text-subtext-0" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
                   <span className="grid min-w-0 gap-[0.1rem]">
                     <strong className={STRONG}>{project.name || basename(project.path)}</strong>
                   </span>
-                  <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />
+                  {single?.branch && single.branch !== (project.name || basename(project.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{single.branch}</span>}
+                  {single?.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
+                  {collapsible && <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />}
                 </button>
+                )}
+                {showHeaderDots && (
+                  <SessionDots sessions={projectSessions} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
                 )}
                 <button
                   type="button"
@@ -734,8 +858,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   </button>
                 )}
                 </div>
-                {!projectCollapsed && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
-                  <div className="workspace-project__workspaces pt-0 pr-[0.35rem] pb-[0.35rem] pl-[1.15rem]">
+                {(!projectCollapsed || (single && !collapsible)) && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
+                  <div className="workspace-project__workspaces pt-0 pb-[0.2rem] pl-[0.9rem]">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
                       // linked worktree renders under it; children of the primary
@@ -754,7 +878,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       return (
                         <Fragment key={workspace.id}>
                         <div
-                          className="workspace-entry group/entry relative border-l border-l-overlay-0"
+                          className="workspace-entry group/entry relative"
                           data-testid={`workspace-entry-${workspace.id}`}
                           onContextMenu={(event) => {
                             if ((event.target as HTMLElement).closest(".workspace-entry__sessions")) return;
@@ -781,17 +905,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               onBlur={() => setRenamingId(null)}
                             />
                           ) : (
+                          <div className={cn("flex items-center rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
                           <button
                             type="button"
                             className={cn(
                               ENTRY_BTN,
-                              workspaceActive ? "workspace-entry__button--active bg-surface-1" : "bg-transparent",
+                              "flex-1 bg-transparent",
+                              workspaceActive && "workspace-entry__button--active",
                             )}
                             aria-pressed={workspaceActive}
                             onClick={() => navigateToWorkspace(workspace.id)}
                             title={workspace.path}
                           >
-                            <span className={DOT} aria-hidden="true">{workspace.dirty ? "●" : "○"}</span>
                             <span className={BODY}>
                               <strong
                                 className={STRONG}
@@ -806,6 +931,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               {/* A branch only when it tells checkouts apart; the path is in the tooltip. */}
                               {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={SPAN}>{workspace.branch}</span>}
                             </span>
+                            {workspace.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
                             {/* Only what needs attention; "ready" is the norm. */}
                             {(workspace.pinned || workspace.state === "sleeping") && (
                               <span className="shrink-0 text-[0.58rem] text-subtext-0">
@@ -813,6 +939,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               </span>
                             )}
                           </button>
+                          {sessionView === "compact" && workspaceSessions.length > 0 && (
+                            <SessionDots sessions={workspaceSessions} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
+                          )}
+                          </div>
                           )}
                           {/* Desktop uses the right-click menu; the phone has no
                               right-click, so it keeps these buttons. */}
@@ -895,42 +1025,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {workspace.state === "sleeping" && (
                             <button
                               type="button"
-                              className={`mt-0 mr-[0.3rem] mb-[0.3rem] ml-[1.45rem] cursor-pointer rounded-ui border border-yellow bg-transparent px-[0.35rem] py-[0.18rem] text-[0.6rem] text-yellow [font-family:inherit] ${FOCUS}`}
+                              className={`mt-0 mr-[0.3rem] mb-[0.3rem] ml-[0.5rem] cursor-pointer rounded-ui border border-yellow bg-transparent px-[0.35rem] py-[0.18rem] text-[0.6rem] text-yellow [font-family:inherit] ${FOCUS}`}
                               onClick={() => restoreWorkspace(workspace.id)}
                             >
                               Restore
                             </button>
                           )}
-                          {workspaceSessions.length > 0 && (
-                            <div className="workspace-entry__sessions pt-0 pr-[0.3rem] pb-1 pl-[1.45rem]">
-                              {workspaceSessions.map((session) => (
-                                <div className="group/row flex items-center" key={session.id}>
-                                  <button
-                                    type="button"
-                                    className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
-                                    data-testid={`workspace-session-${session.id}`}
-                                    onClick={() => {
-                                      switchSession(session.id);
-                                      onNavigate?.();
-                                    }}
-                                  >
-                                    <StatusDot session={session} />
-                                    <span className={SESSION_TITLE}>{session.title || "New session"}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={SESSION_CLOSE}
-                                    data-testid={`workspace-session-close-${session.id}`}
-                                    title="Close session"
-                                    aria-label={`Close ${session.title || "session"}`}
-                                    onClick={() => deleteSession(session.id)}
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          {sessionView === "list" && workspaceSessions.length > 0 && sessionRows(workspaceSessions)}
                         </div>
                         {(children.get(workspace.id) ?? []).length > 0 && depth < 8 && (
                           <div className="ml-[0.9rem]" data-testid={`workspace-children-${workspace.id}`}>
@@ -940,6 +1041,22 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         </Fragment>
                       );
                       };
+                      if (single) {
+                        return (
+                          <>
+                            {single.state === "sleeping" && (
+                              <button
+                                type="button"
+                                className={`mt-0 mr-[0.3rem] mb-[0.3rem] ml-[0.5rem] cursor-pointer rounded-ui border border-yellow bg-transparent px-[0.35rem] py-[0.18rem] text-[0.6rem] text-yellow [font-family:inherit] ${FOCUS}`}
+                                onClick={() => restoreWorkspace(single.id)}
+                              >
+                                Restore
+                              </button>
+                            )}
+                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(sessionsForWorkspace(sessions, single))}
+                          </>
+                        );
+                      }
                       return roots.map((workspace) => renderWorkspace(workspace, 0));
                     })()}
                     <WorktreeJobRows jobs={projectJobs} />

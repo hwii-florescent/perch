@@ -174,6 +174,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     // The agent (and so the workspace the Git pane opens) runs in the repo.
     await addProject(page, repo);
     await page.getByTestId("settings-gear").click();
+    await page.getByTestId("settings-nav-devices").click();
     const devices = page.getByTestId("settings-devices");
     await expect(devices).toBeVisible({ timeout: 10_000 });
     await devices.getByTestId("pair-start").click();
@@ -244,6 +245,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     // 8. Revoking from the host takes the access back.
     await page.goto(hostUrl, { waitUntil: "networkidle" });
     await page.getByTestId("settings-gear").click();
+    await page.getByTestId("settings-nav-devices").click();
     await expect(page.getByTestId("paired-devices")).toBeVisible({ timeout: 10_000 });
     await page.locator('[data-testid^="device-revoke-"]').first().click();
     await expect(page.getByTestId("paired-devices")).toHaveCount(0, { timeout: 10_000 });
