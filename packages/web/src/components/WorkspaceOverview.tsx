@@ -1,4 +1,4 @@
-import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactElement, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
@@ -320,9 +320,21 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
 
-  // The home screen's "Add project" (NoSessionPanel.tsx) opens this form.
+  // The desktop app registers a local folder through the OS picker; the web
+  // build, and any remote host, use the directory-browser dialog.
+  const openAddProject = useEffectEvent(async () => {
+    const invoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+    if (!invoke || activeHostId !== "local") return setAddOpen((open) => !open);
+    try {
+      const picked = await invoke("plugin:dialog|open", { options: { directory: true, title: "Add project" } });
+      if (typeof picked === "string") submitProject(picked);
+    } catch {
+      setAddOpen(true);
+    }
+  });
+  // The home screen's "Add project" (NoSessionPanel.tsx) starts the same flow.
   useEffect(() => {
-    const open = () => setAddOpen(true);
+    const open = () => void openAddProject();
     window.addEventListener(ADD_PROJECT_EVENT, open);
     return () => window.removeEventListener(ADD_PROJECT_EVENT, open);
   }, []);
@@ -528,7 +540,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             type="button"
             className={`cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-accent [font-family:inherit] hover:border-accent focus-visible:border-accent [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]`}
             data-testid="workspace-add-project"
-            onClick={() => setAddOpen((open) => !open)}
+            onClick={() => void openAddProject()}
           >
             + Add
           </button>
