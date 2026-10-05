@@ -211,15 +211,10 @@ test.describe("Navigation redesign (host switcher + project nav)", () => {
 
     await freshPage(page);
 
-    // "local" is always present, and the popover keeps host management
-    // reachable now that per-host sidebar sections are gone.
-    let popover = await openHostSwitcher(page);
-    await expect(popover.locator('[data-testid="host-option-local"]')).toBeVisible({ timeout: 5000 });
-    await expect(popover.locator('[data-testid="host-switcher-manage"]')).toBeVisible();
-    await expect(popover.locator('[data-testid="host-option-local"] .host-state--connected')).toBeVisible();
-    await page.screenshot({ path: "artifacts/n2-switcher-local-only.png" });
-    await page.keyboard.press("Escape");
-    await expect(popover).toHaveCount(0, { timeout: 5000 });
+    // A local-only install has nothing to switch between: no host card
+    // (UI-UX-DIRECTION.md §11). It appears once a remote host is added.
+    await expect(page.locator('[data-testid="host-switcher"]')).toHaveCount(0);
+    let popover: Locator;
 
     // Register a federated host and confirm it joins the list.
     await upsertNavHost();

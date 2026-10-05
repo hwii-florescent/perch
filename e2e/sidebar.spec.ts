@@ -14,11 +14,10 @@ async function open(page: Page): Promise<void> {
 }
 
 test.describe("Perch sidebar", () => {
-  test("1. Load + env header", async ({ page }) => {
+  test("1. Load: a local-only install shows no host card", async ({ page }) => {
     await open(page);
-    await expect(page.locator(".sidebar__env-badge")).toHaveText("LOCAL", { timeout: 10000 });
-    expect((await page.locator(".sidebar__env-host").textContent())?.trim()).toBeTruthy();
-    expect((await page.locator(".sidebar__env-cwd").textContent())?.trim()).toBeTruthy();
+    await expect(page.getByTestId("new-session-local")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("host-switcher")).toHaveCount(0);
   });
 
   test("2. a started session is listed and active", async ({ page }) => {
