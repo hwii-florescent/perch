@@ -143,7 +143,7 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(drawer).toBeVisible({ timeout: 10000 });
     await expect(openBtn).toHaveAttribute("aria-pressed", "true");
     // Files is the default tab, and the drawer has no terminal.
-    await expect(drawer.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
     await expect(drawer.locator(".terminal__surface")).toHaveCount(0);
     // The drawer is not a dockview panel: the layout keeps just chat.
     await expect(page.locator(".dv-tabs-and-actions-container")).toHaveCount(1);
@@ -153,7 +153,7 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expect(drawer).toHaveCount(0);
     await expect(openBtn).toHaveAttribute("aria-pressed", "false");
     await openBtn.click();
-    await expect(drawer.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("workspace-tools-files")).toHaveAttribute("aria-pressed", "true");
     await openBtn.click();
     await expect(drawer).toHaveCount(0);
 

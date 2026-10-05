@@ -185,6 +185,8 @@ there, not here.
   - Chats (`~/.perch/scratch`) is listed after the projects as a flat chat
     list (⌄ collapse, ⋯ Close all chats, ✎ new chat), with no scratch
     workspace row.
+  - Tabs and pane groups are borderless (no pill outline, no group border);
+    split groups share only dockview's sash.
   - One pane shows no pane header: the top-row tab names it. Splits show
     every group's header (`syncPaneHeaders` in `DockviewShell.tsx`).
     Right-clicking a session's top tab opens its pane menu (split, zoom,
@@ -219,7 +221,9 @@ there, not here.
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any
     folder" picker, and perch never registers a project implicitly ($HOME
-    included); `+ Add` is the only way a folder becomes a project. A session
+    included); `+ Add` is the only way a folder becomes a project (the desktop app's
+    native folder dialog for the local host, else a modal directory browser;
+    never an inline sidebar form). A session
     stays in the project it started in whatever its terminal cd's into.
   - Terminals behave like Ghostty/iTerm2: perch must never swallow or
     re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
@@ -230,7 +234,9 @@ there, not here.
     blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
-    then the drawer toggle (a right-panel icon). Both toggles are borderless
+    then the drawer section: the Files/Git switch (`WorkspaceToolsTabs`,
+    only while the drawer is open, as wide as the drawer) and the drawer
+    toggle (a right-panel icon). Both toggles are borderless
     and transparent, filled only on hover. In the macOS app that row
     is also the title bar (overlay title bar, traffic lights in the brand
     section's 78px left padding, `data-tauri-drag-region`).

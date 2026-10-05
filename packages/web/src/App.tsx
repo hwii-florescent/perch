@@ -17,7 +17,7 @@ import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
-import { WorkspaceTools, type WorkspaceToolsTab } from "./components/WorkspaceTools";
+import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
 import "./surfaceSync";
@@ -237,7 +237,16 @@ export default function App() {
             {sidebarToggle}
           </div>
           <TabBar />
-          {terminalButton}
+          {/* With the drawer open, its Files/Git switch heads the same column. */}
+          {tools ? (
+            <div
+              className="box-border flex shrink-0 items-center justify-between gap-2 self-stretch border-l border-l-overlay-0 pr-2 pl-2 w-[var(--tools-width)] -mx-2"
+              data-tauri-drag-region
+            >
+              <WorkspaceToolsTabs requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} />
+              {terminalButton}
+            </div>
+          ) : terminalButton}
         </div>
       )}
 
@@ -286,7 +295,7 @@ export default function App() {
             onCommit={(px) => writeWidth(TOOLS_KEY, px)}
           />
         )}
-        {!isMobile && tools && <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} onClose={() => setTools(null)} />}
+        {!isMobile && tools && <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} />}
       </div>
 
       <StatusBar />
