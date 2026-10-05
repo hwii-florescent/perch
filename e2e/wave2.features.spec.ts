@@ -8,7 +8,7 @@
  *   T2 — login-shell toggle for plain terminal panes: hydrates, toggles,
  *        persists across reload.
  *   T3 — a project's ⋯ → "Close all sessions" deletes every session in it.
- *   T4 — closing a workspace's last tab shows the home screen
+ *   T4 — closing a workspace's last tab shows its start picker
  *        (`no-session-panel`), whose New session gets you out again.
  *
  * All tests are headless (no --headed / --ui) and use plain shell sessions.
@@ -254,7 +254,7 @@ test.describe("Wave 2 (Phase 15) features", () => {
   });
 
   // -------------------------------------------------------------------------
-  // T4 — closing a workspace's last tab shows the home screen
+  // T4 — closing a workspace's last tab shows its start picker
   // -------------------------------------------------------------------------
   test("T4. closing a workspace's last tab shows the home screen", async ({ page }) => {
     await freshPage(page);
@@ -268,8 +268,8 @@ test.describe("Wave 2 (Phase 15) features", () => {
       await page.getByTestId(`tab-close-${id}`).click();
       await expect(panel).toBeVisible({ timeout: 10000 });
 
-      await page.locator('[data-testid="no-session-create"]').click();
-      await page.getByTestId("project-option-none").click();
+      // The workspace stays: its start picker shows, and a choice opens a session in it.
+      await page.getByTestId("workspace-start-terminal").click();
       await expect(panel).not.toBeVisible({ timeout: 10000 });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -9,6 +9,10 @@
  *   viewer's presentation of the workspace (`viewer.presentation.set`);
  * - a viewer with no local tabs for a workspace (cleared storage) gets them back.
  *
+ * A viewer is one window: its id lives in `sessionStorage`, so a reload keeps it and a
+ * second window of the same browser gets its own presentation rows. (A new window, or a
+ * restarted app, starts a fresh viewer; the local tab state still carries over.)
+ *
  * Local workspaces only (the core refuses a remote workspace's resources), and
  * an older core without the capability is left exactly as before.
  */
@@ -16,7 +20,7 @@ import type { ClientMessage, ServerMessage, SurfaceDescriptor, ViewerPresentatio
 import { socket } from "./ws";
 import { newId } from "./ids";
 import { effectiveWorkspace, usePerchStore } from "./store";
-import { fileTabKey, useFileTabs, type FileTab } from "./fileTabs";
+import { fileTabKey, selectedKey, selectResource, useFileTabs, type FileTab } from "./fileTabs";
 import { useSplitSets, type SplitSet } from "./splitSets";
 import { saveTabOrder, storedTabOrder, TAB_ORDER_EVENT } from "./tabOrder";
 import { tabOrderKey, workspaceTabs } from "./workspaceTabs";
@@ -35,8 +39,8 @@ interface Layout {
 
 function viewerId(): string {
   try {
-    let id = localStorage.getItem("perch.viewerId");
-    if (!id) localStorage.setItem("perch.viewerId", (id = newId()));
+    let id = sessionStorage.getItem("perch.viewerId");
+    if (!id) sessionStorage.setItem("perch.viewerId", (id = newId()));
     return id;
   } catch {
     return (memoryViewerId ??= newId());
@@ -98,7 +102,7 @@ async function openTab(tab: FileTab): Promise<void> {
   }));
   if (reply.type !== "surface.opened") return;
   resourceIds.set(fileTabKey(tab), reply.surface.id);
-  scheduleMirror();
+  scheduleMirror(tab.workspaceId);
 }
 
 async function closeTab(tab: FileTab): Promise<void> {
@@ -126,12 +130,15 @@ useFileTabs.subscribe((state, previous) => {
   for (const tab of previous.tabs) if (!state.tabs.includes(tab)) void closeTab(tab);
 });
 
-function buildLayout(workspaceId: string): { order: string[]; layout: Layout } | null {
-  const state = usePerchStore.getState();
+/** `workspaceId`'s presentation, whether or not it is the workspace on screen. */
+function buildLayout(workspaceId: string): { order: string[]; layout: Layout; active?: string } | null {
+  const state = { ...usePerchStore.getState(), activeWorkspaceId: workspaceId };
   if (effectiveWorkspace(state)?.id !== workspaceId) return null;
   const entries = workspaceTabs(state, useFileTabs.getState().tabs);
   const ids = new Set(entries.map((entry) => entry.id));
+  const selected = selectedKey(workspaceId);
   return {
+    active: selected && ids.has(selected) ? resourceIds.get(selected) : undefined,
     order: entries.flatMap((entry) => (entry.kind === "resource" ? resourceIds.get(entry.id) ?? [] : [])),
     layout: {
       v: LAYOUT_VERSION,
@@ -142,16 +149,22 @@ function buildLayout(workspaceId: string): { order: string[]; layout: Layout } |
 }
 
 let mirrorTimer: ReturnType<typeof setTimeout> | undefined;
+/** Workspaces changed since the last send: a switch inside the debounce must not drop the one left. */
+const pending = new Set<string>();
 const lastSent = new Map<string, string>();
 
-function scheduleMirror(): void {
+function scheduleMirror(workspaceId = effectiveWorkspace(usePerchStore.getState())?.id): void {
+  if (workspaceId) pending.add(workspaceId);
   clearTimeout(mirrorTimer);
-  mirrorTimer = setTimeout(mirror, MIRROR_DELAY_MS);
+  mirrorTimer = setTimeout(() => {
+    const due = [...pending];
+    pending.clear();
+    due.forEach(mirror);
+  }, MIRROR_DELAY_MS);
 }
 
-function mirror(): void {
-  const workspaceId = effectiveWorkspace(usePerchStore.getState())?.id;
-  if (!workspaceId || !synced.has(workspaceId)) return;
+function mirror(workspaceId: string): void {
+  if (!synced.has(workspaceId)) return;
   const built = buildLayout(workspaceId);
   if (!built) return;
   const json = JSON.stringify(built);
@@ -162,13 +175,16 @@ function mirror(): void {
     requestId,
     viewerId: viewerId(),
     workspaceId,
-    presentation: { order: built.order, layout: built.layout },
+    presentation: { order: built.order, activeResourceId: built.active, layout: built.layout },
   }));
 }
 
-useFileTabs.subscribe(scheduleMirror);
-useSplitSets.subscribe(scheduleMirror);
-if (typeof window !== "undefined") window.addEventListener(TAB_ORDER_EVENT, scheduleMirror);
+useFileTabs.subscribe((state, previous) => {
+  for (const tab of [...state.tabs, ...previous.tabs]) if (!(state.tabs.includes(tab) && previous.tabs.includes(tab))) scheduleMirror(tab.workspaceId);
+  scheduleMirror();
+});
+useSplitSets.subscribe(() => scheduleMirror());
+if (typeof window !== "undefined") window.addEventListener(TAB_ORDER_EVENT, () => scheduleMirror());
 
 /** A viewer with no local tabs for the workspace gets its saved ones back. */
 async function hydrate(workspaceId: string, presentation: ViewerPresentation): Promise<void> {
@@ -180,9 +196,12 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
   const byId = new Map<string, SurfaceDescriptor>(listed.surfaces.map((surface) => [surface.id, surface]));
   const tabs: FileTab[] = presentation.order.flatMap((id): FileTab[] => {
     const surface = byId.get(id);
-    if (surface?.kind === "file" && surface.locator.path) return [{ workspaceId, path: surface.locator.path }];
-    if (surface?.kind === "diff") return [{ workspaceId, path: "", kind: "review" }];
-    return [];
+    const tab: FileTab | undefined = surface?.kind === "file" && surface.locator.path ? { workspaceId, path: surface.locator.path }
+      : surface?.kind === "diff" ? { workspaceId, path: "", kind: "review" }
+      : undefined;
+    if (!tab) return [];
+    resourceIds.set(fileTabKey(tab), id);
+    return [tab];
   });
   if (tabs.length === 0) return;
   useFileTabs.setState((state) => ({ tabs: [...state.tabs, ...tabs] }));
@@ -191,6 +210,13 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
   const known = new Set(useSplitSets.getState().sets.flatMap((set) => set.ids));
   const restored = layout.sets.filter((set) => !set.ids.some((id) => known.has(id)));
   if (restored.length) useSplitSets.setState((state) => ({ sets: [...state.sets, ...restored] }));
+}
+
+/** Reselect the file or review this viewer had selected, unless it has already chosen this load. */
+function restoreSelected(workspaceId: string, presentation: ViewerPresentation): void {
+  if (!presentation.activeResourceId || selectedKey(workspaceId) !== undefined) return;
+  const key = [...resourceIds].find(([, id]) => id === presentation.activeResourceId)?.[0];
+  if (key && useFileTabs.getState().tabs.some((tab) => fileTabKey(tab) === key)) selectResource(workspaceId, key);
 }
 
 /** First time this workspace is shown (per connection): import legacy state, open what is already here, hydrate. */
@@ -208,7 +234,10 @@ async function sync(workspaceId: string): Promise<void> {
     sessionOrder: key ? storedTabOrder(key).filter((id) => !id.includes("\n")) : [],
   }));
   await Promise.all(tabs.map(openTab));
-  if (imported.type === "viewer.presentation") await hydrate(workspaceId, imported.presentation);
+  if (imported.type === "viewer.presentation") {
+    await hydrate(workspaceId, imported.presentation);
+    restoreSelected(workspaceId, imported.presentation);
+  }
   scheduleMirror();
 }
 

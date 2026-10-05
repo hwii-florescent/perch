@@ -279,3 +279,85 @@ test("a file with an unsaved draft keeps its tab when closed", async ({ page }) 
     cleanup();
   }
 });
+
+test("closing the only terminal keeps the open file, and closing the last tab keeps the workspace", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(`tab-close-${a.sessionId}`).click();
+    await expect.poll(() => strip(page)).toEqual([a.fileTab, a.reviewTab]);
+    await expect.poll(() => activeTab(page)).toBe(a.reviewTab); // the newest resource
+    await page.getByTestId(`review-tab-close-${a.workspaceId}`).click();
+    await page.getByTestId("file-tab-close-README.md").click();
+    await expect(page.getByTestId("no-session-panel")).toBeVisible({ timeout: 15000 });
+    // The empty context is still this workspace (its start picker), not the generic home.
+    await expect(page.getByTestId("home-add-project")).toHaveCount(0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("switching workspace inside the save delay still saves the split left behind", async ({ page }) => {
+  const rootA = prepareFixture();
+  const rootB = prepareFixture();
+  try {
+    const a = await openAll(page, rootA);
+    await startChat(page, "terminal", rootB);
+    await page.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
+    await expect.poll(() => strip(page)).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    // Leave A at once, before the 400 ms debounce fires.
+    await page.locator(`[data-testid^="workspace-entry-"]:not([data-testid="workspace-entry-${a.workspaceId}"]) .workspace-entry__button`).first().click();
+    await page.waitForTimeout(1500);
+
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key === "perch.fileTabs" || key === "perch.splitSets" || key.startsWith("perch.tabOrder.")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 20000 });
+  } finally {
+    cleanup();
+  }
+});
+
+test("two windows of one browser are two viewers", async ({ page, context }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const second = await context.newPage();
+  await second.goto("/", { waitUntil: "domcontentloaded" });
+  const id = (p: Page) => p.evaluate(() => sessionStorage.getItem("perch.viewerId"));
+  await expect.poll(() => id(page)).toBeTruthy();
+  await expect.poll(() => id(second)).toBeTruthy();
+  expect(await id(page)).not.toBe(await id(second));
+  // A reload keeps the window's viewer.
+  const before = await id(page);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  expect(await id(page)).toBe(before);
+});
+
+test("a reload restores the selected file, and keyboard focus selects a split pane", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    await page.getByTestId(a.fileTab).click();
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+    await page.waitForTimeout(1500); // the selection is saved with the presentation
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => activeTab(page), { timeout: 20000 }).toBe(a.fileTab);
+
+    // Split the file beside the terminal; focus moved by keyboard (no click) selects that pane.
+    await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+    await page.getByTestId("split-pane-session").locator("textarea").first().focus();
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
+    await page.getByTestId("workspace-file-editor").focus();
+    await expect.poll(() => activeTab(page)).toBe(a.fileTab);
+  } finally {
+    cleanup();
+  }
+});

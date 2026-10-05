@@ -24,7 +24,7 @@ import {
   writeStoredId,
 } from "./persistence";
 export { readLastAgentChoiceStored } from "./persistence";
-import { activeWorkspaceSessions, omitKey, resolveSessionAgent, shouldReuseCurrentSession } from "./selectors";
+import { activeWorkspaceSessions, effectiveWorkspace, omitKey, resolveSessionAgent, shouldReuseCurrentSession } from "./selectors";
 export {
   activeWorkspaceSessions,
   effectiveActiveProject,
@@ -2050,21 +2050,23 @@ function scheduleChunkFlush(sessionId: string): void {
   chunkRafs.set(sessionId, raf);
 }
 
-/** Leaving the active session lands on a neighbouring tab of the same
- * workspace, like a browser; leaving its last tab shows the home screen,
- * never another workspace's session. */
+/** Leaving the active session lands on a neighbouring session of the same
+ * workspace, like a browser; leaving its last session keeps the workspace
+ * (its open files and reviews stay tabs, `fileTabs.ts` selects one) and
+ * shows its home screen, never another workspace's session. */
 function leaveSession(state: PerchState, sessionId: string): void {
   if (state.sessionId !== sessionId) return;
   const siblings = activeWorkspaceSessions(state).filter((s) => s.id !== sessionId);
-  switchAwayFromActiveSession(siblings, state.activeHostId);
+  switchAwayFromActiveSession(siblings, state.activeHostId, effectiveWorkspace(state)?.id);
 }
 
 /**
  * The active session just went away. Switch to the most recent of
  * `candidates` (which already exclude the departing session) on the same
- * host, else the most recent on any host, else fall back to a blank state.
+ * host, else the most recent on any host, else the home screen, keeping
+ * `keepWorkspaceId` as the workspace on screen when there is one.
  */
-function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string): void {
+function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string, keepWorkspaceId?: string): void {
   const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
   const sameHost = candidates
     .filter((s) => (s.hostId ?? "local") === activeHostId)
@@ -2073,6 +2075,13 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
   const next = sameHost[0] ?? anyHost[0];
   if (next) {
     usePerchStore.getState().switchSession(next.id);
+    return;
+  }
+  if (keepWorkspaceId) {
+    // Set before the session clears, so the one change a subscriber sees keeps its workspace.
+    usePerchStore.setState({ activeWorkspaceId: keepWorkspaceId });
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, keepWorkspaceId);
+    usePerchStore.getState().showWorkspaceHome();
     return;
   }
   usePerchStore.getState().showWorkspaceHome();

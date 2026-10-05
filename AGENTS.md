@@ -171,9 +171,10 @@ there, not here.
     the same pane. When that shell exits too (lifecycle `exited`, which
     hibernation's `sleeping` never is), the session closes itself like its
     tab's × (`PersistentAgentTerminal.tsx`); "Stop agent" does the same.
-  - Closing a workspace's last tab shows the home screen
-    (`NoSessionPanel.tsx`: app name, Add project, New session, shortcuts),
-    never another workspace's session. Clicking a workspace with no sessions
+  - Closing a workspace's last terminal keeps the workspace: its open files
+    and reviews stay tabs (the newest is shown), and with none left the
+    workspace's start picker shows (`NoSessionPanel.tsx`), never another
+    workspace's session. Clicking a workspace with no sessions
     never keeps showing another's either: it starts Settings → "Empty
     workspace opens" (`settings.emptyWorkspaceAgent`), else shows that
     workspace's start picker (`NoSessionPanel.tsx`).

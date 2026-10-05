@@ -71,6 +71,15 @@ useFileTabs.subscribe((state, previous) => {
   if (workspaceId) selected.set(workspaceId, state.active);
 });
 
+/** What `workspaceId` has selected, if it has been chosen this page load (null = its session). */
+export const selectedKey = (workspaceId: string): string | null | undefined => selected.get(workspaceId);
+
+/** Record `key` as `workspaceId`'s selection (a restored one) and show it if that workspace is on screen. */
+export function selectResource(workspaceId: string, key: string): void {
+  selected.set(workspaceId, key);
+  if (effectiveWorkspace(usePerchStore.getState())?.id === workspaceId) restoreSelection(workspaceId);
+}
+
 /** Reselect what `workspaceId` had on screen when it was left (if still open). */
 export function restoreSelection(workspaceId: string): void {
   const key = selected.get(workspaceId);
@@ -78,11 +87,21 @@ export function restoreSelection(workspaceId: string): void {
   if (key && key !== active && tabs.some((tab) => fileTabKey(tab) === key)) useFileTabs.setState({ active: key });
 }
 
-// Any session or workspace switch (tab, sidebar, Navigator, keybinding) shows that session.
+// Any session or workspace switch (tab, sidebar, Navigator, keybinding) shows that session,
+// except when the workspace's last session closes: its newest file or review is shown instead.
 usePerchStore.subscribe((state, previous) => {
   const files = useFileTabs.getState();
+  const workspaceId = effectiveWorkspace(state)?.id;
+  const sameWorkspace = workspaceId === effectiveWorkspace(previous)?.id;
+  if (state.sessionId === previous.sessionId && sameWorkspace) return;
+  const left = state.sessionId === null && previous.sessionId !== null && sameWorkspace
+    ? files.tabs.findLast((tab) => tab.workspaceId === workspaceId)
+    : undefined;
+  if (left) {
+    files.open(left.workspaceId, left.path, left.kind);
+    return;
+  }
   if (!files.active) return;
-  if (state.sessionId === previous.sessionId && effectiveWorkspace(state)?.id === effectiveWorkspace(previous)?.id) return;
   resetting = true;
   files.showSession();
   resetting = false;

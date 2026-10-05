@@ -70,6 +70,7 @@ export function SplitCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `entries` is rebuilt each render
   }, [partner, sessionId, activeKey]);
 
+  // A pane is also activated by keyboard focus (while panes are shared); both guard against redundant activation.
   const focusSession = () => { if (useFileTabs.getState().active) useFileTabs.getState().showSession(); };
   const focusResource = (tab: FileTab) => { if (fileTabKey(tab) !== useFileTabs.getState().active) useFileTabs.getState().open(tab.workspaceId, tab.path, tab.kind); };
 
@@ -130,6 +131,7 @@ export function SplitCanvas() {
         style={dock}
         data-testid="split-pane-session"
         onMouseDownCapture={focusSession}
+        onFocusCapture={split ? focusSession : undefined}
       >
         <DockviewShell />
         {focusBar(!fileShown)}
@@ -141,6 +143,7 @@ export function SplitCanvas() {
           style={slot(id)}
           data-testid={tab.kind === "review" ? "split-pane-review" : `split-pane-file-${tab.path}`}
           onMouseDownCapture={() => focusResource(tab)}
+          onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
