@@ -234,8 +234,17 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
   return true;
 }
 
-/** Counts session-to-session switches: a restore that began before one must not undo it. */
+/** Counts the user's session navigation (a session, or an empty workspace's start picker): a restore that began before one must not undo it. */
 let navigations = 0;
+/** True from a connection drop (and at load) until the session comes back: that session change is the transport resuming, not a choice. */
+let resuming = true;
+
+function noteNavigation(state: ReturnType<typeof usePerchStore.getState>, previous: typeof state): void {
+  if (!state.connected && previous.connected) resuming = true;
+  if (state.sessionId === previous.sessionId) return;
+  if (state.sessionId && resuming) resuming = false;
+  else if (state.connected) navigations++;
+}
 
 /** Show the session this viewer had selected, if it is still in the workspace on screen. */
 function restoreSession(workspaceId: string, presentation: ViewerPresentation): void {
@@ -287,8 +296,7 @@ function syncShown(state = usePerchStore.getState()): void {
 }
 
 usePerchStore.subscribe((state, previous) => {
-  // A switch between two sessions is a choice; to or from none is the connection dropping or resuming.
-  if (state.sessionId && previous.sessionId && state.sessionId !== previous.sessionId) navigations++;
+  noteNavigation(state, previous);
   if (state.sessions !== previous.sessions || state.sessionId !== previous.sessionId) trackSession(state);
   if (state.activeWorkspaceId === previous.activeWorkspaceId && state.sessionId === previous.sessionId
     && state.serverInfo === previous.serverInfo && state.workspaces === previous.workspaces) return;

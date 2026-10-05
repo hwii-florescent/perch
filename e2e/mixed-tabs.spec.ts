@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
-import { startChat } from "./projects";
+import { addProject, startChat } from "./projects";
 
 const RUN_ID = `${Date.now()}-${process.pid}`;
 // One folder per project: the core remembers a project by path, so a deleted and
@@ -494,6 +494,38 @@ test("a restore that finishes late leaves a terminal chosen meanwhile in front",
     await page.getByTestId(`tab-${other}`).click();
     await expect.poll(() => activeTab(page)).toBe(`tab-${other}`);
     await page.waitForTimeout(3000); // the late answer has arrived
+    expect(await activeTab(page)).toBe(`tab-${other}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a restore that finishes late leaves a choice made through an empty workspace in front", async ({ page }) => {
+  const root = prepareFixture();
+  const empty = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    const other = await startChat(page, "terminal", root);
+    await addProject(page, empty);
+    await page.getByTestId(a.terminalTab).click();
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
+    await page.waitForTimeout(1500);
+
+    await page.routeWebSocket(/\/ws/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => server.send(message));
+      server.onMessage((message) => {
+        if (typeof message === "string" && message.includes('"surface.list.result"')) setTimeout(() => ws.send(message), 2500);
+        else ws.send(message);
+      });
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const emptyWorkspace = await firstWorkspaceId(page.locator(".workspace-project").filter({ hasText: path.basename(empty) }));
+    await page.locator(`[data-testid="workspace-entry-${emptyWorkspace}"] .workspace-entry__button`).first().click();
+    await expect(page.getByTestId("no-session-panel")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId(`workspace-session-${other}`).click();
+    await expect.poll(() => activeTab(page)).toBe(`tab-${other}`);
+    await page.waitForTimeout(4000); // the late answer has arrived
     expect(await activeTab(page)).toBe(`tab-${other}`);
   } finally {
     cleanup();
