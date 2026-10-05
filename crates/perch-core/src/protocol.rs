@@ -865,6 +865,58 @@ pub enum ClientMessage {
         terminal_id: String,
     },
 
+    /// Canonical open resources and per-viewer presentation (capability
+    /// `surface.v1`). Opening a file/diff never starts a process and adds a
+    /// tab only for `viewer_id`; closing never stops a process or discards a
+    /// draft. Terminals exist by being started and are closed with
+    /// `terminal.close` / the session's close.
+    #[serde(rename = "surface.open", rename_all = "camelCase")]
+    SurfaceOpen {
+        request_id: String,
+        viewer_id: String,
+        workspace_id: String,
+        kind: crate::surfaces::SurfaceKind,
+        #[serde(default)]
+        locator: crate::surfaces::SurfaceLocator,
+    },
+    #[serde(rename = "surface.list", rename_all = "camelCase")]
+    SurfaceList {
+        request_id: String,
+        workspace_id: String,
+    },
+    #[serde(rename = "surface.close", rename_all = "camelCase")]
+    SurfaceClose {
+        request_id: String,
+        viewer_id: String,
+        workspace_id: String,
+        resource_id: String,
+    },
+    #[serde(rename = "viewer.presentation.get", rename_all = "camelCase")]
+    ViewerPresentationGet {
+        request_id: String,
+        viewer_id: String,
+        workspace_id: String,
+    },
+    #[serde(rename = "viewer.presentation.set", rename_all = "camelCase")]
+    ViewerPresentationSet {
+        request_id: String,
+        viewer_id: String,
+        workspace_id: String,
+        presentation: crate::surfaces::PresentationUpdate,
+    },
+    /// One-time import of this viewer's legacy file tabs / tab order; the
+    /// reply is the viewer's presentation. Repeating it changes nothing.
+    #[serde(rename = "surface.import", rename_all = "camelCase")]
+    SurfaceImport {
+        request_id: String,
+        viewer_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        files: Vec<String>,
+        #[serde(default)]
+        session_order: Vec<String>,
+    },
+
     /// Observe the host-owned provider process. A view release never stops it.
     #[serde(rename = "agent.terminal.open", rename_all = "camelCase")]
     AgentTerminalOpen {
@@ -1787,6 +1839,30 @@ pub enum ServerMessage {
         request_id: String,
         session_id: String,
         terminal_id: String,
+    },
+
+    #[serde(rename = "surface.opened", rename_all = "camelCase")]
+    SurfaceOpened {
+        request_id: String,
+        surface: crate::surfaces::SurfaceDescriptor,
+    },
+    #[serde(rename = "surface.list.result", rename_all = "camelCase")]
+    SurfaceListResult {
+        request_id: String,
+        workspace_id: String,
+        surfaces: Vec<crate::surfaces::SurfaceDescriptor>,
+    },
+    #[serde(rename = "surface.closed", rename_all = "camelCase")]
+    SurfaceClosed {
+        request_id: String,
+        workspace_id: String,
+        resource_id: String,
+    },
+    /// Reply to `viewer.presentation.get|set` and `surface.import`.
+    #[serde(rename = "viewer.presentation", rename_all = "camelCase")]
+    ViewerPresentation {
+        request_id: String,
+        presentation: crate::surfaces::ViewerPresentation,
     },
 
     #[serde(rename = "terminal.created", rename_all = "camelCase")]
