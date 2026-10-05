@@ -54,6 +54,7 @@ async function freshPage(page: Page): Promise<void> {
 async function openSettings(page: Page): Promise<void> {
   await page.locator('[data-testid="settings-gear"]').click();
   await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+  await page.locator('[data-testid="settings-nav-terminal"]').click();
 }
 
 async function closeSettings(page: Page): Promise<void> {

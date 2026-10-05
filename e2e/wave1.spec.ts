@@ -161,6 +161,7 @@ test.describe("Wave 1 functionality gaps", () => {
 
     await page.locator('[data-testid="settings-gear"]').click();
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+    await page.locator('[data-testid="settings-nav-notifications"]').click();
 
     const soundToggle = page.locator('[data-testid="settings-sound-enabled"]');
     const toastSelect = page.locator('[data-testid="settings-toast-delivery"]');
@@ -192,6 +193,7 @@ test.describe("Wave 1 functionality gaps", () => {
       await page.reload({ waitUntil: "networkidle" });
       await page.locator('[data-testid="settings-gear"]').click();
       await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+      await page.locator('[data-testid="settings-nav-notifications"]').click();
       await expect(page.locator('[data-testid="settings-sound-enabled"]')).toBeChecked({
         checked: !originalSound,
       });
@@ -207,6 +209,7 @@ test.describe("Wave 1 functionality gaps", () => {
         await page.reload({ waitUntil: "networkidle" });
         await page.locator('[data-testid="settings-gear"]').click();
         await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
+        await page.locator('[data-testid="settings-nav-notifications"]').click();
         await page.locator('[data-testid="settings-sound-enabled"]').setChecked(originalSound);
         await page.locator('[data-testid="settings-toast-delivery"]').selectOption(originalToast);
         await page.keyboard.press("Escape");

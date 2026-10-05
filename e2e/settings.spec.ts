@@ -28,7 +28,8 @@ import * as path from "path";
 // ---------------------------------------------------------------------------
 
 const BASE_URL = "http://127.0.0.1:7799";
-const HOSTS_FILE = path.join(os.homedir(), ".perch", "hosts.json");
+// The e2e core's own hosts file (playwright.config.ts), never the user's ~/.perch/hosts.json.
+const HOSTS_FILE = "/tmp/perch-e2e-hub-hosts.json";
 const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 // ---------------------------------------------------------------------------
@@ -136,8 +137,8 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
     await gear.click();
     await expect(modal).toBeVisible({ timeout: 8000 });
 
-    // Click the backdrop (outside the panel)
-    await page.locator(".settings-modal__backdrop").click({ position: { x: 10, y: 10 } });
+    // Close with the back button
+    await page.locator('[data-testid="settings-close"]').click();
     await expect(modal).not.toBeVisible({ timeout: 5000 });
 
     await page.screenshot({ path: "artifacts/D1-settings-modal-closed.png" });
@@ -152,6 +153,7 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
 
     await freshSession(page);
     await openSettings(page);
+    await page.locator('[data-testid="settings-nav-hosts"]').click();
 
     const modal = page.locator('[data-testid="settings-modal"]');
 
@@ -178,6 +180,7 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
     // Close and reopen — persisted state should survive
     await closeSettingsEsc(page);
     await openSettings(page);
+    await page.locator('[data-testid="settings-nav-hosts"]').click();
 
     const hostRowAfter = modal.locator('.settings-modal__host-row', { hasText: "test-pod" });
     const checkboxAfter = hostRowAfter.locator('input[type="checkbox"]');
@@ -203,6 +206,7 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
 
     await freshSession(page);
     await openSettings(page);
+    await page.locator('[data-testid="settings-nav-agents"]').click();
 
     const modal = page.locator('[data-testid="settings-modal"]');
 
@@ -225,6 +229,7 @@ test.describe("Stage D: settings modal + SSH hosts CRUD", () => {
 
     // Reopen modal — entry should still be there
     await openSettings(page);
+    await page.locator('[data-testid="settings-nav-agents"]').click();
     await expect(modal.locator('text="claude-test-custom"')).toBeVisible({ timeout: 8000 });
 
     await page.screenshot({ path: "artifacts/D3-model-persisted.png" });

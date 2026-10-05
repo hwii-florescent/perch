@@ -1,12 +1,7 @@
 /**
- * SettingsModal.tsx — Stage D settings panel, updated for Stage F2.
- *
- * Rendered as a fixed overlay from App.tsx whenever `settingsOpen` is true.
- * On open it fetches settings + hosts from the server. Sections:
- *  - SSH Hosts: list with live state dot + enabled toggle/delete; add form
- *    (with optional directUrl and remoteCmd inputs).
- *  - Custom models: per agent, list + add.
- *  - Default working directory: text input + Save.
+ * SettingsPage.tsx — settings as a full-window page (see `SettingsPage` below).
+ * Opens whenever `settingsOpen` is true and fetches settings + hosts from the
+ * server. Sections are grouped into the left-hand tabs; each is a card of rows.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -24,6 +19,9 @@ import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
 import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
+import { SettingsGroup, SettingRow } from "./ui/setting-row";
+import { Switch } from "./ui/switch";
+import { GHOST_BUTTON } from "./ui/icon-button";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
   CATALOG_ACTION, LIST, MODEL_ROW, MUTED, NAME, SECTION, SECTION_TITLE, SELECT, SELECT_HOST,
@@ -49,8 +47,8 @@ function ThemeSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Theme</h3>
+    <SettingsGroup title="Theme">
+      <div className="py-3">
       <ul className="m-0 mb-2 flex list-none flex-wrap gap-[0.4rem] p-0">
         {THEME_NAMES.map((name) => (
           <li key={name}>
@@ -73,7 +71,8 @@ function ThemeSection() {
           </li>
         ))}
       </ul>
-    </section>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -103,17 +102,13 @@ function ChatModeSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Chat Mode</h3>
-      <div className={FIELD_ROW}>
-        <span className="text-subtext-0">UI / CLI</span>
+    <SettingsGroup title="Chat mode">
+      <SettingRow title="UI / CLI" description="UI or CLI for every session.">
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
-      </div>
-      <p className={MUTED}>UI or CLI for every session.</p>
-      <div className={FIELD_ROW}>
-        <span className="text-subtext-0">Empty workspace opens</span>
+      </SettingRow>
+      <SettingRow title="Empty workspace opens" description="What clicking a workspace with no open tabs starts.">
         <select
-          className={INPUT}
+          className={SELECT}
           data-testid="settings-empty-workspace-agent"
           value={settings?.emptyWorkspaceAgent ?? ""}
           onChange={(e) => updateSettings({ emptyWorkspaceAgent: e.target.value })}
@@ -121,9 +116,8 @@ function ChatModeSection() {
           <option value="">Ask (show the picker)</option>
           {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
-      </div>
-      <p className={MUTED}>What clicking a workspace with no open tabs starts.</p>
-    </section>
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -176,8 +170,8 @@ function SshHostsSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>SSH Hosts</h3>
+    <SettingsGroup>
+      <div className="py-3">
 
       {hosts.length === 0 ? (
         <p className={EMPTY}>No hosts configured.</p>
@@ -299,7 +293,8 @@ function SshHostsSection() {
           onChange={(e) => setNewRemoteCmd(e.target.value)}
         />
       </div>
-    </section>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -345,8 +340,8 @@ function CustomModelsSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Custom Models</h3>
+    <SettingsGroup title="Custom Models">
+      <div className="py-3">
       {(["claude", "codex"] as AgentKindKey[]).map((agent) => {
         const list = (settings.customModels[agent] ?? []) as ModelEntry[];
         return (
@@ -397,7 +392,8 @@ function CustomModelsSection() {
           </div>
         );
       })}
-    </section>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -421,8 +417,8 @@ function DefaultCwdSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Default Working Directory</h3>
+    <SettingsGroup title="Default Working Directory">
+      <div className="py-3">
       <div className={ADD_ROW}>
         <input
           type="text"
@@ -442,7 +438,8 @@ function DefaultCwdSection() {
       <p className={MUTED}>
         Used as the cwd for new sessions. Leave empty to use the server process directory.
       </p>
-    </section>
+      </div>
+    </SettingsGroup>
   );
 }
 
@@ -489,19 +486,16 @@ function NotificationsSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Notifications</h3>
-      <label className={CHECKBOX_ROW}>
-        <input
-          type="checkbox"
-          data-testid="settings-sound-enabled"
-          checked={soundEnabled}
-          onChange={(e) => handleSoundEnabledChange(e.target.checked)}
-        />
-        Play a sound when a session finishes or needs attention
-      </label>
-      <div className={FIELD_ROW}>
-        <span className="text-subtext-0">Toast delivery</span>
+    <SettingsGroup>
+      <SettingRow title="Sound" description="Play a sound when a session finishes or needs attention.">
+        <Switch label="Play a sound when a session finishes or needs attention" testId="settings-sound-enabled" checked={soundEnabled} onChange={handleSoundEnabledChange} />
+      </SettingRow>
+      <SettingRow
+        title="Toast delivery"
+        description={toastDelivery === "system" && typeof Notification !== "undefined" && Notification.permission === "denied"
+          ? "System notifications are blocked in your browser settings — falling back to in-app toasts."
+          : undefined}
+      >
         <select
           className={SELECT}
           data-testid="settings-toast-delivery"
@@ -512,15 +506,8 @@ function NotificationsSection() {
           <option value="app">In-app</option>
           <option value="system">System notifications</option>
         </select>
-      </div>
-      {toastDelivery === "system" &&
-        typeof Notification !== "undefined" &&
-        Notification.permission === "denied" && (
-          <p className={MUTED}>
-            System notifications are blocked in your browser settings — falling back to in-app toasts.
-          </p>
-        )}
-    </section>
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -541,18 +528,11 @@ function InterfaceSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Interface</h3>
-      <label className={CHECKBOX_ROW}>
-        <input
-          type="checkbox"
-          data-testid="settings-pane-labels"
-          checked={paneLabels}
-          onChange={(e) => handleChange(e.target.checked)}
-        />
-        Show the active agent on the chat pane's tab (e.g. "Chat · claude")
-      </label>
-    </section>
+    <SettingsGroup title="Interface">
+      <SettingRow title="Agent on the chat tab" description={'Show the active agent on the chat pane\'s tab (e.g. "Chat · claude").'}>
+        <Switch label="Show the active agent on the chat pane's tab" testId="settings-pane-labels" checked={paneLabels} onChange={handleChange} />
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -598,10 +578,8 @@ function TerminalSection() {
   };
 
   return (
-    <section className={SECTION}>
-      <h3 className={SECTION_TITLE}>Terminal</h3>
-      <div className={FIELD_ROW}>
-        <span className="text-subtext-0">Scrollback (lines)</span>
+    <SettingsGroup>
+      <SettingRow title="Scrollback (lines)" description={`${MIN_SCROLLBACK}–${MAX_SCROLLBACK} lines; takes effect on newly-opened terminal panes.`}>
         <input
           type="number"
           className={INPUT_PORT}
@@ -611,24 +589,11 @@ function TerminalSection() {
           value={scrollback}
           onChange={(e) => handleScrollbackChange(e.target.value)}
         />
-      </div>
-      <p className={MUTED}>
-        {MIN_SCROLLBACK}–{MAX_SCROLLBACK} lines; takes effect on newly-opened terminal panes.
-      </p>
-      <label className={CHECKBOX_ROW}>
-        <input
-          type="checkbox"
-          data-testid="settings-terminal-login-shell"
-          checked={loginShell}
-          onChange={(e) => handleLoginShellChange(e.target.checked)}
-        />
-        Spawn plain terminal panes as a login shell
-      </label>
-      <p className={MUTED}>
-        Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created
-        terminals.
-      </p>
-    </section>
+      </SettingRow>
+      <SettingRow title="Login shell" description="Spawn plain terminal panes as a login shell. Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created terminals.">
+        <Switch label="Spawn plain terminal panes as a login shell" testId="settings-terminal-login-shell" checked={loginShell} onChange={handleLoginShellChange} />
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -682,8 +647,8 @@ function DevicesSection() {
   }, [code, remaining]);
 
   return (
-    <section className={SECTION} data-testid="settings-devices">
-      <h3 className={SECTION_TITLE}>Devices</h3>
+    <SettingsGroup testId="settings-devices">
+      <div className="py-3">
       <p className={MUTED}>
         Anything reaching this host from another machine needs a paired device. Local access never does.
       </p>
@@ -734,105 +699,101 @@ function DevicesSection() {
           ))}
         </ul>
       )}
-    </section>
+      </div>
+    </SettingsGroup>
   );
 }
 
-export function SettingsModal() {
+type SettingsTab = "general" | "appearance" | "agents" | "terminal" | "notifications" | "hosts" | "devices";
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "appearance", label: "Appearance" },
+  { id: "agents", label: "Agents" },
+  { id: "terminal", label: "Terminal" },
+  { id: "notifications", label: "Notifications" },
+  { id: "hosts", label: "SSH hosts" },
+  { id: "devices", label: "Devices" },
+];
+
+function TabContent({ tab }: { tab: SettingsTab }) {
+  switch (tab) {
+    case "general": return <><ChatModeSection /><InterfaceSection /><DefaultCwdSection /></>;
+    case "appearance": return <ThemeSection />;
+    case "agents": return <><AgentCatalog /><CustomModelsSection /></>;
+    case "terminal": return <TerminalSection />;
+    case "notifications": return <NotificationsSection />;
+    case "hosts": return <SshHostsSection />;
+    case "devices": return <DevicesSection />;
+  }
+}
+
+/** Settings as a page of its own: it fills the window (the app stays mounted
+ * underneath, so terminals keep running), with a section list on the left and
+ * the chosen section on the right. Not a popup. */
+export function SettingsPage() {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const settingsPage = usePerchStore((s) => s.settingsPage);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const fetchSettings = usePerchStore((s) => s.fetchSettings);
   const fetchHosts = usePerchStore((s) => s.fetchHosts);
+  const [tab, setTab] = useState<SettingsTab>("general");
 
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<SettingsView>("main");
-
-  // Fetch data every time the modal opens, and always open on the main view.
+  // Fetch data every time the page opens, on the section the opener asked for.
   useEffect(() => {
     if (settingsOpen) {
-      setView(settingsPage);
+      setTab(settingsPage === "agents" ? "agents" : "general");
       fetchSettings();
       fetchHosts();
     }
   }, [settingsOpen, settingsPage, fetchSettings, fetchHosts]);
 
-  // Escape: back out of the subpage first, close the modal from the main view.
   useEffect(() => {
     if (!settingsOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (view === "main") setSettingsOpen(false);
-      else setView("main");
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setSettingsOpen(false); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [settingsOpen, setSettingsOpen, view]);
+  }, [settingsOpen, setSettingsOpen]);
 
   if (!settingsOpen) return null;
+  const current = TABS.find((t) => t.id === tab)!;
 
   return (
-    <div
-      className="settings-modal__backdrop fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]"
-      onClick={() => setSettingsOpen(false)}
-    >
-      <div
-        ref={panelRef}
-        className={cn(
-          "flex max-h-[calc(100dvh_-_4rem)] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]",
-          view === "agents" ? "w-[min(960px,calc(100vw_-_2rem))]" : "w-[min(640px,calc(100vw_-_2rem))]",
-        )}
-        data-testid="settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={view === "agents" ? "Agents" : "Settings"}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-b-overlay-0 px-4 pt-[0.85rem] pb-3">
-          {view !== "main" && (
-            <button
-              type="button"
-              className="settings-modal__back"
-              data-testid="settings-back"
-              aria-label="Back to settings"
-              onClick={() => setView("main")}
-            >
-              ‹
-            </button>
-          )}
-          <h2 className="m-0 text-[1rem] font-semibold text-fg">
-            {view === "agents" ? "Agents" : "Settings"}
-          </h2>
+    <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
+      {/* The title bar of the macOS app: empty space drags the window. */}
+      <div className="h-9 shrink-0" data-tauri-drag-region />
+      <div className="flex min-h-0 flex-1 max-[700px]:flex-col">
+        <nav className="flex w-[15rem] shrink-0 flex-col gap-[0.15rem] overflow-y-auto bg-surface-0 px-3 py-3 max-[700px]:w-auto max-[700px]:flex-row max-[700px]:overflow-x-auto max-[700px]:py-2" aria-label="Settings sections">
           <button
             type="button"
-            className="cursor-pointer rounded-ui px-[0.35rem] py-[0.2rem] text-[1rem] leading-none text-subtext-0 [background:none] [border:none] [transition:color_0.12s_ease,background_0.12s_ease] hover:bg-surface-1 hover:text-fg"
+            className={cn(GHOST_BUTTON, "mb-3 flex items-center gap-2 px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:mb-0 max-[700px]:shrink-0")}
+            data-testid="settings-close"
             aria-label="Close settings"
             onClick={() => setSettingsOpen(false)}
           >
-            ✕
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5" /></svg>
+            Back to app
           </button>
-        </div>
-
-        <div className="settings-modal__body flex-1 overflow-y-auto py-2">
-          {view === "agents" ? <AgentCatalog /> : (
-            <>
-              <ThemeSection />
-              <ChatModeSection />
-              <section className={SECTION}>
-                <h3 className={SECTION_TITLE}>Agents</h3>
-                <p className={MUTED}>Installed CLIs, available agents, and your default launcher.</p>
-                <button type="button" className={CATALOG_ACTION} onClick={() => setView("agents")}>Manage agents</button>
-              </section>
-              <NotificationsSection />
-              <InterfaceSection />
-              <TerminalSection />
-              <DevicesSection />
-              <SshHostsSection />
-              <CustomModelsSection />
-              <DefaultCwdSection />
-            </>
-          )}
-        </div>
+          <h2 className="m-0 mb-2 px-2 text-[1.1rem] font-semibold text-fg max-[700px]:hidden">Settings</h2>
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              className={cn(GHOST_BUTTON, "px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:shrink-0", id === tab && "bg-surface-1 text-fg")}
+              data-testid={`settings-nav-${id}`}
+              aria-current={id === tab ? "page" : undefined}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        <main className="settings-modal__body min-w-0 flex-1 overflow-y-auto px-8 py-8 max-[700px]:px-4">
+          <div className={cn("mx-auto", tab === "agents" ? "max-w-[60rem]" : "max-w-[46rem]")}>
+            <h1 className="m-0 mb-8 text-[1.6rem] font-semibold text-fg">{current.label}</h1>
+            <TabContent tab={tab} />
+          </div>
+        </main>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { StatusBar } from "./StatusBar";
 import { Sidebar } from "./Sidebar";
 import { SplitCanvas } from "./components/SplitCanvas";
-import { SettingsModal } from "./components/SettingsModal";
+import { SettingsPage } from "./components/SettingsPage";
 import { TabBar } from "./components/TabBar";
 import { Navigator } from "./components/Navigator";
 import { KeybindHelp } from "./components/KeybindHelp";
@@ -299,7 +299,7 @@ export default function App() {
       </div>
 
       <StatusBar />
-      <SettingsModal />
+      <SettingsPage />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       {isMobile && (

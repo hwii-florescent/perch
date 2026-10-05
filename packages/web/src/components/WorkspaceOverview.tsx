@@ -7,6 +7,7 @@ import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { GHOST_BUTTON, ICON_BUTTON } from "./ui/icon-button";
 import { Chevron } from "./ui/chevron";
 import { Dialog } from "./ui/dialog";
+import { SELECT } from "./ui/settings";
 import { cn } from "../lib/cn";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -246,6 +247,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const snapshot = usePerchStore((state) => state.workspaceSnapshotByHost[activeHostId]);
   const fetchWorkspaceSnapshot = usePerchStore((state) => state.fetchWorkspaceSnapshot);
   const createWorkspaceProject = usePerchStore((state) => state.createWorkspaceProject);
+  const setActiveHost = usePerchStore((state) => state.setActiveHost);
+  const sshHosts = usePerchStore((state) => state.hosts);
+  const hostStates = usePerchStore((state) => state.hostStates);
+  // Which host the Add project dialog registers on; starts as the active one.
+  const [addHostId, setAddHostId] = useState(activeHostId);
   const focusWorkspaceProject = usePerchStore((state) => state.focusWorkspaceProject);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
   const restoreWorkspace = usePerchStore((state) => state.restoreWorkspace);
@@ -333,17 +339,19 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }
   // The home screen's "Add project" (NoSessionPanel.tsx) starts the same flow.
   useEffect(() => {
-    const open = () => setAddOpen(true);
+    const open = () => { setAddHostId(usePerchStore.getState().activeHostId); setAddOpen(true); };
     window.addEventListener(ADD_PROJECT_EVENT, open);
     return () => window.removeEventListener(ADD_PROJECT_EVENT, open);
   }, []);
 
   useEffect(() => {
     if (createRequest?.status !== "success") return;
+    // The sidebar lists one host at a time: follow the project to its host.
+    if (createRequest.hostId !== activeHostId) setActiveHost(createRequest.hostId);
     setName("");
     setAddOpen(false);
     clearCreateRequest();
-  }, [clearCreateRequest, createRequest?.status]);
+  }, [clearCreateRequest, createRequest?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hostProjects = useMemo(
     () => projects
@@ -359,7 +367,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   function submitProject(path: string) {
     if (!path.trim() || createRequest?.status === "pending") return;
-    createWorkspaceProject(path, name, activeHostId);
+    createWorkspaceProject(path, name, addHostId);
   }
 
   function sessionsForProject(projectId: string): SessionSummary[] {
@@ -567,7 +575,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             type="button"
             className={cn(GHOST_BUTTON, "px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-fg [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
-            onClick={() => setAddOpen((open) => !open)}
+            onClick={() => { setAddHostId(activeHostId); setAddOpen((open) => !open); }}
           >
             + Add
           </button>
@@ -586,13 +594,25 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               data-testid="workspace-project-name"
             />
           </label>
-          {tauriInvoke && activeHostId === "local" && (
+          {sshHosts.length > 0 && (
+            <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
+              <span>Host</span>
+              <select className={SELECT} data-testid="workspace-add-host" value={addHostId} onChange={(event) => setAddHostId(event.target.value)}>
+                <option value="local">This machine</option>
+                {sshHosts.filter((host) => host.enabled).map((host) => {
+                  const state = hostStates[host.id]?.state ?? "connecting";
+                  return <option key={host.id} value={host.id} disabled={state !== "connected"}>{host.name}{state === "connected" ? "" : ` (${state})`}</option>;
+                })}
+              </select>
+            </label>
+          )}
+          {tauriInvoke && addHostId === "local" && (
             <button type="button" className={cn(GHOST_BUTTON, "px-[0.6rem] py-[0.4rem] text-left text-[0.8rem] text-fg")} data-testid="workspace-add-browse-native" onClick={() => void browseNative()}>
               Browse folder…
             </button>
           )}
           {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
-          <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
+          <DirectoryBrowser key={addHostId} hostId={addHostId} onUseFolder={submitProject} />
           {createRequest?.status === "pending" && <span className="text-[0.7rem] text-subtext-0" role="status">Registering folder…</span>}
           {createRequest?.status === "error" && <span className="text-[0.7rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
           <div className="flex justify-end">
