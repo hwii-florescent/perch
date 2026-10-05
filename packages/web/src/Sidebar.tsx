@@ -43,6 +43,7 @@ import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
 import { ICON_BUTTON } from "./components/ui/icon-button";
+import { segment } from "./components/ui/segment";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
@@ -766,10 +767,10 @@ export function Sidebar() {
           <span className="shrink-0 pt-[0.6rem] pr-2 text-[0.7rem] text-subtext-0" aria-hidden="true">▾</span>
         </button>}
 
-        <div className="shrink-0 px-2 pt-2 pb-[0.35rem]">
+        <div className="flex shrink-0 flex-col items-stretch">
           <button
             type="button"
-            className="w-full shrink-0 cursor-pointer rounded-ui bg-transparent px-[0.6rem] py-[0.4rem] text-left text-[0.82rem] font-semibold text-fg [border:0] [font-family:inherit] [&:hover:not(:disabled)]:bg-surface-1 disabled:cursor-not-allowed disabled:opacity-40"
+            className={cn(segment(), "w-full shrink-0 px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg")}
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
@@ -802,10 +803,10 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-[0.35rem] border-t border-t-overlay-0 px-2 py-[0.4rem]">
+      <div className="flex shrink-0 items-stretch border-t border-t-overlay-0">
         <button
           type="button"
-          className="cursor-pointer rounded-ui bg-transparent p-1 text-[1.1rem] leading-none text-subtext-0 [border:none] [transition:color_0.12s_ease,background_0.12s_ease] hover:bg-surface-1 hover:text-fg"
+          className={cn(segment(), "w-full justify-end px-[0.9rem] py-[0.4rem] text-[1.1rem] leading-none")}
           data-testid="settings-gear"
           title="Settings"
           aria-label="Settings"

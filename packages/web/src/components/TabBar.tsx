@@ -9,16 +9,16 @@ import { useSplitSets } from "../splitSets";
 import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { openSessionPaneMenu } from "../dockview/DockviewShell";
+import { segment } from "./ui/segment";
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
 // Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
 // overlay-1 in every theme (themes.test.ts). The palettes set the absolute level.
 // The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
-const TAB = `min-w-0 flex-1 truncate rounded-ui bg-transparent text-left px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`;
-// Browser-style: tabs share the strip equally, between a floor and a ceiling; past the floor the strip scrolls.
-const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0";
-const TAB_ACTIVE = "bg-surface-1 text-fg hover:bg-surface-1";
+const TAB = `min-w-0 flex-1 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
+// Tabs are full-bleed segments (ui/segment.ts): the strip has no gap or padding. Browser-style: tabs share the strip equally, between a floor and a ceiling; past the floor the strip scrolls.
+const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0 items-stretch";
 // Members of a split set (shown side by side in the canvas) share a bottom rule.
 const TAB_SPLIT = "shadow-[inset_0_-2px_0_var(--overlay-1)]";
 const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
@@ -178,8 +178,9 @@ export function TabBar() {
           type="button"
           className={cn(
             "tab-bar__tab",
+            segment({ active: s.id === sessionId && !fileShown }),
             TAB,
-            s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
+            s.id === sessionId && !fileShown && "tab-bar__tab--active",
             splitIds.has(s.id) && TAB_SPLIT,
             s.id === draggingId && "opacity-50",
             s.id === dragOverId && "shadow-[-2px_0_0_var(--accent)]",
@@ -203,7 +204,7 @@ export function TabBar() {
             setRenameValue(s.title || "");
           }}
         >
-          {sessionLabel(s)}
+          <span className="truncate">{sessionLabel(s)}</span>
         </button>
         {/* Like closing a tab in Orca: the session, its agent and its shells
          * end (the agent's own transcript stays on disk). */}
@@ -223,7 +224,7 @@ export function TabBar() {
   }
 
   return (
-    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-center gap-[0.15rem] self-stretch overflow-x-auto bg-panel-bg px-2 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
+    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto bg-panel-bg max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry) => entry.kind === "resource" ? (
         <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile} split={splitIds.has(entry.id)}
           dragging={entry.id === draggingId} dragOver={entry.id === dragOverId}
@@ -233,7 +234,7 @@ export function TabBar() {
 
       <button
         type="button"
-        className={`h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui bg-transparent text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`}
+        className={cn(segment(), `w-9 shrink-0 justify-center text-[0.9rem] leading-none ${FOCUS}`)}
         data-testid="tab-new"
         title="New session in this workspace"
         aria-label="New session in this workspace"
@@ -282,8 +283,9 @@ function ResourceTabButton({ tab, id, active, split, dragging, dragOver, onDragS
         type="button"
         className={cn(
           "tab-bar__tab",
+          segment({ active }),
           TAB,
-          active && ["tab-bar__tab--active", TAB_ACTIVE],
+          active && "tab-bar__tab--active",
           split && TAB_SPLIT,
           dragging && "opacity-50",
           dragOver && "shadow-[-2px_0_0_var(--accent)]",

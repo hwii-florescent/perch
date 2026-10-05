@@ -240,7 +240,7 @@ export default function App() {
           {/* With the drawer open, its Files/Git switch heads the same column. */}
           {tools ? (
             <div
-              className="box-border flex shrink-0 items-center justify-between gap-2 self-stretch border-l border-l-overlay-0 pr-2 pl-2 w-[var(--tools-width)] -mx-2"
+              className="box-border flex shrink-0 items-center justify-between gap-2 self-stretch border-l border-l-overlay-0 pr-2 w-[var(--tools-width)] -mx-2"
               data-tauri-drag-region
             >
               <WorkspaceToolsTabs requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} />

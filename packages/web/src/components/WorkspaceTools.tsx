@@ -1,10 +1,11 @@
 import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { useFileTabs } from "../fileTabs";
+import { segment } from "./ui/segment";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
-const BTN = "cursor-pointer rounded-ui bg-transparent px-[0.55rem] py-[0.2rem] text-[0.75rem] text-subtext-0 [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:bg-surface-0 hover:text-fg";
+const BTN = "px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
 
 export type WorkspaceToolsTab = "files" | "gitReview";
 
@@ -37,12 +38,12 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   const shown = tab === "gitReview" && !isGit ? "files" : tab;
   return (
-    <nav className="flex gap-[0.15rem]" aria-label="Files and Git">
+    <nav className="flex items-stretch self-stretch" aria-label="Files and Git">
       {tabs.map(({ id, label }) => (
         <button
           key={id}
           type="button"
-          className={cn(BTN, shown === id && "bg-surface-1 text-fg")}
+          className={cn(segment({ active: shown === id }), BTN)}
           data-testid={`workspace-tools-${id}`}
           aria-pressed={shown === id}
           onClick={() => onTabChange(id)}
