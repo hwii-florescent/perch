@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceTerminal } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { socket } from "../ws";
@@ -9,23 +9,90 @@ import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { closeWorkspaceTerminal, listWorkspaceTerminals, openWorkspaceTerminal } from "../workspaceTerminals";
 import { getDockviewController } from "../dockview/dockviewController";
 import { newId } from "../ids";
+import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
+
+interface ShellState { current: WorkspaceTerminal | null; error: string | null }
+const OPENING: ShellState = { current: null, error: null };
+export const shellTerminalKey = (sessionId: string, paneId: string) => `shell\0${sessionId}\0${paneId}`;
+
+/** One shell pane's terminal and connection, kept across unmounts
+ * (`terminalKeeper.ts`). */
+class ShellView extends KeptTerminal<ShellState> {
+  readonly created: PerchTerminal;
+  /** The terminal id while its shell runs. */
+  inputId: string | null = null;
+  private stop: () => void;
+
+  constructor(sessionId: string, paneId: string, container: HTMLElement) {
+    super(OPENING, container);
+    let attachedId: string | null = null;
+    let exited = false;
+    let exitCode: number | undefined;
+    const created = createPerchTerminal(this.host, (cols, rows) => {
+      if (this.inputId) usePerchStore.getState().resizeTerminal(this.inputId, cols, rows);
+    }, usePerchStore.getState().terminalProfile);
+    this.created = created;
+    created.term.options.disableStdin = true;
+    const binding = openWorkspaceTerminal(sessionId, paneId, created.term.cols, created.term.rows, (row, replay) => {
+      if (this.disposed) return;
+      attachedId = row.id;
+      // Historical terminal queries must not send fresh responses to a shell
+      // that already received them. xterm parses writes asynchronously, so
+      // activate input only after the replay parser reaches this barrier.
+      // Replaying an old OSC 52 must not copy into the user's clipboard again.
+      const suppressClipboard = created.term.parser.registerOscHandler(52, () => true);
+      created.term.write(replay, () => {
+        suppressClipboard.dispose();
+        if (!this.disposed) {
+          this.inputId = row.state === "running" && !exited ? row.id : null;
+          created.term.options.disableStdin = this.inputId === null;
+          this.set({ current: exited ? { ...row, state: "exited", exitCode } : row });
+          created.fit();
+        }
+      });
+      usePerchStore.setState((state) => ({ terminals: { ...state.terminals, [row.id]: {
+        id: row.id, cols: row.cols, rows: row.rows, exitCode: row.exitCode ?? null,
+      } } }));
+      created.fit();
+    }, (data) => created.term.write(data));
+    binding.ready.catch((reason: Error) => { if (!this.disposed) this.set({ error: reason.message }); });
+    const input = created.term.onData((data) => {
+      if (this.inputId) usePerchStore.getState().sendTerminalInput(this.inputId, data);
+    });
+    const stopExit = socket.onMessage((message) => {
+      if (message.type !== "terminal.exit" || message.terminalId !== attachedId) return;
+      exited = true;
+      exitCode = message.code;
+      this.inputId = null;
+      created.term.options.disableStdin = true;
+      const current = this.state.current;
+      if (current) this.set({ current: { ...current, state: "exited", exitCode: message.code } });
+    });
+    this.stop = () => { binding.release(); input.dispose(); stopExit(); created.dispose(); };
+  }
+
+  protected teardown() {
+    this.inputId = null;
+    this.stop();
+  }
+}
 
 export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, onPaneChange }: {
   active: boolean; sessionId: string; paneId?: string; layoutPanelId?: string; onPaneChange?: (paneId: string) => void;
 }) {
   const connected = usePerchStore((state) => state.connected);
   const container = useRef<HTMLDivElement>(null);
-  const emulator = useRef<PerchTerminal | null>(null);
-  const terminalId = useRef<string | null>(null);
   const explicitlyClosed = useRef(false);
-  const [term, setTerm] = useState<PerchTerminal["term"] | null>(null);
+  const [view, setView] = useState<ShellView | null>(null);
   const [selected, setSelected] = useState<string | null>(paneId ?? null);
   const [terminals, setTerminals] = useState<WorkspaceTerminal[]>([]);
-  const [current, setCurrent] = useState<WorkspaceTerminal | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [listError, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState(false);
-  const search = useTerminalSearch(term);
+  const shell = useSyncExternalStore(view?.subscribe ?? noSubscription, view?.getState ?? openingState);
+  const current = closed ? null : shell.current;
+  const error = listError ?? shell.error;
+  const search = useTerminalSearch(view?.created.term ?? null);
 
   useEffect(() => {
     if (!connected) return;
@@ -40,69 +107,19 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
 
   useEffect(() => {
     if (!connected || !selected || !container.current) return;
-    let disposed = false;
-    let attachedId: string | null = null;
-    let exited = false;
-    let exitCode: number | undefined;
-    terminalId.current = null;
-    setCurrent(null);
-    setError(null);
     setClosed(false);
-    const created = createPerchTerminal(container.current, (cols, rows) => {
-      if (terminalId.current) usePerchStore.getState().resizeTerminal(terminalId.current, cols, rows);
-    }, usePerchStore.getState().terminalProfile);
-    emulator.current = created;
-    created.term.options.disableStdin = true;
-    setTerm(created.term);
-    const binding = openWorkspaceTerminal(sessionId, selected, created.term.cols, created.term.rows, (row, replay) => {
-      if (disposed) return;
-      attachedId = row.id;
-      // Historical terminal queries must not send fresh responses to a shell
-      // that already received them. xterm parses writes asynchronously, so
-      // activate input only after the replay parser reaches this barrier.
-      // Replaying an old OSC 52 must not copy into the user's clipboard again.
-      const suppressClipboard = created.term.parser.registerOscHandler(52, () => true);
-      created.term.write(replay, () => {
-        suppressClipboard.dispose();
-        if (!disposed) {
-          terminalId.current = row.state === "running" && !exited ? row.id : null;
-          created.term.options.disableStdin = terminalId.current === null;
-          setCurrent(exited ? { ...row, state: "exited", exitCode } : row);
-          created.fit();
-        }
-      });
-      setTerminals((rows) => [...rows.filter((item) => item.id !== row.id), row]);
-      usePerchStore.setState((state) => ({ terminals: { ...state.terminals, [row.id]: {
-        id: row.id, cols: row.cols, rows: row.rows, exitCode: row.exitCode ?? null,
-      } } }));
-      created.fit();
-    }, (data) => created.term.write(data));
-    binding.ready.catch((reason: Error) => { if (!disposed) setError(reason.message); });
-    const input = created.term.onData((data) => {
-      if (terminalId.current) usePerchStore.getState().sendTerminalInput(terminalId.current, data);
-    });
-    const stopExit = socket.onMessage((message) => {
-      if (message.type !== "terminal.exit" || message.terminalId !== attachedId) return;
-      exited = true;
-      exitCode = message.code;
-      terminalId.current = null;
-      created.term.options.disableStdin = true;
-      setCurrent((row) => row && { ...row, state: "exited", exitCode: message.code });
-    });
-    const stopPaste = attachClipboardImagePaste(container.current, () => terminalId.current);
-    return () => {
-      disposed = true;
-      terminalId.current = null;
-      binding.release();
-      input.dispose();
-      stopPaste();
-      stopExit();
-      created.dispose();
-      emulator.current = null;
-    };
+    const surface = container.current;
+    const shown = showTerminal(shellTerminalKey(sessionId, selected), sessionId, surface, () => new ShellView(sessionId, selected, surface));
+    setView(shown.view);
+    const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
+    return () => { stopPaste(); shown.hide(); };
   }, [connected, sessionId, selected]);
 
-  useEffect(() => { if (active) emulator.current?.fit(); }, [active, current]);
+  useEffect(() => {
+    if (current) setTerminals((rows) => [...rows.filter((item) => item.id !== current.id), current]);
+  }, [current]);
+
+  useEffect(() => { if (active) view?.created.fit(); }, [active, current, view]);
 
   async function closeShell() {
     if (!current || closing) return;
@@ -110,10 +127,9 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     try {
       await closeWorkspaceTerminal(sessionId, current.id);
       explicitlyClosed.current = true;
-      terminalId.current = null;
+      if (selected) forgetTerminal(shellTerminalKey(sessionId, selected));
       setSelected(null);
       setTerminals((rows) => rows.filter((row) => row.id !== current.id));
-      setCurrent(null);
       setClosed(true);
     } catch (reason) { setError((reason as Error).message); }
     finally { setClosing(false); }
@@ -143,3 +159,6 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     {status && <div className="terminal__notice" role={error ? "alert" : "status"}>{status}</div>}
   </div>;
 }
+
+const noSubscription = () => () => {};
+const openingState = () => OPENING;

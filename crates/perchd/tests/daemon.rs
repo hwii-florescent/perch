@@ -35,10 +35,15 @@ fn collector(mut reader: AttachReader) -> mpsc::Receiver<Vec<u8>> {
 
 fn wait_for(rx: &mpsc::Receiver<Vec<u8>>, seen: &mut Vec<u8>, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !String::from_utf8_lossy(seen).contains(needle) {
+    // Only the new bytes (plus a needle's overlap) need searching each time.
+    let mut from = 0;
+    while !String::from_utf8_lossy(&seen[from..]).contains(needle) {
         let left = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(left) {
-            Ok(chunk) => seen.extend(chunk),
+            Ok(chunk) => {
+                from = seen.len().saturating_sub(needle.len() + 3);
+                seen.extend(chunk);
+            }
             Err(_) => panic!(
                 "never saw {needle:?}; got {:?}",
                 String::from_utf8_lossy(seen)
@@ -91,9 +96,14 @@ fn sessions_outlive_clients_and_replay_their_output() {
     let snap = b.snapshot("shell-1").unwrap();
     assert!(snap.text.contains("second-2"), "{:?}", snap.text);
 
-    // `since` resumes at an exact byte offset.
-    let offset = String::from_utf8_lossy(&seen).find("second-2").unwrap() as u64;
+    // `since` resumes at an exact byte offset. A default attach ends its
+    // replay with a repaint that isn't stream bytes, so measure on the
+    // stream itself.
     let c = connect(&dir);
+    let (_, stream, _) = c.attach("shell-1", Some(0)).unwrap();
+    let mut whole = Vec::new();
+    wait_for(&collector(stream), &mut whole, "second-2");
+    let offset = String::from_utf8_lossy(&whole).find("second-2").unwrap() as u64;
     let (resumed, reader2, _) = c.attach("shell-1", Some(offset)).unwrap();
     assert_eq!(resumed.start, offset);
     let rx2 = collector(reader2);
@@ -212,4 +222,51 @@ fn a_client_over_connect_stdio_drives_sessions() {
     assert!(local.session("remote-1").unwrap().unwrap().alive);
     unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The app quits and comes back long after a TUI's only full paint: the
+/// default window no longer holds it, or the modes the TUI set at startup.
+#[test]
+fn a_default_attach_ends_with_the_exact_screen() {
+    let dir = test_dir("restore");
+    let a = connect(&dir);
+    // Single-row redraws, well past the default replay window.
+    let redraws = perchd::proto::DEFAULT_REPLAY / 40 + 1000;
+    let script = format!(
+        r#"printf '\033[?1049h\033[?1000h\033[1;1HTUI_''HEADER'; awk 'BEGIN {{ for (i = 0; i < {redraws}; i++) printf "\033[3;1H\033[2Kstatus %d ______________________", i }}'; printf '\033[3;1HTUI_''DONE'; sleep 30"#
+    );
+    a.create(
+        "tui",
+        vec!["/bin/sh".into(), "-c".into(), script],
+        None,
+        vec![],
+        100,
+        30,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !a.snapshot("tui").unwrap().text.contains("TUI_DONE") {
+        assert!(Instant::now() < deadline, "the TUI never finished drawing");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(a.session("tui").unwrap().unwrap().alive);
+
+    let b = connect(&dir);
+    let (attached, reader, _) = b.attach("tui", None).unwrap();
+    assert!(attached.start > 0, "the window must start past the paint");
+    let mut seen = Vec::new();
+    wait_for(&collector(reader), &mut seen, "TUI_DONE\u{1b}");
+    let mut view = vt100::Parser::new(30, 100, 0);
+    view.process(&seen);
+    assert!(view.screen().alternate_screen());
+    assert!(
+        view.screen().contents().starts_with("TUI_HEADER"),
+        "{}",
+        view.screen().contents()
+    );
+    assert_eq!(
+        view.screen().mouse_protocol_mode(),
+        vt100::MouseProtocolMode::PressRelease
+    );
+    let _ = b.kill("tui", libc::SIGKILL);
 }

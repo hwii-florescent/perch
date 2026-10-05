@@ -133,7 +133,7 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
 /// two call sites cannot drift apart on this filter, which would otherwise
 /// let a `session.updated` push disagree with `session.list` about whether a
 /// row exists. Callers combine this with their own `s.id = ?` etc.
-const SESSION_VISIBILITY_FILTER: &str = "(EXISTS (
+pub(crate) const SESSION_VISIBILITY_FILTER: &str = "(EXISTS (
                  SELECT 1 FROM messages WHERE session_id = s.id
              ) OR s.cli_activity = 1)";
 

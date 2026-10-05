@@ -918,6 +918,13 @@ fn normalized_components(path: &Path) -> Result<Vec<OsString>, FsError> {
     Ok(components)
 }
 
+/// The one canonical workspace-relative form of a file path: what durable
+/// identities (editor buffers, open surfaces) are keyed by.
+pub fn canonical_file_path(path: &str) -> Result<String, FsError> {
+    let path = Path::new(path);
+    require_file_components(&normalized_components(path)?, path)
+}
+
 fn require_file_components(components: &[OsString], path: &Path) -> Result<String, FsError> {
     if components.is_empty() {
         return Err(FsError::InvalidPath {

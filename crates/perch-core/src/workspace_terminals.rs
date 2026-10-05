@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 const MAX_VIEWERS: usize = 32;
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS workspace_terminals (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -185,7 +185,10 @@ impl WorkspaceTerminals {
                     .lock()
                     .unwrap()
                     .entry(row.id.clone())
-                    .or_default();
+                    .or_insert_with(|| Stream {
+                        replay: Replay::new(row.cols, row.rows),
+                        viewers: HashMap::new(),
+                    });
                 let streams = self.streams.clone();
                 let id = row.id.clone();
                 let data = Arc::new(move |_: String, text: String| {

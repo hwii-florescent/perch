@@ -14,7 +14,9 @@
  *        which is app-level, not part of a layout;
  *        the "+" action in a terminal group's own header adds a second
  *        terminal as a TAB in that SAME group, not a new split group.
- *   W5 — narrowing the window keeps the active tab inside the tab strip.
+ *   W5/W6 — terminals kept alive across tab switches; only shown ones hold
+ *        a WebGL context.
+ *   W7 — narrowing the window keeps the active tab inside the tab strip.
  *
  * W1 starts two plain shell sessions in Chats; W2/W3 reuse them.
  *
@@ -178,9 +180,79 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await page.screenshot({ path: "artifacts/w4-03-second-tab-same-group.png" });
   });
   // -------------------------------------------------------------------------
-  // W5 — the active tab stays in view when the strip narrows.
+  // W5 — a full-screen TUI survives a tab switch: the terminal is kept alive
+  // (terminalKeeper.ts). pi/omp paint once, then redraw only changed rows,
+  // so a view rebuilt from the replay's byte tail alone would hold just its
+  // status line, without the modes (mouse reporting) it set at startup.
   // -------------------------------------------------------------------------
-  test("W5. narrowing the window keeps the active tab inside the strip", async ({ page }) => {
+  test("W5. a full-screen TUI's screen and mouse mode survive a tab switch", async ({ page }) => {
+    test.setTimeout(90000);
+    await freshPage(page);
+    const tui = await startChat(page);
+    const other = await startChat(page);
+    await switchViaTabBar(page, tui);
+    const agent = page.getByTestId("persistent-agent-terminal");
+    await agent.locator(".xterm-helper-textarea").focus();
+    // Split strings keep the shell's echo of this line from matching.
+    await page.keyboard.type(`printf '\\033[?1049h\\033[?1000h\\033[1;1HTUI_''HEADER'; i=0; while [ $i -lt 4000 ]; do printf '\\033[3;1H\\033[2Kstatus %s ________________________________________' $i; i=$((i+1)); done; printf '\\033[3;1HTUI_''DONE'; sleep 600\n`);
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 30000 });
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
+
+    // The terminal is kept, not rebuilt: the same xterm comes back.
+    await agent.locator(".xterm").evaluate((el) => { (el as HTMLElement).dataset.keptProbe = "1"; });
+    await switchViaTabBar(page, other);
+    await switchViaTabBar(page, tui);
+    await expect(agent.locator(".xterm")).toHaveAttribute("data-kept-probe", "1");
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_DONE", { timeout: 15000 });
+    await expect(agent.locator(".xterm-rows")).toContainText("TUI_HEADER");
+    await expect(agent.locator(".xterm")).toHaveClass(/enable-mouse-events/);
+    await page.keyboard.press("Control+C");
+  });
+
+  // -------------------------------------------------------------------------
+  // W6 — an inactive tab in a Dockview group stays mounted (only detached),
+  // so it must still give up its WebGL context: browsers cap live ones.
+  // -------------------------------------------------------------------------
+  test("W6. only shown terminals hold a WebGL context, inactive group tabs included", async ({ page }) => {
+    test.setTimeout(60000);
+    await page.addInitScript(() => {
+      // The app's renderer, not automation's DOM one (xtermSetup.ts).
+      Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false });
+      const contexts: WebGL2RenderingContext[] = [];
+      (window as unknown as { liveContexts: () => number }).liveContexts = () => contexts.filter((gl) => !gl.isContextLost()).length;
+      const getContext = HTMLCanvasElement.prototype.getContext as (this: HTMLCanvasElement, type: string, options?: unknown) => RenderingContext | null;
+      HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, options?: unknown) {
+        const context = getContext.call(this, type, options);
+        if (type === "webgl2" && context) contexts.push(context as WebGL2RenderingContext);
+        return context;
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+    const live = () => page.evaluate(() => (window as unknown as { liveContexts: () => number }).liveContexts());
+    await freshPage(page);
+    await startChat(page);
+    await expect.poll(live).toBe(1);
+
+    // Three shells as tabs of one group: one shown, two only detached.
+    await page.keyboard.press("Control+Space");
+    await page.keyboard.press("_");
+    const group = page.locator('.dv-tabs-and-actions-container:has([data-testid="terminal-add-tab"])');
+    const tabs = group.locator('[data-testid^="pane-tab-"]');
+    await expect(tabs).toHaveCount(1, { timeout: 10000 });
+    for (const count of [2, 3]) {
+      await page.getByTestId("terminal-add-tab").click();
+      await expect(tabs).toHaveCount(count, { timeout: 10000 });
+    }
+    await expect.poll(live, { timeout: 15000 }).toBe(2);
+    for (const index of [0, 1, 2, 0]) {
+      await tabs.nth(index).click();
+      await expect.poll(live).toBe(2);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // W7 — the active tab stays in view when the strip narrows.
+  // -------------------------------------------------------------------------
+  test("W7. narrowing the window keeps the active tab inside the strip", async ({ page }) => {
     test.setTimeout(90000);
     await page.setViewportSize({ width: 1440, height: 800 });
     await freshPage(page);

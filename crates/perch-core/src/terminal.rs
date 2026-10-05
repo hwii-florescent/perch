@@ -19,19 +19,55 @@ use uuid::Uuid;
 pub type TerminalDataListener = Arc<dyn Fn(String, String) + Send + Sync>;
 pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
 
-pub const MAX_TERMINAL_REPLAY_BYTES: usize = 128 * 1024;
+/// The scrollback a newly opened view gets: what perchd hands a reattaching
+/// runtime (`perchd::proto::DEFAULT_REPLAY`). Views kept alive across tab
+/// switches (`terminalKeeper.ts`) replay only when first opened.
+// ponytail: held in memory per live terminal; a phone opening one pays the
+// whole transfer. Page the scrollback in on demand if either bites.
+pub const MAX_TERMINAL_REPLAY_BYTES: usize = perchd::proto::DEFAULT_REPLAY as usize;
 
-/// Bounded UTF-8 replay shared by shell and provider runtimes.
-#[derive(Default)]
+/// Bounded UTF-8 replay shared by shell and provider runtimes: the recent
+/// output (for scrollback), then a repaint of the current screen and its
+/// modes, which the tail alone loses (see `perchd::screen`).
 pub(crate) struct TerminalReplay {
     chunks: VecDeque<String>,
     bytes: usize,
+    screen: perchd::screen::Screen,
+}
+
+impl Default for TerminalReplay {
+    fn default() -> Self {
+        Self::new(80, 24)
+    }
+}
+
+/// `(cols, rows)` of a whole chunk that is a [`pty_size_marker`].
+fn parse_size_marker(data: &str) -> Option<(u16, u16)> {
+    let (rows, cols) = data
+        .strip_prefix("\x1b[8;")?
+        .strip_suffix('t')?
+        .split_once(';')?;
+    Some((cols.parse().ok()?, rows.parse().ok()?))
 }
 
 impl TerminalReplay {
+    /// `cols`/`rows`: the PTY's size when its output starts; later resizes
+    /// arrive in-band as size markers.
+    pub(crate) fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            chunks: VecDeque::new(),
+            bytes: 0,
+            screen: perchd::screen::Screen::new(cols, rows),
+        }
+    }
+
     pub(crate) fn push(&mut self, data: &str) {
         if data.is_empty() {
             return;
+        }
+        match parse_size_marker(data) {
+            Some((cols, rows)) => self.screen.set_size(cols, rows),
+            None => self.screen.process(data.as_bytes()),
         }
         let mut start = data.len().saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
         while !data.is_char_boundary(start) {
@@ -48,7 +84,21 @@ impl TerminalReplay {
     }
 
     pub(crate) fn text(&self) -> String {
-        self.chunks.iter().map(String::as_str).collect()
+        if self.chunks.is_empty() {
+            return String::new();
+        }
+        let repaint = self.screen.restore();
+        // Older chunks make room for the repaint, keeping the replay bounded.
+        let mut excess = (self.bytes + repaint.len()).saturating_sub(MAX_TERMINAL_REPLAY_BYTES);
+        let mut text = String::new();
+        for chunk in &self.chunks {
+            if excess > 0 {
+                excess = excess.saturating_sub(chunk.len());
+                continue;
+            }
+            text += chunk;
+        }
+        text + &repaint
     }
 }
 
@@ -1423,7 +1473,45 @@ impl AgentTerminalRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_argv, split_utf8_tail};
+    use super::{
+        pty_size_marker, shell_argv, split_utf8_tail, TerminalReplay, MAX_TERMINAL_REPLAY_BYTES,
+    };
+
+    /// A TUI's full paint long since pushed out of the byte tail by one-row
+    /// updates (pi's status line) must still be on a reattached screen.
+    #[test]
+    fn replay_repaints_rows_older_than_the_tail() {
+        let mut replay = TerminalReplay::new(80, 24);
+        replay.push(
+            "\x1b[?1049h\x1b[?7l\x1b[?1000h\x1b[?1006h\x1b[>7u\x1b[1;1HHEADER\x1b[20;1H> prompt",
+        );
+        replay.push(&pty_size_marker(100, 30));
+        for tick in 0..20_000 {
+            replay.push(&format!("\x1b[30;1H\x1b[2Kstatus {tick}"));
+        }
+        let text = replay.text();
+        assert!(text.len() <= MAX_TERMINAL_REPLAY_BYTES);
+        let mut view = vt100::Parser::new(30, 100, 0);
+        view.process(text.as_bytes());
+        let screen = view.screen().contents();
+        assert!(view.screen().alternate_screen());
+        assert!(screen.starts_with("HEADER"), "{screen}");
+        assert!(
+            screen.contains("> prompt") && screen.contains("status 19999"),
+            "{screen}"
+        );
+        // Mouse reporting (the wheel), autowrap and the kitty keyboard flags
+        // were set once, at startup, long before the tail.
+        assert_eq!(
+            view.screen().mouse_protocol_mode(),
+            vt100::MouseProtocolMode::PressRelease
+        );
+        assert!(
+            text.ends_with("\x1b[?7l\x1b[=7u"),
+            "{:?}",
+            &text[text.len() - 40..]
+        );
+    }
 
     /// Off by default is the whole safety story for this setting: a login
     /// shell runs different rc files, so the pre-existing behaviour has to be

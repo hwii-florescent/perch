@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import v8 from "node:v8";
+import vm from "node:vm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AgentControlLease, AgentLifecycleStatus, AgentTerminalOpenedMessage } from "@perch/shared";
 const transport = vi.hoisted(() => ({ send: vi.fn(), connection: (_: boolean) => {} }));
@@ -69,4 +71,34 @@ it("keeps new lease replies ahead of old status pushes, then revokes input on tr
   expect(sendAgentTerminalInput("controlled", "must-not-send")).toBe(true);
   expect(transport.send).toHaveBeenCalledTimes(count);
   binding.release();
+});
+
+it("a released view's terminal is collectable once its request is retired", async () => {
+  v8.setFlagsFromString("--expose-gc");
+  const gc = vm.runInNewContext("gc") as () => void;
+  let terminal!: WeakRef<object>;
+  await (async () => {
+    const xterm = { buffer: new Uint8Array(1 << 20) };
+    terminal = new WeakRef(xterm);
+    const binding = openAgentTerminal("session", "claude", 80, 24, () => xterm.buffer, () => xterm.buffer, () => xterm.buffer);
+    handleAgentTerminalMessage(opened(0, "collected"));
+    await binding.ready;
+    binding.release();
+  })();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  gc();
+  expect(terminal.deref()).toBeUndefined();
+});
+
+it("releases a view whose open timed out, again when its reply turns up late", async () => {
+  vi.useFakeTimers();
+  const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {});
+  const late = opened(0, "late-terminal");
+  vi.advanceTimersByTime(15_000);
+  await expect(binding.ready).rejects.toThrow(/timed out/);
+  const release = expect.objectContaining({ type: "agent.terminal.release", providerId: "claude" });
+  expect(transport.send).toHaveBeenLastCalledWith(release);
+  transport.send.mockClear();
+  expect(handleAgentTerminalMessage(late)).toBe(true);
+  expect(transport.send).toHaveBeenCalledExactlyOnceWith(release);
 });

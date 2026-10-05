@@ -148,8 +148,9 @@ pub enum Request {
     Health,
 }
 
-/// Default replay window for an attach with no `since`.
-pub const DEFAULT_REPLAY: u64 = 512 * 1024;
+/// Default replay window for an attach with no `since`: the scrollback a
+/// reopened app shows, up to half of what compaction keeps (`LOG_CAP`).
+pub const DEFAULT_REPLAY: u64 = 4 * 1024 * 1024;
 
 pub const ERR_EXISTS: &str = "exists";
 pub const ERR_NOT_FOUND: &str = "not_found";

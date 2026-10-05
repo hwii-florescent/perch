@@ -791,6 +791,117 @@ export interface TerminalClosedMessage {
   terminalId: string;
 }
 
+/** Canonical open resources (capability `surface.v1`). Identity is
+ * host + workspace + kind + locator; files and diffs need no chat session.
+ * Opening a file/diff adds a tab only for the opening viewer; terminals are
+ * global runtimes that exist by being started (and are closed with
+ * `terminal.close`). Nothing here starts a process or drops a draft. */
+export type SurfaceKind = "terminal" | "file" | "diff";
+/** File: `path` (workspace-relative). Diff: `diff`. Terminal: `sessionId`,
+ * plus `paneId` for a shell pane (absent = the session's agent terminal). */
+export interface SurfaceLocator {
+  path?: string;
+  sessionId?: string;
+  paneId?: string;
+  diff?: GitDiffTarget;
+}
+export interface SurfaceDescriptor {
+  id: string;
+  hostId: string;
+  workspaceId: string;
+  kind: SurfaceKind;
+  locator: SurfaceLocator;
+  /** Shell panes only: the pane's runtime and lifecycle (`starting`, `running`,
+   * `exited`, `lost`). A view shows exited/lost as such and never relaunches.
+   * An agent terminal carries none: its liveness is the lifecycle registry's. */
+  runtime?: { id: string; state: string };
+  createdAt: number;
+}
+/** One viewer's arrangement of one workspace. `order` already holds exactly
+ * the existing resources; `layout` is the client's own versioned blob. */
+export interface ViewerPresentation {
+  viewerId: string;
+  workspaceId: string;
+  revision: number;
+  order: string[];
+  activeResourceId?: string;
+  layout?: unknown;
+  /** Verbatim pre-migration per-session layouts, by session id. */
+  legacyLayouts?: Record<string, unknown>;
+}
+export interface PresentationUpdate {
+  /** The `revision` this was made against; a stale one fails with `surface_conflict`. */
+  baseRevision?: number;
+  order: string[];
+  activeResourceId?: string;
+  layout?: unknown;
+}
+export interface SurfaceOpenMessage {
+  type: "surface.open";
+  requestId: string;
+  viewerId: string;
+  workspaceId: string;
+  kind: SurfaceKind;
+  locator?: SurfaceLocator;
+}
+export interface SurfaceListMessage {
+  type: "surface.list";
+  requestId: string;
+  workspaceId: string;
+}
+export interface SurfaceCloseMessage {
+  type: "surface.close";
+  requestId: string;
+  viewerId: string;
+  workspaceId: string;
+  resourceId: string;
+}
+export interface ViewerPresentationGetMessage {
+  type: "viewer.presentation.get";
+  requestId: string;
+  viewerId: string;
+  workspaceId: string;
+}
+export interface ViewerPresentationSetMessage {
+  type: "viewer.presentation.set";
+  requestId: string;
+  viewerId: string;
+  workspaceId: string;
+  presentation: PresentationUpdate;
+}
+/** One-time import of this viewer's legacy file tabs / tab order; repeating it changes nothing. */
+export interface SurfaceImportMessage {
+  type: "surface.import";
+  requestId: string;
+  viewerId: string;
+  workspaceId: string;
+  files?: string[];
+  sessionOrder?: string[];
+}
+export interface SurfaceOpenedMessage {
+  type: "surface.opened";
+  requestId: string;
+  surface: SurfaceDescriptor;
+}
+export interface SurfaceListResultMessage {
+  type: "surface.list.result";
+  requestId: string;
+  workspaceId: string;
+  surfaces: SurfaceDescriptor[];
+}
+export interface SurfaceClosedMessage {
+  type: "surface.closed";
+  requestId: string;
+  workspaceId: string;
+  resourceId: string;
+}
+/** Reply to `viewer.presentation.get|set` and `surface.import`. */
+export interface ViewerPresentationMessage {
+  type: "viewer.presentation";
+  requestId: string;
+  presentation: ViewerPresentation;
+}
+
 export interface AgentTerminalOpenMessage {
   type: "agent.terminal.open";
   requestId: string;
@@ -1466,6 +1577,12 @@ export type ClientMessage =
   | TerminalListMessage
   | TerminalReleaseMessage
   | TerminalCloseMessage
+  | SurfaceOpenMessage
+  | SurfaceListMessage
+  | SurfaceCloseMessage
+  | ViewerPresentationGetMessage
+  | ViewerPresentationSetMessage
+  | SurfaceImportMessage
   | AgentTerminalOpenMessage
   | AgentTerminalReleaseMessage
   | TerminalCreateMessage
@@ -2208,6 +2325,10 @@ export type ServerMessage =
   | TerminalOpenedMessage
   | TerminalListResultMessage
   | TerminalClosedMessage
+  | SurfaceOpenedMessage
+  | SurfaceListResultMessage
+  | SurfaceClosedMessage
+  | ViewerPresentationMessage
   | AgentTerminalOpenedMessage
   | TerminalCreatedMessage
   | TerminalDataMessage

@@ -67,6 +67,9 @@ there, not here.
 - **Terminals:**
   - `terminal.rs`: agent PTYs, now served by perchd.
   - `workspace_terminals.rs`: shell panes.
+  - `surfaces.rs`: canonical host-qualified Terminal/File/Diff resources and
+    per-viewer presentation (capability `surface.v1`); one-time idempotent
+    import of legacy session layouts and file tabs, originals kept.
   - `daemon.rs`: the runtime's perchd client. The daemon is the app binary
     re-run as `<exe> __perchd serve`.
   - `crates/perchd`: the socket protocol, history-log replay and vt100
@@ -109,8 +112,26 @@ there, not here.
   - `convertEol` stays `false`.
   - The theme and font come from the server's `terminalProfile` (the user's
     real terminal), never from perch's UI tokens.
-  - Never add `@xterm/addon-webgl`: canvas rendering empties `.xterm-rows`,
-    which the e2e specs read.
+  - Terminals render with WebGL, as Orca's do (decided with the user
+    2026-10-04): box drawing joins up pixel-aligned, and a busy TUI costs
+    WebKit ~10x less memory than with the DOM renderer. A lost context is
+    replaced, never left on DOM. Automation (`navigator.webdriver`) keeps
+    the DOM renderer, because the e2e specs read text from `.xterm-rows`
+    and a canvas leaves it empty. Only a terminal with a box on screen
+    holds a WebGL context (an `IntersectionObserver` in
+    `createPerchTerminal`): parked ones and inactive Dockview tabs stay
+    mounted but detached. `node e2e/memory/memory.mjs` (after
+    `npm run build`) checks the peak footprint, context replacement and
+    release, and that closed or evicted terminals are freed;
+    workspace-tabs W6 checks tabs within a group.
+  - Nothing cached past its view may close over it: a callback kept after
+    a request settles (`agentTerminals.ts` `retired`) once held 128 dead
+    xterms with their buffers. Cache plain data.
+  - Terminals outlive their pane, like a native terminal's tabs
+    (`terminalKeeper.ts`): switching sessions parks them with their full
+    scrollback instead of rebuilding from the replay. The replay (perchd's
+    default window, then an exact repaint of the screen and modes from
+    `perchd::screen`) serves only a view's first open.
   - An agent PTY has one size, owned by the view holding the resize lease.
     The server sends it in-band (`terminal::pty_size_marker`, at each resize
     and at the head of every replay); other views follow it and never fit
