@@ -470,3 +470,32 @@ test("a window resumes its own terminal, not the one another window chose last",
     cleanup();
   }
 });
+
+test("a restore that finishes late leaves a terminal chosen meanwhile in front", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const a = await openAll(page, root);
+    const other = await startChat(page, "terminal", root);
+    await page.getByTestId(a.terminalTab).click();
+    await expect.poll(() => activeTab(page)).toBe(a.terminalTab);
+    await page.waitForTimeout(1500); // terminal A is saved as selected
+
+    // The saved presentation's restore (surface.list) answers 1.5 s late.
+    await page.routeWebSocket(/\/ws/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => server.send(message));
+      server.onMessage((message) => {
+        if (typeof message === "string" && message.includes('"surface.list.result"')) setTimeout(() => ws.send(message), 1500);
+        else ws.send(message);
+      });
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId(`tab-${other}`)).toBeVisible({ timeout: 20000 });
+    await page.getByTestId(`tab-${other}`).click();
+    await expect.poll(() => activeTab(page)).toBe(`tab-${other}`);
+    await page.waitForTimeout(3000); // the late answer has arrived
+    expect(await activeTab(page)).toBe(`tab-${other}`);
+  } finally {
+    cleanup();
+  }
+});

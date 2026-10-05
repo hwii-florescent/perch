@@ -234,6 +234,9 @@ async function hydrate(workspaceId: string, presentation: ViewerPresentation): P
   return true;
 }
 
+/** Counts session-to-session switches: a restore that began before one must not undo it. */
+let navigations = 0;
+
 /** Show the session this viewer had selected, if it is still in the workspace on screen. */
 function restoreSession(workspaceId: string, presentation: ViewerPresentation): void {
   const id = (presentation.layout as Layout | undefined)?.session;
@@ -253,6 +256,7 @@ function restoreSelected(workspaceId: string, presentation: ViewerPresentation):
 async function sync(workspaceId: string): Promise<void> {
   if (synced.has(workspaceId) || !supported() || !isLocal(workspaceId)) return;
   synced.add(workspaceId);
+  const began = navigations;
   const tabs = useFileTabs.getState().tabs.filter((tab) => tab.workspaceId === workspaceId);
   const key = tabOrderKey(usePerchStore.getState());
   const imported = await ask((requestId) => ({
@@ -267,8 +271,11 @@ async function sync(workspaceId: string): Promise<void> {
   if (imported.type === "viewer.presentation" && !restored.has(workspaceId)) {
     if (await hydrate(workspaceId, imported.presentation)) {
       restored.add(workspaceId);
-      restoreSession(workspaceId, imported.presentation);
-      restoreSelected(workspaceId, imported.presentation);
+      // Tabs and layout are back; what is in the foreground stays the user's if they chose since this began.
+      if (navigations === began) {
+        restoreSession(workspaceId, imported.presentation);
+        restoreSelected(workspaceId, imported.presentation);
+      }
     }
   }
   scheduleMirror();
@@ -280,6 +287,8 @@ function syncShown(state = usePerchStore.getState()): void {
 }
 
 usePerchStore.subscribe((state, previous) => {
+  // A switch between two sessions is a choice; to or from none is the connection dropping or resuming.
+  if (state.sessionId && previous.sessionId && state.sessionId !== previous.sessionId) navigations++;
   if (state.sessions !== previous.sessions || state.sessionId !== previous.sessionId) trackSession(state);
   if (state.activeWorkspaceId === previous.activeWorkspaceId && state.sessionId === previous.sessionId
     && state.serverInfo === previous.serverInfo && state.workspaces === previous.workspaces) return;
