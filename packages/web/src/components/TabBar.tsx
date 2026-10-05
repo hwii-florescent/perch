@@ -15,8 +15,8 @@ import { openSessionPaneMenu } from "../dockview/DockviewShell";
 // overlay-1 in every theme (themes.test.ts). The palettes set the absolute level.
 // The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
-const TAB = `shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [font-family:inherit] hover:border-overlay-1 hover:text-fg ${FOCUS}`;
-const TAB_ACTIVE = "border-overlay-1 bg-surface-1 text-fg";
+const TAB = `shrink-0 rounded-ui bg-transparent px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`;
+const TAB_ACTIVE = "bg-surface-1 text-fg hover:bg-surface-1";
 // Members of a split set (shown side by side in the canvas) share a bottom rule.
 const TAB_SPLIT = "shadow-[inset_0_-2px_0_var(--overlay-1)]";
 const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
@@ -180,7 +180,7 @@ export function TabBar() {
             s.id === sessionId && !fileShown && ["tab-bar__tab--active", TAB_ACTIVE],
             splitIds.has(s.id) && TAB_SPLIT,
             s.id === draggingId && "opacity-50",
-            s.id === dragOverId && "border-accent shadow-[-2px_0_0_var(--accent)]",
+            s.id === dragOverId && "shadow-[-2px_0_0_var(--accent)]",
           )}
           data-testid={`tab-${s.id}`}
           title={s.title || "New session"}
@@ -231,7 +231,7 @@ export function TabBar() {
 
       <button
         type="button"
-        className={`h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:border-accent hover:text-fg ${FOCUS}`}
+        className={`h-[1.6rem] w-[1.6rem] shrink-0 rounded-ui bg-transparent text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`}
         data-testid="tab-new"
         title="New session in this workspace"
         aria-label="New session in this workspace"
@@ -284,7 +284,7 @@ function ResourceTabButton({ tab, id, active, split, dragging, dragOver, onDragS
           active && ["tab-bar__tab--active", TAB_ACTIVE],
           split && TAB_SPLIT,
           dragging && "opacity-50",
-          dragOver && "border-accent shadow-[-2px_0_0_var(--accent)]",
+          dragOver && "shadow-[-2px_0_0_var(--accent)]",
         )}
         data-testid={testId}
         title={review ? "Changes" : tab.path}

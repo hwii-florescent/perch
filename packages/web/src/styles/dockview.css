@@ -23,17 +23,8 @@
   --dv-tabs-and-actions-container-height: 2.1rem;
 }
 
-/* herdr draws every pane with a 1px border: accent when focused, overlay0
- * otherwise (`reference/herdr/src/ui/panes.rs::render_pane_borders`). dockview
- * groups are perch's equivalent of herdr's panes, so mirror that rule on the
- * group chrome itself rather than leaving groups borderless. */
-.dockview-theme-perch .dv-groupview {
-  border: 1px solid var(--overlay-0);
-}
-
-.dockview-theme-perch .dv-groupview.dv-active-group {
-  border-color: var(--overlay-1);
-}
+/* Groups are borderless (UI-UX-DIRECTION.md D1): the only line between split
+ * groups is dockview's sash (--dv-separator-border). */
 
 /* The pane header's action buttons (the `⋯` pane menu and the split-session
  * button) live in dockview's `.dv-tabs-and-actions-container`, laid out as a
