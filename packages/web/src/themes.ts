@@ -102,7 +102,7 @@ export const THEMES: Record<string, Palette> = {
   "tokyo-night-day": {
     accent: "#2e7de9", panelBg: "#e1e2e7", surface0: "#c4c8da", surface1: "#a8aecb",
     surfaceDim: "#d2d3da", overlay0: "#8990b3", overlay1: "#68709a", text: "#3760bf",
-    subtext0: "#6172b0", mauve: "#7847bd", green: "#587539", yellow: "#8c6c3e",
+    subtext0: "#44507b", mauve: "#7847bd", green: "#587539", yellow: "#8c6c3e",
     red: "#f52a65", blue: "#2e7de9", teal: "#118c74", peach: "#b15c00",
   },
   dracula: {
@@ -150,7 +150,7 @@ export const THEMES: Record<string, Palette> = {
   "solarized-light": {
     accent: "#268bd2", panelBg: "#fdf6e3", surface0: "#eee8d5", surface1: "#93a1a1",
     surfaceDim: "#eee8d5", overlay0: "#93a1a1", overlay1: "#586e75", text: "#657b83",
-    subtext0: "#839496", mauve: "#d33682", green: "#859900", yellow: "#b58900",
+    subtext0: "#5c6869", mauve: "#d33682", green: "#859900", yellow: "#b58900",
     red: "#dc322f", blue: "#268bd2", teal: "#2aa198", peach: "#cb4b16",
   },
   kanagawa: {

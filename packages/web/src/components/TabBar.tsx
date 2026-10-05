@@ -11,14 +11,16 @@ import type { SessionSummary } from "@perch/shared";
 const MAX_TAB_LABEL = 24;
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
-// Operational text uses subtext-0 (>= 4.5:1 on surface-0/1); overlay-1 is only 3.5:1 there.
+// Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
+// overlay-1 in every theme (themes.test.ts). The palettes set the absolute level.
 // The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
 const TAB = `shrink-0 rounded-ui border border-overlay-0 bg-surface-0 px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [font-family:inherit] hover:border-overlay-1 hover:text-fg ${FOCUS}`;
 const TAB_ACTIVE = "border-overlay-1 bg-surface-1 text-fg";
 const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
-// The active tab is surface-1, so its x needs the hover fill one step lighter.
-const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-overlay-0" : "hover:bg-surface-1");
+// The active tab is surface-1, so its x hovers on panel-bg: fg is drawn against it in every theme
+// (overlay-0 is fg-coloured in the terminal theme and hid the x).
+const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
 
 /** Short pill label for a tab. Falls back to "New session" for a session
  * with no user messages yet (title is "" until the first chat.send). */
@@ -96,9 +98,15 @@ export function TabBar() {
     if (renamingId) renameInputRef.current?.select();
   }, [renamingId]);
 
-  // The strip scrolls when tabs overflow: keep the active one in view.
+  // The strip scrolls when tabs overflow: keep the active one in view, also when the strip narrows.
   useEffect(() => {
-    stripRef.current?.querySelector(".tab-bar__tab--active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    const strip = stripRef.current;
+    if (!strip) return;
+    const reveal = () => strip.querySelector(".tab-bar__tab--active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    return () => observer.disconnect();
   }, [sessionId, activeFile, orderedTabs.length, workspaceFiles.length]);
 
   function commitRename() {
