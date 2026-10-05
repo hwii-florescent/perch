@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { applyStoredTabOrder, saveTabOrder } from "./tabOrder";
+import { viewerKey } from "./viewer";
 
 // No jsdom: a minimal in-memory localStorage stub is enough to exercise the
 // real read/write path (rather than only ever hitting the try/catch
@@ -69,14 +70,14 @@ describe("applyStoredTabOrder", () => {
   });
 
   it("falls back to given order when the stored value is corrupt JSON", () => {
-    (globalThis.localStorage as unknown as FakeStorage).setItem("perch.tabOrder.proj1", "{not json");
+    (globalThis.localStorage as unknown as FakeStorage).setItem(viewerKey("perch.tabOrder.proj1"), "{not json");
     const sessions: Item[] = [{ id: "a" }, { id: "b" }];
     expect(applyStoredTabOrder("proj1", sessions)).toEqual(sessions);
   });
 
   it("falls back to given order when the stored value is valid JSON but not an array of strings", () => {
     (globalThis.localStorage as unknown as FakeStorage).setItem(
-      "perch.tabOrder.proj1",
+      viewerKey("perch.tabOrder.proj1"),
       JSON.stringify({ not: "an array" }),
     );
     const sessions: Item[] = [{ id: "a" }, { id: "b" }];

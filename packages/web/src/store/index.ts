@@ -8,7 +8,7 @@ import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { defaultModel } from "../models";
 import { applyTheme } from "../themes";
 import { playBlockedTone, playDoneTone } from "../sound";
-import { ownsAgentRuntimeRequest, ownsGitReviewRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
+import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
   ACTIVE_PROJECT_ID_STORAGE_KEY,
   ACTIVE_WORKSPACE_ID_STORAGE_KEY,
@@ -24,7 +24,7 @@ import {
   writeStoredId,
 } from "./persistence";
 export { readLastAgentChoiceStored } from "./persistence";
-import { activeWorkspaceSessions, omitKey, resolveSessionAgent, shouldReuseCurrentSession } from "./selectors";
+import { activeWorkspaceSessions, effectiveWorkspace, omitKey, resolveSessionAgent, shouldReuseCurrentSession } from "./selectors";
 export {
   activeWorkspaceSessions,
   effectiveActiveProject,
@@ -37,6 +37,7 @@ export {
 } from "./selectors";
 export type { ProjectGroup, ProjectNavState } from "./selectors";
 import { newId } from "../ids";
+import { writeSessionId } from "../viewer";
 
 export interface ToolCallEntry {
   name: string;
@@ -571,7 +572,6 @@ export interface PerchState {
    * *active workspace* — the same list `TabBar` shows. Wraps
    * around; no-op if the active workspace has no other sessions. Used by
    * leader,n / leader,p (Phase 4). */
-  switchSessionRelative: (dir: 1 | -1) => void;
   createTerminal: (
     cols: number,
     rows: number,
@@ -1668,14 +1668,14 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     if (hostId === "local") {
       // Clear stored session id so a mid-flight reconnect doesn't resume the
       // old session before session.created arrives (same as socket.newSession()).
-      try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
+      writeSessionId(null);
       const msg: { type: "session.create"; cwd?: string } = { type: "session.create" };
       if (cwd) msg.cwd = cwd;
       socket.send(msg);
     } else {
       // Clear the stored sessionId so a mid-flight reconnect doesn't try
       // to resume the old session before session.created arrives.
-      try { localStorage.removeItem("perch.sessionId"); } catch { /* ignore */ }
+      writeSessionId(null);
       const msg: { type: "session.create"; hostId: string; cwd?: string } = {
         type: "session.create",
         hostId,
@@ -1686,11 +1686,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   showWorkspaceHome: () => {
-    try {
-      localStorage.removeItem("perch.sessionId");
-    } catch {
-      // ignore
-    }
+    writeSessionId(null);
     flushChunkBuffer();
     set({ sessionId: null, messages: [], streamingMessageId: null, cliError: null });
   },
@@ -1799,16 +1795,6 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   toggleSidebar: () => {
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
-  },
-
-  switchSessionRelative: (dir) => {
-    const state = get();
-    const projectSessions = activeWorkspaceSessions(state);
-    if (projectSessions.length < 2) return;
-    const idx = projectSessions.findIndex((s) => s.id === state.sessionId);
-    const base = idx === -1 ? 0 : idx;
-    const next = projectSessions[(base + dir + projectSessions.length) % projectSessions.length];
-    if (next && next.id !== state.sessionId) get().switchSession(next.id);
   },
 
   createTerminal: (cols, rows, options) => {
@@ -2061,21 +2047,23 @@ function scheduleChunkFlush(sessionId: string): void {
   chunkRafs.set(sessionId, raf);
 }
 
-/** Leaving the active session lands on a neighbouring tab of the same
- * workspace, like a browser; leaving its last tab shows the home screen,
- * never another workspace's session. */
+/** Leaving the active session lands on a neighbouring session of the same
+ * workspace, like a browser; leaving its last session keeps the workspace
+ * (its open files and reviews stay tabs, `fileTabs.ts` selects one) and
+ * shows its home screen, never another workspace's session. */
 function leaveSession(state: PerchState, sessionId: string): void {
   if (state.sessionId !== sessionId) return;
   const siblings = activeWorkspaceSessions(state).filter((s) => s.id !== sessionId);
-  switchAwayFromActiveSession(siblings, state.activeHostId);
+  switchAwayFromActiveSession(siblings, state.activeHostId, effectiveWorkspace(state)?.id);
 }
 
 /**
  * The active session just went away. Switch to the most recent of
  * `candidates` (which already exclude the departing session) on the same
- * host, else the most recent on any host, else fall back to a blank state.
+ * host, else the most recent on any host, else the home screen, keeping
+ * `keepWorkspaceId` as the workspace on screen when there is one.
  */
-function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string): void {
+function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId: string, keepWorkspaceId?: string): void {
   const byRecency = (a: SessionSummary, b: SessionSummary) => b.createdAt - a.createdAt;
   const sameHost = candidates
     .filter((s) => (s.hostId ?? "local") === activeHostId)
@@ -2084,6 +2072,13 @@ function switchAwayFromActiveSession(candidates: SessionSummary[], activeHostId:
   const next = sameHost[0] ?? anyHost[0];
   if (next) {
     usePerchStore.getState().switchSession(next.id);
+    return;
+  }
+  if (keepWorkspaceId) {
+    // Set before the session clears, so the one change a subscriber sees keeps its workspace.
+    usePerchStore.setState({ activeWorkspaceId: keepWorkspaceId });
+    writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, keepWorkspaceId);
+    usePerchStore.getState().showWorkspaceHome();
     return;
   }
   usePerchStore.getState().showWorkspaceHome();
@@ -2981,6 +2976,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         // its opaque request ids in a dependency-free registry so a
         // correlated failure is rendered by that pane instead of becoming a
         // misleading assistant error in the active chat transcript.
+        if (ownsSurfaceRequest(msg.requestId)) break;
         if (ownsGitReviewRequest(msg.requestId) || ownsAgentRuntimeRequest(msg.requestId)) {
           const runtime = pendingAgentRuntimeRequests.get(msg.requestId);
           if (runtime) {

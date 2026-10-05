@@ -35,7 +35,7 @@ const BASE_URL = "http://127.0.0.1:7799";
 
 async function freshPage(page: Page): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("perch.sessionId")).forEach((k) => localStorage.removeItem(k)));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }
@@ -240,8 +240,8 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
 
     const menu = page.locator('[data-testid="pane-context-menu"]');
     await expect(menu).toBeVisible({ timeout: 5000 });
-    // Split Right / Split Down / Split with Session / Zoom / Rename / Close.
-    await expect(page.locator(".pane-context-menu__item")).toHaveCount(6);
+    // Split Right / Split Down / Split with Session / Split with tab / Zoom / Rename / Close.
+    await expect(page.locator(".pane-context-menu__item")).toHaveCount(7);
 
     await page.screenshot({ path: "artifacts/p4-header-menu.png" });
 

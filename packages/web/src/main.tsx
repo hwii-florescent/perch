@@ -1,9 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
-import App from "./App";
-import { usePerchStore } from "./store";
-import "./styles/index.css";
+import { claimViewer } from "./viewer";
 
 // PWA service worker. Registering through virtual:pwa-register (rather than
 // the plugin's plain injected register call) matters: in autoUpdate mode this
@@ -21,6 +19,18 @@ registerSW({
   },
 });
 
+const container = document.getElementById("root");
+if (!container) {
+  throw new Error("missing #root element");
+}
+
+// The window's viewer id is settled first: the stores read their per-viewer storage as they load.
+await claimViewer();
+// App first, and its whole module graph with it (the store connects as it loads): a store
+// loaded ahead of the modules that watch it would deliver its first messages unheard.
+const [{ default: App }] = await Promise.all([import("./App"), import("./styles/index.css")]);
+const { usePerchStore } = await import("./store");
+
 // Expose the Zustand store on window so e2e tests can drive/assert state
 // directly (e.g. injecting a synthetic chat message to exercise rendering
 // paths — like an Edit-tool diff — that aren't worth spinning up a real
@@ -32,11 +42,6 @@ declare global {
   }
 }
 window.usePerchStore = usePerchStore;
-
-const container = document.getElementById("root");
-if (!container) {
-  throw new Error("missing #root element");
-}
 
 createRoot(container).render(
   <StrictMode>

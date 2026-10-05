@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import type { DockviewController } from "../dockview/dockviewController";
 import { canStopAgent, stopAgent } from "../agentTerminals";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
+import { useSplitSets } from "../splitSets";
 
 export interface PaneContextMenuProps {
   panelId: string;
@@ -139,6 +140,20 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           >
             Split with Session…
           </button>
+          {sessionId && (
+            <button
+              type="button"
+              className={menuItem()}
+              data-testid="pane-menu-split-tab"
+              title="Show this tab beside another tab; the tab strip stays one row"
+              onClick={() => {
+                useSplitSets.getState().openMenu(sessionId, left, top);
+                onClose();
+              }}
+            >
+              Split with tab…
+            </button>
+          )}
           <button
             type="button"
             className={menuItem()}

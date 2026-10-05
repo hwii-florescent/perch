@@ -58,3 +58,19 @@ export function retireAgentRuntimeRequest(requestId: string): void {
 export function ownsAgentRuntimeRequest(requestId: string): boolean {
   return activeAgentRuntimeRequests.has(requestId) || retiredAgentRuntimeRequests.has(requestId);
 }
+
+/** Surface/viewer-presentation requests (`surfaceSync.ts`): a refused close or a
+ * failed mirror is that module's to handle, never a chat transcript error. */
+const surfaceRequests = new Set<string>();
+
+export function registerSurfaceRequest(requestId: string): void {
+  surfaceRequests.add(requestId);
+}
+
+export function retireSurfaceRequest(requestId: string): void {
+  surfaceRequests.delete(requestId);
+}
+
+export function ownsSurfaceRequest(requestId: string): boolean {
+  return surfaceRequests.has(requestId);
+}

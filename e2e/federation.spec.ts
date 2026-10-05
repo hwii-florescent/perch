@@ -207,7 +207,7 @@ async function upsertRemoteHost(): Promise<void> {
 /** Navigate with a fresh localStorage-cleared session. */
 async function freshSession(page: Page): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("perch.sessionId")).forEach((k) => localStorage.removeItem(k)));
   await page.reload({ waitUntil: "networkidle" });
   // With Fix 3 (lazy DB insert) the sidebar may have zero items on a fresh DB.
   // Only wait for the sidebar wrapper itself, not for session items.

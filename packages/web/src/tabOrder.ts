@@ -4,9 +4,11 @@
  * Drag-to-reorder in TabBar.tsx is purely presentational: perch's protocol
  * has no notion of tab order (sessions are just rows with a `createdAt`), so
  * rather than inventing a new protocol field, the reordered position is
- * persisted client-side in localStorage, keyed per project (`hostId:cwd`) —
+ * persisted client-side in localStorage (per viewer window), keyed per project (`hostId:cwd`) —
  * the same project grouping TabBar/Sidebar already use elsewhere.
  */
+
+import { readViewerStored, viewerKey } from "./viewer";
 
 const STORAGE_PREFIX = "perch.tabOrder.";
 
@@ -16,7 +18,7 @@ function storageKey(projectKey: string): string {
 
 function readOrder(projectKey: string): string[] {
   try {
-    const raw = localStorage.getItem(storageKey(projectKey));
+    const raw = readViewerStored(storageKey(projectKey));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
@@ -27,7 +29,7 @@ function readOrder(projectKey: string): string[] {
 
 function writeOrder(projectKey: string, order: string[]): void {
   try {
-    localStorage.setItem(storageKey(projectKey), JSON.stringify(order));
+    localStorage.setItem(viewerKey(storageKey(projectKey)), JSON.stringify(order));
   } catch {
     // ignore — worst case tabs just fall back to creation order next time
   }
@@ -61,4 +63,13 @@ export function applyStoredTabOrder<T extends { id: string }>(projectKey: string
 /** Persist a new drag-resolved tab order for `projectKey`. */
 export function saveTabOrder(projectKey: string, orderedIds: string[]): void {
   writeOrder(projectKey, orderedIds);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(TAB_ORDER_EVENT));
 }
+
+/** The stored drag order for `projectKey` (empty when never customized). */
+export function storedTabOrder(projectKey: string): string[] {
+  return readOrder(projectKey);
+}
+
+/** Fired on `window` whenever a drag order is saved. */
+export const TAB_ORDER_EVENT = "perch:tabOrder";

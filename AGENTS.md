@@ -95,6 +95,10 @@ there, not here.
   - `xtermSetup.ts`: builds every terminal.
   - `agentTerminals.ts`: CLI panes.
   - `Sidebar.tsx` (Projects → Workspaces → sessions).
+  - `viewer.ts`: a window's viewer id (Web Lock per window, restart reclaims
+    the last free one); local tab/split/order keys and the window's session and
+    project/workspace ids carry `@<viewerId>` (`perch.sessionId` stays a shared
+    last-chosen hint for windows with none).
   - `components/WorkspaceTools.tsx`: the right drawer (file explorer / Git
     for the active workspace); `fileTabs.ts`: files open as top-row tabs.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
@@ -153,9 +157,17 @@ there, not here.
     only: no Terminal (terminals are tabs), and Git only for a git
     workspace. It is app-level, not part of a session's layout, and follows
     the clicked workspace. A clicked file opens as a top-row tab after the
-    workspace's sessions, before `+` (`fileTabs.ts`, per viewer); the active
-    file covers the main area while the session's panes stay mounted
-    underneath. The phone keeps the combined explorer+editor view. The
+    workspace's sessions (the Git drawer's "Open as tab" adds the review the
+    same way), in one order shared by the strip, drag and the Ctrl+Space
+    n/p/1-9 chords (`workspaceTabs.ts`, per viewer); the active file covers
+    the main area while the session's panes stay mounted underneath, unless it
+    is in a split set (`splitSets.ts`, `SplitCanvas.tsx`, per viewer): the
+    members then share the canvas side by side while the strip stays one row.
+    A set holds at most one terminal. `surfaceSync.ts` mirrors the strip,
+    sets and open files/reviews to the core's surfaces (`surface.v1`, local
+    workspaces only): the local stores stay live, a file with an unsaved draft
+    gets its tab back when closed, and a viewer with no local tabs is
+    restored from the core. The phone keeps the combined explorer+editor view. The
     `files`/`gitReview` panel kinds remain only so old saved layouts
     restore.
   - A tab is a terminal. Every CLI agent runs under
@@ -163,9 +175,10 @@ there, not here.
     the same pane. When that shell exits too (lifecycle `exited`, which
     hibernation's `sleeping` never is), the session closes itself like its
     tab's × (`PersistentAgentTerminal.tsx`); "Stop agent" does the same.
-  - Closing a workspace's last tab shows the home screen
-    (`NoSessionPanel.tsx`: app name, Add project, New session, shortcuts),
-    never another workspace's session. Clicking a workspace with no sessions
+  - Closing a workspace's last terminal keeps the workspace: its open files
+    and reviews stay tabs (the newest is shown), and with none left the
+    workspace's start picker shows (`NoSessionPanel.tsx`), never another
+    workspace's session. Clicking a workspace with no sessions
     never keeps showing another's either: it starts Settings → "Empty
     workspace opens" (`settings.emptyWorkspaceAgent`), else shows that
     workspace's start picker (`NoSessionPanel.tsx`).

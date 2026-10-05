@@ -34,7 +34,7 @@ const BASE_URL = "http://127.0.0.1:7799";
 
 async function freshPage(page: Page): Promise<void> {
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
-  await page.evaluate(() => localStorage.removeItem("perch.sessionId"));
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("perch.sessionId")).forEach((k) => localStorage.removeItem(k)));
   await page.reload({ waitUntil: "networkidle" });
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });
 }
