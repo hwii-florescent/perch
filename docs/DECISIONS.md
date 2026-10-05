@@ -7,6 +7,23 @@ The proposal behind them is [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md); the
 Rust-side ownership contracts (viewer identity, runtime incarnation, dirty-buffer
 recovery) are Linear PER-12, not decided here.
 
+## 2026-10-05 — Visual polish pass
+
+Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md).
+
+- **Borderless panes and tabs.** Replaces the herdr-style 1px group border in
+  `styles/dockview.css`. Splits keep one 1px sash.
+- **No Refresh button** on the Projects header.
+- **Add project** is a native folder dialog on desktop for a local host, else a
+  modal directory browser. Never an inline sidebar form. Replaces "`+ Add`
+  expands a form" in the sidebar. The rule "`+ Add` is the only way a folder
+  becomes a project" is unchanged.
+- **Files / Git switch moves to the top row** beside the drawer toggle. Replaces
+  the "one top row, three sections" invariant in `AGENTS.md` when implemented.
+- **Files tree** scrolls and follows the VS Code explorer look.
+- **Open:** a project sort control. Manual / Recent / Name is acceptable; a flat
+  all-sessions list is not decided (conflicts with the sessionless sidebar).
+
 ## 2026-10-04 — Shell navigation, vocabulary, close/restore (PER-6)
 
 Decided with the owner.

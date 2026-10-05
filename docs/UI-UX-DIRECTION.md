@@ -1120,3 +1120,28 @@ A new user should be able to say:
 > “These are my projects. This one has a separate copy for an experiment. These tabs are what I left open. That question mark needs an answer. Opening a file is safe; Run starts something. Closing a running terminal stops it. Quitting Perch does not close my work.”
 
 If a future feature requires a more complicated explanation before these six statements remain true, it belongs behind an explicit advanced action—or outside Perch.
+
+---
+
+## Appendix D. Visual polish pass (2026-10-05)
+
+Findings from a screenshot review of the shipped app. Each item says whether the
+doc already specified it (a deviation to fix) or is new. Decisions are in
+[DECISIONS.md](DECISIONS.md) (2026-10-05); `AGENTS.md` invariants are rewritten in
+the slice that implements each.
+
+| # | Finding | Status | Spec |
+|---|---|---|---|
+| D1 | Panes and tabs are boxed: every Dockview group has a 1px border and the active tab is a bordered pill. | Deviation from §11 ("one subtle 1px separator", "no pill-card"). | Groups are borderless. A single 1px sash separates split groups; the active group is marked by tab/header weight or fill, never a border. The active tab is a neutral fill with label weight, no outline. The terminal and the strip share one surface. |
+| D2 | Workspace rows show a branch subtitle, a `dirty` label and an indented session list. | Deviation from §5 (one line, no subtitles) and the approved sessionless sidebar. | Follows §5 row anatomy. Dirty is a small neutral marker, not a word. |
+| D3 | Local host card (`LOCAL`, hostname, OS, path) and a full-width `+ New session` button sit above the projects. | Deviation from §11 ("What disappears") and §5 inventory. | Hidden on local-only installs. New work starts from a project's menu or the tab strip `+`. |
+| D4 | `Chats ⌄` sits on a different baseline from its `✎` glyph; the glyph is a text/emoji icon. | Alignment is new; icon is a deviation from §11 ("no emoji action buttons"). | Header row is one flex line, vertically centred, with a 16px line icon. |
+| D5 | The `↻` Refresh button on the Projects header. | New. Refresh is not a user task (the snapshot is pushed). | Removed. Replaced by a view/sort control (see D6). |
+| D6 | Sort the project list. | New, and open: "all sessions laid out flat" contradicts §5's stable order and the approved sessionless sidebar. | Open question. Safe subset: sort projects by Manual (default, drag order), Recent, Name. A flat sessions list is not specified. |
+| D7 | `+ Add` expands a folder browser inside the sidebar. | Partly §4A (native picker on desktop, host browser on web). | Desktop with a local host: native folder dialog. Otherwise (web, remote host): the directory browser in a modal dialog, never inline. The empty-state "Register folder" and Home "Add project" use the same flow. |
+| D8 | Files / Git switch lives inside the drawer, below the top row. | New. | Files and Git move to the top row, in the drawer-toggle section, so the drawer is only content. Phone/compact keeps its own controls. |
+| D9 | The Files tree does not scroll. | Bug against §7 (lazy-loaded tree). | The tree is the scroll container (`min-h-0` + `overflow-y-auto`). |
+| D10 | Files tree styling. | New. | VS Code explorer: 22px rows, chevrons, indent guides, quiet file-type icons, selection fill, no per-row borders. |
+
+Not done here: the system-sans chrome font is still undecided (DECISIONS.md,
+"Undecided — trial first").
