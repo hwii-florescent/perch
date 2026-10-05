@@ -257,6 +257,10 @@ there, not here.
   - Shared UI primitives live in `components/ui/` (`Chevron`, `Dialog`,
     `menuPanel`/`menuItem`, `GHOST_BUTTON`): use them, don't restyle per
     call site. See UI-UX-DIRECTION.md Appendix E.
+  - Settings is a full-window page (`SettingsPage.tsx`, opened by
+    `settingsOpen`), not a popup: left section list, right cards of
+    `SettingRow`s. The app stays mounted under it. Add project picks its
+    host in the dialog.
   - Menus offer only what perch does. Don't add Orca items with no perch
     feature behind them (status columns, groups, icons, mark unread).
 - **Store:** anything that reads or replaces `messages` calls

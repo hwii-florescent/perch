@@ -1162,3 +1162,6 @@ sites use it rather than restyling.
 | `Dialog` | Modal shell for forms and pickers: dimmed backdrop, one borderless panel, Escape or backdrop closes. Add project, and later any picker, use it. Confirmations use `ConfirmDialog`. |
 | Add project | Orca/VS Code pattern: a dialog, not an inline form. The desktop app adds an explicit "Browse folder…" button that opens the OS dialog; nothing opens an OS dialog automatically. |
 | Glyphs | 16px line SVG icons only; no emoji or text glyphs as icons. |
+| Settings | A full-window **page**, not a popup (`SettingsPage`): a section list on the left (General, Appearance, Agents, Terminal, Notifications, SSH hosts, Devices), the chosen section on the right as quiet headings above rounded cards. The app stays mounted underneath so terminals keep running. Escape or "Back to app" returns. |
+| `SettingsGroup` / `SettingRow` / `Switch` | One setting is a row: label and description left, control right, hairline between rows; booleans are a `Switch` (a real checkbox underneath). New settings use these, never a bare checkbox or ad-hoc section markup. |
+| Add project host | The Add project dialog shows a **Host** select (This machine, then each enabled SSH host; unreachable hosts are disabled) once any host exists. A local-only install shows no select. After a successful add the sidebar follows the project to its host. |
