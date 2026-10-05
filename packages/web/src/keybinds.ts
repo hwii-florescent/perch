@@ -428,9 +428,18 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       }
     }
 
+    // Space activates a focused button on keyup too. The leader must not
+    // re-click the tab left focused after a keyboard-only tab switch.
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ") &&
+          (!isEditableTarget(e.target) || inTerminal(e.target))) e.preventDefault();
+    }
+
     document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keyup", handleKeyUp);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
       disarm();
       disarmResize();
     };

@@ -26,9 +26,10 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // Only runs when no core is listening yet, so a fresh boot also gets a
-    // fresh DB (rows from earlier runs would satisfy sidebar assertions).
-    command: `rm -rf '${STATE}' && cargo run -p perch-core -- --port ${PORT} --headless`,
+    // Stop the detached test daemon before deleting its socket directory.
+    // Otherwise a second run leaves the live daemon unreachable (PTY opens hang).
+    // Only runs when no core is listening; existing cores retain their state.
+    command: `pkill -f '__perchd serve --dir ${STATE}/perchd$'; rm -rf '${STATE}' && cargo run -p perch-core -- --port ${PORT} --headless`,
     cwd: path.resolve(__dirname, ".."),
     url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: true,

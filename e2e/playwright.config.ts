@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
 import * as os from "os";
+import { CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 // Every core the suite starts (the webServers and the specs' own spawns,
 // which pass process.env through) gets a test PTY daemon. The default
@@ -9,6 +10,8 @@ import * as os from "os";
 process.env.PERCHD_DIR ??= "/tmp/perch-e2e-perchd";
 // Likewise settings: never read or write the user's ~/.perch/settings.json.
 process.env.PERCH_SETTINGS ??= "/tmp/perch-e2e-settings.json";
+// Every core this config starts (including spec-owned spawns) inherits Haiku.
+process.env.ANTHROPIC_MODEL = CHEAP_CLAUDE_MODEL;
 
 export default defineConfig({
   testDir: ".",

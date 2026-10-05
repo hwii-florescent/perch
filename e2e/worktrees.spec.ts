@@ -379,8 +379,12 @@ test.describe("Git worktrees", () => {
       await entry.locator('[data-testid^="worktree-open-"]').click();
       await expect(menu).not.toBeVisible({ timeout: 5000 });
       await expect(page.locator(".status-item--cwd")).toHaveText(expectedPath, { timeout: 20000 });
+      // The cwd arrives before the CLI attaches and makes its session listed.
+      // Do not switch away while its first terminal is still being mounted.
+      await expect(page.getByTestId("persistent-agent-terminal")).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
       const id = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
       expect(id).toBeTruthy();
+      await expect(page.getByTestId(`tab-${id}`)).toBeVisible();
       return id as string;
     }
     const alphaSession = await openFrom("wt-alpha", alphaPath);
