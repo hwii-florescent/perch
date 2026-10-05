@@ -97,6 +97,13 @@ function readCollapsed(): string[] {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 
+type ProjectSort = "recent" | "name";
+const SORT_KEY = "perch.sidebar.projectSort";
+const SORT_LABELS: Record<ProjectSort, string> = { recent: "Recently used", name: "Name" };
+function readSort(): ProjectSort {
+  try { return localStorage.getItem(SORT_KEY) === "name" ? "name" : "recent"; } catch { return "recent"; }
+}
+
 function workspacesForProject(
   workspaces: WorkspaceRecord[],
   projectId: string,
@@ -305,6 +312,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     ];
   }
 
+  const [sort, setSort] = useState<ProjectSort>(readSort);
+  function chooseSort(next: ProjectSort) {
+    setSort(next);
+    try { localStorage.setItem(SORT_KEY, next); } catch { /* per-viewer convenience */ }
+  }
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
 
@@ -327,9 +339,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       .filter((project) => project.hostId === activeHostId)
       .sort((a, b) => {
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-        return b.updatedAt - a.updatedAt;
+        return sort === "name" ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt;
       }),
-    [activeHostId, projects],
+    [activeHostId, projects, sort],
   );
   const chatsProject = hostProjects.find(isChatsProject);
   const visibleProjects = hostProjects.filter((project) => !isChatsProject(project));
@@ -395,12 +407,15 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             <div className="group/ph flex items-center pr-[0.35rem]">
               <button
                 type="button"
-                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-left text-[0.76rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
+                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] py-[0.4rem] pr-[0.55rem] pl-[0.65rem] text-left text-[0.76rem] leading-[1.3rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
                 data-testid="workspace-chats-collapse"
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
               >
-                Chats <span aria-hidden="true">{chatsCollapsed ? "›" : "⌄"}</span>
+                Chats
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d={chatsCollapsed ? "M4.5 2.5 8 6l-3.5 3.5" : "M2.5 4.5 6 8l3.5-3.5"} />
+                </svg>
               </button>
               {chats.length > 0 && (
                 <button
@@ -433,7 +448,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   onNavigate?.();
                 }}
               >
-                ✎
+                <svg className="mx-auto" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5V8M11.2 2.8a1.2 1.2 0 0 1 1.7 1.7L8.5 8.9 6 9.5l.6-2.5z" />
+                </svg>
               </button>
             </div>
             {!chatsCollapsed && chats.length > 0 && (
@@ -491,13 +508,21 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         <div className="flex shrink-0 items-center gap-[0.2rem]">
           <button
             type="button"
-            className={`h-[1.6rem] w-[1.6rem] cursor-pointer rounded-ui p-0 text-[0.95rem] leading-none text-subtext-0 [background:transparent] [border:1px_solid_transparent] [font-family:inherit] hover:border-overlay-0 hover:text-fg focus-visible:border-overlay-0 focus-visible:text-fg [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]`}
-            title="Refresh projects"
-            aria-label="Refresh projects"
-            data-testid="workspace-refresh"
-            onClick={() => fetchWorkspaceSnapshot(activeHostId)}
+            className={`grid h-[1.6rem] w-[1.6rem] cursor-pointer place-items-center rounded-ui p-0 text-subtext-0 [background:transparent] [border:0] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]`}
+            title="Sort projects"
+            aria-label="Sort projects"
+            aria-haspopup="menu"
+            data-testid="workspace-sort"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Sort projects", items: (Object.keys(SORT_LABELS) as ProjectSort[]).map((key) => (
+                { label: `${sort === key ? "✓ " : "   "}${SORT_LABELS[key]}`, testId: `workspace-sort-${key}`, onSelect: () => chooseSort(key) }
+              )) });
+            }}
           >
-            ↻
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3" />
+            </svg>
           </button>
           <button
             type="button"
