@@ -15,7 +15,9 @@ import { openSessionPaneMenu } from "../dockview/DockviewShell";
 // overlay-1 in every theme (themes.test.ts). The palettes set the absolute level.
 // The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
-const TAB = `shrink-0 rounded-ui bg-transparent px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`;
+const TAB = `min-w-0 flex-1 truncate rounded-ui bg-transparent text-left px-3 py-1 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap text-subtext-0 [border:0] [font-family:inherit] hover:bg-surface-0 hover:text-fg ${FOCUS}`;
+// Browser-style: tabs share the strip equally, between a floor and a ceiling; past the floor the strip scrolls.
+const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0";
 const TAB_ACTIVE = "bg-surface-1 text-fg hover:bg-surface-1";
 // Members of a split set (shown side by side in the canvas) share a bottom rule.
 const TAB_SPLIT = "shadow-[inset_0_-2px_0_var(--overlay-1)]";
@@ -171,7 +173,7 @@ export function TabBar() {
           }}
         />
       ) : (
-        <span key={s.id} className="relative inline-flex shrink-0">
+        <span key={s.id} className={TAB_SLOT}>
         <button
           type="button"
           className={cn(
@@ -275,7 +277,7 @@ function ResourceTabButton({ tab, id, active, split, dragging, dragOver, onDragS
   const name = review ? "Changes" : tab.path.split("/").pop() || tab.path;
   const testId = review ? `review-tab-${tab.workspaceId}` : `file-tab-${tab.path}`;
   return (
-    <span className="relative inline-flex shrink-0">
+    <span className={TAB_SLOT}>
       <button
         type="button"
         className={cn(
@@ -299,7 +301,7 @@ function ResourceTabButton({ tab, id, active, split, dragging, dragOver, onDragS
           useSplitSets.getState().openMenu(id, e.clientX, e.clientY);
         }}
       >
-        <span className="inline-block max-w-[14rem] truncate align-bottom">{name}</span>
+        <span className="block truncate">{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>
       <button

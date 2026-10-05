@@ -33,6 +33,10 @@
 .terminal__surface .xterm { height: 100%; }
 .terminal__surface .xterm:not(.allow-transparency) .xterm-viewport { background-color: transparent; }
 
+/* xterm draws a decoration ruler beside the scrollbar once `scrollbar.width`
+ * is set (xtermSetup.ts); perch has no decorations, only a bright edge line. */
+.terminal__surface .xterm-decoration-overview-ruler { display: none; }
+
 .terminal--persistent { flex-direction: column; }
 .terminal__toolbar {
   display: flex;

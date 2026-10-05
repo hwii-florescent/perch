@@ -183,6 +183,9 @@ export function createPerchTerminal(
     // Shift+Enter and friends arrive distinct from Enter once a CLI opts in.
     // Shells that never opt in still get plain `\r`.
     vtExtensions: { kittyKeyboard: true },
+    // A thin scrollbar: xterm's default is 14px, which is also the gutter
+    // FitAddon takes out of the grid.
+    scrollbar: { width: 6 },
   };
   // Cursor shape/blink: same discipline as the palette below. Only set when
   // the profile actually says something; absent means "leave xterm's own
