@@ -97,11 +97,11 @@ function readCollapsed(): string[] {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 
-type ProjectSort = "recent" | "name";
-const SORT_KEY = "perch.sidebar.projectSort";
-const SORT_LABELS: Record<ProjectSort, string> = { recent: "Recently used", name: "Name" };
-function readSort(): ProjectSort {
-  try { return localStorage.getItem(SORT_KEY) === "name" ? "name" : "recent"; } catch { return "recent"; }
+type Organize = "project" | "list";
+const ORGANIZE_KEY = "perch.sidebar.organize";
+const ORGANIZE_LABELS: Record<Organize, string> = { project: "By project", list: "In one list" };
+function readOrganize(): Organize {
+  try { return localStorage.getItem(ORGANIZE_KEY) === "list" ? "list" : "project"; } catch { return "project"; }
 }
 
 function workspacesForProject(
@@ -312,10 +312,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     ];
   }
 
-  const [sort, setSort] = useState<ProjectSort>(readSort);
-  function chooseSort(next: ProjectSort) {
-    setSort(next);
-    try { localStorage.setItem(SORT_KEY, next); } catch { /* per-viewer convenience */ }
+  const [organize, setOrganize] = useState<Organize>(readOrganize);
+  function chooseOrganize(next: Organize) {
+    setOrganize(next);
+    try { localStorage.setItem(ORGANIZE_KEY, next); } catch { /* per-viewer convenience */ }
   }
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
@@ -351,9 +351,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       .filter((project) => project.hostId === activeHostId)
       .sort((a, b) => {
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-        return sort === "name" ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt;
+        return b.updatedAt - a.updatedAt;
       }),
-    [activeHostId, projects, sort],
+    [activeHostId, projects],
   );
   const chatsProject = hostProjects.find(isChatsProject);
   const visibleProjects = hostProjects.filter((project) => !isChatsProject(project));
@@ -408,6 +408,48 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     }
     onNavigate?.();
   }
+
+  // "In one list": every session on this host, projects and Chats alike, newest first.
+  const allSessions = useMemo(
+    () => sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt),
+    [sessions, activeHostId],
+  );
+  const listView = (
+    <div className="px-[0.4rem] py-[0.2rem]" data-testid="workspace-session-list">
+      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}
+      {allSessions.map((session) => {
+        const owner = projects.find((project) => project.id === session.projectId);
+        return (
+          <div className="group/row flex items-center" key={session.id}>
+            <button
+              type="button"
+              className={cn(SESSION, "px-[0.3rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
+              data-testid={`workspace-session-${session.id}`}
+              title={session.cwd}
+              onClick={() => {
+                switchSession(session.id);
+                onNavigate?.();
+              }}
+            >
+              <StatusDot session={session} />
+              <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
+              {owner && !isChatsProject(owner) && <span className="shrink-0 text-[0.62rem] text-overlay-1">{owner.name || basename(owner.path)}</span>}
+            </button>
+            <button
+              type="button"
+              className={SESSION_CLOSE}
+              data-testid={`workspace-session-close-${session.id}`}
+              title="Close chat"
+              aria-label={`Close ${session.title || "chat"}`}
+              onClick={() => deleteSession(session.id)}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   // After the projects, inside their scrolling list (or after the empty state).
   const chatsSection = chatsProject && (() => {
@@ -512,23 +554,25 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     >
       <div className="flex shrink-0 items-center justify-between gap-[0.45rem] border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_72%,transparent)] pt-[0.55rem] pr-[0.55rem] pb-[0.45rem] pl-[0.65rem]">
         <div className="flex min-w-0 items-baseline gap-[0.45rem]">
-          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase">Projects</span>
+          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase">{organize === "list" ? "Chats" : "Projects"}</span>
           <span className="text-[0.65rem] whitespace-nowrap text-subtext-0">
-            {visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
+            {organize === "list"
+              ? `${allSessions.length} chat${allSessions.length === 1 ? "" : "s"}`
+              : visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-[0.2rem]">
           <button
             type="button"
             className={`grid h-[1.6rem] w-[1.6rem] cursor-pointer place-items-center rounded-ui p-0 text-subtext-0 [background:transparent] [border:0] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]`}
-            title="Sort projects"
-            aria-label="Sort projects"
+            title="Organize sidebar"
+            aria-label="Organize sidebar"
             aria-haspopup="menu"
-            data-testid="workspace-sort"
+            data-testid="workspace-organize"
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
-              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Sort projects", items: (Object.keys(SORT_LABELS) as ProjectSort[]).map((key) => (
-                { label: `${sort === key ? "✓ " : "   "}${SORT_LABELS[key]}`, testId: `workspace-sort-${key}`, onSelect: () => chooseSort(key) }
+              setMenu({ x: rect.left, y: rect.bottom + 4, label: "Organize sidebar", items: (Object.keys(ORGANIZE_LABELS) as Organize[]).map((key) => (
+                { label: `${organize === key ? "✓ " : "   "}${ORGANIZE_LABELS[key]}`, testId: `workspace-organize-${key}`, onSelect: () => chooseOrganize(key) }
               )) });
             }}
           >
@@ -589,7 +633,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
 
-      {visibleProjects.length === 0 && snapshot?.state !== "loading" && (
+      {organize === "project" && visibleProjects.length === 0 && snapshot?.state !== "loading" && (
         <div className="grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0">
           <span className="text-[1.3rem] leading-none text-accent" aria-hidden="true">＋</span>
           <strong className="text-[0.77rem] text-fg">Register a project</strong>
@@ -602,6 +646,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto py-[0.28rem]" data-testid="project-list">
+          {organize === "list" ? listView : <>
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
@@ -916,6 +961,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             );
           })}
           {chatsSection}
+          </>}
       </div>
       {menu && <RowMenu {...menu} onClose={() => setMenu(null)} />}
       {newSession && (

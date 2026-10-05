@@ -26,6 +26,19 @@ test.describe("Perch sidebar", () => {
     await expect(page.getByTestId(`workspace-session-${id}`)).toHaveClass(/workspace-entry__session--active/);
   });
 
+  test("2b. Organize sidebar: in one list shows every session flat", async ({ page }) => {
+    await open(page);
+    const id = await startChat(page);
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-organize-list").click();
+    await expect(page.getByTestId("workspace-session-list").getByTestId(`workspace-session-${id}`)).toBeVisible();
+    await expect(page.getByTestId("workspace-chats")).toHaveCount(0);
+    await page.getByTestId("workspace-organize").click();
+    await page.getByTestId("workspace-organize-project").click();
+    await expect(page.getByTestId("workspace-session-list")).toHaveCount(0);
+    await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
+  });
+
   test("3. a session is titled after its first prompt", async ({ page }) => {
     await open(page);
     const id = await startChat(page, "claude");

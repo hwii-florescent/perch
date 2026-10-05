@@ -21,8 +21,11 @@ Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md
 - **Files / Git switch moves to the top row** beside the drawer toggle. Replaces
   the "one top row, three sections" invariant in `AGENTS.md` when implemented.
 - **Files tree** scrolls and follows the VS Code explorer look.
-- **Open:** a project sort control. Manual / Recent / Name is acceptable; a flat
-  all-sessions list is not decided (conflicts with the sessionless sidebar).
+- **Organize sidebar** (header menu): By project (default) or In one list
+  (every session, projects and Chats alike, as a flat list, newest first). This
+  is a view choice, not a new data model: sessions stay under their projects.
+- **Backlog:** "Sort chats by" (Last updated / Manual order). Needs a
+  last-updated field on `SessionSummary` and drag-and-drop.
 
 ## 2026-10-04 — Shell navigation, vocabulary, close/restore (PER-6)
 
