@@ -69,7 +69,7 @@ test.describe("V-01 project/workspace registration", () => {
       await page.getByTestId("workspace-add-form").getByTestId("project-path-input").fill(`${FIRST_PATH}-missing`);
       await page.getByTestId("workspace-project-name").fill(FIRST_NAME);
       await page.getByTestId("workspace-add-form").getByTestId("dir-browser-use").click();
-      const error = page.locator(".workspace-overview__add-form").getByRole("alert").filter({ hasText: "project path is not an existing directory" });
+      const error = page.getByTestId("workspace-add-form").getByRole("alert").filter({ hasText: "project path is not an existing directory" });
       await expect(error).toBeVisible({ timeout: 15000 });
       await expect(page.getByTestId("workspace-add-form").getByTestId("project-path-input")).toHaveValue(`${FIRST_PATH}-missing`);
       await expect(page.getByTestId("workspace-project-name")).toHaveValue(FIRST_NAME);
@@ -83,8 +83,8 @@ test.describe("V-01 project/workspace registration", () => {
       })();
       const first = page.getByTestId(`workspace-project-${firstId}`);
       await expect(page.locator(`[data-testid^="workspace-entry-"]`).first()).toBeVisible();
-      await first.getByRole("button").first().click();
-      await expect(first.getByRole("button").first()).toHaveAttribute("aria-pressed", "true");
+      // The project header only collapses; a workspace row focuses the project.
+      await first.locator('[data-testid^="workspace-entry-"] button').first().click();
       await expect(page.locator(".workspace-entry__button--active")).toHaveCount(1);
 
       const secondId = await addProject(page, SECOND_PATH, SECOND_NAME);
@@ -97,7 +97,6 @@ test.describe("V-01 project/workspace registration", () => {
       await dismissOnboarding(page);
       await expect(page.getByTestId(`workspace-project-${firstId}`)).toBeVisible({ timeout: 15000 });
       await expect(page.getByTestId(`workspace-project-${secondId}`)).toBeVisible({ timeout: 15000 });
-      await expect(page.getByTestId(`workspace-project-${firstId}`).getByRole("button").first()).toHaveAttribute("aria-pressed", "true");
       await expect(page.locator(".workspace-entry__button--active")).toHaveCount(1);
       await page.screenshot({ path: testInfo.outputPath("v01-desktop-reload.png"), fullPage: true });
 
