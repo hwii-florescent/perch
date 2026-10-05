@@ -9,6 +9,7 @@ import {
   type WorkspaceTreeState,
 } from "../filesystemStore";
 import { cn } from "../lib/cn";
+import { Chevron } from "./ui/chevron";
 
 // The legacy rules set `font:` shorthands with an undefined variable and with `inherit`
 // inside the shorthand (invalid), so text here inherits the page font and buttons keep the browser's default:
@@ -100,9 +101,7 @@ function FileTree({
               title={entry.path}
               onClick={() => (isDirectory ? onToggle(entry) : onOpenFile(entry))}
             >
-              <svg className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={isOpen ? "M4.5 6.5 8 10l3.5-3.5" : "M6.5 4.5 10 8l-3.5 3.5"} />
-              </svg>
+              <Chevron open={isOpen} size={16} className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} />
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
               {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" aria-label="symlink">↗</span>}
               {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}

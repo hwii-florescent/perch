@@ -1,10 +1,12 @@
-import { Fragment, type ReactElement, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
-import { ICON_BUTTON } from "./ui/icon-button";
+import { GHOST_BUTTON, ICON_BUTTON } from "./ui/icon-button";
+import { Chevron } from "./ui/chevron";
+import { Dialog } from "./ui/dialog";
 import { cn } from "../lib/cn";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -320,21 +322,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
 
-  // The desktop app registers a local folder through the OS picker; the web
-  // build, and any remote host, use the directory-browser dialog.
-  const openAddProject = useEffectEvent(async () => {
-    const invoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
-    if (!invoke || activeHostId !== "local") return setAddOpen((open) => !open);
+  // The desktop app can also pick a local folder with the OS dialog, but only
+  // when asked for inside the Add project dialog (Orca's "Browse folder").
+  const tauriInvoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+  async function browseNative() {
     try {
-      const picked = await invoke("plugin:dialog|open", { options: { directory: true, title: "Add project" } });
+      const picked = await tauriInvoke?.("plugin:dialog|open", { options: { directory: true, title: "Add project" } });
       if (typeof picked === "string") submitProject(picked);
-    } catch {
-      setAddOpen(true);
-    }
-  });
+    } catch { /* cancelled or unavailable: the directory browser below still works */ }
+  }
   // The home screen's "Add project" (NoSessionPanel.tsx) starts the same flow.
   useEffect(() => {
-    const open = () => void openAddProject();
+    const open = () => setAddOpen(true);
     window.addEventListener(ADD_PROJECT_EVENT, open);
     return () => window.removeEventListener(ADD_PROJECT_EVENT, open);
   }, []);
@@ -378,20 +377,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     const agent = state.settings?.emptyWorkspaceAgent;
     if (agent) createSessionOnHost(hostId, path, agent);
     else state.showWorkspaceHome();
-  }
-
-  function navigateToProject(projectId: string) {
-    focusWorkspaceProject(projectId);
-    const nextSession = sessionsForProject(projectId)[0];
-    if (nextSession) {
-      if (nextSession.id !== sessionId) switchSession(nextSession.id);
-    } else {
-      const state = usePerchStore.getState();
-      const project = projects.find((candidate) => candidate.id === projectId);
-      const workspace = workspaces.find((candidate) => candidate.id === state.activeWorkspaceId);
-      if (project) openEmptyWorkspace(project.hostId, workspace?.path ?? project.path);
-    }
-    onNavigate?.();
   }
 
   function navigateToWorkspace(workspaceId: string) {
@@ -467,9 +452,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 onClick={() => toggleCollapsed(chatsProject.id)}
               >
                 Chats
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d={chatsCollapsed ? "M4.5 2.5 8 6l-3.5 3.5" : "M2.5 4.5 6 8l3.5-3.5"} />
-                </svg>
+                <Chevron open={!chatsCollapsed} />
               </button>
               {chats.length > 0 && (
                 <button
@@ -564,7 +547,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         <div className="flex shrink-0 items-center gap-[0.2rem]">
           <button
             type="button"
-            className={`grid h-[1.6rem] w-[1.6rem] cursor-pointer place-items-center rounded-ui p-0 text-subtext-0 [background:transparent] [border:0] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]`}
+            className={cn(GHOST_BUTTON, "grid h-[1.6rem] w-[1.6rem] place-items-center p-0 [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
             title="Organize sidebar"
             aria-label="Organize sidebar"
             aria-haspopup="menu"
@@ -582,45 +565,42 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </button>
           <button
             type="button"
-            className={`cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-accent [font-family:inherit] hover:border-accent focus-visible:border-accent [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]`}
+            className={cn(GHOST_BUTTON, "px-[0.42rem] py-[0.22rem] text-[0.68rem] font-bold text-fg [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
-            onClick={() => void openAddProject()}
+            onClick={() => setAddOpen((open) => !open)}
           >
             + Add
           </button>
         </div>
       </div>
 
-      {addOpen && createPortal(
-        <div
-          className="fixed inset-0 z-[2100] flex items-center justify-center bg-[rgba(0,0,0,0.55)]"
-          onMouseDown={(event) => { if (event.target === event.currentTarget) setAddOpen(false); }}
-          onKeyDown={(event) => { if (event.key === "Escape") setAddOpen(false); }}
-        >
-          <div className="workspace-overview__add-form grid max-h-[85vh] w-[min(30rem,92vw)] gap-[0.6rem] overflow-y-auto rounded-ui bg-panel-bg p-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]" role="dialog" aria-modal="true" aria-label="Add project" data-testid="workspace-add-form">
-            <h2 className="m-0 text-[0.9rem] font-semibold text-fg">Add project</h2>
-            <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
-              <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
-              <input
-                className="w-full min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Project name"
-                data-testid="workspace-project-name"
-              />
-            </label>
-            {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
-            <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
-            {createRequest?.status === "pending" && <span className="text-[0.7rem] text-subtext-0" role="status">Registering folder…</span>}
-            {createRequest?.status === "error" && <span className="text-[0.7rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
-            <div className="flex justify-end">
-              <button type="button" className={`cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.6rem] py-[0.3rem] text-[0.75rem] text-subtext-0 [font-family:inherit] hover:text-fg disabled:cursor-not-allowed disabled:opacity-[0.45] ${FOCUS}`} disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
-                Cancel
-              </button>
-            </div>
+      {addOpen && (
+        <Dialog title="Add project" onClose={() => setAddOpen(false)} testId="workspace-add-form">
+          <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
+            <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
+            <input
+              className="w-full min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:border-overlay-1 focus:outline-none"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Project name"
+              data-testid="workspace-project-name"
+            />
+          </label>
+          {tauriInvoke && activeHostId === "local" && (
+            <button type="button" className={cn(GHOST_BUTTON, "px-[0.6rem] py-[0.4rem] text-left text-[0.8rem] text-fg")} data-testid="workspace-add-browse-native" onClick={() => void browseNative()}>
+              Browse folder…
+            </button>
+          )}
+          {/* Same folder picker as "+ New session"; its "Use this folder" registers. */}
+          <DirectoryBrowser hostId={activeHostId} onUseFolder={submitProject} />
+          {createRequest?.status === "pending" && <span className="text-[0.7rem] text-subtext-0" role="status">Registering folder…</span>}
+          {createRequest?.status === "error" && <span className="text-[0.7rem] text-red" role="alert">{createRequest.error || "Could not register this folder."}</span>}
+          <div className="flex justify-end">
+            <button type="button" className={cn(GHOST_BUTTON, "px-[0.6rem] py-[0.3rem] text-[0.75rem]", FOCUS)} disabled={createRequest?.status === "pending"} onClick={() => setAddOpen(false)}>
+              Cancel
+            </button>
           </div>
-        </div>,
-        document.body,
+        </Dialog>
       )}
 
       {snapshot?.state === "loading" && (
@@ -695,27 +675,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                     "flex-1 cursor-pointer gap-[0.45rem] bg-transparent pt-2 pr-[0.55rem] pb-[0.45rem] pl-[0.65rem] text-fg",
                     FOCUS,
                   )}
-                  aria-pressed={projectActive}
-                  onClick={() => navigateToProject(project.id)}
+                  data-testid={`workspace-project-collapse-${project.id}`}
+                  aria-expanded={!projectCollapsed}
+                  onClick={() => toggleCollapsed(project.id)}
                   title={project.path}
                 >
                   <span className="w-3 shrink-0 text-center text-[0.65rem] text-subtext-0" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
-                  <span className={BODY}>
+                  <span className="grid min-w-0 gap-[0.1rem]">
                     <strong className={STRONG}>{project.name || basename(project.path)}</strong>
                   </span>
+                  <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />
                 </button>
                 )}
-                <button
-                  type="button"
-                  className={PROJECT_ICON}
-                  data-testid={`workspace-project-collapse-${project.id}`}
-                  aria-expanded={!projectCollapsed}
-                  title={projectCollapsed ? "Show workspaces and sessions" : "Collapse"}
-                  aria-label={projectCollapsed ? "Expand project" : "Collapse project"}
-                  onClick={() => toggleCollapsed(project.id)}
-                >
-                  {projectCollapsed ? "›" : "⌄"}
-                </button>
                 <button
                   type="button"
                   className={PROJECT_ICON}

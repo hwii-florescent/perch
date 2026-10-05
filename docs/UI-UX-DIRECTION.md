@@ -1145,3 +1145,20 @@ the slice that implements each.
 
 Not done here: the system-sans chrome font is still undecided (DECISIONS.md,
 "Undecided — trial first").
+
+---
+
+## Appendix E. Shared UI components and conventions
+
+One look per control. Each lives in `packages/web/src/components/ui/`; call
+sites use it rather than restyling.
+
+| Component | Rule |
+|---|---|
+| `Chevron` | The only disclosure arrow, down when open and right when collapsed, in `currentColor`. Used by Chats, project headers and the Files tree. Never a text glyph (`⌄`, `›`, `▾`). |
+| Collapsible header | The **whole row** toggles, not just the chevron. The chevron sits right after the label. Row actions (`⋯`, `+`) are separate buttons at the end and never toggle. |
+| `menuPanel` / `menuItem` | Every popup menu. The panel is the hover fill (`surface-1`), **no border**, a shadow. Items hover one step lighter. Never an accent or white border. |
+| `GHOST_BUTTON` | Text and icon buttons (`+ Add`, sort/organize, header actions). No fill and no border of its own and no accent colour; the hover fill is the only affordance. A filled button is reserved for the single primary action of a dialog. |
+| `Dialog` | Modal shell for forms and pickers: dimmed backdrop, one borderless panel, Escape or backdrop closes. Add project, and later any picker, use it. Confirmations use `ConfirmDialog`. |
+| Add project | Orca/VS Code pattern: a dialog, not an inline form. The desktop app adds an explicit "Browse folder…" button that opens the OS dialog; nothing opens an OS dialog automatically. |
+| Glyphs | 16px line SVG icons only; no emoji or text glyphs as icons. |

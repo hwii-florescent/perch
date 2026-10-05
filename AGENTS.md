@@ -221,9 +221,10 @@ there, not here.
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any
     folder" picker, and perch never registers a project implicitly ($HOME
-    included); `+ Add` is the only way a folder becomes a project (the desktop app's
-    native folder dialog for the local host, else a modal directory browser;
-    never an inline sidebar form). A session
+    included); `+ Add` is the only way a folder becomes a project (a modal `Dialog`
+    with the directory browser; the desktop app adds a "Browse folder…"
+    button for the local host that opens the OS dialog only when clicked;
+    never an inline sidebar form, never an automatic OS dialog). A session
     stays in the project it started in whatever its terminal cd's into.
   - Terminals behave like Ghostty/iTerm2: perch must never swallow or
     re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
@@ -244,8 +245,8 @@ there, not here.
     no footer button). The sidebar and drawer widths are user-resizable by
     dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
     `perch.layout.*`).
-  - Sidebar rows stay quiet: a project header is its name plus ⌄ (collapse,
-    per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
+  - Sidebar rows stay quiet: a project header is its name plus a `Chevron`
+    (the whole row collapses it, per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,
     Copy path/branch, Pin, Files, Git, Hide, Delete worktree) are in its
     right-click menu; only the phone switcher, which has no right-click,
@@ -253,6 +254,9 @@ there, not here.
     attention (pinned, dirty, sleeping), never "ready".
   - The status bar has no keybind hint, and ctx/cost appear only when a
     turn reports them. The Ctrl+Space leader still works (`?` lists it).
+  - Shared UI primitives live in `components/ui/` (`Chevron`, `Dialog`,
+    `menuPanel`/`menuItem`, `GHOST_BUTTON`): use them, don't restyle per
+    call site. See UI-UX-DIRECTION.md Appendix E.
   - Menus offer only what perch does. Don't add Orca items with no perch
     feature behind them (status columns, groups, icons, mark unread).
 - **Store:** anything that reads or replaces `messages` calls
