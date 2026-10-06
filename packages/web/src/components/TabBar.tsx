@@ -11,6 +11,7 @@ import { useWorkspaceFilesStore } from "../filesystemStore";
 import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import { segment } from "./ui/segment";
 import { NEW_TAB_EVENT } from "../appEvents";
+import { requestCloseSession } from "../closeGuard";
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
 // Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
@@ -59,7 +60,6 @@ export function TabBar() {
   const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
-  const deleteSession = usePerchStore((s) => s.deleteSession);
   const fileTabs = useFileTabs((s) => s.tabs);
   const activeFile = useFileTabs((s) => s.active);
   const showSession = useFileTabs((s) => s.showSession);
@@ -225,7 +225,7 @@ export function TabBar() {
           data-testid={`tab-close-${s.id}`}
           title="Close session"
           aria-label={`Close ${sessionLabel(s)}`}
-          onClick={() => deleteSession(s.id)}
+          onClick={() => requestCloseSession(s.id)}
         >
           ×
         </button>

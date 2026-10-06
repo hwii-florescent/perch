@@ -3,8 +3,7 @@
  *
  * Shown once, on first launch (gated by `onboarding.ts`'s localStorage
  * flag) — a brief orientation covering what perch is, how to start (add a
- * project, then `+`), the direct shortcuts and the browser's leader key
- * (`Ctrl+Space`), `Cmd+/` or `?` for the full keybind help, `Cmd+P` (or
+ * project, then `+`), the direct shortcuts and the `Ctrl+Space` leader, `Cmd+/` or `?` for the full keybind help, `Cmd+P` (or
  * `Ctrl+K` outside a terminal) for the Navigator, and a link-style action to
  * open Settings. Dismissing it (the
  * only way to close it — no backdrop-click-to-dismiss, so a curious click
@@ -60,8 +59,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
           <li>
             Use <kbd className={KBD}>Cmd+T</kbd> for a new tab,{" "}
             <kbd className={KBD}>Cmd+D</kbd> to split, <kbd className={KBD}>Cmd+1</kbd>…
-            to jump tabs. In a browser (which keeps those keys) press{" "}
-            <kbd className={KBD}>Ctrl+Space</kbd> then a letter instead.
+            to jump tabs, <kbd className={KBD}>Cmd+Shift+T</kbd> to reopen a closed one.
           </li>
           <li>
             Press <kbd className={KBD}>Cmd+/</kbd> or <kbd className={KBD}>?</kbd> any time to see the full

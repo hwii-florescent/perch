@@ -10,10 +10,13 @@
  *    as in Ghostty/GNOME Terminal. Each entry gives the macOS and the other
  *    platforms' spec; `null` means "no direct key there" (the leader still
  *    reaches it). The help modal is generated from this table.
- * 2. **The leader** (`Ctrl+Space`, then a letter; `CHORD_ACTIONS`): kept as
- *    the fallback for a plain browser, which reserves Cmd/Ctrl+T/W/N/1-9 and
- *    never lets the page see them, and for rare actions (swap panes, resize
- *    mode). Pressing it arms a ~1.5s window; missing it silently disarms.
+ * 2. **The leader** (`Ctrl+Space`, then a letter; `CHORD_ACTIONS`): the
+ *    namespace for rarer actions that deserve no direct key (swap panes,
+ *    resize mode, next project, the worktree menu). Pressing it arms a ~1.5s
+ *    window; missing it silently disarms.
+ *
+ * perch is a desktop app (a phone app is coming), never a web page, so no
+ * browser reserves a key from it.
  *
  * Cmd+K / Ctrl+K open the Navigator outside terminals; in a terminal Cmd+K
  * clears it (terminalSearch.ts) and Ctrl+K stays the PTY's. Plain `?` opens
@@ -30,7 +33,8 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./sto
 import { activateTab, currentTabs } from "./workspaceTabs";
 import { getDockviewController } from "./dockview/dockviewController";
 import { useFileTabs } from "./fileTabs";
-import { jumpToNest, newScratchpad, stepNest } from "./workspaceNav";
+import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
+import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
 
 const LEADER_TIMEOUT_MS = 1500;
@@ -161,7 +165,8 @@ shortcut("global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (fil
 
 // Tabs (browser style)
 shortcut("tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
-shortcut("tabs", "mod+w", "Close the focused pane, file or tab", () => closeCurrent());
+shortcut("tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
+shortcut("tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab", () => reopenClosedTab());
 for (let i = 1; i <= 8; i++) {
   shortcut("tabs", [`cmd+${i}`, `alt+${i}`], i === 1 ? "Jump to tab 1…8" : `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), i === 1 ? { span: "1…8" } : { hide: true });
 }
@@ -188,11 +193,6 @@ shortcut("panes", "mod+shift+enter", "Zoom / restore the focused pane", () => co
 for (const dir of ["left", "right", "up", "down"] as const) {
   const where = { left: "to the left", right: "to the right", up: "above", down: "below" }[dir];
   shortcut("panes", [`cmd+alt+${dir}`, `ctrl+shift+alt+${dir}`], `Focus the pane ${where}`, () => controller()?.focusPaneDirection(dir));
-  // A split has one resizable axis, so left/up shrink and right/down grow.
-  shortcut("panes", [`cmd+ctrl+${dir}`, null], "Resize the focused pane (left/up shrink, right/down grow)", () => {
-    if (dir === "left" || dir === "up") controller()?.shrinkActivePane();
-    else controller()?.growActivePane();
-  }, { repeat: true, hide: dir !== "left", span: dir === "left" ? "←↑↓→" : undefined });
 }
 
 /** The shortcut `e` triggers on this platform, if any. */
@@ -235,7 +235,7 @@ export const KEYBINDS: KeybindEntry[] = [
   { keys: "Ctrl+Space, n", description: "Next session in the current workspace", group: "leader" },
   { keys: "Ctrl+Space, p", description: "Previous session in the current workspace", group: "leader" },
   { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current workspace", group: "leader" },
-  { keys: "Ctrl+Space, x", description: "Close the current terminal pane", group: "leader" },
+  { keys: "Ctrl+Space, x", description: "Close the focused pane, file or tab (agents ask first)", group: "leader" },
   { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "leader" },
   { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "leader" },
   { keys: "Ctrl+Space, z", description: "Maximize / restore the focused pane", group: "leader" },
@@ -389,8 +389,8 @@ function closeCurrent(): void {
   const files = useFileTabs.getState();
   if (files.active) return files.close(files.active);
   if (controller()?.closeActiveTerminalPanel()) return;
-  const { sessionId, deleteSession } = usePerchStore.getState();
-  if (sessionId) deleteSession(sessionId);
+  const { sessionId } = usePerchStore.getState();
+  if (sessionId) requestCloseSession(sessionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   c: () => newSessionInCurrentProject(),
   n: () => switchTabRelative(1),
   p: () => switchTabRelative(-1),
-  x: () => getDockviewController()?.closeActiveTerminalPanel(),
+  x: () => closeCurrent(),
   v: () => getDockviewController()?.addTerminalPanel("right"),
   // Wave 2 item 8: split-horizontal moved from leader,- to leader,_ (shift+-)
   // to free up leader,-/leader,+ for the new grow/shrink resize chords below

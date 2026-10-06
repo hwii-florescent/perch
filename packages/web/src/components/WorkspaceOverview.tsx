@@ -1,5 +1,6 @@
 import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "../appEvents";
+import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
@@ -382,7 +383,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               data-testid={`workspace-session-close-${session.id}`}
               title="Close session"
               aria-label={`Close ${session.title || "session"}`}
-              onClick={() => deleteSession(session.id)}
+              onClick={() => requestCloseSession(session.id)}
             >
               ×
             </button>
@@ -402,7 +403,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }
   function sessionMenu(session: SessionSummary, x: number, y: number) {
     setMenu({ x, y, label: "Session actions", items: [
-      { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => deleteSession(session.id) },
+      { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => requestCloseSession(session.id) },
     ] });
   }
   function pickSession(id: string) {
@@ -502,7 +503,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               data-testid={`workspace-session-close-${session.id}`}
               title="Close chat"
               aria-label={`Close ${session.title || "chat"}`}
-              onClick={() => deleteSession(session.id)}
+              onClick={() => requestCloseSession(session.id)}
             >
               ×
             </button>
@@ -586,7 +587,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       data-testid={`workspace-session-close-${session.id}`}
                       title="Close chat"
                       aria-label={`Close ${session.title || "chat"}`}
-                      onClick={() => deleteSession(session.id)}
+                      onClick={() => requestCloseSession(session.id)}
                     >
                       ×
                     </button>

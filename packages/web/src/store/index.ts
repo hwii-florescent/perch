@@ -3,6 +3,7 @@ import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal
 import { create } from "zustand";
 import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
+import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { defaultModel } from "../models";
@@ -1517,6 +1518,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       project.hostId,
       WORKSPACE_CAPABILITIES.projectRemove,
     );
+    forgetClosedTabs(projectId);
   },
 
   renameWorkspace: (workspaceId, name) => {
@@ -1695,6 +1697,8 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   deleteSession: (sessionId) => {
+    const closing = get().sessions.find((session) => session.id === sessionId);
+    if (closing) recordClosedTab(closing);
     socket.send({ type: "session.delete", sessionId });
     leaveSession(get(), sessionId);
   },

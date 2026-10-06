@@ -10,7 +10,7 @@
  * overlay in the app — accent border + panel-bg fill (see
  * `.model-chip__popover` comment in styles/composer.css).
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
 
@@ -22,6 +22,8 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Extra content under the message (an option to tick). */
+  children?: ReactNode;
 }
 
 export function ConfirmDialog({
@@ -30,6 +32,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   onConfirm,
   onCancel,
+  children,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -56,6 +59,7 @@ export function ConfirmDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <p className="confirm-dialog__message mx-0 mt-0 mb-4 text-[0.88rem] leading-[1.4] whitespace-pre-wrap text-fg">{message}</p>
+        {children}
         <div className="flex justify-end gap-2">
           <button
             type="button"

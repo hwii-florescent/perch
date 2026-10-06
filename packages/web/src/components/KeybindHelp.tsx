@@ -22,7 +22,7 @@ const GROUP_LABELS: Record<KeybindGroup, string> = {
   nests: "Nests and birdhouses",
   panes: "Splits and panes",
   terminal: "Terminal",
-  leader: "Leader (Ctrl+Space, then a key): the browser fallback",
+  leader: "Leader (Ctrl+Space, then a key)",
 };
 
 const GROUP_ORDER: KeybindGroup[] = ["global", "tabs", "nests", "panes", "terminal", "leader"];

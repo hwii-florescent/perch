@@ -4,6 +4,7 @@
  * keystroke lands exactly where a click would.
  */
 import type { SessionSummary } from "@perch/shared";
+import { takeClosedTab } from "./closedTabs";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "./store";
 
 /** A project's live workspaces: pinned first, then active, then most recent. */
@@ -89,4 +90,15 @@ export function newScratchpad(): void {
   if (workspace) state.focusWorkspace(workspace.id);
   else state.focusWorkspaceProject(chats.id);
   openEmptyWorkspace(chats.hostId, workspace?.path ?? chats.path);
+}
+
+/** Cmd+Shift+T: start the harness of the most recently closed tab again, in its nest.
+ * A tab whose nest is gone is skipped. */
+export function reopenClosedTab(): void {
+  const state = usePerchStore.getState();
+  const nests = new Set(state.workspaces.filter((workspace) => workspace.state !== "archived").map((workspace) => workspace.id));
+  const tab = takeClosedTab((candidate) => !candidate.workspaceId || nests.has(candidate.workspaceId));
+  if (!tab) return;
+  if (tab.workspaceId) state.focusWorkspace(tab.workspaceId);
+  state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
 }
