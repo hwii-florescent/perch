@@ -57,6 +57,7 @@ import type { TerminalProfile } from "@perch/shared";
 import { parseOsc52 } from "./osc52";
 import { usePerchStore } from "./store";
 import { scrollbarWidth } from "./components/ui/scrollbar";
+import { attachTerminalTuiWheel } from "./terminalTuiWheel";
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the
  * agent CLIs (and essentially every TUI) treat as the minimum sane width. */
@@ -296,6 +297,7 @@ export function createPerchTerminal(
   });
 
   term.open(container);
+  const stopTuiWheel = attachTerminalTuiWheel(term);
 
   // xterm 5.5's Viewport schedules constructor/reset callbacks without
   // cancelling them on dispose. A short-lived Dockview pane can disappear
@@ -488,6 +490,7 @@ export function createPerchTerminal(
       visibility.disconnect();
       dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);
+      stopTuiWheel();
       term.dispose();
     },
   };
