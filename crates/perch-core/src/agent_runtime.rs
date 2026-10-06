@@ -207,6 +207,8 @@ pub struct AgentRuntimeAdapter {
     active: Arc<Mutex<HashMap<AgentKey, ActiveRuntime>>>,
     starts: Arc<(Mutex<HashSet<AgentKey>>, Condvar)>,
     authority: Mutex<()>,
+    /// Display-only foreground identity; never changes launch/resume ownership.
+    current_providers: Mutex<HashMap<String, String>>,
     turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
 }
 
@@ -223,12 +225,89 @@ impl AgentRuntimeAdapter {
             active: Arc::new(Mutex::new(HashMap::new())),
             starts: Arc::new((Mutex::new(HashSet::new()), Condvar::new())),
             authority: Mutex::new(()),
+            current_providers: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
     pub fn providers(&self) -> &Arc<ProviderRegistry> {
         &self.providers
+    }
+
+    pub fn current_provider(&self, session_id: &str) -> Option<String> {
+        self.current_providers
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+    }
+
+    /// Observe foreground jobs, including agents typed into a plain shell.
+    /// POSIX ps's '+' flag excludes background/suspended agents. Use the
+    /// nearest agent ancestor, so its tool subprocesses cannot steal its icon.
+    pub async fn refresh_current_providers(&self) -> anyhow::Result<Vec<String>> {
+        let text = if self.active.lock().unwrap().is_empty() {
+            String::new()
+        } else {
+            // ponytail: one POSIX ps snapshot per second for all panes; move
+            // to daemon foreground-process events if polling becomes costly.
+            let mut command = tokio::process::Command::new("ps");
+            command
+                .args(["-ax", "-o", "pid=,ppid=,stat=,comm=,args="])
+                .kill_on_drop(true);
+            let output = tokio::time::timeout(Duration::from_secs(2), command.output()).await??;
+            anyhow::ensure!(output.status.success(), "foreground process query failed");
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        let processes = process_snapshot(&text);
+        let mut names = HashMap::new();
+        for manifest in self.providers.list() {
+            if manifest.id == crate::agent_fleet::TERMINAL_PROVIDER {
+                continue;
+            }
+            names.insert(manifest.id.clone(), manifest.id.clone());
+            let launch = manifest.launch.mode_overrides.get(&AgentMode::Cli);
+            let executable = launch.map_or(manifest.launch.executable.as_str(), |launch| {
+                &launch.executable
+            });
+            let name = Path::new(executable)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(executable);
+            // Generic interpreters are not agent identities on their own.
+            if ![
+                "sh", "bash", "zsh", "fish", "dash", "ksh", "node", "bun", "python", "python3",
+                "env",
+            ]
+            .contains(&name)
+            {
+                names.insert(name.to_string(), manifest.id);
+            }
+        }
+        // Re-read active handles after awaiting ps: a closed/replaced runtime
+        // must not acquire the identity of the process it used to own.
+        let active = self.active.lock().unwrap();
+        let next: HashMap<_, _> = active
+            .values()
+            .filter_map(|runtime| {
+                let identity = &runtime.handle.terminal;
+                // A tmux/SSH attachment is not the remote agent's process tree.
+                identity.daemon_session.as_ref()?;
+                let provider = foreground_provider(identity.process_id?, &processes, &names)?;
+                Some((runtime.handle.key.session_id.clone(), provider))
+            })
+            .collect();
+        let mut previous = self.current_providers.lock().unwrap();
+        let changed = previous
+            .keys()
+            .chain(next.keys())
+            .filter(|id| previous.get(*id) != next.get(*id))
+            .cloned()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        *previous = next;
+        Ok(changed)
     }
 
     pub fn set_turn_boundary_listener(&self, listener: TurnBoundaryListener) -> anyhow::Result<()> {
@@ -1256,6 +1335,79 @@ fn output_status_signal(
     signal
 }
 
+/// Only process names enter the display identity; arguments are never stored
+/// or searched for agent names (a command like `echo pi` is not Pi).
+struct ForegroundProcess<'a> {
+    parent: u32,
+    foreground: bool,
+    names: Vec<&'a str>,
+}
+
+fn process_snapshot(text: &str) -> HashMap<u32, ForegroundProcess<'_>> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let parent = fields.next()?.parse().ok()?;
+            let state = fields.next()?;
+            let executable = fields.next()?;
+            let command = fields.next().unwrap_or(executable);
+            let mut names = vec![executable, command];
+            // Interpreted entrypoints may retain the interpreter's process name.
+            if ["node", "bun", "python", "python3"]
+                .contains(&Path::new(command).file_name()?.to_str()?)
+            {
+                if let Some(script) = fields.next().filter(|script| !script.starts_with('-')) {
+                    names.push(script);
+                }
+            }
+            // ponytail: ps's text format cannot identify executable paths with
+            // whitespace reliably; move names/argv into perchd metadata for those.
+            Some((
+                pid,
+                ForegroundProcess {
+                    parent,
+                    foreground: state.contains('+') && !state.contains('T') && !state.contains('Z'),
+                    names,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn foreground_provider(
+    root: u32,
+    processes: &HashMap<u32, ForegroundProcess<'_>>,
+    providers: &HashMap<String, String>,
+) -> Option<String> {
+    processes.get(&root)?;
+    let nearest = processes
+        .iter()
+        .filter_map(|(&pid, process)| {
+            if !process.foreground {
+                return None;
+            }
+            let provider = process
+                .names
+                .iter()
+                .find_map(|name| providers.get(Path::new(name).file_name()?.to_str()?))?;
+            let mut ancestor = pid;
+            // The bound also rejects malformed/cyclic ancestry without hanging.
+            for depth in 0..processes.len() {
+                if ancestor == root {
+                    return Some((depth, pid, provider));
+                }
+                ancestor = processes.get(&ancestor)?.parent;
+            }
+            None
+        })
+        .min_by_key(|(depth, pid, _)| (*depth, *pid));
+    Some(nearest.map_or(
+        crate::agent_fleet::TERMINAL_PROVIDER.to_string(),
+        |(_, _, provider)| provider.clone(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1284,6 +1436,63 @@ mod tests {
     use std::time::Duration;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn foreground_identity_tracks_shell_agents_tools_and_background_jobs() {
+        let providers = [("pi".into(), "pi".into()), ("codex".into(), "codex".into())]
+            .into_iter()
+            .collect();
+        let cases = [
+            ("10 1 S+ /bin/zsh -zsh", Some("terminal")),
+            ("10 1 S /bin/zsh -zsh\n11 10 S+ pi pi", Some("pi")),
+            // Shell wrapper and agent share the foreground group. A nested
+            // agent called by Pi's tools must not steal the enclosing icon.
+            (
+                "10 1 S+ /bin/sh sh\n11 10 S+ pi pi\n12 11 S+ codex codex",
+                Some("pi"),
+            ),
+            (
+                "10 1 S /bin/zsh zsh\n11 10 S+ /usr/bin/node node /usr/local/bin/pi",
+                Some("pi"),
+            ),
+            ("10 1 S+ zsh zsh\n11 10 S pi pi", Some("terminal")),
+            ("10 1 S+ zsh zsh\n11 10 T+ pi pi", Some("terminal")),
+            ("10 1 S zsh zsh\n11 10 S+ echo echo pi", Some("terminal")),
+            (
+                "10 1 S zsh zsh\n11 10 S+ vim vim pi\n20 1 S+ pi pi",
+                Some("terminal"),
+            ),
+            ("10 1 S zsh zsh\n11 10 S+ codex codex", Some("codex")),
+            // Equal-depth pipeline agents have a stable PID tie-breaker.
+            (
+                "10 1 S zsh zsh\n11 10 S+ pi pi\n12 10 S+ codex codex",
+                Some("pi"),
+            ),
+            ("11 1 S+ pi pi", None),
+            (
+                "10 1 S+ zsh zsh\n11 12 S+ pi pi\n12 11 S sh sh",
+                Some("terminal"),
+            ),
+            ("malformed\n10 1 S+ zsh zsh", Some("terminal")),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(
+                foreground_provider(10, &process_snapshot(text), &providers).as_deref(),
+                expected,
+                "{text}"
+            );
+        }
+        let mut processes = process_snapshot("10 1 S zsh zsh\n11 10 S+ pi pi");
+        assert_eq!(
+            foreground_provider(10, &processes, &providers).as_deref(),
+            Some("pi")
+        );
+        processes.remove(&11); // Exit with no OSC shell-title update.
+        assert_eq!(
+            foreground_provider(10, &processes, &providers).as_deref(),
+            Some("terminal")
+        );
+    }
 
     #[test]
     fn configured_status_markers_survive_split_reads_without_replaying_old_matches() {

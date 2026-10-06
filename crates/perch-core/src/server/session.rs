@@ -644,7 +644,9 @@ pub(super) fn local_sessions_snapshot(app: &AppState) -> Vec<SessionSummary> {
     let blocked = app.blocked_sessions.lock().unwrap();
     let stale = app.stale_sessions.lock().unwrap();
     rows.into_iter()
-        .map(|row| build_session_summary(row, &running, &unseen, &blocked, &stale))
+        .map(|row| {
+            build_session_summary(row, &running, &unseen, &blocked, &stale, &app.agent_runtime)
+        })
         .collect()
 }
 
@@ -658,6 +660,7 @@ pub(super) fn build_session_summary(
     unseen: &std::collections::HashSet<String>,
     blocked: &std::collections::HashSet<String>,
     stale: &std::collections::HashSet<String>,
+    runtime: &crate::agent_runtime::AgentRuntimeAdapter,
 ) -> SessionSummary {
     let status = if running.contains(&row.id) {
         SessionStatus::Running
@@ -670,6 +673,7 @@ pub(super) fn build_session_summary(
         _ => None,
     });
     SessionSummary {
+        current_provider_id: runtime.current_provider(&row.id),
         id: row.id.clone(),
         title: row.title,
         cwd: row.cwd,

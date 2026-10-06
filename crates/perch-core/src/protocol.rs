@@ -293,6 +293,10 @@ pub struct SessionSummary {
     /// Last explicitly selected CLI provider, including configured providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_provider_id: Option<String>,
+    /// Observed foreground CLI identity (or "terminal" for a shell/other job).
+    /// Display only: never replaces the saved launch/resume provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_provider_id: Option<String>,
 }
 
 /// Durable editor draft returned by the workspace buffer endpoints. Both the

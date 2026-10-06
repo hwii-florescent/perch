@@ -363,6 +363,9 @@ export interface SessionSummary {
   cliStarted?: boolean;
   /** Last explicitly selected CLI provider, independent of the Chat runner. */
   cliProviderId?: string;
+  /** Observed foreground CLI identity, or "terminal" for a shell/other job.
+   * Display only; never replaces the saved launch/resume provider. */
+  currentProviderId?: string;
   /** Whether the session's agent is waiting on the human (a permission
    * prompt or a question), from native CLI events, the OSC title, or as a
    * last resort an output pattern. Defaults to false when absent. */

@@ -109,6 +109,58 @@ test.describe("Perch sidebar", () => {
     }
   });
 
+  test("2d. Terminal badge follows manually launched Pi and keeps a tight circular highlight", async ({ page }, testInfo) => {
+    await open(page);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-manual-pi-"));
+    try {
+    const id = await startChat(page, "terminal", dir);
+    const terminal = page.getByTestId("persistent-agent-terminal");
+    const button = page.getByTestId(`workspace-session-${id}`);
+    const ring = button.locator(".agent-status-dot");
+    await expect(ring).toHaveAttribute("data-provider", "terminal");
+    const input = terminal.locator(".xterm-helper-textarea");
+    await input.pressSequentially("pi --provider anthropic --model claude-haiku-4-5 --no-extensions --no-skills --no-prompt-templates");
+    await input.press("Enter");
+    // No model prompt or turn. Check the banner/model before any input.
+    await expect(terminal.locator(".xterm-rows")).toContainText("claude-haiku-4-5", { timeout: 30000 });
+    await expect(ring).toHaveAttribute("data-provider", "pi", { timeout: 10000 });
+    const style = await button.evaluate((element) => {
+      const badge = element.querySelector(".agent-status-dot")!;
+      const mark = badge.querySelector("svg")!;
+      return {
+        button: getComputedStyle(element).backgroundColor,
+        width: badge.getBoundingClientRect().width,
+        height: badge.getBoundingClientRect().height,
+        radius: getComputedStyle(badge).borderRadius,
+        outlineOffset: getComputedStyle(badge).outlineOffset,
+        icon: mark.getBoundingClientRect().width,
+      };
+    });
+    expect(style.button).toBe("rgba(0, 0, 0, 0)");
+    expect(style.width).toBe(20);
+    expect(style.height).toBe(20);
+    expect(style.radius === "50%" || parseFloat(style.radius) >= 10).toBe(true);
+    expect(style.outlineOffset).toBe("1px");
+    expect(style.icon).toBe(14);
+    await page.screenshot({ path: testInfo.outputPath("manual-pi-badge-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("mobile-switch").click();
+    await expect(button).toBeVisible();
+    await expect(ring).toHaveAttribute("data-provider", "pi");
+    await page.screenshot({ path: testInfo.outputPath("manual-pi-badge-mobile.png") });
+    await button.click();
+    await page.setViewportSize({ width: 1280, height: 820 });
+    await input.press("Control+d");
+    await expect(ring).toHaveAttribute("data-provider", "terminal", { timeout: 15000 });
+    // Refresh retains Terminal as the launcher, not Pi as a replacement recipe.
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(ring).toHaveAttribute("data-provider", "terminal");
+    await page.getByTestId(`tab-close-${id}`).click();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("2b. Organize sidebar: in one list shows every session flat", async ({ page }) => {
     await open(page);
     const id = await startChat(page);

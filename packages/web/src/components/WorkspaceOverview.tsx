@@ -123,7 +123,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
         <button
           key={session.id}
           type="button"
-          className={cn("grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
+          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", session.id === activeId && "workspace-entry__session--active")}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -131,7 +131,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
           onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
         >
-          <StatusDot session={session} />
+          <StatusDot session={session} className={cn("group-hover:bg-overlay-0 group-focus-visible:[outline:1px_solid_var(--overlay-1)] group-focus-visible:outline-offset-1", session.id === activeId && "bg-overlay-0 [outline:1px_solid_var(--overlay-1)] outline-offset-1")} />
         </button>
       ))}
     </span>

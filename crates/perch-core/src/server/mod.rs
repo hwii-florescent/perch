@@ -1214,6 +1214,20 @@ fn spawn_agent_lifecycle_task(state: AppState) {
         let mut seen = HashMap::new();
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if state
+                .connected_clients
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+            {
+                match state.agent_runtime.refresh_current_providers().await {
+                    Ok(changed) => {
+                        for session_id in changed {
+                            notify_session_updated(&state, &session_id);
+                        }
+                    }
+                    Err(error) => tracing::debug!(%error, "could not observe foreground agents"),
+                }
+            }
             let _operation = state.agent_operation_lock.lock().unwrap();
             let snapshots = state.agent_runtime.lifecycle().list();
             refresh_stale_sessions(&state, &snapshots);
@@ -2053,6 +2067,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let event_unseen = app.unseen_sessions.clone();
     let event_blocked = app.blocked_sessions.clone();
     let event_stale = app.stale_sessions.clone();
+    let event_runtime = app.agent_runtime.clone();
     tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
@@ -2071,7 +2086,14 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     let unseen = event_unseen.lock().unwrap();
                     let blocked = event_blocked.lock().unwrap();
                     let stale = event_stale.lock().unwrap();
-                    let summary = build_session_summary(row, &running, &unseen, &blocked, &stale);
+                    let summary = build_session_summary(
+                        row,
+                        &running,
+                        &unseen,
+                        &blocked,
+                        &stale,
+                        &event_runtime,
+                    );
                     drop(running);
                     drop(unseen);
                     drop(blocked);
@@ -2905,6 +2927,7 @@ mod session_viewer_filter_tests {
                 host_id: "local".to_string(),
                 cli_started: false,
                 cli_provider_id: None,
+                current_provider_id: None,
                 unseen: false,
                 blocked: false,
                 stale: false,

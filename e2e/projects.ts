@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { realpathSync } from "node:fs";
 
 /** Sessions start only in a project listed in perch, or in Chats. Register
  * `dir` the way "+ Add project" does; resolves once the server replies. */
@@ -24,6 +25,7 @@ export async function addProject(page: Page, dir: string): Promise<void> {
 /** With the new-session picker open, add `dir` as a project and start the
  * session in it. */
 export async function pickProject(page: Page, dir: string): Promise<void> {
+  dir = realpathSync(dir); // The server canonicalizes local paths (notably macOS /var → /private/var).
   await addProject(page, dir);
   const option = page.locator('[data-testid^="project-option-"]').and(page.getByTitle(dir, { exact: true }));
   await expect(option.first()).toBeVisible({ timeout: 10_000 });

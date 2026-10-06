@@ -247,13 +247,18 @@ there, not here.
     dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
     `perch.layout.*`).
   - Sessions sit under their project (`workspace-entry__sessions`). The Organize menu picks **Compact sessions** (default; `SessionDots`: one
-    harness icon inside a status-colored ring per session on the row, click
-    switches, right-click closes) or
+    harness icon inside a tight status-colored circle per session on the row,
+    click switches, right-click closes) or
     **Session list** (`perch.sidebar.sessionView`); the phone always lists. A
     project with one checkout shows no workspace row: its header carries the
     `workspace-entry` testid/`workspace-entry__button` class, and Files/Git
     are on the project menu. Rows are rounded, filled on hover/active
     (`surface-1`), focus is a 1px neutral ring, never an accent outline.
+    Compact badges keep a 32px hit target, but selection/hover/focus hug the
+    20px circular badge, never fill its square hit area. Icons follow the
+    observed foreground provider (`SessionSummary.currentProviderId`), not
+    just the launcher; this display identity must never rewrite the saved
+    launch/resume choice (`cliProviderId`).
   - Sidebar rows stay quiet: a project header is its name plus a `Chevron`
     (the whole row collapses it, per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,

@@ -21,11 +21,11 @@ export function StatusDot({ session, className }: StatusDotProps) {
   const state = sessionDotState(session);
   const { color } = DOT_GLYPH[state];
   const remembered = usePerchStore((s) => s.cliAgentBySession[session.id]);
-  const provider = remembered ?? session.cliProviderId ?? session.lastAgent;
+  const provider = session.currentProviderId ?? remembered ?? session.cliProviderId ?? session.lastAgent;
   const classes = cn(
     "agent-status-dot",
     `agent-status-dot--${state}`,
-    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-[1.5px] leading-none",
+    "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] leading-none",
     className,
   );
 

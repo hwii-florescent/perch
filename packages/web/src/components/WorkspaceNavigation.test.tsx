@@ -79,6 +79,11 @@ it("workspace background picks it, while its badge and rename input keep their o
   click(get("workspace-session-session"));
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   expect(focus).not.toHaveBeenCalled();
+  act(() => usePerchStore.setState({ sessionId: session.id }));
+  const button = get("workspace-session-session");
+  expect(button.classList.contains("rounded-full")).toBe(true);
+  expect(button.classList.contains("bg-overlay-0")).toBe(false);
+  expect(button.querySelector(".agent-status-dot")!.classList.contains("outline-offset-1")).toBe(true);
   act(() => get("workspace-entry-tree").querySelector("strong")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
   click(get("workspace-rename-tree"));
   expect(focus).not.toHaveBeenCalled();
@@ -98,10 +103,21 @@ it("status rings retain every status and select the actual harness rather than a
     expect(badge.classList.contains(`agent-status-dot--${state}`)).toBe(true);
     expect(badge.style.borderColor).toBe(color);
     expect(badge.dataset.provider).toBe("pi");
+    expect(badge.classList.contains("h-5")).toBe(true);
+    expect(badge.classList.contains("w-5")).toBe(true);
     expect(badge.querySelector("svg")!.getAttribute("viewBox")).toBe("0 0 800 800");
   }
   act(() => usePerchStore.setState({ cliAgentBySession: { session: "terminal" } }));
   expect(host.querySelector(".agent-status-dot")!.getAttribute("data-provider")).toBe("terminal");
+});
+
+it("observed foreground identity overrides the launcher without changing its saved choice", () => {
+  usePerchStore.setState({ cliAgentBySession: { session: "terminal" } });
+  render(<StatusDot session={{ ...session, cliProviderId: "terminal", currentProviderId: "pi" }} />);
+  expect(host.querySelector(".agent-status-dot")!.getAttribute("data-provider")).toBe("pi");
+  render(<StatusDot session={{ ...session, cliProviderId: "terminal", currentProviderId: "terminal" }} />);
+  expect(host.querySelector(".agent-status-dot")!.getAttribute("data-provider")).toBe("terminal");
+  expect(usePerchStore.getState().cliAgentBySession.session).toBe("terminal");
 });
 
 it("all catalog harnesses have bundled artwork; custom and unknown harnesses have honest fallbacks", () => {
