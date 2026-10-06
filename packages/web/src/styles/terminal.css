@@ -33,6 +33,11 @@
 .terminal__surface .xterm { height: 100%; }
 .terminal__surface .xterm:not(.allow-transparency) .xterm-viewport { background-color: transparent; }
 
+/* The scrollbar is positioned against the grid, so the gutter and the sub-cell
+ * remainder showed as a gap to its right. Position it against `.xterm`
+ * (the whole surface) instead: the thumb sits flush with the edge. */
+.terminal__surface .xterm-scrollable-element { position: static !important; }
+
 /* xterm draws a decoration ruler beside the scrollbar once `scrollbar.width`
  * is set (xtermSetup.ts); perch has no decorations, only a bright edge line. */
 .terminal__surface .xterm-decoration-overview-ruler { display: none; }

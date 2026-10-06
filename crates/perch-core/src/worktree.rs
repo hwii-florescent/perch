@@ -504,6 +504,102 @@ pub fn slugify_task_name(name: &str) -> String {
 /// An explicit `branch` that already exists locally is checked out as is,
 /// exactly as herdr's `run_worktree_add_command` does (`new_branch` is only a
 /// hint); requesting a missing branch with `new_branch: false` is an error.
+const BIRDS: &[&str] = &[
+    "heron",
+    "falcon",
+    "osprey",
+    "kestrel",
+    "finch",
+    "wren",
+    "plover",
+    "swift",
+    "tern",
+    "puffin",
+    "egret",
+    "ibis",
+    "crane",
+    "lark",
+    "pipit",
+    "shrike",
+    "oriole",
+    "kingfisher",
+    "nuthatch",
+    "harrier",
+    "avocet",
+    "curlew",
+    "dunlin",
+    "godwit",
+    "magpie",
+    "jay",
+    "starling",
+    "swallow",
+    "martin",
+    "robin",
+    "sparrow",
+    "thrush",
+    "warbler",
+    "bunting",
+    "cardinal",
+    "condor",
+    "kite",
+    "merlin",
+    "owl",
+    "petrel",
+];
+
+const CODE_TERMS: &[&str] = &[
+    "parser",
+    "lexer",
+    "compiler",
+    "linker",
+    "kernel",
+    "daemon",
+    "socket",
+    "mutex",
+    "cache",
+    "index",
+    "query",
+    "schema",
+    "patch",
+    "commit",
+    "rebase",
+    "branch",
+    "merge",
+    "stack",
+    "heap",
+    "queue",
+    "token",
+    "buffer",
+    "pointer",
+    "closure",
+    "iterator",
+    "monad",
+    "binary",
+    "bytecode",
+    "syntax",
+    "runtime",
+    "assembler",
+    "pipeline",
+    "refactor",
+    "lambda",
+    "tuple",
+    "vector",
+    "hash",
+    "regex",
+    "thread",
+    "signal",
+];
+
+/// A random "bird-codeterm" seed (e.g. `heron-parser`) for a workspace given
+/// neither a task name nor a branch; `derive_free_branch` keeps it unique.
+fn random_workspace_name() -> String {
+    let id = uuid::Uuid::new_v4();
+    let b = id.as_bytes();
+    let bird = BIRDS[usize::from(b[0]) % BIRDS.len()];
+    let term = CODE_TERMS[usize::from(b[1]) % CODE_TERMS.len()];
+    format!("{bird}-{term}")
+}
+
 pub async fn prepare_create(req: &CreateRequest) -> Result<CreatePlan, WorktreeOpError> {
     let repo_path = expand_tilde(&req.repo_path);
     // Normalize to the parent checkout so the default location is named after
@@ -530,9 +626,9 @@ pub async fn prepare_create(req: &CreateRequest) -> Result<CreatePlan, WorktreeO
         explicit.to_string()
     } else {
         let name = req.name.as_deref().unwrap_or("");
-        // No name and no branch: both are optional, pick a free "workspace".
+        // No name and no branch: both are optional, pick a random one.
         let seed = if name.trim().is_empty() {
-            "workspace".to_string()
+            random_workspace_name()
         } else {
             slugify_task_name(name)
         };
@@ -1669,10 +1765,19 @@ prunable stale
         assert_eq!(slugify_task_name(&"a".repeat(60)).len(), 48);
     }
 
+    #[test]
+    fn random_names_are_bird_plus_code_term_and_valid_branches() {
+        for _ in 0..50 {
+            let name = random_workspace_name();
+            let (bird, term) = name.split_once('-').unwrap();
+            assert!(BIRDS.contains(&bird) && CODE_TERMS.contains(&term));
+            assert_eq!(slugify_task_name(&name), name);
+        }
+    }
+
     #[tokio::test]
-    async fn no_name_and_no_branch_picks_a_free_workspace_branch() {
+    async fn no_name_and_no_branch_derives_a_random_branch() {
         let (root, repo) = repo("unnamed");
-        git(&repo, &["branch", "workspace"]);
         let plan = prepare_create(&CreateRequest {
             repo_path: s(&repo).to_string(),
             new_branch: true,
@@ -1681,7 +1786,10 @@ prunable stale
         })
         .await
         .unwrap();
-        assert_eq!(plan.branch, "workspace-2");
+        assert!(plan
+            .branch
+            .split_once('-')
+            .is_some_and(|(b, _)| BIRDS.contains(&b)));
         std::fs::remove_dir_all(root).unwrap();
     }
 
