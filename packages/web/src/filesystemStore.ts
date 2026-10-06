@@ -1216,16 +1216,18 @@ function invalidateFilesystemRequestsOnDisconnect(): void {
     pendingSaveAfterBuffer.delete(requestId);
   }
   for (const pending of pendingRequests.values()) {
-    if (pending.kind === "search" || pending.kind === "extract") {
-      useWorkspaceFilesStore.setState((state) => pending.kind === "search" ? {
+    if (pending.kind === "search") {
+      useWorkspaceFilesStore.setState((state) => ({
         searches: { ...state.searches, [pending.workspaceId]: {
           ...state.searches[pending.workspaceId]!, state: "error", error: "Disconnected. Retry search after reconnecting.",
         } },
-      } : {
+      }));
+    } else if (pending.kind === "extract") {
+      useWorkspaceFilesStore.setState((state) => ({
         extractions: updateNested(state.extractions, pending.workspaceId, pending.path, {
           state: "error", error: "Connection lost. Refresh the folder to check whether extraction finished before retrying.",
         }),
-      });
+      }));
     }
   }
   pendingReloads.clear();

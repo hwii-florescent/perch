@@ -40,10 +40,7 @@ impl FileService {
                 error,
             )
         })?;
-        let mut budget = Budget {
-            members: 0,
-            bytes: 0,
-        };
+        let mut budget = Budget::default();
         let result: io::Result<()> = (|| {
             if suffix == ".zip" {
                 let mut archive = zip::ZipArchive::new(file)?;
@@ -61,8 +58,7 @@ impl FileService {
                     }) {
                         return Err(invalid("Archive links and special files are not supported"));
                     }
-                    let directory = member.is_dir();
-                    budget.unpack(&root, &name, directory, &mut member)?;
+                    budget.unpack(&root, &name, member.is_dir(), &mut member)?;
                 }
             } else if suffix == ".gz" {
                 let mut decoder = flate2::read::MultiGzDecoder::new(file);
@@ -98,6 +94,7 @@ impl FileService {
     }
 }
 
+#[derive(Default)]
 struct Budget {
     members: usize,
     bytes: u64,
@@ -200,10 +197,7 @@ mod tests {
         );
         assert!(service.extract_archive("sample.zip").is_err());
         let output = open_dir_at(&service.root_handle, OsStr::new("sample-extracted")).unwrap();
-        let mut budget = Budget {
-            members: 0,
-            bytes: 0,
-        };
+        let mut budget = Budget::default();
         for path in [
             "../escape.txt",
             "/escape.txt",

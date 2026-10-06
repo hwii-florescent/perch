@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFDocumentLoadingTask, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { cn } from "../lib/cn";
+import { pageScale } from "./pdfPageScale";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
 /** Native PDF plugins aren't reliable in WKWebView or headless browsers.
@@ -55,12 +56,7 @@ export function WorkspacePdf({ url }: { url: string }) {
         if (!active) return;
         const base = page.getViewport({ scale: 1 });
         const ratio = Math.min(window.devicePixelRatio || 1, 2);
-        const desired = zoom === "fit" ? Math.max(1, width - 24) / base.width : Number(zoom);
-        // ponytail: one page/canvas, capped at 16M pixels / 8192 per axis.
-        // A tiled renderer is the upgrade for poster-sized pages at high zoom.
-        const scale = Math.min(desired, 8192 / base.width / ratio, 8192 / base.height / ratio,
-          Math.sqrt(16_777_216 / (base.width * base.height)) / ratio);
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale: pageScale(base, zoom, width, ratio) });
         const target = canvas.current!;
         target.width = Math.ceil(viewport.width * ratio);
         target.height = Math.ceil(viewport.height * ratio);

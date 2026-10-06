@@ -6,12 +6,14 @@ import {
   useWorkspaceFilesStore,
   type WorkspaceDocumentState,
   type WorkspacePreviewState,
+  type WorkspaceSearchState,
   type WorkspaceTreeState,
 } from "../filesystemStore";
 import { cn } from "../lib/cn";
 import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { WorkspaceFileAsset } from "./WorkspaceFileAsset";
+import { assetKind } from "./workspaceFileKind";
 
 // The legacy rules set `font:` shorthands with an undefined variable and with `inherit`
 // inside the shorthand (invalid), so text here inherits the page font and buttons keep the browser's default:
@@ -245,6 +247,37 @@ function ConflictPanel({
   );
 }
 
+function SearchResults({ result, query, selectedPath, onOpenFile, onRetry }: {
+  result?: WorkspaceSearchState;
+  query: string;
+  selectedPath: string | null;
+  onOpenFile: (entry: DirectoryEntry) => void;
+  onRetry: () => void;
+}) {
+  if (result?.query !== query || result.state === "loading") {
+    return <div className={TREE_STATE} role="status">Searching…</div>;
+  }
+  if (result.state === "error") {
+    return (
+      <div className={cn(TREE_STATE, "text-red")} role="alert">
+        {result.error}
+        <button type="button" className={TREE_BUTTON} onClick={onRetry}>Retry</button>
+      </div>
+    );
+  }
+  const count = result.entries.length;
+  return (
+    <>
+      <div className={TREE_STATE}>{count ? `${count} file${count === 1 ? "" : "s"}` : "No matching files"}</div>
+      {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left text-[0.8rem]", selectedPath === entry.path && "bg-surface-1 text-fg")} title={entry.path} onClick={() => onOpenFile(entry)} data-testid={`workspace-file-entry-${entry.path}`}>
+        <span className="w-full truncate text-fg">{entry.name}</span>
+        <span className="w-full truncate text-[0.7rem] text-subtext-0">{entry.path}</span>
+      </button>)}
+      {result.truncated && <div className={TREE_STATE}>Search limited for this workspace. Narrow the filename or path to see more.</div>}
+    </>
+  );
+}
+
 export interface WorkspaceFilesViewProps {
   workspaceId: string;
   /** Path carried by Dockview's persisted panel params. Keeping this outside
@@ -393,6 +426,15 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   }
 
   const explorerOpen = layout === "explorer" || (!layout && mobileExplorerOpen);
+  // Media, archives and binary files (a failed text read) open in the asset viewer.
+  const showAsset = !dirty && document?.metadata != null
+    && (document.state === "error" || assetKind(document.metadata.mediaType) !== undefined);
+
+  function refreshTree() {
+    requestTree(workspaceId, "");
+    for (const path of expanded) requestTree(workspaceId, path);
+    if (query) searchFiles(workspaceId, query);
+  }
 
   if (!workspace) {
     return (
@@ -446,22 +488,12 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
                   Editor
                 </button>
               )}
-              <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={() => { requestTree(workspaceId, ""); for (const path of expanded) requestTree(workspaceId, path); if (query) searchFiles(workspaceId, query); }} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
+              <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={refreshTree} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto" data-testid="workspace-file-tree-scroll">
           {query ? <div aria-live="polite">
-            {searchResult?.query !== query || searchResult.state === "loading" ? <div className={TREE_STATE} role="status">Searching…</div> : searchResult.state === "error" ? <div className={cn(TREE_STATE, "text-red")} role="alert">
-              {searchResult.error}
-              <button type="button" className={TREE_BUTTON} onClick={() => searchFiles(workspaceId, query)}>Retry</button>
-            </div> : <>
-              <div className={TREE_STATE}>{searchResult.entries.length ? `${searchResult.entries.length} file${searchResult.entries.length === 1 ? "" : "s"}` : "No matching files"}</div>
-              {searchResult.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left text-[0.8rem]", selectedPath === entry.path && "bg-surface-1 text-fg")} title={entry.path} onClick={() => handleOpenFile(entry)} data-testid={`workspace-file-entry-${entry.path}`}>
-                <span className="w-full truncate text-fg">{entry.name}</span>
-                <span className="w-full truncate text-[0.7rem] text-subtext-0">{entry.path}</span>
-              </button>)}
-              {searchResult.truncated && <div className={TREE_STATE}>Search limited for this workspace. Narrow the filename or path to see more.</div>}
-            </>}
+            <SearchResults result={searchResult} query={query} selectedPath={selectedPath} onOpenFile={handleOpenFile} onRetry={() => searchFiles(workspaceId, query)} />
           </div> : <>
           {rootTree?.state === "loading" && <div className={TREE_STATE} role="status">Loading tree…</div>}
           {rootTree?.state === "error" && (
@@ -502,8 +534,8 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               <strong className="text-[0.9rem] text-fg">Open a file to edit</strong>
               <span>Folders load one level at a time. Files stay inside this workspace.</span>
             </div>
-          ) : !dirty && document.metadata && (document.state === "error" || /^(image\/|video\/|audio\/|application\/(pdf|zip|x-tar|gzip)$)/.test(document.metadata.mediaType ?? "")) ? (
-            <WorkspaceFileAsset key={selectedPath} workspaceId={workspaceId} metadata={document.metadata} />
+          ) : showAsset ? (
+            <WorkspaceFileAsset key={selectedPath} workspaceId={workspaceId} metadata={document.metadata!} />
           ) : (
             <>
               <div className="flex shrink-0 items-center justify-between gap-[0.65rem] border-b border-b-overlay-0 px-[0.65rem] py-[0.42rem] [@container(max-width:460px)]:flex-wrap">

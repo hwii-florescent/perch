@@ -13,12 +13,11 @@
 //! traverses without following links and reports incomplete results. Raw
 //! content is streamed from a validated descriptor by the HTTP adapter;
 //! `archive` extracts into an exclusive sibling folder with expansion limits.
-//! File reads and
-//! previews are bounded before and during the read, and text versions are
-//! SHA-256 hashes of the exact bytes returned.  Saves are written to a fresh
-//! file in the same directory, synced, and atomically renamed into place.
-//! Expected-version checks are serialized by the service, so two concurrent
-//! saves cannot both pass against the same old version.
+//! File reads and previews are bounded before and during the read, and text
+//! versions are SHA-256 hashes of the exact bytes returned.  Saves are written
+//! to a fresh file in the same directory, synced, and atomically renamed into
+//! place. Expected-version checks are serialized by the service, so two
+//! concurrent saves cannot both pass against the same old version.
 
 mod archive;
 
