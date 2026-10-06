@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { usePerchStore } from "./store";
 import { socket } from "./ws";
 import { cn } from "./lib/cn";
@@ -24,23 +24,26 @@ function resetTitle(w: UsageWindow): string {
  * fills. The account label shows only when a provider has several. */
 function UsageSummary({ usage }: { usage: AccountUsage[] }) {
   return (
-    <div className="flex shrink-0 items-center gap-3" data-testid="usage-summary">
+    <div className="flex shrink-0 items-center gap-2.5" data-testid="usage-summary">
       {usage.map((a, i) => {
         const several = usage.filter((o) => o.provider === a.provider).length > 1;
         const name = several && a.label ? `${a.provider} ${a.label}` : a.provider;
         return (
-          <span key={`${a.provider}:${a.label ?? i}`} className="flex gap-1.5">
-            <span title={a.label}>{name}</span>
-            {a.windows.map((w) => (
-              <span
-                key={w.label}
-                className={usageTone(w.usedPercent)}
-                title={`${name} ${w.label} window: ${Math.round(w.usedPercent)}% used${resetTitle(w)}`}
-              >
-                {w.label} {Math.round(w.usedPercent)}%
-              </span>
-            ))}
-          </span>
+          <Fragment key={`${a.provider}:${a.label ?? i}`}>
+            {i > 0 && <span aria-hidden className="h-3 w-px shrink-0 bg-overlay-0" />}
+            <span className="flex gap-1.5">
+              <span className="font-medium" title={a.label}>{name}</span>
+              {a.windows.map((w) => (
+                <span
+                  key={w.label}
+                  className={usageTone(w.usedPercent)}
+                  title={`${name} ${w.label} window: ${Math.round(w.usedPercent)}% used${resetTitle(w)}`}
+                >
+                  {w.label} {Math.round(w.usedPercent)}%
+                </span>
+              ))}
+            </span>
+          </Fragment>
         );
       })}
     </div>
