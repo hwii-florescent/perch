@@ -12,8 +12,23 @@ arguments in `crates/perch-core/src/agent_catalog.json` are adapted from
 - `src/shared/tui-agent-permissions.ts`
 
 Perch launches Claude Agent Teams with Claude's native in-process team mode;
-it does not depend on Orca's application-specific pane wrapper. Branding and
-image assets are not included in this adaptation.
+it does not depend on Orca's application-specific pane wrapper.
+
+## Orca harness and terminal icons
+
+`packages/web/src/components/AgentIcon.tsx` and
+`packages/web/src/assets/agent-icons/` adapt the SVG marks, generic terminal
+icon and bundled favicons from Orca commit
+`564f135248874ca3a710e3932c2395f5cbff0203`:
+
+- `src/renderer/src/lib/agent-icon-glyphs.tsx`
+- `src/renderer/src/components/status-bar/icons.tsx`
+- `src/renderer/src/components/tab-bar/shell-icons.tsx`
+- `src/shared/agent-icons/`
+- `resources/openclaude-logo.png`
+
+Brand marks remain the property of their respective owners. The Orca-derived
+code and assets above are distributed under the following MIT notice.
 
 MIT License
 

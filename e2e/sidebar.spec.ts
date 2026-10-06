@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { startChat } from "./projects";
+import { execFileSync } from "node:child_process";
 
 async function open(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
@@ -46,6 +47,65 @@ test.describe("Perch sidebar", () => {
     await expect(page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`)).toBeVisible();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("2c. scoped +, harness rings and whole worktree rows", async ({ page }, testInfo) => {
+    const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-harness-")));
+    const repo = path.join(fixture, "perch");
+    const treePath = path.join(fixture, "feature");
+    fs.mkdirSync(repo);
+    const git = (args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], { cwd: repo, input: "", timeout: 15000 });
+    git(["init", "-q", "-b", "main"]);
+    git(["-c", "user.name=perch e2e", "-c", "user.email=e2e@perch.test", "commit", "--allow-empty", "-qm", "fixture"]);
+    try {
+      await open(page);
+      const mainSession = await startChat(page, "terminal", repo);
+      await page.getByTestId(`worktree-menu-local-${repo}`).click();
+      await page.getByTestId("worktree-branch-input").fill("feature");
+      await page.getByTestId("worktree-path-input").fill(treePath);
+      await page.getByTestId("worktree-create-submit").click();
+      const project = page.locator(".workspace-project").filter({ has: page.locator(`button[title="${repo}"]`) }).first();
+      const main = project.locator(".workspace-entry").filter({ has: page.locator(`button[title="${repo}"]`) });
+      const tree = project.locator(".workspace-entry").filter({ has: page.locator(`button[title="${treePath}"]`) });
+      await expect(tree).toBeVisible({ timeout: 30000 });
+      await tree.click({ position: { x: 8, y: 8 } });
+      await expect(tree.locator(".workspace-entry__button--active")).toBeVisible();
+      await page.getByTestId("tab-new").click();
+      await expect(page.locator('[data-testid^="project-option-"]')).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath("scoped-harness-picker.png") });
+      await page.getByTestId("new-session-provider-terminal").click();
+      const terminal = page.getByTestId("persistent-agent-terminal");
+      await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30000 });
+      const ring = tree.locator(".agent-status-dot");
+      await expect(ring).toHaveAttribute("data-provider", "terminal");
+      await expect(ring.locator("svg")).toBeVisible();
+      const name = main.locator("strong");
+      const branch = main.locator("span").filter({ hasText: /^main$/ }).last();
+      const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
+      expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
+      expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
+      // Empty space beside the badges navigates; a badge only picks its session.
+      const treeSession = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+      await main.locator('[data-testid="session-dots"]').click({ position: { x: 120, y: 16 } });
+      await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
+      await page.getByTestId(`workspace-session-${treeSession}`).click();
+      await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
+      await page.screenshot({ path: testInfo.outputPath("worktree-harness-rings-desktop.png") });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId("mobile-switch").click();
+      const mobileSession = page.getByTestId(`workspace-session-${treeSession}`);
+      await expect(mobileSession).toBeVisible();
+      const mobileTree = page.locator(".workspace-entry").filter({ has: mobileSession });
+      const actions = mobileTree.getByTestId(/^workspace-pin-/).locator("..");
+      const headerBox = await mobileTree.locator(".workspace-entry__button").boundingBox();
+      const actionsBox = await actions.boundingBox();
+      const sessionBox = await mobileSession.boundingBox();
+      expect(actionsBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
+      expect(sessionBox!.y).toBeGreaterThanOrEqual(actionsBox!.y + actionsBox!.height);
+      await page.screenshot({ path: testInfo.outputPath("worktree-harness-rings-mobile.png") });
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
 

@@ -38,7 +38,10 @@ import {
 import { StatusDot } from "./components/StatusDot";
 import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { AgentPicker } from "./components/AgentPicker";
+import { AgentPicker, useAgentChoices } from "./components/AgentPicker";
+import { AgentIcon } from "./components/AgentIcon";
+import { menuItem } from "./components/ui/menu";
+import { CATALOG_ACTION } from "./components/ui/settings";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
@@ -558,17 +561,21 @@ export interface NewSessionPopoverProps {
   hostId: string;
   /** Known project cwds for this host, derived from existing sessions. */
   projectCwds: string[];
+  /** A scoped launcher chooses only the harness, never a different project. */
+  fixedCwd?: string;
   anchorRect: DOMRect;
   onClose: () => void;
   /** Provider selected before opening a session in the chosen directory. */
   onSelect: (cwd: string | undefined, agent: string) => void;
 }
 
-export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
+export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
   const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
   const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
+  const { connected, discovery, catalog, choices } = useAgentChoices(hostId);
+  const manage = usePerchStore((s) => s.openAgentCatalog);
 
   // Position: open below the anchor button, left-aligned. Clamped to the
   // viewport: the project list grows one row per listed project.
@@ -602,6 +609,27 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
 
   return createPortal(
     <div className="new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" ref={popoverRef} style={style}>
+      {fixedCwd !== undefined ? (
+        <div className="min-h-0 overflow-y-auto py-1">
+          {choices.map((choice) => (
+            <button type="button" key={choice.id} className={cn(menuItem(), "flex items-center gap-2")}
+              data-testid={`new-session-provider-${choice.id}`}
+              disabled={!connected || (discovery && catalog?.state !== "ready")}
+              onClick={() => {
+                if (choice.id === "claude" || choice.id === "codex") setLastAgentChoice(choice.id);
+                onSelect(fixedCwd, choice.id);
+                onClose();
+              }}>
+              <AgentIcon provider={choice.id} />
+              {choice.label}
+            </button>
+          ))}
+          {discovery && catalog?.state === "loading" && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Checking agents…</p>}
+          {discovery && catalog?.state === "error" && <p className="mx-3 text-[0.75rem] text-red" role="alert">{catalog.error}</p>}
+          {discovery && catalog?.state === "ready" && !choices.length && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Enable or install an agent in Manage agents.</p>}
+          {discovery && <button type="button" className={cn(CATALOG_ACTION, "mx-3")} onClick={() => { onClose(); manage(); }}>Manage agents</button>}
+        </div>
+      ) : <>
       <AgentPicker
         hostId={hostId}
         onManage={onClose}
@@ -640,6 +668,7 @@ export function NewSessionPopover({ hostId, projectCwds, anchorRect, onClose, on
         No project
         <span className={POPOVER_PICK_CWD}>Chats</span>
       </button>
+      </>}
     </div>,
     document.body
   );

@@ -34,7 +34,8 @@ test.describe("Status glyph system", () => {
     await startChat(page);
     const dot = page.locator(".status-bar .agent-status-dot");
     await expect(dot).toHaveClass(/agent-status-dot--idle/);
-    await expect(dot).toContainText("○");
+    await expect(dot).toHaveAttribute("data-provider", "terminal");
+    await expect(dot.locator("svg")).toBeVisible();
     const color = await dot.evaluate((el) => getComputedStyle(el).color);
     expect(color).not.toBe("");
     expect(color.startsWith("var(")).toBeFalsy();
@@ -45,7 +46,8 @@ test.describe("Status glyph system", () => {
     const sessionId = await startSlowTurn(page);
     const working = page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-status-dot--working");
     await expect(working).toBeVisible({ timeout: 15_000 });
-    await expect(working).toContainText("●");
+    await expect(working).toHaveAttribute("data-provider", "claude");
+    await expect(working.locator("svg")).toBeVisible();
     expect(await working.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
     await expect(working).not.toBeVisible({ timeout: 90_000 });
   });
@@ -66,7 +68,7 @@ test.describe("Status glyph system", () => {
       const row = page2.getByTestId(`workspace-session-${sessionId}`);
       const done = row.locator(".agent-status-dot--done");
       await expect(done).toBeVisible({ timeout: 90_000 });
-      await expect(done).toContainText("●");
+      await expect(done.locator("svg")).toBeVisible();
 
       await row.click();
       await expect(row.locator(".agent-status-dot--idle")).toBeVisible({ timeout: 10_000 });

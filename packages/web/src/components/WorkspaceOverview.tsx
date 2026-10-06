@@ -40,7 +40,7 @@ const GLYPH = `w-[1.7rem] shrink-0 self-stretch cursor-pointer rounded-none p-0 
 const PROJECT_ICON = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/ph:opacity-100 aria-[expanded=false]:opacity-100`;
 const SESSION_CLOSE = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/row:opacity-100`;
 const HEADER_PLUS = "h-auto w-[1.7rem] self-stretch rounded-none p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
-const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:mr-[0.3rem] [@media(max-width:700px)]:mb-[0.35rem] [@media(max-width:700px)]:ml-[1.45rem] [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
+const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:m-0 [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -108,7 +108,7 @@ function readSessionView(): SessionView {
   try { return localStorage.getItem(SESSION_VIEW_KEY) === "list" ? "list" : "compact"; } catch { return "compact"; }
 }
 
-/** Compact sessions: one status dot per session, on a second line under the
+/** Compact sessions: one harness/status badge per session, on a second line under the
  * row's name (`flex-wrap` on the row). Click switches to it, right-click
  * closes it; the tooltip names it and its state. */
 function SessionDots({ sessions, activeId, onPick, onMenu }: {
@@ -123,7 +123,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
         <button
           key={session.id}
           type="button"
-          className={cn("grid h-[1.5rem] w-[1.6rem] shrink-0 cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
+          className={cn("grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -131,7 +131,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
           onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
         >
-          <StatusDot session={session} className="mt-0 text-[0.8rem]" />
+          <StatusDot session={session} />
         </button>
       ))}
     </span>
@@ -788,6 +788,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 <div
                   className={cn("group/ph flex flex-wrap items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
+                  onClick={(event) => {
+                    if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;
+                    onHeaderClick();
+                  }}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setMenu({ x: event.clientX, y: event.clientY, label: "Project actions", items: projectMenu(project) });
@@ -885,8 +889,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       return (
                         <Fragment key={workspace.id}>
                         <div
-                          className="workspace-entry group/entry relative"
+                          className={cn("workspace-entry group/entry relative cursor-pointer hover:bg-surface-1", workspaceActive && "bg-surface-1")}
                           data-testid={`workspace-entry-${workspace.id}`}
+                          onClick={(event) => {
+                            if (renamingId === workspace.id || (event.target as HTMLElement).closest("button, input, a")) return;
+                            navigateToWorkspace(workspace.id);
+                          }}
                           onContextMenu={(event) => {
                             if ((event.target as HTMLElement).closest(".workspace-entry__sessions")) return;
                             event.preventDefault();
@@ -924,9 +932,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             onClick={() => navigateToWorkspace(workspace.id)}
                             title={workspace.path}
                           >
-                            <span className={BODY}>
+                            <span className={cn(BODY, "flex items-baseline gap-[0.35rem]")}>
                               <strong
-                                className={STRONG}
+                                className={cn(STRONG, "min-w-0")}
                                 title="Double-click to rename"
                                 onDoubleClick={(event) => {
                                   event.stopPropagation();
@@ -936,7 +944,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 {workspace.name || basename(workspace.path)}
                               </strong>
                               {/* A branch only when it tells checkouts apart; the path is in the tooltip. */}
-                              {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={SPAN}>{workspace.branch}</span>}
+                              {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{workspace.branch}</span>}
                             </span>
                             {workspace.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
                             {/* Only what needs attention; "ready" is the norm. */}
@@ -954,7 +962,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {/* Desktop uses the right-click menu; the phone has no
                               right-click, so it keeps these buttons. */}
                           {compact && (
-                          <div className="absolute top-[0.3rem] right-[0.3rem] flex gap-[0.2rem]">
+                          <div className="flex flex-wrap gap-[0.3rem] pr-[0.3rem] pb-[0.35rem] pl-[1.5rem]">
                           <button
                             type="button"
                             className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}

@@ -246,7 +246,8 @@ export function TabBar() {
       {popoverAnchor && (
         <NewSessionPopover
           hostId={hostId}
-          projectCwds={cwd ? [cwd] : []}
+          projectCwds={[]}
+          fixedCwd={cwd ?? "~"}
           anchorRect={popoverAnchor}
           onClose={() => setPopoverAnchor(null)}
           onSelect={(selectedCwd, provider) => createSessionOnHost(hostId, selectedCwd, provider)}

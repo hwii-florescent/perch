@@ -281,8 +281,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       const alphaSession = sql("SELECT session_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
       const firstTerminalId = await terminal.getAttribute("data-terminal-id");
       await page.getByTestId("tab-new").click();
-      await page.getByTestId("new-session-popover-agent").selectOption("turnbot");
-      await page.getByTestId("project-option-0").click();
+      await page.getByTestId("new-session-provider-turnbot").click();
       const secondTerminal = page.locator('[data-testid="persistent-agent-terminal"]:visible').last();
       await expect(secondTerminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
       await expect(secondTerminal).not.toHaveAttribute("data-terminal-id", firstTerminalId!);

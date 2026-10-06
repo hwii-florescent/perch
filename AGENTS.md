@@ -143,8 +143,9 @@ there, not here.
 - **CLI mode:**
   - It mounts no terminal until the session is started (`CliStartPanel`).
   - It shows no provider/model/effort UI; that chrome is Hosted-only.
-  - The tab-bar `+` opens a picker and creates nothing until something is
-    chosen.
+  - The tab-bar `+` opens a harness picker scoped to the current workspace
+    (or Chats with none selected), never asks for a project again, and creates
+    nothing until a harness is chosen.
 - **Workspace UX (decided with the user 2026-10-01, Orca-style; don't
   revert):**
   - **Pending replacement:** `docs/DECISIONS.md` (2026-10-04) approves
@@ -246,7 +247,8 @@ there, not here.
     dragging the dividers (`ResizeHandle.tsx`; per viewer, localStorage
     `perch.layout.*`).
   - Sessions sit under their project (`workspace-entry__sessions`). The Organize menu picks **Compact sessions** (default; `SessionDots`: one
-    status dot per session on the row, click switches, right-click closes) or
+    harness icon inside a status-colored ring per session on the row, click
+    switches, right-click closes) or
     **Session list** (`perch.sidebar.sessionView`); the phone always lists. A
     project with one checkout shows no workspace row: its header carries the
     `workspace-entry` testid/`workspace-entry__button` class, and Files/Git
