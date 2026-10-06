@@ -118,7 +118,13 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   onMenu: (session: SessionSummary, x: number, y: number) => void;
 }) {
   return (
-    <span className="order-last flex w-full min-w-0 items-stretch gap-0 overflow-hidden pl-[0.75rem]" data-testid="session-dots">
+    <span className="order-last w-full min-w-0 pb-1">
+    <span
+      className="mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-0/40 bg-transparent px-1"
+      data-testid="session-dots"
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+    >
       {sessions.map((session) => (
         <button
           key={session.id}
@@ -134,6 +140,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
           <StatusDot session={session} className={cn("group-hover:bg-overlay-0 group-focus-visible:[outline:1px_solid_var(--overlay-1)] group-focus-visible:outline-offset-1", session.id === activeId && "bg-overlay-0 [outline:1px_solid_var(--overlay-1)] outline-offset-1")} />
         </button>
       ))}
+    </span>
     </span>
   );
 }
@@ -280,7 +287,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const workspaces = usePerchStore((state) => state.workspaces);
   const sessions = usePerchStore((state) => state.sessions);
   const worktreeJobs = usePerchStore((state) => state.worktreeJobs);
-  const activeProjectId = usePerchStore((state) => state.activeProjectId);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
   const snapshot = usePerchStore((state) => state.workspaceSnapshotByHost[activeHostId]);
   const fetchWorkspaceSnapshot = usePerchStore((state) => state.fetchWorkspaceSnapshot);
@@ -786,7 +792,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex flex-wrap items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  className={cn("group/ph flex cursor-pointer flex-wrap items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {
                     if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;

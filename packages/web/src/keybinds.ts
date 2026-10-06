@@ -22,9 +22,10 @@
  * Focus guard: chords (leader arm + the follow-up letter) and the plain `?`
  * binding are both suppressed while `document.activeElement` is inside a
  * `textarea`/`input`/`[contenteditable]`. A focused terminal is the
- * exception for chords: CLI panes always hold focus, so the leader has to
- * work there. `terminalKeyHandler` keeps xterm from also sending Ctrl+Space
- * (NUL) and the chord's follow-up letter to the PTY.
+ * exception for chords, as is the workspace file editor: panes hold focus
+ * when their tab is selected, so the leader has to work there.
+ * `terminalKeyHandler` keeps xterm from also sending Ctrl+Space (NUL) and
+ * the chord's follow-up letter to the PTY.
  */
 import { useEffect, useRef } from "react";
 import { usePerchStore, effectiveActiveProject } from "./store";
@@ -85,8 +86,9 @@ export const KEYBINDS: KeybindEntry[] = [
 // Focus guard
 // ---------------------------------------------------------------------------
 
-function isEditableTarget(target: EventTarget | null): boolean {
+function isEditableTarget(target: EventTarget | null, exceptPanes = false): boolean {
   if (!(target instanceof Element)) return false;
+  if (exceptPanes && target.closest('.xterm, [data-testid="workspace-file-editor"]')) return false;
   return target.closest('input, textarea, [contenteditable=""], [contenteditable="true"], .xterm') != null;
 }
 
@@ -354,7 +356,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       // chord — never intercept real typing).
       if (resizeArmedRef.current) {
         if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
-        if (isEditableTarget(e.target) && !inTerminal(e.target)) {
+        if (isEditableTarget(e.target, true)) {
           disarmResize();
           return;
         }
@@ -412,9 +414,9 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
 
       const editable = isEditableTarget(e.target);
 
-      // Ctrl+Space -> arm the leader. Ignored while typing, except in a terminal.
+      // Ctrl+Space -> arm the leader. Forms keep it; terminal/file panes don't.
       if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ")) {
-        if (editable && !inTerminal(e.target)) return;
+        if (isEditableTarget(e.target, true)) return;
         e.preventDefault();
         arm();
         return;
@@ -432,7 +434,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     // re-click the tab left focused after a keyboard-only tab switch.
     function handleKeyUp(e: KeyboardEvent) {
       if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ") &&
-          (!isEditableTarget(e.target) || inTerminal(e.target))) e.preventDefault();
+          !isEditableTarget(e.target, true)) e.preventDefault();
     }
 
     document.addEventListener("keydown", handleKeyDown);

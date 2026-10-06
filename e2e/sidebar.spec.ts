@@ -85,9 +85,18 @@ test.describe("Perch sidebar", () => {
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
       expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
       expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
-      // Empty space beside the badges navigates; a badge only picks its session.
+      // The centered session bar is a separate target; its border/blank space
+      // does not navigate. The gutter alongside it still selects the workspace.
       const treeSession = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-      await main.locator('[data-testid="session-dots"]').click({ position: { x: 120, y: 16 } });
+      const bar = main.getByTestId("session-dots");
+      await bar.click({ position: { x: 120, y: 16 } });
+      await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
+      await bar.click({ position: { x: 1, y: 1 } });
+      await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
+      const [mainBox, barBox] = await Promise.all([main.boundingBox(), bar.boundingBox()]);
+      expect(barBox!.width / mainBox!.width).toBeCloseTo(0.85, 1);
+      expect(barBox!.x - mainBox!.x).toBeCloseTo((mainBox!.width - barBox!.width) / 2, 0);
+      await main.click({ position: { x: 2, y: barBox!.y - mainBox!.y + 16 } });
       await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
       await page.getByTestId(`workspace-session-${treeSession}`).click();
       await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);

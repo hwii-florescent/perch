@@ -72,10 +72,13 @@ it("tab + uses Chats with no selected project, and cannot launch while discovery
 
 it("workspace background picks it, while its badge and rename input keep their own actions", () => {
   render(<WorkspaceOverview />);
-  click(get("workspace-entry-tree").querySelector('[data-testid="session-dots"]')!);
+  click(get("workspace-entry-tree"));
   expect(focus).toHaveBeenCalledExactlyOnceWith("tree");
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   focus.mockClear(); switchSession.mockClear();
+  click(get("workspace-entry-tree").querySelector('[data-testid="session-dots"]')!);
+  expect(focus).not.toHaveBeenCalled();
+  expect(switchSession).not.toHaveBeenCalled();
   click(get("workspace-session-session"));
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   expect(focus).not.toHaveBeenCalled();
@@ -88,6 +91,20 @@ it("workspace background picks it, while its badge and rename input keep their o
   click(get("workspace-rename-tree"));
   expect(focus).not.toHaveBeenCalled();
   expect(get("workspace-entry-main").querySelector("strong")!.parentElement!.className).toContain("items-baseline");
+});
+
+it("a single-checkout project selects from its background, but not from its session bar", () => {
+  usePerchStore.setState({ workspaces: [workspace], sessions: [{ ...session, workspaceId: workspace.id, cwd: workspace.path }], activeWorkspaceId: workspace.id });
+  render(<WorkspaceOverview />);
+  click(get("workspace-entry-main"));
+  expect(focus).toHaveBeenCalledExactlyOnceWith("main");
+  focus.mockClear(); switchSession.mockClear();
+  click(get("session-dots"));
+  expect(focus).not.toHaveBeenCalled();
+  expect(switchSession).not.toHaveBeenCalled();
+  click(get("workspace-session-session"));
+  expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
+  expect(focus).not.toHaveBeenCalled();
 });
 
 it("status rings retain every status and select the actual harness rather than a stale hosted agent", () => {

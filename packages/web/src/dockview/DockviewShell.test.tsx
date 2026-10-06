@@ -31,6 +31,7 @@ it("applies a saved layout that arrives before Dockview is ready", async () => {
     addPanel: vi.fn(), fromJSON: vi.fn(), panels: [], groups: [],
     toJSON: vi.fn(() => ({ panels: {} })),
     onDidLayoutChange: vi.fn(), onUnhandledDragOver: vi.fn(), onDidDrop: vi.fn(),
+    onDidActivePanelChange: vi.fn(() => ({ dispose: vi.fn() })),
   };
   try {
     await act(async () => { root.render(<DockviewShell />); });

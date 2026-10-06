@@ -6,8 +6,9 @@ import { Terminal } from "@xterm/xterm";
 import { terminalKeyHandler, useLeaderKey } from "./keybinds";
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {
+  let navigations = 0;
   function Leader() {
-    useLeaderKey({ openNavigator() {}, openKeybindHelp() {} });
+    useLeaderKey({ openNavigator() { navigations++; }, openKeybindHelp() {} });
     return null;
   }
   const host = document.createElement("div");
@@ -27,6 +28,17 @@ it("cancels the leader on keyup without swallowing ordinary Space or text input"
     expect(release(button, true)).toBe(false);
     expect(release(button, false)).toBe(true);
     expect(release(input, true)).toBe(true);
+    const editor = document.createElement("textarea");
+    editor.dataset.testid = "workspace-file-editor";
+    host.append(editor);
+    const press = (target: HTMLElement, key: string, ctrlKey = false) => target.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true, cancelable: true }));
+    expect(press(input, " ", true)).toBe(true); // forms still keep Ctrl+Space
+    expect(press(editor, "?")).toBe(true); // ordinary editor text is untouched
+    expect(press(editor, " ", true)).toBe(false);
+    expect(release(editor, true)).toBe(false);
+    expect(press(editor, "g")).toBe(false);
+    expect(navigations).toBe(1);
+    expect(press(editor, "n")).toBe(true); // no armed chord: normal typing
   } finally {
     await act(async () => { root.unmount(); });
     env.IS_REACT_ACT_ENVIRONMENT = previous;

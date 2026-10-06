@@ -204,7 +204,10 @@ there, not here.
     lease ("last actor drives"), and Stop agent is in the pane ⋯ menu.
   - The tab bar shows only the active workspace's sessions
     (`activeWorkspaceSessions` in `store/selectors.ts`), and `+` creates in
-    that workspace's path.
+    that workspace's path. Selecting a tab focuses its terminal input or
+    file editor once mounted (and after the session's layout restores),
+    including keyboard navigation and tabs in a split. Ctrl+Space stays
+    available in the file editor; ordinary form fields keep their input.
   - The default theme is `"perch"`: monotone neutral greys, color only for
     status. `styles/base.css` `:root`, `PERCH_DEFAULT` in `themes.ts` and Rust
     `default_theme()` must agree. The active tab and pane are marked in grey,
@@ -255,7 +258,10 @@ there, not here.
     are on the project menu. Rows are rounded, filled on hover/active
     (`surface-1`), focus is a 1px neutral ring, never an accent outline.
     Compact badges keep a 32px hit target, but selection/hover/focus hug the
-    20px circular badge, never fill its square hit area. Icons follow the
+    20px circular badge, never fill its square hit area. The compact badges
+    sit in a faint bordered bar centered at 85% of the row width. The bar's
+    border and blank space never select the workspace; the row's remaining
+    background does, including the gutters beside the bar. Icons follow the
     observed foreground provider (`SessionSummary.currentProviderId`), not
     just the launcher; this display identity must never rewrite the saved
     launch/resume choice (`cliProviderId`).

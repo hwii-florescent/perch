@@ -88,8 +88,10 @@ test("a terminal, a file and the review share one ordered strip", async ({ page 
     expect(await activeTab(page)).toBe(reviewTab);
     await chord(page, "n");
     await expect.poll(() => activeTab(page)).toBe(terminalTab);
+    await expect(page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea")).toBeFocused();
     await chord(page, "n");
     await expect.poll(() => activeTab(page)).toBe(fileTab);
+    await expect(page.getByTestId("workspace-file-editor")).toBeFocused();
     await chord(page, "n");
     await expect.poll(() => activeTab(page)).toBe(reviewTab);
     await chord(page, "p");
@@ -162,6 +164,9 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
     // Members are marked in the strip; clicking any one keeps the set; focus follows a click in a pane.
     await page.getByTestId(terminalTab).click();
     await expect(canvas).toHaveAttribute("data-split", "3");
+    await expect(page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea")).toBeFocused();
+    await page.getByTestId(fileTab).click();
+    await expect(page.getByTestId("workspace-file-editor")).toBeFocused();
     await page.getByTestId(readme).click({ position: { x: 20, y: 20 } });
     await expect(page.getByTestId(fileTab)).toHaveClass(/tab-bar__tab--active/);
 

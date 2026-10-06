@@ -65,6 +65,16 @@ test.describe("Workspace tabs (Phase 3)", () => {
     await expectActive(page, sessionAId);
     await expect(page.getByTestId(`workspace-session-${sessionAId}`)).toHaveClass(/workspace-entry__session--active/);
     await expect(tabB).not.toHaveClass(/tab-bar__tab--active/);
+    const input = page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea");
+    await expect(input).toBeFocused();
+    // Type through the page keyboard: no pane click or locator.focus().
+    await page.keyboard.type("echo perch-tab-focus");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("persistent-agent-terminal").locator(".xterm-rows")).toContainText("perch-tab-focus");
+    await tabB.click();
+    await expect(input).toBeFocused();
+    await page.getByTestId(`workspace-session-${sessionAId}`).click();
+    await expect(input).toBeFocused();
   });
 
   // -------------------------------------------------------------------------

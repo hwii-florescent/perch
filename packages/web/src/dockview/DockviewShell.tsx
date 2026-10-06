@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -15,6 +15,7 @@ import "./paneSplit.css";
 import { ChatView } from "../views/Chat";
 import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
+import { useFileTabs } from "../fileTabs";
 import { closeWorkspaceTerminal, listWorkspaceTerminals } from "../workspaceTerminals";
 import { forgetTerminal } from "../terminalKeeper";
 import { shellTerminalKey } from "../views/PersistentTerminal";
@@ -304,6 +305,9 @@ function endPaneShell(paneId: string): void {
 export function DockviewShell() {
   const apiRef = useRef<DockviewApi | null>(null);
   const [readyApi, setReadyApi] = useState<DockviewApi | null>(null);
+  const [appliedSessionId, setAppliedSessionId] = useState<string | null>(null);
+  const activeFile = useFileTabs((s) => s.active);
+  const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const sessionId = usePerchStore((s) => s.sessionId);
   const sessions = usePerchStore((s) => s.sessions);
   const sessionLayouts = usePerchStore((s) => s.sessionLayouts);
@@ -461,6 +465,7 @@ export function DockviewShell() {
     if (!sessionId) return;
     flushPendingSave();
     appliedSessionIdRef.current = null;
+    setAppliedSessionId(null);
     usePerchStore.setState((state) => {
       if (!(sessionId in state.sessionLayouts)) return state;
       const next = { ...state.sessionLayouts };
@@ -502,12 +507,41 @@ export function DockviewShell() {
       restoringRef.current = false;
       syncPaneHeaders(api);
       appliedSessionIdRef.current = sessionId;
+      setAppliedSessionId(sessionId);
       savedPanelIdsRef.current = Object.keys(api.toJSON().panels).sort().join("\0");
     }
     // sessionLayouts is intentionally in the dependency array (to re-run
     // this effect when a new reply arrives) even though the value used
     // inside is read fresh via getState().
   }, [sessionId, sessionLayouts, readyApi]);
+
+  // Dockview activation selects a panel, but does not focus its input. Wait
+  // for this session's restored layout and any asynchronously mounted xterm.
+  useEffect(() => {
+    if (!readyApi || !sessionId || appliedSessionId !== sessionId || activeFile || settingsOpen) return;
+    let frame = 0;
+    let observer: MutationObserver | undefined;
+    const focusPanel = () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      const element = readyApi.activePanel?.view.content.element;
+      if (!element) return;
+      const focus = () => {
+        frame = requestAnimationFrame(() => {
+          const input = element.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea, textarea");
+          if (!input || !input.isConnected) return;
+          input.focus({ preventScroll: true });
+          observer?.disconnect();
+        });
+      };
+      observer = new MutationObserver(() => { cancelAnimationFrame(frame); focus(); });
+      observer.observe(element, { childList: true, subtree: true });
+      focus();
+    };
+    focusPanel();
+    const changed = readyApi.onDidActivePanelChange(focusPanel);
+    return () => { changed.dispose(); cancelAnimationFrame(frame); observer?.disconnect(); };
+  }, [readyApi, sessionId, appliedSessionId, activeFile, settingsOpen]);
 
   return (
     <>

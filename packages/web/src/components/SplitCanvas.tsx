@@ -32,6 +32,7 @@ export function SplitCanvas() {
   const activeKey = useFileTabs((s) => s.active);
   const sets = useSplitSets((s) => s.sets);
   const resize = useSplitSets((s) => s.resize);
+  const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const shownWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [live, setLive] = useState<number[] | null>(null);
@@ -40,6 +41,28 @@ export function SplitCanvas() {
   const resources = new Map(entries.flatMap((entry) => entry.kind === "resource" ? [[entry.id, entry.tab] as const] : []));
   const fileShown = activeKey !== null && resources.has(activeKey);
   const activeId = fileShown ? activeKey : sessionId;
+  const editorShown = fileShown && resources.get(activeKey)?.kind !== "review";
+  // File tabs can finish loading after activation; focus the editor, not its
+  // search field. Session inputs are focused by Dockview after layout restore.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !editorShown || !activeKey || settingsOpen) return;
+    let frame = 0;
+    const focus = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const pane = [...host.querySelectorAll<HTMLElement>("[data-tab-id]")].find((element) => element.dataset.tabId === activeKey);
+        const editor = pane?.querySelector<HTMLTextAreaElement>('[data-testid="workspace-file-editor"]');
+        if (!editor) return;
+        editor.focus({ preventScroll: true });
+        observer.disconnect();
+      });
+    };
+    const observer = new MutationObserver(focus);
+    observer.observe(host, { childList: true, subtree: true });
+    focus();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [activeKey, editorShown, settingsOpen]);
   // The Dockview shows the current session only: another session's tab is not a visible member.
   const available = entries.filter((entry) => entry.kind === "resource" || entry.id === sessionId).map((entry) => entry.id);
   const split = visibleSplit(sets, available, activeId);
@@ -142,6 +165,7 @@ export function SplitCanvas() {
           className={cn("absolute top-0 bottom-0 z-10 flex bg-panel-bg", !split && "inset-0")}
           style={slot(id)}
           data-testid={tab.kind === "review" ? "split-pane-review" : `split-pane-file-${tab.path}`}
+          data-tab-id={id}
           onMouseDownCapture={() => focusResource(tab)}
           onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
