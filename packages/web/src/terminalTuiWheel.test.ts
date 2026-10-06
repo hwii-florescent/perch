@@ -33,11 +33,12 @@ async function terminal() {
   term.onData((data) => reports.push(data));
   const write = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
   await write("\x1b[?1000h\x1b[?1006h"); // vt200 mouse tracking, SGR encoding
-  const wheel = (deltaY: number, init: WheelEventInit = {}, legacyDelta?: number) => {
+  const wheel = (deltaY: number, init: WheelEventInit = {}, legacyDelta?: number, timeStamp?: number) => {
     const event = new WheelEvent("wheel", {
       bubbles: true, cancelable: true, deltaY, clientX: 8, clientY: 8, ...init,
     });
     if (legacyDelta !== undefined) Object.defineProperty(event, "wheelDeltaY", { value: legacyDelta });
+    if (timeStamp !== undefined) Object.defineProperty(event, "timeStamp", { value: timeStamp });
     screen.dispatchEvent(event);
     return event;
   };
@@ -93,16 +94,47 @@ describe("TUI trackpad wheel distance", () => {
     expect(reports.every((report) => report.startsWith("\x1b[<89;"))).toBe(true);
   });
 
-  it("leaves notched mice and non-pixel wheel input on xterm's native path", async () => {
+  it("scrolls a notched mouse wheel by its row distance, at least one row per notch", async () => {
     const { reports, wheel } = await terminal();
-    wheel(64, {}, 120);
-    expect(reports).toHaveLength(1); // synchronous native report
-    wheel(3, { deltaMode: WheelEvent.DOM_DELTA_LINE });
-    expect(reports).toHaveLength(2);
-    wheel(1, { deltaMode: WheelEvent.DOM_DELTA_PAGE });
-    expect(reports).toHaveLength(3);
+    wheel(4, {}, -120, 0); // a small notch still moves one row
     await Promise.resolve();
-    expect(reports).toHaveLength(3);
+    expect(reports).toHaveLength(1);
+    wheel(64, {}, -120, 1000); // 4 rows, log-compressed to 4.2 (stock xterm sent 1)
+    await Promise.resolve();
+    expect(reports).toHaveLength(1 + 4);
+    expect(reports.every((report) => report.startsWith("\x1b[<65;"))).toBe(true);
+  });
+
+  it("scrolls line and page wheel input by row distance, compressed", async () => {
+    const { reports, wheel } = await terminal();
+    wheel(3, { deltaMode: WheelEvent.DOM_DELTA_LINE }, undefined, 0);
+    await Promise.resolve();
+    expect(reports).toHaveLength(3); // 1 + log2(3) * 1.6 = 3.5
+    wheel(1, { deltaMode: WheelEvent.DOM_DELTA_PAGE }, undefined, 1000);
+    await Promise.resolve();
+    expect(reports).toHaveLength(3 + 6); // 24 rows compress to 6; the .5 carried makes 6.5
+  });
+
+  it("ramps up a fast burst of notches but not slow ones", async () => {
+    const burst = await terminal();
+    burst.wheel(16, {}, -120, 0);
+    burst.wheel(16, {}, -120, 10);
+    burst.wheel(16, {}, -120, 20);
+    await Promise.resolve();
+    expect(burst.reports.length).toBeGreaterThan(3); // plain notches would be 3
+    const slow = await terminal();
+    slow.wheel(16, {}, -120, 0);
+    slow.wheel(16, {}, -120, 200);
+    slow.wheel(16, {}, -120, 400);
+    await Promise.resolve();
+    expect(slow.reports).toHaveLength(3);
+  });
+
+  it("caps one big notch at the compressed maximum", async () => {
+    const { reports, wheel } = await terminal();
+    wheel(2000, {}, -120, 0);
+    await Promise.resolve();
+    expect(reports).toHaveLength(6);
   });
 
   it("leaves ordinary scrollback, Shift+scroll and keyboard input alone", async () => {
