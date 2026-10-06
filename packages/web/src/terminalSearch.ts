@@ -11,12 +11,14 @@
  * (only the focused terminal's textarea receives the event at all), and
  * returning `false` both lets us `preventDefault()` the browser's native
  * find dialog. Ctrl+F is left to the PTY (readline's forward-char), as in
- * Ghostty and iTerm2.
+ * Ghostty and iTerm2. The same handler owns the terminal-only shortcuts that
+ * need the xterm instance: Cmd+K clears, Cmd+Up/Down scroll to the top/bottom
+ * (Ctrl+Shift instead of Cmd off macOS).
  */
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { SearchAddon } from "@xterm/addon-search";
-import { terminalKeyHandler } from "./keybinds";
+import { isShortcut, terminalKeyHandler } from "./keybinds";
 
 export interface TerminalSearchController {
   open: boolean;
@@ -54,6 +56,17 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
       if (e.type === "keydown" && e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setOpen(true);
+        return false;
+      }
+      if (e.type === "keydown" && isShortcut(e, "mod+k")) {
+        e.preventDefault();
+        term.clear();
+        return false;
+      }
+      if (e.type === "keydown" && (isShortcut(e, "mod+up") || isShortcut(e, "mod+down"))) {
+        e.preventDefault();
+        if (isShortcut(e, "mod+up")) term.scrollToTop();
+        else term.scrollToBottom();
         return false;
       }
       if (e.type === "keydown" && e.key === "Escape" && openRef.current) {

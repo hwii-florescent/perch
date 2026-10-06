@@ -10,6 +10,7 @@ import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import { segment } from "./ui/segment";
+import { NEW_TAB_EVENT } from "../appEvents";
 
 // Every tab sits in a wrapper that reserves room for its x (pr-[1.6rem]).
 // Operational text uses subtext-0: on surface-0 and panel-bg it contrasts at least as much as
@@ -98,6 +99,16 @@ export function TabBar() {
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
   }, [renamingId]);
+
+  // Cmd+T (keybinds.ts): open the harness picker as the "+" button would.
+  useEffect(() => {
+    const open = () => {
+      const button = stripRef.current?.querySelector('[data-testid="tab-new"]');
+      if (button) setPopoverAnchor(button.getBoundingClientRect());
+    };
+    window.addEventListener(NEW_TAB_EVENT, open);
+    return () => window.removeEventListener(NEW_TAB_EVENT, open);
+  }, []);
 
   // The strip scrolls when tabs overflow: keep the active one in view, also when the strip narrows.
   useEffect(() => {

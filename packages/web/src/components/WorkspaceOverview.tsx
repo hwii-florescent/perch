@@ -1,5 +1,5 @@
 import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
-import { ADD_PROJECT_EVENT } from "./NoSessionPanel";
+import { ADD_PROJECT_EVENT } from "../appEvents";
 import { createPortal } from "react-dom";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { StatusDot } from "./StatusDot";
@@ -16,6 +16,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
+import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, sessionsForWorkspace, workspacesForProject } from "../workspaceNav";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
 // `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
@@ -152,37 +153,6 @@ function readOrganize(): Organize {
   try { return localStorage.getItem(ORGANIZE_KEY) === "list" ? "list" : "project"; } catch { return "project"; }
 }
 
-function workspacesForProject(
-  workspaces: WorkspaceRecord[],
-  projectId: string,
-): WorkspaceRecord[] {
-  return workspaces
-    .filter((workspace) => workspace.projectId === projectId && workspace.state !== "archived")
-    .sort((a, b) => {
-      if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-      if (a.state !== b.state) return a.state === "active" ? -1 : 1;
-      return b.updatedAt - a.updatedAt;
-    });
-}
-
-/** The Chats project: the scratch folder "No project" sessions run in
- * (`session::chats_pair`). Listed as a flat chat list after the projects. */
-function isChatsProject(project: WorkspaceProject): boolean {
-  return project.path.endsWith("/.perch/scratch");
-}
-
-function sessionsForWorkspace(
-  sessions: SessionSummary[],
-  workspace: WorkspaceRecord,
-): SessionSummary[] {
-  return sessions
-    .filter((session) => {
-      if (session.workspaceId) return session.workspaceId === workspace.id;
-      return (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path;
-    })
-    .sort((a, b) => b.createdAt - a.createdAt);
-}
-
 /** Orca's hidden-worktrees card: worktrees perch discovered but did not
  * create (or that were hidden) stay out of the tree until shown here. */
 function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecord[]; projectId: string }) {
@@ -296,7 +266,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const hostStates = usePerchStore((state) => state.hostStates);
   // Which host the Add project dialog registers on; starts as the active one.
   const [addHostId, setAddHostId] = useState(activeHostId);
-  const focusWorkspaceProject = usePerchStore((state) => state.focusWorkspaceProject);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
   const restoreWorkspace = usePerchStore((state) => state.restoreWorkspace);
   const renameWorkspace = usePerchStore((state) => state.renameWorkspace);
@@ -496,28 +465,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** A clicked workspace with no sessions never keeps showing another
-   * workspace's session: it starts the agent set in Settings → "Empty
-   * workspace opens", else shows its start picker (`NoSessionPanel`). */
-  function openEmptyWorkspace(hostId: string, path: string) {
-    const state = usePerchStore.getState();
-    const agent = state.settings?.emptyWorkspaceAgent;
-    if (agent) createSessionOnHost(hostId, path, agent);
-    else state.showWorkspaceHome();
-  }
-
   function navigateToWorkspace(workspaceId: string) {
-    focusWorkspace(workspaceId);
-    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
-    if (!workspace) {
-      onNavigate?.();
-      return;
-    }
-    const workspaceSessions = sessionsForWorkspace(sessions, workspace);
-    if (!workspaceSessions.some((candidate) => candidate.id === sessionId)) {
-      if (workspaceSessions[0]) switchSession(workspaceSessions[0].id);
-      else openEmptyWorkspace(workspace.hostId, workspace.path);
-    }
+    goToWorkspace(workspaceId);
     onNavigate?.();
   }
 
@@ -567,7 +516,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const chatsSection = chatsProject && (() => {
         const chats = sessionsForProject(chatsProject.id);
         const chatsCollapsed = collapsed.includes(chatsProject.id);
-        const chatsWorkspace = workspacesForProject(workspaces, chatsProject.id)[0];
         return (
           <div className="pb-1" data-testid="workspace-chats">
             <div className="group/ph flex items-stretch hover:bg-surface-1">
@@ -606,9 +554,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 title="New chat"
                 aria-label="New chat"
                 onClick={() => {
-                  if (chatsWorkspace) focusWorkspace(chatsWorkspace.id);
-                  else focusWorkspaceProject(chatsProject.id);
-                  openEmptyWorkspace(chatsProject.hostId, chatsWorkspace?.path ?? chatsProject.path);
+                  newScratchpad();
                   onNavigate?.();
                 }}
               >

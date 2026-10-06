@@ -124,7 +124,7 @@ export default function App() {
   }, [isMobile, workspaceFilesWorkspaceId, workspaceGitReviewWorkspaceId]);
 
   // Phase 4 (Keybindings + Navigator): single global keydown listener owning
-  // the Ctrl+Space leader chord, Ctrl/Cmd+K, and plain '?'. Overlay open/close
+  // the direct shortcuts, the Ctrl+Space leader chord, Ctrl/Cmd+K, and plain '?'. Overlay open/close
   // state lives here (not in the zustand store) to keep the diff to the
   // shared, high-contention store.ts minimal.
   const openNavigator = useCallback(() => {
@@ -135,7 +135,7 @@ export default function App() {
     setNavigatorOpen(false);
     setKeybindHelpOpen(true);
   }, []);
-  useLeaderKey({ openNavigator, openKeybindHelp });
+  useLeaderKey({ openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal });
 
   // A rejected WebSocket handshake looks exactly like an unreachable host from
   // the browser's side, so ask the host which it is whenever the socket is

@@ -11,6 +11,58 @@ use perch_core::boot::{
 };
 use perch_core::server::CliArgs;
 
+/// The app menu. Tauri's default one binds Cmd+W to "Close Window", which macOS
+/// handles before the web view sees the key; perch uses Cmd+W to close a tab
+/// (`keybinds.ts`), so this is the default minus that item. The window still
+/// closes with its red button and Cmd+Q quits.
+#[cfg(target_os = "macos")]
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, PredefinedMenuItem as P, Submenu};
+    let sep = || P::separator(app);
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                "perch",
+                true,
+                &[
+                    &P::about(app, None, None)?,
+                    &sep()?,
+                    &P::services(app, None)?,
+                    &sep()?,
+                    &P::hide(app, None)?,
+                    &P::hide_others(app, None)?,
+                    &P::show_all(app, None)?,
+                    &sep()?,
+                    &P::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &P::undo(app, None)?,
+                    &P::redo(app, None)?,
+                    &sep()?,
+                    &P::cut(app, None)?,
+                    &P::copy(app, None)?,
+                    &P::paste(app, None)?,
+                    &P::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[&P::minimize(app, None)?, &P::maximize(app, None)?],
+            )?,
+        ],
+    )
+}
+
 fn main() {
     // `<exe> __perchd …` is the terminal daemon, not the app (see daemon.rs).
     perch_core::daemon::run_if_requested();
@@ -94,6 +146,9 @@ fn main() {
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            app.set_menu(app_menu(app.handle())?)?;
+
             let mut builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("perch")
                 .inner_size(1280.0, 800.0)

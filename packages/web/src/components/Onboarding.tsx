@@ -3,8 +3,9 @@
  *
  * Shown once, on first launch (gated by `onboarding.ts`'s localStorage
  * flag) — a brief orientation covering what perch is, how to start (add a
- * project, then `+`), the leader key (`Ctrl+Space`), `?` for the full
- * keybind help, `Ctrl/Cmd+K` for the Navigator, and a link-style action to
+ * project, then `+`), the direct shortcuts and the browser's leader key
+ * (`Ctrl+Space`), `Cmd+/` or `?` for the full keybind help, `Cmd+P` (or
+ * `Ctrl+K` outside a terminal) for the Navigator, and a link-style action to
  * open Settings. Dismissing it (the
  * only way to close it — no backdrop-click-to-dismiss, so a curious click
  * outside the panel doesn't lose the flag-set before it's been read) marks
@@ -57,16 +58,17 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
             or a terminal in it.
           </li>
           <li>
-            Press <kbd className={KBD}>Ctrl+Space</kbd> then a letter for
-            quick actions — the <em>leader key</em> for everything from splitting
-            panes to jumping sessions.
+            Use <kbd className={KBD}>Cmd+T</kbd> for a new tab,{" "}
+            <kbd className={KBD}>Cmd+D</kbd> to split, <kbd className={KBD}>Cmd+1</kbd>…
+            to jump tabs. In a browser (which keeps those keys) press{" "}
+            <kbd className={KBD}>Ctrl+Space</kbd> then a letter instead.
           </li>
           <li>
-            Press <kbd className={KBD}>?</kbd> any time to see the full
+            Press <kbd className={KBD}>Cmd+/</kbd> or <kbd className={KBD}>?</kbd> any time to see the full
             list of keybindings.
           </li>
           <li>
-            Press <kbd className={KBD}>Cmd+K</kbd> (or{" "}
+            Press <kbd className={KBD}>Cmd+P</kbd> (or{" "}
             <kbd className={KBD}>Ctrl+K</kbd> outside a terminal) to
             open the Navigator and jump to any session or project.
           </li>

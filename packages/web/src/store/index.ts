@@ -404,7 +404,7 @@ export interface PerchState {
    * matching `WorktreeMenu` instance self-opens against its own button rect;
    * cleared by that instance once consumed. With `remove`, the menu skips
    * its popover and asks to delete that checkout instead. */
-  worktreeMenuRequest: { projectKey: string; nonce: number; remove?: { path: string; branch?: string } } | null;
+  worktreeMenuRequest: { projectKey: string; nonce: number; remove?: { path: string; branch?: string }; create?: boolean } | null;
   /** Background worktree creates on the local host, replaced wholesale by
    * each `worktree.jobs` broadcast (see `server/worktree_jobs.rs`). */
   worktreeJobs: WorktreeJob[];
@@ -559,7 +559,7 @@ export interface PerchState {
   retryWorktreeJob: (jobId: string) => void;
   dismissWorktreeJob: (jobId: string) => void;
   /** Ask the `WorktreeMenu` for `${hostId}:${cwd}` to open itself (leader,W). */
-  requestWorktreeMenu: (projectKey: string, remove?: { path: string; branch?: string }) => void;
+  requestWorktreeMenu: (projectKey: string, remove?: { path: string; branch?: string }, create?: boolean) => void;
   /** Clear a consumed `worktreeMenuRequest`. */
   clearWorktreeMenuRequest: () => void;
   /** Request the persisted dockview layout blob for a session. Reply lands
@@ -1777,12 +1777,13 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   retryWorktreeJob: (jobId) => socket.send({ type: "worktree.job.retry", jobId }),
   dismissWorktreeJob: (jobId) => socket.send({ type: "worktree.job.dismiss", jobId }),
 
-  requestWorktreeMenu: (projectKey, remove) => {
+  requestWorktreeMenu: (projectKey, remove, create) => {
     set((state) => ({
       worktreeMenuRequest: {
         projectKey,
         nonce: (state.worktreeMenuRequest?.nonce ?? 0) + 1,
         ...(remove ? { remove } : {}),
+        ...(create ? { create } : {}),
       },
     }));
   },

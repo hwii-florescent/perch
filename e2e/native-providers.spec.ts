@@ -159,7 +159,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await page.screenshot({ path: testInfo.outputPath("native-ui-two-panes.png"), fullPage: true });
     await setChatMode(page, "cli");
 
-    await page.keyboard.press("ControlOrMeta+k");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+p" : "Control+Shift+p");
     await expect(page.getByTestId("navigator-command-omp")).toBeVisible();
     await expect(page.getByTestId("navigator-command-pi")).toBeVisible();
     await page.getByTestId("navigator-input").fill("new terminal");

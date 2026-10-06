@@ -1,8 +1,8 @@
 /**
  * KeybindHelp.tsx — Phase 4 (Keybindings + Navigator) searchable modal
  * listing every binding from `../keybinds.ts`'s `KEYBINDS` table, grouped by
- * `KeybindGroup` (global / navigation / sessions / panes). Opened via plain
- * `?` (outside inputs) or the leader chord `Ctrl+Space, ?`.
+ * `KeybindGroup`. Opened via the Cmd+/ shortcut, plain `?` (outside inputs) or the
+ * leader chord `Ctrl+Space, ?`.
  *
  * Portal-rendered into `document.body`, same structural pattern as
  * `Navigator.tsx` (backdrop + centered panel).
@@ -18,12 +18,14 @@ export interface KeybindHelpProps {
 
 const GROUP_LABELS: Record<KeybindGroup, string> = {
   global: "Global",
-  navigation: "Navigation",
-  sessions: "Sessions",
-  panes: "Panes",
+  tabs: "Tabs",
+  nests: "Nests and birdhouses",
+  panes: "Splits and panes",
+  terminal: "Terminal",
+  leader: "Leader (Ctrl+Space, then a key): the browser fallback",
 };
 
-const GROUP_ORDER: KeybindGroup[] = ["global", "navigation", "sessions", "panes"];
+const GROUP_ORDER: KeybindGroup[] = ["global", "tabs", "nests", "panes", "terminal", "leader"];
 
 export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
   const [query, setQuery] = useState("");

@@ -1,44 +1,115 @@
 /**
- * keybinds.ts — Phase 4 (Keybindings + Navigator) default web keymap.
+ * keybinds.ts — the web keymap.
  *
- * herdr's default keymap uses a `prefix` key (`ctrl+b` by default) followed
- * by a second keystroke ("chord"). Browsers reserve too many single-key
- * combinations for that model to translate directly (`ctrl+b` = bold in a
- * lot of browser chrome/extensions), so the web keymap uses `Ctrl+Space` as
- * the leader instead — chosen because it is not reserved by any major
- * browser. Pressing the leader "arms" a ~1.5s window during which the next
- * keystroke is looked up in `CHORD_ACTIONS`; missing that window silently
- * disarms (no action, no error).
+ * Two layers, one table each:
  *
- * Two bindings are NOT part of the leader chord, matching herdr's actual
- * UX for these (both are also directly reachable without a prefix in most
- * command-palette-style tools):
- *   - `Cmd+K` opens the Navigator unconditionally (even while a text
- *     input has focus — command-palette convention, e.g. Slack/Linear);
- *     `Ctrl+K` does too, except in a terminal, where it belongs to the PTY.
- *   - plain `?` opens KeybindHelp, but only when focus is NOT inside an
- *     editable element (a bare `?` must still be typeable in the composer).
+ * 1. **Direct shortcuts** (`SHORTCUTS`): browser-tab, Vivaldi-workspace and
+ *    iTerm2/Ghostty style keys. On macOS the app owns every Cmd combination
+ *    (they never reach the PTY; see `terminalKeyHandler`), so `mod` is Cmd
+ *    there. Elsewhere Ctrl alone belongs to the shell, so `mod` is Ctrl+Shift,
+ *    as in Ghostty/GNOME Terminal. Each entry gives the macOS and the other
+ *    platforms' spec; `null` means "no direct key there" (the leader still
+ *    reaches it). The help modal is generated from this table.
+ * 2. **The leader** (`Ctrl+Space`, then a letter; `CHORD_ACTIONS`): kept as
+ *    the fallback for a plain browser, which reserves Cmd/Ctrl+T/W/N/1-9 and
+ *    never lets the page see them, and for rare actions (swap panes, resize
+ *    mode). Pressing it arms a ~1.5s window; missing it silently disarms.
  *
- * Focus guard: chords (leader arm + the follow-up letter) and the plain `?`
- * binding are both suppressed while `document.activeElement` is inside a
- * `textarea`/`input`/`[contenteditable]`. A focused terminal is the
- * exception for chords, as is the workspace file editor: panes hold focus
- * when their tab is selected, so the leader has to work there.
- * `terminalKeyHandler` keeps xterm from also sending Ctrl+Space (NUL) and
- * the chord's follow-up letter to the PTY.
+ * Cmd+K / Ctrl+K open the Navigator outside terminals; in a terminal Cmd+K
+ * clears it (terminalSearch.ts) and Ctrl+K stays the PTY's. Plain `?` opens
+ * the help outside editable elements.
+ *
+ * Focus guard: leader chords and `?` are suppressed while focus is in a
+ * `textarea`/`input`/`[contenteditable]`; a focused terminal or the file
+ * editor is the exception, as panes hold focus when their tab is selected.
+ * Direct shortcuts work from anywhere, even inside inputs, like a browser's.
+ * `terminalKeyHandler` keeps xterm from also sending any of them to the PTY.
  */
 import { useEffect, useRef } from "react";
-import { usePerchStore, effectiveActiveProject } from "./store";
+import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./store";
 import { activateTab, currentTabs } from "./workspaceTabs";
 import { getDockviewController } from "./dockview/dockviewController";
+import { useFileTabs } from "./fileTabs";
+import { jumpToNest, newScratchpad, stepNest } from "./workspaceNav";
+import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
 
 const LEADER_TIMEOUT_MS = 1500;
 
 // ---------------------------------------------------------------------------
-// Keybind table (also consumed by KeybindHelp.tsx for the searchable modal)
+// Key combos: "mod+shift+]" → modifiers + a physical key
 // ---------------------------------------------------------------------------
 
-export type KeybindGroup = "global" | "navigation" | "sessions" | "panes";
+const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+
+interface Combo {
+  cmd: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+  /** `KeyboardEvent.code`: digits, punctuation and arrows match by position. */
+  code: string;
+  /** Letters also match `KeyboardEvent.key`, so Dvorak/AZERTY follow the layout. */
+  letter?: string;
+}
+
+const CODES: Record<string, string> = {
+  "[": "BracketLeft", "]": "BracketRight", ",": "Comma", "/": "Slash", enter: "Enter",
+  up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
+  pageup: "PageUp", pagedown: "PageDown",
+};
+
+const comboCache = new Map<string, Combo>();
+
+/** `mod` is Cmd on a Mac and Ctrl+Shift everywhere else. */
+function parseCombo(spec: string, mac: boolean): Combo {
+  const cacheKey = `${mac}|${spec}`;
+  const cached = comboCache.get(cacheKey);
+  if (cached) return cached;
+  const combo: Combo = { cmd: false, ctrl: false, shift: false, alt: false, code: "" };
+  for (const part of spec.split("+")) {
+    if (part === "mod") {
+      if (mac) combo.cmd = true;
+      else { combo.ctrl = true; combo.shift = true; }
+    } else if (part === "cmd" || part === "ctrl" || part === "shift" || part === "alt") combo[part] = true;
+    else if (/^[a-z]$/.test(part)) { combo.code = `Key${part.toUpperCase()}`; combo.letter = part; }
+    else if (/^[0-9]$/.test(part)) combo.code = `Digit${part}`;
+    else if (CODES[part]) combo.code = CODES[part];
+    else throw new Error(`unknown key "${part}" in "${spec}"`);
+  }
+  comboCache.set(cacheKey, combo);
+  return combo;
+}
+
+function comboMatches(e: KeyboardEvent, c: Combo): boolean {
+  if (e.metaKey !== c.cmd || e.ctrlKey !== c.ctrl || e.shiftKey !== c.shift || e.altKey !== c.alt) return false;
+  return e.code === c.code || (c.letter !== undefined && !e.altKey && e.key.toLowerCase() === c.letter);
+}
+
+/** True when `e` is the combo `spec` on this platform (`isShortcut(e, "mod+k")`). */
+export function isShortcut(e: KeyboardEvent, spec: string, mac = IS_MAC): boolean {
+  return comboMatches(e, parseCombo(spec, mac));
+}
+
+const KEY_LABELS: Record<string, string> = {
+  up: "↑", down: "↓", left: "←", right: "→", enter: "Enter", pageup: "PgUp", pagedown: "PgDn",
+};
+
+const keyLabel = (key: string) => KEY_LABELS[key] ?? key.toUpperCase();
+
+/** "mod+shift+]" → "⌘⇧]" on a Mac, "Ctrl+Shift+]" elsewhere. */
+export function formatCombo(spec: string, mac = IS_MAC): string {
+  const c = parseCombo(spec, mac);
+  const key = spec.split("+").pop() ?? "";
+  const label = keyLabel(key);
+  if (mac) return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.cmd ? "⌘" : ""}${label}`;
+  return [c.ctrl && "Ctrl", c.alt && "Alt", c.shift && "Shift", label].filter(Boolean).join("+");
+}
+
+// ---------------------------------------------------------------------------
+// Direct shortcut table (also consumed by KeybindHelp.tsx)
+// ---------------------------------------------------------------------------
+
+export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader";
 
 export interface KeybindEntry {
   keys: string;
@@ -46,39 +117,142 @@ export interface KeybindEntry {
   group: KeybindGroup;
 }
 
+export interface LeaderKeyHandlers {
+  openNavigator: () => void;
+  openKeybindHelp: () => void;
+  toggleDrawer: () => void;
+}
+
+interface Shortcut {
+  group: KeybindGroup;
+  description: string;
+  /** [macOS, other platforms]; `null` = no direct key there. */
+  keys: [string, string | null];
+  run: (handlers: LeaderKeyHandlers) => void;
+  /** Fires on key auto-repeat too (resizing); others ignore a held key. */
+  repeat?: boolean;
+  /** Help shows this instead of the last key (e.g. "1…8"). */
+  span?: string;
+  /** Not listed in the help (a member of a range shown once). */
+  hide?: boolean;
+}
+
+export const SHORTCUTS: Shortcut[] = [];
+
+function shortcut(
+  group: KeybindGroup,
+  keys: string | [string, string | null],
+  description: string,
+  run: Shortcut["run"],
+  extra: Pick<Shortcut, "repeat" | "span" | "hide"> = {},
+): void {
+  SHORTCUTS.push({ group, keys: typeof keys === "string" ? [keys, keys] : keys, description, run, ...extra });
+}
+
+const controller = () => getDockviewController();
+const chrome = () => usePerchStore.getState();
+
+// Global
+shortcut("global", "mod+p", "Open Navigator", (h) => h.openNavigator());
+shortcut("global", "mod+,", "Open Settings", () => chrome().setSettingsOpen(true));
+shortcut("global", "mod+/", "Open this keybind help", (h) => h.openKeybindHelp());
+shortcut("global", "mod+b", "Toggle sidebar", () => chrome().toggleSidebar());
+shortcut("global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (files and Git)", (h) => h.toggleDrawer());
+
+// Tabs (browser style)
+shortcut("tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
+shortcut("tabs", "mod+w", "Close the focused pane, file or tab", () => closeCurrent());
+for (let i = 1; i <= 8; i++) {
+  shortcut("tabs", [`cmd+${i}`, `alt+${i}`], i === 1 ? "Jump to tab 1…8" : `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), i === 1 ? { span: "1…8" } : { hide: true });
+}
+shortcut("tabs", ["cmd+9", "alt+9"], "Jump to the last tab", () => jumpToNthWorkspaceTab(Infinity));
+shortcut("tabs", ["cmd+shift+]", "ctrl+pagedown"], "Next tab", () => switchTabRelative(1));
+shortcut("tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", () => switchTabRelative(-1));
+
+// Nests and birdhouses (workspaces and projects)
+shortcut("nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));
+shortcut("nests", ["ctrl+shift+down", "alt+shift+down"], "Next nest", () => stepNest(1));
+for (let i = 1; i <= 9; i++) {
+  shortcut("nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], i === 1 ? "Jump to nest 1…9" : `Jump to nest ${i}`, () => jumpToNest(i), i === 1 ? { span: "1…9" } : { hide: true });
+}
+shortcut("nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
+shortcut("nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
+shortcut("nests", ["cmd+shift+n", null], "New scratchpad chat", () => newScratchpad());
+
+// Splits and panes (iTerm2/Ghostty)
+shortcut("panes", "mod+d", "Split right", () => controller()?.addTerminalPanel("right"));
+shortcut("panes", ["cmd+shift+d", "alt+shift+d"], "Split down", () => controller()?.addTerminalPanel("below"));
+shortcut("panes", "mod+[", "Previous pane", () => controller()?.cycleToPreviousPane());
+shortcut("panes", "mod+]", "Next pane", () => controller()?.cycleToNextPane());
+shortcut("panes", "mod+shift+enter", "Zoom / restore the focused pane", () => controller()?.toggleMaximizeActive());
+for (const dir of ["left", "right", "up", "down"] as const) {
+  const where = { left: "to the left", right: "to the right", up: "above", down: "below" }[dir];
+  shortcut("panes", [`cmd+alt+${dir}`, `ctrl+shift+alt+${dir}`], `Focus the pane ${where}`, () => controller()?.focusPaneDirection(dir));
+  // A split has one resizable axis, so left/up shrink and right/down grow.
+  shortcut("panes", [`cmd+ctrl+${dir}`, null], "Resize the focused pane (left/up shrink, right/down grow)", () => {
+    if (dir === "left" || dir === "up") controller()?.shrinkActivePane();
+    else controller()?.growActivePane();
+  }, { repeat: true, hide: dir !== "left", span: dir === "left" ? "←↑↓→" : undefined });
+}
+
+/** The shortcut `e` triggers on this platform, if any. */
+export function shortcutFor(e: KeyboardEvent, mac = IS_MAC): Shortcut | undefined {
+  return SHORTCUTS.find((s) => {
+    const spec = s.keys[mac ? 0 : 1];
+    return spec !== null && comboMatches(e, parseCombo(spec, mac));
+  });
+}
+
+const helpKeys = (s: Shortcut): string | null => {
+  const spec = s.keys[IS_MAC ? 0 : 1];
+  if (spec === null) return null;
+  const keys = formatCombo(spec, IS_MAC);
+  return s.span ? keys.slice(0, -keyLabel(spec.split("+").pop() ?? "").length) + s.span : keys;
+};
+
+const modK = (spec: string) => formatCombo(spec, IS_MAC);
+
 export const KEYBINDS: KeybindEntry[] = [
-  { keys: "Cmd+K (Ctrl+K outside terminals)", description: "Open Navigator", group: "global" },
-  { keys: "Ctrl+Space, g", description: "Open Navigator", group: "global" },
+  ...SHORTCUTS.flatMap((s): KeybindEntry[] => {
+    const keys = helpKeys(s);
+    return keys && !s.hide ? [{ keys, description: s.description, group: s.group }] : [];
+  }),
+  { keys: IS_MAC ? "⌘K" : "Ctrl+K", description: "Open Navigator (outside terminals)", group: "global" },
   { keys: "?", description: "Open this keybind help (outside inputs)", group: "global" },
-  { keys: "Ctrl+Space, ?", description: "Open this keybind help", group: "global" },
   { keys: "Esc", description: "Close any open overlay", group: "global" },
-  { keys: "Ctrl+Space, b", description: "Toggle sidebar collapse", group: "navigation" },
-  { keys: "Ctrl+Space, s", description: "Open Settings", group: "navigation" },
-  { keys: "Ctrl+Space, w", description: "Jump to the next project's most recent session", group: "navigation" },
-  { keys: "Ctrl+Space, W", description: "Open the worktree menu for the current project", group: "navigation" },
-  { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "navigation" },
-  { keys: "Ctrl+Space, c", description: "New session in the current project", group: "sessions" },
-  { keys: "Ctrl+Space, n", description: "Next session in the current workspace", group: "sessions" },
-  { keys: "Ctrl+Space, p", description: "Previous session in the current workspace", group: "sessions" },
-  { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current workspace", group: "sessions" },
-  { keys: "Ctrl+Space, x", description: "Close the current terminal pane", group: "panes" },
-  { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "panes" },
-  { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "panes" },
-  { keys: "Ctrl+Space, z", description: "Maximize / restore the focused pane", group: "panes" },
-  { keys: "Ctrl+Space, h/j/k/l", description: "Focus the pane to the left/below/above/right", group: "panes" },
-  { keys: "Ctrl+Space, o", description: "Cycle focus to the next pane", group: "panes" },
-  { keys: "Ctrl+Space, }", description: "Swap the focused pane with the next one", group: "panes" },
+  { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "global" },
+  { keys: modK("mod+f"), description: "Find in the terminal", group: "terminal" },
+  { keys: modK("mod+k"), description: "Clear the terminal (screen and scrollback)", group: "terminal" },
+  { keys: `${modK("mod+up")} / ${modK("mod+down")}`, description: "Scroll to the top / bottom", group: "terminal" },
+  { keys: IS_MAC ? "⌘C / ⌘V" : "Ctrl+Shift+C / V", description: "Copy / paste", group: "terminal" },
+  { keys: "Ctrl+Space, g", description: "Open Navigator", group: "leader" },
+  { keys: "Ctrl+Space, ?", description: "Open this keybind help", group: "leader" },
+  { keys: "Ctrl+Space, b", description: "Toggle sidebar collapse", group: "leader" },
+  { keys: "Ctrl+Space, s", description: "Open Settings", group: "leader" },
+  { keys: "Ctrl+Space, w", description: "Jump to the next project's most recent session", group: "leader" },
+  { keys: "Ctrl+Space, W", description: "Open the worktree menu for the current project", group: "leader" },
+  { keys: "Ctrl+Space, c", description: "New session in the current project", group: "leader" },
+  { keys: "Ctrl+Space, n", description: "Next session in the current workspace", group: "leader" },
+  { keys: "Ctrl+Space, p", description: "Previous session in the current workspace", group: "leader" },
+  { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current workspace", group: "leader" },
+  { keys: "Ctrl+Space, x", description: "Close the current terminal pane", group: "leader" },
+  { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "leader" },
+  { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "leader" },
+  { keys: "Ctrl+Space, z", description: "Maximize / restore the focused pane", group: "leader" },
+  { keys: "Ctrl+Space, h/j/k/l", description: "Focus the pane to the left/below/above/right", group: "leader" },
+  { keys: "Ctrl+Space, o", description: "Cycle focus to the next pane", group: "leader" },
+  { keys: "Ctrl+Space, }", description: "Swap the focused pane with the next one", group: "leader" },
   {
     keys: "Ctrl+Space, H/J/K/L",
     description: "Swap the focused pane with its neighbour left/below/above/right",
-    group: "panes",
+    group: "leader",
   },
-  { keys: "Ctrl+Space, +", description: "Grow the focused pane", group: "panes" },
-  { keys: "Ctrl+Space, -", description: "Shrink the focused pane", group: "panes" },
+  { keys: "Ctrl+Space, +", description: "Grow the focused pane", group: "leader" },
+  { keys: "Ctrl+Space, -", description: "Shrink the focused pane", group: "leader" },
   {
     keys: "Ctrl+Space, r, then h/j/k/l…",
     description: "Resize mode: repeated h/j/k/l resizes the focused pane (Esc or timeout exits)",
-    group: "panes",
+    group: "leader",
   },
 ];
 
@@ -101,15 +275,17 @@ let chordPending = false;
 
 /** xterm's custom key handler (attached by terminalSearch.ts for every
  * terminal). Returns false for keys the PTY must not see: the leader chord,
- * and Cmd combinations, which belong to the app as in Ghostty (copy, paste,
- * find, Navigator; the browser default still runs). Without the Cmd rule
- * the kitty protocol would encode them as CSI u. Everything else, Ctrl/
- * Shift+Enter included, is xterm's to encode; the kitty keyboard protocol
- * (xtermSetup.ts) lets CLIs tell those apart as they do in Ghostty. */
+ * every direct shortcut, and Cmd combinations, which belong to the app as in
+ * Ghostty (copy, paste, find, Navigator; the browser default still runs).
+ * Without the Cmd rule the kitty protocol would encode them as CSI u.
+ * Everything else, Ctrl/Shift+Enter included, is xterm's to encode; the kitty
+ * keyboard protocol (xtermSetup.ts) lets CLIs tell those apart as they do in
+ * Ghostty. */
 export function terminalKeyHandler(e: KeyboardEvent): boolean {
   if (e.metaKey) return false;
   if (e.type !== "keydown") return true;
   if (chordPending) return false;
+  if (shortcutFor(e)) return false;
   return !(e.ctrlKey && !e.altKey && (e.code === "Space" || e.key === " "));
 }
 
@@ -119,10 +295,10 @@ export function terminalKeyHandler(e: KeyboardEvent): boolean {
 // ---------------------------------------------------------------------------
 
 /** Jump to the Nth (1-indexed) tab of the strip, in the order it shows (sessions
- * and open files alike). No-op out of range. */
+ * and open files alike); past the end (Infinity) is the last tab. */
 function jumpToNthWorkspaceTab(n: number): void {
   const { tabs, activeId } = currentTabs();
-  const target = tabs[n - 1];
+  const target = tabs[Math.min(n, tabs.length) - 1];
   if (target && target.id !== activeId) activateTab(target);
 }
 
@@ -182,32 +358,44 @@ function newSessionInCurrentProject(): void {
   state.createSessionOnHost(hostId, cwd);
 }
 
-/**
- * Worktree menu for the active project (leader,W — capital, so it does not
- * collide with leader,w's next-project jump). Resolves the active session's
- * `(hostId, cwd)` project key and asks that project's `WorktreeMenu` in the
- * sidebar to open itself (see `worktreeMenuRequest` in the store). No-op when
- * there is no active project cwd, or when the cwd is not a git repo — in the
- * latter case the sidebar never renders a menu for that project, so nothing
- * consumes the request and it is simply ignored.
- */
-function openWorktreeMenuForActiveProject(): void {
+/** `${hostId}:${repoPath}`: the key the sidebar's `WorktreeMenu` for the
+ * checkout on screen answers to. A linked worktree resolves to its project's
+ * main repo, so the menu opens from any nest. */
+function activeRepoKey(): string | null {
   const state = usePerchStore.getState();
+  const workspace = effectiveWorkspace(state);
+  const owner = workspace && state.workspaceProjects.find((project) => project.id === workspace.projectId);
+  if (owner?.repoPath) return `${owner.hostId}:${owner.repoPath}`;
   const project = effectiveActiveProject(state);
   const hostId = project?.hostId ?? state.activeHostId;
   const cwd = project?.cwd ?? (hostId === "local" ? state.status?.cwd : undefined);
-  if (!cwd) return;
-  state.requestWorktreeMenu(`${hostId}:${cwd}`);
+  return cwd ? `${hostId}:${cwd}` : null;
+}
+
+/**
+ * Worktree menu for the active project (leader,W; with `create`, Cmd+N opens
+ * it on the create form). The request is consumed by that project's
+ * `WorktreeMenu` in the sidebar (see `worktreeMenuRequest` in the store); a
+ * folder that is not a git repo has no menu, so the request is ignored.
+ */
+function openWorktreeMenuForActiveProject(create = false): void {
+  const key = activeRepoKey();
+  if (key) withSidebar(() => usePerchStore.getState().requestWorktreeMenu(key, undefined, create));
+}
+
+/** Cmd+W: the open file or review, else a split's focused terminal pane,
+ * else the session's tab (the same end as its ×). */
+function closeCurrent(): void {
+  const files = useFileTabs.getState();
+  if (files.active) return files.close(files.active);
+  if (controller()?.closeActiveTerminalPanel()) return;
+  const { sessionId, deleteSession } = usePerchStore.getState();
+  if (sessionId) deleteSession(sessionId);
 }
 
 // ---------------------------------------------------------------------------
 // Chord action table — the letter pressed after the Ctrl+Space leader
 // ---------------------------------------------------------------------------
-
-export interface LeaderKeyHandlers {
-  openNavigator: () => void;
-  openKeybindHelp: () => void;
-}
 
 const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   g: (h) => h.openNavigator(),
@@ -403,10 +591,19 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
         return;
       }
 
-      // Cmd+K -> Navigator, unconditionally (command-palette convention;
-      // deliberately NOT gated by the editable-focus guard below). Ctrl+K too,
-      // except in a terminal: there it is the PTY's (readline kill-line).
-      if ((e.metaKey || (e.ctrlKey && !inTerminal(e.target))) && !e.altKey && e.key.toLowerCase() === "k") {
+      // Direct shortcuts work from anywhere, inputs included, like a browser's.
+      const direct = e.isComposing ? undefined : shortcutFor(e);
+      if (direct) {
+        e.preventDefault();
+        if (!e.repeat || direct.repeat) direct.run(handlersRef.current);
+        return;
+      }
+
+      // Cmd+K / Ctrl+K -> Navigator (command-palette convention; deliberately
+      // NOT gated by the editable-focus guard below), except in a terminal:
+      // there Cmd+K clears (terminalSearch.ts) and Ctrl+K is the PTY's
+      // (readline kill-line).
+      if ((e.metaKey || e.ctrlKey) && !inTerminal(e.target) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         handlersRef.current.openNavigator();
         return;

@@ -1,10 +1,10 @@
 /**
  * keybindings.spec.ts — e2e tests for Phase 4 (Keybindings + Navigator):
- * the Ctrl+Space leader chord, Cmd+K + plain '?' shortcuts, the
+ * the Ctrl+Space leader chord, Cmd+P + plain '?' shortcuts, the
  * Navigator fuzzy-finder, the KeybindHelp modal, sidebar collapse, and the
  * dockview pane keybindings (split/close/maximize).
  *
- *   K1 — Cmd+K opens the Navigator; typing filters the list; Enter
+ *   K1 — Cmd+P opens the Navigator; typing filters the list; Enter
  *        switches to the selected session and closes the modal; Escape
  *        closes without switching.
  *   K2 — plain '?' opens KeybindHelp when focus is outside any input
@@ -70,15 +70,15 @@ test.describe("Keybindings + Navigator (Phase 4)", () => {
   let sessionBId = "";
 
   // -------------------------------------------------------------------------
-  // K1 — Navigator: open via Cmd+K, filter by typing, Enter switches + closes,
+  // K1 — Navigator: open via Cmd+P, filter by typing, Enter switches + closes,
   // Escape closes without switching.
   // -------------------------------------------------------------------------
-  test("K1. Cmd+K opens Navigator; filtering + Enter switches session; Escape closes", async ({ page }) => {
+  test("K1. Cmd+P opens Navigator; filtering + Enter switches session; Escape closes", async ({ page }) => {
     await freshPage(page);
     sessionAId = await namedChat(page, "KBNAV-ALPHA");
     sessionBId = await namedChat(page, "KBNAV-BETA");
 
-    await page.keyboard.press("Meta+k");
+    await page.keyboard.press("Meta+p");
     const navigator = page.locator('[data-testid="navigator"]');
     await expect(navigator).toBeVisible({ timeout: 5000 });
     await expect(page.locator(`[data-testid="navigator-row-${sessionAId}"]`)).toBeVisible({ timeout: 5000 });
@@ -87,7 +87,7 @@ test.describe("Keybindings + Navigator (Phase 4)", () => {
     await expect(navigator).not.toBeVisible({ timeout: 5000 });
     await isActive(page, sessionBId);
 
-    await page.keyboard.press("Meta+k");
+    await page.keyboard.press("Meta+p");
     await expect(navigator).toBeVisible({ timeout: 5000 });
     await page.locator('[data-testid="navigator-input"]').fill("KBNAV-ALPHA");
     await expect(page.locator(`[data-testid="navigator-row-${sessionAId}"]`)).toBeVisible({ timeout: 5000 });

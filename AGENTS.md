@@ -236,11 +236,18 @@ there, not here.
     stays in the project it started in whatever its terminal cd's into.
   - Terminals behave like Ghostty/iTerm2: perch must never swallow or
     re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
-    so Ctrl/Shift+Enter reach CLIs that opt in; the only key perch keeps is
-    the Ctrl+Space leader. Cmd combinations stay with the app and never reach
-    the PTY (copy, paste, Cmd+F find, Cmd+K Navigator); Ctrl+F and Ctrl+K go
-    to the PTY. Turn-review capture on Enter is best-effort and never
-    blocks the keystroke.
+    so Ctrl/Shift+Enter reach CLIs that opt in. The keys perch keeps are the
+    direct shortcuts of `keybinds.ts` (`SHORTCUTS`, the one table the `?`
+    help is generated from: browser-tab, Vivaldi-nest and iTerm2/Ghostty
+    style; `mod` = Cmd on macOS, Ctrl+Shift elsewhere) and the Ctrl+Space
+    leader, kept as the browser fallback because a browser never lets the
+    page see Cmd/Ctrl+T/W/N/1-9. Cmd combinations never reach the PTY
+    (copy, paste, Cmd+F find, Cmd+K clear, Cmd+P Navigator); Cmd+K opens the
+    Navigator only outside terminals. Ctrl+F and Ctrl+K go to the PTY. A
+    new shortcut must not collide with a plain Ctrl letter. The desktop
+    app's menu (`perch-desktop` `app_menu`) has no "Close Window" item so
+    Cmd+W reaches the web view. Turn-review capture on Enter is
+    best-effort and never blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
     then the drawer section: the Files/Git switch (`WorkspaceToolsTabs`,
@@ -277,7 +284,7 @@ there, not here.
     keeps them as buttons. A workspace shows a state only when it needs
     attention (pinned, dirty, sleeping), never "ready".
   - The status bar has no keybind hint, and ctx/cost appear only when a
-    turn reports them. The Ctrl+Space leader still works (`?` lists it).
+    turn reports them. The Ctrl+Space leader still works (`?` and Cmd+/ list it).
   - Shared UI primitives live in `components/ui/` (`Chevron`, `Dialog`,
     `menuPanel`/`menuItem`, `GHOST_BUTTON`): use them, don't restyle per
     call site. See UI-UX-DIRECTION.md Appendix E.

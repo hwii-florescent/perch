@@ -736,7 +736,7 @@ Do not globally steal bare letters, Escape, Ctrl-F, Ctrl-K, Ctrl-J, Ctrl-P or Ct
 
 Browser tabs own Cmd/Ctrl-T, W, Shift-T and often numbered tab keys. A webpage cannot reliably override them. Advertise browser-style shortcuts in Tauri only where supported; **do not claim them as universal web shortcuts**.
 
-Use the existing Ctrl-Space leader as the reliable cross-client namespace: `c` New Tab, `x` Close, `g` Actions, plus documented chords for Quick Open and Reopen. Bare Ctrl combinations in Linux terminals continue to reach the PTY; terminal-safe Ctrl-Shift alternatives may be offered where nonconflicting. Every action also has pointer access. Display platform/client-specific bindings, and test rather than assuming a PWA can reclaim browser-reserved keys.
+**Update (2026-10):** `keybinds.ts` now has direct browser-tab / iTerm2-style shortcuts (Cmd on macOS, Ctrl+Shift elsewhere; see its `SHORTCUTS` table and the `?` help). The leader below remains the browser fallback, since a browser reserves Cmd/Ctrl+T/W/N/1-9 and Ctrl+Shift+T/W/N/P on Linux. Original text: use the existing Ctrl-Space leader as the reliable cross-client namespace: `c` New Tab, `x` Close, `g` Actions, plus documented chords for Quick Open and Reopen. Bare Ctrl combinations in Linux terminals continue to reach the PTY; terminal-safe Ctrl-Shift alternatives may be offered where nonconflicting. Every action also has pointer access. Display platform/client-specific bindings, and test rather than assuming a PWA can reclaim browser-reserved keys.
 
 ### Accessibility
 

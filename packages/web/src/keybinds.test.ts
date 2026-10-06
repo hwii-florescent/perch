@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
-import { terminalKeyHandler, useLeaderKey } from "./keybinds";
+import { KEYBINDS, SHORTCUTS, formatCombo, isShortcut, shortcutFor, terminalKeyHandler, useLeaderKey } from "./keybinds";
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {
   let navigations = 0;
   function Leader() {
-    useLeaderKey({ openNavigator() { navigations++; }, openKeybindHelp() {} });
+    useLeaderKey({ openNavigator() { navigations++; }, openKeybindHelp() {}, toggleDrawer() {} });
     return null;
   }
   const host = document.createElement("div");
@@ -83,5 +83,45 @@ describe("kitty keyboard protocol", () => {
     press({ shiftKey: true });
     expect(sent).toEqual(["\r", "\r", "\x1b[13;5u", "\x1b[13;2u"]);
     term.dispose();
+  });
+});
+
+describe("direct shortcuts", () => {
+  it("maps mod to Cmd on a Mac and Ctrl+Shift elsewhere, matching modifiers exactly", () => {
+    expect(isShortcut(key({ key: "t", code: "KeyT", metaKey: true }), "mod+t", true)).toBe(true);
+    expect(isShortcut(key({ key: "t", code: "KeyT", metaKey: true, shiftKey: true }), "mod+t", true)).toBe(false);
+    expect(isShortcut(key({ key: "T", code: "KeyT", ctrlKey: true, shiftKey: true }), "mod+t", false)).toBe(true);
+    expect(isShortcut(key({ key: "t", code: "KeyT", ctrlKey: true }), "mod+t", false)).toBe(false); // plain Ctrl+T is the shell's
+    expect(isShortcut(key({ key: "}", code: "BracketRight", metaKey: true, shiftKey: true }), "cmd+shift+]", true)).toBe(true);
+  });
+
+  it("formats combos for each platform", () => {
+    expect(formatCombo("cmd+shift+]", true)).toBe("⇧⌘]");
+    expect(formatCombo("ctrl+shift+up", true)).toBe("⌃⇧↑");
+    expect(formatCombo("mod+t", false)).toBe("Ctrl+Shift+T");
+  });
+
+  it("never binds one key twice on a platform", () => {
+    for (const mac of [true, false]) {
+      const seen = new Map<string, string>();
+      for (const s of SHORTCUTS) {
+        const spec = s.keys[mac ? 0 : 1];
+        if (spec === null) continue;
+        const c = formatCombo(spec, mac);
+        expect(seen.get(c), `${c} (${mac ? "mac" : "other"}) is bound to both "${seen.get(c)}" and "${s.description}"`).toBeUndefined();
+        seen.set(c, s.description);
+      }
+    }
+  });
+
+  it("finds a shortcut by event and leaves plain Ctrl letters to the PTY", () => {
+    const e = (init: Partial<KeyboardEvent>) => key({ ...init });
+    expect(shortcutFor(e({ code: "ArrowDown", ctrlKey: true, shiftKey: true }), true)?.description).toBe("Next nest");
+    expect(terminalKeyHandler(e({ code: "KeyC", key: "c", ctrlKey: true }))).toBe(true); // Ctrl+C reaches the shell
+  });
+
+  it("lists every non-hidden shortcut in the help", () => {
+    expect(KEYBINDS.some((k) => k.description === "New nest (worktree)")).toBe(true);
+    expect(KEYBINDS.some((k) => k.group === "leader")).toBe(true);
   });
 });

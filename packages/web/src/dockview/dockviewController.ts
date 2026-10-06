@@ -107,7 +107,7 @@ export interface DockviewController {
    * it would leave the session with no view). No-op if the active panel is
    * "chat" or if there is no active panel. Closes terminal panels AND
    * session-chat panels alike — "chat" is the only permanent one. */
-  closeActiveTerminalPanel(): void;
+  closeActiveTerminalPanel(): boolean;
   /** Close a panel (never "chat"). Closing a terminal pane ends its shell,
    * like closing a tab in a terminal app; only switching sessions keeps it. */
   closePanel(panelId: string): void;
@@ -144,6 +144,8 @@ export interface DockviewController {
   /** Cycle dockview's focus to the next panel/group in tab order (wraps
    * around). Backs leader,o. */
   cycleToNextPane(): void;
+  /** The reverse of `cycleToNextPane`. */
+  cycleToPreviousPane(): void;
   /** Swap the active group with the "next" group (cyclic order of
    * `api.groups`) by moving the active group to sit on whichever side the
    * next group currently occupies — for the common two-way split this
@@ -223,7 +225,10 @@ export function createDockviewController(api: DockviewApi, endShell?: (shellPane
       });
     },
     closeActiveTerminalPanel() {
-      if (api.activePanel) closePanel(api.activePanel.id);
+      const panel = api.activePanel;
+      if (!panel || panel.id === PRIMARY_CHAT_PANEL_ID) return false;
+      closePanel(panel.id);
+      return true;
     },
     closePanel,
     addTerminalTabInGroup(referencePanelId) {
@@ -286,6 +291,9 @@ export function createDockviewController(api: DockviewApi, endShell?: (shellPane
     },
     cycleToNextPane() {
       api.moveToNext({ includePanel: true });
+    },
+    cycleToPreviousPane() {
+      api.moveToPrevious({ includePanel: true });
     },
     swapActivePaneWithNext() {
       const groups: DockviewGroupPanel[] = api.groups;

@@ -17,6 +17,7 @@ import { usePerchStore, effectiveActiveProject } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { useAgentChoices } from "./AgentPicker";
 import { cn } from "../lib/cn";
+import { requestAddProject } from "../appEvents";
 
 // Both screens share the cli-start card layout; `home` centres it.
 const PANEL = "flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto bg-panel-bg px-4 py-8";
@@ -26,8 +27,6 @@ const HINT = "m-0 text-center text-[0.85rem] text-subtext-0";
 const KBD = `min-w-6 rounded-ui border border-overlay-0 bg-surface-0 px-[0.35rem] py-[0.1rem] text-center text-[0.75rem] text-fg ${FONT}`;
 const ACTION = `cursor-pointer rounded-ui border border-overlay-0 bg-surface-0 px-[0.9rem] py-2 text-[0.85rem] text-fg ${FONT} hover:border-overlay-1 hover:bg-surface-1 focus-visible:border-overlay-1 focus-visible:bg-surface-1`;
 
-/** Asks the sidebar's project list to open its "register a folder" form. */
-export const ADD_PROJECT_EVENT = "perch:add-project";
 
 const SHORTCUTS: [string, string[]][] = [
   ["New session", ["Ctrl", "Space", "C"]],
@@ -64,10 +63,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   }
 
   function addProject() {
-    const state = usePerchStore.getState();
-    if (state.sidebarCollapsed) state.toggleSidebar();
-    // After the sidebar has rendered, when it was just reopened.
-    setTimeout(() => window.dispatchEvent(new Event(ADD_PROJECT_EVENT)));
+    requestAddProject();
   }
 
   return (

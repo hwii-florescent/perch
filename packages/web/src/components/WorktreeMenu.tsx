@@ -227,7 +227,10 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
     if (!menuRequest || menuRequest.projectKey !== projectKey) return;
     clearWorktreeMenuRequest();
     if (menuRequest.remove) setPendingRemove({ ...menuRequest.remove, force: false });
-    else openMenu();
+    else {
+      openMenu();
+      if (menuRequest.create) setShowCreateForm(true);
+    }
   }, [menuRequest, projectKey, clearWorktreeMenuRequest, openMenu]);
 
   // Dismiss on outside click / Escape (same contract as SessionMenu). Skipped
