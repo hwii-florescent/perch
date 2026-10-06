@@ -1,7 +1,7 @@
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
@@ -288,6 +288,8 @@ export interface PerchState {
    * terminal. `null` = server had nothing to report, so xterm's stock
    * defaults apply — perch's UI theme is deliberately never substituted. */
   terminalProfile: TerminalProfile | null;
+  /** Claude/Codex plan usage for the status bar (`usage.result`). */
+  usage: AccountUsage[];
   /** Set while a CLI PTY is being attached for a given session, cleared on
    * success or error. Used to route ServerMessage::Error to cliError instead
    * of the chat message list when the error arrives during attach. */
@@ -997,6 +999,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   agentControlBySession: {},
   serverInfo: null,
   terminalProfile: null,
+  usage: [],
   attachingCliForSession: null,
   cliError: null,
   settingsOpen: false,
@@ -3166,6 +3169,9 @@ export function handleServerMessage(msg: ServerMessage): void {
       }));
       break;
     }
+    case "usage.result":
+      usePerchStore.setState({ usage: msg.accounts });
+      break;
     case "fs.browse.result": {
       const resolve = pendingBrowses.get(msg.requestId);
       if (resolve) {

@@ -1115,6 +1115,35 @@ export interface SessionRenameMessage {
   title: string;
 }
 
+/** Ask the local server for Claude/Codex plan usage; reply is `usage.result`. */
+export interface UsageGetMessage {
+  type: "usage.get";
+}
+
+/** One rolling rate-limit window. `label` is derived from the duration
+ * ("5h", "7d"). `resetsAt` is an ISO string (Claude) or epoch seconds
+ * (Codex), as the provider reported it. */
+export interface UsageWindow {
+  label: string;
+  usedPercent: number;
+  windowMinutes: number;
+  resetsAt?: string | number;
+}
+
+/** One provider login. `label` tells accounts apart (email, dir suffix, or
+ * configured in `~/.perch/usage-accounts.json`). */
+export interface AccountUsage {
+  provider: string;
+  label?: string;
+  windows: UsageWindow[];
+}
+
+/** Reply to `usage.get`; an account that couldn't be read is absent. */
+export interface UsageResultMessage {
+  type: "usage.result";
+  accounts: AccountUsage[];
+}
+
 /** List directories at `path` (or the user's home directory when absent) on
  * the given host (local when absent/`"local"`), for the new-session cwd
  * picker. `requestId` is echoed back on `FsBrowseResultMessage` so the client
@@ -1614,6 +1643,7 @@ export type ClientMessage =
   | SessionLayoutSetMessage
   | SessionRenameMessage
   | FsBrowseMessage
+  | UsageGetMessage
   | FsTreeMessage
   | FsReadMessage
   | FsPreviewMessage
@@ -2358,6 +2388,7 @@ export type ServerMessage =
   | ReviewBatchSendResultMessage
   | ReviewBatchDeliveryMessage
   | FsBrowseResultMessage
+  | UsageResultMessage
   | FsTreeResultMessage
   | FsReadResultMessage
   | FsPreviewResultMessage

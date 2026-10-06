@@ -842,6 +842,11 @@ pub enum ClientMessage {
     #[serde(rename = "commands.list", rename_all = "camelCase")]
     CommandsList { session_id: String },
 
+    /// Ask the local server for Claude/Codex plan usage; answered with
+    /// `usage.result` (see `usage.rs`). Not forwarded to remote hosts.
+    #[serde(rename = "usage.get")]
+    UsageGet {},
+
     /// Persistent shell pane operations. Closing a view only releases its subscription.
     #[serde(rename = "terminal.open", rename_all = "camelCase")]
     TerminalOpen {
@@ -1763,6 +1768,12 @@ pub enum ServerMessage {
         session_id: String,
         claude: Vec<CommandEntry>,
         codex: Vec<CommandEntry>,
+    },
+
+    /// Reply to `usage.get`; an account that couldn't be read is absent.
+    #[serde(rename = "usage.result")]
+    UsageResult {
+        accounts: Vec<crate::usage::AccountUsage>,
     },
 
     /// Provider manifests plus best-effort executable availability.  The

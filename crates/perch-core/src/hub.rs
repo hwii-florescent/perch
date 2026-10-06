@@ -1357,8 +1357,8 @@ impl HubManager {
             // ----------------------------------------------------------------
             // status.update → relay via hub broadcast (tagged? ignore for now)
             // ----------------------------------------------------------------
-            ServerMessage::StatusUpdate { .. } => {
-                // Status updates are per-host; we don't relay them in v1.
+            ServerMessage::StatusUpdate { .. } | ServerMessage::UsageResult { .. } => {
+                // Per-host; we don't relay these in v1 (usage is local-only).
             }
 
             // ----------------------------------------------------------------

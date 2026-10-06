@@ -84,6 +84,10 @@ there, not here.
 - **Data:**
   - `db/`: `~/.perch/history.sqlite`.
   - `settings.rs`, `hosts.rs`: `~/.perch/*.json`, written atomically.
+  - `usage.rs`: plan usage (5h/7d windows) per provider account for the
+    status bar (`usage.get`/`usage.result`); Claude, Codex, Kimi, Grok,
+    ported from Orca's `rate-limits`; extra accounts in
+    `~/.perch/usage-accounts.json`.
   - `models.rs`: model lists, per host.
   - `worktree.rs`, `source_control.rs`, `review.rs`, `filesystem.rs`.
 - **Other:**
