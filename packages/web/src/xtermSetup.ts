@@ -50,7 +50,6 @@
  * context.
  */
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -184,8 +183,8 @@ export function createPerchTerminal(
     // Shift+Enter and friends arrive distinct from Enter once a CLI opts in.
     // Shells that never opt in still get plain `\r`.
     vtExtensions: { kittyKeyboard: true },
-    // A thin scrollbar: xterm's default is 14px, which is also the gutter
-    // FitAddon takes out of the grid. Same width as every other scrollbar.
+    // Same thin scrollbar as the app, overlaid at the surface edge by
+    // terminal.css. It must not reserve a second gutter in the cell grid.
     scrollbar: { width: scrollbarWidth() },
   };
   // Cursor shape/blink: same discipline as the palette below. Only set when
@@ -228,8 +227,17 @@ export function createPerchTerminal(
   };
   mql?.addEventListener("change", handleSchemeChange);
 
-  const fitAddon = new FitAddon();
-  term.loadAddon(fitAddon);
+  // FitAddon always deducts scrollbar.width, even though our scrollbar
+  // overlays the surface. Use xterm's public cell dimensions to fit the full
+  // box; only a fractional-cell remainder should be left at the edge.
+  function fitGrid(): void {
+    const cell = term.dimensions?.css.cell;
+    if (!cell || !(cell.width > 0 && cell.height > 0)) return;
+    term.resize(
+      Math.max(2, Math.floor(container.clientWidth / cell.width)),
+      Math.max(1, Math.floor(container.clientHeight / cell.height)),
+    );
+  }
 
   // Unicode 11 width tables. Without this xterm uses its built-in Unicode 6
   // tables, which report the wrong width for most emoji and several
@@ -251,6 +259,8 @@ export function createPerchTerminal(
   // the new tab a `window.opener` back-reference to this app.
   term.loadAddon(
     new WebLinksAddon((_event, uri) => {
+      // WebLinksAddon's default matcher permits only http:// and https://.
+      // pi-lens-ignore: no-open-redirect
       window.open(uri, "_blank", "noopener");
     }),
   );
@@ -293,8 +303,10 @@ export function createPerchTerminal(
   // Keep this compatibility guard local to the pinned 5.x viewport API;
   // do not defer disposal or retain detached terminal buffers.
   let disposed = false;
+  // SAFETY: this optional private path is the pinned xterm 5.x viewport;
+  // the runtime method check below excludes versions without that legacy API.
   const viewport = (term as unknown as { _core?: { viewport?: { syncScrollArea: (immediate?: boolean) => void } } })._core?.viewport;
-  if (viewport) {
+  if (viewport?.syncScrollArea) {
     const sync = viewport.syncScrollArea.bind(viewport);
     viewport.syncScrollArea = (immediate) => { if (!disposed) sync(immediate); };
   }
@@ -329,6 +341,8 @@ export function createPerchTerminal(
     }
   };
   const dropWebgl = (): void => {
+    // SAFETY: the pinned WebGL addon holds a WebGL2 context at this private
+    // path; optional access covers inactive or already-disposed renderers.
     const gl = (webgl as unknown as { _renderer?: { _gl?: WebGL2RenderingContext } } | null)?._renderer?._gl;
     webgl?.dispose();
     webgl = null;
@@ -399,11 +413,10 @@ export function createPerchTerminal(
       }
     }
     if (term.options.fontSize !== size) term.options.fontSize = size;
-    fitAddon.fit();
+    fitGrid();
 
-    // The estimate is off by a couple of columns because `clientWidth`
-    // includes the viewport scrollbar that FitAddon subtracts. Correct once,
-    // using the *measured* column count, which is exact. At most two resizes
+    // Renderer/device-pixel rounding can differ from the off-terminal font
+    // estimate. Correct once using the *measured* column count. At most two resizes
     // and only when scaling is active — and crucially both are in the same
     // direction, so the buffer is never reflowed through a wider intermediate
     // grid the way the old reset-to-base approach did.
@@ -414,7 +427,7 @@ export function createPerchTerminal(
       );
       if (corrected < size) {
         term.options.fontSize = corrected;
-        fitAddon.fit();
+        fitGrid();
       }
     }
   }
