@@ -24,6 +24,13 @@ export function getWsUrl(): string {
   return `${protocol}//${window.location.host}${getBasePath()}ws`;
 }
 
+/** Descriptor-confined raw file content. Cookies carry paired-device auth. */
+export function getWorkspaceFileUrl(workspaceId: string, path: string, download = false): string {
+  const query = new URLSearchParams({ workspaceId, path });
+  if (download) query.set("download", "1");
+  return `${window.location.origin}${getBasePath()}workspace-file?${query}`;
+}
+
 /** The `{base}clipboard-image` HTTP upload URL (see server.rs's
  * `clipboard_image_upload` handler) — Wave 2 item 9's clipboard image paste.
  * Local host only: this always targets *this* perch instance's own HTTP

@@ -307,31 +307,24 @@ fn fs_error_response(
     }
 }
 
-pub(super) fn spawn_fs_tree(
+/// Run `work` on the blocking pool and send this request's one reply:
+/// `reply(request_id, workspace_id, value)` on success, else the structured
+/// fs.error. Operations with side effects beyond the reply (`fs.write`,
+/// `fs.buffer.get`/`set`) keep their own spawn.
+fn spawn_fs_task<T: Send + 'static>(
     state: &Arc<ConnState>,
     request_id: String,
     workspace_id: String,
-    path: Option<String>,
+    work: impl FnOnce(&AppState, &str) -> Result<T, FsAdapterFailure> + Send + 'static,
+    reply: impl FnOnce(String, String, T) -> ServerMessage + Send + 'static,
 ) {
     let out_tx = state.out_tx.clone();
     let app = state.app.clone();
     let task_workspace_id = workspace_id.clone();
     tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let service = workspace_file_service(&app, &task_workspace_id)?;
-            service
-                .list_dir(path.as_deref().unwrap_or(""))
-                .map_err(FsAdapterFailure::Filesystem)
-        })
-        .await;
+        let result = tokio::task::spawn_blocking(move || work(&app, &task_workspace_id)).await;
         let message = match result {
-            Ok(Ok(listing)) => ServerMessage::FsTreeResult {
-                request_id,
-                workspace_id,
-                path: listing.path,
-                entries: listing.entries,
-                truncated: listing.truncated,
-            },
+            Ok(Ok(value)) => reply(request_id, workspace_id, value),
             Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
             Err(error) => fs_error_response(
                 request_id,
@@ -341,6 +334,209 @@ pub(super) fn spawn_fs_tree(
         };
         let _ = out_tx.send(message);
     });
+}
+
+pub(super) fn spawn_fs_tree(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    path: Option<String>,
+) {
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            workspace_file_service(app, workspace_id)?
+                .list_dir(path.as_deref().unwrap_or(""))
+                .map_err(FsAdapterFailure::Filesystem)
+        },
+        |request_id, workspace_id, listing| ServerMessage::FsTreeResult {
+            request_id,
+            workspace_id,
+            path: listing.path,
+            entries: listing.entries,
+            truncated: listing.truncated,
+        },
+    );
+}
+
+pub(super) fn spawn_fs_search(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    query: String,
+) {
+    let search_query = query.clone();
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            workspace_file_service(app, workspace_id)?
+                .search(&search_query)
+                .map_err(FsAdapterFailure::Filesystem)
+        },
+        |request_id, workspace_id, listing| ServerMessage::FsSearchResult {
+            request_id,
+            workspace_id,
+            query,
+            entries: listing.entries,
+            truncated: listing.truncated,
+        },
+    );
+}
+
+pub(super) fn spawn_fs_extract(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    path: String,
+) {
+    let archive_path = path.clone();
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let lock = filesystem_operation_lock(app, workspace_id, &archive_path);
+            let _guard = lock.lock().unwrap();
+            workspace_file_service(app, workspace_id)?
+                .extract_archive(&archive_path)
+                .map_err(FsAdapterFailure::Filesystem)
+        },
+        |request_id, workspace_id, destination| ServerMessage::FsExtractResult {
+            request_id,
+            workspace_id,
+            path,
+            destination,
+        },
+    );
+}
+
+/// Raw media/downloads use HTTP (including byte ranges), not base64 over WS.
+/// Authorization and descriptor confinement are identical to the WS plane.
+pub(super) async fn file_content(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    use axum::body::Body;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if let Err(status) = authorize_request(&app, &peer, &headers, &params) {
+        return (status, "device access denied").into_response();
+    }
+    let (Some(workspace_id), Some(path)) = (params.get("workspaceId"), params.get("path")) else {
+        return (StatusCode::BAD_REQUEST, "workspaceId and path are required").into_response();
+    };
+    let workspace_id = workspace_id.clone();
+    let path = path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        workspace_file_service(&app, &workspace_id)?
+            .open_content(&path)
+            .map_err(FsAdapterFailure::Filesystem)
+    })
+    .await;
+    let (file, metadata) = match result {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let size = metadata.size;
+    let range = headers.get("range").and_then(|value| value.to_str().ok());
+    let (start, end) = match range {
+        Some(value) => match byte_range(value, size) {
+            Some(bounds) => bounds,
+            None => {
+                return (
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    [("content-range", format!("bytes */{size}"))],
+                )
+                    .into_response()
+            }
+        },
+        None => (0, size.saturating_sub(1)),
+    };
+    let length = if size == 0 { 0 } else { end - start + 1 };
+    let mut file = tokio::fs::File::from_std(file);
+    if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let mime = metadata
+        .media_type
+        .as_deref()
+        .unwrap_or("application/octet-stream");
+    let inline = !params.contains_key("download") && renders_inline(mime);
+    let mut response = axum::http::Response::builder()
+        .status(if range.is_some() {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header("content-type", mime)
+        .header("content-length", length)
+        .header("accept-ranges", "bytes")
+        .header("cache-control", "private, no-store")
+        .header("x-content-type-options", "nosniff")
+        .header("cross-origin-resource-policy", "same-origin")
+        // SVG/other active content must never acquire the app's privileges.
+        .header(
+            "content-security-policy",
+            "sandbox; default-src 'none'; frame-ancestors 'self'",
+        );
+    if !inline {
+        let name: String = metadata
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || ".-_".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        response = response.header(
+            "content-disposition",
+            format!("attachment; filename=\"{name}\""),
+        );
+    }
+    if range.is_some() {
+        response = response.header("content-range", format!("bytes {start}-{end}/{size}"));
+    }
+    response
+        .body(Body::from_stream(tokio_util::io::ReaderStream::new(
+            file.take(length),
+        )))
+        .unwrap()
+}
+
+/// Only passive media may render in the browser; everything else downloads.
+/// The web viewer's `assetKind` lists the same types.
+fn renders_inline(mime: &str) -> bool {
+    ["image/", "video/", "audio/"]
+        .iter()
+        .any(|prefix| mime.starts_with(prefix))
+        || mime == "application/pdf"
+}
+
+fn byte_range(value: &str, size: u64) -> Option<(u64, u64)> {
+    if size == 0 {
+        return None;
+    }
+    let (start, end) = value.strip_prefix("bytes=")?.split_once('-')?;
+    if start.is_empty() {
+        let suffix: u64 = end.parse().ok()?;
+        return (suffix > 0).then_some((size.saturating_sub(suffix), size - 1));
+    }
+    let start: u64 = start.parse().ok()?;
+    let end = if end.is_empty() {
+        size - 1
+    } else {
+        end.parse::<u64>().ok()?.min(size - 1)
+    };
+    (start < size && start <= end).then_some((start, end))
 }
 
 pub(super) fn spawn_fs_read(
@@ -349,34 +545,23 @@ pub(super) fn spawn_fs_read(
     workspace_id: String,
     path: String,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let service = workspace_file_service(&app, &task_workspace_id)?;
-            service
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            workspace_file_service(app, workspace_id)?
                 .read_file(&path)
                 .map_err(FsAdapterFailure::Filesystem)
-        })
-        .await;
-        let message = match result {
-            Ok(Ok(read)) => ServerMessage::FsReadResult {
-                request_id,
-                workspace_id,
-                metadata: read.metadata,
-                content: read.content,
-                version: read.version,
-            },
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
-                request_id,
-                workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+        },
+        |request_id, workspace_id, read| ServerMessage::FsReadResult {
+            request_id,
+            workspace_id,
+            metadata: read.metadata,
+            content: read.content,
+            version: read.version,
+        },
+    );
 }
 
 pub(super) fn spawn_fs_preview(
@@ -385,37 +570,28 @@ pub(super) fn spawn_fs_preview(
     workspace_id: String,
     path: String,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let service = workspace_file_service(&app, &task_workspace_id)?;
-            service.preview(&path).map_err(FsAdapterFailure::Filesystem)
-        })
-        .await;
-        let message = match result {
-            Ok(Ok(preview)) => ServerMessage::FsPreviewResult {
-                request_id,
-                workspace_id,
-                metadata: preview.metadata,
-                version: preview.version,
-                kind: preview.kind,
-                content: preview.content,
-                media_type: preview.media_type,
-                requires_sandbox: preview.requires_sandbox,
-                truncated: preview.truncated,
-                message: preview.message,
-            },
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
-                request_id,
-                workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            workspace_file_service(app, workspace_id)?
+                .preview(&path)
+                .map_err(FsAdapterFailure::Filesystem)
+        },
+        |request_id, workspace_id, preview| ServerMessage::FsPreviewResult {
+            request_id,
+            workspace_id,
+            metadata: preview.metadata,
+            version: preview.version,
+            kind: preview.kind,
+            content: preview.content,
+            media_type: preview.media_type,
+            requires_sandbox: preview.requires_sandbox,
+            truncated: preview.truncated,
+            message: preview.message,
+        },
+    );
 }
 
 struct FsWriteExecution {
@@ -436,18 +612,17 @@ pub(super) fn spawn_fs_write(
     expected_version: Option<String>,
     expected_buffer_revision: Option<u64>,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
     let operation_id = request_id.clone();
-    let operation_lock = filesystem_operation_lock(&app, &workspace_id, &path);
-    let event_workspace_id = workspace_id.clone();
     let event_path = path.clone();
-    let events_tx = app.hub.hub_events_tx.clone();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
+    let events_tx = state.app.hub.hub_events_tx.clone();
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let operation_lock = filesystem_operation_lock(app, workspace_id, &path);
             let _operation_guard = operation_lock.lock().unwrap();
-            let service = workspace_file_service(&app, &task_workspace_id)?;
+            let service = workspace_file_service(app, workspace_id)?;
             let content_version = FileService::version_for_bytes(content.as_bytes());
 
             // A retried request id returns the original publication result,
@@ -462,7 +637,7 @@ pub(super) fn spawn_fs_write(
                         })
                     })?
             {
-                if receipt.workspace_id != task_workspace_id
+                if receipt.workspace_id != workspace_id
                     || receipt.path != path
                     || receipt.content_version != content_version
                     || receipt.expected_buffer_revision != expected_buffer_revision
@@ -480,7 +655,7 @@ pub(super) fn spawn_fs_write(
                 })?;
                 let current_buffer =
                     app.db
-                        .get_file_buffer(&task_workspace_id, &path)
+                        .get_file_buffer(workspace_id, &path)
                         .map_err(|error| {
                             FsAdapterFailure::Buffer(FileBufferError::Database {
                                 message: error.to_string(),
@@ -501,7 +676,7 @@ pub(super) fn spawn_fs_write(
             app.db
                 .begin_file_save_intent(
                     &operation_id,
-                    &task_workspace_id,
+                    workspace_id,
                     &path,
                     &content,
                     &content_version,
@@ -525,7 +700,7 @@ pub(super) fn spawn_fs_write(
                 .db
                 .complete_file_save(FileSaveCompletion {
                     operation_id: &operation_id,
-                    workspace_id: &task_workspace_id,
+                    workspace_id,
                     path: &path,
                     content: &content,
                     version: &write.version,
@@ -541,39 +716,29 @@ pub(super) fn spawn_fs_write(
                 buffer_conflict: reconciled.as_ref().is_some_and(|row| row.conflict),
                 replayed: false,
             })
-        })
-        .await;
-        let message = match result {
-            Ok(Ok(execution)) => {
-                if !execution.replayed {
-                    let _ = events_tx.send(Arc::new(ServerMessage::FsChanged {
-                        workspace_id: event_workspace_id.clone(),
-                        path: event_path.clone(),
-                        version: Some(execution.result.version.clone()),
-                        kind: "changed".to_string(),
-                        metadata: Some(execution.result.metadata.clone()),
-                        buffer_revision: execution.buffer_revision,
-                        conflict: execution.buffer_conflict,
-                    }));
-                }
-                ServerMessage::FsWriteResult {
-                    request_id,
-                    workspace_id,
-                    metadata: execution.result.metadata,
-                    bytes_written: execution.result.bytes_written,
-                    version: execution.result.version,
+        },
+        move |request_id, workspace_id, execution| {
+            if !execution.replayed {
+                let _ = events_tx.send(Arc::new(ServerMessage::FsChanged {
+                    workspace_id: workspace_id.clone(),
+                    path: event_path,
+                    version: Some(execution.result.version.clone()),
+                    kind: "changed".to_string(),
+                    metadata: Some(execution.result.metadata.clone()),
                     buffer_revision: execution.buffer_revision,
-                }
+                    conflict: execution.buffer_conflict,
+                }));
             }
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
+            ServerMessage::FsWriteResult {
                 request_id,
                 workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+                metadata: execution.result.metadata,
+                bytes_written: execution.result.bytes_written,
+                version: execution.result.version,
+                buffer_revision: execution.buffer_revision,
+            }
+        },
+    );
 }
 
 pub(super) fn spawn_fs_buffer_list(
@@ -581,17 +746,17 @@ pub(super) fn spawn_fs_buffer_list(
     request_id: String,
     workspace_id: String,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        |app, workspace_id| {
             // Resolve the retained service even for a metadata-only list so
             // archived/remote/path-swapped workspaces cannot expose rows.
-            let _service = workspace_file_service(&app, &task_workspace_id)?;
+            let _service = workspace_file_service(app, workspace_id)?;
             let mut buffers = app
                 .db
-                .list_file_buffer_metadata(&task_workspace_id, MAX_FILE_BUFFERS_PER_WORKSPACE + 1)
+                .list_file_buffer_metadata(workspace_id, MAX_FILE_BUFFERS_PER_WORKSPACE + 1)
                 .map_err(|error| {
                     FsAdapterFailure::Buffer(FileBufferError::Database {
                         message: error.to_string(),
@@ -600,27 +765,17 @@ pub(super) fn spawn_fs_buffer_list(
             let truncated = buffers.len() > MAX_FILE_BUFFERS_PER_WORKSPACE;
             buffers.truncate(MAX_FILE_BUFFERS_PER_WORKSPACE);
             Ok((buffers, truncated))
-        })
-        .await;
-        let message = match result {
-            Ok(Ok((buffers, truncated))) => ServerMessage::FsBufferListResult {
-                request_id,
-                workspace_id,
-                buffers: buffers
-                    .into_iter()
-                    .map(file_buffer_summary_to_wire)
-                    .collect(),
-                truncated,
-            },
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
-                request_id,
-                workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+        },
+        |request_id, workspace_id, (buffers, truncated)| ServerMessage::FsBufferListResult {
+            request_id,
+            workspace_id,
+            buffers: buffers
+                .into_iter()
+                .map(file_buffer_summary_to_wire)
+                .collect(),
+            truncated,
+        },
+    );
 }
 
 /// Read the disk baseline and reconcile a durable buffer's external version.
@@ -632,20 +787,19 @@ pub(super) fn spawn_fs_buffer_get(
     workspace_id: String,
     path: String,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
-    let operation_lock = filesystem_operation_lock(&app, &workspace_id, &path);
-    let events_tx = app.hub.hub_events_tx.clone();
-    tokio::spawn(async move {
-        let event_workspace_id = workspace_id.clone();
-        let event_path = path.clone();
-        let result = tokio::task::spawn_blocking(move || {
+    let event_path = path.clone();
+    let events_tx = state.app.hub.hub_events_tx.clone();
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let operation_lock = filesystem_operation_lock(app, workspace_id, &path);
             let _operation_guard = operation_lock.lock().unwrap();
-            let service = workspace_file_service(&app, &task_workspace_id)?;
+            let service = workspace_file_service(app, workspace_id)?;
             let existing = app
                 .db
-                .get_file_buffer(&task_workspace_id, &path)
+                .get_file_buffer(workspace_id, &path)
                 .map_err(|error| {
                     FsAdapterFailure::Buffer(FileBufferError::Database {
                         message: error.to_string(),
@@ -659,7 +813,7 @@ pub(super) fn spawn_fs_buffer_get(
                         } else if row.dirty {
                             app.db
                                 .observe_file_buffer(
-                                    &task_workspace_id,
+                                    workspace_id,
                                     &path,
                                     FileBufferObservation {
                                         content: None,
@@ -681,7 +835,7 @@ pub(super) fn spawn_fs_buffer_get(
                         } else {
                             app.db
                                 .observe_file_buffer(
-                                    &task_workspace_id,
+                                    workspace_id,
                                     &path,
                                     FileBufferObservation {
                                         content: Some(&read.content),
@@ -704,7 +858,7 @@ pub(super) fn spawn_fs_buffer_get(
                     } else {
                         app.db
                             .ensure_file_buffer(
-                                &task_workspace_id,
+                                workspace_id,
                                 &path,
                                 FileBufferUpdate {
                                     content: read.content.clone(),
@@ -733,7 +887,7 @@ pub(super) fn spawn_fs_buffer_get(
                     let current = app
                         .db
                         .observe_file_buffer(
-                            &task_workspace_id,
+                            workspace_id,
                             &path,
                             FileBufferObservation {
                                 content: None,
@@ -755,37 +909,26 @@ pub(super) fn spawn_fs_buffer_get(
                 Err(error) => return Err(FsAdapterFailure::Filesystem(error)),
             };
             Ok((buffer, changed))
-        })
-        .await;
-        let message = match result {
-            Ok(Ok((buffer, changed))) => {
-                if changed {
-                    let version = buffer.external_version.clone();
-                    let _ = events_tx.send(Arc::new(ServerMessage::FsChanged {
-                        workspace_id: event_workspace_id,
-                        path: event_path,
-                        version,
-                        kind: "changed".to_string(),
-                        metadata: None,
-                        buffer_revision: Some(buffer.revision),
-                        conflict: buffer.conflict,
-                    }));
-                }
-                ServerMessage::FsBufferResult {
-                    request_id,
-                    workspace_id,
-                    buffer: file_buffer_to_wire(buffer),
-                }
+        },
+        move |request_id, workspace_id, (buffer, changed)| {
+            if changed {
+                let _ = events_tx.send(Arc::new(ServerMessage::FsChanged {
+                    workspace_id: workspace_id.clone(),
+                    path: event_path,
+                    version: buffer.external_version.clone(),
+                    kind: "changed".to_string(),
+                    metadata: None,
+                    buffer_revision: Some(buffer.revision),
+                    conflict: buffer.conflict,
+                }));
             }
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
+            ServerMessage::FsBufferResult {
                 request_id,
                 workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+                buffer: file_buffer_to_wire(buffer),
+            }
+        },
+    );
 }
 
 pub(super) fn spawn_fs_buffer_set(
@@ -797,14 +940,14 @@ pub(super) fn spawn_fs_buffer_set(
     base_content: Option<String>,
     expected_buffer_revision: Option<u64>,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
-    let operation_lock = filesystem_operation_lock(&app, &workspace_id, &path);
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let operation_lock = filesystem_operation_lock(app, workspace_id, &path);
             let _operation_guard = operation_lock.lock().unwrap();
-            let service = workspace_file_service(&app, &task_workspace_id)?;
+            let service = workspace_file_service(app, workspace_id)?;
             if content.len() > service.config().max_read_bytes
                 || content.len() > service.config().max_write_bytes
                 || content.len() > MAX_FILE_BUFFER_BYTES
@@ -819,7 +962,7 @@ pub(super) fn spawn_fs_buffer_set(
             }
             let existing = app
                 .db
-                .get_file_buffer(&task_workspace_id, &path)
+                .get_file_buffer(workspace_id, &path)
                 .map_err(|error| {
                     FsAdapterFailure::Buffer(FileBufferError::Database {
                         message: error.to_string(),
@@ -864,7 +1007,7 @@ pub(super) fn spawn_fs_buffer_set(
             let row = app
                 .db
                 .set_file_buffer(
-                    &task_workspace_id,
+                    workspace_id,
                     &path,
                     FileBufferUpdate {
                         content,
@@ -881,23 +1024,13 @@ pub(super) fn spawn_fs_buffer_set(
                 )
                 .map_err(FsAdapterFailure::Buffer)?;
             Ok(row)
-        })
-        .await;
-        let message = match result {
-            Ok(Ok(buffer)) => ServerMessage::FsBufferResult {
-                request_id,
-                workspace_id,
-                buffer: file_buffer_to_wire(buffer),
-            },
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
-                request_id,
-                workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+        },
+        |request_id, workspace_id, buffer| ServerMessage::FsBufferResult {
+            request_id,
+            workspace_id,
+            buffer: file_buffer_to_wire(buffer),
+        },
+    );
 }
 
 pub(super) fn spawn_fs_buffer_close(
@@ -908,36 +1041,26 @@ pub(super) fn spawn_fs_buffer_close(
     expected_buffer_revision: Option<u64>,
     discard: bool,
 ) {
-    let out_tx = state.out_tx.clone();
-    let app = state.app.clone();
-    let task_workspace_id = workspace_id.clone();
     let result_path = path.clone();
-    let operation_lock = filesystem_operation_lock(&app, &workspace_id, &path);
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let _operation_guard = operation_lock.lock().unwrap();
-            let _service = workspace_file_service(&app, &task_workspace_id)?;
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let lock = filesystem_operation_lock(app, workspace_id, &path);
+            let _operation_guard = lock.lock().unwrap();
+            let _service = workspace_file_service(app, workspace_id)?;
             app.db
-                .close_file_buffer(&task_workspace_id, &path, expected_buffer_revision, discard)
+                .close_file_buffer(workspace_id, &path, expected_buffer_revision, discard)
                 .map_err(FsAdapterFailure::Buffer)
-        })
-        .await;
-        let message = match result {
-            Ok(Ok(removed)) => ServerMessage::FsBufferCloseResult {
-                request_id,
-                workspace_id,
-                path: result_path,
-                removed,
-            },
-            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
-            Err(error) => fs_error_response(
-                request_id,
-                workspace_id,
-                FsAdapterFailure::Task(format!("filesystem task failed: {error}")),
-            ),
-        };
-        let _ = out_tx.send(message);
-    });
+        },
+        |request_id, workspace_id, removed| ServerMessage::FsBufferCloseResult {
+            request_id,
+            workspace_id,
+            path: result_path,
+            removed,
+        },
+    );
 }
 
 pub(super) fn handle_fs_browse(
@@ -1039,4 +1162,20 @@ pub(super) fn handle_fs_browse(
         home,
         entries,
     });
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::byte_range;
+    #[test]
+    fn media_ranges_support_seek_and_suffix_without_overflow() {
+        assert_eq!(byte_range("bytes=2-5", 10), Some((2, 5)));
+        assert_eq!(byte_range("bytes=2-", 10), Some((2, 9)));
+        assert_eq!(byte_range("bytes=-3", 10), Some((7, 9)));
+        assert_eq!(byte_range("bytes=-20", 10), Some((0, 9)));
+        for range in ["bytes=10-", "bytes=8-2", "bytes=-0", "bytes=0-1,4-5", "bad"] {
+            assert_eq!(byte_range(range, 10), None);
+        }
+        assert_eq!(byte_range("bytes=0-", 0), None);
+    }
 }

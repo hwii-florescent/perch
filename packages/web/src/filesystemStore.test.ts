@@ -113,6 +113,8 @@ beforeEach(() => {
   FakeWebSocket.sent = [];
   useWorkspaceFilesStore.setState({
     trees: {},
+    searches: {},
+    extractions: {},
     documents: {},
     previews: {},
     bufferSummaries: {},
@@ -126,6 +128,39 @@ afterEach(() => {
 });
 
 describe("workspace filesystem store", () => {
+  it("ignores stale searches and keeps workspace search results separate", () => {
+    const first = useWorkspaceFilesStore.getState().searchFiles("search-a", "old")!;
+    const latest = useWorkspaceFilesStore.getState().searchFiles("search-a", "new")!;
+    const other = useWorkspaceFilesStore.getState().searchFiles("search-b", "other")!;
+    respond({ type: "fs.search.result", requestId: latest, workspaceId: "search-a", query: "new", entries: [], truncated: true });
+    respond({ type: "fs.search.result", requestId: first, workspaceId: "search-a", query: "old", entries: [], truncated: false });
+    respond({ type: "fs.search.result", requestId: other, workspaceId: "search-b", query: "other", entries: [], truncated: false });
+    expect(useWorkspaceFilesStore.getState().searches["search-a"]).toMatchObject({ query: "new", truncated: true });
+    expect(useWorkspaceFilesStore.getState().searches["search-b"].query).toBe("other");
+  });
+
+  it("refreshes an extracted archive's parent and exposes errors/uncertain disconnects", () => {
+    const store = useWorkspaceFilesStore.getState();
+    const requestId = store.extractArchive("extract", "sub/files.zip")!;
+    expect(store.extractArchive("extract", "sub/files.zip")).toBeNull();
+    respond({ type: "fs.extract.result", requestId, workspaceId: "extract", path: "sub/files.zip", destination: "sub/files-extracted" });
+    expect(outgoing("fs.tree", "extract", "sub")).toBeDefined();
+    expect(useWorkspaceFilesStore.getState().extractions.extract["sub/files.zip"].destination).toBe("sub/files-extracted");
+    const retry = store.extractArchive("extract", "sub/files.zip")!;
+    respond({ type: "fs.error", requestId: retry, workspaceId: "extract", code: "io_error", message: "Folder exists", path: "sub/files-extracted" });
+    expect(useWorkspaceFilesStore.getState().extractions.extract["sub/files.zip"].error).toBe("Folder exists");
+    store.extractArchive("extract", "another.zip");
+    handleFilesystemConnectionChange(false);
+    expect(useWorkspaceFilesStore.getState().extractions.extract["another.zip"].state).toBe("error");
+  });
+
+  it("keeps binary metadata so a file tab can use the native media viewer", () => {
+    useWorkspaceFilesStore.getState().openFile("media", "clip.mp4");
+    const request = outgoing("fs.read", "media", "clip.mp4");
+    respond({ type: "fs.error", requestId: request.requestId as string, workspaceId: "media", code: "binary", message: "Not text", path: "clip.mp4", metadata: { ...metadata("media", "clip.mp4"), mediaType: "video/mp4" } });
+    expect(useWorkspaceFilesStore.getState().documents.media["clip.mp4"].metadata?.mediaType).toBe("video/mp4");
+  });
+
   it("keeps lazy tree replies scoped to their workspace", () => {
     const firstRequest = useWorkspaceFilesStore.getState().requestTree("workspace-a", "");
     const secondRequest = useWorkspaceFilesStore.getState().requestTree("workspace-b", "");

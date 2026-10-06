@@ -24,6 +24,7 @@
     "dockview-react": "^7.0.2",
     "dompurify": "^3.4.12",
     "marked": "^18.0.7",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.7.0",
