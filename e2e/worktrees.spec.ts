@@ -577,6 +577,22 @@ test.describe("Git worktrees", () => {
   // across `git worktree move`, and is archived once `git worktree remove`
   // drops it.
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // WT12 — an empty form creates a bird-codeterm workspace and starts the pane.
+  // -------------------------------------------------------------------------
+  test("WT12. Empty form: random name, starting pane opens in the new workspace", async ({ page }) => {
+    await freshPage(page);
+    const popover = await openWorktreeMenu(page);
+    if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click();
+    await popover.locator('[data-testid="worktree-agent-select"]').selectOption("terminal");
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+    const row = page.locator(".workspace-entry button[title]").filter({ hasText: /^[a-z]+-[a-z]+$/ });
+    await expect(row.first()).toBeVisible({ timeout: 30000 });
+    // The pane started in the new checkout: its path is the terminal's cwd.
+    const worktreePath = (await row.first().getAttribute("title"))!;
+    await expect(page.locator(".terminal--persistent:visible .xterm-rows")).toContainText(path.basename(worktreePath), { timeout: 30000 });
+  });
+
   test("WT11. External worktrees start hidden, show, hide and clean up", async ({ page }) => {
     await freshPage(page);
     // Unique per run: a reused DB remembers a path it saw before (and its visibility).

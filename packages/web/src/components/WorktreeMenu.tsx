@@ -95,18 +95,24 @@ function basename(p: string): string {
  * (a background create reports the path before the workspace exists). */
 function startPaneWhenReady(hostId: string, path: string, agent: string) {
   const find = () => usePerchStore.getState().workspaces.find((w) => w.hostId === hostId && w.path === path && w.state !== "archived");
-  const start = () => {
+  let finished = false;
+  let stop = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Unsubscribe before starting: createSessionOnHost updates the store, which
+  // would re-enter this listener.
+  const check = () => {
     const workspace = find();
-    if (!workspace) return false;
+    if (!workspace || finished) return;
+    finished = true;
+    stop();
+    clearTimeout(timer);
     const state = usePerchStore.getState();
     state.focusWorkspace(workspace.id);
     state.createSessionOnHost(hostId, path, agent);
-    return true;
   };
-  if (start()) return;
-  const stop = usePerchStore.subscribe(() => { if (start()) done(); });
-  const timer = setTimeout(() => done(), 5 * 60_000);
-  function done() { stop(); clearTimeout(timer); }
+  stop = usePerchStore.subscribe(check);
+  timer = setTimeout(() => { finished = true; stop(); }, 5 * 60_000);
+  check();
 }
 
 export interface WorktreeMenuProps {
@@ -531,7 +537,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                 }}
               />
               <select
-                className={AGENT_PICKER}
+                className={cn(AGENT_PICKER, "text-[0.78rem]")}
                 data-testid="worktree-agent-select"
                 aria-label="Starting pane"
                 value={agent}
