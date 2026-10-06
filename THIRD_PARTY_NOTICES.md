@@ -51,3 +51,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## PDF.js
+
+PDF previews use [Mozilla PDF.js](https://github.com/mozilla/pdf.js), distributed
+as `pdfjs-dist` under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+Copyright Mozilla Foundation and PDF.js contributors. The dependency retains
+its copyright/license headers and includes the full license in its `LICENSE` file.

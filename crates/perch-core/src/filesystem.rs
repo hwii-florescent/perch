@@ -9,12 +9,18 @@
 //! attempts and the less obvious case where a parent directory is swapped for
 //! a symlink between validation and use.
 //!
-//! Directory listing is one level at a time and capped.  File reads and
+//! Directory listing is one level at a time and capped. Filename/path search
+//! traverses without following links and reports incomplete results. Raw
+//! content is streamed from a validated descriptor by the HTTP adapter;
+//! `archive` extracts into an exclusive sibling folder with expansion limits.
+//! File reads and
 //! previews are bounded before and during the read, and text versions are
 //! SHA-256 hashes of the exact bytes returned.  Saves are written to a fresh
 //! file in the same directory, synced, and atomically renamed into place.
 //! Expected-version checks are serialized by the service, so two concurrent
 //! saves cannot both pass against the same old version.
+
+mod archive;
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -435,6 +441,74 @@ impl FileService {
             entries,
             truncated: read_dir.truncated,
         })
+    }
+
+    /// Search filenames/relative paths, not file contents. Never follow links.
+    pub fn search(&self, query: &str) -> Result<DirectoryListing, FsError> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() || query.len() > 256 {
+            return Err(FsError::InvalidPath {
+                path: query,
+                reason: "search needs 1–256 bytes".into(),
+            });
+        }
+        let mut queue = std::collections::VecDeque::from([String::new()]);
+        let mut entries = Vec::new();
+        let mut examined = 0;
+        let mut truncated = false;
+        let started = std::time::Instant::now();
+        // ponytail: bounded traversal (20k entries / 2s / 200 hits), not an
+        // index. Add an incremental index if large workspaces need full search.
+        while let Some(path) = queue.pop_front() {
+            let listing = match self.list_dir(&path) {
+                Ok(listing) => listing,
+                Err(error) if path.is_empty() => return Err(error),
+                Err(_) => {
+                    truncated = true;
+                    continue;
+                }
+            };
+            truncated |= listing.truncated;
+            for entry in listing.entries {
+                examined += 1;
+                if entry.kind == EntryKind::Directory && entry.name != ".git" {
+                    queue.push_back(entry.path.clone());
+                } else if entry.kind == EntryKind::File
+                    && entry.path.to_lowercase().contains(&query)
+                {
+                    entries.push(entry);
+                }
+                if examined >= 20_000 || entries.len() >= 200 || started.elapsed().as_secs() >= 2 {
+                    return Ok(DirectoryListing {
+                        path: String::new(),
+                        entries,
+                        truncated: true,
+                    });
+                }
+            }
+        }
+        Ok(DirectoryListing {
+            path: String::new(),
+            entries,
+            truncated,
+        })
+    }
+
+    /// Open raw content through the same retained, no-follow workspace root.
+    /// HTTP adapters stream this descriptor; they must not reopen its pathname.
+    pub fn open_content(&self, path: &str) -> Result<(File, FileMetadata), FsError> {
+        let components = normalized_components(Path::new(path))?;
+        let relative = require_file_components(&components, Path::new(path))?;
+        let (parent, name) = self.open_parent(&components, &relative)?;
+        let file = open_file_at(&parent, &name)
+            .map_err(|error| FsError::path_not_found(&relative, error))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| FsError::io("stat", &relative, error))?;
+        if !metadata.is_file() {
+            return Err(FsError::NotRegularFile { path: relative });
+        }
+        Ok((file, metadata_for_file(&relative, &metadata)))
     }
 
     /// Read a bounded UTF-8 text file and return its content hash.
@@ -1035,6 +1109,20 @@ fn media_type_for_name(name: &str) -> Option<String> {
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",
         "pdf" => "application/pdf",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "ogv" => "video/ogg",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "zip" => "application/zip",
+        "tar" => "application/x-tar",
+        "gz" | "tgz" => "application/gzip",
         _ => return None,
     };
     Some(media_type.to_string())
@@ -1582,6 +1670,41 @@ mod tests {
 
     fn cleanup(root: &Path) {
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_finds_unopened_nested_files_and_raw_content_is_confined() {
+        let (root, service) = fixture("search-content");
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join("src/nested/Example.txt"), b"hello").unwrap();
+        fs::write(root.join(".git/Example.txt"), b"hidden").unwrap();
+        fs::write(root.join("video.mp4"), [0, 1, 2, 3]).unwrap();
+        let hits = service.search("EXAMPLE").unwrap();
+        assert_eq!(hits.entries.len(), 1);
+        assert_eq!(hits.entries[0].path, "src/nested/Example.txt");
+        assert!(!hits.truncated);
+        assert_eq!(service.search("src/nested").unwrap().entries.len(), 1);
+        assert!(service.search("").is_err());
+        assert!(service.search(&"x".repeat(257)).is_err());
+        let (mut content, metadata) = service.open_content("video.mp4").unwrap();
+        assert_eq!(metadata.media_type.as_deref(), Some("video/mp4"));
+        let mut bytes = Vec::new();
+        content.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, [0, 1, 2, 3]);
+        assert!(service.open_content("../outside").is_err());
+        assert!(service.open_content("src").is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
+            assert!(service.open_content("link/video.mp4").is_err());
+            assert_eq!(service.search("Example").unwrap().entries.len(), 1);
+        }
+        for index in 0..201 {
+            fs::write(root.join(format!("match-{index}")), b"").unwrap();
+        }
+        assert!(service.search("match-").unwrap().truncated);
+        cleanup(&root);
     }
 
     #[test]

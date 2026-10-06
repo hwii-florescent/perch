@@ -13,7 +13,7 @@ name = "perch_core"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "io-std", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "io-std", "sync", "time", "fs"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
@@ -28,6 +28,12 @@ uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 libc = "0.2"
 sha2 = "0.10"
+# Archive parsing stays in-process so paths, links and expansion limits are
+# checked before writing; never invoke an unrestricted extraction command.
+zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+tar = "0.4"
+flate2 = "1"
+tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"

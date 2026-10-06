@@ -12,6 +12,8 @@ import type {
   FsPreviewResultMessage,
   FsReadResultMessage,
   FsTreeResultMessage,
+  FsSearchResultMessage,
+  FsExtractResultMessage,
   FsWriteResultMessage,
   ServerMessage,
 } from "@perch/shared";
@@ -82,9 +84,23 @@ export interface WorkspacePreviewState {
   error?: string;
 }
 
+export interface WorkspaceSearchState {
+  query: string;
+  entries: DirectoryEntry[];
+  truncated: boolean;
+  state: "loading" | "ready" | "error";
+  error?: string;
+}
+
+export interface WorkspaceExtractionState {
+  state: "loading" | "ready" | "error";
+  destination?: string;
+  error?: string;
+}
+
 interface PendingFilesystemRequest {
   workspaceId: string;
-  kind: "tree" | "read" | "preview" | "write" | "bufferList" | "bufferGet" | "bufferSet" | "bufferClose";
+  kind: "search" | "extract" | "tree" | "read" | "preview" | "write" | "bufferList" | "bufferGet" | "bufferSet" | "bufferClose";
   path: string;
   transportGeneration?: number;
   reconnect?: boolean;
@@ -101,6 +117,10 @@ interface PendingFilesystemRequest {
 
 export interface WorkspaceFilesState {
   trees: Record<string, Record<string, WorkspaceTreeState>>;
+  searches: Record<string, WorkspaceSearchState>;
+  extractions: Record<string, Record<string, WorkspaceExtractionState>>;
+  searchFiles: (workspaceId: string, query: string) => string | null;
+  extractArchive: (workspaceId: string, path: string) => string | null;
   documents: Record<string, Record<string, WorkspaceDocumentState>>;
   previews: Record<string, Record<string, WorkspacePreviewState>>;
   bufferSummaries: Record<string, FileBufferSummary[]>;
@@ -391,10 +411,34 @@ function requestBufferResync(
 
 export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => ({
   trees: {},
+  searches: {},
+  extractions: {},
   documents: {},
   previews: {},
   bufferSummaries: {},
   bufferListState: {},
+
+  searchFiles: (workspaceId, query) => {
+    const requestId = beginRequest(workspaceId, "search", "");
+    set((state) => ({ searches: { ...state.searches, [workspaceId]: {
+      query, entries: [], truncated: false,
+      state: requestId ? "loading" : "error",
+      ...(!requestId ? { error: "Disconnected. Reconnect and retry search." } : {}),
+    } } }));
+    if (requestId) socket.send({ type: "fs.search", requestId, workspaceId, query });
+    return requestId;
+  },
+
+  extractArchive: (workspaceId, path) => {
+    if (get().extractions[workspaceId]?.[path]?.state === "loading") return null;
+    const requestId = beginRequest(workspaceId, "extract", path);
+    set((state) => ({ extractions: updateNested(state.extractions, workspaceId, path, {
+      state: requestId ? "loading" : "error",
+      ...(!requestId ? { error: "Disconnected. Reconnect before extracting." } : {}),
+    }) }));
+    if (requestId) socket.send({ type: "fs.extract", requestId, workspaceId, path });
+    return requestId;
+  },
 
   requestTree: (workspaceId, pathParam) => {
     const path = normalizeWorkspacePath(pathParam);
@@ -602,6 +646,10 @@ export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => 
       const trees = { ...state.trees };
       const documents = { ...state.documents };
       const previews = { ...state.previews };
+      const searches = { ...state.searches };
+      const extractions = { ...state.extractions };
+      delete searches[workspaceId];
+      delete extractions[workspaceId];
       const bufferSummaries = { ...state.bufferSummaries };
       const bufferListState = { ...state.bufferListState };
       delete trees[workspaceId];
@@ -630,7 +678,7 @@ export const useWorkspaceFilesStore = create<WorkspaceFilesState>((set, get) => 
           latestRequestByKey.delete(requestKey(pending.kind, pending.workspaceId, pending.path));
         }
       }
-      return { trees, documents, previews, bufferSummaries, bufferListState };
+      return { trees, documents, previews, searches, extractions, bufferSummaries, bufferListState };
     });
   },
 }));
@@ -679,6 +727,8 @@ function handleFsMessage(raw: ServerMessage): boolean {
   }
 
   if (
+    raw.type !== "fs.search.result" &&
+    raw.type !== "fs.extract.result" &&
     raw.type !== "fs.tree.result" &&
     raw.type !== "fs.read.result" &&
     raw.type !== "fs.preview.result" &&
@@ -690,6 +740,8 @@ function handleFsMessage(raw: ServerMessage): boolean {
   ) return false;
 
   const message = raw as
+    | FsSearchResultMessage
+    | FsExtractResultMessage
     | FsTreeResultMessage
     | FsReadResultMessage
     | FsPreviewResultMessage
@@ -700,7 +752,7 @@ function handleFsMessage(raw: ServerMessage): boolean {
     | FsErrorMessage;
   const pending = pendingRequests.get(message.requestId);
   if (!pending || pending.workspaceId !== message.workspaceId) return true;
-  const messagePath = message.type === "fs.buffer.result"
+  const messagePath = pending.kind === "search" || pending.kind === "extract" ? pending.path : message.type === "fs.buffer.result"
     ? normalizeWorkspacePath(message.buffer.path)
     : message.type === "fs.buffer.list.result"
       ? ""
@@ -712,6 +764,24 @@ function handleFsMessage(raw: ServerMessage): boolean {
     return true;
   }
   finishRequest(message.requestId, pending);
+
+  if (message.type === "fs.search.result") {
+    useWorkspaceFilesStore.setState((state) => ({ searches: { ...state.searches, [message.workspaceId]: {
+      query: message.query, entries: message.entries, truncated: message.truncated, state: "ready",
+    } } }));
+    return true;
+  }
+  if (message.type === "fs.extract.result") {
+    useWorkspaceFilesStore.setState((state) => ({ extractions: updateNested(state.extractions, message.workspaceId, message.path, {
+      state: "ready", destination: message.destination,
+    }) }));
+    const store = useWorkspaceFilesStore.getState();
+    // Refresh the archive's parent, even if it was reached through search.
+    store.requestTree(message.workspaceId, message.path.split("/").slice(0, -1).join("/"));
+    const query = store.searches[message.workspaceId]?.query;
+    if (query) store.searchFiles(message.workspaceId, query);
+    return true;
+  }
 
   if (message.type === "fs.tree.result") {
     useWorkspaceFilesStore.setState((state) => ({
@@ -986,6 +1056,16 @@ function handleFsMessage(raw: ServerMessage): boolean {
 
   const error = message as FsErrorMessage;
   useWorkspaceFilesStore.setState((state) => {
+    if (pending.kind === "search") {
+      return { searches: { ...state.searches, [pending.workspaceId]: {
+        ...state.searches[pending.workspaceId]!, state: "error", error: error.message,
+      } } };
+    }
+    if (pending.kind === "extract") {
+      return { extractions: updateNested(state.extractions, pending.workspaceId, pending.path, {
+        state: "error", error: error.message,
+      }) };
+    }
     if (pending.kind === "tree") {
       return {
         trees: updateNested(state.trees, pending.workspaceId, pending.path, {
@@ -1081,6 +1161,7 @@ function handleFsMessage(raw: ServerMessage): boolean {
         documents: updateDocuments(state.documents, pending.workspaceId, pending.path, {
           ...current,
           state: isConflict ? "conflict" : "error",
+          metadata: error.metadata ?? current.metadata,
           requestId: current.requestId === message.requestId ? undefined : current.requestId,
           readRequestId: current.readRequestId === message.requestId ? undefined : current.readRequestId,
           error: error.message,
@@ -1133,6 +1214,19 @@ function invalidateFilesystemRequestsOnDisconnect(): void {
   for (const [requestId, save] of pendingSaveAfterBuffer) {
     pendingSaveAfterReconnect.set(documentKey(save.workspaceId, save.path), save);
     pendingSaveAfterBuffer.delete(requestId);
+  }
+  for (const pending of pendingRequests.values()) {
+    if (pending.kind === "search" || pending.kind === "extract") {
+      useWorkspaceFilesStore.setState((state) => pending.kind === "search" ? {
+        searches: { ...state.searches, [pending.workspaceId]: {
+          ...state.searches[pending.workspaceId]!, state: "error", error: "Disconnected. Retry search after reconnecting.",
+        } },
+      } : {
+        extractions: updateNested(state.extractions, pending.workspaceId, pending.path, {
+          state: "error", error: "Connection lost. Refresh the folder to check whether extraction finished before retrying.",
+        }),
+      });
+    }
   }
   pendingReloads.clear();
   pendingRequests.clear();

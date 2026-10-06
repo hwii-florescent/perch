@@ -736,6 +736,7 @@ pub async fn run(
         .route(&clipboard_image_path, post(clipboard_image_upload))
         .route(&upload_path, post(attachment_upload))
         .route(&pair_path, get(pair_status).post(pair_claim))
+        .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
 
     if options.web_dist_dir.is_dir() {
@@ -2293,6 +2294,9 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.close",
         "surface.v1",
         "fs.tree",
+        "fs.search",
+        "fs.extract",
+        "fs.content",
         "fs.read",
         "fs.preview",
         "fs.write",

@@ -1144,6 +1144,20 @@ pub enum ClientMessage {
         path: Option<String>,
     },
 
+    #[serde(rename = "fs.search", rename_all = "camelCase")]
+    FsSearch {
+        request_id: String,
+        workspace_id: String,
+        query: String,
+    },
+
+    #[serde(rename = "fs.extract", rename_all = "camelCase")]
+    FsExtract {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+    },
+
     /// Read one bounded UTF-8 text file from a durable workspace.
     #[serde(rename = "fs.read", rename_all = "camelCase")]
     FsRead {
@@ -2134,6 +2148,23 @@ pub enum ServerMessage {
         path: String,
         entries: Vec<DirectoryEntry>,
         truncated: bool,
+    },
+
+    #[serde(rename = "fs.search.result", rename_all = "camelCase")]
+    FsSearchResult {
+        request_id: String,
+        workspace_id: String,
+        query: String,
+        entries: Vec<DirectoryEntry>,
+        truncated: bool,
+    },
+
+    #[serde(rename = "fs.extract.result", rename_all = "camelCase")]
+    FsExtractResult {
+        request_id: String,
+        workspace_id: String,
+        path: String,
+        destination: String,
     },
 
     /// Reply to `fs.read` with bounded text and its exact content version.

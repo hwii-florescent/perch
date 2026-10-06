@@ -59,7 +59,7 @@ export default defineConfig({
       workbox: {
         // Serve the app shell for any navigation that doesn't hit a real
         // asset, and never intercept the WS endpoint.
-        navigateFallbackDenylist: [/\/ws$/],
+        navigateFallbackDenylist: [/\/ws$/, /\/workspace-file$/],
       },
     }),
   ],

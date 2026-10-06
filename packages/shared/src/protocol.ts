@@ -1164,6 +1164,20 @@ export interface FsTreeMessage {
   path?: string;
 }
 
+export interface FsSearchMessage {
+  type: "fs.search";
+  requestId: string;
+  workspaceId: string;
+  query: string;
+}
+
+export interface FsExtractMessage {
+  type: "fs.extract";
+  requestId: string;
+  workspaceId: string;
+  path: string;
+}
+
 export interface FsReadMessage {
   type: "fs.read";
   requestId: string;
@@ -1645,6 +1659,8 @@ export type ClientMessage =
   | FsBrowseMessage
   | UsageGetMessage
   | FsTreeMessage
+  | FsSearchMessage
+  | FsExtractMessage
   | FsReadMessage
   | FsPreviewMessage
   | FsWriteMessage
@@ -2135,6 +2151,23 @@ export interface FsTreeResultMessage {
   truncated: boolean;
 }
 
+export interface FsSearchResultMessage {
+  type: "fs.search.result";
+  requestId: string;
+  workspaceId: string;
+  query: string;
+  entries: DirectoryEntry[];
+  truncated: boolean;
+}
+
+export interface FsExtractResultMessage {
+  type: "fs.extract.result";
+  requestId: string;
+  workspaceId: string;
+  path: string;
+  destination: string;
+}
+
 export interface FsReadResultMessage {
   type: "fs.read.result";
   requestId: string;
@@ -2390,6 +2423,8 @@ export type ServerMessage =
   | FsBrowseResultMessage
   | UsageResultMessage
   | FsTreeResultMessage
+  | FsSearchResultMessage
+  | FsExtractResultMessage
   | FsReadResultMessage
   | FsPreviewResultMessage
   | FsWriteResultMessage

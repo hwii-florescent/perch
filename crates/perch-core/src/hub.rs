@@ -1581,6 +1581,8 @@ impl HubManager {
             | ServerMessage::WorkspaceUpdated { .. }
             | ServerMessage::WorkspaceFocus { .. }
             | ServerMessage::FsTreeResult { .. }
+            | ServerMessage::FsSearchResult { .. }
+            | ServerMessage::FsExtractResult { .. }
             | ServerMessage::FsReadResult { .. }
             | ServerMessage::FsPreviewResult { .. }
             | ServerMessage::FsWriteResult { .. }

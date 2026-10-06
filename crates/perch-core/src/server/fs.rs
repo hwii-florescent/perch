@@ -343,6 +343,199 @@ pub(super) fn spawn_fs_tree(
     });
 }
 
+pub(super) fn spawn_fs_search(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    query: String,
+) {
+    let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
+    let task_workspace_id = workspace_id.clone();
+    let task_query = query.clone();
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            workspace_file_service(&app, &task_workspace_id)?
+                .search(&task_query)
+                .map_err(FsAdapterFailure::Filesystem)
+        })
+        .await;
+        let message = match result {
+            Ok(Ok(listing)) => ServerMessage::FsSearchResult {
+                request_id,
+                workspace_id,
+                query,
+                entries: listing.entries,
+                truncated: listing.truncated,
+            },
+            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
+            Err(error) => fs_error_response(
+                request_id,
+                workspace_id,
+                FsAdapterFailure::Task(error.to_string()),
+            ),
+        };
+        let _ = out_tx.send(message);
+    });
+}
+
+pub(super) fn spawn_fs_extract(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    path: String,
+) {
+    let out_tx = state.out_tx.clone();
+    let app = state.app.clone();
+    let task_workspace_id = workspace_id.clone();
+    let task_path = path.clone();
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            let lock = filesystem_operation_lock(&app, &task_workspace_id, &task_path);
+            let _guard = lock.lock().unwrap();
+            workspace_file_service(&app, &task_workspace_id)?
+                .extract_archive(&task_path)
+                .map_err(FsAdapterFailure::Filesystem)
+        })
+        .await;
+        let message = match result {
+            Ok(Ok(destination)) => ServerMessage::FsExtractResult {
+                request_id,
+                workspace_id,
+                path,
+                destination,
+            },
+            Ok(Err(error)) => fs_error_response(request_id, workspace_id, error),
+            Err(error) => fs_error_response(
+                request_id,
+                workspace_id,
+                FsAdapterFailure::Task(error.to_string()),
+            ),
+        };
+        let _ = out_tx.send(message);
+    });
+}
+
+/// Raw media/downloads use HTTP (including byte ranges), not base64 over WS.
+/// Authorization and descriptor confinement are identical to the WS plane.
+pub(super) async fn file_content(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    use axum::body::Body;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if let Err(status) = authorize_request(&app, &peer, &headers, &params) {
+        return (status, "device access denied").into_response();
+    }
+    let (Some(workspace_id), Some(path)) = (params.get("workspaceId"), params.get("path")) else {
+        return (StatusCode::BAD_REQUEST, "workspaceId and path are required").into_response();
+    };
+    let workspace_id = workspace_id.clone();
+    let path = path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        workspace_file_service(&app, &workspace_id)?
+            .open_content(&path)
+            .map_err(FsAdapterFailure::Filesystem)
+    })
+    .await;
+    let (file, metadata) = match result {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let size = metadata.size;
+    let range = headers.get("range").and_then(|value| value.to_str().ok());
+    let (start, end) = match range {
+        Some(value) => match byte_range(value, size) {
+            Some(range) => range,
+            None => {
+                return (
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    [("content-range", format!("bytes */{size}"))],
+                )
+                    .into_response()
+            }
+        },
+        None => (0, size.saturating_sub(1)),
+    };
+    let length = if size == 0 { 0 } else { end - start + 1 };
+    let mut file = tokio::fs::File::from_std(file);
+    if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let mime = metadata
+        .media_type
+        .as_deref()
+        .unwrap_or("application/octet-stream");
+    let inline = !params.contains_key("download")
+        && (mime.starts_with("image/")
+            || mime.starts_with("video/")
+            || mime.starts_with("audio/")
+            || mime == "application/pdf");
+    let mut response = axum::http::Response::builder()
+        .status(if range.is_some() {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header("content-type", mime)
+        .header("content-length", length)
+        .header("accept-ranges", "bytes")
+        .header("cache-control", "private, no-store")
+        .header("x-content-type-options", "nosniff")
+        .header("cross-origin-resource-policy", "same-origin")
+        // SVG/other active content must never acquire the app's privileges.
+        .header(
+            "content-security-policy",
+            "sandbox; default-src 'none'; frame-ancestors 'self'",
+        );
+    if !inline {
+        let name: String = metadata
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || ".-_".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        response = response.header(
+            "content-disposition",
+            format!("attachment; filename=\"{name}\""),
+        );
+    }
+    if range.is_some() {
+        response = response.header("content-range", format!("bytes {start}-{end}/{size}"));
+    }
+    response
+        .body(Body::from_stream(tokio_util::io::ReaderStream::new(
+            file.take(length),
+        )))
+        .unwrap()
+}
+
+fn byte_range(value: &str, size: u64) -> Option<(u64, u64)> {
+    if size == 0 {
+        return None;
+    }
+    let (start, end) = value.strip_prefix("bytes=")?.split_once('-')?;
+    if start.is_empty() {
+        let suffix: u64 = end.parse().ok()?;
+        return (suffix > 0).then_some((size.saturating_sub(suffix), size - 1));
+    }
+    let start: u64 = start.parse().ok()?;
+    let end = if end.is_empty() {
+        size - 1
+    } else {
+        end.parse::<u64>().ok()?.min(size - 1)
+    };
+    (start < size && start <= end).then_some((start, end))
+}
+
 pub(super) fn spawn_fs_read(
     state: &Arc<ConnState>,
     request_id: String,
@@ -1039,4 +1232,20 @@ pub(super) fn handle_fs_browse(
         home,
         entries,
     });
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::byte_range;
+    #[test]
+    fn media_ranges_support_seek_and_suffix_without_overflow() {
+        assert_eq!(byte_range("bytes=2-5", 10), Some((2, 5)));
+        assert_eq!(byte_range("bytes=2-", 10), Some((2, 9)));
+        assert_eq!(byte_range("bytes=-3", 10), Some((7, 9)));
+        assert_eq!(byte_range("bytes=-20", 10), Some((0, 9)));
+        for range in ["bytes=10-", "bytes=8-2", "bytes=-0", "bytes=0-1,4-5", "bad"] {
+            assert_eq!(byte_range(range, 10), None);
+        }
+        assert_eq!(byte_range("bytes=0-", 0), None);
+    }
 }
