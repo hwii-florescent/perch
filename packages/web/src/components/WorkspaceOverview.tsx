@@ -108,8 +108,9 @@ function readSessionView(): SessionView {
   try { return localStorage.getItem(SESSION_VIEW_KEY) === "list" ? "list" : "compact"; } catch { return "compact"; }
 }
 
-/** Compact sessions: one status dot per session on the row's own line. Click
- * switches to it, right-click closes it; the tooltip names it and its state. */
+/** Compact sessions: one status dot per session, on a second line under the
+ * row's name (`flex-wrap` on the row). Click switches to it, right-click
+ * closes it; the tooltip names it and its state. */
 function SessionDots({ sessions, activeId, onPick, onMenu }: {
   sessions: SessionSummary[];
   activeId: string | null;
@@ -117,12 +118,12 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   onMenu: (session: SessionSummary, x: number, y: number) => void;
 }) {
   return (
-    <span className="flex min-w-0 shrink items-stretch gap-0 self-stretch overflow-hidden" data-testid="session-dots">
+    <span className="order-last flex w-full min-w-0 items-stretch gap-0 overflow-hidden pl-[0.75rem]" data-testid="session-dots">
       {sessions.map((session) => (
         <button
           key={session.id}
           type="button"
-          className={cn("grid w-[1.6rem] shrink-0 self-stretch cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
+          className={cn("grid h-[1.5rem] w-[1.6rem] shrink-0 cursor-pointer place-items-center rounded-none bg-transparent p-0 [border:0] hover:bg-overlay-0", FOCUS, session.id === activeId && "workspace-entry__session--active bg-overlay-0")}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -331,6 +332,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
         : []),
       ...singleExtras(project),
+      ...(compact ? [] : [{
+        label: sessionViewStored === "compact" ? "Show session list" : "Show compact sessions",
+        testId: `workspace-project-session-view-${project.id}`,
+        onSelect: () => chooseSessionView(sessionViewStored === "compact" ? "list" : "compact"),
+      }]),
       "divider",
       { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
     ];
@@ -780,7 +786,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  className={cn("group/ph flex flex-wrap items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -906,7 +912,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               onBlur={() => setRenamingId(null)}
                             />
                           ) : (
-                          <div className={cn("flex items-stretch hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
+                          <div className={cn("flex flex-wrap items-stretch hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
                           <button
                             type="button"
                             className={cn(

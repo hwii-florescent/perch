@@ -492,7 +492,7 @@ test.describe("Git worktrees", () => {
     if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await popover.locator('[data-testid="worktree-name-input"]').fill("Stack on base!");
     await expect(popover.locator('[data-testid="worktree-branch-input"]')).toHaveAttribute(
-      "placeholder", "branch: stack-on-base");
+      "placeholder", "branch (optional): stack-on-base");
     await expect(popover.locator('datalist option[value="wt-base"]')).toHaveCount(1);
     await popover.locator('[data-testid="worktree-start-input"]').fill("wt-base");
     await page.screenshot({ path: "artifacts/worktrees-wt8-form.png" });

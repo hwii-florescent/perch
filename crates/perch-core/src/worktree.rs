@@ -530,16 +530,17 @@ pub async fn prepare_create(req: &CreateRequest) -> Result<CreatePlan, WorktreeO
         explicit.to_string()
     } else {
         let name = req.name.as_deref().unwrap_or("");
-        let seed = slugify_task_name(name);
+        // No name and no branch: both are optional, pick a free "workspace".
+        let seed = if name.trim().is_empty() {
+            "workspace".to_string()
+        } else {
+            slugify_task_name(name)
+        };
         if seed.is_empty() {
-            return Err(WorktreeOpError::plain(if name.trim().is_empty() {
-                "a task name or branch is required".to_string()
-            } else {
-                format!(
-                    "'{}' has no characters usable in a branch name",
-                    name.trim()
-                )
-            }));
+            return Err(WorktreeOpError::plain(format!(
+                "'{}' has no characters usable in a branch name",
+                name.trim()
+            )));
         }
         derive_free_branch(&primary, &repo_name, &seed, custom_path.is_some()).await?
     };
@@ -1666,6 +1667,22 @@ prunable stale
         assert_eq!(slugify_task_name("v1.2..3"), "v1.2.3");
         assert_eq!(slugify_task_name("🚀"), "");
         assert_eq!(slugify_task_name(&"a".repeat(60)).len(), 48);
+    }
+
+    #[tokio::test]
+    async fn no_name_and_no_branch_picks_a_free_workspace_branch() {
+        let (root, repo) = repo("unnamed");
+        git(&repo, &["branch", "workspace"]);
+        let plan = prepare_create(&CreateRequest {
+            repo_path: s(&repo).to_string(),
+            new_branch: true,
+            path: Some(s(&root.join("w")).to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(plan.branch, "workspace-2");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn head(dir: &Path) -> String {

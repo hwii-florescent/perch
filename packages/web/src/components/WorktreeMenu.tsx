@@ -42,6 +42,7 @@ import { cn } from "../lib/cn";
 import { ICON_BUTTON } from "./ui/icon-button";
 import { usePerchStore } from "../store";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AGENT_PICKER, useAgentChoices } from "./AgentPicker";
 import type { WorktreeEntry, WorktreePreservedBranch } from "@perch/shared";
 
 
@@ -88,6 +89,24 @@ export function slugifyTaskName(name: string): string {
 function basename(p: string): string {
   const parts = p.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || p;
+}
+
+/** Start `agent` in the workspace at `path` once the core has registered it
+ * (a background create reports the path before the workspace exists). */
+function startPaneWhenReady(hostId: string, path: string, agent: string) {
+  const find = () => usePerchStore.getState().workspaces.find((w) => w.hostId === hostId && w.path === path && w.state !== "archived");
+  const start = () => {
+    const workspace = find();
+    if (!workspace) return false;
+    const state = usePerchStore.getState();
+    state.focusWorkspace(workspace.id);
+    state.createSessionOnHost(hostId, path, agent);
+    return true;
+  };
+  if (start()) return;
+  const stop = usePerchStore.subscribe(() => { if (start()) done(); });
+  const timer = setTimeout(() => done(), 5 * 60_000);
+  function done() { stop(); clearTimeout(timer); }
 }
 
 export interface WorktreeMenuProps {
@@ -144,6 +163,12 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
   const [taskName, setTaskName] = useState("");
   const [startFrom, setStartFrom] = useState("");
   const [parentId, setParentId] = useState("");
+  // The pane the new workspace starts with; untouched = Settings' "Empty
+  // workspace opens", else none.
+  const [agentPick, setAgentPick] = useState<string | null>(null);
+  const emptyAgent = usePerchStore((s) => s.settings?.emptyWorkspaceAgent);
+  const { choices: agentChoices } = useAgentChoices(hostId);
+  const agent = agentPick ?? emptyAgent ?? "";
   const [newBranch, setNewBranch] = useState(true);
   const [customPath, setCustomPath] = useState("");
   const [pathTouched, setPathTouched] = useState(false);
@@ -225,6 +250,9 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
 
   /** The branch the server will use: the override, else the task-name slug. */
   const effectiveBranch = branch.trim() || (startFromSupported ? slugifyTaskName(taskName) : "");
+  // With a task name or branch the server derives the rest; with neither it
+  // picks a free "workspace" name. Older hosts still need a branch.
+  const canCreate = startFromSupported ? !taskName.trim() || effectiveBranch !== "" : effectiveBranch !== "";
 
   // Keep the path preview in sync with the branch until the user edits it.
   useEffect(() => {
@@ -250,7 +278,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
 
   async function submitCreate() {
     const trimmed = branch.trim();
-    if (!effectiveBranch || creating) return;
+    if (!canCreate || creating) return;
     setCreating(true);
     setError(null);
     const extra = startFromSupported
@@ -271,11 +299,14 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
       setError(reply.message);
       return;
     }
+    const createdPath = reply.type === "worktree.job.started" ? reply.job.path : reply.type === "worktree.done" ? reply.path : "";
+    if (agent && createdPath) startPaneWhenReady(hostId, createdPath, agent);
     setShowCreateForm(false);
     setBranch("");
     setTaskName("");
     setStartFrom("");
     setParentId("");
+    setAgentPick(null);
     setPathTouched(false);
     if (reply.type === "worktree.job.started") {
       setOpen(false);
@@ -413,7 +444,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                     ref={nameInputRef}
                     className={INPUT}
                     data-testid="worktree-name-input"
-                    placeholder="task name"
+                    placeholder="task name (optional)"
                     aria-label="Task name"
                     value={taskName}
                     onChange={(e) => setTaskName(e.target.value)}
@@ -448,7 +479,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                 className={INPUT}
                 data-testid="worktree-branch-input"
                 placeholder={startFromSupported
-                  ? `branch: ${slugifyTaskName(taskName) || "derived from the task name"}`
+                  ? `branch (optional): ${slugifyTaskName(taskName) || "derived from the task name"}`
                   : "branch name"}
                 aria-label={startFromSupported ? "Branch name override" : "Branch name"}
                 value={branch}
@@ -488,7 +519,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                 className={INPUT}
                 data-testid="worktree-path-input"
                 aria-label="Checkout path"
-                placeholder={defaultRoot ? `${defaultRoot}/<branch>` : "custom path (optional)"}
+                placeholder={defaultRoot ? `worktree path (optional): ${defaultRoot}/<branch>` : "worktree path (optional)"}
                 value={customPath}
                 onChange={(e) => {
                   setPathTouched(true);
@@ -499,6 +530,16 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                   if (e.key === "Enter") void submitCreate();
                 }}
               />
+              <select
+                className={AGENT_PICKER}
+                data-testid="worktree-agent-select"
+                aria-label="Starting pane"
+                value={agent}
+                onChange={(e) => setAgentPick(e.target.value)}
+              >
+                <option value="">no starting pane</option>
+                {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>start with {choice.label}</option>)}
+              </select>
               <div className="mt-[0.15rem] flex justify-end gap-[0.35rem]">
                 <button
                   type="button"
@@ -513,7 +554,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                   type="button"
                   className="cursor-pointer rounded-ui bg-accent px-[0.6rem] py-1 text-[0.75rem] font-semibold text-panel-bg [font-family:inherit] [border:none] disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="worktree-create-submit"
-                  disabled={!effectiveBranch || creating}
+                  disabled={!canCreate || creating}
                   onClick={() => void submitCreate()}
                 >
                   {creating ? "Creating…" : "Create"}
