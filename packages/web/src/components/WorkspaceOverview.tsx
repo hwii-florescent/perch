@@ -1,4 +1,4 @@
-import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
@@ -25,23 +25,26 @@ import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, se
 const FOCUS = "focus-visible:[outline:1px_solid_var(--overlay-1)] focus-visible:[outline-offset:-1px]";
 const FONT = "[font-family:inherit] [font-size:inherit] [font-weight:inherit]";
 const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
-const SESSION = `${ROW_BTN} cursor-pointer gap-[0.4rem] rounded-none bg-transparent px-[0.65rem] py-[0.3rem] text-[0.7rem] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
+const SESSION = `${ROW_BTN} min-h-8 cursor-pointer gap-[0.4rem] rounded-ui bg-transparent px-[0.65rem] py-1 text-[13px] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
 const SESSION_TITLE = "overflow-hidden text-ellipsis whitespace-nowrap";
 const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
 const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
-const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} cursor-pointer gap-[0.35rem] rounded-none py-[0.4rem] pr-[0.3rem] pl-[1.5rem] text-fg ${FOCUS}`;
-const STRONG = "overflow-hidden text-[0.76rem] font-bold text-ellipsis whitespace-nowrap text-fg";
-const SPAN = "overflow-hidden text-[0.63rem] text-ellipsis whitespace-nowrap text-subtext-0";
+const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-3 text-fg ${FOCUS}`;
+const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg";
+const WORKSPACE_TITLE = "min-w-0 overflow-hidden text-[13px] font-medium text-ellipsis whitespace-nowrap";
+const WORKSPACE_TREE = "workspace-tree relative flex flex-col gap-[2px]";
+const WORKSPACE_TREE_GUIDE = "workspace-tree__guide pointer-events-none absolute top-0 left-[15px] w-px bg-overlay-1";
+const SPAN = "overflow-hidden text-[12px] text-ellipsis whitespace-nowrap text-subtext-0";
 const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
 const SMALL_BTN = "shrink-0 cursor-pointer rounded-ui border px-[0.3rem] py-[0.14rem] text-[0.58rem] leading-[1.1] [font-family:inherit]";
 const JOB_ACTION = `${SMALL_BTN} border-overlay-0 bg-transparent text-subtext-0 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent`;
 // Glyph buttons at the end of a row: shown on hover of the row (`group/ph`, `group/row`),
 // on keyboard focus, always on touch.
 const REVEAL = "opacity-0 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
-const GLYPH = `w-[1.7rem] shrink-0 self-stretch cursor-pointer rounded-none p-0 leading-none [background:none] [border:0] ${FONT} hover:bg-surface-1 hover:text-fg`;
+const GLYPH = `w-[1.7rem] shrink-0 self-stretch cursor-pointer rounded-ui p-0 leading-none [background:none] [border:0] ${FONT} hover:bg-surface-1 hover:text-fg`;
 const PROJECT_ICON = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/ph:opacity-100 aria-[expanded=false]:opacity-100`;
 const SESSION_CLOSE = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/row:opacity-100`;
-const HEADER_PLUS = "h-auto w-[1.7rem] self-stretch rounded-none p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
+const HEADER_PLUS = "h-auto w-[1.7rem] self-stretch rounded-ui p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
 const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:m-0 [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
 
 function basename(path: string): string {
@@ -122,7 +125,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   return (
     <span className="order-last w-full min-w-0 pb-1">
     <span
-      className="mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-0/40 bg-transparent px-1"
+      className="mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-1 bg-transparent px-1"
       data-testid="session-dots"
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
@@ -139,7 +142,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
           onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
         >
-          <StatusDot session={session} className={cn("group-hover:bg-overlay-0 group-focus-visible:[outline:1px_solid_var(--overlay-1)] group-focus-visible:outline-offset-1", session.id === activeId && "bg-overlay-0 [outline:1px_solid_var(--overlay-1)] outline-offset-1")} />
+          <StatusDot session={session} className={cn("h-[18px] w-[18px] group-hover:bg-overlay-0 group-focus-visible:[outline:1px_solid_var(--overlay-1)] group-focus-visible:outline-offset-1", session.id === activeId && "bg-overlay-0 [outline:1px_solid_var(--overlay-1)] outline-offset-1")} />
         </button>
       ))}
     </span>
@@ -172,7 +175,7 @@ function HiddenWorktrees({ workspaces, projectId }: { workspaces: WorkspaceRecor
         {count} hidden worktree{count === 1 ? "" : "s"}
       </button>
       {open && workspaces.map((workspace) => (
-        <div className="flex items-center gap-[0.35rem] py-[0.2rem] pr-[0.45rem] pl-[1.45rem]" key={workspace.id} title={workspace.path}>
+        <div className="flex items-center gap-[0.35rem] py-[3px] pr-3 pl-[1.45rem]" key={workspace.id} title={workspace.path}>
           <span className={BODY}>
             <strong className={STRONG}>{workspace.branch || basename(workspace.path)}</strong>
             <span className={SPAN}>{workspace.path}</span>
@@ -485,7 +488,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           <div className="group/row flex items-stretch" key={session.id}>
             <button
               type="button"
-              className={cn(SESSION, "px-[0.65rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
+              className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
               data-testid={`workspace-session-${session.id}`}
               title={session.cwd}
               onClick={() => {
@@ -519,10 +522,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         const chatsCollapsed = collapsed.includes(chatsProject.id);
         return (
           <div className="pb-1" data-testid="workspace-chats">
-            <div className="group/ph flex items-stretch hover:bg-surface-1">
+            <div className="group/ph flex items-stretch rounded-ui hover:bg-surface-1">
               <button
                 type="button"
-                className="flex flex-1 cursor-pointer items-center gap-[0.35rem] py-[0.5rem] pr-[0.55rem] pl-[0.75rem] text-left text-[0.76rem] leading-[1.3rem] font-bold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
+                className="flex min-h-8 flex-1 cursor-pointer items-center gap-[0.35rem] rounded-ui py-1 pr-[0.55rem] pl-[0.75rem] text-left text-[14px] font-semibold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
                 data-testid="workspace-chats-collapse"
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
@@ -570,7 +573,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   <div className="group/row flex items-stretch" key={session.id}>
                     <button
                       type="button"
-                      className={cn(SESSION, "px-[0.65rem] py-[0.3rem] text-[0.7rem]", session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
+                      className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active font-semibold text-fg" : "text-subtext-0")}
                       data-testid={`workspace-session-${session.id}`}
                       title={session.title || "New chat"}
                       onClick={() => {
@@ -602,7 +605,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   return (
     <section
       className={cn(
-        "workspace-overview flex flex-col overflow-hidden",
+        "workspace-overview flex flex-col overflow-hidden [--radius:4px]",
         // compact = the phone switcher, where the panel owns the bottom edge
         compact ? "min-h-full flex-1" : "min-h-0 flex-1 border-b border-b-overlay-0",
       )}
@@ -716,7 +719,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto py-[0.28rem]" data-testid="project-list">
+      <div className="min-h-0 flex-1 overflow-y-auto px-[3px] py-[3px]" data-testid="project-list">
           {organize === "list" ? listView : <>
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
@@ -734,12 +737,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const onHeaderClick = () => (collapsible || !single ? toggleCollapsed(project.id) : navigateToWorkspace(single.id));
             return (
               <div
-                className="workspace-project pb-[0.2rem]"
+                className="workspace-project pb-1"
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex cursor-pointer flex-wrap items-stretch hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  className={cn("group/ph flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {
                     if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -773,7 +776,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={cn(
                     ROW_BTN,
-                    "flex-1 cursor-pointer gap-[0.45rem] bg-transparent py-[0.5rem] pr-[0.4rem] pl-[0.75rem] text-fg",
+                    "min-h-8 flex-1 cursor-pointer gap-[0.45rem] rounded-ui bg-transparent py-[3px] pr-3 pl-3 text-fg",
                     single && "workspace-entry__button",
                     single && single.id === activeWorkspaceId && "workspace-entry__button--active",
                     FOCUS,
@@ -823,7 +826,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 )}
                 </div>
                 {(!projectCollapsed || (single && !collapsible)) && (allWorkspaces.length > 0 || projectJobs.length > 0) && (
-                  <div className="workspace-project__workspaces pt-0 pb-[0.2rem]">
+                  <div className="workspace-project__workspaces flex flex-col gap-[2px]">
                     {(() => {
                       // Orca's parent nesting: a worktree whose parent is another
                       // linked worktree renders under it; children of the primary
@@ -836,13 +839,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         if (parent?.parentWorkspaceId) children.set(parent.id, [...(children.get(parent.id) ?? []), w]);
                         else roots.push(w);
                       }
-                      const renderWorkspace = (workspace: WorkspaceRecord, depth: number): ReactElement => {
+                      const renderWorkspace = (workspace: WorkspaceRecord, depth: number, isLastSibling: boolean): ReactElement => {
                       const workspaceActive = workspace.id === activeWorkspaceId;
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
+                      const nested = children.get(workspace.id) ?? [];
                       return (
-                        <Fragment key={workspace.id}>
+                        <div className="relative flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
                         <div
-                          className={cn("workspace-entry group/entry relative cursor-pointer hover:bg-surface-1", workspaceActive && "bg-surface-1")}
+                          className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}
                           data-testid={`workspace-entry-${workspace.id}`}
                           onClick={(event) => {
                             if (renamingId === workspace.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -873,7 +877,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               onBlur={() => setRenamingId(null)}
                             />
                           ) : (
-                          <div className={cn("flex flex-wrap items-stretch hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
+                          <div className={cn("flex flex-wrap items-stretch rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}>
                           <button
                             type="button"
                             className={cn(
@@ -885,9 +889,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             onClick={() => navigateToWorkspace(workspace.id)}
                             title={workspace.path}
                           >
+                            <svg className="h-3 w-3 shrink-0 text-overlay-1" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true" focusable="false">
+                              <path d="M3 6h7" />
+                            </svg>
                             <span className={cn(BODY, "flex items-baseline gap-[0.35rem]")}>
                               <strong
-                                className={cn(STRONG, "min-w-0")}
+                                className={cn(WORKSPACE_TITLE, workspaceActive ? "text-fg" : "text-subtext-0")}
                                 title="Double-click to rename"
                                 onDoubleClick={(event) => {
                                   event.stopPropagation();
@@ -1001,12 +1008,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           )}
                           {sessionView === "list" && workspaceSessions.length > 0 && sessionRows(workspaceSessions)}
                         </div>
-                        {(children.get(workspace.id) ?? []).length > 0 && depth < 8 && (
-                          <div className="ml-[0.9rem]" data-testid={`workspace-children-${workspace.id}`}>
-                            {(children.get(workspace.id) ?? []).map((child) => renderWorkspace(child, depth + 1))}
+                        {nested.length > 0 && depth < 8 && (
+                          <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
+                            {nested.map((child, index) => renderWorkspace(child, depth + 1, index === nested.length - 1))}
                           </div>
                         )}
-                        </Fragment>
+                        <span aria-hidden="true" data-guide-end={isLastSibling ? "row" : "next-sibling"} className={cn(WORKSPACE_TREE_GUIDE, isLastSibling ? "h-4" : "bottom-[-18px]")} />
+                        </div>
                       );
                       };
                       if (single) {
@@ -1025,7 +1033,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           </>
                         );
                       }
-                      return roots.map((workspace) => renderWorkspace(workspace, 0));
+                      return (
+                        <div className={WORKSPACE_TREE} data-testid="workspace-tree-root">
+                          {roots.map((workspace, index) => renderWorkspace(workspace, 0, index === roots.length - 1))}
+                        </div>
+                      );
                     })()}
                     <WorktreeJobRows jobs={projectJobs} />
                     {hiddenWorkspaces.length > 0 && (

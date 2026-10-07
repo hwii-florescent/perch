@@ -80,6 +80,21 @@ test.describe("Perch sidebar", () => {
       const ring = tree.locator(".agent-status-dot");
       await expect(ring).toHaveAttribute("data-provider", "terminal");
       await expect(ring.locator("svg")).toBeVisible();
+      // Navigation rows balance the session strip, without shrinking its hit targets.
+      await expect(project.locator('[data-testid^="project-toggle-"] strong')).toHaveCSS("font-size", "14px");
+      await expect(tree.locator("strong")).toHaveCSS("font-size", "13px");
+      await expect(tree).toHaveCSS("border-radius", "4px");
+      await expect(ring).toHaveCSS("width", "18px");
+      await expect(ring).toHaveCSS("height", "18px");
+      const target = tree.getByTestId(/^workspace-session-/);
+      await expect(target).toHaveCSS("width", "32px");
+      await expect(target).toHaveCSS("height", "32px");
+      const nameRow = tree.locator(".workspace-entry__button");
+      expect((await nameRow.boundingBox())!.height).toBeGreaterThanOrEqual(32);
+      const strip = tree.getByTestId("session-dots");
+      await expect(strip).toHaveCSS("border-top-color", "rgb(122, 122, 122)");
+      // Selection still covers the strip's gutter, not just the name row.
+      await expect(tree).toHaveCSS("background-color", "rgb(51, 51, 51)");
       const name = main.locator("strong");
       const branch = main.locator("span").filter({ hasText: /^main$/ }).last();
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);

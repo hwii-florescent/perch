@@ -555,10 +555,28 @@ test.describe("Git worktrees", () => {
     const nested = page.getByTestId(`workspace-children-${parentId}`);
     await expect(nested.locator(".workspace-entry").filter({ hasText: "wt-child" })).toHaveCount(1, { timeout: 20000 });
 
+    // Put the primary checkout first so wt-parent is the last visible root,
+    // even though it owns a nested child. Its guide must end at its own row.
+    const primary = row(FIXTURE_NAME).first();
+    await expect(primary).toBeVisible();
+    const primaryId = ((await primary.getAttribute("data-testid")) ?? "").replace("workspace-entry-", "");
+    await primary.click({ button: "right" });
+    await page.getByTestId(`workspace-pin-${primaryId}`).click();
+    const lastRoot = projectCard.locator('[data-testid="workspace-tree-root"] > [data-testid^="workspace-node-"]').last();
+    await expect(lastRoot).toHaveAttribute("data-testid", `workspace-node-${parentId}`);
+    const guidePosition = await lastRoot.evaluate((node) => {
+      const guide = node.querySelector<HTMLElement>(":scope > .workspace-tree__guide")!;
+      const icon = node.querySelector(".workspace-entry svg")!;
+      const iconBox = icon.getBoundingClientRect();
+      return { end: guide.dataset.guideEnd, delta: guide.getBoundingClientRect().bottom - (iconBox.top + iconBox.height / 2) };
+    });
+    expect(guidePosition.end).toBe("row");
+    expect(Math.abs(guidePosition.delta)).toBeLessThanOrEqual(1);
+
     // Pin moves wt-parent to the top of the project.
     await row("wt-parent").first().locator(".workspace-entry__button").click({ button: "right" });
     await page.getByTestId(`workspace-pin-${parentId}`).click();
-    const first = projectCard.locator(".workspace-project__workspaces > .workspace-entry").first();
+    const first = projectCard.locator('[data-testid="workspace-tree-root"] .workspace-entry').first();
     await expect(first).toContainText("pinned", { timeout: 10000 });
     await expect(first).toContainText("wt-parent");
 

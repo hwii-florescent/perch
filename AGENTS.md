@@ -280,8 +280,10 @@ there, not here.
     are on the project menu. Rows are rounded, filled on hover/active
     (`surface-1`), focus is a 1px neutral ring, never an accent outline.
     Compact badges keep a 32px hit target, but selection/hover/focus hug the
-    20px circular badge, never fill its square hit area. The compact badges
-    sit in a faint bordered bar centered at 85% of the row width. The bar's
+    18px circular badge, never fill its square hit area. Project/workspace
+    names use 14px/13px type and 32px minimum rows, with 4px sidebar control
+    corners. The full workspace highlight stays behind its name and sessions.
+    The compact badges sit in a neutral, clearly bordered bar centered at 85% of the row width. The bar's
     border and blank space never select the workspace; the row's remaining
     background does, including the gutters beside the bar. Icons follow the
     observed foreground provider (`SessionSummary.currentProviderId`), not

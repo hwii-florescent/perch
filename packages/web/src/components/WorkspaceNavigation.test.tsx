@@ -10,6 +10,7 @@ vi.mock("../dockview/DockviewShell", () => ({ openSessionPaneMenu: vi.fn() }));
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key), clear: () => storage.clear() });
 const { usePerchStore } = await import("../store");
+const { jumpToNest, orderedNests, stepNest } = await import("../workspaceNav");
 const { TabBar } = await import("./TabBar");
 const { WorkspaceOverview } = await import("./WorkspaceOverview");
 const { StatusDot } = await import("./StatusDot");
@@ -86,6 +87,11 @@ it("workspace background picks it, while its badge and rename input keep their o
   const button = get("workspace-session-session");
   expect(button.classList.contains("rounded-full")).toBe(true);
   expect(button.classList.contains("bg-overlay-0")).toBe(false);
+  expect(button.classList.contains("h-8")).toBe(true);
+  expect(button.querySelector(".agent-status-dot")!.classList.contains("h-[18px]")).toBe(true);
+  expect(get("session-dots").classList.contains("border-overlay-1")).toBe(true);
+  expect(get("workspace-entry-tree").classList.contains("rounded-ui")).toBe(true);
+  expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(true);
   expect(button.querySelector(".agent-status-dot")!.classList.contains("outline-offset-1")).toBe(true);
   act(() => get("workspace-entry-tree").querySelector("strong")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
   click(get("workspace-rename-tree"));
@@ -93,9 +99,68 @@ it("workspace background picks it, while its badge and rename input keep their o
   expect(get("workspace-entry-main").querySelector("strong")!.parentElement!.className).toContain("items-baseline");
 });
 
+it("keeps tree guides continuous and correctly terminated for visible workspaces", () => {
+  const nested = { ...worktree, id: "nested-tree", path: "/repo-nested", name: "nested", parentWorkspaceId: "tree" };
+  const laterSibling = { ...worktree, id: "later-tree", path: "/repo-later", name: "later" };
+  const lastParent = { ...worktree, id: "last-parent", path: "/repo-last", name: "last", parentWorkspaceId: "main" };
+  const lastNested = { ...worktree, id: "last-nested", path: "/repo-last-nested", name: "last nested", parentWorkspaceId: "last-parent" };
+  // Hidden is deliberately last in the full sibling order; it must not extend the visible rail.
+  const hidden = { ...worktree, id: "hidden-tree", path: "/repo-hidden", name: "hidden", hidden: true };
+  usePerchStore.setState({ workspaces: [workspace, worktree, nested, laterSibling, lastParent, lastNested, hidden] });
+  render(<WorkspaceOverview />);
+
+  const project = get("workspace-project-project");
+  const entries = [...project.querySelectorAll('[data-testid^="workspace-entry-"]')];
+  expect(entries.map((entry) => entry.getAttribute("data-testid"))).toEqual([
+    "workspace-entry-main",
+    "workspace-entry-tree",
+    "workspace-entry-nested-tree",
+    "workspace-entry-later-tree",
+    "workspace-entry-last-parent",
+    "workspace-entry-last-nested",
+  ]);
+  expect(project.querySelector('[data-testid="workspace-node-hidden-tree"]')).toBeNull();
+  expect(project.querySelector('[data-testid="workspace-tree-root"]')?.className).toContain("workspace-tree");
+  expect(project.querySelector('[data-testid="workspace-children-tree"]')?.className).toContain("workspace-tree");
+  expect(project.querySelector('[data-testid="workspace-children-last-parent"]')?.className).toContain("workspace-tree");
+  const guides = [...project.querySelectorAll(".workspace-tree__guide")];
+  expect(guides).toHaveLength(entries.length);
+  expect(guides.every((guide) => ["absolute", "pointer-events-none"].every((name) => guide.classList.contains(name)))).toBe(true);
+  const guideEnd = (id: string) => project.querySelector(`[data-testid="workspace-node-${id}"] > .workspace-tree__guide`)?.getAttribute("data-guide-end");
+  expect(guideEnd("tree")).toBe("next-sibling");
+  expect(guideEnd("last-parent")).toBe("row");
+  expect(guideEnd("last-nested")).toBe("row");
+  expect(entries.map((entry) => entry.querySelector("svg path")?.getAttribute("d"))).toEqual(entries.map(() => "M3 6h7"));
+  expect(entries.every((entry) => entry.querySelector("strong")?.classList.contains("font-medium"))).toBe(true);
+  expect(entries.every((entry) => !entry.querySelector("strong")?.classList.contains("font-bold"))).toBe(true);
+  expect(project.querySelector(".workspace-project__workspaces")?.classList.contains("border-t")).toBe(false);
+  expect(get("project-toggle-project").classList.contains("min-h-8")).toBe(true);
+  expect(get("project-toggle-project").querySelector("strong")?.classList.contains("text-[14px]")).toBe(true);
+  expect(entries.every((entry) => entry.querySelector(".workspace-entry__button")?.classList.contains("min-h-8"))).toBe(true);
+  expect(entries.every((entry) => entry.querySelector("strong")?.classList.contains("text-[13px]"))).toBe(true);
+  expect(orderedNests().map(({ id }) => id)).toEqual(["main", "tree", "nested-tree", "later-tree", "last-parent", "last-nested"]);
+
+  const visibleWorkspaces = [workspace, worktree, nested, laterSibling, lastParent, lastNested];
+  const navigationSessions = visibleWorkspaces.map((item) => ({ ...session, id: `session-${item.id}`, workspaceId: item.id, cwd: item.path }));
+  act(() => usePerchStore.setState({ sessions: navigationSessions, activeWorkspaceId: "last-nested", sessionId: "session-last-nested" }));
+  stepNest(1);
+  expect(focus).toHaveBeenCalledExactlyOnceWith("main");
+  expect(switchSession).toHaveBeenCalledExactlyOnceWith("session-main");
+  act(() => usePerchStore.setState({ sessions: [session], activeWorkspaceId: "tree", sessionId: null }));
+  focus.mockClear(); switchSession.mockClear();
+});
+
 it("a single-checkout project selects from its background, but not from its session bar", () => {
   usePerchStore.setState({ workspaces: [workspace], sessions: [{ ...session, workspaceId: workspace.id, cwd: workspace.path }], activeWorkspaceId: workspace.id });
   render(<WorkspaceOverview />);
+  expect(orderedNests().map(({ id }) => id)).toEqual(["main"]);
+  expect(document.querySelector('[data-testid="workspace-tree-root"]')).toBeNull();
+  jumpToNest(1);
+  expect(focus).toHaveBeenCalledExactlyOnceWith("main");
+  expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
+  focus.mockClear(); switchSession.mockClear();
+  stepNest(1);
+  expect(focus).not.toHaveBeenCalled();
   click(get("workspace-entry-main"));
   expect(focus).toHaveBeenCalledExactlyOnceWith("main");
   focus.mockClear(); switchSession.mockClear();
