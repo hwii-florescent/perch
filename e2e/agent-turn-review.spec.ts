@@ -102,7 +102,7 @@ async function startCore(options: { port: number; home: string; repo: string; lo
   const core = spawn(
     path.join(root, "target/debug/perch-core"),
     ["--port", String(options.port), "--db-path", path.join(options.home, "history.sqlite"), "--hosts-path", path.join(options.home, "hosts.json"), "--providers-path", path.join(options.home, "providers.json"), "--cwd", options.repo],
-    { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info" }, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: root, env: { ...process.env, ANTHROPIC_MODEL: "claude-haiku-4-5", PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info" }, stdio: ["ignore", "pipe", "pipe"] },
   );
   core.stdout?.on("data", (chunk) => options.log.push(String(chunk)));
   core.stderr?.on("data", (chunk) => options.log.push(String(chunk)));
@@ -207,6 +207,9 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
         await expect(rows).toContainText(/❯\s*No, exit|bypass permissions on/, { timeout: 10_000 });
       }
       await expect(rows).toContainText("bypass permissions on", { timeout: 30_000 });
+      // This isolated fixture uses the repo-approved cheap alias. Verify the
+      // CLI banner before sending the first agent prompt.
+      await expect(rows).toContainText(/Haiku/i, { timeout: 30_000 });
     }
 
     // 3. One turn: the agent edits a tracked file and adds an untracked one.
@@ -254,7 +257,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     git("rm -q to_delete.txt", repo);
     await page.getByTestId("git-refresh").click();
     await selector.selectOption("head");
-    const files = page.locator('[data-testid="git-diff-file"]');
+    const files = page.getByTestId("git-diff-file-select").locator("option");
     await expect(files.filter({ hasText: "renamed.txt" })).toContainText(/renamed|added/i, { timeout: 20000 });
     await expect(files.filter({ hasText: "to_delete.txt" })).toContainText(/deleted/i);
     await expect(page.getByTestId("git-status")).toContainText("to_delete.txt");
@@ -299,7 +302,7 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
 
       // Each session's recorded comparison remains reviewable after another
       // session edits the same files. Switching must discard a path filter too.
-      await page.locator('[data-testid="git-diff-file"]').filter({ hasText: "src/main.txt" }).click();
+      await page.getByTestId("git-diff-file-select").selectOption("src/main.txt");
       const sessionSelector = page.getByTestId("git-turn-session");
       const selectTurnFor = async (sessionId: string) => {
         await sessionSelector.selectOption(sessionId);
@@ -465,7 +468,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     // The base is a content commit that carries the untracked file, so Git
     // calls it deleted while the untracked pass adds it back. One entry, and
     // no deletion claimed for a file the reviewer can see on disk.
-    const untracked = page.locator('[data-testid="git-diff-file"]').filter({ hasText: "agent_new.txt" });
+    const untracked = page.getByTestId("git-diff-file-select").locator('option[value="agent_new.txt"]');
     await expect(untracked).toHaveCount(1);
     await expect(untracked).not.toContainText(/deleted/i);
     await page.screenshot({ path: testInfo.outputPath("turn-running.png"), fullPage: true });

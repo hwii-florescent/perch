@@ -239,7 +239,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("git-refresh").click();
       await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE, { timeout: 15000 });
-      const changedFile = page.getByTestId("git-diff-file").filter({ hasText: RELATIVE_FILE });
+      const changedFile = page.getByTestId("git-diff-file-select").locator(`option[value="${RELATIVE_FILE}"]`);
       await expect(changedFile).toHaveCount(1, { timeout: 15000 });
       await expect(changedFile).toContainText("modified");
       await expect(page.getByTestId("git-diff")).toContainText("saved sentinel", { timeout: 15000 });

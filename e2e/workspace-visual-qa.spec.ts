@@ -22,6 +22,7 @@ import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
+const LONG_DIFF_LINE = "long-unbroken-token".repeat(16);
 
 function git(args: string, cwd: string): void {
   execSync(`git ${args}`, {
@@ -134,6 +135,19 @@ async function expectNoPageOverflow(page: Page): Promise<void> {
   expect(overflow.scrollWidth, "page scrolls horizontally").toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
+async function expectWholeDiffScrollable(diff: Locator): Promise<void> {
+  const metrics = await diff.evaluate((element) => ({
+    overflowX: getComputedStyle(element).overflowX,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+    codeOverflowX: Array.from(element.querySelectorAll('[data-testid="git-diff-line"] code'))
+      .map((code) => getComputedStyle(code).overflowX),
+  }));
+  expect(metrics.overflowX, "the diff is not the horizontal scroll surface").toBe("auto");
+  expect(metrics.scrollWidth, "long diff lines do not overflow the file viewport").toBeGreaterThan(metrics.clientWidth);
+  expect(metrics.codeOverflowX.every((value) => value === "visible"), "individual lines scroll horizontally").toBe(true);
+}
+
 test("populated surfaces stay usable at narrow panes, wide desktop and phone width", async ({ page, context }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const shots = path.join(__dirname, "screenshots-visual-qa");
@@ -155,7 +169,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
   git("add -A", repo);
   git('commit -q -m "initial"', repo);
   // Populate what the surfaces render: a modification and an addition.
-  fs.writeFileSync(path.join(repo, RELATIVE_FILE), "modified sentinel with a fairly long line of content\n");
+  fs.writeFileSync(path.join(repo, RELATIVE_FILE), `modified sentinel with a fairly long line of content\n${LONG_DIFF_LINE}\n`);
   fs.writeFileSync(path.join(repo, "untracked-with-a-long-name.txt"), "new file\n");
   fs.writeFileSync(hosts, JSON.stringify({ hosts: [] }));
 
@@ -193,20 +207,45 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     const review = page.getByTestId("workspace-git-review");
     await expect(review).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("git-status")).toContainText("changed path", { timeout: 20000 });
-    await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
+    const diff = page.getByTestId("git-diff");
+    const filePicker = page.getByTestId("git-diff-file-select");
+    await expect(diff).toContainText("modified sentinel", { timeout: 20000 });
+    await expect(filePicker).toBeVisible();
+    await filePicker.selectOption("untracked-with-a-long-name.txt");
+    await expect(diff).toContainText("untracked-with-a-long-name.txt");
+    await expect(diff).not.toContainText("modified sentinel");
+    await filePicker.selectOption("");
+    await expect(diff).toContainText("modified sentinel");
+    await expectWholeDiffScrollable(diff);
     await page.screenshot({ path: path.join(shots, "git-narrow-desktop.png"), fullPage: false });
     expect(await clippedControls(review), "Git review controls clipped at a narrow pane width").toEqual([]);
     await expectNoPageOverflow(page);
 
     // The whole point of the pane is the review action, so exercise it here
     // rather than only measuring boxes.
-    const line = page.locator('[data-testid="git-diff-line"][data-side="new"]').filter({ hasText: "modified sentinel" }).first();
+    const line = page.locator('[data-testid="git-diff-line"][data-side="new"]').filter({ hasText: LONG_DIFF_LINE }).first();
     await expect(line).toBeVisible({ timeout: 15000 });
     await line.getByTestId("git-comment-add").click();
-    await expect(page.getByTestId("git-comment-composer")).toBeVisible({ timeout: 5000 });
+    const composer = page.getByTestId("git-comment-composer");
+    await expect(composer).toBeVisible({ timeout: 5000 });
+    const diffBounds = await diff.boundingBox();
+    const composerBounds = await composer.boundingBox();
+    expect(diffBounds).not.toBeNull();
+    expect(composerBounds).not.toBeNull();
+    if (diffBounds && composerBounds) {
+      expect(composerBounds.x).toBeGreaterThanOrEqual(diffBounds.x - 1);
+      expect(composerBounds.x + composerBounds.width).toBeLessThanOrEqual(diffBounds.x + diffBounds.width + 1);
+    }
     await page.getByTestId("git-comment-body").fill("narrow pane note");
     await page.getByRole("button", { name: "Add comment", exact: true }).click();
-    await expect(page.locator(".workspace-git__comment").filter({ hasText: "narrow pane note" })).toBeVisible({ timeout: 15000 });
+    const thread = page.getByTestId("git-line-comments").last();
+    await expect(thread.locator(".workspace-git__comment").filter({ hasText: "narrow pane note" })).toBeVisible({ timeout: 15000 });
+    const threadBounds = await thread.boundingBox();
+    expect(threadBounds).not.toBeNull();
+    if (diffBounds && threadBounds) {
+      expect(threadBounds.x).toBeGreaterThanOrEqual(diffBounds.x - 1);
+      expect(threadBounds.x + threadBounds.width).toBeLessThanOrEqual(diffBounds.x + diffBounds.width + 1);
+    }
     expect(await clippedControls(review), "Git review controls clipped once a comment thread renders").toEqual([]);
 
     // --- Files, narrow desktop pane --------------------------------------
@@ -227,6 +266,8 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
     await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
+    await expect(page.getByTestId("git-diff-file-select")).toBeVisible();
+    await expectWholeDiffScrollable(page.getByTestId("git-diff"));
     await page.screenshot({ path: path.join(shots, "git-phone.png"), fullPage: false });
     expect(await clippedControls(page.getByTestId("workspace-git-review")), "Git review controls clipped at phone width").toEqual([]);
     await expectNoPageOverflow(page);
@@ -242,6 +283,12 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await page.setViewportSize({ width: 1440, height: 900 });
     await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(review).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("git-status")).toContainText("2 changed paths", { timeout: 20000 });
+    await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
+    await page.getByTestId("workspace-tools").evaluate((element) => element.style.setProperty("--tools-width", "760px"));
+    await expect(review.locator('nav[aria-label="Changed files"]')).toBeVisible();
+    await expect(page.getByTestId("git-diff-file-select")).toBeHidden();
+    await page.screenshot({ path: path.join(shots, "git-wide-pane.png"), fullPage: false });
     expect(await clippedControls(review), "Git review controls clipped at a wide viewport").toEqual([]);
     await expectFocusVisible(review, '[data-testid="git-refresh"]');
     await expectNoPageOverflow(page);

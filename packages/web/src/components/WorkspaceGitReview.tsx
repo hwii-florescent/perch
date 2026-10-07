@@ -23,7 +23,7 @@ const CONNECTION = "rounded-[999px] border px-[0.42rem] py-[0.18rem] text-[0.7re
 const CONNECTION_READY = "text-green border-[color:color-mix(in_srgb,var(--green)_45%,transparent)]";
 const CONNECTION_ERROR = "text-red border-[color:color-mix(in_srgb,var(--red)_45%,transparent)]";
 const CONNECTION_IDLE = "text-subtext-0 border-[color:var(--git-border)]";
-const DIFF_LINE = `relative grid min-w-[44rem] grid-cols-[3.2rem_3.2rem_1.1rem_minmax(30rem,1fr)_auto] items-baseline text-fg [font-family:var(--font-mono)] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
+const DIFF_LINE = `relative grid min-w-max grid-cols-[3.2rem_3.2rem_1.1rem_minmax(0,1fr)_auto] items-baseline text-fg [font-family:var(--font-mono)] text-[0.72rem] leading-[1.45] whitespace-pre [@container(max-width:700px)]:grid-cols-[2.6rem_2.6rem_1rem_minmax(0,1fr)_auto]`;
 // A selected addition/deletion keeps its green/red tint (the legacy rule order); hover tints accent.
 const DIFF_LINE_KIND: Record<string, string> = {
   addition: "bg-[color-mix(in_srgb,var(--green)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
@@ -33,10 +33,10 @@ const DIFF_LINE_CONTEXT = "hover:bg-[color-mix(in_srgb,var(--accent)_12%,transpa
 const DIFF_LINE_SELECTED = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const LINE_MARKER_TONE: Record<string, string> = { addition: "text-green", deletion: "text-red" };
 const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0";
-const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 flex-col items-start gap-[0.08rem] rounded-ui border px-[0.4rem] py-[0.3rem] text-left text-fg [background:none] hover:bg-surface-1";
+const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui border px-[0.4rem] py-[0.3rem] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "border-transparent";
 const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", untracked: "text-yellow", conflict: "text-red" };
+const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", changed: "text-yellow", untracked: "text-yellow", conflict: "text-red" };
 const TB_FIELD = "flex min-w-0 max-w-full flex-col items-start gap-[0.35rem] text-[0.68rem] text-subtext-0";
 const TB_INPUT = "min-w-0 max-w-full rounded-ui border border-[color:var(--git-border)] bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
 const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
@@ -631,7 +631,7 @@ export function WorkspaceGitReview({
     const lineComments = comments.filter((comment) => isCommentOnLine(comment, path, side, line, diff));
     if (lineComments.length === 0) return null;
     return (
-      <div className="col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[7.5rem] [@container(max-width:700px)]:ml-[5.8rem]" data-testid="git-line-comments">
+      <div className="workspace-git__line-comment-thread col-[1/-1] mt-[0.2rem] mr-[0.7rem] mb-[0.35rem] ml-[7.5rem] [@container(max-width:700px)]:ml-[5.8rem]" data-testid="git-line-comments">
         {lineComments.map((comment) => renderCommentCard(comment, true))}
       </div>
     );
@@ -702,8 +702,8 @@ export function WorkspaceGitReview({
                   onClick={() => { setActiveFile(entry.path); setSelection(null); }}
                   title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
                 >
-                  <span className={`text-[0.64rem] ${FILE_STATE_TONE[statusTone(entry)] ?? "text-subtext-0"}`}>{entryState(entry)}</span>
-                  <span className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{entry.path}</span>
+                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{entry.path}</span>
+                  <span className={`shrink-0 text-[0.64rem] ${FILE_STATE_TONE[statusTone(entry)] ?? "text-subtext-0"}`} title={entryState(entry)}>{entryState(entry)}</span>
                 </button>
               </div>
             ))}
@@ -727,11 +727,11 @@ export function WorkspaceGitReview({
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [@container(max-width:700px)]:min-h-[27rem] [@container(max-width:700px)]:flex-auto">
-          <div className="flex flex-wrap items-end justify-between gap-[0.65rem] border-b border-b-[color:var(--git-border)] px-[0.7rem] py-[0.55rem] [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start">
-            <div className={TB_GROUP}>
+          <div className="flex flex-wrap items-end justify-between gap-[0.65rem] border-b border-b-[color:var(--git-border)] px-[0.7rem] py-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch [@container(max-width:700px)]:justify-start [@container(max-width:700px)]:gap-[0.35rem]">
+            <div className={`${TB_GROUP} [@container(max-width:700px)]:grid [@container(max-width:700px)]:w-full [@container(max-width:700px)]:grid-cols-2`}>
               <label className={TB_FIELD}>
                 <span>Compare</span>
-                <select className={TB_INPUT} data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
+                <select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
                   <option value="workingTree">Working tree</option>
                   <option value="staged">Staged</option>
                   <option value="head">HEAD</option>
@@ -742,7 +742,7 @@ export function WorkspaceGitReview({
               </label>
               <label className={TB_FIELD}>
                 <span>Turn session</span>
-                <select className={TB_INPUT} data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
+                <select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
                   chooseTarget("workingTree");
                   actions.selectAgentSession(event.target.value || undefined);
                 }}>
@@ -761,7 +761,7 @@ export function WorkspaceGitReview({
                 </>
               )}
             </div>
-            <div className={`${TB_GROUP} justify-end`}>
+            <div className={`${TB_GROUP} justify-end [@container(max-width:700px)]:w-full [@container(max-width:700px)]:flex-row`}>
               <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
               <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
               <label className={TB_FIELD}><span>Context</span><select className={`${TB_INPUT} w-[5rem]`} value={contextLines} onChange={(event) => setContextLines(Number(event.target.value))}><option value={0}>0 lines</option><option value={3}>3 lines</option><option value={8}>8 lines</option></select></label>
@@ -791,8 +791,8 @@ export function WorkspaceGitReview({
             </p>
           )}
 
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:min-h-[20rem]">
-            <nav className="flex w-auto min-w-[7rem] flex-[0_1_clamp(7rem,28%,13rem)] flex-col gap-[0.15rem] overflow-y-auto border-r border-r-[color:var(--git-border)] p-[0.35rem] [@container(max-width:700px)]:w-[clamp(7rem,28%,10rem)] [@container(max-width:700px)]:flex-[0_1_clamp(7rem,28%,10rem)]" aria-label="Changed files">
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden [@container(max-width:700px)]:min-h-[20rem] [@container(max-width:700px)]:flex-col">
+            <nav className="flex w-auto min-w-[7rem] flex-[0_1_clamp(7rem,28%,13rem)] flex-col gap-[0.15rem] overflow-y-auto border-r border-r-[color:var(--git-border)] p-[0.35rem] [@container(max-width:700px)]:w-[clamp(7rem,28%,10rem)] [@container(max-width:700px)]:flex-[0_1_clamp(7rem,28%,10rem)] [@container(max-width:700px)]:hidden" aria-label="Changed files">
               <div className="flex items-center justify-between gap-[0.6rem] pt-1 pr-[0.3rem] pb-[0.4rem] pl-[0.3rem]"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
               {diffFiles.map((file) => {
                 const path = filePath(file);
@@ -801,15 +801,32 @@ export function WorkspaceGitReview({
               {diffState !== "loading" && diffFiles.length === 0 && <div className={STATUS_NOTE}>No files in this diff.</div>}
             </nav>
 
-            <div className={`min-h-0 min-w-0 flex-1 overflow-auto [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
+            <label className="hidden shrink-0 items-center gap-2 border-b border-b-[color:var(--git-border)] px-[0.65rem] py-[0.4rem] text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:flex">
+              <span className="shrink-0">File</span>
+              <select
+                className={`${TB_INPUT} min-w-0 flex-1`}
+                aria-label="Diff file"
+                data-testid="git-diff-file-select"
+                value={selectedFile ?? ""}
+                onChange={(event) => { setActiveFile(event.target.value || undefined); setSelection(null); }}
+              >
+                <option value="">All files · {diffFiles.length}</option>
+                {diffFiles.map((file) => {
+                  const path = filePath(file);
+                  return <option value={path} key={path}>{file.status} · {path}</option>;
+                })}
+              </select>
+            </label>
+
+            <div className={`workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
               {diffState === "loading" || diffFiles.length === 0 ? <EmptyDiffState state={diffState} error={diffError} /> : (
                 <>
                   {diff?.truncated && <div className={BANNER_WARNING} role="status">This diff is truncated. Narrow the path or comparison before commenting.</div>}
                   {displayedFiles.map((file) => {
                     const displayPath = filePath(file);
                     return (
-                      <article className={`min-w-[min-content] [@container(max-width:700px)]:min-w-0`} key={displayPath}>
-                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
+                      <article className="min-w-max" key={displayPath}>
+                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`} title={displayPath}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
                         {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
                           <section className="border-b border-b-[color:var(--git-border)]" key={`${displayPath}:${hunkIndex}`}>
                             <div className={`bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-1 text-accent [font-family:var(--font-mono)] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
@@ -835,7 +852,7 @@ export function WorkspaceGitReview({
                                   <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`Old line ${line.oldLine ?? "none"}`}>{line.oldLine ?? ""}</span>
                                   <span className="min-h-[1.45em] pr-[0.45rem] text-right text-overlay-0 select-none" aria-label={`New line ${line.newLine ?? "none"}`}>{line.newLine ?? ""}</span>
                                   <span className={`text-center select-none ${LINE_MARKER_TONE[line.kind] ?? "text-subtext-0"}`} aria-hidden="true">{statusSymbol(line.kind)}</span>
-                                  <code className={`min-w-0 overflow-visible text-inherit [font:inherit] [@container(max-width:700px)]:overflow-x-auto`}>{line.content || " "}</code>
+                                  <code className="min-w-0 overflow-visible text-inherit [font:inherit]">{line.content || " "}</code>
                                   {number !== undefined && <button type="button" className={LINE_COMMENT_BUTTON} data-testid="git-comment-add" aria-label={`Comment on ${path} line ${number}`} onClick={(event) => { event.stopPropagation(); selectLine(path, line, false); startComment(); }}>＋</button>}
                                   {number !== undefined && renderCommentThread(path, side, number)}
                                 </div>
@@ -847,7 +864,7 @@ export function WorkspaceGitReview({
                     );
                   })}
                   {selection && (
-                    <div className="m-[0.7rem] rounded-ui border border-accent p-[0.65rem]" data-testid="git-comment-composer">
+                    <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui border border-accent p-[0.65rem]" data-testid="git-comment-composer">
                       <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
                       <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
                       <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}><button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
@@ -858,7 +875,7 @@ export function WorkspaceGitReview({
             </div>
           </div>
 
-          <section className="shrink-0 max-h-[17rem] overflow-y-auto border-t border-t-[color:var(--git-border)]" data-testid="git-review-panel">
+          <section className="shrink-0 max-h-[17rem] overflow-y-auto border-t border-t-[color:var(--git-border)] [@container(max-width:700px)]:max-h-[10rem]" data-testid="git-review-panel">
             <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.55rem]"><div className="flex min-w-0 flex-col gap-[0.1rem]"><span className={EYEBROW}>Inline review</span><strong>{unresolvedCount ? `${unresolvedCount} unresolved note${unresolvedCount === 1 ? "" : "s"}` : "No unresolved notes"}</strong></div><button type="button" className={BTN_DEFAULT} disabled={!unresolvedCount || batchBusy} onClick={requestBatchPreview} data-testid="git-review-preview">{batchBusy ? "Preparing…" : "Preview packet"}</button></div>
             {comments.length > 0 && <div className={`${SUMMARY} px-[0.7rem] pb-[0.45rem]`}>Comments stay attached to their path and core-derived anchor. Stale or orphaned anchors require an explicit correction before sending.</div>}
             {unplacedComments.length > 0 && (

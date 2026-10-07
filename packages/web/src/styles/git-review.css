@@ -41,3 +41,25 @@
   outline: none;
   border-color: var(--accent);
 }
+
+.workspace-git__diff {
+  container-type: inline-size;
+}
+
+.workspace-git__line-comment-thread {
+  position: sticky;
+  left: 0;
+  max-width: max(0px, min(42rem, calc(100cqi - 8.2rem)));
+}
+
+.workspace-git__comment-composer {
+  position: sticky;
+  left: 0;
+  max-width: max(0px, calc(100cqi - 1.4rem));
+}
+
+@container (max-width: 700px) {
+  .workspace-git__line-comment-thread {
+    max-width: max(0px, calc(100cqi - 6.5rem));
+  }
+}

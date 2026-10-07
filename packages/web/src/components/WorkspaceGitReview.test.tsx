@@ -166,6 +166,36 @@ afterEach(async () => {
 });
 
 describe("WorkspaceGitReview interaction truthfulness", () => {
+  it("selects one file while keeping horizontal scrolling at the diff surface", async () => {
+    const actionSet = actions();
+    const twoFileDiff: GitDiffSnapshot = {
+      ...diff,
+      files: [
+        ...diff.files,
+        { ...diff.files[0]!, oldPath: "src/other.ts", newPath: "src/other.ts" },
+      ],
+    };
+    await render({ ...props(actionSet), diff: twoFileDiff });
+
+    const picker = document.querySelector('[data-testid="git-diff-file-select"]') as HTMLSelectElement | null;
+    expect(picker).not.toBeNull();
+    if (!picker) throw new Error("missing narrow diff file picker");
+    await act(async () => {
+      picker.value = "src/other.ts";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const editor = document.querySelector('[data-testid="git-diff"]');
+    expect(editor?.className).toContain("overflow-auto");
+    expect(editor?.querySelectorAll("article")).toHaveLength(1);
+    expect(editor?.textContent).toContain("src/other.ts");
+    expect(editor?.textContent).not.toContain("src/main.ts");
+    const line = editor?.querySelector<HTMLElement>('[data-testid="git-diff-line"]');
+    expect(line?.className).toContain("min-w-max");
+    expect(line?.querySelector("code")?.className).toContain("overflow-visible");
+    expect(line?.querySelector("code")?.className).not.toContain("overflow-x-auto");
+  });
+
   it("focuses the destructive confirmation and closes it with Escape", async () => {
     const actionSet = actions();
     await render(props(actionSet));
