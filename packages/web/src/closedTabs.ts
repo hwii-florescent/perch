@@ -1,5 +1,5 @@
 /**
- * closedTabs.ts — the list behind Cmd+Shift+T. Per viewer (a window's own
+ * closedTabs.ts — the list behind Cmd+Shift+T: sessions and files alike, as the strip treats them. Per viewer (a window's own
  * localStorage key), newest first, 20 entries for 7 days. Holds descriptors
  * only: no terminal contents, prompt text or command history. Reopening starts
  * a fresh session of the same harness in the same nest; it never re-runs a
@@ -14,22 +14,26 @@ const KEY = "perch.closedTabs";
 const MAX = 20;
 const TTL_MS = 7 * 24 * 3_600_000;
 
-export interface ClosedTab {
-  hostId: string;
-  cwd: string;
-  workspaceId?: string;
-  projectId?: string;
-  /** The harness to start again (`cliProviderId`); absent starts the default. */
-  providerId?: string;
-  title: string;
-  closedAt: number;
-}
+/** A closed session (a terminal or agent) or a closed file or review, newest first in one list. */
+export type ClosedTab = { closedAt: number } & (
+  | {
+      kind?: "session";
+      hostId: string;
+      cwd: string;
+      workspaceId?: string;
+      projectId?: string;
+      /** The harness to start again (`cliProviderId`); absent starts the default. */
+      providerId?: string;
+      title: string;
+    }
+  | { kind: "file"; workspaceId: string; path: string; review?: boolean }
+);
 
 function read(): ClosedTab[] {
   try {
     const list: unknown = JSON.parse(localStorage.getItem(viewerKey(KEY)) ?? "[]");
     const now = Date.now();
-    return Array.isArray(list) ? list.filter((tab): tab is ClosedTab => typeof tab?.cwd === "string" && now - tab.closedAt < TTL_MS) : [];
+    return Array.isArray(list) ? list.filter((tab): tab is ClosedTab => typeof tab?.closedAt === "number" && now - tab.closedAt < TTL_MS && (tab.kind === "file" ? typeof tab.path === "string" : typeof tab.cwd === "string")) : [];
   } catch { return []; }
 }
 
@@ -51,6 +55,11 @@ export function recordClosedTab(session: SessionSummary): void {
   }, ...read()]);
 }
 
+/** Remember a file or review tab that is being closed. */
+export function recordClosedFile(tab: { workspaceId: string; path: string; kind?: "review" }): void {
+  write([{ kind: "file", workspaceId: tab.workspaceId, path: tab.path, ...(tab.kind ? { review: true } : {}), closedAt: Date.now() }, ...read()]);
+}
+
 /** Remove and return the newest entry `usable` accepts; entries it rejects are dropped too. */
 export function takeClosedTab(usable: (tab: ClosedTab) => boolean): ClosedTab | undefined {
   const list = read();
@@ -61,5 +70,5 @@ export function takeClosedTab(usable: (tab: ClosedTab) => boolean): ClosedTab | 
 
 /** Remove Birdhouse: its closed tabs go with it. */
 export function forgetClosedTabs(projectId: string): void {
-  write(read().filter((tab) => tab.projectId !== projectId));
+  write(read().filter((tab) => tab.kind === "file" || tab.projectId !== projectId));
 }

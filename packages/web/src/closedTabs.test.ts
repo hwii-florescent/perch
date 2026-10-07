@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSummary } from "@perch/shared";
 import { forgetClosedTabs, recordClosedTab, takeClosedTab } from "./closedTabs";
-import { isAgentSession, requestCloseSession, setWarnOnCloseAgent, useCloseGuard, warnOnCloseAgent } from "./closeGuard";
+import { isAgentSession, requestCloseSession, useCloseGuard } from "./closeGuard";
 import { usePerchStore } from "./store";
 
 const session = (init: Partial<SessionSummary>): SessionSummary => ({
@@ -59,8 +59,7 @@ describe("close warning", () => {
     expect(useCloseGuard.getState().pending?.id).toBe("a");
 
     useCloseGuard.setState({ pending: null });
-    setWarnOnCloseAgent(false);
-    expect(warnOnCloseAgent()).toBe(false);
+    usePerchStore.setState({ settings: { warnCloseAgent: false } as never });
     requestCloseSession("a");
     expect(deleted).toEqual(["t", "a"]);
   });

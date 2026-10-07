@@ -3,7 +3,8 @@
  * `@xterm/addon-search`, shared between `views/Terminal.tsx` and
  * `views/AgentCliTerminal.tsx`.
  *
- * Cmd+F opens a find-bar overlay while a terminal pane is focused.
+ * Cmd+F opens a find-bar overlay while a terminal pane is focused (all of the
+ * terminal shortcuts, Settings > Keyboard, are the `terminal.*` ids of keybinds.ts).
  * Implemented via `term.attachCustomKeyEventHandler` rather than a DOM-level
  * keydown listener: xterm registers that handler ahead of its own key
  * evaluation and calls it once per keydown on *that terminal's* hidden
@@ -18,7 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { SearchAddon } from "@xterm/addon-search";
-import { isShortcut, terminalKeyHandler } from "./keybinds";
+import { shortcutFor, terminalKeyHandler } from "./keybinds";
 
 export interface TerminalSearchController {
   open: boolean;
@@ -53,20 +54,13 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type === "keydown" && e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
+      const direct = e.type === "keydown" ? shortcutFor(e, true) : undefined;
+      if (direct?.scope === "terminal") {
         e.preventDefault();
-        setOpen(true);
-        return false;
-      }
-      if (e.type === "keydown" && isShortcut(e, "mod+k")) {
-        e.preventDefault();
-        term.clear();
-        return false;
-      }
-      if (e.type === "keydown" && (isShortcut(e, "mod+up") || isShortcut(e, "mod+down"))) {
-        e.preventDefault();
-        if (isShortcut(e, "mod+up")) term.scrollToTop();
-        else term.scrollToBottom();
+        if (direct.id === "terminal.find") setOpen(true);
+        else if (direct.id === "terminal.clear") term.clear();
+        else if (direct.id === "terminal.scrollTop") term.scrollToTop();
+        else if (direct.id === "terminal.scrollBottom") term.scrollToBottom();
         return false;
       }
       if (e.type === "keydown" && e.key === "Escape" && openRef.current) {

@@ -69,6 +69,13 @@ pub struct Settings {
     /// (e.g. `"terminal"`). Empty (the default) shows the start picker.
     #[serde(default)]
     pub empty_workspace_agent: String,
+    /// Shortcut overrides: action id → key combo (`"cmd+shift+t"`), `""` =
+    /// no shortcut. An absent id keeps the client's default.
+    #[serde(default)]
+    pub keybindings: std::collections::BTreeMap<String, String>,
+    /// Ask before closing a tab that runs an agent. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub warn_close_agent: bool,
 }
 
 impl Default for Settings {
@@ -83,8 +90,14 @@ impl Default for Settings {
             terminal_scrollback: default_terminal_scrollback(),
             terminal_login_shell: false,
             empty_workspace_agent: String::new(),
+            keybindings: Default::default(),
+            warn_close_agent: true,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_theme() -> String {
@@ -135,6 +148,8 @@ pub struct SettingsPatch {
     pub terminal_scrollback: Option<u32>,
     pub terminal_login_shell: Option<bool>,
     pub empty_workspace_agent: Option<String>,
+    pub keybindings: Option<std::collections::BTreeMap<String, String>>,
+    pub warn_close_agent: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -233,6 +248,12 @@ impl SettingsStore {
         if let Some(agent) = patch.empty_workspace_agent {
             guard.empty_workspace_agent = agent;
         }
+        if let Some(keybindings) = patch.keybindings {
+            guard.keybindings = keybindings;
+        }
+        if let Some(warn) = patch.warn_close_agent {
+            guard.warn_close_agent = warn;
+        }
         let snapshot = guard.clone();
         drop(guard);
         self.write_to_disk(&snapshot)?;
@@ -261,4 +282,41 @@ impl SettingsStore {
 pub fn default_settings_path() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join(".perch").join("settings.json"))
+}
+
+#[cfg(test)]
+mod keybinding_tests {
+    use super::*;
+
+    #[test]
+    fn keybindings_and_close_warning_round_trip_and_default() {
+        let dir = std::env::temp_dir().join(format!("perch-settings-kb-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        // An old file without the new fields still loads, with the defaults.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"theme":"perch"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert!(store.get().keybindings.is_empty());
+        assert!(store.get().warn_close_agent);
+
+        let patch: SettingsPatch = serde_json::from_str(
+            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false}"#,
+        )
+        .unwrap();
+        store.update(patch).unwrap();
+        let reloaded = SettingsStore::load(&path).get();
+        assert_eq!(
+            reloaded.keybindings.get("tabs.new").map(String::as_str),
+            Some("cmd+t")
+        );
+        assert_eq!(
+            reloaded
+                .keybindings
+                .get("panes.splitRight")
+                .map(String::as_str),
+            Some("")
+        );
+        assert!(!reloaded.warn_close_agent);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

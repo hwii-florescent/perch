@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
-import { KEYBINDS, SHORTCUTS, formatCombo, isShortcut, shortcutFor, terminalKeyHandler, useLeaderKey } from "./keybinds";
+import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey } from "./keybinds";
+import { IS_MAC, comboMatches, formatCombo, normalizeCombo, parseCombo, recordCombo } from "./keyCombo";
+import { usePerchStore } from "./store";
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {
   let navigations = 0;
@@ -87,41 +89,95 @@ describe("kitty keyboard protocol", () => {
 });
 
 describe("direct shortcuts", () => {
+  const press = (init: Partial<KeyboardEvent>) => key({ type: "keydown", ...init });
+
   it("maps mod to Cmd on a Mac and Ctrl+Shift elsewhere, matching modifiers exactly", () => {
-    expect(isShortcut(key({ key: "t", code: "KeyT", metaKey: true }), "mod+t", true)).toBe(true);
-    expect(isShortcut(key({ key: "t", code: "KeyT", metaKey: true, shiftKey: true }), "mod+t", true)).toBe(false);
-    expect(isShortcut(key({ key: "T", code: "KeyT", ctrlKey: true, shiftKey: true }), "mod+t", false)).toBe(true);
-    expect(isShortcut(key({ key: "t", code: "KeyT", ctrlKey: true }), "mod+t", false)).toBe(false); // plain Ctrl+T is the shell's
-    expect(isShortcut(key({ key: "}", code: "BracketRight", metaKey: true, shiftKey: true }), "cmd+shift+]", true)).toBe(true);
+    const t = (e: KeyboardEvent, spec: string, mac: boolean) => comboMatches(e, parseCombo(spec, mac));
+    expect(t(press({ key: "t", code: "KeyT", metaKey: true }), "mod+t", true)).toBe(true);
+    expect(t(press({ key: "t", code: "KeyT", metaKey: true, shiftKey: true }), "mod+t", true)).toBe(false);
+    expect(t(press({ key: "T", code: "KeyT", ctrlKey: true, shiftKey: true }), "mod+t", false)).toBe(true);
+    expect(t(press({ key: "t", code: "KeyT", ctrlKey: true }), "mod+t", false)).toBe(false); // plain Ctrl+T is the shell's
+    expect(t(press({ key: "}", code: "BracketRight", metaKey: true, shiftKey: true }), "cmd+shift+]", true)).toBe(true);
   });
 
   it("formats combos for each platform", () => {
     expect(formatCombo("cmd+shift+]", true)).toBe("⇧⌘]");
     expect(formatCombo("ctrl+shift+up", true)).toBe("⌃⇧↑");
     expect(formatCombo("mod+t", false)).toBe("Ctrl+Shift+T");
+    expect(formatCombo("alt+f5", false)).toBe("Alt+F5");
   });
 
-  it("never binds one key twice on a platform", () => {
+  it("never binds one key twice on a platform, and every default parses", () => {
+    expect(new Set(SHORTCUTS.map((s) => s.id)).size).toBe(SHORTCUTS.length);
     for (const mac of [true, false]) {
-      const seen = new Map<string, string>();
-      for (const s of SHORTCUTS) {
-        const spec = s.keys[mac ? 0 : 1];
-        if (spec === null) continue;
-        const c = formatCombo(spec, mac);
-        expect(seen.get(c), `${c} (${mac ? "mac" : "other"}) is bound to both "${seen.get(c)}" and "${s.description}"`).toBeUndefined();
-        seen.set(c, s.description);
+      for (const inTerm of [false, true]) { // Cmd+K is the Navigator outside a terminal and "clear" inside one
+        const seen = new Map<string, string>();
+        for (const s of SHORTCUTS.filter((x) => (inTerm ? x.scope !== "outsideTerminal" : x.scope !== "terminal"))) {
+          const spec = s.keys[mac ? 0 : 1];
+          if (spec === null) continue;
+          const c = normalizeCombo(spec, mac);
+          expect(seen.get(c), `${c} (${mac ? "mac" : "other"}) is bound to both "${seen.get(c)}" and "${s.description}"`).toBeUndefined();
+          seen.set(c, s.description);
+        }
       }
     }
   });
 
-  it("finds a shortcut by event and leaves plain Ctrl letters to the PTY", () => {
-    const e = (init: Partial<KeyboardEvent>) => key({ ...init });
-    expect(shortcutFor(e({ code: "ArrowDown", ctrlKey: true, shiftKey: true }), true)?.description).toBe("Next nest");
-    expect(terminalKeyHandler(e({ code: "KeyC", key: "c", ctrlKey: true }))).toBe(true); // Ctrl+C reaches the shell
+  it("follows the user's overrides: a new key, no key, and a conflicting key", () => {
+    const withOverrides = (keybindings: Record<string, string>) => usePerchStore.setState({ settings: { keybindings } as never });
+    const newTab = SHORTCUTS.find((s) => s.id === "tabs.new")!;
+    const cmdT = press({ key: "t", code: "KeyT", metaKey: true });
+    const cmdJ = press({ key: "j", code: "KeyJ", metaKey: true });
+    withOverrides({});
+    expect(shortcutFor(cmdT, false, true)?.id).toBe("tabs.new");
+    withOverrides({ "tabs.new": "cmd+j" });
+    expect(shortcutFor(cmdT, false, true)).toBeUndefined();
+    expect(shortcutFor(cmdJ, false, true)?.id).toBe("tabs.new");
+    expect(shortcutsBoundTo("cmd+j", "tabs.close", true).map((x) => x.id)).toEqual(["tabs.new"]);
+    withOverrides({ "tabs.new": "" });
+    expect(effectiveSpec(newTab, true)).toBeNull();
+    expect(shortcutFor(cmdT, false, true)).toBeUndefined();
+    withOverrides({ "tabs.new": "not+a+key" }); // a hand-edited file must not break the keymap
+    expect(effectiveSpec(newTab, true)).toBeNull();
+    withOverrides({});
   });
 
-  it("lists every non-hidden shortcut in the help", () => {
-    expect(KEYBINDS.some((k) => k.description === "New nest (worktree)")).toBe(true);
-    expect(KEYBINDS.some((k) => k.group === "leader")).toBe(true);
+  it("leaves plain Ctrl letters to the PTY and lets Ctrl+K through outside terminals only", () => {
+    usePerchStore.setState({ settings: { keybindings: {} } as never });
+    expect(terminalKeyHandler(press({ code: "KeyC", key: "c", ctrlKey: true }))).toBe(true);
+    const ctrlK = press({ code: "KeyK", key: "k", ctrlKey: true });
+    expect(shortcutFor(ctrlK, false, false)?.id).toBe("global.navigatorAlt");
+    expect(shortcutFor(ctrlK, true, false)).toBeUndefined();
+    if (!IS_MAC) expect(terminalKeyHandler(ctrlK)).toBe(true); // Ctrl+K is the shell's inside a terminal
+    expect(shortcutFor(press({ code: "KeyK", key: "k", metaKey: true }), true, true)?.id).toBe("terminal.clear");
+    expect(shortcutFor(press({ code: "KeyK", key: "k", metaKey: true }), false, true)?.id).toBe("global.navigatorAlt");
+  });
+
+  it("lists shortcuts in the help and collapses an untouched range", () => {
+    usePerchStore.setState({ settings: { keybindings: {} } as never });
+    const entries = keybindEntries(true);
+    expect(entries.filter((k) => k.description.startsWith("Jump to tab")).map((k) => k.keys)).toEqual(["⌘1…8"]);
+    expect(entries.some((k) => k.description === "New nest (worktree)")).toBe(true);
+    expect(entries.some((k) => k.group === "leader")).toBe(true);
+    usePerchStore.setState({ settings: { keybindings: { "tabs.jump2": "cmd+alt+2" } } as never });
+    expect(keybindEntries(true).filter((k) => /^Jump to tab \d$/.test(k.description))).toHaveLength(8);
+    usePerchStore.setState({ settings: { keybindings: { "tabs.new": "" } } as never });
+    expect(keybindEntries(true).some((k) => k.description.startsWith("New tab"))).toBe(false);
+  });
+});
+
+describe("recordCombo", () => {
+  it("turns a keydown into a spec, waits on bare modifiers and refuses plain keys", () => {
+    const rec = (init: Partial<KeyboardEvent>) => recordCombo(key(init));
+    expect(rec({ key: "Meta", code: "MetaLeft", metaKey: true })).toBeNull();
+    expect(rec({ key: "t", code: "KeyT", metaKey: true, shiftKey: true })).toEqual({ spec: "cmd+shift+t" });
+    expect(rec({ key: "ArrowUp", code: "ArrowUp", ctrlKey: true, shiftKey: true })).toEqual({ spec: "ctrl+shift+up" });
+    expect(rec({ key: "}", code: "BracketRight", metaKey: true, shiftKey: true })).toEqual({ spec: "cmd+shift+]" });
+    expect(rec({ key: "¬", code: "KeyL", altKey: true })).toEqual({ spec: "alt+l" }); // by position, not the typed character
+    expect(rec({ key: "F5", code: "F5" })).toEqual({ spec: "f5" });
+    expect(rec({ key: "t", code: "KeyT" })).toHaveProperty("error");
+    expect(rec({ key: "t", code: "KeyT", shiftKey: true })).toHaveProperty("error");
+    expect(rec({ key: "Escape", code: "Escape", metaKey: true })).toHaveProperty("error");
+    expect(parseCombo("cmd+shift+]", true).code).toBe("BracketRight");
   });
 });

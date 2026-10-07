@@ -149,6 +149,11 @@ export interface SettingsData {
    * `"terminal"`). Empty (the default, and absent from older peers) shows
    * the start picker instead. */
   emptyWorkspaceAgent?: string;
+  /** Shortcut overrides: action id → key combo (`"cmd+shift+t"`), `""` = no
+   * shortcut; an absent id keeps the default. Absent from older peers. */
+  keybindings?: Record<string, string>;
+  /** Ask before closing a tab that runs an agent. Absent = true. */
+  warnCloseAgent?: boolean;
 }
 
 /**
@@ -170,6 +175,9 @@ export interface SettingsPatch {
   terminalScrollback?: number;
   terminalLoginShell?: boolean;
   emptyWorkspaceAgent?: string;
+  /** Replaces the whole override map. */
+  keybindings?: Record<string, string>;
+  warnCloseAgent?: boolean;
 }
 
 export type HostMode = "perch" | "direct";

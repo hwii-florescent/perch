@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { effectiveWorkspace, usePerchStore } from "./store";
 import { readViewerStored, viewerKey } from "./viewer";
+import { recordClosedFile } from "./closedTabs";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
  * a file, or (`kind: "review"`) the workspace's change review. */
@@ -38,7 +39,7 @@ function loadTabs(): FileTab[] {
   }
 }
 
-export const useFileTabs = create<FileTabsState>((set) => ({
+export const useFileTabs = create<FileTabsState>((set, get) => ({
   tabs: loadTabs(),
   active: null,
   open: (workspaceId, path, kind) => set((state) => {
@@ -47,10 +48,14 @@ export const useFileTabs = create<FileTabsState>((set) => ({
     const known = state.tabs.some((tab) => fileTabKey(tab) === key);
     return { tabs: known ? state.tabs : [...state.tabs, next], active: key };
   }),
-  close: (key) => set((state) => ({
-    tabs: state.tabs.filter((tab) => fileTabKey(tab) !== key),
-    active: state.active === key ? null : state.active,
-  })),
+  close: (key) => {
+    const closing = get().tabs.find((tab) => fileTabKey(tab) === key);
+    if (closing) recordClosedFile(closing);
+    set((state) => ({
+      tabs: state.tabs.filter((tab) => fileTabKey(tab) !== key),
+      active: state.active === key ? null : state.active,
+    }));
+  },
   showSession: () => set({ active: null }),
 }));
 

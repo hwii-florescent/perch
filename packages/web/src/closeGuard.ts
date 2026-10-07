@@ -1,21 +1,16 @@
 /**
  * closeGuard.ts — the warning before closing an agent session. Closing a tab
  * ends its agent, so a click on ×, Cmd+W or a sidebar close asks first;
- * terminals close without asking. "Don't show this again" is a per-device
- * preference, switched back on in Settings.
+ * terminals close without asking. "Don't show this again" turns the
+ * `warnCloseAgent` setting off; Settings turns it back on.
  */
 import { create } from "zustand";
 import type { SessionSummary } from "@perch/shared";
 import { usePerchStore } from "./store";
 
-const KEY = "perch.warnCloseAgent";
-
-export function warnOnCloseAgent(): boolean {
-  try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
-}
-
-export function setWarnOnCloseAgent(on: boolean): void {
-  try { if (on) localStorage.removeItem(KEY); else localStorage.setItem(KEY, "0"); } catch { /* best effort */ }
+/** Settings > "Warn before closing an agent" (the server's `warnCloseAgent`; on until the settings arrive). */
+function warnOnCloseAgent(): boolean {
+  return usePerchStore.getState().settings?.warnCloseAgent !== false;
 }
 
 /** A session whose harness is an agent CLI (not a plain terminal). */

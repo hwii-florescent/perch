@@ -21,7 +21,7 @@ import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
-import { setWarnOnCloseAgent, warnOnCloseAgent } from "../closeGuard";
+import { KeybindingsSection } from "./KeybindingsSection";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
@@ -97,8 +97,6 @@ function ChatModeSection() {
     setChatMode(settings.chatMode ?? "cli");
   }, [settings?.chatMode]);
 
-  const [warnClose, setWarnClose] = useState(warnOnCloseAgent);
-
   const handleChange = (mode: "hosted" | "cli") => {
     setChatMode(mode);
     updateSettings({ chatMode: mode });
@@ -110,7 +108,7 @@ function ChatModeSection() {
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </SettingRow>
       <SettingRow title="Warn before closing an agent" description="Ask first when closing a tab that runs an agent. Terminals close without asking.">
-        <Switch label="Warn before closing an agent" testId="settings-warn-close-agent" checked={warnClose} onChange={(on) => { setWarnClose(on); setWarnOnCloseAgent(on); }} />
+        <Switch label="Warn before closing an agent" testId="settings-warn-close-agent" checked={settings?.warnCloseAgent !== false} onChange={(on) => updateSettings({ warnCloseAgent: on })} />
       </SettingRow>
       <SettingRow title="Empty workspace opens" description="What clicking a workspace with no open tabs starts.">
         <select
@@ -710,12 +708,13 @@ function DevicesSection() {
   );
 }
 
-type SettingsTab = "general" | "appearance" | "agents" | "terminal" | "notifications" | "hosts" | "devices";
+type SettingsTab = "general" | "appearance" | "agents" | "keyboard" | "terminal" | "notifications" | "hosts" | "devices";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
   { id: "agents", label: "Agents" },
+  { id: "keyboard", label: "Keyboard" },
   { id: "terminal", label: "Terminal" },
   { id: "notifications", label: "Notifications" },
   { id: "hosts", label: "SSH hosts" },
@@ -727,6 +726,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
     case "general": return <><ChatModeSection /><InterfaceSection /><DefaultCwdSection /></>;
     case "appearance": return <ThemeSection />;
     case "agents": return <><AgentCatalog /><CustomModelsSection /></>;
+    case "keyboard": return <KeybindingsSection />;
     case "terminal": return <TerminalSection />;
     case "notifications": return <NotificationsSection />;
     case "hosts": return <SshHostsSection />;

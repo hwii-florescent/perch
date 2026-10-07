@@ -5,6 +5,7 @@
  */
 import type { SessionSummary } from "@perch/shared";
 import { takeClosedTab } from "./closedTabs";
+import { useFileTabs } from "./fileTabs";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "./store";
 
 /** A project's live workspaces: pinned first, then active, then most recent. */
@@ -92,13 +93,15 @@ export function newScratchpad(): void {
   openEmptyWorkspace(chats.hostId, workspace?.path ?? chats.path);
 }
 
-/** Cmd+Shift+T: start the harness of the most recently closed tab again, in its nest.
- * A tab whose nest is gone is skipped. */
+/** Cmd+Shift+T: bring back the most recently closed tab: a file or review opens again,
+ * a terminal or agent starts its harness again in its nest (a fresh session, not the old
+ * process). A tab whose nest is gone is skipped. */
 export function reopenClosedTab(): void {
   const state = usePerchStore.getState();
   const nests = new Set(state.workspaces.filter((workspace) => workspace.state !== "archived").map((workspace) => workspace.id));
   const tab = takeClosedTab((candidate) => !candidate.workspaceId || nests.has(candidate.workspaceId));
   if (!tab) return;
-  if (tab.workspaceId) state.focusWorkspace(tab.workspaceId);
-  state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
+  if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
+  if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : undefined);
+  else state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
 }

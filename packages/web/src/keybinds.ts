@@ -36,81 +36,12 @@ import { useFileTabs } from "./fileTabs";
 import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
+import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
 
 const LEADER_TIMEOUT_MS = 1500;
 
 // ---------------------------------------------------------------------------
-// Key combos: "mod+shift+]" → modifiers + a physical key
-// ---------------------------------------------------------------------------
-
-const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
-
-interface Combo {
-  cmd: boolean;
-  ctrl: boolean;
-  shift: boolean;
-  alt: boolean;
-  /** `KeyboardEvent.code`: digits, punctuation and arrows match by position. */
-  code: string;
-  /** Letters also match `KeyboardEvent.key`, so Dvorak/AZERTY follow the layout. */
-  letter?: string;
-}
-
-const CODES: Record<string, string> = {
-  "[": "BracketLeft", "]": "BracketRight", ",": "Comma", "/": "Slash", enter: "Enter",
-  up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
-  pageup: "PageUp", pagedown: "PageDown",
-};
-
-const comboCache = new Map<string, Combo>();
-
-/** `mod` is Cmd on a Mac and Ctrl+Shift everywhere else. */
-function parseCombo(spec: string, mac: boolean): Combo {
-  const cacheKey = `${mac}|${spec}`;
-  const cached = comboCache.get(cacheKey);
-  if (cached) return cached;
-  const combo: Combo = { cmd: false, ctrl: false, shift: false, alt: false, code: "" };
-  for (const part of spec.split("+")) {
-    if (part === "mod") {
-      if (mac) combo.cmd = true;
-      else { combo.ctrl = true; combo.shift = true; }
-    } else if (part === "cmd" || part === "ctrl" || part === "shift" || part === "alt") combo[part] = true;
-    else if (/^[a-z]$/.test(part)) { combo.code = `Key${part.toUpperCase()}`; combo.letter = part; }
-    else if (/^[0-9]$/.test(part)) combo.code = `Digit${part}`;
-    else if (CODES[part]) combo.code = CODES[part];
-    else throw new Error(`unknown key "${part}" in "${spec}"`);
-  }
-  comboCache.set(cacheKey, combo);
-  return combo;
-}
-
-function comboMatches(e: KeyboardEvent, c: Combo): boolean {
-  if (e.metaKey !== c.cmd || e.ctrlKey !== c.ctrl || e.shiftKey !== c.shift || e.altKey !== c.alt) return false;
-  return e.code === c.code || (c.letter !== undefined && !e.altKey && e.key.toLowerCase() === c.letter);
-}
-
-/** True when `e` is the combo `spec` on this platform (`isShortcut(e, "mod+k")`). */
-export function isShortcut(e: KeyboardEvent, spec: string, mac = IS_MAC): boolean {
-  return comboMatches(e, parseCombo(spec, mac));
-}
-
-const KEY_LABELS: Record<string, string> = {
-  up: "↑", down: "↓", left: "←", right: "→", enter: "Enter", pageup: "PgUp", pagedown: "PgDn",
-};
-
-const keyLabel = (key: string) => KEY_LABELS[key] ?? key.toUpperCase();
-
-/** "mod+shift+]" → "⌘⇧]" on a Mac, "Ctrl+Shift+]" elsewhere. */
-export function formatCombo(spec: string, mac = IS_MAC): string {
-  const c = parseCombo(spec, mac);
-  const key = spec.split("+").pop() ?? "";
-  const label = keyLabel(key);
-  if (mac) return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.cmd ? "⌘" : ""}${label}`;
-  return [c.ctrl && "Ctrl", c.alt && "Alt", c.shift && "Shift", label].filter(Boolean).join("+");
-}
-
-// ---------------------------------------------------------------------------
-// Direct shortcut table (also consumed by KeybindHelp.tsx)
+// Shortcut table (also consumed by KeybindHelp.tsx and Settings > Keyboard)
 // ---------------------------------------------------------------------------
 
 export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader";
@@ -127,104 +58,144 @@ export interface LeaderKeyHandlers {
   toggleDrawer: () => void;
 }
 
-interface Shortcut {
+export interface Shortcut {
+  /** Stable name: what a user's override in `settings.keybindings` is keyed by. */
+  id: string;
   group: KeybindGroup;
   description: string;
-  /** [macOS, other platforms]; `null` = no direct key there. */
+  /** Built-in defaults [macOS, other platforms]; `null` = none there. */
   keys: [string, string | null];
   run: (handlers: LeaderKeyHandlers) => void;
-  /** Fires on key auto-repeat too (resizing); others ignore a held key. */
-  repeat?: boolean;
-  /** Help shows this instead of the last key (e.g. "1…8"). */
-  span?: string;
-  /** Not listed in the help (a member of a range shown once). */
-  hide?: boolean;
+  /**
+   * `terminal`: needs the xterm instance, so `terminalSearch.ts` runs it (the
+   * global listener skips it). `outsideTerminal`: in a terminal the key
+   * belongs to the PTY, so it is neither run nor swallowed there.
+   */
+  scope?: "terminal" | "outsideTerminal";
+  /** The help lists a range (jump to tab 1…8) as one row while none of its members is customised. */
+  range?: { id: string; label?: string };
 }
 
 export const SHORTCUTS: Shortcut[] = [];
 
 function shortcut(
+  id: string,
   group: KeybindGroup,
   keys: string | [string, string | null],
   description: string,
   run: Shortcut["run"],
-  extra: Pick<Shortcut, "repeat" | "span" | "hide"> = {},
+  extra: Pick<Shortcut, "scope" | "range"> = {},
 ): void {
-  SHORTCUTS.push({ group, keys: typeof keys === "string" ? [keys, keys] : keys, description, run, ...extra });
+  SHORTCUTS.push({ id, group, keys: typeof keys === "string" ? [keys, keys] : keys, description, run, ...extra });
 }
 
 const controller = () => getDockviewController();
 const chrome = () => usePerchStore.getState();
+const noop = () => {};
 
 // Global
-shortcut("global", "mod+p", "Open Navigator", (h) => h.openNavigator());
-shortcut("global", "mod+,", "Open Settings", () => chrome().setSettingsOpen(true));
-shortcut("global", "mod+/", "Open this keybind help", (h) => h.openKeybindHelp());
-shortcut("global", "mod+b", "Toggle sidebar", () => chrome().toggleSidebar());
-shortcut("global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (files and Git)", (h) => h.toggleDrawer());
+shortcut("global.navigator", "global", "mod+p", "Open Navigator", (h) => h.openNavigator());
+shortcut("global.navigatorAlt", "global", ["cmd+k", "ctrl+k"], "Open Navigator (outside terminals)", (h) => h.openNavigator(), { scope: "outsideTerminal" });
+shortcut("global.settings", "global", "mod+,", "Open Settings", () => chrome().setSettingsOpen(true));
+shortcut("global.help", "global", "mod+/", "Open this keybind help", (h) => h.openKeybindHelp());
+shortcut("global.sidebar", "global", "mod+b", "Toggle sidebar", () => chrome().toggleSidebar());
+shortcut("global.drawer", "global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (files and Git)", (h) => h.toggleDrawer());
 
 // Tabs (browser style)
-shortcut("tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
-shortcut("tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
-shortcut("tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab", () => reopenClosedTab());
+shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
+shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
+shortcut("tabs.reopen", "tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab or file", () => reopenClosedTab());
 for (let i = 1; i <= 8; i++) {
-  shortcut("tabs", [`cmd+${i}`, `alt+${i}`], i === 1 ? "Jump to tab 1…8" : `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), i === 1 ? { span: "1…8" } : { hide: true });
+  shortcut(`tabs.jump${i}`, "tabs", [`cmd+${i}`, `alt+${i}`], `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), { range: { id: "tabs.jump", label: "1…8" } });
 }
-shortcut("tabs", ["cmd+9", "alt+9"], "Jump to the last tab", () => jumpToNthWorkspaceTab(Infinity));
-shortcut("tabs", ["cmd+shift+]", "ctrl+pagedown"], "Next tab", () => switchTabRelative(1));
-shortcut("tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", () => switchTabRelative(-1));
+shortcut("tabs.last", "tabs", ["cmd+9", "alt+9"], "Jump to the last tab", () => jumpToNthWorkspaceTab(Infinity));
+shortcut("tabs.next", "tabs", ["cmd+shift+]", "ctrl+pagedown"], "Next tab", () => switchTabRelative(1));
+shortcut("tabs.prev", "tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", () => switchTabRelative(-1));
 
 // Nests and birdhouses (workspaces and projects)
-shortcut("nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));
-shortcut("nests", ["ctrl+shift+down", "alt+shift+down"], "Next nest", () => stepNest(1));
+shortcut("nests.prev", "nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));
+shortcut("nests.next", "nests", ["ctrl+shift+down", "alt+shift+down"], "Next nest", () => stepNest(1));
 for (let i = 1; i <= 9; i++) {
-  shortcut("nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], i === 1 ? "Jump to nest 1…9" : `Jump to nest ${i}`, () => jumpToNest(i), i === 1 ? { span: "1…9" } : { hide: true });
+  shortcut(`nests.jump${i}`, "nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], `Jump to nest ${i}`, () => jumpToNest(i), { range: { id: "nests.jump", label: "1…9" } });
 }
-shortcut("nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
-shortcut("nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
-shortcut("nests", ["cmd+shift+n", null], "New scratchpad chat", () => newScratchpad());
+shortcut("nests.new", "nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
+shortcut("nests.addBirdhouse", "nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
+shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New scratchpad chat", () => newScratchpad());
 
 // Splits and panes (iTerm2/Ghostty)
-shortcut("panes", "mod+d", "Split right", () => controller()?.addTerminalPanel("right"));
-shortcut("panes", ["cmd+shift+d", "alt+shift+d"], "Split down", () => controller()?.addTerminalPanel("below"));
-shortcut("panes", "mod+[", "Previous pane", () => controller()?.cycleToPreviousPane());
-shortcut("panes", "mod+]", "Next pane", () => controller()?.cycleToNextPane());
-shortcut("panes", "mod+shift+enter", "Zoom / restore the focused pane", () => controller()?.toggleMaximizeActive());
+shortcut("panes.splitRight", "panes", "mod+d", "Split right", () => controller()?.addTerminalPanel("right"));
+shortcut("panes.splitDown", "panes", ["cmd+shift+d", "alt+shift+d"], "Split down", () => controller()?.addTerminalPanel("below"));
+shortcut("panes.prev", "panes", "mod+[", "Previous pane", () => controller()?.cycleToPreviousPane());
+shortcut("panes.next", "panes", "mod+]", "Next pane", () => controller()?.cycleToNextPane());
+shortcut("panes.zoom", "panes", "mod+shift+enter", "Zoom / restore the focused pane", () => controller()?.toggleMaximizeActive());
 for (const dir of ["left", "right", "up", "down"] as const) {
   const where = { left: "to the left", right: "to the right", up: "above", down: "below" }[dir];
-  shortcut("panes", [`cmd+alt+${dir}`, `ctrl+shift+alt+${dir}`], `Focus the pane ${where}`, () => controller()?.focusPaneDirection(dir));
+  shortcut(`panes.focus.${dir}`, "panes", [`cmd+alt+${dir}`, `ctrl+shift+alt+${dir}`], `Focus the pane ${where}`, () => controller()?.focusPaneDirection(dir));
 }
 
-/** The shortcut `e` triggers on this platform, if any. */
-export function shortcutFor(e: KeyboardEvent, mac = IS_MAC): Shortcut | undefined {
+// Terminal: run by terminalSearch.ts, which has the xterm instance
+shortcut("terminal.find", "terminal", "mod+f", "Find in the terminal", noop, { scope: "terminal" });
+shortcut("terminal.clear", "terminal", "mod+k", "Clear the terminal (screen and scrollback)", noop, { scope: "terminal" });
+shortcut("terminal.scrollTop", "terminal", "mod+up", "Scroll to the top", noop, { scope: "terminal" });
+shortcut("terminal.scrollBottom", "terminal", "mod+down", "Scroll to the bottom", noop, { scope: "terminal" });
+
+/** The user's overrides (action id → combo, "" = none) from Settings > Keyboard. */
+function overrides(): Record<string, string> {
+  return usePerchStore.getState().settings?.keybindings ?? {};
+}
+
+/** The combo `s` is bound to on this platform: the user's choice, else the default; `null` = none. */
+export function effectiveSpec(s: Shortcut, mac = IS_MAC): string | null {
+  const own = overrides()[s.id];
+  if (own !== undefined) return own !== "" && validCombo(own) ? own : null;
+  return s.keys[mac ? 0 : 1];
+}
+
+/** The shortcut `e` triggers on this platform, if any. `inTerm`: the key went to a focused terminal, where
+ * `terminal` shortcuts apply and `outsideTerminal` ones do not (the PTY keeps their key). */
+export function shortcutFor(e: KeyboardEvent, inTerm = false, mac = IS_MAC): Shortcut | undefined {
   return SHORTCUTS.find((s) => {
-    const spec = s.keys[mac ? 0 : 1];
+    if (inTerm ? s.scope === "outsideTerminal" : s.scope === "terminal") return false;
+    const spec = effectiveSpec(s, mac);
     return spec !== null && comboMatches(e, parseCombo(spec, mac));
   });
 }
 
-const helpKeys = (s: Shortcut): string | null => {
-  const spec = s.keys[IS_MAC ? 0 : 1];
-  if (spec === null) return null;
-  const keys = formatCombo(spec, IS_MAC);
-  return s.span ? keys.slice(0, -keyLabel(spec.split("+").pop() ?? "").length) + s.span : keys;
-};
+/** Two shortcuts can fire on the same keystroke unless one is terminal-only and the other terminal-free. */
+const overlaps = (a: Shortcut, b: Shortcut) => !(a.scope && b.scope && a.scope !== b.scope);
 
-const modK = (spec: string) => formatCombo(spec, IS_MAC);
+/** The other shortcuts already on `spec` that would fire together with `id` (for the recorder to move). */
+export function shortcutsBoundTo(spec: string, id: string, mac = IS_MAC): Shortcut[] {
+  const want = normalizeCombo(spec, mac);
+  const mine = SHORTCUTS.find((s) => s.id === id);
+  return SHORTCUTS.filter((s) => {
+    const other = s.id === id || (mine && !overlaps(mine, s)) ? null : effectiveSpec(s, mac);
+    return other !== null && normalizeCombo(other, mac) === want;
+  });
+}
 
-export const KEYBINDS: KeybindEntry[] = [
-  ...SHORTCUTS.flatMap((s): KeybindEntry[] => {
-    const keys = helpKeys(s);
-    return keys && !s.hide ? [{ keys, description: s.description, group: s.group }] : [];
-  }),
-  { keys: IS_MAC ? "⌘K" : "Ctrl+K", description: "Open Navigator (outside terminals)", group: "global" },
-  { keys: "?", description: "Open this keybind help (outside inputs)", group: "global" },
-  { keys: "Esc", description: "Close any open overlay", group: "global" },
-  { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "global" },
-  { keys: modK("mod+f"), description: "Find in the terminal", group: "terminal" },
-  { keys: modK("mod+k"), description: "Clear the terminal (screen and scrollback)", group: "terminal" },
-  { keys: `${modK("mod+up")} / ${modK("mod+down")}`, description: "Scroll to the top / bottom", group: "terminal" },
-  { keys: IS_MAC ? "⌘C / ⌘V" : "Ctrl+Shift+C / V", description: "Copy / paste", group: "terminal" },
+/** The help and Settings' view of the keymap: static keys plus the current shortcuts. */
+export function keybindEntries(mac = IS_MAC): KeybindEntry[] {
+  const custom = overrides();
+  const rangeEdited = (id: string) => SHORTCUTS.some((s) => s.range?.id === id && custom[s.id] !== undefined);
+  const seenRanges = new Set<string>();
+  const direct = SHORTCUTS.flatMap((s): KeybindEntry[] => {
+    const spec = effectiveSpec(s, mac);
+    if (spec === null) return [];
+    if (s.range && !rangeEdited(s.range.id)) {
+      if (seenRanges.has(s.range.id)) return [];
+      seenRanges.add(s.range.id);
+      const keys = formatCombo(spec, mac);
+      return [{ keys: keys.slice(0, -keyLabel(spec).length) + (s.range.label ?? ""), description: `Jump to ${s.range.id === "tabs.jump" ? "tab" : "nest"} ${s.range.label}`, group: s.group }];
+    }
+    return [{ keys: formatCombo(spec, mac), description: s.description, group: s.group }];
+  });
+  return [
+    ...direct,
+    { keys: "?", description: "Open this keybind help (outside inputs)", group: "global" },
+    { keys: "Esc", description: "Close any open overlay", group: "global" },
+    { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "global" },
+    { keys: mac ? "⌘C / ⌘V" : "Ctrl+Shift+C / V", description: "Copy / paste", group: "terminal" },
   { keys: "Ctrl+Space, g", description: "Open Navigator", group: "leader" },
   { keys: "Ctrl+Space, ?", description: "Open this keybind help", group: "leader" },
   { keys: "Ctrl+Space, b", description: "Toggle sidebar collapse", group: "leader" },
@@ -254,7 +225,8 @@ export const KEYBINDS: KeybindEntry[] = [
     description: "Resize mode: repeated h/j/k/l resizes the focused pane (Esc or timeout exits)",
     group: "leader",
   },
-];
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Focus guard
@@ -285,7 +257,7 @@ export function terminalKeyHandler(e: KeyboardEvent): boolean {
   if (e.metaKey) return false;
   if (e.type !== "keydown") return true;
   if (chordPending) return false;
-  if (shortcutFor(e)) return false;
+  if (shortcutFor(e, true)) return false;
   return !(e.ctrlKey && !e.altKey && (e.code === "Space" || e.key === " "));
 }
 
@@ -592,20 +564,12 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       }
 
       // Direct shortcuts work from anywhere, inputs included, like a browser's.
-      const direct = e.isComposing ? undefined : shortcutFor(e);
-      if (direct) {
+      // `terminal` ones belong to the focused xterm (terminalSearch.ts); an
+      // `outsideTerminal` one (Ctrl+K) is the PTY's inside a terminal.
+      const direct = e.isComposing ? undefined : shortcutFor(e, inTerminal(e.target));
+      if (direct && direct.scope !== "terminal") {
         e.preventDefault();
-        if (!e.repeat || direct.repeat) direct.run(handlersRef.current);
-        return;
-      }
-
-      // Cmd+K / Ctrl+K -> Navigator (command-palette convention; deliberately
-      // NOT gated by the editable-focus guard below), except in a terminal:
-      // there Cmd+K clears (terminalSearch.ts) and Ctrl+K is the PTY's
-      // (readline kill-line).
-      if ((e.metaKey || e.ctrlKey) && !inTerminal(e.target) && !e.altKey && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        handlersRef.current.openNavigator();
+        if (!e.repeat) direct.run(handlersRef.current);
         return;
       }
 

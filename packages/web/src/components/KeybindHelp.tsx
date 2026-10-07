@@ -9,7 +9,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { KEYBINDS, type KeybindGroup } from "../keybinds";
+import { keybindEntries, type KeybindGroup } from "../keybinds";
+import { usePerchStore } from "../store";
 
 export interface KeybindHelpProps {
   open: boolean;
@@ -46,16 +47,17 @@ export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
+  const overrides = usePerchStore((s) => s.settings?.keybindings);
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = KEYBINDS.filter(
+    const filtered = keybindEntries().filter(
       (k) => !q || k.keys.toLowerCase().includes(q) || k.description.toLowerCase().includes(q),
     );
     return GROUP_ORDER.map((group) => ({
       group,
       entries: filtered.filter((k) => k.group === group),
     })).filter((g) => g.entries.length > 0);
-  }, [query]);
+  }, [query, overrides]);
 
   if (!open) return null;
 

@@ -80,6 +80,12 @@ pub struct SettingsData {
     /// `"terminal"`). Empty (the default) shows the start picker instead.
     #[serde(default)]
     pub empty_workspace_agent: String,
+    /// Shortcut overrides: action id → key combo, `""` = no shortcut.
+    #[serde(default)]
+    pub keybindings: std::collections::BTreeMap<String, String>,
+    /// Ask before closing a tab that runs an agent. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub warn_close_agent: bool,
 }
 
 fn default_theme() -> String {
@@ -130,6 +136,12 @@ pub struct SettingsPatch {
     /// Absent = unchanged; present = set; `""` = back to the picker.
     #[serde(default)]
     pub empty_workspace_agent: Option<String>,
+    /// Absent = unchanged; present = replace the whole map.
+    #[serde(default)]
+    pub keybindings: Option<std::collections::BTreeMap<String, String>>,
+    /// Absent = unchanged; present = set.
+    #[serde(default)]
+    pub warn_close_agent: Option<bool>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

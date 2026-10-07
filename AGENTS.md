@@ -218,9 +218,10 @@ there, not here.
     not with an accent fill.
   - Closing an agent session (tab ×, Cmd+W, sidebar close; not a terminal)
     asks first (`closeGuard.ts`, `CloseAgentGuard.tsx`); "Don't show this
-    warning again" is a per-device preference, switched back on in Settings.
-    Cmd+Shift+T reopens the last closed tab as a fresh session of the same
-    harness in the same nest (`closedTabs.ts`, per viewer, 20 entries, 7
+    warning again" sets `settings.warnCloseAgent` off, Settings turns it back
+    on. Cmd+Shift+T reopens the last closed tab, terminals, agents and files
+    alike: a file or review opens again; a session starts a fresh one of the
+    same harness in the same nest (`closedTabs.ts`, per viewer, 20 entries, 7
     days, descriptors only, cleared on Remove project); it does not resume
     the agent's conversation yet.
   - perch never archives: closing is deleting. Tab and session-row ×,
@@ -245,7 +246,9 @@ there, not here.
     re-encode input. xterm (6.1 beta) answers the kitty keyboard protocol,
     so Ctrl/Shift+Enter reach CLIs that opt in. The keys perch keeps are the
     direct shortcuts of `keybinds.ts` (`SHORTCUTS`, the one table the `?`
-    help is generated from: browser-tab, Vivaldi-nest and iTerm2/Ghostty
+    help and Settings > Keyboard are generated from; each has a stable id and
+    the user's override lives in `settings.keybindings`, "" = none, so never
+    hard-code a key outside the table: browser-tab, Vivaldi-nest and iTerm2/Ghostty
     style; `mod` = Cmd on macOS, Ctrl+Shift elsewhere) and the Ctrl+Space
     leader, kept for rarer actions (swap panes, resize mode). perch is a
     desktop app (a phone app is coming), never a web page, so no browser

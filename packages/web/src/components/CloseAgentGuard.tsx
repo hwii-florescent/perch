@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { sessionLabel } from "../workspaceTabs";
-import { setWarnOnCloseAgent, useCloseGuard } from "../closeGuard";
+import { useCloseGuard } from "../closeGuard";
 import { usePerchStore } from "../store";
 
 /** Mounted once in App: the warning `requestCloseSession` raises for an agent session. */
@@ -16,7 +16,7 @@ export function CloseAgentGuard() {
       confirmLabel="Close"
       onCancel={dismiss}
       onConfirm={() => {
-        if (never) setWarnOnCloseAgent(false);
+        if (never) usePerchStore.getState().updateSettings({ warnCloseAgent: false });
         usePerchStore.getState().deleteSession(pending.id);
         dismiss();
       }}

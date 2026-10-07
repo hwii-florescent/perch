@@ -28,6 +28,8 @@ pub(super) fn handle_settings_update(
         terminal_scrollback: patch.terminal_scrollback,
         terminal_login_shell: patch.terminal_login_shell,
         empty_workspace_agent: patch.empty_workspace_agent,
+        keybindings: patch.keybindings,
+        warn_close_agent: patch.warn_close_agent,
     };
     match state.app.settings.update(store_patch) {
         Ok(updated) => {
@@ -118,6 +120,8 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         terminal_scrollback: s.terminal_scrollback,
         terminal_login_shell: s.terminal_login_shell,
         empty_workspace_agent: s.empty_workspace_agent.clone(),
+        keybindings: s.keybindings.clone(),
+        warn_close_agent: s.warn_close_agent,
     }
 }
 
