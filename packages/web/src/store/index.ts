@@ -2368,7 +2368,6 @@ function handleWorkspaceMessage(raw: unknown): boolean {
       if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
       return true;
     }
-    const focusRequest = msg.requestId ? pendingWorkspaceRequests.get(msg.requestId) : undefined;
     const latestRequestId = latestWorkspaceFocusRequestByHost.get(hostId);
     // A focus reply belongs to a host and a request. A delayed reply from a
     // previous host must never move the current navigation scope back.

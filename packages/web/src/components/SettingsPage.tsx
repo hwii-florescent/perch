@@ -25,7 +25,7 @@ import { KeybindingsSection } from "./KeybindingsSection";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
-  CATALOG_ACTION, LIST, MODEL_ROW, MUTED, NAME, SECTION, SECTION_TITLE, SELECT, SELECT_HOST,
+  LIST, MODEL_ROW, MUTED, NAME, SELECT, SELECT_HOST,
 } from "./ui/settings";
 
 // ---------------------------------------------------------------------------
@@ -600,15 +600,6 @@ function TerminalSection() {
     </SettingsGroup>
   );
 }
-
-// ---------------------------------------------------------------------------
-// SettingsModal
-// ---------------------------------------------------------------------------
-
-/** Which view the modal body is showing. The modal is a flat scrolling list of
- * sections by default; "agents" swaps the body for the agent catalog. */
-type SettingsView = "main" | "agents";
-
 
 // ---------------------------------------------------------------------------
 // DevicesSection — pairing codes and paired devices
