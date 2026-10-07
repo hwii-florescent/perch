@@ -785,7 +785,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   onClick={onHeaderClick}
                   title={project.path}
                 >
-                  <span className="w-3 shrink-0 text-center text-[0.65rem] text-subtext-0" aria-hidden="true">{project.favorite ? "◆" : "◇"}</span>
+                  <svg className="h-3 w-3 shrink-0 text-subtext-0" data-testid="project-folder-icon" viewBox="0 0 16 16" fill={project.favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                    <path d="M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" />
+                  </svg>
                   <span className="grid min-w-0 gap-[0.1rem]">
                     <strong className={STRONG}>{project.name || basename(project.path)}</strong>
                   </span>
@@ -894,7 +896,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 <circle cx="4" cy="13" r="1.5" />
                                 <circle cx="12" cy="3" r="1.5" />
                                 <path d="M4 4.5v7M4 9h4a4 4 0 0 0 4-4v-.5" />
-                              </> : <path d="M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" />}
+                              </> : <path d="M8 3l5 5-5 5-5-5z" />}
                             </svg>
                             <span className={cn(BODY, "flex items-baseline gap-[0.35rem]")}>
                               <strong

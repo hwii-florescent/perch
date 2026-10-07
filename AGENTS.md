@@ -282,9 +282,9 @@ there, not here.
     Compact badges keep a 32px hit target, but selection/hover/focus hug the
     18px circular badge, never fill its square hit area. Project/workspace
     names use 14px/13px type and 32px minimum rows, with 6px sidebar control
-    corners. Folder icons mark the primary checkout; branch icons mark linked
-    worktrees. No connecting rails; only genuinely nested worktrees indent.
-    Project/root workspace
+    corners. Folder icons mark projects (filled when favorite); diamonds mark
+    the primary checkout; branch icons mark linked worktrees. No connecting
+    rails; only genuinely nested worktrees indent. Project/root workspace
     names stay aligned. The full workspace highlight stays behind its name
     and sessions. The compact badges sit in a neutral, clearly bordered bar
     centered at 85% of the row width. The bar's

@@ -125,7 +125,12 @@ it("identifies visible workspaces with checkout icons and nests without connecti
   expect(project.querySelector('[data-testid="workspace-children-last-parent"]')?.className).toContain("workspace-tree");
   expect(project.querySelector(".workspace-tree__guide, [data-guide-end]")).toBeNull();
   expect(entries.every((entry) => entry.querySelector('[data-testid="workspace-checkout-icon"]')?.getAttribute("aria-hidden") === "true")).toBe(true);
-  // The primary checkout is a folder; linked and nested worktrees use branch nodes.
+  // Projects are folders, the primary checkout is a diamond, and worktrees branch.
+  expect(get("project-folder-icon").querySelector("path")?.getAttribute("d")).toContain("h3l2 2h5");
+  expect(get("workspace-entry-main").querySelector('[data-testid="workspace-checkout-icon"] path')?.getAttribute("d")).toBe("M8 3l5 5-5 5-5-5z");
+  expect(get("project-folder-icon").getAttribute("fill")).toBe("none");
+  act(() => usePerchStore.setState({ workspaceProjects: usePerchStore.getState().workspaceProjects.map((project) => ({ ...project, favorite: true })) }));
+  expect(get("project-folder-icon").getAttribute("fill")).toBe("currentColor");
   expect(entries.map((entry) => entry.querySelectorAll('[data-testid="workspace-checkout-icon"] circle').length)).toEqual([0, 3, 3, 3, 3, 3]);
   expect(get("workspace-children-tree").classList.contains("ml-[0.9rem]")).toBe(true);
   expect(get("workspace-overview").classList.contains("[--radius:6px]")).toBe(true);

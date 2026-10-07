@@ -88,6 +88,8 @@ test.describe("Perch sidebar", () => {
       await expect(tree.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(3);
       await expect(main.getByTestId("workspace-checkout-icon")).toBeVisible();
       await expect(main.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(0);
+      await expect(main.getByTestId("workspace-checkout-icon").locator("path")).toHaveAttribute("d", "M8 3l5 5-5 5-5-5z");
+      await expect(project.getByTestId("project-folder-icon")).toBeVisible();
       await expect(project.locator(".workspace-tree__guide, [data-guide-end]")).toHaveCount(0);
       await expect(ring).toHaveCSS("width", "18px");
       await expect(ring).toHaveCSS("height", "18px");
