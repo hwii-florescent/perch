@@ -55,6 +55,11 @@ export function navigateToWorkspace(workspaceId: string): void {
   else openEmptyWorkspace(workspace.hostId, workspace.path);
 }
 
+function favoritesThenRecent(a: WorkspaceProject, b: WorkspaceProject): number {
+  if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+  return b.updatedAt - a.updatedAt;
+}
+
 /** The active host's nests in the sidebar's order: favourite projects first,
  * then by recent activity; Chats and hidden worktrees left out.
  * ponytail: a worktree nested under another renders under it in the sidebar
@@ -63,7 +68,7 @@ export function orderedNests(): WorkspaceRecord[] {
   const state = usePerchStore.getState();
   return state.workspaceProjects
     .filter((project) => project.hostId === state.activeHostId && !isChatsProject(project))
-    .sort((a, b) => (a.favorite !== b.favorite ? (a.favorite ? -1 : 1) : b.updatedAt - a.updatedAt))
+    .sort(favoritesThenRecent)
     .flatMap((project) => workspacesForProject(state.workspaces, project.id).filter((workspace) => !workspace.hidden));
 }
 
@@ -71,8 +76,11 @@ export function orderedNests(): WorkspaceRecord[] {
 export function stepNest(dir: 1 | -1): void {
   const nests = orderedNests();
   if (nests.length < 2) return;
-  const idx = nests.findIndex((nest) => nest.id === usePerchStore.getState().activeWorkspaceId);
-  const next = nests[idx === -1 ? (dir > 0 ? 0 : nests.length - 1) : (idx + dir + nests.length) % nests.length];
+  const current = nests.findIndex((nest) => nest.id === usePerchStore.getState().activeWorkspaceId);
+  let target: number;
+  if (current !== -1) target = (current + dir + nests.length) % nests.length;
+  else target = dir > 0 ? 0 : nests.length - 1;
+  const next = nests[target];
   if (next) navigateToWorkspace(next.id);
 }
 
@@ -98,7 +106,7 @@ export function newScratchpad(): void {
  * process). A tab whose nest is gone is skipped. */
 export function reopenClosedTab(): void {
   const state = usePerchStore.getState();
-  const nests = new Set(state.workspaces.filter((workspace) => workspace.state !== "archived").map((workspace) => workspace.id));
+  const nests = new Set(state.workspaces.flatMap((workspace) => (workspace.state === "archived" ? [] : [workspace.id])));
   const tab = takeClosedTab((candidate) => !candidate.workspaceId || nests.has(candidate.workspaceId));
   if (!tab) return;
   if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
