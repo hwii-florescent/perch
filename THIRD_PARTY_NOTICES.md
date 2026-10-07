@@ -1,5 +1,9 @@
 # Third-party notices
 
+Perch's original code is licensed under the GNU General Public License,
+version 3 only (`GPL-3.0-only`); see [LICENSE](LICENSE). Third-party code,
+dependencies, and assets retain their respective licenses and notices.
+
 ## Orca agent catalog and launch metadata
 
 The provider names, executable mappings, documentation links, and default

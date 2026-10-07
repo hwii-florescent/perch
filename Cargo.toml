@@ -8,6 +8,7 @@ default-members = ["crates/perch-core", "crates/perchd"]
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
+license = "GPL-3.0-only"
 
 # Release builds are shipped artifacts (the devpod server and the Tauri bundle),
 # so trade build time for a smaller, faster binary. Deliberately NOT setting

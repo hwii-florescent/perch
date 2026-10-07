@@ -2,6 +2,7 @@
 name = "perch-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Rust core for perch: agent runner, terminals, history db, WS server."
 
 [[bin]]

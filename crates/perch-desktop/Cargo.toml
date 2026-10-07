@@ -2,6 +2,7 @@
 name = "perch-desktop"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Tauri desktop shell for perch. Boots the perch-core axum server in-process, then opens a native window. Build on macOS."
 build = "build.rs"
 
