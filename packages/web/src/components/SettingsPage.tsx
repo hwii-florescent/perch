@@ -77,6 +77,28 @@ function ThemeSection() {
   );
 }
 
+function TabShapeSection() {
+  const settings = usePerchStore((s) => s.settings);
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+
+  return (
+    <SettingsGroup title="Tabs">
+      <SettingRow title="Tab shape" description="Choose square corners or rounded browser-style tabs.">
+        <select
+          className={SELECT}
+          data-testid="settings-tab-shape"
+          aria-label="Tab shape"
+          value={settings?.tabShape ?? "square"}
+          onChange={(e) => updateSettings({ tabShape: e.target.value as "square" | "round" })}
+        >
+          <option value="square">Square</option>
+          <option value="round">Rounded</option>
+        </select>
+      </SettingRow>
+    </SettingsGroup>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ChatModeSection — the one global UI/CLI setting.
 // ---------------------------------------------------------------------------
@@ -715,7 +737,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
 function TabContent({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case "general": return <><ChatModeSection /><InterfaceSection /><DefaultCwdSection /></>;
-    case "appearance": return <ThemeSection />;
+    case "appearance": return <><ThemeSection /><TabShapeSection /></>;
     case "agents": return <><AgentCatalog /><CustomModelsSection /></>;
     case "keyboard": return <KeybindingsSection />;
     case "terminal": return <TerminalSection />;

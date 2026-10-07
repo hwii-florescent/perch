@@ -86,6 +86,9 @@ pub struct SettingsData {
     /// Ask before closing a tab that runs an agent. Defaults to `true`.
     #[serde(default = "default_true")]
     pub warn_close_agent: bool,
+    /// Tab corner style: "square" or "round". Defaults to square.
+    #[serde(default = "default_tab_shape")]
+    pub tab_shape: String,
 }
 
 fn default_theme() -> String {
@@ -102,6 +105,10 @@ fn default_toast_delivery() -> String {
 
 fn default_chat_mode() -> String {
     "cli".to_string()
+}
+
+fn default_tab_shape() -> String {
+    "square".to_string()
 }
 
 fn default_true() -> bool {
@@ -142,6 +149,8 @@ pub struct SettingsPatch {
     /// Absent = unchanged; present = set.
     #[serde(default)]
     pub warn_close_agent: Option<bool>,
+    #[serde(default)]
+    pub tab_shape: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

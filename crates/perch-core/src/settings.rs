@@ -76,6 +76,9 @@ pub struct Settings {
     /// Ask before closing a tab that runs an agent. Defaults to `true`.
     #[serde(default = "default_true")]
     pub warn_close_agent: bool,
+    /// Tab corner style: "square" or "round". Defaults to square.
+    #[serde(default = "default_tab_shape")]
+    pub tab_shape: String,
 }
 
 impl Default for Settings {
@@ -92,6 +95,7 @@ impl Default for Settings {
             empty_workspace_agent: String::new(),
             keybindings: Default::default(),
             warn_close_agent: true,
+            tab_shape: default_tab_shape(),
         }
     }
 }
@@ -114,6 +118,10 @@ fn default_toast_delivery() -> String {
 
 fn default_chat_mode() -> String {
     "cli".to_string()
+}
+
+fn default_tab_shape() -> String {
+    "square".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +158,7 @@ pub struct SettingsPatch {
     pub empty_workspace_agent: Option<String>,
     pub keybindings: Option<std::collections::BTreeMap<String, String>>,
     pub warn_close_agent: Option<bool>,
+    pub tab_shape: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -254,6 +263,9 @@ impl SettingsStore {
         if let Some(warn) = patch.warn_close_agent {
             guard.warn_close_agent = warn;
         }
+        if let Some(tab_shape) = patch.tab_shape {
+            guard.tab_shape = tab_shape;
+        }
         let snapshot = guard.clone();
         drop(guard);
         self.write_to_disk(&snapshot)?;
@@ -298,9 +310,10 @@ mod keybinding_tests {
         let store = SettingsStore::load(&path);
         assert!(store.get().keybindings.is_empty());
         assert!(store.get().warn_close_agent);
+        assert_eq!(store.get().tab_shape, "square");
 
         let patch: SettingsPatch = serde_json::from_str(
-            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false}"#,
+            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false,"tabShape":"round"}"#,
         )
         .unwrap();
         store.update(patch).unwrap();
@@ -317,6 +330,7 @@ mod keybinding_tests {
             Some("")
         );
         assert!(!reloaded.warn_close_agent);
+        assert_eq!(reloaded.tab_shape, "round");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

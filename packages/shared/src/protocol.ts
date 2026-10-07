@@ -154,6 +154,8 @@ export interface SettingsData {
   keybindings?: Record<string, string>;
   /** Ask before closing a tab that runs an agent. Absent = true. */
   warnCloseAgent?: boolean;
+  /** Tab corner style. Absent = "square" for older peers. */
+  tabShape?: "square" | "round";
 }
 
 /**
@@ -178,6 +180,7 @@ export interface SettingsPatch {
   /** Replaces the whole override map. */
   keybindings?: Record<string, string>;
   warnCloseAgent?: boolean;
+  tabShape?: "square" | "round";
 }
 
 export type HostMode = "perch" | "direct";

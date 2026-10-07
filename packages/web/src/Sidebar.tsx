@@ -608,7 +608,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
   }, [onClose]);
 
   return createPortal(
-    <div className="new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" ref={popoverRef} style={style}>
+    <div className="new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col overflow-hidden rounded-ui bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" ref={popoverRef} style={style}>
       {fixedCwd !== undefined ? (
         <div className="min-h-0 overflow-y-auto py-1">
           {choices.map((choice) => (
