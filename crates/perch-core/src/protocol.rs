@@ -865,8 +865,12 @@ pub enum ClientMessage {
 
     /// Ask the local server for Claude/Codex plan usage; answered with
     /// `usage.result` (see `usage.rs`). Not forwarded to remote hosts.
-    #[serde(rename = "usage.get")]
-    UsageGet {},
+    #[serde(rename = "usage.get", rename_all = "camelCase")]
+    UsageGet {
+        /// Bypass the short result cache for a user-requested refresh.
+        #[serde(default)]
+        force: bool,
+    },
 
     /// Persistent shell pane operations. Closing a view only releases its subscription.
     #[serde(rename = "terminal.open", rename_all = "camelCase")]
@@ -2434,6 +2438,21 @@ pub enum ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_get_force_is_optional_and_camel_case() {
+        let legacy: ClientMessage =
+            serde_json::from_value(serde_json::json!({ "type": "usage.get" }))
+                .expect("legacy request defaults to cached usage");
+        assert!(matches!(legacy, ClientMessage::UsageGet { force: false }));
+
+        let forced: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "usage.get",
+            "force": true
+        }))
+        .expect("forced request deserializes");
+        assert!(matches!(forced, ClientMessage::UsageGet { force: true }));
+    }
 
     #[test]
     fn error_request_id_uses_wire_camel_case() {

@@ -3,7 +3,12 @@
 //! (`orca/src/main/rate-limits`). Local host only.
 //!
 //! - Claude: `api.anthropic.com/api/oauth/usage` with the CLI's OAuth token
-//!   (macOS keychain, else `<config dir>/.credentials.json`).
+//!   (macOS keychain, else `<config dir>/.credentials.json`). On 401, Perch
+//!   asks a hidden Claude Code PTY to refresh its own rotating credentials. It
+//!   preserves an inherited `CLAUDE_CONFIG_DIR` override; otherwise the default
+//!   probe leaves it unset so Claude Code uses the unscoped Keychain item. The
+//!   probe cooldown is process-local; detached CLI grandchildren may outlive
+//!   the PTY process group.
 //! - Codex: `chatgpt.com/backend-api/wham/usage` with `<CODEX_HOME>/auth.json`.
 //!
 //! - Kimi Code: `<KIMI_CODE_HOME or ~/.kimi-code>/credentials/kimi-code.json`
@@ -22,19 +27,22 @@
 //! To add a provider: one `fetch_*(&Account) -> Option<AccountUsage>` and an
 //! arm in `fetch`. HTTP goes through the `curl` CLI (as `hub.rs` does; no HTTP
 //! crate), with headers on stdin so tokens never show in `ps`. Results are
-//! cached because the endpoints rate-limit; a failing account is omitted.
+//! cached because the endpoints rate-limit; failed Claude usage is surfaced.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::OnceLock;
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 const CACHE_TTL: Duration = Duration::from_secs(180);
+const CLAUDE_REFRESH_COOLDOWN: Duration = Duration::from_secs(600);
+const CLAUDE_REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `resets_at` is passed through as the provider gave it: an ISO string
 /// (Claude) or epoch seconds (Codex). The client turns it into a `Date`.
@@ -57,6 +65,9 @@ pub struct AccountUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub windows: Vec<UsageWindow>,
+    /// A provider-specific failure that explains why no windows are available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,15 +80,20 @@ struct Account {
     is_default: bool,
 }
 
-/// Cached result; the lock is held across the fetch so concurrent callers
-/// (several connected views) share one round of requests.
-pub async fn current() -> Vec<AccountUsage> {
+/// Cached result. The lock is only held to read/write the cache; provider I/O
+/// and the Claude CLI probe run without holding it.
+pub async fn current(force_refresh: bool) -> Vec<AccountUsage> {
     type Cached = Option<(Instant, Vec<AccountUsage>)>;
     static CACHE: OnceLock<tokio::sync::Mutex<Cached>> = OnceLock::new();
-    let mut cache = CACHE.get_or_init(Default::default).lock().await;
-    if let Some((at, usage)) = cache.as_ref() {
-        if at.elapsed() < CACHE_TTL {
-            return usage.clone();
+    let started = Instant::now();
+    {
+        let cache = CACHE.get_or_init(Default::default).lock().await;
+        if !force_refresh {
+            if let Some((at, usage)) = cache.as_ref() {
+                if at.elapsed() < CACHE_TTL {
+                    return usage.clone();
+                }
+            }
         }
     }
     let usage: Vec<AccountUsage> = futures::future::join_all(accounts().iter().map(fetch))
@@ -85,13 +101,29 @@ pub async fn current() -> Vec<AccountUsage> {
         .into_iter()
         .flatten()
         .collect();
+    let has_windows = |accounts: &[AccountUsage]| accounts.iter().any(|a| !a.windows.is_empty());
+    let mut cache = CACHE.get_or_init(Default::default).lock().await;
+    if let Some((at, cached)) = cache.as_ref() {
+        if *at > started {
+            if has_windows(&usage) && !has_windows(cached) {
+                // A later overlapping failure must not erase a successful result.
+            } else {
+                return cached.clone();
+            }
+        }
+    }
     *cache = Some((Instant::now(), usage.clone()));
     usage
 }
 
 async fn fetch(a: &Account) -> Option<AccountUsage> {
     match a.provider {
-        "claude" => fetch_claude(a).await,
+        "claude" => Some(fetch_claude(a).await.unwrap_or_else(|| AccountUsage {
+            provider: a.provider.into(),
+            label: a.label.clone(),
+            windows: vec![],
+            error: Some("Claude usage unavailable. Refresh, then check Claude Code's sign-in if it persists.".into()),
+        })),
         "codex" => fetch_codex(a).await,
         "kimi" => fetch_kimi(a).await,
         "grok" => fetch_grok(a).await,
@@ -209,6 +241,49 @@ async fn curl_json(url: &str, headers: &[String]) -> Option<Value> {
     serde_json::from_slice(&out.stdout).ok()
 }
 
+/// The status is needed only to recognize an expired Claude OAuth token. The
+/// response body and bearer token stay out of process arguments and logs.
+async fn curl_json_status(url: &str, headers: &[String]) -> Result<Value, u16> {
+    let mut child = Command::new("curl")
+        .args([
+            "-sS",
+            "--max-time",
+            "10",
+            "-w",
+            "\\n%{http_code}",
+            "-H",
+            "@-",
+            url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|_| 0u16)?;
+    let mut stdin = child.stdin.take().ok_or(0u16)?;
+    stdin
+        .write_all(headers.join("\n").as_bytes())
+        .await
+        .map_err(|_| 0u16)?;
+    drop(stdin);
+    let out = child.wait_with_output().await.map_err(|_| 0u16)?;
+    if !out.status.success() {
+        return Err(0u16);
+    }
+    parse_curl_json_status(&out.stdout)
+}
+
+fn parse_curl_json_status(stdout: &[u8]) -> Result<Value, u16> {
+    let text = String::from_utf8_lossy(stdout);
+    let (body, status) = text.rsplit_once('\n').ok_or(0u16)?;
+    let status: u16 = status.trim().parse().map_err(|_| 0u16)?;
+    if !(200..300).contains(&status) {
+        return Err(status);
+    }
+    serde_json::from_str(body).map_err(|_| 0u16)
+}
+
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(Into::into)
 }
@@ -240,14 +315,17 @@ async fn claude_token(a: &Account) -> Option<String> {
     };
     if cfg!(target_os = "macos") {
         for service in claude_keychain_services(a) {
-            let out = Command::new("security")
+            let mut command = Command::new("security");
+            command
                 .args(["find-generic-password", "-s", &service, "-w"])
                 .stderr(Stdio::null())
-                .output()
-                .await
-                .ok()?;
-            if let Some(t) = parse(&String::from_utf8_lossy(&out.stdout)) {
-                return Some(t);
+                .kill_on_drop(true);
+            if let Ok(Ok(out)) =
+                tokio::time::timeout(Duration::from_secs(3), command.output()).await
+            {
+                if let Some(t) = parse(&String::from_utf8_lossy(&out.stdout)) {
+                    return Some(t);
+                }
             }
         }
     }
@@ -269,7 +347,34 @@ fn claude_email(a: &Account) -> Option<String> {
 
 async fn fetch_claude(a: &Account) -> Option<AccountUsage> {
     let token = claude_token(a).await?;
-    let body = curl_json(
+    match fetch_claude_token(&token).await {
+        Ok(Some(usage)) => return Some(label_claude_usage(a, usage)),
+        Err(401) => {}
+        _ => return None,
+    }
+
+    // Another Claude process may already have refreshed the rotating token.
+    if let Some(latest) = claude_token(a).await.filter(|latest| latest != &token) {
+        if let Ok(Some(usage)) = fetch_claude_token(&latest).await {
+            return Some(label_claude_usage(a, usage));
+        }
+    }
+
+    if !claim_claude_cli_refresh(&a.dir) || !refresh_claude_via_cli(a).await {
+        return None;
+    }
+    let refreshed = claude_token(a).await?;
+    let body = fetch_claude_token(&refreshed).await.ok()??;
+    Some(label_claude_usage(a, body))
+}
+
+fn label_claude_usage(a: &Account, mut usage: AccountUsage) -> AccountUsage {
+    usage.label = a.label.clone().or_else(|| claude_email(a));
+    usage
+}
+
+async fn fetch_claude_token(token: &str) -> Result<Option<AccountUsage>, u16> {
+    let body = curl_json_status(
         "https://api.anthropic.com/api/oauth/usage",
         &[
             format!("Authorization: Bearer {token}"),
@@ -278,9 +383,266 @@ async fn fetch_claude(a: &Account) -> Option<AccountUsage> {
         ],
     )
     .await?;
-    let mut usage = claude_from_json(&body)?;
-    usage.label = a.label.clone().or_else(|| claude_email(a));
-    Some(usage)
+    Ok(claude_from_json(&body))
+}
+
+/// One probe per account per core process; separate core processes do not share this cooldown.
+fn claim_claude_cli_refresh(dir: &Path) -> bool {
+    static LAST_REFRESH: OnceLock<StdMutex<std::collections::HashMap<PathBuf, Instant>>> =
+        OnceLock::new();
+    let mut last = LAST_REFRESH
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if last
+        .get(dir)
+        .is_some_and(|at| at.elapsed() < CLAUDE_REFRESH_COOLDOWN)
+    {
+        return false;
+    }
+    last.insert(dir.to_owned(), Instant::now());
+    true
+}
+
+#[derive(Clone, Copy)]
+struct CliProbeTiming {
+    startup_delay: Duration,
+    timeout: Duration,
+    settle_delay: Duration,
+    poll_interval: Duration,
+}
+
+const CLI_PROBE_TIMING: CliProbeTiming = CliProbeTiming {
+    startup_delay: Duration::from_secs(2),
+    timeout: CLAUDE_REFRESH_TIMEOUT,
+    settle_delay: Duration::from_secs(2),
+    poll_interval: Duration::from_millis(250),
+};
+
+struct ProbeChild(Box<dyn portable_pty::Child + Send + Sync>, Option<u32>);
+
+impl Drop for ProbeChild {
+    fn drop(&mut self) {
+        // portable-pty starts a new session on Unix. Terminate the whole process
+        // group even if the CLI leader exited: helper children can retain the PTY.
+        // ponytail: descendants that detach with their own setsid escape this; use
+        // a process supervisor if Claude Code ever requires detached helpers.
+        #[cfg(unix)]
+        if let Some(pid) = self.1.and_then(|pid| i32::try_from(pid).ok()) {
+            // SAFETY: negative pid targets only the PTY child's own process group.
+            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            let deadline = Instant::now() + Duration::from_millis(200);
+            while Instant::now() < deadline {
+                // SAFETY: signal 0 only probes whether this process group still exists.
+                if unsafe { libc::kill(-pid, 0) } != 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // SAFETY: same owned PTY process group; escalation bounds cleanup time.
+            unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Let Claude Code refresh and persist its own rotating credentials. Never
+/// call its undocumented OAuth endpoint or write its keychain item ourselves.
+async fn refresh_claude_via_cli(account: &Account) -> bool {
+    let account = account.clone();
+    tokio::task::spawn_blocking(move || {
+        run_claude_usage_probe(&account, Path::new("claude"), CLI_PROBE_TIMING)
+    })
+    .await
+    .unwrap_or(false)
+}
+
+fn claude_usage_probe_dir(account: &Account) -> Option<PathBuf> {
+    let base = home()?.join(".perch/usage-trust");
+    claude_usage_probe_dir_under(account, &base)
+}
+
+fn claude_usage_probe_dir_under(account: &Account, base: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    // Keep Claude Code's folder-trust entry stable without placing a
+    // predictable path in a shared temp directory.
+    let uid = unsafe { libc::geteuid() };
+    let parent = base.parent()?;
+    for (path, private) in [(parent, false), (base, true)] {
+        match std::fs::DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        let mode = metadata.permissions().mode() & 0o777;
+        if !metadata.file_type().is_dir()
+            || metadata.uid() != uid
+            || (private && mode != 0o700)
+            || (!private && mode & 0o022 != 0)
+        {
+            return None;
+        }
+    }
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(account.dir.as_os_str().as_encoded_bytes())
+    );
+    let account_dir = base.join(&digest[..16]);
+    match std::fs::DirBuilder::new().mode(0o700).create(&account_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return None,
+    }
+    let metadata = std::fs::symlink_metadata(&account_dir).ok()?;
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != uid
+        || metadata.permissions().mode() & 0o777 != 0o700
+    {
+        return None;
+    }
+    Some(account_dir)
+}
+
+fn run_claude_usage_probe(account: &Account, executable: &Path, timing: CliProbeTiming) -> bool {
+    let Some(probe_dir) = claude_usage_probe_dir(account) else {
+        return false;
+    };
+    run_claude_usage_probe_in(account, executable, timing, &probe_dir)
+}
+
+fn claude_probe_config_dir(account: &Account, inherited_override: bool) -> Option<&Path> {
+    (!account.is_default || inherited_override).then_some(account.dir.as_path())
+}
+
+fn run_claude_usage_probe_in(
+    account: &Account,
+    executable: &Path,
+    timing: CliProbeTiming,
+    probe_dir: &Path,
+) -> bool {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::sync::mpsc;
+    use std::thread;
+
+    if std::fs::create_dir(probe_dir)
+        .is_err_and(|error| error.kind() != std::io::ErrorKind::AlreadyExists)
+    {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::set_permissions(probe_dir, std::fs::Permissions::from_mode(0o700)).is_err() {
+            return false;
+        }
+    }
+    let pair = match native_pty_system().openpty(PtySize {
+        rows: 40,
+        cols: 120,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(pair) => pair,
+        Err(_) => return false,
+    };
+    let reader = match pair.master.try_clone_reader() {
+        Ok(reader) => reader,
+        Err(_) => return false,
+    };
+    let mut writer = match pair.master.take_writer() {
+        Ok(writer) => writer,
+        Err(_) => return false,
+    };
+    let mut command = CommandBuilder::new(executable.as_os_str());
+    if let Some(config_dir) =
+        claude_probe_config_dir(account, std::env::var_os("CLAUDE_CONFIG_DIR").is_some())
+    {
+        command.env("CLAUDE_CONFIG_DIR", config_dir);
+    } else {
+        command.env_remove("CLAUDE_CONFIG_DIR");
+    }
+    command.env("TERM", "xterm-256color");
+    command.cwd(probe_dir);
+    let child = match pair.slave.spawn_command(command) {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    drop(pair.slave);
+    let process_id = child.process_id();
+    let _child = ProbeChild(child, process_id);
+    let (tx, rx) = mpsc::channel();
+    if thread::Builder::new()
+        .name("perch-claude-usage-reader".into())
+        .spawn(move || {
+            let mut reader = reader;
+            let mut bytes = [0; 4096];
+            while let Ok(n) = reader.read(&mut bytes) {
+                if n == 0 || tx.send(bytes[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        })
+        .is_err()
+    {
+        return false;
+    }
+
+    let start = Instant::now();
+    let mut output = String::new();
+    let mut usage_sent = false;
+    let mut trust_accepted = false;
+    let mut palette_accepted = false;
+    let mut last_output = Instant::now();
+    let mut ready = false;
+    while start.elapsed() < timing.timeout {
+        if !usage_sent && start.elapsed() >= timing.startup_delay {
+            if writer.write_all(b"/usage\r").is_err() {
+                break;
+            }
+            usage_sent = true;
+        }
+        match rx.recv_timeout(timing.poll_interval) {
+            Ok(bytes) => {
+                last_output = Instant::now();
+                output.push_str(&String::from_utf8_lossy(&bytes));
+                if output.len() > 512_000 {
+                    output.drain(..output.len() - 512_000);
+                }
+                let clean = strip_terminal_sequences(&output);
+                let lower = clean.to_lowercase();
+                if !trust_accepted && lower.contains("do you trust") {
+                    trust_accepted = writer.write_all(b"y\r").is_ok();
+                } else if usage_sent
+                    && !palette_accepted
+                    && lower.contains("show plan usage limits")
+                {
+                    palette_accepted = writer.write_all(b"\r").is_ok();
+                }
+                ready = lower.contains("current session")
+                    && (lower.contains("current week") || lower.contains("weekly limits"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if ready && last_output.elapsed() >= timing.settle_delay {
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    ready
+}
+
+fn strip_terminal_sequences(raw: &str) -> String {
+    static ANSI: OnceLock<Option<regex::Regex>> = OnceLock::new();
+    match ANSI.get_or_init(|| {
+        regex::Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)").ok()
+    }) {
+        Some(ansi) => ansi.replace_all(raw, "").into_owned(),
+        None => raw.to_owned(),
+    }
 }
 
 fn claude_from_json(body: &Value) -> Option<AccountUsage> {
@@ -295,6 +657,7 @@ fn claude_from_json(body: &Value) -> Option<AccountUsage> {
         provider: "claude".into(),
         label: None,
         windows,
+        error: None,
     })
 }
 
@@ -341,6 +704,7 @@ fn codex_from_json(body: &Value) -> Option<AccountUsage> {
         provider: "codex".into(),
         label: None,
         windows,
+        error: None,
     })
 }
 
@@ -421,6 +785,7 @@ fn kimi_from_json(body: &Value) -> Option<AccountUsage> {
         provider: "kimi".into(),
         label: None,
         windows,
+        error: None,
     })
 }
 
@@ -473,6 +838,7 @@ async fn fetch_grok(a: &Account) -> Option<AccountUsage> {
             .clone()
             .or_else(|| entry["email"].as_str().map(Into::into)),
         windows: vec![window],
+        error: None,
     })
 }
 
@@ -525,6 +891,178 @@ fn grok_window(c: &Value) -> Option<UsageWindow> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn curl_status_parser_distinguishes_expired_tokens_and_json_errors() {
+        assert_eq!(
+            parse_curl_json_status(b"{\"message\":\"expired\"}\n401"),
+            Err(401)
+        );
+        assert_eq!(
+            parse_curl_json_status(b"{\"five_hour\":{\"utilization\":1}}\n200"),
+            Ok(json!({"five_hour":{"utilization":1}}))
+        );
+        assert_eq!(parse_curl_json_status(b"no status line"), Err(0));
+    }
+
+    #[test]
+    fn default_claude_probe_uses_default_keychain_unless_config_dir_was_overridden() {
+        let default = Account {
+            provider: "claude",
+            dir: PathBuf::from("/home/test/.claude"),
+            label: None,
+            is_default: true,
+        };
+        let extra = Account {
+            provider: "claude",
+            dir: PathBuf::from("/home/test/.claude-work"),
+            label: Some("work".into()),
+            is_default: false,
+        };
+        assert_eq!(claude_probe_config_dir(&default, false), None);
+        assert_eq!(
+            claude_probe_config_dir(&default, true),
+            Some(default.dir.as_path())
+        );
+        assert_eq!(
+            claude_probe_config_dir(&extra, false),
+            Some(extra.dir.as_path())
+        );
+    }
+
+    #[test]
+    fn cli_refresh_attempts_are_cooled_down_even_when_usage_cache_is_forced() {
+        let path = std::env::temp_dir().join(format!("perch-usage-test-{}", uuid::Uuid::new_v4()));
+        assert!(claim_claude_cli_refresh(&path));
+        assert!(!claim_claude_cli_refresh(&path));
+
+        let concurrent_path =
+            std::env::temp_dir().join(format!("perch-usage-test-{}", uuid::Uuid::new_v4()));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let claims: Vec<_> = (0..8)
+            .map(|_| {
+                let barrier = barrier.clone();
+                let path = concurrent_path.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    claim_claude_cli_refresh(&path)
+                })
+            })
+            .collect();
+        assert_eq!(
+            claims
+                .into_iter()
+                .map(|claim| claim.join().unwrap())
+                .filter(|won| *won)
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hidden_cli_probe_is_bounded_isolated_and_cleans_up_each_process_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("perch-cli-probe-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let config = root.join("custom-claude-config");
+        std::fs::create_dir(&config).unwrap();
+        let account = Account {
+            provider: "claude",
+            dir: config.clone(),
+            label: Some("work".into()),
+            is_default: false,
+        };
+        let probe_dir = root.join("isolated-probe");
+        let stable_base = root.join("stable-trust");
+        let stable_probe = claude_usage_probe_dir_under(&account, &stable_base).unwrap();
+        assert_eq!(
+            claude_usage_probe_dir_under(&account, &stable_base).unwrap(),
+            stable_probe
+        );
+        assert_eq!(
+            std::fs::metadata(&stable_probe)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        std::fs::remove_dir_all(stable_probe).unwrap();
+        let timing = CliProbeTiming {
+            startup_delay: Duration::from_millis(20),
+            timeout: Duration::from_millis(300),
+            settle_delay: Duration::from_millis(20),
+            poll_interval: Duration::from_millis(5),
+        };
+
+        for (name, body, expected_ready, expect_child) in [
+            ("ready", "printf '\\033[31mCurrent session\\033[0m\\nCurrent week\\n'; sleep 30 & echo $! > child-pid; wait", true, true),
+            ("timeout", "sleep 30 & echo $! > child-pid; wait", false, true),
+            ("leader-exit", "sleep 30 & echo $! > child-pid; exit 0", false, true),
+            ("exit", "exit 0", false, false),
+        ] {
+            let mode = root.join(name);
+            std::fs::create_dir(&mode).unwrap();
+            let result = mode.join("result");
+            let pid = mode.join("pid");
+            let child_pid_path = mode.join("child-pid");
+            let script = mode.join("claude-fake");
+            let body = body.replace("child-pid", &child_pid_path.to_string_lossy());
+            let script_text = format!(
+                r#"#!/bin/sh
+printf '%s\n%s\n' "$CLAUDE_CONFIG_DIR" "$(pwd)" > '{}'
+echo $$ > '{}'
+{}
+"#,
+                result.display(), pid.display(), body
+            );
+            std::fs::write(&script, script_text).unwrap();
+            let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&script, permissions).unwrap();
+
+            assert_eq!(run_claude_usage_probe_in(&account, &script, timing, &probe_dir), expected_ready, "{name}");
+            let output = std::fs::read_to_string(&result).unwrap();
+            let mut lines = output.lines();
+            assert_eq!(lines.next(), Some(config.to_string_lossy().as_ref()));
+            let cwd = PathBuf::from(lines.next().unwrap());
+            let temp_dir = std::env::temp_dir().canonicalize().unwrap();
+            let app_dir = std::env::current_dir().unwrap().canonicalize().unwrap();
+            assert!(cwd.starts_with(&temp_dir), "{name}: cwd={cwd:?}, temp={temp_dir:?}");
+            assert!(!cwd.starts_with(app_dir), "probe must not run in the app repo");
+            assert_eq!(cwd, probe_dir.canonicalize().unwrap());
+            assert_ne!(cwd, config.canonicalize().unwrap());
+            if expect_child {
+                assert_process_stopped(std::fs::read_to_string(child_pid_path).unwrap().trim());
+            }
+            assert_process_stopped(std::fs::read_to_string(pid).unwrap().trim());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn assert_process_stopped(pid: &str) {
+        let pid: libc::pid_t = pid.parse().unwrap();
+        for _ in 0..100 {
+            // SAFETY: signal 0 only probes whether this process id still exists.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("probe process {pid} survived cleanup");
+    }
+
+    #[test]
+    fn terminal_control_sequences_are_removed_from_cli_output() {
+        assert_eq!(
+            strip_terminal_sequences("\u{1b}[31mCurrent session\u{1b}[0m"),
+            "Current session"
+        );
+    }
 
     #[test]
     fn claude_windows() {

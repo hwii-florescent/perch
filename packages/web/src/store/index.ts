@@ -291,6 +291,8 @@ export interface PerchState {
   terminalProfile: TerminalProfile | null;
   /** Claude/Codex plan usage for the status bar (`usage.result`). */
   usage: AccountUsage[];
+  /** Local receipt time for the latest usage response; drives refresh feedback. */
+  usageUpdatedAt: number;
   /** Set while a CLI PTY is being attached for a given session, cleared on
    * success or error. Used to route ServerMessage::Error to cliError instead
    * of the chat message list when the error arrives during attach. */
@@ -1001,6 +1003,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   serverInfo: null,
   terminalProfile: null,
   usage: [],
+  usageUpdatedAt: 0,
   attachingCliForSession: null,
   cliError: null,
   settingsOpen: false,
@@ -3174,7 +3177,7 @@ export function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "usage.result":
-      usePerchStore.setState({ usage: msg.accounts });
+      usePerchStore.setState({ usage: msg.accounts, usageUpdatedAt: Date.now() });
       break;
     case "fs.browse.result": {
       const resolve = pendingBrowses.get(msg.requestId);

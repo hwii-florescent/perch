@@ -1126,9 +1126,11 @@ export interface SessionRenameMessage {
   title: string;
 }
 
-/** Ask the local server for Claude/Codex plan usage; reply is `usage.result`. */
+/** Ask the local server for plan usage; reply is `usage.result`.
+ * `force` bypasses the short server cache for a user-requested refresh. */
 export interface UsageGetMessage {
   type: "usage.get";
+  force?: boolean;
 }
 
 /** One rolling rate-limit window. `label` is derived from the duration
@@ -1147,9 +1149,10 @@ export interface AccountUsage {
   provider: string;
   label?: string;
   windows: UsageWindow[];
+  error?: string;
 }
 
-/** Reply to `usage.get`; an account that couldn't be read is absent. */
+/** Reply to `usage.get`; failed Claude usage fetches carry an account error. */
 export interface UsageResultMessage {
   type: "usage.result";
   accounts: AccountUsage[];

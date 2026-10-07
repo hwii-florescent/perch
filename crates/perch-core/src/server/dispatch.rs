@@ -176,10 +176,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::CommandsList { ref session_id } => {
             session::handle_commands_list(state, raw_text, session_id)
         }
-        ClientMessage::UsageGet {} => {
+        ClientMessage::UsageGet { force } => {
             let out_tx = state.out_tx.clone();
             tokio::spawn(async move {
-                let accounts = crate::usage::current().await;
+                let accounts = crate::usage::current(force).await;
                 let _ = out_tx.send(ServerMessage::UsageResult { accounts });
             });
         }
