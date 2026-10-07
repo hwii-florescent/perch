@@ -80,16 +80,16 @@ export function normalizeCombo(spec: string, mac = IS_MAC): string {
 /** "cmd+shift+]" → "⇧⌘]" on a Mac, "Ctrl+Shift+]" elsewhere. */
 export function formatCombo(spec: string, mac = IS_MAC): string {
   const c = parseCombo(spec, mac);
-  const key = tokenOf(c.code) ?? "";
-  const label = LABELS[key] ?? key.toUpperCase();
+  const label = labelOf(tokenOf(c.code) ?? "");
   if (mac) return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.cmd ? "⌘" : ""}${label}`;
   return [c.ctrl && "Ctrl", c.alt && "Alt", c.shift && "Shift", label].filter(Boolean).join("+");
 }
 
+const labelOf = (token: string) => LABELS[token] ?? token.toUpperCase();
+
 /** The key part of a spec as shown ("1" in "cmd+1"). */
 export function keyLabel(spec: string): string {
-  const key = spec.split("+").pop() ?? "";
-  return LABELS[key] ?? key.toUpperCase();
+  return labelOf(spec.split("+").pop() ?? "");
 }
 
 export type Recorded = { spec: string } | { error: string } | null;

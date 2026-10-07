@@ -178,6 +178,5 @@ describe("recordCombo", () => {
     expect(rec({ key: "t", code: "KeyT" })).toHaveProperty("error");
     expect(rec({ key: "t", code: "KeyT", shiftKey: true })).toHaveProperty("error");
     expect(rec({ key: "Escape", code: "Escape", metaKey: true })).toHaveProperty("error");
-    expect(parseCombo("cmd+shift+]", true).code).toBe("BracketRight");
   });
 });

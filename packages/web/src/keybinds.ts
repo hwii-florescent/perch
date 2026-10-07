@@ -58,6 +58,12 @@ export interface LeaderKeyHandlers {
   toggleDrawer: () => void;
 }
 
+interface ShortcutRange {
+  id: string;
+  noun: string;
+  label: string;
+}
+
 export interface Shortcut {
   /** Stable name: what a user's override in `settings.keybindings` is keyed by. */
   id: string;
@@ -73,7 +79,7 @@ export interface Shortcut {
    */
   scope?: "terminal" | "outsideTerminal";
   /** The help lists a range (jump to tab 1…8) as one row while none of its members is customised. */
-  range?: { id: string; label?: string };
+  range?: ShortcutRange;
 }
 
 export const SHORTCUTS: Shortcut[] = [];
@@ -105,8 +111,9 @@ shortcut("global.drawer", "global", ["cmd+shift+b", "alt+shift+b"], "Toggle the 
 shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
 shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
 shortcut("tabs.reopen", "tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab or file", () => reopenClosedTab());
+const TAB_JUMPS: ShortcutRange = { id: "tabs.jump", noun: "tab", label: "1…8" };
 for (let i = 1; i <= 8; i++) {
-  shortcut(`tabs.jump${i}`, "tabs", [`cmd+${i}`, `alt+${i}`], `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), { range: { id: "tabs.jump", label: "1…8" } });
+  shortcut(`tabs.jump${i}`, "tabs", [`cmd+${i}`, `alt+${i}`], `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), { range: TAB_JUMPS });
 }
 shortcut("tabs.last", "tabs", ["cmd+9", "alt+9"], "Jump to the last tab", () => jumpToNthWorkspaceTab(Infinity));
 shortcut("tabs.next", "tabs", ["cmd+shift+]", "ctrl+pagedown"], "Next tab", () => switchTabRelative(1));
@@ -115,8 +122,9 @@ shortcut("tabs.prev", "tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", ()
 // Nests and birdhouses (workspaces and projects)
 shortcut("nests.prev", "nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));
 shortcut("nests.next", "nests", ["ctrl+shift+down", "alt+shift+down"], "Next nest", () => stepNest(1));
+const NEST_JUMPS: ShortcutRange = { id: "nests.jump", noun: "nest", label: "1…9" };
 for (let i = 1; i <= 9; i++) {
-  shortcut(`nests.jump${i}`, "nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], `Jump to nest ${i}`, () => jumpToNest(i), { range: { id: "nests.jump", label: "1…9" } });
+  shortcut(`nests.jump${i}`, "nests", [`ctrl+shift+${i}`, `alt+shift+${i}`], `Jump to nest ${i}`, () => jumpToNest(i), { range: NEST_JUMPS });
 }
 shortcut("nests.new", "nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
 shortcut("nests.addBirdhouse", "nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
@@ -155,7 +163,8 @@ export function effectiveSpec(s: Shortcut, mac = IS_MAC): string | null {
  * `terminal` shortcuts apply and `outsideTerminal` ones do not (the PTY keeps their key). */
 export function shortcutFor(e: KeyboardEvent, inTerm = false, mac = IS_MAC): Shortcut | undefined {
   return SHORTCUTS.find((s) => {
-    if (inTerm ? s.scope === "outsideTerminal" : s.scope === "terminal") return false;
+    const wrongContext = inTerm ? "outsideTerminal" : "terminal";
+    if (s.scope === wrongContext) return false;
     const spec = effectiveSpec(s, mac);
     return spec !== null && comboMatches(e, parseCombo(spec, mac));
   });
@@ -169,7 +178,8 @@ export function shortcutsBoundTo(spec: string, id: string, mac = IS_MAC): Shortc
   const want = normalizeCombo(spec, mac);
   const mine = SHORTCUTS.find((s) => s.id === id);
   return SHORTCUTS.filter((s) => {
-    const other = s.id === id || (mine && !overlaps(mine, s)) ? null : effectiveSpec(s, mac);
+    if (s.id === id || (mine && !overlaps(mine, s))) return false;
+    const other = effectiveSpec(s, mac);
     return other !== null && normalizeCombo(other, mac) === want;
   });
 }
@@ -186,7 +196,8 @@ export function keybindEntries(mac = IS_MAC): KeybindEntry[] {
       if (seenRanges.has(s.range.id)) return [];
       seenRanges.add(s.range.id);
       const keys = formatCombo(spec, mac);
-      return [{ keys: keys.slice(0, -keyLabel(spec).length) + (s.range.label ?? ""), description: `Jump to ${s.range.id === "tabs.jump" ? "tab" : "nest"} ${s.range.label}`, group: s.group }];
+      const { noun, label } = s.range;
+      return [{ keys: keys.slice(0, -keyLabel(spec).length) + label, description: `Jump to ${noun} ${label}`, group: s.group }];
     }
     return [{ keys: formatCombo(spec, mac), description: s.description, group: s.group }];
   });

@@ -29,11 +29,17 @@ export type ClosedTab = { closedAt: number } & (
   | { kind: "file"; workspaceId: string; path: string; review?: boolean }
 );
 
+/** A stored entry that is well formed and not older than the TTL. */
+function isLiveEntry(tab: ClosedTab, now: number): boolean {
+  if (typeof tab?.closedAt !== "number" || now - tab.closedAt >= TTL_MS) return false;
+  return tab.kind === "file" ? typeof tab.path === "string" : typeof tab.cwd === "string";
+}
+
 function read(): ClosedTab[] {
   try {
     const list: unknown = JSON.parse(localStorage.getItem(viewerKey(KEY)) ?? "[]");
     const now = Date.now();
-    return Array.isArray(list) ? list.filter((tab): tab is ClosedTab => typeof tab?.closedAt === "number" && now - tab.closedAt < TTL_MS && (tab.kind === "file" ? typeof tab.path === "string" : typeof tab.cwd === "string")) : [];
+    return Array.isArray(list) ? list.filter((tab: ClosedTab) => isLiveEntry(tab, now)) : [];
   } catch { return []; }
 }
 

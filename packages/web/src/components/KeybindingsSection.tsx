@@ -44,7 +44,8 @@ export function KeybindingsSection() {
   // While recording, every key is ours: capture before the app's own listeners run.
   useEffect(() => {
     if (!recording) return;
-    function onKey(e: KeyboardEvent) {
+    const id = recording;
+    const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
@@ -54,9 +55,9 @@ export function KeybindingsSection() {
       }
       const recorded = recordCombo(e);
       if (!recorded) return;
-      if ("error" in recorded) setNote({ id: recording!, text: recorded.error });
-      else commit(recording!, recorded.spec);
-    }
+      if ("error" in recorded) setNote({ id, text: recorded.error });
+      else commit(id, recorded.spec);
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [recording, custom]); // eslint-disable-line react-hooks/exhaustive-deps
