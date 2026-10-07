@@ -99,12 +99,12 @@ it("workspace background picks it, while its badge and rename input keep their o
   expect(get("workspace-entry-main").querySelector("strong")!.parentElement!.className).toContain("items-baseline");
 });
 
-it("keeps tree guides continuous and correctly terminated for visible workspaces", () => {
+it("identifies visible workspaces with checkout icons and nests without connecting rails", () => {
   const nested = { ...worktree, id: "nested-tree", path: "/repo-nested", name: "nested", parentWorkspaceId: "tree" };
   const laterSibling = { ...worktree, id: "later-tree", path: "/repo-later", name: "later" };
   const lastParent = { ...worktree, id: "last-parent", path: "/repo-last", name: "last", parentWorkspaceId: "main" };
   const lastNested = { ...worktree, id: "last-nested", path: "/repo-last-nested", name: "last nested", parentWorkspaceId: "last-parent" };
-  // Hidden is deliberately last in the full sibling order; it must not extend the visible rail.
+  // A hidden final sibling must stay out of both the rendered and keyboard order.
   const hidden = { ...worktree, id: "hidden-tree", path: "/repo-hidden", name: "hidden", hidden: true };
   usePerchStore.setState({ workspaces: [workspace, worktree, nested, laterSibling, lastParent, lastNested, hidden] });
   render(<WorkspaceOverview />);
@@ -123,14 +123,12 @@ it("keeps tree guides continuous and correctly terminated for visible workspaces
   expect(project.querySelector('[data-testid="workspace-tree-root"]')?.className).toContain("workspace-tree");
   expect(project.querySelector('[data-testid="workspace-children-tree"]')?.className).toContain("workspace-tree");
   expect(project.querySelector('[data-testid="workspace-children-last-parent"]')?.className).toContain("workspace-tree");
-  const guides = [...project.querySelectorAll(".workspace-tree__guide")];
-  expect(guides).toHaveLength(entries.length);
-  expect(guides.every((guide) => ["absolute", "pointer-events-none"].every((name) => guide.classList.contains(name)))).toBe(true);
-  const guideEnd = (id: string) => project.querySelector(`[data-testid="workspace-node-${id}"] > .workspace-tree__guide`)?.getAttribute("data-guide-end");
-  expect(guideEnd("tree")).toBe("next-sibling");
-  expect(guideEnd("last-parent")).toBe("row");
-  expect(guideEnd("last-nested")).toBe("row");
-  expect(entries.map((entry) => entry.querySelector("svg path")?.getAttribute("d"))).toEqual(entries.map(() => "M3 6h7"));
+  expect(project.querySelector(".workspace-tree__guide, [data-guide-end]")).toBeNull();
+  expect(entries.every((entry) => entry.querySelector('[data-testid="workspace-checkout-icon"]')?.getAttribute("aria-hidden") === "true")).toBe(true);
+  // The primary checkout is a folder; linked and nested worktrees use branch nodes.
+  expect(entries.map((entry) => entry.querySelectorAll('[data-testid="workspace-checkout-icon"] circle').length)).toEqual([0, 3, 3, 3, 3, 3]);
+  expect(get("workspace-children-tree").classList.contains("ml-[0.9rem]")).toBe(true);
+  expect(get("workspace-overview").classList.contains("[--radius:6px]")).toBe(true);
   expect(entries.every((entry) => entry.querySelector("strong")?.classList.contains("font-medium"))).toBe(true);
   expect(entries.every((entry) => !entry.querySelector("strong")?.classList.contains("font-bold"))).toBe(true);
   expect(project.querySelector(".workspace-project__workspaces")?.classList.contains("border-t")).toBe(false);
@@ -155,6 +153,7 @@ it("a single-checkout project selects from its background, but not from its sess
   render(<WorkspaceOverview />);
   expect(orderedNests().map(({ id }) => id)).toEqual(["main"]);
   expect(document.querySelector('[data-testid="workspace-tree-root"]')).toBeNull();
+  expect(document.querySelector('[data-testid="workspace-checkout-icon"]')).toBeNull();
   jumpToNest(1);
   expect(focus).toHaveBeenCalledExactlyOnceWith("main");
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");

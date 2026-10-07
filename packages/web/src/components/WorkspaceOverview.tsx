@@ -32,8 +32,7 @@ const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
 const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-3 text-fg ${FOCUS}`;
 const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg";
 const WORKSPACE_TITLE = "min-w-0 overflow-hidden text-[13px] font-medium text-ellipsis whitespace-nowrap";
-const WORKSPACE_TREE = "workspace-tree relative flex flex-col gap-[2px]";
-const WORKSPACE_TREE_GUIDE = "workspace-tree__guide pointer-events-none absolute top-0 left-[15px] w-px bg-overlay-1";
+const WORKSPACE_TREE = "workspace-tree flex flex-col gap-[2px]";
 const SPAN = "overflow-hidden text-[12px] text-ellipsis whitespace-nowrap text-subtext-0";
 const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
 const SMALL_BTN = "shrink-0 cursor-pointer rounded-ui border px-[0.3rem] py-[0.14rem] text-[0.58rem] leading-[1.1] [font-family:inherit]";
@@ -605,7 +604,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   return (
     <section
       className={cn(
-        "workspace-overview flex flex-col overflow-hidden [--radius:4px]",
+        "workspace-overview flex flex-col overflow-hidden [--radius:6px]",
         // compact = the phone switcher, where the panel owns the bottom edge
         compact ? "min-h-full flex-1" : "min-h-0 flex-1 border-b border-b-overlay-0",
       )}
@@ -839,12 +838,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         if (parent?.parentWorkspaceId) children.set(parent.id, [...(children.get(parent.id) ?? []), w]);
                         else roots.push(w);
                       }
-                      const renderWorkspace = (workspace: WorkspaceRecord, depth: number, isLastSibling: boolean): ReactElement => {
+                      const renderWorkspace = (workspace: WorkspaceRecord, depth: number): ReactElement => {
                       const workspaceActive = workspace.id === activeWorkspaceId;
                       const workspaceSessions = sessionsForWorkspace(sessions, workspace);
                       const nested = children.get(workspace.id) ?? [];
                       return (
-                        <div className="relative flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
+                        <div className="flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
                         <div
                           className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}
                           data-testid={`workspace-entry-${workspace.id}`}
@@ -889,8 +888,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             onClick={() => navigateToWorkspace(workspace.id)}
                             title={workspace.path}
                           >
-                            <svg className="h-3 w-3 shrink-0 text-overlay-1" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true" focusable="false">
-                              <path d="M3 6h7" />
+                            <svg className="h-3 w-3 shrink-0 text-subtext-0" data-testid="workspace-checkout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                              {workspace.parentWorkspaceId ? <>
+                                <circle cx="4" cy="3" r="1.5" />
+                                <circle cx="4" cy="13" r="1.5" />
+                                <circle cx="12" cy="3" r="1.5" />
+                                <path d="M4 4.5v7M4 9h4a4 4 0 0 0 4-4v-.5" />
+                              </> : <path d="M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" />}
                             </svg>
                             <span className={cn(BODY, "flex items-baseline gap-[0.35rem]")}>
                               <strong
@@ -1010,10 +1014,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
-                            {nested.map((child, index) => renderWorkspace(child, depth + 1, index === nested.length - 1))}
+                            {nested.map((child) => renderWorkspace(child, depth + 1))}
                           </div>
                         )}
-                        <span aria-hidden="true" data-guide-end={isLastSibling ? "row" : "next-sibling"} className={cn(WORKSPACE_TREE_GUIDE, isLastSibling ? "h-4" : "bottom-[-18px]")} />
                         </div>
                       );
                       };
@@ -1035,7 +1038,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       }
                       return (
                         <div className={WORKSPACE_TREE} data-testid="workspace-tree-root">
-                          {roots.map((workspace, index) => renderWorkspace(workspace, 0, index === roots.length - 1))}
+                          {roots.map((workspace) => renderWorkspace(workspace, 0))}
                         </div>
                       );
                     })()}

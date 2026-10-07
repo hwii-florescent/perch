@@ -281,9 +281,13 @@ there, not here.
     (`surface-1`), focus is a 1px neutral ring, never an accent outline.
     Compact badges keep a 32px hit target, but selection/hover/focus hug the
     18px circular badge, never fill its square hit area. Project/workspace
-    names use 14px/13px type and 32px minimum rows, with 4px sidebar control
-    corners. The full workspace highlight stays behind its name and sessions.
-    The compact badges sit in a neutral, clearly bordered bar centered at 85% of the row width. The bar's
+    names use 14px/13px type and 32px minimum rows, with 6px sidebar control
+    corners. Folder icons mark the primary checkout; branch icons mark linked
+    worktrees. No connecting rails; only genuinely nested worktrees indent.
+    Project/root workspace
+    names stay aligned. The full workspace highlight stays behind its name
+    and sessions. The compact badges sit in a neutral, clearly bordered bar
+    centered at 85% of the row width. The bar's
     border and blank space never select the workspace; the row's remaining
     background does, including the gutters beside the bar. Icons follow the
     observed foreground provider (`SessionSummary.currentProviderId`), not

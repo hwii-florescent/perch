@@ -83,7 +83,12 @@ test.describe("Perch sidebar", () => {
       // Navigation rows balance the session strip, without shrinking its hit targets.
       await expect(project.locator('[data-testid^="project-toggle-"] strong')).toHaveCSS("font-size", "14px");
       await expect(tree.locator("strong")).toHaveCSS("font-size", "13px");
-      await expect(tree).toHaveCSS("border-radius", "4px");
+      await expect(tree).toHaveCSS("border-radius", "6px");
+      await expect(tree.getByTestId("workspace-checkout-icon")).toBeVisible();
+      await expect(tree.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(3);
+      await expect(main.getByTestId("workspace-checkout-icon")).toBeVisible();
+      await expect(main.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(0);
+      await expect(project.locator(".workspace-tree__guide, [data-guide-end]")).toHaveCount(0);
       await expect(ring).toHaveCSS("width", "18px");
       await expect(ring).toHaveCSS("height", "18px");
       const target = tree.getByTestId(/^workspace-session-/);
@@ -93,11 +98,14 @@ test.describe("Perch sidebar", () => {
       expect((await nameRow.boundingBox())!.height).toBeGreaterThanOrEqual(32);
       const strip = tree.getByTestId("session-dots");
       await expect(strip).toHaveCSS("border-top-color", "rgb(122, 122, 122)");
+      await expect(strip).toHaveCSS("border-radius", "6px");
       // Selection still covers the strip's gutter, not just the name row.
       await expect(tree).toHaveCSS("background-color", "rgb(51, 51, 51)");
       const name = main.locator("strong");
       const branch = main.locator("span").filter({ hasText: /^main$/ }).last();
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
+      const projectName = await project.locator('[data-testid^="project-toggle-"] strong').boundingBox();
+      expect(Math.abs(nameBox!.x - projectName!.x)).toBeLessThanOrEqual(1);
       expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
       expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
       // The centered session bar is a separate target; its border/blank space
