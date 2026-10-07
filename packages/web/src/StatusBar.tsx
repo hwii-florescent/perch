@@ -5,6 +5,8 @@ import { socket } from "./ws";
 import { cn } from "./lib/cn";
 import { StatusDot } from "./components/StatusDot";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./components/popoverPosition";
+import { GHOST_BUTTON } from "./components/ui/icon-button";
+import { menuPanel } from "./components/ui/menu";
 import type { AccountUsage, SessionSummary, UsageWindow } from "@perch/shared";
 
 function formatTokens(n: number): string {
@@ -69,7 +71,7 @@ function UsageSummary({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="usage-details-popover"
-        className="flex shrink-0 cursor-pointer items-center gap-2.5 rounded-sm bg-transparent p-0 text-subtext-0 hover:text-fg focus-visible:[outline:1px_solid_var(--overlay-1)]"
+        className={cn(GHOST_BUTTON, "flex shrink-0 items-center gap-2.5 p-0 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
         title="Open plan usage details"
         onClick={() => {
           if (open) {
@@ -107,7 +109,7 @@ function UsageSummary({
           role="dialog"
           aria-label="Plan usage details"
           data-testid="usage-details"
-          className="fixed z-[2100] w-[min(340px,calc(100vw-16px))] overflow-y-auto rounded-ui bg-surface-1 p-3 text-fg shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          className={cn(menuPanel, "fixed z-[2100] w-[min(340px,calc(100vw-16px))] overflow-y-auto p-3 text-fg")}
           style={popoverStyle}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
@@ -123,7 +125,7 @@ function UsageSummary({
               data-testid="usage-refresh"
               disabled={refreshing}
               aria-busy={refreshing}
-              className="rounded-sm px-2 py-1 text-[0.78rem] text-fg hover:bg-overlay-0 disabled:cursor-wait disabled:opacity-50 focus-visible:[outline:1px_solid_var(--overlay-1)]"
+              className={cn(GHOST_BUTTON, "px-2 py-1 text-[0.78rem] text-fg hover:bg-overlay-0 disabled:cursor-wait disabled:opacity-50 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
               onClick={() => {
                 setRefreshing(true);
                 setRefreshNotice("");

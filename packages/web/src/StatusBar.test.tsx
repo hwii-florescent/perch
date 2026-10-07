@@ -39,6 +39,7 @@ function get(testId: string) { const element = document.querySelector(`[data-tes
 it("opens reset details from the complete usage block and can force a fresh fetch", () => {
   render(<StatusBar />);
   const trigger = get("usage-summary") as HTMLButtonElement;
+  expect(trigger.className).toContain("[border:0]");
   expect(trigger.textContent).toContain("claude");
   expect(trigger.textContent).toContain("5h 41%");
   click(trigger);

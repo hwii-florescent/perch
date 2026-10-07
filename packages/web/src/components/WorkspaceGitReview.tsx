@@ -33,7 +33,7 @@ const DIFF_LINE_CONTEXT = "hover:bg-[color-mix(in_srgb,var(--accent)_12%,transpa
 const DIFF_LINE_SELECTED = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const LINE_MARKER_TONE: Record<string, string> = { addition: "text-green", deletion: "text-red" };
 const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitespace-nowrap text-subtext-0";
-const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui border px-[0.4rem] py-[0.3rem] text-left text-fg [background:none] hover:bg-surface-1";
+const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui border px-3 py-[3px] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "border-transparent";
 const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", changed: "text-yellow", untracked: "text-yellow", conflict: "text-red" };
@@ -686,7 +686,7 @@ export function WorkspaceGitReview({
             </div>
           )}
 
-          <div className="flex flex-col gap-[0.12rem] px-[0.45rem] pt-0 pb-[0.55rem]" role="list" aria-label="Changed paths">
+          <div className="flex flex-col gap-[2px] px-[3px] pt-0 pb-[0.55rem]" role="list" aria-label="Changed paths">
             {changedFiles.map((entry) => (
               <div className="flex min-w-0 items-center gap-[0.3rem]" key={entry.path} role="listitem">
                 <input

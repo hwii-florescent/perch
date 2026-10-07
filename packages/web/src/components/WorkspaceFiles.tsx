@@ -93,10 +93,10 @@ function FileTree({
             <button
               type="button"
               className={cn(
-                "flex min-h-[1.4rem] w-full cursor-pointer items-center gap-[0.15rem] pr-2 text-left text-[0.8rem] [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
+                "flex min-h-[1.4rem] w-full cursor-pointer items-center gap-[0.15rem] pr-3 text-left text-[0.8rem] [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
                 selected ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
               )}
-              style={{ paddingLeft: "0.25rem" }}
+              style={{ paddingLeft: "0.75rem" }}
               data-testid={`workspace-file-entry-${entry.path}`}
               title={entry.path}
               onClick={() => (isDirectory ? onToggle(entry) : onOpenFile(entry))}
@@ -471,11 +471,11 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           )}
           aria-label="Workspace file tree"
         >
-          <div className="flex shrink-0 items-center gap-1 px-2 py-2">
+          <div className="flex shrink-0 items-center gap-1 px-3 py-[3px]">
             <input type="search" className="min-h-8 min-w-0 flex-1 rounded-ui border border-overlay-0 bg-panel-bg px-2 text-[0.8rem] text-fg placeholder:text-subtext-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg" aria-label="Search workspace files" placeholder="Search files in workspace…" maxLength={256} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setFileQuery(""); }} data-testid="workspace-files-search" />
             {fileQuery && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2 text-[0.75rem]")} onClick={() => setFileQuery("")}>Clear</button>}
           </div>
-          <div className="flex shrink-0 items-center justify-between py-[0.3rem] pr-[0.55rem] pl-[0.65rem] text-[0.68rem] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
+          <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[0.68rem] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
             <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
               {!layout && (

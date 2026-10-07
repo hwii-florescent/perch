@@ -474,11 +474,11 @@ function ProjectRow({
 
   return (
     <div className="mb-1">
-      <div className="sidebar__project-header flex items-stretch gap-1 px-[0.35rem]">
+      <div className="sidebar__project-header flex items-stretch gap-[2px] px-[3px]">
         <button
           type="button"
           className={cn(
-            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui border-current px-[0.3rem] py-[0.4rem] text-left text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease]",
+            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui border-current px-3 py-[3px] text-left text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease]",
             // The legacy active rule outranked :hover, so an active row keeps its fill under the pointer.
             isActiveProject ? "bg-surface-0 border-l-accent" : "bg-transparent border-l-transparent hover:bg-surface-1",
           )}
@@ -811,7 +811,7 @@ export function Sidebar() {
         {workspaceNavigationEnabled ? (
           <WorkspaceOverview />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto py-[0.2rem]" data-testid="project-list">
+          <div className="min-h-0 flex-1 overflow-y-auto px-[3px] py-[3px]" data-testid="project-list">
             {projects.length === 0 ? (
               <p className="mx-[0.65rem] my-[0.6rem] text-[0.72rem] text-subtext-0">No projects yet.</p>
             ) : (

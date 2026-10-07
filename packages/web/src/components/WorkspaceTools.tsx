@@ -38,7 +38,7 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   const shown = tab === "gitReview" && !isGit ? "files" : tab;
   return (
-    <nav className="flex items-stretch self-stretch" aria-label="Files and Git">
+    <nav className="flex items-stretch gap-[2px] self-stretch px-[3px] py-[3px]" aria-label="Files and Git">
       {tabs.map(({ id, label }) => (
         <button
           key={id}
@@ -74,7 +74,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
 
   return (
     <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col border-l border-l-overlay-0 bg-panel-bg" data-testid="workspace-tools" aria-label="Files and Git">
-      <div className="flex items-center gap-2 px-[0.65rem] py-1">
+      <div className="flex items-center gap-2 px-3 py-[3px]">
         <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
