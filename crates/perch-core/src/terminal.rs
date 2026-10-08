@@ -1506,11 +1506,9 @@ mod tests {
             view.screen().mouse_protocol_mode(),
             vt100::MouseProtocolMode::PressRelease
         );
-        assert!(
-            text.ends_with("\x1b[?7l\x1b[=7u"),
-            "{:?}",
-            &text[text.len() - 40..]
-        );
+        assert!(text.ends_with("\x1b[?7l"));
+        // The repaint now restores the saved keyboard stack as well as flags.
+        assert!(text.contains("\x1b[<16u\x1b[=0u\x1b[>7u"));
     }
 
     /// Off by default is the whole safety story for this setting: a login

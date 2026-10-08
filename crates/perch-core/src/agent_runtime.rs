@@ -605,7 +605,10 @@ impl AgentRuntimeAdapter {
         if snapshot.state == AgentState::Sleeping {
             return Err(RuntimeAdapterError::RequiresWake(key));
         }
+        // A shell has no conversation identity: if its daemon process is
+        // gone, reopening starts a new login shell. Agents still fail closed.
         if snapshot.state == AgentState::Reconnecting
+            && provider_id != crate::agent_fleet::TERMINAL_PROVIDER
             && provider_session_id.is_none()
             && self.runtime(&key).is_none()
             && !crate::daemon::session_alive(&terminal_key(&key))
@@ -1812,6 +1815,50 @@ mod tests {
             adapter.snapshot(&key).unwrap().state,
             AgentState::Reconnecting
         );
+    }
+
+    #[test]
+    fn reconnect_without_a_surviving_shell_starts_a_terminal() {
+        let adapter = adapter();
+        adapter
+            .providers
+            .register(ProviderManifest::terminal())
+            .unwrap();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        let registration = AgentRegistration {
+            key: key.clone(),
+            provider_id: crate::agent_fleet::TERMINAL_PROVIDER.into(),
+            provider_session_id: None,
+            resumable: false,
+            now_ms: now_millis(),
+        };
+        adapter.lifecycle.register(registration.clone()).unwrap();
+        adapter
+            .signal(
+                &key,
+                ProviderSignal::TransportLost {
+                    reason: "core restarted".into(),
+                },
+                now_millis(),
+            )
+            .unwrap();
+        let attach = adapter
+            .attach_cli(
+                registration,
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert!(attach.handle.provider_session_id.is_none());
+        assert!(adapter.runtime_alive(&key));
     }
 
     #[test]
