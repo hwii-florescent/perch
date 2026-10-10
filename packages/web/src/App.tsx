@@ -67,14 +67,14 @@ export default function App() {
   const workspaceGitReviewWorkspaceId = usePerchStore((state) => state.workspaceGitReviewWorkspaceId);
   const closeWorkspaceGitReview = usePerchStore((state) => state.closeWorkspaceGitReview);
   const activeWorkspaceId = usePerchStore((state) => state.activeWorkspaceId);
-  // The right drawer (Files | Git for the active workspace). App state, not
+  // The right drawer (Files | Git | Browser for the active workspace). App state, not
   // part of a session's layout, so it stays put across chats. An old stored
   // "terminal" tab maps to Files.
   const [tools, setTools] = useState<WorkspaceToolsTab | null>(() => {
     try {
       const stored = localStorage.getItem(TOOLS_STORAGE_KEY);
       if (!stored) return null;
-      return stored === "gitReview" ? "gitReview" : "files";
+      return stored === "gitReview" || stored === "browser" ? stored : "files";
     } catch { return null; }
   });
   const sidebarCollapsed = usePerchStore((state) => state.sidebarCollapsed);

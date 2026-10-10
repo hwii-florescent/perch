@@ -15,7 +15,11 @@ const COVERS = '[role="dialog"], [role="menu"], .pane-context-menu__item';
  * over `.host` (`browser.rs`): a real browser, so GitHub and every other site works. Without
  * Tauri (the headless web server) it is a sandboxed iframe, which sites that forbid framing
  * show blank; Open externally is always one click away. */
-export function WorkspaceBrowser({ tabId, initialUrl }: { tabId: string; initialUrl: string }) {
+export function WorkspaceBrowser({ tabId, initialUrl }: {
+  tabId: string;
+  /** "" shows an empty address bar (the drawer's browser) and no page until one is entered. */
+  initialUrl: string;
+}) {
   const id = browserId(tabId);
   const [url, setUrl] = useState(initialUrl);
   const [draft, setDraft] = useState(initialUrl);
@@ -23,11 +27,19 @@ export function WorkspaceBrowser({ tabId, initialUrl }: { tabId: string; initial
   const editing = useRef(false);
   const host = useRef<HTMLDivElement>(null);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const started = url !== "";
+  const latest = useRef(url);
+  latest.current = url;
+
+  // A page this view opened before it was unmounted (switching drawer tabs) is still there.
+  useEffect(() => {
+    if (nativeBrowser) void browserCall<string>("url", { id }).then((current) => { if (current) { setUrl(current); setDraft(current); } });
+  }, [id]);
 
   // Native: keep the webview on `host`'s rectangle, hidden while covered or unmounted.
   useEffect(() => {
     const el = host.current;
-    if (!nativeBrowser || !el) return;
+    if (!nativeBrowser || !el || !started) return;
     let last = "";
     let frame = 0;
     const sync = () => {
@@ -39,7 +51,7 @@ export function WorkspaceBrowser({ tabId, initialUrl }: { tabId: string; initial
       last = next;
       void (hidden
         ? browserCall("hide", { id })
-        : browserCall("show", { id, url: initialUrl, x: r.x, y: r.y, width: r.width, height: r.height }));
+        : browserCall("show", { id, url: latest.current, x: r.x, y: r.y, width: r.width, height: r.height }));
     };
     const schedule = () => { frame ||= requestAnimationFrame(sync); };
     const resize = new ResizeObserver(schedule);
@@ -62,14 +74,15 @@ export function WorkspaceBrowser({ tabId, initialUrl }: { tabId: string; initial
       window.removeEventListener("resize", schedule);
       void browserCall("hide", { id });
     };
-  }, [id, initialUrl, settingsOpen]);
+  }, [id, started, settingsOpen]);
 
   const go = () => {
     const next = webUrl(/^[a-z][a-z\d+.-]*:/i.test(draft) ? draft : `http://${draft}`);
     if (!next) return;
     setUrl(next);
     setDraft(next);
-    if (nativeBrowser) void browserCall("go", { id, url: next });
+    // Before the first address there is no page yet; becoming `started` shows it at `next`.
+    if (nativeBrowser && started) void browserCall("go", { id, url: next });
   };
   const act = (action: "back" | "forward" | "reload") => {
     if (nativeBrowser) void browserCall("action", { id, action });
@@ -103,7 +116,9 @@ export function WorkspaceBrowser({ tabId, initialUrl }: { tabId: string; initial
         <button type="button" className={BTN} data-testid="browser-open-external" onClick={() => openExternal(url)}>Open externally</button>
       </div>
       <div ref={host} className="host relative min-h-0 flex-1">
-        {nativeBrowser ? null : own ? (
+        {!started ? (
+          <div className="p-4 text-[0.85rem] text-subtext-0">Enter an address to browse.</div>
+        ) : nativeBrowser ? null : own ? (
           <div className="p-4 text-[0.85rem] text-subtext-0">perch's own address can't be shown inside perch.</div>
         ) : (
           <iframe

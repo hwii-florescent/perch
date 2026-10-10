@@ -2,16 +2,18 @@ import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { useFileTabs } from "../fileTabs";
 import { segment } from "./ui/segment";
+import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
 const BTN = "px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
 
-export type WorkspaceToolsTab = "files" | "gitReview";
+export type WorkspaceToolsTab = "files" | "gitReview" | "browser";
 
 const TABS: { id: WorkspaceToolsTab; label: string }[] = [
   { id: "files", label: "Files" },
   { id: "gitReview", label: "Git" },
+  { id: "browser", label: "Browser" },
 ];
 
 /** The workspace the drawer shows and whether it offers Git. */
@@ -27,7 +29,7 @@ function useToolsContext(requestedWorkspaceId?: string | null) {
   return { workspaceId, row, isGit };
 }
 
-/** Files / Git switch. It lives in the top row beside the drawer toggle
+/** Files / Git / Browser switch. It lives in the top row beside the drawer toggle
  * (UI-UX-DIRECTION.md D8), not inside the drawer. */
 export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   requestedWorkspaceId?: string | null;
@@ -38,7 +40,7 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   const shown = tab === "gitReview" && !isGit ? "files" : tab;
   return (
-    <nav className="flex items-stretch gap-[2px] self-stretch px-[3px] py-[3px]" aria-label="Files and Git">
+    <nav className="flex items-stretch gap-[2px] self-stretch px-[3px] py-[3px]" aria-label="Files, Git and Browser">
       {tabs.map(({ id, label }) => (
         <button
           key={id}
@@ -57,7 +59,7 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
 
 /**
  * The desktop drawer behind the toolbar's right-panel button: the file
- * explorer and Git for whichever workspace is active. A clicked file opens as
+ * explorer, Git and a browser for whichever workspace is active. A clicked file opens as
  * a top-row tab beside the workspace's sessions (`fileTabs.ts`). Terminals are session
  * tabs, not drawer content. Git shows only for a git checkout. It belongs to
  * the app, not to a session's saved layout, so it stays open across chats and
@@ -73,7 +75,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
   const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
   return (
-    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col border-l border-l-overlay-0 bg-panel-bg" data-testid="workspace-tools" aria-label="Files and Git">
+    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col border-l border-l-overlay-0 bg-panel-bg" data-testid="workspace-tools" aria-label="Files, Git and Browser">
       <div className="flex items-center gap-2 px-3 py-[3px]">
         <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
@@ -94,6 +96,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
           />
         ) : missing)}
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}
+        {tab === "browser" && (workspaceId ? <WorkspaceBrowser key={workspaceId} tabId={`drawer\n${workspaceId}`} initialUrl="" /> : missing)}
       </div>
     </aside>
   );

@@ -158,9 +158,12 @@ there, not here.
     the rule below still holds; that slice rewrites it in the same commit.
   - Naming: Projects are folders; Workspaces are a project's checkout and
     its worktrees; sessions live under a workspace.
-  - The right drawer (`WorkspaceTools.tsx`) holds the file explorer and Git
-    only: no Terminal (terminals are tabs), and Git only for a git
-    workspace. It is app-level, not part of a session's layout, and follows
+  - The right drawer (`WorkspaceTools.tsx`) holds the file explorer, Git
+    and a Browser (`WorkspaceBrowser.tsx`, opened by hand; a link clicked in
+    a terminal opens a `kind: "browser"` top-row tab instead, Cmd/Ctrl+click
+    the OS browser; in the desktop app a page is a native child webview
+    placed over its pane by `browser.rs`, never an iframe): no Terminal
+    (terminals are tabs), and Git only for a git workspace. It is app-level, not part of a session's layout, and follows
     the clicked workspace. A clicked file opens as a top-row tab after the
     workspace's sessions (the Git drawer's "Open as tab" adds the review the
     same way), in one order shared by the strip, drag and the Ctrl+Space
@@ -261,7 +264,7 @@ there, not here.
     best-effort and never blocks the keystroke.
   - One top row, three sections: brand ("perch" + the sidebar toggle, as
     wide as the sidebar so the tabs start above the main column), the tabs,
-    then the drawer section: the Files/Git switch (`WorkspaceToolsTabs`,
+    then the drawer section: the Files/Git/Browser switch (`WorkspaceToolsTabs`,
     only while the drawer is open, as wide as the drawer) and the drawer
     toggle (a right-panel icon). Both toggles are borderless
     and transparent, filled only on hover. In the macOS app that row
