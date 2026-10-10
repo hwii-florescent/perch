@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The UI is served by the in-process core over loopback, so IPC is granted to that origin. Notifications (the plugin replaces window.Notification, which WKWebView does not deliver on its own) window dragging (the top row is the title bar on macOS) the native folder picker (Add project) and opening a link in the OS browser only.",
-  "windows": ["main"],
+  "description": "The UI is served by the in-process core over loopback, so IPC is granted to that origin. Notifications (the plugin replaces window.Notification, which WKWebView does not deliver on its own) window dragging (the top row is the title bar on macOS) the native folder picker (Add project), opening a link in the OS browser and driving the built-in browser's webviews only. It is granted to the main webview, not the window: the browser tabs are child webviews of the same window and must get no IPC.",
+  "webviews": ["main"],
   "remote": { "urls": ["http://127.0.0.1:*/*"] },
-  "permissions": ["notification:default", "core:window:allow-start-dragging", "dialog:allow-open", "allow-open-external"]
+  "permissions": ["notification:default", "core:window:allow-start-dragging", "dialog:allow-open", "allow-open-external", "allow-browser-show", "allow-browser-hide", "allow-browser-close", "allow-browser-go", "allow-browser-action", "allow-browser-url"]
 }

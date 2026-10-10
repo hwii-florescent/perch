@@ -8,7 +8,8 @@ build = "build.rs"
 
 [dependencies]
 perch-core = { path = "../perch-core" }
-tauri = { version = "2", features = [] }
+# `unstable` is `Window::add_child`, the child webviews of the built-in browser (src/browser.rs).
+tauri = { version = "2", features = ["unstable"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

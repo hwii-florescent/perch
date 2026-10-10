@@ -21,10 +21,12 @@ const LOOPBACK = /^(localhost|127\.[\d.]+|0\.0\.0\.0|\[::1?\])$/;
 /** True for a URL that names this machine's loopback, which a page loaded here cannot reach on another host. */
 export const isLoopback = (url: string) => LOOPBACK.test(parseUrl(url)?.hostname ?? "");
 
+/** The desktop app's IPC, absent in a plain browser (the headless web server). */
+export const tauriInvoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+
 /** Open `url` in the OS default browser. The desktop app has no `window.open`, so it asks the shell. */
 export function openExternal(url: string): void {
-  const invoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
-  if (invoke) void invoke("open_external", { url }).catch(() => {});
+  if (tauriInvoke) void tauriInvoke("open_external", { url }).catch(() => {});
   // `noopener` denies the new tab a `window.opener` back-reference to this app.
   // pi-lens-ignore: no-open-redirect
   else window.open(url, "_blank", "noopener");

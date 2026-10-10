@@ -5,6 +5,8 @@
 //! `http://127.0.0.1:<port>/`.  All logic lives in perch-core; Tauri only
 //! supplies the native window chrome.
 
+mod browser;
+
 use perch_core::boot::{
     adopt_login_shell_path, augment_path_with_local_bin, boot, resolve_web_dist_dir,
     scrub_nested_agent_env,
@@ -164,7 +166,15 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![open_external])
+        .invoke_handler(tauri::generate_handler![
+            open_external,
+            browser::browser_show,
+            browser::browser_hide,
+            browser::browser_close,
+            browser::browser_go,
+            browser::browser_action,
+            browser::browser_url
+        ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;

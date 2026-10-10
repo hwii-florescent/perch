@@ -173,7 +173,7 @@ export function SplitCanvas() {
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
           ) : tab.kind === "browser" ? (
-            <WorkspaceBrowser initialUrl={tab.path} />
+            <WorkspaceBrowser tabId={id} initialUrl={tab.path} />
           ) : (
             <WorkspaceFilesView layout="editor" workspaceId={tab.workspaceId} initialPath={tab.path} />
           )}
