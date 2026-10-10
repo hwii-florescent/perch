@@ -2,7 +2,7 @@ import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { useFileTabs } from "../fileTabs";
 import { segment } from "./ui/segment";
-import { WorkspaceBrowser } from "./WorkspaceBrowser";
+import { DrawerBrowser } from "./DrawerBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
@@ -96,7 +96,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
           />
         ) : missing)}
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}
-        {tab === "browser" && (workspaceId ? <WorkspaceBrowser key={workspaceId} tabId={`drawer\n${workspaceId}`} initialUrl="" /> : missing)}
+        {tab === "browser" && (workspaceId ? <DrawerBrowser key={workspaceId} workspaceId={workspaceId} /> : missing)}
       </div>
     </aside>
   );

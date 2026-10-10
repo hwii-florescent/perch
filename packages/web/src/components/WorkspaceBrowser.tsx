@@ -15,10 +15,12 @@ const COVERS = '[role="dialog"], [role="menu"], .pane-context-menu__item';
  * over `.host` (`browser.rs`): a real browser, so GitHub and every other site works. Without
  * Tauri (the headless web server) it is a sandboxed iframe, which sites that forbid framing
  * show blank; Open externally is always one click away. */
-export function WorkspaceBrowser({ tabId, initialUrl }: {
+export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   tabId: string;
   /** "" shows an empty address bar (the drawer's browser) and no page until one is entered. */
   initialUrl: string;
+  /** Told each address the page reaches, so its owner can keep it. */
+  onUrl?: (url: string) => void;
 }) {
   const id = browserId(tabId);
   const [url, setUrl] = useState(initialUrl);
@@ -30,6 +32,9 @@ export function WorkspaceBrowser({ tabId, initialUrl }: {
   const started = url !== "";
   const latest = useRef(url);
   latest.current = url;
+  const report = useRef(onUrl);
+  report.current = onUrl;
+  useEffect(() => { if (url) report.current?.(url); }, [url]);
 
   // A page this view opened before it was unmounted (switching drawer tabs) is still there.
   useEffect(() => {
