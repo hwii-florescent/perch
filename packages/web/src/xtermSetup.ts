@@ -52,6 +52,7 @@
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openTerminalLink } from "./links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { TerminalProfile } from "@perch/shared";
 import { parseOsc52 } from "./osc52";
@@ -251,20 +252,15 @@ export function createPerchTerminal(
     // Proposed-API addon; a version skew shouldn't take the pane down.
   }
 
-  // Clickable links. Opening directly (no confirmation dialog) is deliberate:
+  // Clickable links (plain URLs and OSC 8 hyperlinks): click opens perch's browser tab,
+  // Cmd/Ctrl+click the OS browser (links.ts). Opening directly (no confirmation dialog) is deliberate:
   // a click is itself the explicit user action, exactly like clicking a link
   // in iTerm2 or any other terminal — the CLIs' own output already contains
   // URLs a user is expected to open (docs, PR links, etc.), and interposing a
   // confirm() on every click would be friction with no real protection (the
-  // same URL is right there in the scrollback either way). `noopener` denies
-  // the new tab a `window.opener` back-reference to this app.
-  term.loadAddon(
-    new WebLinksAddon((_event, uri) => {
-      // WebLinksAddon's default matcher permits only http:// and https://.
-      // pi-lens-ignore: no-open-redirect
-      window.open(uri, "_blank", "noopener");
-    }),
-  );
+  // same URL is right there in the scrollback either way).
+  term.options.linkHandler = { activate: (event, uri) => openTerminalLink(event, uri) };
+  term.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(event, uri)));
 
   // OSC 52 clipboard write. `vim "+y`, tmux copy-mode and many TUIs emit this
   // to push a yank into the *system* clipboard rather than relying on the

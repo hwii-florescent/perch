@@ -4,7 +4,7 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../st
 import { NewSessionPopover } from "../Sidebar";
 import { saveTabOrder } from "../tabOrder";
 import { useFileTabs, type FileTab } from "../fileTabs";
-import { activateTab, sessionLabel, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
+import { activateTab, sessionLabel, tabName, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
 import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
@@ -291,8 +291,9 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging, dragOve
     const document = s.documents[tab.workspaceId]?.[tab.path];
     return !review && document != null && document.content !== document.savedContent;
   });
-  const name = review ? "Changes" : tab.path.split("/").pop() || tab.path;
-  const testId = review ? `review-tab-${tab.workspaceId}` : `file-tab-${tab.path}`;
+  const browser = tab.kind === "browser";
+  const name = tabName(tab);
+  const testId = review ? `review-tab-${tab.workspaceId}` : browser ? "browser-tab" : `file-tab-${tab.path}`;
   return (
     <span className={TAB_SLOT}>
       <button
@@ -326,7 +327,7 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging, dragOve
       <button
         type="button"
         className={closeButton(active)}
-        data-testid={review ? `review-tab-close-${tab.workspaceId}` : `file-tab-close-${tab.path}`}
+        data-testid={review ? `review-tab-close-${tab.workspaceId}` : browser ? "browser-tab-close" : `file-tab-close-${tab.path}`}
         aria-label={`Close ${name}`}
         onClick={() => close(id)}
       >

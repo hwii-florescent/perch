@@ -5,6 +5,7 @@ import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { MIN_PANE_PX, useSplitSets, visibleSplit } from "../splitSets";
 import { activateTab, workspaceTabs } from "../workspaceTabs";
+import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
@@ -41,7 +42,7 @@ export function SplitCanvas() {
   const resources = new Map(entries.flatMap((entry) => entry.kind === "resource" ? [[entry.id, entry.tab] as const] : []));
   const fileShown = activeKey !== null && resources.has(activeKey);
   const activeId = fileShown ? activeKey : sessionId;
-  const editorShown = fileShown && resources.get(activeKey)?.kind !== "review";
+  const editorShown = fileShown && !resources.get(activeKey)?.kind;
   // File tabs can finish loading after activation; focus the editor, not its
   // search field. Session inputs are focused by Dockview after layout restore.
   useEffect(() => {
@@ -164,13 +165,15 @@ export function SplitCanvas() {
           key={id}
           className={cn("absolute top-0 bottom-0 z-10 flex bg-panel-bg", !split && "inset-0")}
           style={slot(id)}
-          data-testid={tab.kind === "review" ? "split-pane-review" : `split-pane-file-${tab.path}`}
+          data-testid={tab.kind === "review" ? "split-pane-review" : tab.kind === "browser" ? "split-pane-browser" : `split-pane-file-${tab.path}`}
           data-tab-id={id}
           onMouseDownCapture={() => focusResource(tab)}
           onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
+          ) : tab.kind === "browser" ? (
+            <WorkspaceBrowser initialUrl={tab.path} />
           ) : (
             <WorkspaceFilesView layout="editor" workspaceId={tab.workspaceId} initialPath={tab.path} />
           )}

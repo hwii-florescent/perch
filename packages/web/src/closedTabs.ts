@@ -26,7 +26,7 @@ export type ClosedTab = { closedAt: number } & (
       providerId?: string;
       title: string;
     }
-  | { kind: "file"; workspaceId: string; path: string; review?: boolean }
+  | { kind: "file"; workspaceId: string; path: string; review?: boolean; browser?: boolean }
 );
 
 /** A stored entry that is well formed and not older than the TTL. */
@@ -62,8 +62,8 @@ export function recordClosedTab(session: SessionSummary): void {
 }
 
 /** Remember a file or review tab that is being closed. */
-export function recordClosedFile(tab: { workspaceId: string; path: string; kind?: "review" }): void {
-  write([{ kind: "file", workspaceId: tab.workspaceId, path: tab.path, ...(tab.kind ? { review: true } : {}), closedAt: Date.now() }, ...read()]);
+export function recordClosedFile(tab: { workspaceId: string; path: string; kind?: "review" | "browser" }): void {
+  write([{ kind: "file", workspaceId: tab.workspaceId, path: tab.path, ...(tab.kind === "review" ? { review: true } : tab.kind === "browser" ? { browser: true } : {}), closedAt: Date.now() }, ...read()]);
 }
 
 /** Remove and return the newest entry `usable` accepts; entries it rejects are dropped too. */

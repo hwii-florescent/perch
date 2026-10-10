@@ -63,6 +63,25 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     )
 }
 
+/// Opens a terminal link in the OS default browser. The UI passes whatever the terminal
+/// printed, so only http(s) goes through (and `open` never sees a leading `-`).
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("only http(s) links can be opened".into());
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn main() {
     // `<exe> __perchd …` is the terminal daemon, not the app (see daemon.rs).
     perch_core::daemon::run_if_requested();
@@ -145,6 +164,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![open_external])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;

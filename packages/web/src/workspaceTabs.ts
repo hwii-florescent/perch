@@ -3,6 +3,7 @@ import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, us
 import { fileTabKey, useFileTabs, type FileTab } from "./fileTabs";
 import { applyStoredTabOrder } from "./tabOrder";
 import { useSplitSets } from "./splitSets";
+import { parseUrl } from "./links";
 
 /** One entry of the strip: a session (a terminal or agent) or an open resource.
  * `id` is the session id or `fileTabKey`, so one stored order covers both. */
@@ -47,9 +48,16 @@ export function sessionLabel(session: SessionSummary): string {
   return title.length > MAX_TAB_LABEL ? `${title.slice(0, MAX_TAB_LABEL - 1)}…` : title;
 }
 
+/** A resource tab's name: a file's basename, "Changes", or a page's host. */
+export function tabName(tab: FileTab): string {
+  if (tab.kind === "review") return "Changes";
+  if (tab.kind === "browser") return parseUrl(tab.path)?.host ?? tab.path;
+  return tab.path.split("/").pop() || tab.path;
+}
+
 export function entryLabel(entry: TabEntry): string {
   if (entry.kind === "session") return sessionLabel(entry.session);
-  return entry.tab.kind === "review" ? "Changes" : entry.tab.path.split("/").pop() || entry.tab.path;
+  return tabName(entry.tab);
 }
 
 export function activateTab(entry: TabEntry): void {

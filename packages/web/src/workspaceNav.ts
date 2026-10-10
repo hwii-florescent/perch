@@ -110,6 +110,6 @@ export function reopenClosedTab(): void {
   const tab = takeClosedTab((candidate) => !candidate.workspaceId || nests.has(candidate.workspaceId));
   if (!tab) return;
   if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
-  if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : undefined);
+  if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : tab.browser ? "browser" : undefined);
   else state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
 }

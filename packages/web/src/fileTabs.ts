@@ -4,22 +4,23 @@ import { readViewerStored, viewerKey } from "./viewer";
 import { recordClosedFile } from "./closedTabs";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
- * a file, or (`kind: "review"`) the workspace's change review. */
+ * a file, or (`kind: "review"`) the workspace's change review, or (`kind: "browser"`)
+ * a page in perch's browser, whose `path` is its URL. */
 export interface FileTab {
   workspaceId: string;
   /** The file's path; "" for a review. */
   path: string;
-  kind?: "review";
+  kind?: "review" | "browser";
 }
 
 // NUL cannot occur in a path, so a review never collides with a file.
-export const fileTabKey = (tab: FileTab) => `${tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.path}`;
+export const fileTabKey = (tab: FileTab) => `${tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.path}`;
 
 interface FileTabsState {
   tabs: FileTab[];
   /** The file shown in the main area instead of the session, if any. */
   active: string | null;
-  open: (workspaceId: string, path: string, kind?: "review") => void;
+  open: (workspaceId: string, path: string, kind?: FileTab["kind"]) => void;
   close: (key: string) => void;
   /** Back to the session view (a session tab was clicked or switched to). */
   showSession: () => void;
@@ -32,7 +33,7 @@ function loadTabs(): FileTab[] {
   try {
     const parsed: unknown = JSON.parse(readViewerStored(STORAGE_KEY) ?? "[]");
     return Array.isArray(parsed)
-      ? parsed.filter((tab): tab is FileTab => typeof tab?.workspaceId === "string" && typeof tab?.path === "string" && (tab.kind === undefined || tab.kind === "review"))
+      ? parsed.filter((tab): tab is FileTab => typeof tab?.workspaceId === "string" && typeof tab?.path === "string" && (tab.kind === undefined || tab.kind === "review" || tab.kind === "browser"))
       : [];
   } catch {
     return [];

@@ -84,7 +84,8 @@ const isLocal = (workspaceId: string) =>
   usePerchStore.getState().workspaces?.find((workspace) => workspace.id === workspaceId)?.hostId === "local";
 
 async function openTab(tab: FileTab): Promise<void> {
-  if (!supported() || !isLocal(tab.workspaceId)) return;
+  // A browser page has no core resource; it stays a local tab.
+  if (tab.kind === "browser" || !supported() || !isLocal(tab.workspaceId)) return;
   const review = tab.kind === "review";
   const reply = await ask((requestId) => ({
     type: "surface.open",
@@ -273,7 +274,7 @@ async function sync(workspaceId: string): Promise<void> {
     requestId,
     viewerId: viewerId(),
     workspaceId,
-    files: tabs.filter((tab) => tab.kind !== "review").map((tab) => tab.path),
+    files: tabs.filter((tab) => !tab.kind).map((tab) => tab.path),
     sessionOrder: key ? storedTabOrder(key).filter((id) => !id.includes("\n")) : [],
   }));
   await Promise.all(tabs.map(openTab));
