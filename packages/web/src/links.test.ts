@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePerchStore } from "./store";
 import { useFileTabs } from "./fileTabs";
-import { isLoopback, openTerminalLink, webUrl } from "./links";
+import { openTerminalLink, webUrl } from "./links";
 
 describe("terminal links", () => {
   beforeEach(() => {
@@ -15,8 +15,6 @@ describe("terminal links", () => {
     expect(webUrl("file:///etc/passwd")).toBeNull();
     expect(webUrl("javascript:alert(1)")).toBeNull();
     expect(webUrl("not a url")).toBeNull();
-    expect(isLoopback("http://localhost:3000/")).toBe(true);
-    expect(isLoopback("https://example.com/")).toBe(false);
   });
 
   it("click opens a browser tab, Cmd+click the OS browser", () => {
@@ -39,13 +37,12 @@ describe("terminal links", () => {
     expect(useFileTabs.getState().tabs).toHaveLength(1);
   });
 
-  it("ignores non-web links and a remote workspace's localhost", () => {
+  it("ignores non-web links", () => {
     usePerchStore.setState({
       activeWorkspaceId: "w2",
       workspaces: [{ id: "w2", hostId: "dev", path: "/p" }] as never,
     });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
-    openTerminalLink({ metaKey: false, ctrlKey: false }, "http://localhost:3000/");
     openTerminalLink({ metaKey: true, ctrlKey: false }, "file:///etc/passwd");
     expect(useFileTabs.getState().tabs).toEqual([]);
     expect(open).not.toHaveBeenCalled();

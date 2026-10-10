@@ -16,11 +16,6 @@ export function webUrl(uri: string): string | null {
   return url && (url.protocol === "http:" || url.protocol === "https:") ? url.href : null;
 }
 
-const LOOPBACK = /^(localhost|127\.[\d.]+|0\.0\.0\.0|\[::1?\])$/;
-
-/** True for a URL that names this machine's loopback, which a page loaded here cannot reach on another host. */
-export const isLoopback = (url: string) => LOOPBACK.test(parseUrl(url)?.hostname ?? "");
-
 /** The desktop app's IPC, absent in a plain browser (the headless web server). */
 export const tauriInvoke = (window as { __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 
@@ -38,8 +33,6 @@ export function openTerminalLink(event: Pick<MouseEvent, "metaKey" | "ctrlKey">,
   const url = webUrl(uri);
   if (!url) return;
   const workspace = effectiveWorkspace(usePerchStore.getState());
-  // A remote workspace's localhost is not this machine's: opening it here would show the wrong server.
-  if (workspace && workspace.hostId !== "local" && isLoopback(url)) return;
   if (event.metaKey || event.ctrlKey || !workspace) openExternal(url);
   else useFileTabs.getState().open(workspace.id, url, "browser");
 }
