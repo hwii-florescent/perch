@@ -15,6 +15,7 @@ const { TabBar } = await import("./TabBar");
 const { WorkspaceOverview } = await import("./WorkspaceOverview");
 const { StatusDot } = await import("./StatusDot");
 const { AgentIcon } = await import("./AgentIcon");
+const { saveTabOrder } = await import("../tabOrder");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -174,6 +175,39 @@ it("a single-checkout project selects from its background, but not from its sess
   click(get("workspace-session-session"));
   expect(switchSession).toHaveBeenCalledExactlyOnceWith("session");
   expect(focus).not.toHaveBeenCalled();
+});
+
+it.each(["single", "worktree", "collapsed"])("%s workspace badges follow the strip, including live drag reordering", (kind) => {
+  const owner = kind === "single" ? workspace : worktree;
+  const older = { ...session, workspaceId: owner.id, cwd: owner.path };
+  const newer = { ...older, id: "newer", createdAt: 2 };
+  usePerchStore.setState({ workspaces: kind === "single" ? [workspace] : [workspace, worktree], sessions: [newer, older], sessionId: newer.id, activeWorkspaceId: owner.id });
+  render(<><WorkspaceOverview /><TabBar /></>);
+  if (kind === "collapsed") click(get("project-toggle-project"));
+  const badgeIds = () => [...get("session-dots").querySelectorAll("button")].map((button) => button.dataset.testid!.replace("workspace-session-", ""));
+  const tabIds = () => [...host.querySelectorAll('[data-testid^="tab-"][draggable="true"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
+  expect(badgeIds()).toEqual([older.id, newer.id]);
+  expect(badgeIds()).toEqual(tabIds());
+  act(() => saveTabOrder(`remote:ws:${owner.id}`, [newer.id, "closed-tab", older.id]));
+  expect(badgeIds()).toEqual([newer.id, older.id]); // updates without remount or switching
+});
+
+it("workspace hints match jump targets and temporarily reveal collapsed projects", () => {
+  const hidden = { ...worktree, id: "hidden", hidden: true };
+  usePerchStore.setState({ workspaces: [workspace, worktree, hidden], settings: { keybindings: { "nests.jump1": "ctrl+shift+1", "nests.jump2": "ctrl+shift+2" } } as never });
+  render(<WorkspaceOverview />);
+  click(get("project-toggle-project"));
+  expect(document.querySelector('[data-testid="workspace-entry-tree"]')).toBeNull();
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", ctrlKey: true, shiftKey: true })));
+  expect(get("workspace-shortcut-main").textContent).toBe("1");
+  expect(get("workspace-shortcut-tree").textContent).toBe("2");
+  expect(document.querySelector('[data-testid="workspace-shortcut-hidden"]')).toBeNull();
+  jumpToNest(Number(get("workspace-shortcut-tree").textContent));
+  expect(focus).toHaveBeenCalledExactlyOnceWith("tree");
+  act(() => document.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", ctrlKey: true })));
+  expect(document.querySelector("kbd")).toBeNull();
+  expect(document.querySelector('[data-testid="workspace-entry-tree"]')).toBeNull();
+  expect(JSON.parse(localStorage.getItem("perch.sidebar.collapsedProjects")!)).toEqual(["project"]);
 });
 
 it("status rings retain every status and select the actual harness rather than a stale hosted agent", () => {

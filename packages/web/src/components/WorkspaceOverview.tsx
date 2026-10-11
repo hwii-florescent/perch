@@ -17,7 +17,10 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
-import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, sessionsForWorkspace, workspacesForProject } from "../workspaceNav";
+import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, orderedNests, sessionsForWorkspace, workspacesForProject } from "../workspaceNav";
+import { workspaceTabs } from "../workspaceTabs";
+import { TAB_ORDER_EVENT } from "../tabOrder";
+import { useNestShortcutHints } from "../keybinds";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
 // `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
@@ -255,6 +258,23 @@ export interface WorkspaceOverviewProps {
 }
 
 export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOverviewProps) {
+  const nestHints = useNestShortcutHints();
+  const showNestHints = nestHints.some(Boolean);
+  const numberedNests = orderedNests().slice(0, nestHints.length);
+  function nestHint(workspaceId: string) {
+    const label = nestHints[numberedNests.findIndex((nest) => nest.id === workspaceId)];
+    return label ? <kbd className="ml-auto shrink-0 rounded-ui border border-overlay-1 bg-surface-0 px-1.5 text-[11px] leading-[18px] text-fg [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
+  }
+  const [, refreshTabOrder] = useState(0);
+  useEffect(() => {
+    const refresh = () => refreshTabOrder((version) => version + 1);
+    window.addEventListener(TAB_ORDER_EVENT, refresh);
+    return () => window.removeEventListener(TAB_ORDER_EVENT, refresh);
+  }, []);
+  function tabOrderedSessions(workspace: WorkspaceRecord): SessionSummary[] {
+    return workspaceTabs({ ...usePerchStore.getState(), activeHostId: workspace.hostId, activeWorkspaceId: workspace.id }, [])
+      .flatMap((entry) => entry.kind === "session" ? [entry.session] : []);
+  }
   const activeHostId = usePerchStore((state) => state.activeHostId);
   const projects = usePerchStore((state) => state.workspaceProjects);
   const workspaces = usePerchStore((state) => state.workspaces);
@@ -719,7 +739,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto px-[3px] py-[3px]" data-testid="project-list">
-          {organize === "list" ? listView : <>
+          {organize === "list" && !showNestHints ? listView : <>
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);
@@ -727,7 +747,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const projectJobs = project.hostId === "local"
               ? worktreeJobs.filter((job) => job.repoPath === project.repoPath || job.repoPath === project.path)
               : [];
-            const projectCollapsed = collapsed.includes(project.id);
+            const projectCollapsed = collapsed.includes(project.id) && !showNestHints;
             const single = singleWorkspaceOf(project);
             const projectSessions = sessionsForProject(project.id);
             // With nothing to fold away, the header opens the checkout instead.
@@ -794,10 +814,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   {single?.branch && single.branch !== (project.name || basename(project.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{single.branch}</span>}
                   {single?.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
                   {collapsible && <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />}
+                  {single && nestHint(single.id)}
                 </button>
                 )}
                 {showHeaderDots && (
-                  <SessionDots sessions={projectSessions} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
+                  <SessionDots sessions={allWorkspaces.flatMap(tabOrderedSessions)} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
                 )}
                 <button
                   type="button"
@@ -913,6 +934,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{workspace.branch}</span>}
                             </span>
                             {workspace.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
+                            {nestHint(workspace.id)}
                             {/* Only what needs attention; "ready" is the norm. */}
                             {(workspace.pinned || workspace.state === "sleeping") && (
                               <span className="shrink-0 text-[0.58rem] text-subtext-0">
@@ -921,7 +943,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             )}
                           </button>
                           {sessionView === "compact" && workspaceSessions.length > 0 && (
-                            <SessionDots sessions={workspaceSessions} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
+                            <SessionDots sessions={tabOrderedSessions(workspace)} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
                           )}
                           </div>
                           )}

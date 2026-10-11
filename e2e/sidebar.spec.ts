@@ -8,7 +8,7 @@ import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { startChat } from "./projects";
+import { addProject, startChat } from "./projects";
 import { execFileSync } from "node:child_process";
 
 async function open(page: Page): Promise<void> {
@@ -34,7 +34,15 @@ test.describe("Perch sidebar", () => {
     await open(page);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-dots-"));
     try {
+    const first = await startChat(page, "terminal", dir);
     const id = await startChat(page, "terminal", dir);
+    const badges = page.getByTestId("session-dots").filter({ has: page.getByTestId(`workspace-session-${first}`) });
+    const ids = () => badges.locator("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")!.replace("workspace-session-", "")));
+    expect(await ids()).toEqual([first, id]);
+    await page.getByTestId(`tab-${id}`).dragTo(page.getByTestId(`tab-${first}`));
+    await expect.poll(ids).toEqual([id, first]);
+    await page.reload({ waitUntil: "networkidle" });
+    await expect.poll(ids).toEqual([id, first]);
     const dot = page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`);
     await expect(dot).toHaveClass(/workspace-entry__session--active/);
     await expect(page.locator(".workspace-entry__sessions")).toHaveCount(0);
@@ -47,6 +55,39 @@ test.describe("Perch sidebar", () => {
     await expect(page.getByTestId("session-dots").getByTestId(`workspace-session-${id}`)).toBeVisible();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("2b. held workspace shortcut modifiers reveal the matching numbers", async ({ page }, testInfo) => {
+    const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-hints-")));
+    const paths = [path.join(fixture, "first"), path.join(fixture, "second")];
+    paths.forEach((dir) => fs.mkdirSync(dir));
+    try {
+      await open(page);
+      for (const dir of paths) await addProject(page, dir);
+      const entries = paths.map((dir) => page.locator(".workspace-entry").filter({ has: page.locator(`button[title="${dir}"]`) }));
+      for (const entry of entries) await expect(entry).toBeVisible();
+      const hints = page.locator('[data-testid^="workspace-shortcut-"]');
+      await expect(hints).toHaveCount(0);
+      await page.keyboard.down("Control");
+      await page.keyboard.down("Shift");
+      for (const entry of entries) await expect(entry.locator("kbd")).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("workspace-number-hints.png") });
+      const number = (await entries[0].locator("kbd").textContent())!;
+      await page.keyboard.press(`Digit${number}`);
+      await expect(entries[0].locator(".workspace-entry__button--active")).toBeVisible();
+      await page.keyboard.up("Shift");
+      await expect(hints).toHaveCount(0);
+      await page.keyboard.up("Control");
+      await page.keyboard.down("Shift"); // modifier order does not matter
+      await page.keyboard.down("Control");
+      await expect(entries[0].locator("kbd")).toBeVisible();
+      await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+      await expect(hints).toHaveCount(0);
+      await page.keyboard.up("Control");
+      await page.keyboard.up("Shift");
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
     }
   });
 

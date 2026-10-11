@@ -28,7 +28,7 @@
  * Direct shortcuts work from anywhere, even inside inputs, like a browser's.
  * `terminalKeyHandler` keeps xterm from also sending any of them to the PTY.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./store";
 import { activateTab, currentTabs } from "./workspaceTabs";
 import { getDockviewController } from "./dockview/dockviewController";
@@ -168,6 +168,45 @@ export function shortcutFor(e: KeyboardEvent, inTerm = false, mac = IS_MAC): Sho
     const spec = effectiveSpec(s, mac);
     return spec !== null && comboMatches(e, parseCombo(spec, mac));
   });
+}
+
+type HeldModifiers = Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">;
+
+/** Labels for the nest-jump keys whose modifiers are currently held. */
+export function nestShortcutHints(held: HeldModifiers | null, mac = IS_MAC): (string | null)[] {
+  return SHORTCUTS.filter((s) => s.range === NEST_JUMPS).map((s) => {
+    const spec = effectiveSpec(s, mac);
+    if (!held || !spec || !(held.ctrlKey || held.shiftKey || held.altKey || held.metaKey)) return null;
+    const combo = parseCombo(spec, mac);
+    return held.ctrlKey === combo.ctrl && held.shiftKey === combo.shift &&
+      held.altKey === combo.alt && held.metaKey === combo.cmd ? keyLabel(spec) : null;
+  });
+}
+
+/** Passive hints only: modifier presses still belong to the focused terminal/input. */
+export function useNestShortcutHints(): (string | null)[] {
+  const [held, setHeld] = useState<HeldModifiers | null>(null);
+  usePerchStore((state) => state.settings?.keybindings);
+  useEffect(() => {
+    const update = (event: KeyboardEvent) => {
+      const next = { ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey };
+      setHeld((current) => current?.ctrlKey === next.ctrlKey && current.shiftKey === next.shiftKey &&
+        current.altKey === next.altKey && current.metaKey === next.metaKey ? current : next);
+    };
+    const clear = () => setHeld(null);
+    const visibility = () => { if (document.hidden) clear(); };
+    document.addEventListener("keydown", update);
+    document.addEventListener("keyup", update);
+    window.addEventListener("blur", clear);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      document.removeEventListener("keydown", update);
+      document.removeEventListener("keyup", update);
+      window.removeEventListener("blur", clear);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  return nestShortcutHints(held);
 }
 
 /** Two shortcuts can fire on the same keystroke unless one is terminal-only and the other terminal-free. */

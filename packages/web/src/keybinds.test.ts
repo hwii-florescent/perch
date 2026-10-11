@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
-import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey } from "./keybinds";
+import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints } from "./keybinds";
 import { IS_MAC, comboMatches, formatCombo, normalizeCombo, parseCombo, recordCombo } from "./keyCombo";
 import { usePerchStore } from "./store";
 
@@ -44,6 +44,57 @@ it("cancels the leader on keyup without swallowing ordinary Space or text input"
   } finally {
     await act(async () => { root.unmount(); });
     env.IS_REACT_ACT_ENVIRONMENT = previous;
+    host.remove();
+  }
+});
+
+it("shows nest hints only for the held shortcut modifiers, including overrides", () => {
+  const held = { ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
+  const previous = usePerchStore.getState().settings;
+  try {
+    usePerchStore.setState({ settings: { keybindings: {} } as never });
+    expect(nestShortcutHints(held, true)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    expect(nestShortcutHints({ ...held, shiftKey: false }, true)).toEqual(Array(9).fill(null));
+    expect(nestShortcutHints(null, true)).toEqual(Array(9).fill(null));
+    expect(nestShortcutHints(held, false)).toEqual(Array(9).fill(null));
+    expect(nestShortcutHints({ ...held, ctrlKey: false, altKey: true }, false)[0]).toBe("1");
+    usePerchStore.setState({ settings: { keybindings: { "nests.jump1": "", "nests.jump2": "ctrl+shift+f2", "nests.jump3": "cmd+3" } } as never });
+    expect(nestShortcutHints(held, true).slice(0, 3)).toEqual([null, "F2", null]);
+    expect(nestShortcutHints({ ...held, ctrlKey: false, shiftKey: false, metaKey: true }, true)[2]).toBe("3");
+  } finally {
+    usePerchStore.setState({ settings: previous });
+  }
+});
+
+it("clears passive nest hints on key release, window blur and document hiding", async () => {
+  function Hints() { return createElement("span", null, useNestShortcutHints().filter(Boolean).join(" ")); }
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = env.IS_REACT_ACT_ENVIRONMENT;
+  const settings = usePerchStore.getState().settings;
+  env.IS_REACT_ACT_ENVIRONMENT = true;
+  usePerchStore.setState({ settings: { keybindings: { "nests.jump1": "ctrl+shift+1" } } as never });
+  await act(async () => { root.render(createElement(Hints)); });
+  const press = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", ctrlKey: true, shiftKey: true, cancelable: true }));
+  try {
+    await act(async () => { expect(press()).toBe(true); }); // never swallows the key
+    expect(host.textContent).toBe("1");
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", ctrlKey: true })); });
+    expect(host.textContent).toBe("");
+    await act(async () => { press(); });
+    await act(async () => { window.dispatchEvent(new Event("blur")); });
+    expect(host.textContent).toBe("");
+    await act(async () => { press(); });
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(host.textContent).toBe("");
+  } finally {
+    delete (document as unknown as { hidden?: boolean }).hidden;
+    await act(async () => { root.unmount(); });
+    env.IS_REACT_ACT_ENVIRONMENT = previous;
+    usePerchStore.setState({ settings });
     host.remove();
   }
 });
