@@ -22,6 +22,9 @@ export function StatusDot({ session, className }: StatusDotProps) {
   const { color } = DOT_GLYPH[state];
   const remembered = usePerchStore((s) => s.cliAgentBySession[session.id]);
   const provider = session.currentProviderId ?? remembered ?? session.cliProviderId ?? session.lastAgent;
+  // Preserve transparent brand artwork on a dark tile, like the self-contained
+  // Kilo/Droid marks, instead of recoloring it or washing it out on light themes.
+  const branded = provider === "claude" || provider === "claude-agent-teams" || provider === "omp";
   const classes = cn(
     "agent-status-dot",
     `agent-status-dot--${state}`,
@@ -31,7 +34,7 @@ export function StatusDot({ session, className }: StatusDotProps) {
 
   return (
     <span className={classes} style={{ borderColor: color }} data-provider={provider ?? "unknown"} title={`${provider ?? "Agent"} · ${state}`} aria-hidden="true">
-      <span className="inline-flex text-fg"><AgentIcon provider={provider} size={14} monochrome /></span>
+      <span className={cn("inline-flex text-fg", branded && "rounded-full bg-[#161616]")}><AgentIcon provider={provider} size={14} /></span>
     </span>
   );
 }

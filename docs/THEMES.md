@@ -54,8 +54,10 @@ RGB app palette: the terminal emulator resolves those colors.
 - Status badges use a stable `panel-bg` backing for the harness mark and a
   status-colored border. Focus/selection is an outside **neutral text-colored
   outline**, not a bright overlay fill obscuring the icon. The 32px hit target
-  and tight 18px badge are unchanged. Tiny transparent Claude/OMP marks use
-  the theme foreground; larger picker icons retain their brand colors.
+  and tight 18px badge are unchanged. Claude keeps its orange and OMP its
+  gradient, with a small dark backing behind those transparent marks so their
+  original colors stay legible in light themes. Naturally monochrome marks
+  (Codex, pi, etc.) follow the theme foreground.
 - `applyTheme()` sets native `color-scheme` as well as the color tokens, so
   light themes get light selects, form controls, and browser-managed chrome.
 

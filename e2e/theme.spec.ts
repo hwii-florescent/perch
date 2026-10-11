@@ -252,7 +252,14 @@ test.describe("Phase 1: theme system", () => {
           for (const [provider, color] of [["pi", p.yellow], ["claude", p.red], ["omp", p.teal]] as const) {
             const mark = area.locator(`.agent-status-dot[data-provider="${provider}"]`).first();
             await expect(mark).toHaveCSS("border-top-color", rgb(color));
-            await expect(mark.locator("path").first()).toHaveCSS("fill", rgb(p.text));
+            const path = mark.locator("path").first();
+            if (provider === "pi") {
+              await expect(path).toHaveCSS("fill", rgb(p.text));
+            } else {
+              await expect(mark.locator("svg").locator("..")).toHaveCSS("background-color", rgb("#161616"));
+              if (provider === "claude") await expect(path).toHaveCSS("fill", rgb("#d97757"));
+              else await expect(path).toHaveAttribute("fill", /^url\(#[^)]+\)$/);
+            }
           }
 
           if (!phone) {

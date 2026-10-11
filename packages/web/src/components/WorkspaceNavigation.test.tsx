@@ -261,15 +261,18 @@ it("observed foreground identity overrides the launcher without changing its sav
   expect(usePerchStore.getState().cliAgentBySession.session).toBe("terminal");
 });
 
-it("small transparent harness marks inherit the theme while pickers retain brand colors", () => {
+it("badges retain original brand colors on a contrast-safe backing; monochrome marks follow the theme", () => {
   for (const provider of ["claude", "claude-agent-teams", "omp"]) {
     render(<StatusDot session={{ ...session, currentProviderId: provider }} />);
-    expect(host.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
+    const path = host.querySelector("path")!;
+    expect(path.getAttribute("fill")).toMatch(provider === "omp" ? /^url\(#/ : /^#D97757$/);
+    expect(path.closest("svg")!.parentElement!.classList.contains("bg-[#161616]")).toBe(true);
     render(<AgentIcon provider={provider} />);
-    const fill = host.querySelector("path")?.getAttribute("fill");
-    expect(fill).not.toBe("currentColor");
-    expect(fill).toMatch(provider === "omp" ? /^url\(#/ : /^#D97757$/);
+    expect(host.querySelector("path")?.getAttribute("fill")).toMatch(provider === "omp" ? /^url\(#/ : /^#D97757$/);
   }
+  render(<StatusDot session={{ ...session, currentProviderId: "pi" }} />);
+  expect(host.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
+  expect(host.querySelector("svg")!.parentElement!.classList.contains("bg-[#161616]")).toBe(false);
 });
 
 it("all catalog harnesses have bundled artwork; custom and unknown harnesses have honest fallbacks", () => {
