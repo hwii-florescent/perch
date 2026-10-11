@@ -1,18 +1,10 @@
 /**
- * themes.ts — herdr-parity theme system (Phase 0 + Phase 1).
- *
- * `Palette` is the 16-token semantic color system lifted from herdr
- * (`herdr-analysis-report.md` §5.15: `accent, panel_bg, surface0, surface1,
- * surface_dim, overlay0, overlay1, text, subtext0, mauve, green, yellow,
- * red, blue, teal, peach`). `THEMES` holds all 18 herdr built-in themes,
- * transcribed verbatim (RGB -> hex) from that report's palette table, plus
- * perch's own monotone look (`"perch"`), the default. See `default_theme()`
- * in `crates/perch-core/src/{protocol,settings}.rs` for the Rust side of this
- * default, and `applyTheme()`'s fallback below for the client-side one.
- *
- * `applyTheme(name)` sets each token as a CSS custom property on
- * `document.documentElement.style`, which is all `styles/` needs since
- * every themed rule reads its color via `var(--token)`.
+ * App palettes, based on Herdr's theme set and the original themes' UI colors.
+ * Sources and role mappings: docs/THEMES.md. Foreground/comment colors are not
+ * backgrounds: surface tokens must remain readable in menus and selected rows.
+ * `resolveTheme` adapts low-contrast foregrounds for UI-sized text; `THEMES`
+ * keeps the source colors. Terminal rendering still uses the server profile,
+ * not these app tokens. The default name agrees with Rust's `default_theme()`.
  */
 
 export interface Palette {
@@ -44,22 +36,21 @@ export const PERCH_DEFAULT: Palette = {
   surface1: "#333333",
   surfaceDim: "#1c1c1c",
   overlay0: "#3a3a3a",
-  overlay1: "#7a7a7a",
+  overlay1: "#9b9b9b",
   text: "#d8d8d8",
-  subtext0: "#9a9a9a",
+  subtext0: "#9b9b9b",
   mauve: "#a993c9",
   green: "#7fb685",
   yellow: "#d3b46a",
-  red: "#d77a7a",
+  red: "#df8c8c",
   blue: "#7aa2d7",
   teal: "#7fb8b8",
   peach: "#d39a6a",
 };
 
 /**
- * All 18 herdr built-in themes, transcribed verbatim (RGB -> hex) from
- * `herdr-analysis-report.md` §5.15's palette table, plus `"perch"` as a
- * 19th entry (perch's own monotone look, the default).
+ * Herdr's 18 built-in themes plus perch's neutral default. Named colors come
+ * from the upstream palettes; surfaces use UI backgrounds, not syntax colors.
  *
  * Note on `terminal`: herdr's 16-color "terminal" theme is defined via named
  * ANSI colors (`Blue`, `Reset`, `DarkGray`, `Gray`, `White`, `LightRed`, …)
@@ -82,38 +73,38 @@ export const THEMES: Record<string, Palette> = {
   perch: PERCH_DEFAULT,
   catppuccin: CATPPUCCIN_DEFAULT,
   "catppuccin-latte": {
-    accent: "#1e66f5", panelBg: "#eff1f5", surface0: "#ccd0da", surface1: "#bcc0cc",
+    accent: "#1e66f5", panelBg: "#eff1f5", surface0: "#e6e9ef", surface1: "#ccd0da",
     surfaceDim: "#e6e9ef", overlay0: "#9ca0b0", overlay1: "#8c8fa1", text: "#4c4f69",
     subtext0: "#6c6f85", mauve: "#8839ef", green: "#40a02b", yellow: "#df8e1d",
     red: "#d20f39", blue: "#1e66f5", teal: "#179299", peach: "#fe640b",
   },
   terminal: {
-    accent: "#0000ee", panelBg: "#000000", surface0: "#000000", surface1: "#7f7f7f",
-    surfaceDim: "#7f7f7f", overlay0: "#e5e5e5", overlay1: "#ffffff", text: "#e5e5e5",
+    accent: "#0000ee", panelBg: "#000000", surface0: "#121212", surface1: "#1c1c1c",
+    surfaceDim: "#000000", overlay0: "#e5e5e5", overlay1: "#ffffff", text: "#e5e5e5",
     subtext0: "#e5e5e5", mauve: "#e5e5e5", green: "#00cd00", yellow: "#cdcd00",
     red: "#ff0000", blue: "#0000ee", teal: "#00cdcd", peach: "#cdcd00",
   },
   "tokyo-night": {
-    accent: "#7aa2f7", panelBg: "#1a1b26", surface0: "#24283b", surface1: "#414868",
+    accent: "#7aa2f7", panelBg: "#1a1b26", surface0: "#24283b", surface1: "#292e42",
     surfaceDim: "#1a1b26", overlay0: "#565f89", overlay1: "#697196", text: "#c0caf5",
     subtext0: "#a9b1d6", mauve: "#bb9af7", green: "#9ece6a", yellow: "#e0af68",
     red: "#f7768e", blue: "#7aa2f7", teal: "#7dcfff", peach: "#ff9e64",
   },
   "tokyo-night-day": {
-    accent: "#2e7de9", panelBg: "#e1e2e7", surface0: "#c4c8da", surface1: "#a8aecb",
-    surfaceDim: "#d2d3da", overlay0: "#8990b3", overlay1: "#68709a", text: "#3760bf",
-    subtext0: "#44507b", mauve: "#7847bd", green: "#587539", yellow: "#8c6c3e",
-    red: "#f52a65", blue: "#2e7de9", teal: "#118c74", peach: "#b15c00",
+    accent: "#2959aa", panelBg: "#e6e7ed", surface0: "#d6d8df", surface1: "#e1e2e8",
+    surfaceDim: "#d6d8df", overlay0: "#c1c2c7", overlay1: "#707280", text: "#343b59",
+    subtext0: "#4a5272", mauve: "#5a3e8e", green: "#485e30", yellow: "#8f5e15",
+    red: "#942f2f", blue: "#2959aa", teal: "#006c86", peach: "#965027",
   },
   dracula: {
-    accent: "#bd93f9", panelBg: "#282a36", surface0: "#44475a", surface1: "#6272a4",
-    surfaceDim: "#282a36", overlay0: "#6272a4", overlay1: "#828cb4", text: "#f8f8f2",
+    accent: "#bd93f9", panelBg: "#282a36", surface0: "#343746", surface1: "#44475a",
+    surfaceDim: "#21222c", overlay0: "#6272a4", overlay1: "#828cb4", text: "#f8f8f2",
     subtext0: "#d2d2dc", mauve: "#ff79c6", green: "#50fa7b", yellow: "#f1fa8c",
     red: "#ff5555", blue: "#8be9fd", teal: "#8be9fd", peach: "#ffb86c",
   },
   nord: {
     accent: "#88c0d0", panelBg: "#2e3440", surface0: "#3b4252", surface1: "#434c5e",
-    surfaceDim: "#2e3440", overlay0: "#4c566a", overlay1: "#646e82", text: "#eceff4",
+    surfaceDim: "#2e3440", overlay0: "#4c566a", overlay1: "#646e82", text: "#d8dee9",
     subtext0: "#d8dee9", mauve: "#b48ead", green: "#a3be8c", yellow: "#ebcb8b",
     red: "#bf616a", blue: "#81a1c1", teal: "#8fbcbb", peach: "#d08770",
   },
@@ -136,27 +127,27 @@ export const THEMES: Record<string, Palette> = {
     red: "#e06c75", blue: "#61afef", teal: "#56b6c2", peach: "#d19a66",
   },
   "one-light": {
-    accent: "#4078f2", panelBg: "#fafafa", surface0: "#f0f0f1", surface1: "#e5e5e6",
+    accent: "#4078f2", panelBg: "#fafafa", surface0: "#eaeaeb", surface1: "#e5e5e6",
     surfaceDim: "#f5f5f6", overlay0: "#a0a1a7", overlay1: "#686b77", text: "#383a42",
     subtext0: "#686b77", mauve: "#a626a4", green: "#50a14f", yellow: "#c18401",
     red: "#e45649", blue: "#4078f2", teal: "#0184bc", peach: "#986801",
   },
   solarized: {
-    accent: "#268bd2", panelBg: "#002b36", surface0: "#073642", surface1: "#586e75",
-    surfaceDim: "#002b36", overlay0: "#586e75", overlay1: "#657b83", text: "#93a1a1",
+    accent: "#268bd2", panelBg: "#002b36", surface0: "#073642", surface1: "#004454",
+    surfaceDim: "#00212b", overlay0: "#586e75", overlay1: "#657b83", text: "#93a1a1",
     subtext0: "#839496", mauve: "#d33682", green: "#859900", yellow: "#b58900",
     red: "#dc322f", blue: "#268bd2", teal: "#2aa198", peach: "#cb4b16",
   },
   "solarized-light": {
-    accent: "#268bd2", panelBg: "#fdf6e3", surface0: "#eee8d5", surface1: "#93a1a1",
+    accent: "#268bd2", panelBg: "#fdf6e3", surface0: "#eee8d5", surface1: "#eee8d5",
     surfaceDim: "#eee8d5", overlay0: "#93a1a1", overlay1: "#586e75", text: "#657b83",
-    subtext0: "#5c6869", mauve: "#d33682", green: "#859900", yellow: "#b58900",
+    subtext0: "#586e75", mauve: "#d33682", green: "#859900", yellow: "#b58900",
     red: "#dc322f", blue: "#268bd2", teal: "#2aa198", peach: "#cb4b16",
   },
   kanagawa: {
     accent: "#7e9cd8", panelBg: "#1f1f28", surface0: "#2a2a37", surface1: "#363646",
     surfaceDim: "#1f1f28", overlay0: "#727169", overlay1: "#87867d", text: "#dcd7ba",
-    subtext0: "#c8c3aa", mauve: "#957fb8", green: "#76946a", yellow: "#c0a36e",
+    subtext0: "#c8c093", mauve: "#957fb8", green: "#76946a", yellow: "#c0a36e",
     red: "#c34043", blue: "#7e9cd8", teal: "#7fb4ca", peach: "#ffa066",
   },
   "kanagawa-lotus": {
@@ -168,17 +159,17 @@ export const THEMES: Record<string, Palette> = {
   "rose-pine": {
     accent: "#c4a7e7", panelBg: "#191724", surface0: "#1f1d2e", surface1: "#26233a",
     surfaceDim: "#191724", overlay0: "#6e6a86", overlay1: "#908caa", text: "#e0def4",
-    subtext0: "#c8c5dc", mauve: "#c4a7e7", green: "#31748f", yellow: "#f6c177",
-    red: "#eb6f92", blue: "#31748f", teal: "#9ccfd8", peach: "#ea9a97",
+    subtext0: "#908caa", mauve: "#c4a7e7", green: "#31748f", yellow: "#f6c177",
+    red: "#eb6f92", blue: "#31748f", teal: "#9ccfd8", peach: "#ebbcba",
   },
   "rose-pine-dawn": {
     accent: "#907aa9", panelBg: "#faf4ed", surface0: "#f2e9e1", surface1: "#fffaf3",
-    surfaceDim: "#f2e9e1", overlay0: "#9893a5", overlay1: "#797593", text: "#464261",
+    surfaceDim: "#f2e9e1", overlay0: "#9893a5", overlay1: "#797593", text: "#575279",
     subtext0: "#797593", mauve: "#907aa9", green: "#286983", yellow: "#ea9d34",
     red: "#b4637a", blue: "#286983", teal: "#56949f", peach: "#d7827e",
   },
   vesper: {
-    accent: "#ffc799", panelBg: "#1a1a1a", surface0: "#232323", surface1: "#282828",
+    accent: "#ffc799", panelBg: "#101010", surface0: "#232323", surface1: "#282828",
     surfaceDim: "#101010", overlay0: "#5c5c5c", overlay1: "#7e7e7e", text: "#ffffff",
     subtext0: "#a0a0a0", mauve: "#ffd1a8", green: "#99ffe4", yellow: "#ffc799",
     red: "#ff8080", blue: "#b0b0b0", teal: "#66ddcc", peach: "#ffc799",
@@ -208,14 +199,52 @@ const TOKEN_CSS_VARS: Record<keyof Palette, string> = {
   peach: "--peach",
 };
 
+function luminance(hex: string): number {
+  return [0.2126, 0.7152, 0.0722].reduce((sum, weight, i) => {
+    const v = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+    return sum + weight * (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  }, 0);
+}
+
+function contrast(a: string, b: string): number {
+  const x = luminance(a), y = luminance(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+/** Keep upstream colors when readable; otherwise move only as far toward the
+ * theme's foreground pole as needed for small operational text (4.5:1).
+ * Check every surface, including selected/hovered rows.
+ * ponytail: one foreground per token assumes uniformly light/dark built-in
+ * surfaces. Mixed-surface custom themes would need per-surface foregrounds. */
+export function resolveTheme(name: string) {
+  const source = (Object.hasOwn(THEMES, name) ? THEMES[name] : undefined) ?? PERCH_DEFAULT;
+  const light = luminance(source.panelBg) > 0.179;
+  const backgrounds = [source.panelBg, source.surface0, source.surface1, source.surfaceDim];
+  const palette = { ...source };
+  const foregrounds = ["text", "subtext0", "overlay1", "accent", "mauve", "green", "yellow", "red", "blue", "teal", "peach"] as const;
+  for (const key of foregrounds) {
+    const rgb = [1, 3, 5].map((i) => parseInt(source[key].slice(i, i + 2), 16));
+    for (let step = 0; step <= 100; step++) {
+      const candidate = `#${rgb.map((v) => Math.round(v + ((light ? 0 : 255) - v) * step / 100).toString(16).padStart(2, "0")).join("")}`;
+      if (backgrounds.every((bg) => contrast(candidate, bg) >= 4.5)) {
+        palette[key] = candidate;
+        break;
+      }
+    }
+  }
+  // Contrast is symmetric: panel-bg is also readable on these colored fills.
+  return { ...palette, colorScheme: light ? "light" : "dark" };
+}
+
 /** Set every semantic token as a CSS custom property on `<html>`. Falls
  * back to the default theme (perch) for an unknown/unset theme name so
  * a stale or corrupted `settings.theme` value never leaves the app
  * unstyled. */
 export function applyTheme(name: string): void {
-  const palette = THEMES[name] ?? PERCH_DEFAULT;
+  const palette = resolveTheme(name);
   const root = document.documentElement.style;
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
     root.setProperty(TOKEN_CSS_VARS[key], palette[key]);
   }
+  root.setProperty("color-scheme", palette.colorScheme);
 }

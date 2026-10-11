@@ -14,13 +14,13 @@
   --surface-1: #333333;
   --surface-dim: #1c1c1c;
   --overlay-0: #3a3a3a;
-  --overlay-1: #7a7a7a;
+  --overlay-1: #9b9b9b;
   --text: #d8d8d8;
-  --subtext-0: #9a9a9a;
+  --subtext-0: #9b9b9b;
   --mauve: #a993c9;
   --green: #7fb685;
   --yellow: #d3b46a;
-  --red: #d77a7a;
+  --red: #df8c8c;
   --blue: #7aa2d7;
   --teal: #7fb8b8;
   --peach: #d39a6a;
@@ -59,6 +59,8 @@
  * box (-2px) because many strips scroll and clip outlines. xterm's hidden
  * textarea and text fields keep their own treatment. */
 @layer base {
+  ::selection { background: var(--accent); color: var(--panel-bg); }
+  :where(input, textarea)::placeholder { color: var(--subtext-0); opacity: 1; }
   :where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;

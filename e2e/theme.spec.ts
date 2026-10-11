@@ -24,23 +24,27 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { SETTINGS_FILE } from "./chatMode";
+import { resolveTheme, THEME_NAMES } from "../packages/web/src/themes";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
+// Match the public test handle declared by main.tsx; e2e files are checked
+// separately from the web tsconfig, so that global isn't otherwise in scope.
+declare global {
+  interface Window {
+    usePerchStore: typeof import("../packages/web/src/store").usePerchStore;
+  }
+}
 const BASE_URL = "http://127.0.0.1:7799";
 
-// Known accent values for the themes this spec exercises, transcribed from
-// packages/web/src/themes.ts (must stay in sync with that table).
-const ACCENT = {
-  perch: "#c8c8c8",
-  catppuccin: "#89b4fa",
-  dracula: "#bd93f9",
-  "one-light": "#4078f2",
-} as const;
+// Browser application/persistence checks use the resolved UI colors; unit
+// tests separately protect source palette values and absolute contrast floors.
+const ACCENT = Object.fromEntries(THEME_NAMES.map((name) => [name, resolveTheme(name).accent]));
+const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
 
 // ---------------------------------------------------------------------------
 // Filesystem helpers
@@ -208,4 +212,79 @@ test.describe("Phase 1: theme system", () => {
       .toBe(ACCENT.perch);
     await closeSettingsEsc(page);
   });
+
+  for (const phone of [false, true]) {
+    test(`T4. all themes keep harness badges and controls readable (${phone ? "phone" : "desktop"})`, async ({ page }) => {
+      await freshSession(page);
+      // Render-only fixture: no agent launches, model prompts, PTYs, or fake DB
+      // rows. The public store test handle is also used by mixed-tabs.spec.ts.
+      await page.evaluate(() => {
+        const project = { id: "theme-project", hostId: "local", path: "/tmp/theme-preview", name: "Theme preview", favorite: false, createdAt: 1, updatedAt: 1 };
+        const workspace = { id: "theme-workspace", projectId: project.id, hostId: "local", path: project.path, name: project.name, branch: "main", dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 };
+        window.usePerchStore.setState({
+          workspaceProjects: [project], workspaces: [workspace], activeWorkspaceId: workspace.id,
+          activeProject: { hostId: "local", cwd: project.path }, sessionId: "theme-codex",
+          sessions: ["codex", "pi", "claude", "omp", "terminal"].map((provider, i) => ({
+            id: `theme-${provider}`, title: provider, cwd: project.path, hostId: "local", workspaceId: workspace.id,
+            cliProviderId: provider, createdAt: i + 1, status: i === 1 ? "running" as const : "idle" as const,
+            blocked: i === 2, unseen: i === 3,
+          })),
+        });
+      });
+      await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1280, height: 800 });
+      try {
+        for (const name of THEME_NAMES) {
+          const p = resolveTheme(name);
+          await openSettings(page);
+          await page.getByTestId(`theme-option-${name}`).click();
+          await expect.poll(() => page.evaluate(() => window.usePerchStore.getState().settings?.theme)).toBe(name);
+          await expect.poll(() => getAccent(page)).toBe(p.accent);
+          await expect(page.locator("html")).toHaveCSS("color-scheme", p.colorScheme);
+          await closeSettingsEsc(page);
+
+          if (phone) await page.getByTestId("mobile-switch").click();
+          const area = phone ? page.getByTestId("mobile-switcher") : page.locator(".sidebar");
+          const badge = area.locator('.agent-status-dot[data-provider="codex"]').first();
+          await expect(badge).toBeVisible();
+          await expect(badge).toHaveCSS("background-color", rgb(p.panelBg));
+          await expect(badge.locator("svg")).toHaveCSS("fill", rgb(p.text));
+          await expect(badge).toHaveCSS("border-top-color", rgb(p.green));
+          for (const [provider, color] of [["pi", p.yellow], ["claude", p.red], ["omp", p.teal]] as const) {
+            const mark = area.locator(`.agent-status-dot[data-provider="${provider}"]`).first();
+            await expect(mark).toHaveCSS("border-top-color", rgb(color));
+            await expect(mark.locator("path").first()).toHaveCSS("fill", rgb(p.text));
+          }
+
+          if (!phone) {
+            const selected = page.getByTestId("workspace-session-theme-codex");
+            await expect(selected).toHaveAttribute("aria-current", "true");
+            await expect(badge).toHaveCSS("outline-color", rgb(p.text));
+            await expect(badge).toHaveCSS("outline-width", "1px");
+            await selected.hover();
+            await expect(badge).toHaveCSS("background-color", rgb(p.surface0));
+            await expect(badge.locator("svg")).toHaveCSS("fill", rgb(p.text));
+            const other = page.getByTestId("workspace-session-theme-pi");
+            await page.keyboard.press("Tab"); // establish keyboard :focus-visible
+            await other.focus();
+            await expect(other.locator(".agent-status-dot")).toHaveCSS("outline-color", rgb(p.text));
+            await expect(other.locator(".agent-status-dot")).toHaveCSS("outline-width", "1px");
+
+            await page.getByTestId("workspace-project-menu-theme-project").click();
+            const menuItem = page.getByRole("menu").locator(".pane-context-menu__item").first();
+            await menuItem.hover();
+            await expect(menuItem).toHaveCSS("background-color", rgb(p.surface0));
+            await expect(menuItem).toHaveCSS("color", rgb(p.text));
+            await page.screenshot({ path: `artifacts/T4-${name}-desktop.png` });
+            await page.keyboard.press("Escape");
+          } else {
+            await area.screenshot({ path: `artifacts/T4-${name}-phone.png` });
+            await page.getByTestId("mobile-switcher-close").click();
+          }
+        }
+      } finally {
+        await page.evaluate(() => window.usePerchStore.getState().updateSettings({ theme: "perch" }));
+        await expect.poll(() => getAccent(page)).toBe(ACCENT.perch);
+      }
+    });
+  }
 });

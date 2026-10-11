@@ -125,7 +125,7 @@ function UsageSummary({
               data-testid="usage-refresh"
               disabled={refreshing}
               aria-busy={refreshing}
-              className={cn(GHOST_BUTTON, "px-2 py-1 text-[0.78rem] text-fg hover:bg-overlay-0 disabled:cursor-wait disabled:opacity-50 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+              className={cn(GHOST_BUTTON, "px-2 py-1 text-[0.78rem] text-fg hover:bg-surface-0 disabled:cursor-wait disabled:opacity-50 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
               onClick={() => {
                 setRefreshing(true);
                 setRefreshNotice("");

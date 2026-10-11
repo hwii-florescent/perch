@@ -25,13 +25,13 @@ export function StatusDot({ session, className }: StatusDotProps) {
   const classes = cn(
     "agent-status-dot",
     `agent-status-dot--${state}`,
-    "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] leading-none",
+    "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] bg-panel-bg leading-none",
     className,
   );
 
   return (
     <span className={classes} style={{ borderColor: color }} data-provider={provider ?? "unknown"} title={`${provider ?? "Agent"} · ${state}`} aria-hidden="true">
-      <span className="inline-flex text-fg"><AgentIcon provider={provider} size={14} /></span>
+      <span className="inline-flex text-fg"><AgentIcon provider={provider} size={14} monochrome /></span>
     </span>
   );
 }

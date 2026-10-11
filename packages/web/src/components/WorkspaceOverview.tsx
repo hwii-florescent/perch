@@ -144,7 +144,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
           onClick={(event) => { event.stopPropagation(); onPick(session.id); }}
           onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(session, event.clientX, event.clientY); }}
         >
-          <StatusDot session={session} className={cn("h-[18px] w-[18px] group-hover:bg-overlay-0 group-focus-visible:[outline:1px_solid_var(--overlay-1)] group-focus-visible:outline-offset-1", session.id === activeId && "bg-overlay-0 [outline:1px_solid_var(--overlay-1)] outline-offset-1")} />
+          <StatusDot session={session} className={cn("h-[18px] w-[18px] group-hover:bg-surface-0 group-focus-visible:[outline:1px_solid_var(--text)] group-focus-visible:outline-offset-1", session.id === activeId && "[outline:1px_solid_var(--text)] outline-offset-1")} />
         </button>
       ))}
     </span>

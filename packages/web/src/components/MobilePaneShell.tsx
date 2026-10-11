@@ -6,7 +6,7 @@ import { cn } from "../lib/cn";
 
 const TAB = "min-h-[44px] min-w-[4.2rem] flex-[1_0_auto] cursor-pointer rounded-ui border px-[0.55rem] py-[0.32rem] text-[0.72rem] [font-family:inherit] [line-height:inherit] hover:border-accent focus-visible:border-accent";
 const tab = (active: boolean) =>
-  cn(TAB, active ? "border-accent bg-accent font-bold text-panel-bg hover:text-fg focus-visible:text-fg" : "border-overlay-0 bg-surface-0 text-overlay-1 hover:text-fg focus-visible:text-fg");
+  cn(TAB, active ? "border-accent bg-accent font-bold text-panel-bg" : "border-overlay-0 bg-surface-0 text-overlay-1 hover:text-fg focus-visible:text-fg");
 
 export type MobilePaneKind = "chat" | "terminal" | "files" | "gitReview";
 

@@ -93,7 +93,11 @@ it("workspace background picks it, while its badge and rename input keep their o
   expect(get("session-dots").classList.contains("border-overlay-1")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("rounded-ui")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(true);
-  expect(button.querySelector(".agent-status-dot")!.classList.contains("outline-offset-1")).toBe(true);
+  const badge = button.querySelector(".agent-status-dot")!;
+  expect(badge.classList.contains("outline-offset-1")).toBe(true);
+  expect(badge.classList.contains("[outline:1px_solid_var(--text)]")).toBe(true);
+  expect(badge.classList.contains("bg-panel-bg")).toBe(true);
+  expect(badge.className).not.toContain("bg-overlay-0");
   act(() => get("workspace-entry-tree").querySelector("strong")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
   click(get("workspace-rename-tree"));
   expect(focus).not.toHaveBeenCalled();
@@ -241,6 +245,7 @@ it("status rings retain every status and select the actual harness rather than a
     expect(badge.dataset.provider).toBe("pi");
     expect(badge.classList.contains("h-5")).toBe(true);
     expect(badge.classList.contains("w-5")).toBe(true);
+    expect(badge.classList.contains("bg-panel-bg")).toBe(true);
     expect(badge.querySelector("svg")!.getAttribute("viewBox")).toBe("0 0 800 800");
   }
   act(() => usePerchStore.setState({ cliAgentBySession: { session: "terminal" } }));
@@ -254,6 +259,17 @@ it("observed foreground identity overrides the launcher without changing its sav
   render(<StatusDot session={{ ...session, cliProviderId: "terminal", currentProviderId: "terminal" }} />);
   expect(host.querySelector(".agent-status-dot")!.getAttribute("data-provider")).toBe("terminal");
   expect(usePerchStore.getState().cliAgentBySession.session).toBe("terminal");
+});
+
+it("small transparent harness marks inherit the theme while pickers retain brand colors", () => {
+  for (const provider of ["claude", "claude-agent-teams", "omp"]) {
+    render(<StatusDot session={{ ...session, currentProviderId: provider }} />);
+    expect(host.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
+    render(<AgentIcon provider={provider} />);
+    const fill = host.querySelector("path")?.getAttribute("fill");
+    expect(fill).not.toBe("currentColor");
+    expect(fill).toMatch(provider === "omp" ? /^url\(#/ : /^#D97757$/);
+  }
 });
 
 it("all catalog harnesses have bundled artwork; custom and unknown harnesses have honest fallbacks", () => {

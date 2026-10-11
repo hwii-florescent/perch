@@ -51,7 +51,7 @@ const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui border bo
 const BTN = "rounded-ui border px-2 py-[0.3rem] whitespace-nowrap disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:border-accent";
 const BTN_DEFAULT = `${BTN} border-[color:var(--git-border)] bg-surface-1 text-fg [&:hover:not(:disabled)]:text-accent`;
 const BTN_QUIET = `${BTN} border-[color:var(--git-border)] bg-transparent text-fg [&:hover:not(:disabled)]:text-accent`;
-const BTN_PRIMARY = `${BTN} border-accent bg-accent text-inherit [&:hover:not(:disabled)]:text-accent`;
+const BTN_PRIMARY = `${BTN} border-accent bg-accent text-panel-bg`;
 const BTN_DANGER = `${BTN} border-[color:var(--git-border)] bg-surface-1 text-red [&:hover:not(:disabled)]:text-red`;
 // Inside `comment-actions` every button is a transparent accent link; a `__button` there keeps its frame.
 const CA_BTN_BASE = "rounded-ui border border-[color:var(--git-border)] bg-transparent px-2 py-[0.3rem] text-[0.66rem]! whitespace-nowrap text-accent disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:border-accent";

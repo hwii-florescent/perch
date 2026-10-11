@@ -28,7 +28,7 @@ export const SLASH_NAME_OFF = `${SLASH_NAME} text-fg`;
 export const SLASH_DESC = "text-[0.72rem] text-subtext-0";
 
 const PLAN_TOGGLE = "cursor-pointer rounded-ui border px-[0.6rem] py-[0.3rem] text-[0.78rem] leading-[1.2] [font-family:inherit] hover:border-accent hover:text-fg";
-export const PLAN_TOGGLE_ON = `${PLAN_TOGGLE} border-accent bg-accent font-semibold text-surface-0`;
+export const PLAN_TOGGLE_ON = `${PLAN_TOGGLE} border-accent bg-accent font-semibold text-panel-bg hover:text-panel-bg`;
 export const PLAN_TOGGLE_OFF = `${PLAN_TOGGLE} border-overlay-0 bg-surface-1 text-subtext-0`;
 
 const SEND = "shrink-0 cursor-pointer rounded-ui px-[0.9rem] py-[0.35rem] text-[0.9rem] font-semibold text-panel-bg [border:none] [font-family:inherit]";
