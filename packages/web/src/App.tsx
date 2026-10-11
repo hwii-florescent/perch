@@ -21,7 +21,6 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
-import perchLogo from "./assets/perch-logo-texture-medium.webp";
 import "./surfaceSync";
 import "./workspaceCleanup";
 
@@ -236,10 +235,7 @@ export default function App() {
             )}
             data-tauri-drag-region
           >
-            <span className="flex items-center gap-2 text-[0.85rem] font-semibold text-subtext-0 select-none" data-tauri-drag-region>
-              <img src={perchLogo} alt="" width={24} height={24} className="shrink-0 rounded-ui" draggable={false} data-tauri-drag-region />
-              perch
-            </span>
+            <span className="text-[0.85rem] font-semibold text-subtext-0 select-none" data-tauri-drag-region>perch</span>
             {sidebarToggle}
           </div>
           <TabBar />
