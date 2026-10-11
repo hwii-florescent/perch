@@ -77,7 +77,7 @@ test.describe("Perch sidebar", () => {
         await expect(hint).toBeVisible();
         await expect(hint).toHaveCSS("border-top-width", "0px");
         await expect(hint).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-        await expect(hint).toHaveCSS("color", "rgb(122, 162, 215)");
+        await expect(hint).toHaveCSS("color", "rgb(200, 200, 200)");
         const [rowBox, hintBox, nameBox] = await Promise.all([entry.boundingBox(), hint.boundingBox(), entry.locator("strong").boundingBox()]);
         expect(rowBox!.x + rowBox!.width - hintBox!.x - hintBox!.width).toBeCloseTo(12, 0);
         expect(nameBox).toEqual(namesBefore[index]); // hint does not shift/truncate the name
@@ -85,6 +85,16 @@ test.describe("Perch sidebar", () => {
         await expect(entry.getByTestId(/^workspace-project-new-session-/)).not.toBeVisible();
       }
       await page.screenshot({ path: testInfo.outputPath("workspace-number-hints.png") });
+      // Live palette changes must recolor already-visible hints without a remount.
+      const originalAccent = await page.evaluate(() => document.documentElement.style.getPropertyValue("--accent"));
+      try {
+        for (const [accent, color] of [["#bd93f9", "rgb(189, 147, 249)"], ["#076678", "rgb(7, 102, 120)"]]) {
+          await page.evaluate((accent) => document.documentElement.style.setProperty("--accent", accent), accent);
+          for (const entry of entries) await expect(entry.locator("kbd")).toHaveCSS("color", color);
+        }
+      } finally {
+        await page.evaluate((accent) => document.documentElement.style.setProperty("--accent", accent), originalAccent);
+      }
       const number = (await entries[0].locator("kbd").textContent())!;
       await page.keyboard.press(`Digit${number}`);
       await expect(entries[0].locator(".workspace-entry__button--active")).toBeVisible();

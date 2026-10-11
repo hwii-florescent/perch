@@ -263,7 +263,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const numberedNests = orderedNests().slice(0, nestHints.length);
   function nestHint(workspaceId: string) {
     const label = nestHints[numberedNests.findIndex((nest) => nest.id === workspaceId)];
-    return label ? <kbd className="pointer-events-none absolute top-[7px] right-3 w-8 text-right text-[11px] leading-[18px] font-semibold text-blue tabular-nums [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
+    return label ? <kbd className="pointer-events-none absolute top-[7px] right-3 w-8 text-right text-[11px] leading-[18px] font-semibold text-accent tabular-nums [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
   }
   const [, refreshTabOrder] = useState(0);
   useEffect(() => {
