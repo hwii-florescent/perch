@@ -263,7 +263,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const numberedNests = orderedNests().slice(0, nestHints.length);
   function nestHint(workspaceId: string) {
     const label = nestHints[numberedNests.findIndex((nest) => nest.id === workspaceId)];
-    return label ? <kbd className="ml-auto shrink-0 rounded-ui border border-overlay-1 bg-surface-0 px-1.5 text-[11px] leading-[18px] text-fg [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
+    return label ? <kbd className="pointer-events-none absolute top-[7px] right-3 w-8 text-right text-[11px] leading-[18px] font-semibold text-blue tabular-nums [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
   }
   const [, refreshTabOrder] = useState(0);
   useEffect(() => {
@@ -749,6 +749,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
               : [];
             const projectCollapsed = collapsed.includes(project.id) && !showNestHints;
             const single = singleWorkspaceOf(project);
+            const shortcutHint = single ? nestHint(single.id) : null;
             const projectSessions = sessionsForProject(project.id);
             // With nothing to fold away, the header opens the checkout instead.
             const collapsible = single ? sessionView === "list" && projectSessions.length > 0 : true;
@@ -761,7 +762,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {
                     if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -814,7 +815,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   {single?.branch && single.branch !== (project.name || basename(project.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{single.branch}</span>}
                   {single?.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
                   {collapsible && <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />}
-                  {single && nestHint(single.id)}
+                  {shortcutHint}
                 </button>
                 )}
                 {showHeaderDots && (
@@ -822,7 +823,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 )}
                 <button
                   type="button"
-                  className={PROJECT_ICON}
+                  className={cn(PROJECT_ICON, shortcutHint && "invisible")}
                   data-testid={`workspace-project-menu-${project.id}`}
                   title="Project actions"
                   aria-label="Project actions"
@@ -834,10 +835,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 >
                   ⋯
                 </button>
-                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} className={HEADER_PLUS} /> : (
+                {project.repoPath ? <WorktreeMenu hostId={project.hostId} cwd={project.repoPath} projectKey={`${project.hostId}:${project.repoPath}`} className={cn(HEADER_PLUS, shortcutHint && "invisible")} /> : (
                   <button
                     type="button"
-                    className={cn("worktree-menu__btn", ICON_BUTTON, HEADER_PLUS)}
+                    className={cn("worktree-menu__btn", ICON_BUTTON, HEADER_PLUS, shortcutHint && "invisible")}
                     data-testid={`workspace-project-new-session-${project.id}`}
                     title="New session in this folder"
                     aria-label="New session"
@@ -904,7 +905,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             type="button"
                             className={cn(
                               ENTRY_BTN,
-                              "flex-1 bg-transparent",
+                              "flex-1 bg-transparent pr-12",
                               workspaceActive && "workspace-entry__button--active",
                             )}
                             aria-pressed={workspaceActive}

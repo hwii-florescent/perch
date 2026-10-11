@@ -6,6 +6,7 @@
 import type { SessionSummary } from "@perch/shared";
 import { takeClosedTab } from "./closedTabs";
 import { useFileTabs } from "./fileTabs";
+import { lastWorkspaceSession } from "./surfaceSync";
 import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "./store";
 
 /** A project's live workspaces: pinned first, then active, then most recent. */
@@ -51,7 +52,8 @@ export function navigateToWorkspace(workspaceId: string): void {
   if (!workspace) return;
   const own = sessionsForWorkspace(before.sessions, workspace);
   if (own.some((candidate) => candidate.id === before.sessionId)) return;
-  if (own[0]) before.switchSession(own[0].id);
+  const target = own.find((session) => session.id === lastWorkspaceSession(workspaceId)) ?? own[0];
+  if (target) before.switchSession(target.id);
   else openEmptyWorkspace(workspace.hostId, workspace.path);
 }
 

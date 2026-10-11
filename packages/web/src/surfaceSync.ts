@@ -128,10 +128,13 @@ useFileTabs.subscribe((state, previous) => {
 /** The session each workspace last showed in this window, for workspaces no longer on screen. */
 const lastSession = new Map<string, string>();
 
+/** The workspace's last shown session (validated against live tabs by the caller). */
+export const lastWorkspaceSession = (workspaceId: string): string | undefined => lastSession.get(workspaceId);
+
 function trackSession(state: ReturnType<typeof usePerchStore.getState>): void {
   const workspace = effectiveWorkspace(state);
   if (!workspace || !state.sessionId || lastSession.get(workspace.id) === state.sessionId) return;
-  if (state.sessions.find((session) => session.id === state.sessionId)?.workspaceId !== workspace.id) return;
+  if (!activeWorkspaceSessions(state).some((session) => session.id === state.sessionId)) return;
   lastSession.set(workspace.id, state.sessionId);
   scheduleMirror(workspace.id);
 }

@@ -69,9 +69,21 @@ test.describe("Perch sidebar", () => {
       for (const entry of entries) await expect(entry).toBeVisible();
       const hints = page.locator('[data-testid^="workspace-shortcut-"]');
       await expect(hints).toHaveCount(0);
+      const namesBefore = await Promise.all(entries.map((entry) => entry.locator("strong").boundingBox()));
       await page.keyboard.down("Control");
       await page.keyboard.down("Shift");
-      for (const entry of entries) await expect(entry.locator("kbd")).toBeVisible();
+      for (const [index, entry] of entries.entries()) {
+        const hint = entry.locator("kbd");
+        await expect(hint).toBeVisible();
+        await expect(hint).toHaveCSS("border-top-width", "0px");
+        await expect(hint).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(hint).toHaveCSS("color", "rgb(122, 162, 215)");
+        const [rowBox, hintBox, nameBox] = await Promise.all([entry.boundingBox(), hint.boundingBox(), entry.locator("strong").boundingBox()]);
+        expect(rowBox!.x + rowBox!.width - hintBox!.x - hintBox!.width).toBeCloseTo(12, 0);
+        expect(nameBox).toEqual(namesBefore[index]); // hint does not shift/truncate the name
+        await entry.hover();
+        await expect(entry.getByTestId(/^workspace-project-new-session-/)).not.toBeVisible();
+      }
       await page.screenshot({ path: testInfo.outputPath("workspace-number-hints.png") });
       const number = (await entries[0].locator("kbd").textContent())!;
       await page.keyboard.press(`Digit${number}`);
@@ -86,6 +98,34 @@ test.describe("Perch sidebar", () => {
       await expect(hints).toHaveCount(0);
       await page.keyboard.up("Control");
       await page.keyboard.up("Shift");
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test("2b. returning to a workspace restores its last viewed tab", async ({ page }) => {
+    const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-return-")));
+    const paths = [path.join(fixture, "first"), path.join(fixture, "second")];
+    paths.forEach((dir) => fs.mkdirSync(dir));
+    try {
+      await open(page);
+      const older = await startChat(page, "terminal", paths[0]);
+      const newer = await startChat(page, "terminal", paths[0]);
+      await expect(page.getByTestId(`tab-${newer}`)).toHaveClass(/tab-bar__tab--active/);
+      await page.getByTestId(`tab-${older}`).click();
+      const other = await startChat(page, "terminal", paths[1]);
+      await expect(page.getByTestId(`tab-${other}`)).toHaveClass(/tab-bar__tab--active/);
+      const firstRow = page.locator(".workspace-entry").filter({ has: page.locator(`button[title="${paths[0]}"]`) });
+      await firstRow.locator(".workspace-entry__button").click();
+      await expect(page.getByTestId(`tab-${older}`)).toHaveClass(/tab-bar__tab--active/);
+      await page.getByTestId(`workspace-session-${other}`).click();
+      await page.keyboard.down("Control");
+      await page.keyboard.down("Shift");
+      const number = (await firstRow.locator("kbd").textContent())!;
+      await page.keyboard.press(`Digit${number}`);
+      await page.keyboard.up("Shift");
+      await page.keyboard.up("Control");
+      await expect(page.getByTestId(`tab-${older}`)).toHaveClass(/tab-bar__tab--active/);
     } finally {
       fs.rmSync(fixture, { recursive: true, force: true });
     }
@@ -166,6 +206,17 @@ test.describe("Perch sidebar", () => {
       await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
       await page.getByTestId(`workspace-session-${treeSession}`).click();
       await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
+      await page.keyboard.down("Control");
+      await page.keyboard.down("Shift");
+      for (const entry of [main, tree]) {
+        const hint = entry.locator("kbd");
+        await expect(hint).toBeVisible();
+        const [rowBox, hintBox] = await Promise.all([entry.boundingBox(), hint.boundingBox()]);
+        expect(rowBox!.x + rowBox!.width - hintBox!.x - hintBox!.width).toBeCloseTo(12, 0);
+      }
+      await page.screenshot({ path: testInfo.outputPath("worktree-number-hints-desktop.png") });
+      await page.keyboard.up("Shift");
+      await page.keyboard.up("Control");
       await page.screenshot({ path: testInfo.outputPath("worktree-harness-rings-desktop.png") });
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByTestId("mobile-switch").click();

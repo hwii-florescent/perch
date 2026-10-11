@@ -210,6 +210,22 @@ it("workspace hints match jump targets and temporarily reveal collapsed projects
   expect(JSON.parse(localStorage.getItem("perch.sidebar.collapsedProjects")!)).toEqual(["project"]);
 });
 
+it.each([false, true])("workspace navigation restores the last viewed session, not the newest (legacy=%s)", (legacy) => {
+  const older = { ...session, id: "last-viewed", workspaceId: legacy ? undefined : worktree.id };
+  const newer = { ...session, id: "newest", createdAt: 2 };
+  const other = { ...session, id: "other-workspace", workspaceId: workspace.id, cwd: workspace.path };
+  usePerchStore.setState({ sessions: [older, newer, other], activeWorkspaceId: worktree.id, sessionId: older.id });
+  usePerchStore.setState({ activeWorkspaceId: workspace.id, sessionId: other.id });
+  jumpToNest(2);
+  expect(focus).toHaveBeenCalledExactlyOnceWith(worktree.id);
+  expect(switchSession).toHaveBeenCalledExactlyOnceWith(older.id);
+  switchSession.mockClear();
+  // A closed remembered tab cannot reopen itself or select another workspace's tab.
+  usePerchStore.setState({ sessions: [newer, other] });
+  jumpToNest(2);
+  expect(switchSession).toHaveBeenCalledExactlyOnceWith(newer.id);
+});
+
 it("status rings retain every status and select the actual harness rather than a stale hosted agent", () => {
   for (const [overrides, state, color] of [
     [{}, "idle", "var(--green)"],
