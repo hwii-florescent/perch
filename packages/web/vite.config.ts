@@ -24,6 +24,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
+      includeAssets: ["favicon.png", "apple-touch-icon.png"],
       // Relative start_url/scope so the installed PWA identity works no
       // matter which proxy path it was installed from.
       manifest: {
@@ -38,25 +39,22 @@ export default defineConfig({
         theme_color: "#0b0d10",
         icons: [
           {
-            // Inline SVG data-URI icon so the manifest is fully
-            // self-contained (no extra static asset paths to resolve
-            // under a dynamic proxy base).
-            src:
-              "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%230b0d10'/%3E%3Ctext x='50%25' y='58%25' font-size='104' text-anchor='middle' fill='%2358e6a8' font-family='monospace'%3E%3F%3E%3C/text%3E%3C/svg%3E",
+            // Relative to the manifest, so icons also work behind a proxy.
+            src: "./perch-192.png",
             sizes: "192x192",
-            type: "image/svg+xml",
+            type: "image/png",
             purpose: "any",
           },
           {
-            src:
-              "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%230b0d10'/%3E%3Ctext x='50%25' y='58%25' font-size='104' text-anchor='middle' fill='%2358e6a8' font-family='monospace'%3E%3F%3E%3C/text%3E%3C/svg%3E",
+            src: "./perch-512.png",
             sizes: "512x512",
-            type: "image/svg+xml",
-            purpose: "maskable",
+            type: "image/png",
+            purpose: "any",
           },
         ],
       },
       workbox: {
+        globPatterns: ["**/*.{js,css,html,png,webp}"],
         // Serve the app shell for any navigation that doesn't hit a real
         // asset, and never intercept the WS endpoint.
         navigateFallbackDenylist: [/\/ws$/, /\/workspace-file$/],

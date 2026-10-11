@@ -18,6 +18,7 @@ import { NewSessionPopover } from "../Sidebar";
 import { useAgentChoices } from "./AgentPicker";
 import { cn } from "../lib/cn";
 import { requestAddProject } from "../appEvents";
+import perchLogo from "../assets/perch-logo-texture-medium.webp";
 
 // Both screens share the cli-start card layout; `home` centres it.
 const PANEL = "flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto bg-panel-bg px-4 py-8";
@@ -69,6 +70,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   return (
     <div className={cn(PANEL, "items-center")} data-testid="no-session-panel">
       <div className="flex w-full max-w-[24rem] flex-col items-center gap-4">
+        <img src={perchLogo} alt="" width={80} height={80} className="rounded-ui" draggable={false} />
         <h1 className={NAME}>perch</h1>
         <p className={HINT}>Select a workspace from the sidebar to begin.</p>
         <div className="flex flex-wrap justify-center gap-[0.6rem]">
