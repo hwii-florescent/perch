@@ -1583,6 +1583,7 @@ impl HubManager {
             | ServerMessage::FsTreeResult { .. }
             | ServerMessage::FsSearchResult { .. }
             | ServerMessage::FsExtractResult { .. }
+            | ServerMessage::FsMutateResult { .. }
             | ServerMessage::FsReadResult { .. }
             | ServerMessage::FsPreviewResult { .. }
             | ServerMessage::FsWriteResult { .. }

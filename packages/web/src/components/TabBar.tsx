@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
-import { saveTabOrder } from "../tabOrder";
+import { useTabOrderVersion } from "../tabOrder";
 import { useFileTabs, type FileTab } from "../fileTabs";
-import { activateTab, sessionLabel, tabName, tabOrderKey, workspaceTabs, type TabEntry } from "../workspaceTabs";
+import { activateTab, sessionLabel, tabName, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
+import { beginTabDrag, useTabDrag } from "../tabDrag";
+import { TabDragLayer } from "./TabDragLayer";
 import { TabSplitMenu } from "./TabSplitMenu";
 import { useWorkspaceFilesStore } from "../filesystemStore";
-import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import { segment } from "./ui/segment";
 import { NEW_TAB_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
@@ -39,9 +40,10 @@ const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-pa
  *
  * Clicking a tab reuses the existing `switchSession` action (same as the
  * sidebar); double-clicking a tab renames it (Wave 1 item 2, inline input).
- * Dragging a tab reorders it within the strip (Wave 2 item 10) — purely
- * presentational, persisted client-side *per workspace* via `tabOrder.ts` (no
- * protocol field for tab order exists or is added). The trailing "+" opens
+ * Dragging a tab (`tabDrag.ts`) reorders it within the strip, or splits the
+ * canvas when dropped on a side of a pane; the order is persisted client-side
+ * *per workspace* via `tabOrder.ts` (no protocol field for tab order exists
+ * or is added). The trailing "+" opens
  * the CLI picker (`NewSessionPopover`) for this workspace's path on its host;
  * with no workspace it uses the active project's cwd, and the sidebar's
  * "+ New session" button keeps picking a *different* folder one click away.
@@ -58,12 +60,10 @@ export function TabBar() {
   const activeProject = usePerchStore((s) => s.activeProject);
   const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
   const workspaces = usePerchStore((s) => s.workspaces);
-  const switchSession = usePerchStore((s) => s.switchSession);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
   const fileTabs = useFileTabs((s) => s.tabs);
   const activeFile = useFileTabs((s) => s.active);
-  const showSession = useFileTabs((s) => s.showSession);
   const tabShape = usePerchStore((s) => s.settings?.tabShape === "round" ? "round" : "square");
 
   const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
@@ -71,19 +71,15 @@ export function TabBar() {
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  // Bumped after every drop purely to trigger a re-render: `orderedTabs`
-  // below re-reads localStorage on every render (no memoization), so any
-  // state change — including this one — is enough to reflect a fresh order.
-  const [, setOrderVersion] = useState(0);
+  const draggingId = useTabDrag((s) => s.drag?.id ?? null);
+  // The order is read from storage on every render: a saved drag order must re-render the strip.
+  useTabOrderVersion();
 
   const navState = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces };
   const ws = effectiveWorkspace(navState);
   const project = effectiveActiveProject(navState);
   const hostId = ws?.hostId ?? project?.hostId ?? activeHostId;
   const cwd = ws?.path ?? project?.cwd ?? null;
-  const projectKey = tabOrderKey(navState);
 
   // `workspaceTabs` scopes and orders the strip (sessions and open resources
   // alike); `keybinds.ts` cycles through the same list, so leader,n/p/1-9 and
@@ -136,37 +132,6 @@ export function TabBar() {
     setPopoverAnchor(e.currentTarget.getBoundingClientRect());
   }
 
-  function handleTabDragStart(id: string) {
-    setDraggingId(id);
-  }
-
-  function handleTabDragOver(e: React.DragEvent<HTMLElement>, id: string) {
-    e.preventDefault();
-    if (!draggingId || draggingId === id) return;
-    if (dragOverId !== id) setDragOverId(id);
-  }
-
-  function handleTabDrop(id: string) {
-    if (projectKey && draggingId && draggingId !== id) {
-      const ids = entries.map((entry) => entry.id);
-      const fromIdx = ids.indexOf(draggingId);
-      const toIdx = ids.indexOf(id);
-      if (fromIdx !== -1 && toIdx !== -1) {
-        ids.splice(fromIdx, 1);
-        ids.splice(toIdx, 0, draggingId);
-        saveTabOrder(projectKey, ids);
-        setOrderVersion((v) => v + 1);
-      }
-    }
-    setDraggingId(null);
-    setDragOverId(null);
-  }
-
-  function handleTabDragEnd() {
-    setDraggingId(null);
-    setDragOverId(null);
-  }
-
   function sessionTab(entry: Extract<TabEntry, { kind: "session" }>) {
     const s = entry.session;
     return (
@@ -186,7 +151,7 @@ export function TabBar() {
           }}
         />
       ) : (
-        <span key={s.id} className={TAB_SLOT}>
+        <span key={s.id} className={TAB_SLOT} data-tab-entry={s.id}>
         <button
           type="button"
           className={cn(
@@ -196,22 +161,15 @@ export function TabBar() {
             TAB_SHAPE(tabShape),
             s.id === sessionId && !fileShown && "tab-bar__tab--active",
             splitIds.has(s.id) && TAB_SPLIT,
-            s.id === draggingId && "opacity-50",
-            s.id === dragOverId && "shadow-[-2px_0_0_var(--accent)]",
+            s.id === draggingId && "opacity-40",
           )}
           data-testid={`tab-${s.id}`}
           title={s.title || "New session"}
-          draggable
-          onDragStart={() => handleTabDragStart(s.id)}
-          onDragOver={(e) => handleTabDragOver(e, s.id)}
-          onDrop={() => handleTabDrop(s.id)}
-          onDragEnd={handleTabDragEnd}
+          onPointerDown={(e) => beginTabDrag(e, s.id, sessionLabel(s))}
           onClick={() => activateTab(entry)}
           onContextMenu={(e) => {
             e.preventDefault();
-            showSession();
-            if (s.id !== sessionId) switchSession(s.id);
-            openSessionPaneMenu(e.clientX, e.clientY);
+            useSplitSets.getState().openMenu(s.id, e.clientX, e.clientY);
           }}
           onDoubleClick={() => {
             setRenamingId(s.id);
@@ -241,9 +199,7 @@ export function TabBar() {
     <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-[2px] self-stretch overflow-x-auto bg-panel-bg px-[3px] py-[3px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry) => entry.kind === "resource" ? (
         <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile} tabShape={tabShape} split={splitIds.has(entry.id)}
-          dragging={entry.id === draggingId} dragOver={entry.id === dragOverId}
-          onDragStart={() => handleTabDragStart(entry.id)} onDragOver={(e) => handleTabDragOver(e, entry.id)}
-          onDrop={() => handleTabDrop(entry.id)} onDragEnd={handleTabDragEnd} />
+          dragging={entry.id === draggingId} />
       ) : sessionTab(entry))}
 
       <button
@@ -257,6 +213,7 @@ export function TabBar() {
         {"+"}
       </button>
       {splitMenu && <TabSplitMenu entries={entries} menu={splitMenu} />}
+      <TabDragLayer />
       {popoverAnchor && (
         <NewSessionPopover
           hostId={hostId}
@@ -272,20 +229,16 @@ export function TabBar() {
 }
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
-function ResourceTabButton({ tab, id, active, tabShape, split, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd }: {
+function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
   tab: FileTab;
   id: string;
   active: boolean;
   tabShape: "square" | "round";
   split: boolean;
   dragging: boolean;
-  dragOver: boolean;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent<HTMLElement>) => void;
-  onDrop: () => void;
-  onDragEnd: () => void;
 }) {
   const close = useFileTabs((s) => s.close);
+  const pin = useFileTabs((s) => s.pin);
   const review = tab.kind === "review";
   const dirty = useWorkspaceFilesStore((s) => {
     const document = s.documents[tab.workspaceId]?.[tab.path];
@@ -295,7 +248,7 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging, dragOve
   const name = tabName(tab);
   const testId = review ? `review-tab-${tab.workspaceId}` : browser ? "browser-tab" : `file-tab-${tab.path}`;
   return (
-    <span className={TAB_SLOT}>
+    <span className={TAB_SLOT} data-tab-entry={id}>
       <button
         type="button"
         className={cn(
@@ -305,23 +258,19 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging, dragOve
           TAB_SHAPE(tabShape),
           active && "tab-bar__tab--active",
           split && TAB_SPLIT,
-          dragging && "opacity-50",
-          dragOver && "shadow-[-2px_0_0_var(--accent)]",
+          dragging && "opacity-40",
         )}
         data-testid={testId}
         title={review ? "Changes" : tab.path}
-        draggable
-        onDragStart={onDragStart}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        onDragEnd={onDragEnd}
+        onPointerDown={(e) => beginTabDrag(e, id, name)}
         onClick={() => activateTab({ id, kind: "resource", tab })}
+        onDoubleClick={() => pin(id)}
         onContextMenu={(e) => {
           e.preventDefault();
           useSplitSets.getState().openMenu(id, e.clientX, e.clientY);
         }}
       >
-        <span className="block truncate">{name}</span>
+        <span className={cn("block truncate", tab.preview && "italic")}>{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>
       <button

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -110,8 +110,13 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
+const PrimaryHidden = createContext(false);
+
 function ChatPanel() {
-  return <ChatView />;
+  // Tiled tabs each have a stable, session-bound ChatView in SplitCanvas.
+  // Never attach a second xterm to the same PTY in the hidden Dockview.
+  const hidden = useContext(PrimaryHidden);
+  return hidden ? null : <ChatView />;
 }
 
 /** Renders a split-pane chat bound to a specific session (added via
@@ -302,7 +307,7 @@ function endPaneShell(paneId: string): void {
     .catch((error: Error) => console.warn("[perch] could not end the closed pane's shell:", error.message));
 }
 
-export function DockviewShell() {
+export function DockviewShell({ primaryHidden = false }: { primaryHidden?: boolean }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const [readyApi, setReadyApi] = useState<DockviewApi | null>(null);
   const [appliedSessionId, setAppliedSessionId] = useState<string | null>(null);
@@ -518,7 +523,7 @@ export function DockviewShell() {
   // Dockview activation selects a panel, but does not focus its input. Wait
   // for this session's restored layout and any asynchronously mounted xterm.
   useEffect(() => {
-    if (!readyApi || !sessionId || appliedSessionId !== sessionId || activeFile || settingsOpen) return;
+    if (primaryHidden || !readyApi || !sessionId || appliedSessionId !== sessionId || activeFile || settingsOpen) return;
     let frame = 0;
     let observer: MutationObserver | undefined;
     const focusPanel = () => {
@@ -541,10 +546,11 @@ export function DockviewShell() {
     focusPanel();
     const changed = readyApi.onDidActivePanelChange(focusPanel);
     return () => { changed.dispose(); cancelAnimationFrame(frame); observer?.disconnect(); };
-  }, [readyApi, sessionId, appliedSessionId, activeFile, settingsOpen]);
+  }, [readyApi, sessionId, appliedSessionId, activeFile, settingsOpen, primaryHidden]);
 
   return (
     <>
+      <PrimaryHidden.Provider value={primaryHidden}>
       <DockviewReact
         className="dockview-theme-perch"
         theme={themeAbyss}
@@ -553,6 +559,7 @@ export function DockviewShell() {
         rightHeaderActionsComponent={PaneGroupHeaderActions}
         onReady={handleReady}
       />
+      </PrimaryHidden.Provider>
       {contextMenu &&
         (() => {
           const controller = getDockviewController();

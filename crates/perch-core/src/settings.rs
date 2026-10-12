@@ -76,6 +76,9 @@ pub struct Settings {
     /// Ask before closing a tab that runs an agent. Defaults to `true`.
     #[serde(default = "default_true")]
     pub warn_close_agent: bool,
+    /// A single-clicked file opens as a replaceable preview tab. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub preview_tabs: bool,
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
@@ -95,6 +98,7 @@ impl Default for Settings {
             empty_workspace_agent: String::new(),
             keybindings: Default::default(),
             warn_close_agent: true,
+            preview_tabs: true,
             tab_shape: default_tab_shape(),
         }
     }
@@ -158,6 +162,7 @@ pub struct SettingsPatch {
     pub empty_workspace_agent: Option<String>,
     pub keybindings: Option<std::collections::BTreeMap<String, String>>,
     pub warn_close_agent: Option<bool>,
+    pub preview_tabs: Option<bool>,
     pub tab_shape: Option<String>,
 }
 
@@ -262,6 +267,9 @@ impl SettingsStore {
         }
         if let Some(warn) = patch.warn_close_agent {
             guard.warn_close_agent = warn;
+        }
+        if let Some(preview) = patch.preview_tabs {
+            guard.preview_tabs = preview;
         }
         if let Some(tab_shape) = patch.tab_shape {
             guard.tab_shape = tab_shape;

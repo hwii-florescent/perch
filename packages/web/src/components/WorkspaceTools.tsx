@@ -1,12 +1,16 @@
 import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
-import { useFileTabs } from "../fileTabs";
+import { fileTabKey, useFileTabs } from "../fileTabs";
+import { openFilePreview } from "../workspaceTabs";
 import { segment } from "./ui/segment";
+import { GHOST_BUTTON } from "./ui/icon-button";
 import { DrawerBrowser } from "./DrawerBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
 const BTN = "px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
+/** The drawer header's action (same as the Browser section's buttons): the ghost button, filled only on hover. */
+const HEADER_ACTION = cn(GHOST_BUTTON, "shrink-0 px-2 py-1 text-[0.75rem]");
 
 export type WorkspaceToolsTab = "files" | "gitReview" | "browser";
 
@@ -81,7 +85,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
         {tab === "gitReview" && workspaceId && (
-          <button type="button" className={BTN} data-testid="workspace-tools-open-review" title="Open the review as a tab" onClick={() => useFileTabs.getState().open(workspaceId, "", "review")}>
+          <button type="button" className={HEADER_ACTION} data-testid="workspace-tools-open-review" title="Open the review as a tab" onClick={() => useFileTabs.getState().open(workspaceId, "", "review")}>
             Open as tab
           </button>
         )}
@@ -92,7 +96,12 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
             key={workspaceId}
             layout="explorer"
             workspaceId={workspaceId}
-            onOpenFile={(path) => useFileTabs.getState().open(workspaceId, path)}
+            onOpenFile={(path, pinned) => {
+              if (!pinned) return openFilePreview(workspaceId, path);
+              const files = useFileTabs.getState();
+              files.open(workspaceId, path);
+              files.pin(fileTabKey({ workspaceId, path }));
+            }}
           />
         ) : missing)}
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}

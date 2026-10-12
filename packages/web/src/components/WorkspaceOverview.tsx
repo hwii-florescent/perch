@@ -1035,7 +1035,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               Restore
                             </button>
                           )}
-                          {sessionView === "list" && workspaceSessions.length > 0 && sessionRows(workspaceSessions)}
+                          {sessionView === "list" && workspaceSessions.length > 0 && sessionRows(tabOrderedSessions(workspace))}
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
@@ -1057,7 +1057,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 Restore
                               </button>
                             )}
-                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(sessionsForWorkspace(sessions, single))}
+                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(tabOrderedSessions(single))}
                           </>
                         );
                       }

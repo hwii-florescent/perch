@@ -1,18 +1,20 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useSplitSets, visibleSplit } from "../splitSets";
+import { MAX_SPLIT, useSplitSets, visibleSplit } from "../splitSets";
 import { activateTab, entryLabel, type TabEntry } from "../workspaceTabs";
-import { useFileTabs } from "../fileTabs";
+import { closeTab, exitSplit } from "../tiledPanes";
+import { canStopAgent, stopAgent } from "../agentTerminals";
+import { openSessionPaneMenu } from "../dockview/DockviewShell";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 
 /**
  * Right-click menu of a tab for split sets: show it beside another open tab,
- * or take it out of its set. A set holds one terminal at most (the terminal's
- * own panes live in its Dockview), so two terminals are never offered.
+ * or take it out of its set. Any tabs can share a set, terminals included, up
+ * to `MAX_SPLIT`.
  */
 export function TabSplitMenu({ entries, menu }: { entries: TabEntry[]; menu: { id: string; x: number; y: number } }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { split, unsplit, closeMenu } = useSplitSets.getState();
+  const { split, untile, closeMenu } = useSplitSets.getState();
   const sets = useSplitSets((s) => s.sets);
   const self = entries.find((entry) => entry.id === menu.id);
 
@@ -30,12 +32,11 @@ export function TabSplitMenu({ entries, menu }: { entries: TabEntry[]; menu: { i
   if (!self) return null;
   const inSet = visibleSplit(sets, entries.map((entry) => entry.id), menu.id) !== null;
   const home = sets.find((set) => set.ids.includes(menu.id));
-  const terminals = (ids: string[]) => entries.filter((entry) => entry.kind === "session" && ids.includes(entry.id)).length;
-  // The group a split would make (see `joinSplit`) must keep at most one terminal.
+  // The group a split would make (see `joinSplit`) must fit `MAX_SPLIT`.
   const offered = entries.filter((entry) => {
     if (entry.id === menu.id || home?.ids.includes(entry.id)) return false;
     const group = home ? [...home.ids, entry.id] : [...(sets.find((set) => set.ids.includes(entry.id))?.ids ?? [entry.id]), menu.id];
-    return terminals(group) <= 1;
+    return group.length <= MAX_SPLIT;
   });
 
   const left = Math.min(menu.x, window.innerWidth - 220);
@@ -57,19 +58,27 @@ export function TabSplitMenu({ entries, menu }: { entries: TabEntry[]; menu: { i
       {inSet && (
         <>
           {offered.length > 0 && <div className={menuDivider} />}
-          <button type="button" className={menuItem()} data-testid="tab-unsplit" onClick={() => { unsplit(menu.id); closeMenu(); }}>
+          <button type="button" className={menuItem()} data-testid="tab-unsplit" onClick={() => { exitSplit(menu.id); closeMenu(); }}>
             Unsplit this tab
           </button>
-        </>
-      )}
-      {self.kind === "resource" && (
-        <>
-          <div className={menuDivider} />
-          <button type="button" className={menuItem({ danger: true })} onClick={() => { useFileTabs.getState().close(self.id); closeMenu(); }}>
-            Close
+          <button type="button" className={menuItem()} data-testid="tab-untile-all" onClick={() => { untile(menu.id); activateTab(self); closeMenu(); }}>
+            Unsplit all tabs
           </button>
         </>
       )}
+      {self.kind === "session" && (
+        <>
+          <div className={menuDivider} />
+          <button type="button" className={menuItem()} onClick={() => { activateTab(self); closeMenu(); openSessionPaneMenu(menu.x, menu.y); }}>
+            Session pane actions…
+          </button>
+          {canStopAgent(self.id) && <button type="button" className={menuItem({ danger: true })} data-testid="pane-menu-stop-agent" onClick={() => { stopAgent(self.id); closeMenu(); }}>Stop agent</button>}
+        </>
+      )}
+      <div className={menuDivider} />
+      <button type="button" className={menuItem({ danger: true })} data-testid="tab-menu-close" onClick={() => { closeTab(self.id); closeMenu(); }}>
+        Close tab
+      </button>
     </div>,
     document.body,
   );

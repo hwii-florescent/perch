@@ -86,6 +86,9 @@ pub struct SettingsData {
     /// Ask before closing a tab that runs an agent. Defaults to `true`.
     #[serde(default = "default_true")]
     pub warn_close_agent: bool,
+    /// A single-clicked file opens as a replaceable preview tab. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub preview_tabs: bool,
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
@@ -149,6 +152,8 @@ pub struct SettingsPatch {
     /// Absent = unchanged; present = set.
     #[serde(default)]
     pub warn_close_agent: Option<bool>,
+    #[serde(default)]
+    pub preview_tabs: Option<bool>,
     #[serde(default)]
     pub tab_shape: Option<String>,
 }
@@ -769,6 +774,17 @@ pub struct HistoryMessage {
 // Client -> Server
 // ---------------------------------------------------------------------------
 
+/// What an `fs.mutate` does to one workspace entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FsMutateOp {
+    CreateFile,
+    CreateDir,
+    Rename,
+    Copy,
+    Delete,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
@@ -1181,6 +1197,18 @@ pub enum ClientMessage {
         request_id: String,
         workspace_id: String,
         path: String,
+    },
+
+    /// Create / rename / delete one entry of a durable workspace. Paths are
+    /// workspace-relative; `to` is the new path for `rename`/`copy`. Never overwrites.
+    #[serde(rename = "fs.mutate", rename_all = "camelCase")]
+    FsMutate {
+        request_id: String,
+        workspace_id: String,
+        op: FsMutateOp,
+        path: String,
+        #[serde(default)]
+        to: Option<String>,
     },
 
     /// Read one bounded UTF-8 text file from a durable workspace.
@@ -2220,6 +2248,17 @@ pub enum ServerMessage {
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+
+    /// Reply to a successful `fs.mutate`.
+    #[serde(rename = "fs.mutate.result", rename_all = "camelCase")]
+    FsMutateResult {
+        request_id: String,
+        workspace_id: String,
+        op: FsMutateOp,
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
     },
 
     /// Reply to `fs.write` after the durable atomic publication.

@@ -18,6 +18,34 @@ export function browserCall<T = null>(command: string, args: Record<string, unkn
   return run;
 }
 
+/**
+ * Drag passthrough. A native page sits above the web view and swallows pointer events, so a tab
+ * or divider drag would stall over one (Orca sets `pointer-events: none` on its webviews; a native
+ * child webview has no such switch). While any drag holds this, every page is hidden
+ * (`WorkspaceBrowser` reads `passthroughActive`) and the pane's placeholder takes the pointer.
+ * Returns an idempotent release; holds nest.
+ * ponytail: the page is blank during the drag; a snapshot placeholder would need a native capture.
+ */
+let holds = 0;
+const passthroughListeners = new Set<() => void>();
+export const passthroughActive = () => holds > 0;
+export function onPassthrough(listener: () => void): () => void {
+  passthroughListeners.add(listener);
+  return () => { passthroughListeners.delete(listener); };
+}
+export function acquirePassthrough(): () => void {
+  if (!nativeBrowser) return () => {};
+  holds++;
+  passthroughListeners.forEach((listener) => listener());
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holds--;
+    passthroughListeners.forEach((listener) => listener());
+  };
+}
+
 // A closed tab destroys its page. Switching tabs only hides it, so a page keeps its state.
 useFileTabs.subscribe((state, previous) => {
   if (!nativeBrowser || state.tabs === previous.tabs) return;

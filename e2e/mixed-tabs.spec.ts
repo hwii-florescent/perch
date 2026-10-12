@@ -76,6 +76,9 @@ test("a terminal, a file and the review share one ordered strip", async ({ page 
 
     // A file and the review open as tabs after the terminal, with no agent started.
     await expect(page.getByTestId("workspace-git-review").last()).toBeVisible({ timeout: 20000 });
+    // The tab's pane is not blank: the review fills it (it once collapsed to zero width in the pane's flex row).
+    const reviewBox = await page.getByTestId("split-pane-review").getByTestId("workspace-git-review").boundingBox();
+    expect(reviewBox?.width ?? 0).toBeGreaterThan(300);
     expect(await strip(page)).toEqual([terminalTab, fileTab, reviewTab]);
     expect(await activeTab(page)).toBe(reviewTab);
 
@@ -110,6 +113,169 @@ test("a terminal, a file and the review share one ordered strip", async ({ page 
 });
 
 const box = async (page: Page, testId: string) => (await page.getByTestId(testId).boundingBox())!;
+
+/** Presses on a tab and moves the pointer to `to`, leaving the button down (tab drags are pointer-based). */
+async function holdTab(page: Page, testId: string, to: { x: number; y: number }): Promise<void> {
+  const from = await box(page, testId);
+  await page.mouse.move(from.x + from.width / 2 - 10, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+}
+
+test("a tab dropped past the last one goes last, and one dropped on a pane's side splits it that way", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    const { terminalTab, fileTab, reviewTab } = await openAll(page, root);
+    await expect(page.getByTestId("workspace-git-review").last()).toBeVisible({ timeout: 20000 });
+    expect(await strip(page)).toEqual([terminalTab, fileTab, reviewTab]);
+
+    // Past the last tab, in the strip's empty space: the bar shows, and the tab goes last.
+    const bar = await box(page, "tab-bar");
+    await holdTab(page, terminalTab, { x: bar.x + bar.width - 4, y: bar.y + bar.height / 2 });
+    await expect(page.getByTestId("tab-drop-bar")).toBeVisible();
+    await page.mouse.up();
+    await expect.poll(() => strip(page)).toEqual([fileTab, reviewTab, terminalTab]);
+    await expect(page.getByTestId("tab-drag-layer")).toHaveCount(0);
+
+    // Over a pane's lower edge the highlight is its lower half; releasing stacks the tab below.
+    const pane = await box(page, "split-pane-review");
+    await holdTab(page, fileTab, { x: pane.x + pane.width / 2, y: pane.y + pane.height - 8 });
+    await expect(page.getByTestId("tab-drop-zone")).toHaveAttribute("data-zone", "down");
+    await page.mouse.up();
+    const canvas = page.getByTestId("split-canvas");
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    await expect(page.getByTestId("split-divider-0")).toHaveAttribute("aria-orientation", "horizontal");
+    // Stacked, the file is below the review, and the strip's order follows.
+    const stacked = [await box(page, "split-pane-review"), await box(page, "split-pane-file-README.md")];
+    expect(stacked[0]!.y).toBeLessThan(stacked[1]!.y);
+    expect(stacked[0]!.x).toBeCloseTo(stacked[1]!.x, 0);
+    expect((await strip(page)).filter((id) => id !== terminalTab)).toEqual([reviewTab, fileTab]);
+
+    // Escape drops nothing.
+    const upper = await box(page, "split-pane-review");
+    await holdTab(page, terminalTab, { x: upper.x + upper.width - 8, y: upper.y + upper.height / 2 });
+    await expect(page.getByTestId("tab-drop-zone")).toHaveAttribute("data-zone", "right");
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(page.getByTestId("tab-drag-layer")).toHaveCount(0);
+    await expect(canvas).toHaveAttribute("data-split", "2");
+
+    // A side across the stack's axis nests: the upper pane becomes a row of it and the new tab.
+    await holdTab(page, terminalTab, { x: upper.x + upper.width - 8, y: upper.y + upper.height / 2 });
+    await page.mouse.up();
+    await expect(canvas).toHaveAttribute("data-split", "3");
+    const [review, terminal, file] = [await box(page, "split-pane-review"), await box(page, "split-pane-session"), await box(page, "split-pane-file-README.md")];
+    expect(review.x).toBeLessThan(terminal.x);
+    expect(review.y).toBeCloseTo(terminal.y, 0);
+    expect(file.y).toBeGreaterThan(review.y + review.height - 2);
+    expect(file.width).toBeGreaterThan(review.width + terminal.width - 4);
+    await expect(canvas.locator('[role="separator"][aria-orientation="vertical"]')).toHaveCount(1);
+    await expect(canvas.locator('[role="separator"][aria-orientation="horizontal"]')).toHaveCount(1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("two terminals tile side by side, the strip stays one row, and the order survives a reload", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const first = await startChat(page, "terminal", root);
+    const second = await startChat(page, "terminal", root);
+    const [t1, t2] = [`tab-${first}`, `tab-${second}`];
+    expect(await strip(page)).toEqual([t1, t2]);
+
+    // The first terminal dropped on the left of the (current) second one: both show, in that order.
+    const pane = await box(page, "split-pane-session");
+    await holdTab(page, t1, { x: pane.x + 12, y: pane.y + pane.height / 2 });
+    await expect(page.getByTestId("tab-drop-zone")).toHaveAttribute("data-zone", "left");
+    await page.mouse.up();
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+    const [left, right] = [await box(page, "split-pane-session"), await box(page, `split-pane-session-${second}`)];
+    expect(left.x).toBeLessThan(right.x);
+    await expect(page.getByTestId(`split-pane-session-${second}`).locator(".xterm")).toBeVisible({ timeout: 20000 });
+    expect(await strip(page)).toEqual([t1, t2]);
+    await expect(page.getByTestId("tab-bar")).toHaveCount(1);
+    // Focus changes must preserve the terminal DOM node, not replace its renderer.
+    const leftTerminal = await page.locator(`[data-pane-id="${first}"] .xterm`).elementHandle();
+    const rightTerminal = await page.locator(`[data-pane-id="${second}"] .xterm`).elementHandle();
+    await page.keyboard.press("Meta+Alt+ArrowRight");
+    await expect.poll(() => activeTab(page)).toBe(t2);
+    await page.keyboard.press("Meta+Alt+ArrowLeft");
+    await expect.poll(() => activeTab(page)).toBe(t1);
+    expect(await leftTerminal!.evaluate((el) => el.isConnected)).toBe(true);
+    expect(await rightTerminal!.evaluate((el) => el.isConnected)).toBe(true);
+
+    // Reordering the strip is remembered after a reload (the app's restart is the same: one origin).
+    const bar = await box(page, "tab-bar");
+    await holdTab(page, t1, { x: bar.x + bar.width - 4, y: bar.y + bar.height / 2 });
+    await page.mouse.up();
+    await expect.poll(() => strip(page)).toEqual([t2, t1]);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => strip(page), { timeout: 20000 }).toEqual([t2, t1]);
+    await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
+  } finally {
+    cleanup();
+  }
+});
+
+test("tiled pane controls, tab menus and pane shortcuts all act on the visible tiles", async ({ page }, testInfo) => {
+  const root = prepareFixture();
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const first = await startChat(page, "terminal", root);
+    const second = await startChat(page, "terminal", root);
+    const canvas = page.getByTestId("split-canvas");
+    const pane = await box(page, "split-pane-session");
+    await holdTab(page, `tab-${first}`, { x: pane.x + 12, y: pane.y + pane.height / 2 });
+    await page.mouse.up();
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    await expect(page.getByTestId(`tile-expand-${first}`)).toBeVisible();
+    await expect(page.getByTestId(`tile-close-${second}`)).toBeVisible();
+
+    // The same actions listed in Settings: previous/next, zoom/restore and directional focus.
+    await page.keyboard.press("Meta+]");
+    await expect.poll(() => activeTab(page)).toBe(`tab-${second}`);
+    await expect(page.locator(`[data-pane-id="${second}"] .xterm-helper-textarea`)).toBeFocused();
+    await page.keyboard.press("Meta+Shift+Enter");
+    await expect(page.getByTestId("split-divider-0")).toHaveCount(0);
+    await page.keyboard.press("Meta+Shift+Enter");
+    await expect(page.getByTestId("split-divider-0")).toBeVisible();
+    await chord(page, "+");
+    await expect.poll(async () => (await box(page, "split-pane-session")).width).toBeGreaterThan(pane.width / 2 + 30);
+    await chord(page, "h");
+    await expect.poll(() => activeTab(page)).toBe(`tab-${first}`);
+
+    // The full-size button leaves the split, but neither tab closes.
+    await page.getByTestId(`tile-expand-${first}`).click();
+    await expect(canvas).toHaveAttribute("data-split", "0");
+    expect(await strip(page)).toEqual([`tab-${first}`, `tab-${second}`]);
+    await page.getByTestId(`tab-${first}`).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${second}`).click();
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    await page.getByTestId(`tab-${second}`).click({ button: "right" });
+    await page.getByTestId("tab-untile-all").click();
+    await expect(canvas).toHaveAttribute("data-split", "0");
+
+    // A split shortcut creates a real terminal tab in this nest, not a hidden shell.
+    await page.getByTestId(`tab-${first}`).click({ button: "right" });
+    await page.getByTestId(`tab-split-with-${second}`).click();
+    await page.keyboard.press("Meta+Shift+d");
+    await expect(canvas).toHaveAttribute("data-split", "3", { timeout: 20000 });
+    // Split below across a row of two: the active pane nests as a column, so both axes have a divider.
+    await expect(canvas.locator('[role="separator"][aria-orientation="horizontal"]')).toHaveCount(1);
+    await expect(canvas.locator('[role="separator"][aria-orientation="vertical"]')).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath("tile-controls.png") });
+    const third = (await strip(page)).find((id) => id !== `tab-${first}` && id !== `tab-${second}`)!.replace("tab-", "");
+    await page.getByTestId(`tile-close-${third}`).click();
+    await expect(canvas).toHaveAttribute("data-split", "2");
+    await page.getByTestId(`tab-${first}`).click({ button: "right" });
+    await page.getByTestId("tab-unsplit").click();
+    await expect(canvas).toHaveAttribute("data-split", "0");
+  } finally {
+    cleanup();
+  }
+});
 
 test("tabs split side by side under one strip", async ({ page }, testInfo) => {
   const root = prepareFixture();
@@ -177,6 +343,8 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
     // Unsplit one member; the other two stay split, then the last pair dissolves.
     await page.getByTestId(reviewTab).click({ button: "right" });
     await page.getByTestId("tab-unsplit").click();
+    await expect(canvas).toHaveAttribute("data-split", "0"); // the removed tab becomes full size
+    await page.getByTestId(terminalTab).click();
     await expect(canvas).toHaveAttribute("data-split", "2");
     await page.getByTestId(fileTab).click({ button: "right" });
     await page.getByTestId("tab-unsplit").click();

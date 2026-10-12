@@ -31,7 +31,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./store";
 import { activateTab, currentTabs } from "./workspaceTabs";
-import { getDockviewController } from "./dockview/dockviewController";
+import { getPaneController as getDockviewController } from "./tiledPanes";
 import { useFileTabs } from "./fileTabs";
 import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
@@ -111,6 +111,10 @@ shortcut("global.drawer", "global", ["cmd+shift+b", "alt+shift+b"], "Toggle the 
 shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
 shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
 shortcut("tabs.reopen", "tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab or file", () => reopenClosedTab());
+shortcut("tabs.keepOpen", "tabs", ["cmd+alt+enter", "ctrl+alt+enter"], "Keep the preview tab open (make it a regular tab)", () => {
+  const { active, pin } = useFileTabs.getState();
+  if (active) pin(active);
+});
 const TAB_JUMPS: ShortcutRange = { id: "tabs.jump", noun: "tab", label: "1…8" };
 for (let i = 1; i <= 8; i++) {
   shortcut(`tabs.jump${i}`, "tabs", [`cmd+${i}`, `alt+${i}`], `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), { range: TAB_JUMPS });
@@ -306,6 +310,9 @@ let chordPending = false;
 export function terminalKeyHandler(e: KeyboardEvent): boolean {
   if (e.metaKey) return false;
   if (e.type !== "keydown") return true;
+  // macOS turns Ctrl+Enter in a text control into the OS context menu unless the keydown is
+  // cancelled; xterm only cancels keys it encodes itself, so kitty-mode Ctrl+Enter leaked it.
+  if (e.ctrlKey && e.key === "Enter") e.preventDefault();
   if (chordPending) return false;
   if (shortcutFor(e, true)) return false;
   return !(e.ctrlKey && !e.altKey && (e.code === "Space" || e.key === " "));

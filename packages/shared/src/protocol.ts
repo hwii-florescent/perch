@@ -154,6 +154,8 @@ export interface SettingsData {
   keybindings?: Record<string, string>;
   /** Ask before closing a tab that runs an agent. Absent = true. */
   warnCloseAgent?: boolean;
+  /** A single-clicked file opens as a replaceable preview tab. Absent = true. */
+  previewTabs?: boolean;
   /** Tab corner style. Absent = "square" for older peers. */
   tabShape?: "square" | "round";
 }
@@ -180,6 +182,7 @@ export interface SettingsPatch {
   /** Replaces the whole override map. */
   keybindings?: Record<string, string>;
   warnCloseAgent?: boolean;
+  previewTabs?: boolean;
   tabShape?: "square" | "round";
 }
 
@@ -1192,6 +1195,19 @@ export interface FsExtractMessage {
   path: string;
 }
 
+export type FsMutateOp = "createFile" | "createDir" | "rename" | "copy" | "delete";
+
+/** Create / rename / delete one workspace entry; never overwrites. `to` is the
+ * new path of a `rename` or `copy`. Failures come back as `fs.error`. */
+export interface FsMutateMessage {
+  type: "fs.mutate";
+  requestId: string;
+  workspaceId: string;
+  op: FsMutateOp;
+  path: string;
+  to?: string;
+}
+
 export interface FsReadMessage {
   type: "fs.read";
   requestId: string;
@@ -1675,6 +1691,7 @@ export type ClientMessage =
   | FsTreeMessage
   | FsSearchMessage
   | FsExtractMessage
+  | FsMutateMessage
   | FsReadMessage
   | FsPreviewMessage
   | FsWriteMessage
@@ -2182,6 +2199,15 @@ export interface FsExtractResultMessage {
   destination: string;
 }
 
+export interface FsMutateResultMessage {
+  type: "fs.mutate.result";
+  requestId: string;
+  workspaceId: string;
+  op: FsMutateOp;
+  path: string;
+  to?: string;
+}
+
 export interface FsReadResultMessage {
   type: "fs.read.result";
   requestId: string;
@@ -2439,6 +2465,7 @@ export type ServerMessage =
   | FsTreeResultMessage
   | FsSearchResultMessage
   | FsExtractResultMessage
+  | FsMutateResultMessage
   | FsReadResultMessage
   | FsPreviewResultMessage
   | FsWriteResultMessage

@@ -24,6 +24,15 @@ if (!container) {
   throw new Error("missing #root element");
 }
 
+// perch is an app, not a web page: no browser context menu. Surfaces with a menu of their own
+// preventDefault it before this runs; text fields (outside terminals) keep the OS one for cut/copy/paste.
+// This also swallows the menu macOS opens for Ctrl+Enter in a terminal's hidden textarea.
+document.addEventListener("contextmenu", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("input, textarea, [contenteditable='true']") && !target.closest(".xterm")) return;
+  event.preventDefault();
+});
+
 // The window's viewer id is settled first: the stores read their per-viewer storage as they load.
 await claimViewer();
 // App first, and its whole module graph with it (the store connects as it loads): a store

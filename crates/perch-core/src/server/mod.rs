@@ -459,9 +459,11 @@ pub async fn run(
 
     // Bind the TCP listener first so we know the actual port (important when
     // port 0 is requested — the OS assigns a free port).
-    let bind_addr = if options.port == 0 {
-        // Port 0: bind loopback only so the OS picks a free port.
-        SocketAddr::from(([127, 0, 0, 1], 0))
+    let bind_addr = if options.port == 0 || options.ready_tx.is_some() {
+        // Port 0 (the OS picks a free port) and the in-process desktop shell
+        // (`ready_tx`, which may ask for a fixed port to keep its web origin)
+        // bind loopback only.
+        SocketAddr::from(([127, 0, 0, 1], options.port))
     } else {
         SocketAddr::from(([0, 0, 0, 0], options.port))
     };
@@ -2296,6 +2298,7 @@ fn foundation_capabilities() -> Vec<String> {
         "fs.tree",
         "fs.search",
         "fs.extract",
+        "fs.mutate",
         "fs.content",
         "fs.read",
         "fs.preview",

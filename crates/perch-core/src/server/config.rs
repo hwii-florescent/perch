@@ -30,6 +30,7 @@ pub(super) fn handle_settings_update(
         empty_workspace_agent: patch.empty_workspace_agent,
         keybindings: patch.keybindings,
         warn_close_agent: patch.warn_close_agent,
+        preview_tabs: patch.preview_tabs,
         tab_shape: patch.tab_shape,
     };
     match state.app.settings.update(store_patch) {
@@ -123,6 +124,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         empty_workspace_agent: s.empty_workspace_agent.clone(),
         keybindings: s.keybindings.clone(),
         warn_close_agent: s.warn_close_agent,
+        preview_tabs: s.preview_tabs,
         tab_shape: s.tab_shape.clone(),
     }
 }

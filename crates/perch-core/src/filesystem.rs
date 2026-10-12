@@ -851,6 +851,87 @@ impl FileService {
         self.write_file(path, content.as_bytes(), expected_version)
     }
 
+    /// Create an empty regular file; never replaces an existing entry.
+    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> Result<(), FsError> {
+        self.write_file(path, b"", None).map(|_| ())
+    }
+
+    /// Create one directory whose parent already exists.
+    pub fn create_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), FsError> {
+        let components = normalized_components(path.as_ref())?;
+        let relative = require_file_components(&components, path.as_ref())?;
+        let _guard = self.lock();
+        let (parent, name) = self.open_parent(&components, &relative)?;
+        mkdir_at(&parent, &name).map_err(|error| entry_error("create folder", &relative, error))
+    }
+
+    /// Move/rename a file or folder to a name that does not exist yet.
+    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), FsError> {
+        let from_components = normalized_components(from.as_ref())?;
+        let from_relative = require_file_components(&from_components, from.as_ref())?;
+        let to_components = normalized_components(to.as_ref())?;
+        let to_relative = require_file_components(&to_components, to.as_ref())?;
+        let _guard = self.lock();
+        let (from_parent, from_name) = self.open_parent(&from_components, &from_relative)?;
+        let (to_parent, to_name) = self.open_parent(&to_components, &to_relative)?;
+        if exists_at(&to_parent, &to_name) && !same_entry_name(&from_components, &to_components) {
+            return Err(entry_error(
+                "rename",
+                &to_relative,
+                io::Error::from_raw_os_error(libc::EEXIST),
+            ));
+        }
+        rename_between(&from_parent, &from_name, &to_parent, &to_name)
+            .map_err(|error| entry_error("rename", &from_relative, error))
+    }
+
+    /// Copy a file, symlink or folder tree to a name that does not exist yet.
+    /// Symlinks are recreated, never followed. A failure part-way through a
+    /// folder leaves the part already copied.
+    pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<(), FsError> {
+        let from_components = normalized_components(from.as_ref())?;
+        let from_relative = require_file_components(&from_components, from.as_ref())?;
+        let to_components = normalized_components(to.as_ref())?;
+        let to_relative = require_file_components(&to_components, to.as_ref())?;
+        if to_components.starts_with(&from_components) {
+            return Err(FsError::InvalidPath {
+                path: to_relative,
+                reason: "cannot copy a folder into itself".to_string(),
+            });
+        }
+        let _guard = self.lock();
+        let (from_parent, from_name) = self.open_parent(&from_components, &from_relative)?;
+        let (to_parent, to_name) = self.open_parent(&to_components, &to_relative)?;
+        copy_entry(&from_parent, &from_name, &to_parent, &to_name)
+            .map_err(|error| entry_error("copy", &from_relative, error))
+    }
+
+    /// Delete a file, symlink (the link itself) or folder tree. Permanent.
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), FsError> {
+        let components = normalized_components(path.as_ref())?;
+        let relative = require_file_components(&components, path.as_ref())?;
+        let _guard = self.lock();
+        let (parent, name) = self.open_parent(&components, &relative)?;
+        let is_dir =
+            is_dir_at(&parent, &name).map_err(|error| FsError::path_not_found(&relative, error))?;
+        if is_dir {
+            // ponytail: the parents were walked no-follow above, but
+            // remove_dir_all reopens by path, so a parent swapped for a
+            // symlink in between is not caught. Upgrade: recurse with
+            // openat/unlinkat on the retained descriptors.
+            fs::remove_dir_all(self.root.join(&relative))
+        } else {
+            unlink_at(&parent, &name)
+        }
+        .map_err(|error| entry_error("delete", &relative, error))
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.write_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn open_directory(&self, components: &[OsString], relative: &str) -> Result<File, FsError> {
         let root = self
             .root_handle
@@ -1361,6 +1442,194 @@ fn create_temp_at(_parent: &File, _name: &OsStr) -> io::Result<File> {
     ))
 }
 
+/// A rename that only changes letter case (`a.txt` -> `A.txt`) sees itself as
+/// existing on case-insensitive volumes; that is not a collision.
+fn same_entry_name(from: &[OsString], to: &[OsString]) -> bool {
+    from.len() == to.len()
+        && from
+            .iter()
+            .zip(to)
+            .all(|(a, b)| a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase())
+}
+
+fn entry_error(operation: &'static str, path: &str, error: io::Error) -> FsError {
+    match error.kind() {
+        io::ErrorKind::AlreadyExists => FsError::InvalidPath {
+            path: path.to_string(),
+            reason: "already exists".to_string(),
+        },
+        io::ErrorKind::NotFound => FsError::NotFound {
+            path: path.to_string(),
+        },
+        _ => FsError::io(operation, path, error),
+    }
+}
+
+#[cfg(unix)]
+fn mkdir_at(parent: &File, name: &OsStr) -> io::Result<()> {
+    let name = CStringPath::new(name)?;
+    let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o777) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn rename_between(
+    old_parent: &File,
+    old: &OsStr,
+    new_parent: &File,
+    new: &OsStr,
+) -> io::Result<()> {
+    let old = CStringPath::new(old)?;
+    let new = CStringPath::new(new)?;
+    let result = unsafe {
+        libc::renameat(
+            old_parent.as_raw_fd(),
+            old.as_ptr(),
+            new_parent.as_raw_fd(),
+            new.as_ptr(),
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// `lstat` semantics: a dangling symlink exists.
+#[cfg(unix)]
+fn stat_at(parent: &File, name: &OsStr) -> io::Result<libc::stat> {
+    let name = CStringPath::new(name)?;
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == 0 {
+        Ok(stat)
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn exists_at(parent: &File, name: &OsStr) -> bool {
+    stat_at(parent, name).is_ok()
+}
+
+#[cfg(unix)]
+fn is_dir_at(parent: &File, name: &OsStr) -> io::Result<bool> {
+    Ok(stat_at(parent, name)?.st_mode & libc::S_IFMT == libc::S_IFDIR)
+}
+
+/// Copy one entry between retained directory descriptors (no-follow throughout).
+#[cfg(unix)]
+fn copy_entry(from_parent: &File, from: &OsStr, to_parent: &File, to: &OsStr) -> io::Result<()> {
+    match stat_at(from_parent, from)?.st_mode & libc::S_IFMT {
+        libc::S_IFDIR => {
+            mkdir_at(to_parent, to)?;
+            let source = open_dir_at(from_parent, from)?;
+            let target = open_dir_at(to_parent, to)?;
+            let listing = read_directory_from_fd(&source, 1_000_000)?;
+            if listing.truncated {
+                return Err(io::Error::other("folder has too many entries to copy"));
+            }
+            for entry in listing.entries {
+                copy_entry(&source, &entry.name, &target, &entry.name)?;
+            }
+            Ok(())
+        }
+        libc::S_IFLNK => {
+            let name = CStringPath::new(from)?;
+            let mut buffer = vec![0u8; libc::PATH_MAX as usize + 1];
+            let length = unsafe {
+                libc::readlinkat(
+                    from_parent.as_raw_fd(),
+                    name.as_ptr(),
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                )
+            };
+            if length < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            buffer.truncate(length as usize);
+            let link = std::ffi::CString::new(buffer)
+                .map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+            let new = CStringPath::new(to)?;
+            let result =
+                unsafe { libc::symlinkat(link.as_ptr(), to_parent.as_raw_fd(), new.as_ptr()) };
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        }
+        libc::S_IFREG => {
+            let mut source = open_file_at(from_parent, from)?;
+            let mode = file_mode(&source.metadata()?);
+            let temp_name = format!(".perch-copy-{}", uuid::Uuid::new_v4());
+            let mut temp = create_temp_at(to_parent, OsStr::new(&temp_name))?;
+            // Published with link_at, which fails if the name appeared meanwhile.
+            let result = io::copy(&mut source, &mut temp)
+                .and_then(|_| set_mode(&temp, mode))
+                .and_then(|_| temp.sync_all())
+                .and_then(|_| link_at(to_parent, OsStr::new(&temp_name), to));
+            let _ = unlink_at(to_parent, OsStr::new(&temp_name));
+            result
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "only files, folders and symlinks can be copied",
+        )),
+    }
+}
+
+#[cfg(not(unix))]
+fn copy_entry(_: &File, _: &OsStr, _: &File, _: &OsStr) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unsupported on this platform",
+    ))
+}
+
+#[cfg(not(unix))]
+fn mkdir_at(_parent: &File, _name: &OsStr) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unsupported on this platform",
+    ))
+}
+
+#[cfg(not(unix))]
+fn rename_between(_: &File, _: &OsStr, _: &File, _: &OsStr) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unsupported on this platform",
+    ))
+}
+
+#[cfg(not(unix))]
+fn exists_at(_parent: &File, _name: &OsStr) -> bool {
+    false
+}
+
+#[cfg(not(unix))]
+fn is_dir_at(_parent: &File, _name: &OsStr) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unsupported on this platform",
+    ))
+}
+
 #[cfg(unix)]
 fn rename_at(parent: &File, old: &OsStr, new: &OsStr) -> io::Result<()> {
     let old = CStringPath::new(old)?;
@@ -1669,6 +1938,49 @@ mod tests {
 
     fn cleanup(root: &Path) {
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_rename_and_remove_stay_inside_the_workspace() {
+        let (root, service) = fixture("mutate");
+        service.create_dir("a").unwrap();
+        service.create_file("a/one.txt").unwrap();
+        assert!(service.create_dir("a").is_err(), "no clobbering");
+        assert!(service.create_file("a/one.txt").is_err(), "no clobbering");
+        service.create_file("two.txt").unwrap();
+        assert!(
+            service.rename("two.txt", "a/one.txt").is_err(),
+            "no clobbering"
+        );
+        service.rename("two.txt", "a/two.txt").unwrap();
+        service.rename("a", "b").unwrap();
+        assert!(root.join("b/two.txt").is_file() && !root.join("a").exists());
+        assert!(service.rename("b", "../escaped").is_err());
+        assert!(service.remove("../x").is_err());
+        assert!(
+            service.remove("").is_err(),
+            "the root itself is never removed"
+        );
+        std::os::unix::fs::symlink("two.txt", root.join("b/link")).unwrap();
+        service.create_dir("b/sub").unwrap();
+        fs::write(root.join("b/sub/deep.txt"), "deep").unwrap();
+        service.copy("b", "c").unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("c/sub/deep.txt")).unwrap(),
+            "deep"
+        );
+        assert_eq!(
+            fs::read_link(root.join("c/link")).unwrap(),
+            Path::new("two.txt")
+        );
+        assert!(service.copy("b", "c").is_err(), "no clobbering");
+        assert!(service.copy("b", "b/inside").is_err(), "not into itself");
+        assert!(service.copy("b", "../escaped").is_err());
+        service.remove("c").unwrap();
+        service.remove("b/one.txt").unwrap();
+        service.remove("b").unwrap();
+        assert!(!root.join("b").exists());
+        cleanup(&root);
     }
 
     #[test]

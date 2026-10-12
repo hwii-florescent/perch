@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
+import { ChatView } from "../views/Chat";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
-import { MIN_PANE_PX, useSplitSets, visibleSplit } from "../splitSets";
-import { activateTab, workspaceTabs } from "../workspaceTabs";
+import { layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
+import { acquirePassthrough } from "../browserNative";
+import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
+import { closeTab, exitSplit } from "../tiledPanes";
+import { GHOST_BUTTON } from "./ui/icon-button";
+import { useTabOrderVersion } from "../tabOrder";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
@@ -14,8 +19,13 @@ const STEP = 0.02;
 /**
  * The canvas under the one tab strip. Normally the session's Dockview fills it
  * and an open file or review covers it. When the active tab belongs to a split
- * set, the set's members share the width instead, side by side, with
- * draggable dividers. The strip is untouched: every member stays an ordinary
+ * set, the set's members share the canvas instead, side by side or stacked
+ * (`set.dir`), with draggable dividers. Any tabs share a set, several
+ * terminals included: each has a stable session-bound ChatView. Focusing a
+ * tile must not move its xterm between a plain pane and Dockview (that created
+ * duplicate PTY attachments and renderer churn on every focus change).
+ * Every visible pane is marked `data-pane-id` for the tab drag (`tabDrag.ts`),
+ * which splits a pane by a tab dropped on one of its sides. The strip is untouched: every member stays an ordinary
  * tab, and only this area splits.
  *
  * The Dockview stays mounted at one place in the tree (a terminal must never
@@ -33,10 +43,23 @@ export function SplitCanvas() {
   const activeKey = useFileTabs((s) => s.active);
   const sets = useSplitSets((s) => s.sets);
   const resize = useSplitSets((s) => s.resize);
+  const zoomedId = useSplitSets((s) => s.zoomedId);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const shownWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const [live, setLive] = useState<number[] | null>(null);
+  // A saved drag order changes the panes' order: re-render for it.
+  useTabOrderVersion();
+  const [live, setLive] = useState<{ path: number[]; sizes: number[] } | null>(null);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const measure = () => setBox({ width: host.clientWidth, height: host.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
 
   const entries = workspaceTabs({ sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces }, fileTabs);
   const resources = new Map(entries.flatMap((entry) => entry.kind === "resource" ? [[entry.id, entry.tab] as const] : []));
@@ -52,6 +75,8 @@ export function SplitCanvas() {
     const focus = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        // A file previewed from the explorer with the keyboard (Space) leaves focus in the list.
+        if (document.activeElement?.closest('[data-explorer-keynav="true"]')) return;
         const pane = [...host.querySelectorAll<HTMLElement>("[data-tab-id]")].find((element) => element.dataset.tabId === activeKey);
         const editor = pane?.querySelector<HTMLTextAreaElement>('[data-testid="workspace-file-editor"]');
         if (!editor) return;
@@ -64,16 +89,19 @@ export function SplitCanvas() {
     focus();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [activeKey, editorShown, settingsOpen]);
-  // The Dockview shows the current session only: another session's tab is not a visible member.
-  const available = entries.filter((entry) => entry.kind === "resource" || entry.id === sessionId).map((entry) => entry.id);
-  const split = visibleSplit(sets, available, activeId);
-  const sizes = live && split && live.length === split.ids.length ? live : split?.sizes ?? [];
-  const lefts = sizes.map((_, i) => sizes.slice(0, i).reduce((sum, size) => sum + size, 0));
-
-  const slot = (id: string): { left: string; width: string } | undefined => {
-    const i = split?.ids.indexOf(id) ?? -1;
-    return i < 0 ? undefined : { left: `${lefts[i]! * 100}%`, width: `${sizes[i]! * 100}%` };
+  const split = visibleSplit(sets, entries.map((entry) => entry.id), activeId);
+  const tiledSessions = entries.flatMap((entry) => (entry.kind === "session" && split?.ids.includes(entry.id) ? [entry] : []));
+  const zoomed = split?.ids.includes(zoomedId ?? "") && zoomedId === activeId ? zoomedId : null;
+  const tileVisible = (id: string) => !zoomed || zoomed === id;
+  // Shared rounded edges: no gaps, and no half-pixel canvas compositing.
+  const placed = split ? layout(split.tree, { x: 0, y: 0, w: box.width, h: box.height }, { round: true, live }) : null;
+  const slot = (id: string) => {
+    const r = placed?.panes.get(id);
+    if (!r) return undefined;
+    if (zoomed) return tileVisible(id) ? { inset: 0 } : { display: "none" };
+    return { left: r.x, top: r.y, width: r.w, height: r.h };
   };
+  const dividers = placed?.strips.flatMap((strip) => strip.edges.map((edge, i) => ({ strip, i, edge }))) ?? [];
 
   // Coming back to a project: its selected file or review returns. The session the
   // navigation lands on can arrive after the workspace does (the server confirms it),
@@ -87,7 +115,8 @@ export function SplitCanvas() {
   }, [shownWorkspaceId, sessionId]);
 
   // A split set shows its terminal beside the file: if another session is current, bring the set's up.
-  const partner = fileShown ? sets.find((set) => set.ids.includes(activeKey))?.ids.find((id) => id !== activeKey && entries.some((entry) => entry.id === id && entry.kind === "session")) : undefined;
+  const activeSet = fileShown ? sets.find((set) => set.ids.includes(activeKey)) : undefined;
+  const partner = activeSet?.ids.includes(sessionId ?? "") ? undefined : activeSet?.ids.find((id) => id !== activeKey && entries.some((entry) => entry.id === id && entry.kind === "session"));
   useEffect(() => {
     const entry = entries.find((candidate) => candidate.id === activeKey);
     if (partner && partner !== sessionId && entry) activateTab(entry);
@@ -101,48 +130,76 @@ export function SplitCanvas() {
   // Which resource panes to mount: the set's resource members, else the one open file or review.
   const panes = [...resources].filter(([id]) => (split ? split.ids.includes(id) : id === activeKey && fileShown));
 
-  const dragDivider = (i: number, e: React.PointerEvent<HTMLDivElement>) => {
+  /** The pane sizes of `strip` with its divider `i` moved to the fraction `at` of the strip. */
+  const moved = (strip: Strip, i: number, at: number) => {
+    const length = strip.dir === "col" ? strip.rect.h : strip.rect.w;
+    const min = MIN_PANE_PX / (length || 1);
+    const from = strip.sizes.slice(0, i).reduce((sum, size) => sum + size, 0);
+    const to = from + strip.sizes[i]! + strip.sizes[i + 1]!;
+    if (to - from < 2 * min) return null;
+    const edge = Math.min(to - min, Math.max(from + min, at));
+    const next = strip.sizes.slice();
+    next[i] = edge - from;
+    next[i + 1] = to - edge;
+    return next;
+  };
+
+  const dragDivider = (strip: Strip, i: number, e: React.PointerEvent<HTMLDivElement>) => {
     const host = hostRef.current;
     if (!host || !split) return;
     e.preventDefault();
     const rect = host.getBoundingClientRect();
-    const min = MIN_PANE_PX / rect.width;
-    const start = sizes.slice();
-    const from = lefts[i]!;
-    const to = lefts[i + 1]! + start[i + 1]!;
-    let latest = start;
+    const col = strip.dir === "col";
+    const [origin, length] = col ? [strip.rect.y, strip.rect.h] : [strip.rect.x, strip.rect.w];
+    // A native browser page would swallow the drag over it.
+    const release = acquirePassthrough();
+    let latest: number[] | null = null;
     const move = (ev: PointerEvent) => {
-      const boundary = Math.min(to - min, Math.max(from + min, (ev.clientX - rect.left) / rect.width));
-      latest = start.slice();
-      latest[i] = boundary - from;
-      latest[i + 1] = to - boundary;
-      setLive(latest);
+      const next = moved(strip, i, ((col ? ev.clientY - rect.top : ev.clientX - rect.left) - origin) / (length || 1));
+      if (!next) return;
+      latest = next;
+      setLive({ path: strip.path, sizes: next });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      release();
       setLive(null);
-      resize(split.ids, latest);
+      if (latest) resize(split.ids, latest, strip.path);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
 
-  const nudgeDivider = (i: number, e: React.KeyboardEvent) => {
-    if (!split || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+  const nudgeDivider = (strip: Strip, i: number, e: React.KeyboardEvent) => {
+    const [less, more] = strip.dir === "col" ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"];
+    if (!split || (e.key !== less && e.key !== more)) return;
     e.preventDefault();
-    const delta = e.key === "ArrowRight" ? STEP : -STEP;
-    const min = MIN_PANE_PX / (hostRef.current?.getBoundingClientRect().width || 1);
-    const next = sizes.slice();
-    const a = Math.max(min, next[i]! + delta);
-    const b = next[i]! + next[i + 1]! - a;
-    if (b < min) return;
-    next[i] = a;
-    next[i + 1] = b;
-    resize(split.ids, next);
+    const at = strip.sizes.slice(0, i + 1).reduce((sum, size) => sum + size, 0) + (e.key === more ? STEP : -STEP);
+    const next = moved(strip, i, at);
+    if (next) resize(split.ids, next, strip.path);
   };
 
-  const dock = slot(sessionId ?? "");
+  // Dockview retains the session layout underneath, but not a second primary terminal.
+  const primaryHidden = !!split;
+  useEffect(() => {
+    if (!split || !activeId || settingsOpen) return;
+    const host = hostRef.current;
+    if (!host) return;
+    let frame = 0;
+    const focus = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const pane = [...host.querySelectorAll<HTMLElement>("[data-pane-id]")].find((el) => el.dataset.paneId === activeId);
+        const input = pane?.querySelector<HTMLElement>(".xterm-helper-textarea, textarea");
+        if (input) { input.focus({ preventScroll: true }); observer.disconnect(); }
+      });
+    };
+    const observer = new MutationObserver(focus);
+    observer.observe(host, { childList: true, subtree: true });
+    focus();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [activeId, primaryHidden, settingsOpen]);
   // A thin rule marks the focused pane, only while panes are shared.
   const focusBar = (on: boolean) => on && split
     ? <div className="pointer-events-none absolute top-0 right-0 left-0 z-20 h-[2px] bg-overlay-1" data-testid="split-focus-bar" />
@@ -151,20 +208,38 @@ export function SplitCanvas() {
   return (
     <div ref={hostRef} className="absolute inset-0" data-testid="split-canvas" data-split={split ? split.ids.length : 0}>
       <div
-        className={cn("absolute top-0 bottom-0", !dock && "inset-0")}
-        style={dock}
-        data-testid="split-pane-session"
+        className={cn("absolute inset-0", primaryHidden && "hidden")}
+        data-testid={primaryHidden ? "split-dock-parked" : "split-pane-session"}
+        data-pane-id={primaryHidden ? undefined : sessionId ?? undefined}
+        data-pane-visible={!primaryHidden && !fileShown}
         onMouseDownCapture={focusSession}
         onFocusCapture={split ? focusSession : undefined}
       >
-        <DockviewShell />
+        <DockviewShell primaryHidden={primaryHidden} />
         {focusBar(!fileShown)}
       </div>
+      {tiledSessions.map((entry) => (
+        <div
+          key={entry.id}
+          className="absolute z-10 flex min-h-0 min-w-0 flex-col bg-panel-bg"
+          style={slot(entry.id)}
+          data-testid={entry.id === sessionId ? "split-pane-session" : `split-pane-session-${entry.id}`}
+          data-pane-id={entry.id}
+          data-pane-visible={tileVisible(entry.id)}
+          onMouseDownCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
+          onFocusCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
+        >
+          <ChatView sessionId={entry.id} />
+          {focusBar(entry.id === activeId)}
+        </div>
+      ))}
       {panes.map(([id, tab]) => (
         <div
           key={id}
-          className={cn("absolute top-0 bottom-0 z-10 flex bg-panel-bg", !split && "inset-0")}
+          className={cn("absolute z-10 flex bg-panel-bg", !split && "inset-0")}
           style={slot(id)}
+          data-pane-id={id}
+          data-pane-visible={tileVisible(id)}
           data-testid={tab.kind === "review" ? "split-pane-review" : tab.kind === "browser" ? "split-pane-browser" : `split-pane-file-${tab.path}`}
           data-tab-id={id}
           onMouseDownCapture={() => focusResource(tab)}
@@ -180,21 +255,36 @@ export function SplitCanvas() {
           {focusBar(id === activeKey)}
         </div>
       ))}
-      {split && sizes.slice(0, -1).map((_, i) => (
-        <div
-          key={split.ids[i + 1]}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize split panes"
-          aria-valuenow={Math.round((lefts[i]! + sizes[i]!) * 100)}
-          tabIndex={0}
-          data-testid={`split-divider-${i}`}
-          className="absolute top-0 bottom-0 z-30 w-[5px] cursor-col-resize bg-transparent hover:bg-accent focus-visible:bg-accent"
-          style={{ left: `calc(${(lefts[i]! + sizes[i]!) * 100}% - 2px)` }}
-          onPointerDown={(e) => dragDivider(i, e)}
-          onKeyDown={(e) => nudgeDivider(i, e)}
-        />
+      {split && entries.filter((entry) => split.ids.includes(entry.id) && tileVisible(entry.id)).map((entry) => (
+        <div key={`controls-${entry.id}`} className="pointer-events-none absolute z-40" style={slot(entry.id)}>
+          <div className="pointer-events-auto absolute top-1 right-1 flex gap-1 rounded-ui bg-panel-bg" data-testid={`tile-controls-${entry.id}`}>
+            <button type="button" className={cn(GHOST_BUTTON, "flex h-7 w-7 items-center justify-center p-0 text-fg")} title="Exit split — show this tab full size" aria-label={`Exit split for ${entryLabel(entry)}`} data-testid={`tile-expand-${entry.id}`} onClick={() => exitSplit(entry.id)}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
+            </button>
+            <button type="button" className={cn(GHOST_BUTTON, "flex h-7 w-7 items-center justify-center p-0 text-fg")} title="Close this tab" aria-label={`Close ${entryLabel(entry)}`} data-testid={`tile-close-${entry.id}`} onClick={() => closeTab(entry.id)}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg>
+            </button>
+          </div>
+        </div>
       ))}
+      {split && !zoomed && dividers.map(({ strip, i, edge }, n) => {
+        const col = strip.dir === "col";
+        return (
+          <div
+            key={`${strip.path.join(".")}/${i}`}
+            role="separator"
+            aria-orientation={col ? "horizontal" : "vertical"}
+            aria-label="Resize split panes"
+            aria-valuenow={Math.round(strip.sizes.slice(0, i + 1).reduce((sum, size) => sum + size, 0) * 100)}
+            tabIndex={0}
+            data-testid={`split-divider-${n}`}
+            className={cn("absolute z-30 bg-transparent hover:bg-accent focus-visible:bg-accent", col ? "h-[5px] cursor-row-resize" : "w-[5px] cursor-col-resize")}
+            style={col ? { top: edge - 2, left: strip.rect.x, width: strip.rect.w } : { left: edge - 2, top: strip.rect.y, height: strip.rect.h }}
+            onPointerDown={(e) => dragDivider(strip, i, e)}
+            onKeyDown={(e) => nudgeDivider(strip, i, e)}
+          />
+        );
+      })}
     </div>
   );
 }

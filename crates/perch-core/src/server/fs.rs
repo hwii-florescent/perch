@@ -8,6 +8,7 @@
 //! call them directly, so they stay reachable from the parent.
 
 use super::*;
+use crate::protocol::FsMutateOp;
 
 /// Errors raised before a workspace service exists are kept separate from
 /// filesystem errors so the client can distinguish an expired/unknown durable
@@ -410,6 +411,48 @@ pub(super) fn spawn_fs_extract(
             workspace_id,
             path,
             destination,
+        },
+    );
+}
+
+pub(super) fn spawn_fs_mutate(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    op: FsMutateOp,
+    path: String,
+    to: Option<String>,
+) {
+    let (work_path, work_to) = (path.clone(), to.clone());
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            let lock = filesystem_operation_lock(app, workspace_id, &work_path);
+            let _guard = lock.lock().unwrap();
+            let service = workspace_file_service(app, workspace_id)?;
+            match op {
+                FsMutateOp::CreateFile => service.create_file(&work_path),
+                FsMutateOp::CreateDir => service.create_dir(&work_path),
+                FsMutateOp::Delete => service.remove(&work_path),
+                FsMutateOp::Rename | FsMutateOp::Copy => match &work_to {
+                    Some(to) if op == FsMutateOp::Rename => service.rename(&work_path, to),
+                    Some(to) => service.copy(&work_path, to),
+                    None => Err(FsError::InvalidPath {
+                        path: work_path.clone(),
+                        reason: "rename and copy need a destination".to_string(),
+                    }),
+                },
+            }
+            .map_err(FsAdapterFailure::Filesystem)
+        },
+        move |request_id, workspace_id, ()| ServerMessage::FsMutateResult {
+            request_id,
+            workspace_id,
+            op,
+            path,
+            to,
         },
     );
 }

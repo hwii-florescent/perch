@@ -165,13 +165,32 @@ there, not here.
     placed over its pane by `browser.rs`, never an iframe): no Terminal
     (terminals are tabs), and Git only for a git workspace. It is app-level, not part of a session's layout, and follows
     the clicked workspace. A clicked file opens as a top-row tab after the
-    workspace's sessions (the Git drawer's "Open as tab" adds the review the
+    workspace's sessions as a preview tab (italic; VS Code style): the next
+    single-clicked file replaces it in place, until it is edited, double-clicked
+    (explorer entry or tab), or opened by an explicit action (`FileTab.preview`,
+    `openFilePreview` in `workspaceTabs.ts`; a preview in a split set is kept;
+    Settings → "Preview files in tabs" = `settings.previewTabs` turns it off;
+    ⌘⌥Enter (Cmd+Option+Enter) on a Mac, Ctrl+Alt+Enter elsewhere,
+    `tabs.keepOpen`, pins the active one; a middle click pins too).  Modelled on
+    VS Code's explorer (`listService.ts`, `listCommands.ts`): arrows focus only,
+    Space = select with preserved focus (preview), Enter = select and focus the
+    editor (pinned); unlike VS Code, a single click also focuses the editor. The explorer is
+    keyboard-driven (`explorerNav.ts`): arrows move the cursor only, Left/Right
+    fold, Space previews and keeps focus in the list (`data-explorer-keynav`
+    makes `SplitCanvas` leave focus there), Enter opens a regular tab and
+    focuses the editor.
+    (the Git drawer's "Open as tab" adds the review the
     same way), in one order shared by the strip, drag and the Ctrl+Space
     n/p/1-9 chords (`workspaceTabs.ts`, per viewer); the active file covers
     the main area while the session's panes stay mounted underneath, unless it
     is in a split set (`splitSets.ts`, `SplitCanvas.tsx`, per viewer): the
-    members then share the canvas side by side while the strip stays one row.
-    A set holds at most one terminal. `surfaceSync.ts` mirrors the strip,
+    members then share the canvas side by side or stacked (`SplitSet.dir`, one
+    direction per set) while the strip stays one row. Tabs are dragged by
+    pointer events (`tabDrag.ts`, `TabDragLayer.tsx`), never HTML5 drag and
+    drop (its OS "+" cursor and ghost can't be styled; Tauri's file-drop
+    handler is off for the same reason): onto the strip it reorders (past the
+    last tab = last), onto a side of a pane it splits that way and the strip
+    follows. A set holds at most four tabs (terminals included), one axis per set; dropping a tab on a pane's side splits it (`tabDrag.ts`). Every tile has close / exit-split buttons, the Settings pane shortcuts act on the tiles (`tiledPanes.ts`), and the tab right-click menu splits/unsplits. `surfaceSync.ts` mirrors the strip,
     sets and open files/reviews to the core's surfaces (`surface.v1`, local
     workspaces only): the local stores stay live, a file with an unsaved draft
     gets its tab back when closed, and a viewer with no local tabs is
@@ -314,6 +333,14 @@ there, not here.
     host in the dialog.
   - Menus offer only what perch does. Don't add Orca items with no perch
     feature behind them (status columns, groups, icons, mark unread).
+  - perch is an app: `main.tsx` cancels every `contextmenu` that has no menu
+    of its own (text fields outside terminals keep the OS one). A surface
+    with a right-click menu calls `preventDefault` itself. The file
+    explorer's is `FileEntryMenu.tsx` over `fs.mutate` (`fileOps.ts`): new
+    file/folder, cut/copy/paste/duplicate (an in-app clipboard, `useEntryClipboard`;
+    paste = `rename`/`copy`, never overwriting), rename, delete (permanent,
+    confirmed), copy path, and Reveal in Finder (desktop app only: the
+    `reveal_in_finder` Tauri command).
 - **Store:** anything that reads or replaces `messages` calls
   `flushChunkBuffer()` first (see its doc comment). A late flush silently
   drops text.

@@ -8,6 +8,7 @@
  * the same project grouping TabBar/Sidebar already use elsewhere.
  */
 
+import { useEffect, useState } from "react";
 import { readViewerStored, viewerKey } from "./viewer";
 
 const STORAGE_PREFIX = "perch.tabOrder.";
@@ -73,3 +74,28 @@ export function storedTabOrder(projectKey: string): string[] {
 
 /** Fired on `window` whenever a drag order is saved. */
 export const TAB_ORDER_EVENT = "perch:tabOrder";
+
+/** Re-renders its component whenever a tab order is saved (the order is read from storage, not state). */
+export function useTabOrderVersion(): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    window.addEventListener(TAB_ORDER_EVENT, bump);
+    return () => window.removeEventListener(TAB_ORDER_EVENT, bump);
+  }, []);
+  return version;
+}
+
+/** `ids` with `id` moved to `index` of the list without it (past the end = last). */
+export function moveTab(ids: string[], id: string, index: number): string[] {
+  const rest = ids.filter((other) => other !== id);
+  rest.splice(Math.max(0, Math.min(index, rest.length)), 0, id);
+  return rest;
+}
+
+/** `ids` with `id` moved right before (or after) `target`. */
+export function moveBeside(ids: string[], id: string, target: string, after: boolean): string[] {
+  const rest = ids.filter((other) => other !== id);
+  const at = rest.indexOf(target);
+  return moveTab(ids, id, at < 0 ? rest.length : at + (after ? 1 : 0));
+}

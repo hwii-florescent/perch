@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
-import { browserCall, browserId, nativeBrowser } from "../browserNative";
+import { browserCall, browserId, nativeBrowser, onPassthrough, passthroughActive } from "../browserNative";
 import { openExternal, parseUrl, webUrl } from "../links";
 import { usePerchStore } from "../store";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -50,7 +50,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     const sync = () => {
       frame = 0;
       const r = el.getBoundingClientRect();
-      const hidden = settingsOpen || r.width < 2 || r.height < 2 || document.querySelector(COVERS) !== null;
+      const hidden = settingsOpen || r.width < 2 || r.height < 2 || document.querySelector(COVERS) !== null || passthroughActive();
       const next = hidden ? "hidden" : `${r.x},${r.y},${r.width},${r.height}`;
       if (next === last) return;
       last = next;
@@ -64,6 +64,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     const mutations = new MutationObserver(schedule);
     mutations.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", schedule);
+    const unpass = onPassthrough(schedule);
     schedule();
     // The address follows the page's own navigation (links, redirects, back).
     const poll = setInterval(() => {
@@ -76,6 +77,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
       clearInterval(poll);
       resize.disconnect();
       mutations.disconnect();
+      unpass();
       window.removeEventListener("resize", schedule);
       void browserCall("hide", { id });
     };

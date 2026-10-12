@@ -132,6 +132,9 @@ function ChatModeSection() {
       <SettingRow title="Warn before closing an agent" description="Ask first when closing a tab that runs an agent. Terminals close without asking.">
         <Switch label="Warn before closing an agent" testId="settings-warn-close-agent" checked={settings?.warnCloseAgent !== false} onChange={(on) => updateSettings({ warnCloseAgent: on })} />
       </SettingRow>
+      <SettingRow title="Preview files in tabs" description="A single-clicked file opens in an italic preview tab that the next clicked file replaces. Edit or double-click it to keep it. Off opens every clicked file in its own tab.">
+        <Switch label="Preview files in tabs" testId="settings-preview-tabs" checked={settings?.previewTabs !== false} onChange={(on) => updateSettings({ previewTabs: on })} />
+      </SettingRow>
       <SettingRow title="Empty workspace opens" description="What clicking a workspace with no open tabs starts.">
         <select
           className={SELECT}

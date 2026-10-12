@@ -189,7 +189,7 @@ it.each(["single", "worktree", "collapsed"])("%s workspace badges follow the str
   render(<><WorkspaceOverview /><TabBar /></>);
   if (kind === "collapsed") click(get("project-toggle-project"));
   const badgeIds = () => [...get("session-dots").querySelectorAll("button")].map((button) => button.dataset.testid!.replace("workspace-session-", ""));
-  const tabIds = () => [...host.querySelectorAll('[data-testid^="tab-"][draggable="true"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
+  const tabIds = () => [...host.querySelectorAll('.tab-bar__tab[data-testid^="tab-"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
   expect(badgeIds()).toEqual([older.id, newer.id]);
   expect(badgeIds()).toEqual(tabIds());
   act(() => saveTabOrder(`remote:ws:${owner.id}`, [newer.id, "closed-tab", older.id]));

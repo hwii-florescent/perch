@@ -84,6 +84,29 @@ fn open_external(url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Shows a file in Finder (macOS) or its folder in the file manager. The UI sends the
+/// absolute path of an explorer entry; anything else is refused (and `open` never sees a
+/// leading `-`).
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path);
+    if !path.is_absolute() || std::fs::symlink_metadata(&path).is_err() {
+        return Err("not an existing absolute path".into());
+    }
+    let mut command;
+    if cfg!(target_os = "macos") {
+        command = std::process::Command::new("open");
+        command.arg("-R").arg(&path);
+    } else {
+        command = std::process::Command::new("xdg-open");
+        command.arg(path.parent().unwrap_or(&path));
+    }
+    command.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// The loopback port the app serves its UI on (see `main`).
+const DESKTOP_PORT: u16 = 47788;
+
 fn main() {
     // `<exe> __perchd …` is the terminal daemon, not the app (see daemon.rs).
     perch_core::daemon::run_if_requested();
@@ -110,8 +133,24 @@ fn main() {
     // passing an empty slice means no argv overrides, which is correct here.
     let empty: Vec<String> = vec![];
     let mut args = CliArgs::parse(&empty);
-    // Force port 0 so the OS assigns a free loopback port.
-    args.port = 0;
+    // The web view's saved state (tab order, splits, open files, which window it
+    // is) is keyed by its origin, port included, so the port must survive a
+    // restart: ask for the same loopback port every launch, and take any free one
+    // only when it is busy (a second app, or a test: it then starts clean).
+    // Test mode always takes a free port, so it never shares the real app's state.
+    args.port = if std::env::var("PERCH_DESKTOP_TEST").as_deref() == Ok("1") {
+        0
+    } else {
+        let wanted = std::env::var("PERCH_DESKTOP_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(DESKTOP_PORT);
+        // ponytail: probe-then-bind can race another process taking the port in between; boot then fails and the app exits.
+        match std::net::TcpListener::bind(("127.0.0.1", wanted)) {
+            Ok(_) => wanted,
+            Err(_) => 0,
+        }
+    };
 
     let web_dist_dir = resolve_web_dist_dir();
 
@@ -168,6 +207,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             open_external,
+            reveal_in_finder,
             browser::browser_show,
             browser::browser_hide,
             browser::browser_close,
@@ -182,7 +222,11 @@ fn main() {
             let mut builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("perch")
                 .inner_size(1280.0, 800.0)
-                .min_inner_size(800.0, 600.0);
+                .min_inner_size(800.0, 600.0)
+                // Tauri's native file-drop handler swallows every drag over the
+                // web view on macOS, so in-page HTML5 drags (tab reorder) never
+                // drop. perch doesn't use Tauri's drag-drop events.
+                .disable_drag_drop_handler();
 
             // Orca-style: no separate title bar. The web view's top row (tabs
             // + ›_) runs under the traffic lights; it pads 78px for them and

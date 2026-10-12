@@ -9,14 +9,8 @@
  *        asserted via the group's bounding box width changing.
  *   X3 — dragging a TabBar tab reorders the strip; the new order persists
  *        across a reload (client-side only, via `tabOrder.ts`'s localStorage
- *        key — no protocol field). TabBar's drag handlers are plain React
- *        state (`draggingId`), not `DataTransfer`-payload-driven, but they're
- *        wired to native HTML5 `dragstart`/`dragover`/`drop`/`dragend`
- *        events, so a real `DataTransfer` still has to be dispatched for the
- *        events to fire as `DragEvent`s at all (Playwright's built-in
- *        `dragTo()` only simulates mouse movement, which native HTML5
- *        `draggable` elements ignore — see Playwright's documented
- *        workaround for testing HTML5 drag-and-drop).
+ *        key — no protocol field). The drag is pointer-event based
+ *        (`tabDrag.ts`), so Playwright's real mouse moves drive it.
  *   X4 — first-run onboarding modal appears on a genuinely fresh browser
  *        profile and dismissing it marks it seen (never shown again). Every
  *        *other* test in this suite (and the rest of the e2e suite) runs
@@ -87,17 +81,9 @@ async function isGroupActive(group: Locator): Promise<boolean> {
   return cls.split(/\s+/).includes("dv-active-group");
 }
 
-/** Simulates a native HTML5 drag-and-drop of `source` onto `target`.
- * Playwright's built-in `dragTo()` only replays mouse movement, which real
- * `draggable` elements ignore — dispatching the actual `DragEvent` sequence
- * (with a real in-page `DataTransfer`) is Playwright's documented workaround
- * for testing HTML5 drag-and-drop. */
+/** Drags `source` onto `target` with the real mouse (tab drags are pointer-based, `tabDrag.ts`). */
 async function htmlDragAndDrop(page: Page, source: Locator, target: Locator): Promise<void> {
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await source.dispatchEvent("dragstart", { dataTransfer });
-  await target.dispatchEvent("dragover", { dataTransfer });
-  await target.dispatchEvent("drop", { dataTransfer });
-  await source.dispatchEvent("dragend", { dataTransfer });
+  await source.dragTo(target);
 }
 
 test.describe("Wave 2 functionality gaps", () => {

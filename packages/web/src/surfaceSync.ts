@@ -121,8 +121,11 @@ async function closeTab(tab: FileTab): Promise<void> {
 /** Tabs opened or closed here are opened or closed in the core. */
 useFileTabs.subscribe((state, previous) => {
   if (state.tabs === previous.tabs) return;
-  for (const tab of state.tabs) if (!previous.tabs.includes(tab)) void openTab(tab);
-  for (const tab of previous.tabs) if (!state.tabs.includes(tab)) void closeTab(tab);
+  // By key, not identity: pinning a preview tab swaps its object but is the same resource.
+  const now = new Set(state.tabs.map(fileTabKey));
+  const before = new Set(previous.tabs.map(fileTabKey));
+  for (const tab of state.tabs) if (!before.has(fileTabKey(tab))) void openTab(tab);
+  for (const tab of previous.tabs) if (!now.has(fileTabKey(tab))) void closeTab(tab);
 });
 
 /** The session each workspace last showed in this window, for workspaces no longer on screen. */
@@ -213,10 +216,15 @@ const restored = new Set<string>();
 /** False when it could not finish (a dropped connection), so a later sync tries again. */
 async function hydrate(workspaceId: string, presentation: ViewerPresentation): Promise<boolean> {
   const layout = presentation.layout as Layout | undefined;
-  if (!layout || layout.v !== LAYOUT_VERSION || presentation.order.length === 0) return true;
-  const listed = await ask((requestId) => ({ type: "surface.list", requestId, workspaceId }));
-  if (listed.type !== "surface.list.result") return false;
-  const byId = new Map<string, SurfaceDescriptor>(listed.surfaces.map((surface) => [surface.id, surface]));
+  if (!layout || layout.v !== LAYOUT_VERSION) return true;
+  // A strip of terminals only has no resources to list, but still has an order and splits to put back.
+  let surfaces: SurfaceDescriptor[] = [];
+  if (presentation.order.length > 0) {
+    const listed = await ask((requestId) => ({ type: "surface.list", requestId, workspaceId }));
+    if (listed.type !== "surface.list.result") return false;
+    surfaces = listed.surfaces;
+  }
+  const byId = new Map<string, SurfaceDescriptor>(surfaces.map((surface) => [surface.id, surface]));
   const tabs: FileTab[] = presentation.order.flatMap((id): FileTab[] => {
     const surface = byId.get(id);
     const tab: FileTab | undefined = surface?.kind === "file" && surface.locator.path ? { workspaceId, path: surface.locator.path }

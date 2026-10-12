@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { effectiveWorkspace, usePerchStore } from "./store";
 import { readViewerStored, viewerKey } from "./viewer";
 import { recordClosedFile } from "./closedTabs";
+import { useWorkspaceFilesStore } from "./filesystemStore";
 
 /** A workspace resource open as a top-row tab, a peer of the workspace's sessions:
  * a file, or (`kind: "review"`) the workspace's change review, or (`kind: "browser"`)
@@ -11,6 +12,9 @@ export interface FileTab {
   /** The file's path; "" for a review. */
   path: string;
   kind?: "review" | "browser";
+  /** A file opened by a single click (VS Code's preview tab, shown in italics): the next
+   * previewed file replaces it in place until it is edited, double-clicked or opened for real. */
+  preview?: boolean;
 }
 
 // NUL cannot occur in a path, so a review never collides with a file.
@@ -22,6 +26,11 @@ interface FileTabsState {
   active: string | null;
   open: (workspaceId: string, path: string, kind?: FileTab["kind"]) => void;
   close: (key: string) => void;
+  /** Show `path` as the workspace's preview tab: in `replaceKey`'s slot (that preview tab goes,
+   * unrecorded), else at the end. An already open file is just shown, preview or not. */
+  openPreview: (workspaceId: string, path: string, replaceKey?: string) => void;
+  /** A preview tab becomes a regular one. */
+  pin: (key: string) => void;
   /** Back to the session view (a session tab was clicked or switched to). */
   showSession: () => void;
 }
@@ -49,6 +58,21 @@ export const useFileTabs = create<FileTabsState>((set, get) => ({
     const known = state.tabs.some((tab) => fileTabKey(tab) === key);
     return { tabs: known ? state.tabs : [...state.tabs, next], active: key };
   }),
+  openPreview: (workspaceId, path, replaceKey) => set((state) => {
+    const next: FileTab = { workspaceId, path, preview: true };
+    const key = fileTabKey(next);
+    if (state.tabs.some((tab) => fileTabKey(tab) === key)) return { active: key };
+    const at = replaceKey ? state.tabs.findIndex((tab) => fileTabKey(tab) === replaceKey && tab.preview) : -1;
+    if (at < 0) return { tabs: [...state.tabs, next], active: key };
+    const tabs = [...state.tabs];
+    tabs[at] = next;
+    return { tabs, active: key };
+  }),
+  pin: (key) => set((state) => (
+    state.tabs.some((tab) => tab.preview && fileTabKey(tab) === key)
+      ? { tabs: state.tabs.map((tab) => (tab.preview && fileTabKey(tab) === key ? { ...tab, preview: false } : tab)) }
+      : state
+  )),
   close: (key) => {
     const closing = get().tabs.find((tab) => fileTabKey(tab) === key);
     if (closing) recordClosedFile(closing);
@@ -63,6 +87,17 @@ export const useFileTabs = create<FileTabsState>((set, get) => ({
 useFileTabs.subscribe((state, previous) => {
   if (state.tabs === previous.tabs) return;
   try { localStorage.setItem(viewerKey(STORAGE_KEY), JSON.stringify(state.tabs)); } catch { /* convenience only */ }
+});
+
+// Editing a previewed file makes its tab permanent (and it stays so after a save).
+useWorkspaceFilesStore.subscribe((state, previous) => {
+  if (state.documents === previous.documents) return;
+  const { tabs } = useFileTabs.getState();
+  const edited = tabs.filter((tab) => {
+    const document = tab.preview ? state.documents[tab.workspaceId]?.[tab.path] : undefined;
+    return document != null && document.content !== document.savedContent;
+  });
+  if (edited.length > 0) useFileTabs.setState({ tabs: tabs.map((tab) => (edited.includes(tab) ? { ...tab, preview: false } : tab)) });
 });
 
 // What each workspace has selected: an open file or review, or null for its

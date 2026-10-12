@@ -369,6 +369,13 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             path,
         } => fs::spawn_fs_extract(state, request_id, workspace_id, path),
+        ClientMessage::FsMutate {
+            request_id,
+            workspace_id,
+            op,
+            path,
+            to,
+        } => fs::spawn_fs_mutate(state, request_id, workspace_id, op, path, to),
         ClientMessage::FsRead {
             request_id,
             workspace_id,
