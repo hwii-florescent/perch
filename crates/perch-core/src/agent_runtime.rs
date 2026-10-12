@@ -37,12 +37,22 @@ const RUNTIME_VIEWER: &str = "__perch_runtime__";
 /// terminal. The pty, and so the "exited" overlay, ends only with the shell.
 /// The no-op INT trap keeps Ctrl+C aimed at the agent from also ending the
 /// wrapper; caught (not ignored) signals reset to default in the child.
-fn in_shell(argv: Vec<String>) -> Vec<String> {
+///
+/// If the agent exits while no core is running (`daemon::cores_dir` has no
+/// live pid) nobody could have quit it from a pane, so the wrapper drops
+/// `marker` and the next core resumes the agent. Agents like pi catch SIGTERM
+/// and exit 0, so the exit status can't tell a kill from a quit.
+fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
     [
         "/bin/sh",
         "-c",
-        "trap : INT; \"$@\"; exec \"${SHELL:-/bin/sh}\" -l",
+        "trap : INT; m=$1; c=$2; shift 2; \"$@\"; up=; \
+         for p in \"$c\"/*; do kill -0 \"${p##*/}\" 2>/dev/null && up=1; done; \
+         [ \"$up\" ] || { mkdir -p \"${m%/*}\" && : > \"$m\"; }; \
+         exec \"${SHELL:-/bin/sh}\" -l",
         "perch-agent",
+        &marker.display().to_string(),
+        &cores.display().to_string(),
     ]
     .into_iter()
     .map(String::from)
@@ -688,7 +698,11 @@ impl AgentRuntimeAdapter {
             let command = if provider_id == crate::agent_fleet::TERMINAL_PROVIDER {
                 command
             } else {
-                in_shell(command)
+                in_shell(
+                    command,
+                    &crate::daemon::exit_marker(&terminal_key(&key)),
+                    &crate::daemon::cores_dir(),
+                )
             };
             crate::provider_environment::prepare(command, &manifest.environment)
         })() {
@@ -1415,18 +1429,37 @@ fn foreground_provider(
 mod tests {
     #[test]
     fn in_shell_keeps_argv_and_falls_back_to_the_login_shell() {
-        let argv = super::in_shell(vec![
-            "printf".into(),
-            "%s|".into(),
-            "a b".into(),
-            "c".into(),
-        ]);
-        let output = std::process::Command::new(&argv[0])
-            .args(&argv[1..])
-            .env("SHELL", "/bin/echo")
-            .output()
-            .unwrap();
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "a b|c|-l\n");
+        let dir = std::env::temp_dir().join(format!("perch-in-shell-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let run = |cores: &Path| {
+            let argv = super::in_shell(
+                vec!["printf".into(), "%s|".into(), "a b".into(), "c".into()],
+                &dir.join("agent-exit/k"),
+                cores,
+            );
+            let output = std::process::Command::new(&argv[0])
+                .args(&argv[1..])
+                .env("SHELL", "/bin/echo")
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&output.stdout), "a b|c|-l\n");
+        };
+        // A live core (this test process) means the user was there: no marker.
+        let cores = dir.join("cores");
+        std::fs::create_dir_all(&cores).unwrap();
+        let me = cores.join(std::process::id().to_string());
+        std::fs::write(&me, b"").unwrap();
+        run(&cores);
+        assert!(!dir.join("agent-exit/k").exists());
+        // No live core (a dead pid, then no dir at all): the exit is recorded.
+        std::fs::remove_file(&me).unwrap();
+        std::fs::write(cores.join("2147483646"), b"").unwrap();
+        run(&cores);
+        assert!(dir.join("agent-exit/k").exists());
+        std::fs::remove_file(dir.join("agent-exit/k")).unwrap();
+        run(&dir.join("missing"));
+        assert!(dir.join("agent-exit/k").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     use super::*;

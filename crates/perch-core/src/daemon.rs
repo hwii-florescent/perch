@@ -40,6 +40,43 @@ pub fn dir() -> PathBuf {
     }
 }
 
+/// Where each running core records its pid (one empty file named by pid).
+/// An agent's wrapper shell (`agent_runtime::in_shell`) reads it to tell "the
+/// agent exited while perch was away" (killed from Activity Monitor, say)
+/// from "the user quit it in a pane".
+pub fn cores_dir() -> PathBuf {
+    dir().join("cores")
+}
+
+/// Marker the wrapper drops when its agent exits while no core is running;
+/// the next core to boot resumes that agent (`server/recover.rs`).
+pub fn exit_marker(terminal_key: &str) -> PathBuf {
+    dir().join("agent-exit").join(terminal_key)
+}
+
+/// Announce this core to the wrappers and forget cores that are gone.
+/// ponytail: a crashed core's file outlives it until its pid is reused, which
+/// at worst skips one resume; a pid-reuse-proof lock would need flock.
+pub fn register_core() {
+    let cores = cores_dir();
+    if std::fs::create_dir_all(&cores).is_err() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(&cores) {
+        for entry in entries.flatten() {
+            let alive = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+                .is_some_and(|pid| unsafe { libc::kill(pid, 0) } == 0);
+            if !alive {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = std::fs::write(cores.join(std::process::id().to_string()), b"");
+}
+
 /// The shared client, connecting (and starting the daemon) on first use or
 /// after the previous connection was lost.
 pub fn client() -> anyhow::Result<Client> {

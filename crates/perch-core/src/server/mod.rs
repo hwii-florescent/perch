@@ -86,6 +86,7 @@ use workspace::effective_focus;
 mod agent_history;
 mod agents;
 mod native_ui;
+mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
 mod surfaces;
 mod terminal;
@@ -569,6 +570,7 @@ pub async fn run(
     // states are converted to Reconnecting by the persistence facade and the
     // runtime adapter will only launch an explicit provider continuation when
     // a client attaches.
+    crate::daemon::register_core();
     let agent_persistence = Arc::new(AgentPersistence::new(db.clone()));
     agent_persistence.ensure_schema()?;
     let restored_agents = agent_persistence.load_snapshots(now_millis())?;
@@ -724,6 +726,12 @@ pub async fn run(
     // reconciliation before accepting clients. This is intentionally bounded
     // by the durable intent table and never scans the repository.
     recover_file_save_intents(&state);
+
+    // Off the async runtime: it talks to perchd and takes the operation lock.
+    {
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || recover::recover_agents(&state));
+    }
 
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());

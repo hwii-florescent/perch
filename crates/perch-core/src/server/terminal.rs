@@ -466,7 +466,7 @@ fn codex_model_of(row: &crate::db::SessionRow) -> Option<String> {
 /// so it cannot be broken by that (undocumented) naming scheme. `None` means
 /// "can't tell" (no `~/.claude/projects` at all) — callers keep the
 /// conservative `--resume` behaviour in that case.
-fn claude_conversation_exists(session_id: &str) -> Option<bool> {
+pub(super) fn claude_conversation_exists(session_id: &str) -> Option<bool> {
     let home = std::env::var("HOME").ok()?;
     claude_conversation_exists_in(
         &Path::new(&home).join(".claude").join("projects"),
