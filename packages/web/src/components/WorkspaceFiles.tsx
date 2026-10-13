@@ -17,6 +17,7 @@ import { WorkspaceFileAsset } from "./WorkspaceFileAsset";
 import { assetKind } from "./workspaceFileKind";
 import { explorerKey, flattenTree } from "../explorerNav";
 import { IS_MAC } from "../keyCombo";
+import { useZoom } from "../zoom";
 import type { CodeEditorHandle } from "./CodeEditor";
 
 // CodeMirror is its own chunk: it loads when the first file opens, not with the app.
@@ -44,6 +45,19 @@ const CODE = "text-overlay-1 [font:inherit]";
 const PRE = "m-0 overflow-auto border border-overlay-0 bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
 const BANNER = "shrink-0 border-b border-b-[color:color-mix(in_srgb,var(--yellow)_35%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
 const MOBILE_BTN = "hidden min-h-[2.5rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.55rem] py-[0.35rem] text-accent hover:border-accent focus-visible:border-accent";
+
+// VS Code's explorer: 13px text in 22px rows (workbench `font-size`, `explorerviewlet.css`), times the zoom.
+const ROW_FONT = "text-[length:calc(13px*var(--zoom,1))]";
+const ROW_MIN_H = "min-h-[calc(22px*var(--zoom,1))]";
+const HEADER_ICON = cn(GHOST_BUTTON, "grid size-6 place-items-center p-0");
+
+function HeaderIcon({ label, onClick, active, children }: { label: string; onClick: () => void; active?: boolean; children: React.ReactNode }) {
+  return (
+    <button type="button" className={cn(HEADER_ICON, active && "text-fg")} aria-label={label} title={label} onClick={onClick}>
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+    </button>
+  );
+}
 
 const EMPTY_TREES: Record<string, WorkspaceTreeState> = {};
 const EMPTY_DOCUMENTS: Record<string, WorkspaceDocumentState> = {};
@@ -91,6 +105,7 @@ function FileTree({
   onOpenFile,
   onMenu,
 }: FileTreeProps) {
+  const zoom = useZoom();
   const tree = trees[path];
   if (!tree) return null;
   return (
@@ -105,7 +120,7 @@ function FileTree({
             <button
               type="button"
               className={cn(
-                "flex min-h-[1.4rem] w-full cursor-pointer items-center gap-[0.15rem] pr-3 text-left text-[0.8rem] [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
+                cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-[0.15rem] pr-3 text-left [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
                 selected || cursor === entry.path ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
                 cursor === entry.path && CURSOR_RING,
               )}
@@ -123,7 +138,7 @@ function FileTree({
               onAuxClick={(event) => { if (event.button === 1 && !isDirectory) { event.preventDefault(); onOpenFile(entry, true); } }}
               onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }}
             >
-              <Chevron open={isOpen} size={16} className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} />
+              <Chevron open={isOpen} size={Math.round(16 * zoom)} className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} />
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
               {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" role="img" aria-label="symlink">↗</span>}
               {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}
@@ -256,7 +271,7 @@ function SearchResults({ result, query, selectedPath, cursor, onOpenFile, onMenu
   return (
     <>
       <div className={TREE_STATE}>{count ? `${count} file${count === 1 ? "" : "s"}` : "No matching files"}</div>
-      {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left text-[0.8rem]", (selectedPath === entry.path || cursor === entry.path) && "bg-surface-1 text-fg", cursor === entry.path && CURSOR_RING)} role="treeitem" aria-selected={selectedPath === entry.path} tabIndex={-1} data-path={entry.path} title={entry.path} onClick={() => onOpenFile(entry)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }} data-testid={`workspace-file-entry-${entry.path}`}>
+      {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left", ROW_FONT, (selectedPath === entry.path || cursor === entry.path) && "bg-surface-1 text-fg", cursor === entry.path && CURSOR_RING)} role="treeitem" aria-selected={selectedPath === entry.path} tabIndex={-1} data-path={entry.path} title={entry.path} onClick={() => onOpenFile(entry)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }} data-testid={`workspace-file-entry-${entry.path}`}>
         <span className="w-full truncate text-fg">{entry.name}</span>
         <span className="w-full truncate text-[0.7rem] text-subtext-0">{entry.path}</span>
       </button>)}
@@ -284,6 +299,8 @@ export interface WorkspaceFilesViewProps {
 /** Bounded workspace file surface. Directory levels are fetched on demand;
  * files are read only after an explicit click. Text drafts are persisted in
  * server-owned buffers; media uses a descriptor-confined HTTP stream. */
+let wrapPreference = false;
+
 export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose, layout, onOpenFile }: WorkspaceFilesViewProps) {
   const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
@@ -304,15 +321,19 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
+  // The header's search icon reveals the search box; closing it clears the query.
+  const [searchOpen, setSearchOpen] = useState(false);
   const query = fileQuery.trim();
-  const [wrap, setWrap] = useState(false);
+  // Word wrap is a preference of the editor, not of one mount: it survives tab switches.
+  const [wrap, setWrapState] = useState(wrapPreference);
+  const setWrap = (update: (value: boolean) => boolean) => setWrapState((value) => (wrapPreference = update(value)));
   // The caret for the status bar; find/replace/go-to-line live inside the editor (CodeEditor.tsx).
   const [caret, setCaret] = useState({ line: 1, col: 1 });
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false);
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(true);
   // The explorer's right-click menu: the entry (null = the empty space, i.e. the root) and where.
-  const [menu, setMenu] = useState<{ entry: DirectoryEntry | null; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ entry: DirectoryEntry | null; x: number; y: number; stage?: "newFile" | "newFolder" } | null>(null);
   // The keyboard cursor over the explorer's rows (`explorerNav.ts`); `treeRef` is the focusable list.
   const [cursor, setCursor] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
@@ -324,6 +345,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     setSelectedPath(restoredPath || null);
     setPreviewOpen(false);
     setFileQuery("");
+    setSearchOpen(false);
     setNotice(null);
     setReloadConfirmOpen(false);
     setMobileExplorerOpen(!restoredPath);
@@ -481,14 +503,25 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           aria-label="Workspace file tree"
         >
           <div className="flex shrink-0 items-center gap-1 px-3 py-[3px]">
-            <input type="search" className="min-h-8 min-w-0 flex-1 rounded-ui border border-overlay-0 bg-panel-bg px-2 text-[0.8rem] text-fg placeholder:text-subtext-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg" aria-label="Search workspace files" placeholder="Search files in workspace…" maxLength={256} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} onKeyDown={(event) => {
-              if (event.key === "Escape") setFileQuery("");
+            {!searchOpen && <>
+              <HeaderIcon label="Search files" onClick={() => setSearchOpen(true)}>
+                <circle cx="6.5" cy="6.5" r="4" /><path d="m9.5 9.5 4 4" />
+              </HeaderIcon>
+              <HeaderIcon label="New file" onClick={() => setMenu({ entry: null, x: 0, y: 0, stage: "newFile" })}>
+                <path d="M9 2H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5.5zM9 2v3.5h3.5M8 7.5v4M6 9.5h4" />
+              </HeaderIcon>
+              <HeaderIcon label="New folder" onClick={() => setMenu({ entry: null, x: 0, y: 0, stage: "newFolder" })}>
+                <path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1zM8 7v3.5M6.25 8.75h3.5" />
+              </HeaderIcon>
+            </>}
+            {searchOpen && <input autoFocus type="search" className={cn(ROW_FONT, "min-h-8 min-w-0 flex-1 rounded-ui border border-overlay-0 bg-panel-bg px-2 text-fg placeholder:text-subtext-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg")} aria-label="Search workspace files" placeholder="Search files in workspace…" maxLength={256} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} onKeyDown={(event) => {
+              if (event.key === "Escape") { setFileQuery(""); setSearchOpen(false); }
               // Down from the search box walks its results (or the tree) with the keyboard.
               if (event.key === "ArrowDown" && rows.length > 0) { event.preventDefault(); setCursor(rows[0]!.path); treeRef.current?.focus(); }
-            }} data-testid="workspace-files-search" />
-            {fileQuery && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2 text-[0.75rem]")} onClick={() => setFileQuery("")}>Clear</button>}
+            }} data-testid="workspace-files-search" />}
+            {searchOpen && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2 text-[0.75rem]")} onClick={() => { setFileQuery(""); setSearchOpen(false); }}>Close</button>}
           </div>
-          <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[0.68rem] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
+          <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[length:calc(11px*var(--zoom,1))] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
             <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
               {!layout && (
@@ -606,8 +639,9 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               <div className="relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden">
                 <Suspense fallback={<div className={PREVIEW_STATE} role="status">Loading editor…</div>}>
                   <CodeEditor
-                    key={selectedPath}
+                    key={`${selectedPath}\0${document.reloadEpoch ?? 0}`}
                     path={selectedPath}
+                    docKey={`${workspaceId}\0${selectedPath}\0${document.reloadEpoch ?? 0}`}
                     ref={editorRef}
                     value={document.content}
                     onChange={(content) => updateDraft(workspaceId, selectedPath, content)}
@@ -640,6 +674,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           target={menu.entry}
           x={menu.x}
           y={menu.y}
+          initialStage={menu.stage}
           onClose={() => setMenu(null)}
           onOpenFile={(path) => handleOpenFile({ name: basename(path), path, kind: "file" } as DirectoryEntry, true)}
           onExpand={(path) => {

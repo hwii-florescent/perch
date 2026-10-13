@@ -334,6 +334,43 @@ describe("workspace filesystem store", () => {
     expect(document?.state).toBe("ready");
   });
 
+  it("keeps typing made while a buffer.set is in flight and syncs it next", () => {
+    openAndLoad("ws-ack", "a.txt", "alpha");
+    const store = useWorkspaceFilesStore.getState();
+    store.updateDraft("ws-ack", "a.txt", "draft A");
+    vi.advanceTimersByTime(400);
+    const first = outgoing("fs.buffer.set", "ws-ack", "a.txt");
+    expect(first.content).toBe("draft A");
+    store.updateDraft("ws-ack", "a.txt", "draft B");
+    respond(bufferResult(first.requestId as string, "ws-ack", "a.txt", "draft A", "alpha", 1));
+    expect(useWorkspaceFilesStore.getState().documents["ws-ack"]!["a.txt"]!.content).toBe("draft B");
+    vi.advanceTimersByTime(400);
+    const second = outgoing("fs.buffer.set", "ws-ack", "a.txt");
+    expect(second.requestId).not.toBe(first.requestId);
+    expect(second.content).toBe("draft B");
+  });
+
+  it("bumps reloadEpoch on discard-and-reload so the editor starts a fresh undo history", () => {
+    openAndLoad("ws-epoch", "a.txt", "alpha");
+    const store = useWorkspaceFilesStore.getState();
+    expect(store.reloadFile("ws-epoch", "a.txt")).toBeTruthy();
+    const close = outgoing("fs.buffer.close", "ws-epoch", "a.txt");
+    respond({ type: "fs.buffer.close.result", requestId: close.requestId as string, workspaceId: "ws-epoch", path: "a.txt", removed: true });
+    expect(useWorkspaceFilesStore.getState().documents["ws-epoch"]!["a.txt"]!.reloadEpoch).toBe(1);
+  });
+
+  it("saves the text of the Save click, not the in-flight sync's older text", () => {
+    openAndLoad("ws-save2", "a.txt", "alpha");
+    const store = useWorkspaceFilesStore.getState();
+    store.updateDraft("ws-save2", "a.txt", "first draft");
+    vi.advanceTimersByTime(400);
+    const set = outgoing("fs.buffer.set", "ws-save2", "a.txt");
+    store.updateDraft("ws-save2", "a.txt", "new draft at Cmd+S");
+    store.saveFile("ws-save2", "a.txt");
+    respond(bufferResult(set.requestId as string, "ws-save2", "a.txt", "first draft", "alpha", 1));
+    expect(outgoing("fs.write", "ws-save2", "a.txt").content).toBe("new draft at Cmd+S");
+  });
+
   it("keeps a draft on optimistic concurrency conflict and retries overwrite with disk version", () => {
     openAndLoad("workspace-conflict", "README.md", "original");
     useWorkspaceFilesStore.getState().updateDraft("workspace-conflict", "README.md", "my draft");

@@ -52,6 +52,9 @@ export interface WorkspaceDocumentState {
   baseVersion?: string;
   externalVersion?: string;
   bufferRevision?: number;
+  /** Bumped when the user discards the draft and reloads from disk: the editor starts a fresh undo
+   * history instead of mapping the old one through the emptied and refilled document. */
+  reloadEpoch?: number;
   bufferState?: "idle" | "loading" | "saving" | "ready" | "conflict" | "error";
   readRequestId?: string;
   bufferRequestId?: string;
@@ -148,7 +151,6 @@ let transportGeneration = 0;
  * draft. A workspace with more than this many dirty files is allowed to grow
  * temporarily so a user's work is never discarded silently. */
 export const MAX_CACHED_DOCUMENTS = 32;
-type FilesystemRequestKind = PendingFilesystemRequest["kind"];
 
 function newRequestId(): string {
   return newId();
@@ -235,18 +237,6 @@ function updateDocuments(
   const nextWorkspace = { ...workspaceRecords };
   for (const [candidatePath] of evictable.slice(0, removeCount)) delete nextWorkspace[candidatePath];
   return { ...updated, [workspaceId]: nextWorkspace };
-}
-
-function removeNested<T>(
-  records: Record<string, Record<string, T>>,
-  workspaceId: string,
-  path: string,
-): Record<string, Record<string, T>> {
-  const workspaceRecords = records[workspaceId];
-  if (!workspaceRecords || !(path in workspaceRecords)) return records;
-  const nextWorkspace = { ...workspaceRecords };
-  delete nextWorkspace[path];
-  return { ...records, [workspaceId]: nextWorkspace };
 }
 
 function treeFor(state: WorkspaceFilesState, workspaceId: string, path: string): WorkspaceTreeState {
@@ -819,6 +809,9 @@ function handleFsMessage(raw: ServerMessage): boolean {
       : pending.reconnect
         ? pending.afterSave
         : undefined;
+    const chainContent = pending.kind === "bufferSet"
+      ? pendingSaveAfterBuffer.get(message.requestId)?.content
+      : undefined;
     const shouldScheduleDraft = { value: false };
     const shouldRetryAfterResync = { value: false };
     const shouldChainSave = { value: false };
@@ -847,7 +840,12 @@ function handleFsMessage(raw: ServerMessage): boolean {
       if (shouldChainSave.value && pending.kind === "bufferSet") pendingSaveAfterBuffer.delete(message.requestId);
       const baseContent = buffer.baseContent;
       const baseVersion = buffer.baseVersion;
-      const content = preserveDraft ? current.content : buffer.content;
+      // The ack describes what was sent, not what is on screen: text typed
+      // while the request was in flight outranks the reply.
+      const typedSinceSend = pending.kind === "bufferSet"
+        && pending.content !== undefined
+        && current.content !== pending.content;
+      const content = preserveDraft || typedSinceSend ? current.content : buffer.content;
       const conflict = bufferConflict
         ? {
             message: "File changed on disk.",
@@ -907,11 +905,12 @@ function handleFsMessage(raw: ServerMessage): boolean {
     } else if (shouldScheduleDraft.value) {
       scheduleBufferSet(pending.workspaceId, pending.path);
     }
-    if (shouldChainSave.value && pendingSave && pending.kind === "bufferSet") {
+    if (shouldChainSave.value && pendingSave && chainContent !== undefined) {
       sendFilesystemWrite(
         pending.workspaceId,
         pending.path,
-        pending.content!,
+        // The text of the Save click, which may be newer than this request's.
+        chainContent,
         pendingSave.expectedVersion,
         buffer.revision,
       );
@@ -930,6 +929,7 @@ function handleFsMessage(raw: ServerMessage): boolean {
           // old draft/base before issuing the fresh read so the late durable
           // response is treated as a new disk baseline rather than mistaken
           // for user typing that must be preserved.
+          reloadEpoch: (documentFor(state, reload.workspaceId, reload.path).reloadEpoch ?? 0) + 1,
           content: "",
           savedContent: "",
           persistedContent: undefined,
