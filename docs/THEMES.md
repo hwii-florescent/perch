@@ -64,10 +64,35 @@ RGB app palette: the terminal emulator resolves those colors.
 The neutral CSS defaults and `PERCH_DEFAULT` must agree. Unknown names,
 including inherited object keys, fall back to perch and reset dark appearance.
 
+## Syntax colors
+
+The file editor (`CodeEditor.tsx`, CodeMirror 6) colors code with the theme's own
+CSS variables, so every theme recolors an open editor with no new theme data.
+`editorSyntax.ts` maps lezer tags to variables; never hex. `resolveTheme()`
+already guarantees 4.5:1 for each of them on the editor surfaces.
+
+| Syntax tag | CSS variable |
+| --- | --- |
+| keyword, control, operator keyword | `--mauve` |
+| string, template | `--green` |
+| number, boolean, null, constant | `--peach` |
+| function / method name, property | `--blue` |
+| type, class, namespace | `--yellow` |
+| tag, regex, escape, link | `--teal` |
+| comment, doc comment | `--overlay-1` (italic) |
+| invalid | `--red` |
+| everything else | `--text` |
+
+The language comes from the filename (ts/tsx/js/jsx/json/rust/python/markdown/
+css/html/yaml/toml/shell/go/dockerfile); anything else stays plain. Past
+`MAX_HIGHLIGHT_CHARS` (300,000) the file is plain too. Themes whose foreground
+replaces blue (Tokyo Night Day, Solarized) show those tags in plain text; that
+is accepted. `perch` is colored as well (muted palette).
+
 ## Checks
 
 ```sh
-npm run test -w @perch/web -- src/themes.test.ts src/components/WorkspaceNavigation.test.tsx
+npm run test -w @perch/web -- src/themes.test.ts src/editorSyntax.test.ts src/components/WorkspaceNavigation.test.tsx
 npm run build
 cd e2e && PERCH_E2E_WEBKIT=1 npx playwright test theme.spec.ts
 ```

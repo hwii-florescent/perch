@@ -194,6 +194,59 @@ test("editor (CodeMirror): find, replace, go to line, save, Tab indent", async (
   }
 });
 
+test("editor (CodeMirror): syntax colors follow the theme variables; unknown and large files stay plain", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-syntax-"));
+  try {
+    fs.writeFileSync(path.join(root, "code.ts"), "const answer = 42; // note\n");
+    fs.writeFileSync(path.join(root, "plain.txt"), "const answer = 42;\n");
+    fs.writeFileSync(path.join(root, "big.ts"), `const a = 1;\n${"// pad\n".repeat(60_000)}`);
+    await page.goto("/");
+    await addProject(page, root);
+    const project = page.locator(".workspace-project").filter({ hasText: path.basename(root) });
+    await openWorkspaceTool(page, await firstWorkspaceId(project), "files");
+    const color = (text: string) => page.locator(".cm-line span", { hasText: text }).first().evaluate((el) => getComputedStyle(el).color);
+    const cssColor = (name: string) => page.evaluate((n) => {
+      const probe = document.createElement("i");
+      probe.style.color = `var(--${n})`;
+      document.body.append(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    }, name);
+
+    await page.getByTestId("workspace-file-entry-code.ts").click();
+    const editor = page.getByTestId("workspace-file-editor");
+    await expect.poll(() => color("const")).toBe(await cssColor("mauve"));
+    expect(await color("42")).toBe(await cssColor("peach"));
+    // A theme change is only CSS variables: the open editor recolours with no re-render.
+    await page.evaluate(() => document.documentElement.style.setProperty("--mauve", "#ff0000"));
+    await expect.poll(() => color("const")).toBe("rgb(255, 0, 0)");
+
+    // Find matches and Tab stay usable over syntax colors.
+    await page.keyboard.press(`${MOD}+f`);
+    await page.locator(".cm-search input[name=search]").pressSequentially("answer");
+    await expect(page.locator(".cm-searchMatch")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press(`${MOD}+Home`);
+    await page.keyboard.press("Tab");
+    await expectDoc(editor, "  const answer = 42; // note\n");
+
+    await page.getByTestId("workspace-file-entry-plain.txt").click();
+    await expectDoc(editor, "const answer = 42;\n");
+    expect(await page.locator(".cm-line span").count()).toBe(0);
+
+    await page.getByTestId("workspace-file-entry-big.ts").click();
+    await expect.poll(async () => (await docOf(editor)).length).toBeGreaterThan(300_000);
+    await expect(editor).toBeFocused();
+    expect(await page.locator(".cm-line span").count()).toBe(0);
+    await page.keyboard.press(`${MOD}+End`);
+    await page.keyboard.type("x");
+    await expect.poll(async () => (await docOf(editor)).endsWith("x")).toBe(true);
+  } finally {
+    fs.rmSync(root, { force: true, recursive: true });
+  }
+});
+
 test("editor (CodeMirror): fast typing keeps every key; a reload replaces the live document", async ({ page }) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-sync-"));
   try {

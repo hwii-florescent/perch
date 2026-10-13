@@ -4,7 +4,11 @@ Goal: the file editor (`packages/web/src/components/CodeEditor.tsx`, CodeMirror 
 colors code by meaning, and **inherits the app theme** (`themes.ts`), so every
 theme, light or dark, recolors the editor with no new theme data.
 
-Nothing below is committed yet. All of it is uncommitted work in the tree.
+**Status:** steps 1-4 and 6 are implemented (`editorSyntax.ts`, `CodeEditor.tsx`, `docs/THEMES.md`), with
+unit tests and a Chromium e2e. Decisions taken: `perch` is colored too, the starter language list is as in
+step 3, and diffs come later. Still open: the manual WebKit/desktop pass, memory check, and visual baselines.
+Note: `@codemirror/language-data` makes every language its own chunk (precache 24 -> 142 entries, +1.3 MB);
+switch to the individual `@codemirror/lang-*` packages if that matters.
 
 ## Done (editor migration, the prerequisite)
 

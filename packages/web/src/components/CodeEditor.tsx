@@ -13,9 +13,10 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { history } from "@codemirror/commands";
-import { bracketMatching, indentUnit } from "@codemirror/language";
+import { bracketMatching, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { gotoLine, highlightSelectionMatches, search } from "@codemirror/search";
 import { editorKeymap } from "../editorKeymap";
+import { MAX_HIGHLIGHT_CHARS, loadLanguage, syntaxStyle } from "../editorSyntax";
 
 export interface CodeEditorHandle {
   openGoto: () => void;
@@ -30,6 +31,8 @@ export interface CodeEditorProps {
   readOnly: boolean;
   wrap: boolean;
   label: string;
+  /** The file's path: its extension picks the language (`editorSyntax.ts`). */
+  path: string;
   ref?: Ref<CodeEditorHandle>;
 }
 
@@ -37,6 +40,7 @@ export interface CodeEditorProps {
 const External = Annotation.define<boolean>();
 const wrapping = new Compartment();
 const access = new Compartment();
+const language = new Compartment();
 
 const MUTED = "var(--overlay-1)";
 const theme = EditorView.theme({
@@ -77,7 +81,7 @@ const theme = EditorView.theme({
   "&.cm-editor .cm-button:hover": { backgroundColor: "var(--surface-1)", color: "var(--text)" },
 });
 
-export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, ref }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, ref }: CodeEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   // Latest callbacks, so the editor is built once.
@@ -117,6 +121,8 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
           // The testid sits on the editable area only: the find panel's inputs must stay "editable" for keybinds.ts.
           EditorView.contentAttributes.of({ "aria-label": name, "data-testid": "workspace-file-editor", spellcheck: "false", autocorrect: "off", autocapitalize: "off" }),
           theme,
+          syntaxHighlighting(syntaxStyle),
+          language.of([]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !update.transactions.some((tr) => tr.annotation(External))) {
               const text = update.state.doc.toString();
@@ -139,6 +145,17 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
     }
     return () => { editor.destroy(); view.current = null; };
   }, []);
+
+  // The language follows the file's path and size. The editor can mount before the content arrives, so
+  // size is read from `value`, not at mount; past the cap the file is plain (a late load is dropped).
+  const large = value.length > MAX_HIGHLIGHT_CHARS;
+  useEffect(() => {
+    let alive = true;
+    void loadLanguage(path, large).then((support) => {
+      if (alive) view.current?.dispatch({ effects: language.reconfigure(support ?? []) });
+    });
+    return () => { alive = false; };
+  }, [path, large]);
 
   // The store changed the draft (reload, conflict, recovery): apply it without losing the caret or the undo stack.
   useEffect(() => {

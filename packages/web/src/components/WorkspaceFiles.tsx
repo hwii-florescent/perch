@@ -607,6 +607,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
                 <Suspense fallback={<div className={PREVIEW_STATE} role="status">Loading editor…</div>}>
                   <CodeEditor
                     key={selectedPath}
+                    path={selectedPath}
                     ref={editorRef}
                     value={document.content}
                     onChange={(content) => updateDraft(workspaceId, selectedPath, content)}
