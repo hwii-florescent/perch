@@ -29,6 +29,8 @@ export interface FileEntryMenuProps {
   /** Show this folder's children (a create just put something there). */
   onExpand: (path: string) => void;
   onRefresh: () => void;
+  /** Skip the menu and open this name prompt (the explorer header's new file / new folder icons). */
+  initialStage?: "newFile" | "newFolder";
 }
 
 type Stage = "menu" | "newFile" | "newFolder" | "rename" | "delete" | "error";
@@ -37,8 +39,8 @@ const MENU_W = 210;
 const MENU_H = 400;
 const basename = (path: string) => path.split("/").pop() ?? path;
 
-export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClose, onOpenFile, onExpand, onRefresh }: FileEntryMenuProps) {
-  const [stage, setStage] = useState<Stage>("menu");
+export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClose, onOpenFile, onExpand, onRefresh, initialStage }: FileEntryMenuProps) {
+  const [stage, setStage] = useState<Stage>(initialStage ?? "menu");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);

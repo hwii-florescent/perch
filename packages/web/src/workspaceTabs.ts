@@ -1,6 +1,6 @@
 import type { SessionSummary } from "@perch/shared";
 import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, usePerchStore, type ProjectNavState } from "./store";
-import { fileTabKey, useFileTabs, type FileTab } from "./fileTabs";
+import { fileTabKey, isBlankBrowser, useFileTabs, type FileTab } from "./fileTabs";
 import { applyStoredTabOrder, saveTabOrder, storedTabOrder } from "./tabOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
@@ -70,7 +70,7 @@ export function sessionLabel(session: SessionSummary): string {
 /** A resource tab's name: a file's basename, "Changes", or a page's host. */
 export function tabName(tab: FileTab): string {
   if (tab.kind === "review") return "Changes";
-  if (tab.kind === "browser") return parseUrl(tab.path)?.host ?? tab.path;
+  if (tab.kind === "browser") return isBlankBrowser(tab) ? "New browser" : parseUrl(tab.path)?.host ?? tab.path;
   return tab.path.split("/").pop() || tab.path;
 }
 

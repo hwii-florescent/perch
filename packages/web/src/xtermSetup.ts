@@ -58,6 +58,7 @@ import type { TerminalProfile } from "@perch/shared";
 import { parseOsc52 } from "./osc52";
 import { usePerchStore } from "./store";
 import { scrollbarWidth } from "./components/ui/scrollbar";
+import { onZoom, zoomFactor } from "./zoom";
 import { attachTerminalTuiWheel } from "./terminalTuiWheel";
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the
@@ -154,7 +155,10 @@ export function createPerchTerminal(
   // at the wrong width and knocks every following column out of alignment.
   // The generic stack is appended, never prepended, so it is only reached for
   // codepoints the chosen font lacks.
-  const baseFontSize = profile?.fontSize ?? FALLBACK_FONT_SIZE;
+  const profileFontSize = profile?.fontSize ?? FALLBACK_FONT_SIZE;
+  // The profile's size times the zoom (`zoom.ts`): the "base" the fit-by-scaling below shrinks from.
+  const scaled = () => Math.round(profileFontSize * zoomFactor() * 10) / 10;
+  let baseFontSize = scaled();
   const fontFamily = profile?.fontFamily
     ? `"${profile.fontFamily}", ${FALLBACK_FONT_FAMILY}`
     : FALLBACK_FONT_FAMILY;
@@ -469,6 +473,13 @@ export function createPerchTerminal(
   });
   observer.observe(container);
 
+  // Zoom changes the base size: re-measure the cell and fit again.
+  const stopZoom = onZoom(() => {
+    baseFontSize = scaled();
+    cachedBaseCellWidth = 0;
+    fit();
+  });
+
   return {
     term,
     fit,
@@ -483,6 +494,7 @@ export function createPerchTerminal(
       disposed = true;
       if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
+      stopZoom();
       visibility.disconnect();
       dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);

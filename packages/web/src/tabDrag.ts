@@ -106,11 +106,18 @@ function commit(drag: TabDragState): void {
     return;
   }
   const { drop } = drag;
-  if (!drop?.zone || !key || !ids.includes(drop.targetId)) return;
-  useSplitSets.getState().drop(drag.id, drop.targetId, drop.zone);
+  if (drop?.zone) dropTab(drag.id, drop.targetId, drop.zone);
+}
+
+/** Split `dragged` onto the `zone` side of `target`: the one path for a drag, a shortcut and the menus. */
+export function dropTab(dragged: string, target: string, zone: DropZone): void {
+  const ids = currentTabs().tabs.map((tab) => tab.id);
+  const key = tabOrderKey(usePerchStore.getState());
+  if (!key || !ids.includes(dragged) || !ids.includes(target)) return;
+  useSplitSets.getState().drop(dragged, target, zone);
   // Left/up puts the tab before the pane's in the strip, right/down after: the strip order is the pane order.
-  saveTabOrder(key, moveBeside(ids, drag.id, drop.targetId, drop.zone === "right" || drop.zone === "down"));
-  const entry = currentTabs().tabs.find((tab) => tab.id === drag.id);
+  saveTabOrder(key, moveBeside(ids, dragged, target, zone === "right" || zone === "down"));
+  const entry = currentTabs().tabs.find((tab) => tab.id === dragged);
   if (entry) activateTab(entry);
 }
 

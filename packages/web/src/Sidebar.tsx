@@ -40,7 +40,7 @@ import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker, useAgentChoices } from "./components/AgentPicker";
 import { AgentIcon } from "./components/AgentIcon";
-import { menuItem } from "./components/ui/menu";
+import { menuDivider, menuItem } from "./components/ui/menu";
 import { CATALOG_ACTION } from "./components/ui/settings";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
@@ -567,9 +567,11 @@ export interface NewSessionPopoverProps {
   onClose: () => void;
   /** Provider selected before opening a session in the chosen directory. */
   onSelect: (cwd: string | undefined, agent: string) => void;
+  /** Non-agent things to open in a scoped launcher (the tab strip's "+": a browser, a file). */
+  extras?: { id: string; label: string; icon: React.ReactNode; onSelect: () => void }[];
 }
 
-export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, onClose, onSelect }: NewSessionPopoverProps) {
+export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, onClose, onSelect, extras }: NewSessionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const lastAgentChoice = usePerchStore((s) => s.lastAgentChoice);
   const setLastAgentChoice = usePerchStore((s) => s.setLastAgentChoice);
@@ -622,6 +624,14 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
               }}>
               <AgentIcon provider={choice.id} />
               {choice.label}
+            </button>
+          ))}
+          {extras && extras.length > 0 && <div className={menuDivider} />}
+          {extras?.map((extra) => (
+            <button type="button" key={extra.id} className={cn(menuItem(), "flex items-center gap-2")} data-testid={`new-tab-${extra.id}`}
+              onClick={() => { onClose(); extra.onSelect(); }}>
+              {extra.icon}
+              {extra.label}
             </button>
           ))}
           {discovery && catalog?.state === "loading" && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Checking agents…</p>}

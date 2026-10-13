@@ -65,6 +65,9 @@ export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={onClose}>
       <div
         className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[calc(100dvh_-_4rem)] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keybindings"
         data-testid="keybind-help"
         onClick={(e) => e.stopPropagation()}
       >

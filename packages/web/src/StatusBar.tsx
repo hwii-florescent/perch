@@ -7,6 +7,8 @@ import { StatusDot } from "./components/StatusDot";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./components/popoverPosition";
 import { GHOST_BUTTON } from "./components/ui/icon-button";
 import { menuPanel } from "./components/ui/menu";
+import { useZoom, zoomReset } from "./zoom";
+import { IS_MAC, formatCombo } from "./keyCombo";
 import type { AccountUsage, SessionSummary, UsageWindow } from "@perch/shared";
 
 function formatTokens(n: number): string {
@@ -185,6 +187,7 @@ export function StatusBar() {
     const id = setInterval(ask, 180_000);
     return () => clearInterval(id);
   }, [connected]);
+  const zoom = useZoom();
   const status = usePerchStore((s) => s.status);
   const sessionId = usePerchStore((s) => s.sessionId);
   const knownSession = usePerchStore((s) => s.sessions.find((sess) => sess.id === sessionId));
@@ -207,6 +210,11 @@ export function StatusBar() {
       </span>
       <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
       <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-3">
+        {zoom !== 1 && (
+          <button type="button" data-testid="zoom-indicator" className={cn(GHOST_BUTTON, "px-1 tabular-nums text-fg")} title={`Zoom ${Math.round(zoom * 100)}%. Click to reset (${formatCombo(IS_MAC ? "cmd+0" : "ctrl+0")})`} onClick={zoomReset}>
+            {Math.round(zoom * 100)}%
+          </button>
+        )}
         <span>{status?.branch ?? ""}</span>
         {status?.contextTokens !== undefined && <span>ctx {formatTokens(status.contextTokens)}</span>}
         {status?.costUsd !== undefined && <span>${status.costUsd.toFixed(3)}</span>}

@@ -3,6 +3,7 @@ import { cn } from "../lib/cn";
 import { browserCall, browserId, nativeBrowser, onPassthrough, passthroughActive } from "../browserNative";
 import { openExternal, parseUrl, webUrl } from "../links";
 import { usePerchStore } from "../store";
+import { useZoom } from "../zoom";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
 const BTN = cn(GHOST_BUTTON, "px-2 py-1 text-[0.8rem]");
@@ -29,6 +30,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const editing = useRef(false);
   const host = useRef<HTMLDivElement>(null);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const zoom = useZoom();
   const started = url !== "";
   const latest = useRef(url);
   latest.current = url;
@@ -52,11 +54,12 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
       const r = el.getBoundingClientRect();
       const hidden = settingsOpen || r.width < 2 || r.height < 2 || document.querySelector(COVERS) !== null || passthroughActive();
       const next = hidden ? "hidden" : `${r.x},${r.y},${r.width},${r.height}`;
+      // zoom is in the effect's deps, so a zoom change re-runs it and `last` starts empty: show re-sends it.
       if (next === last) return;
       last = next;
       void (hidden
         ? browserCall("hide", { id })
-        : browserCall("show", { id, url: latest.current, x: r.x, y: r.y, width: r.width, height: r.height }));
+        : browserCall("show", { id, url: latest.current, x: r.x, y: r.y, width: r.width, height: r.height, zoom }));
     };
     const schedule = () => { frame ||= requestAnimationFrame(sync); };
     const resize = new ResizeObserver(schedule);
@@ -81,7 +84,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
       window.removeEventListener("resize", schedule);
       void browserCall("hide", { id });
     };
-  }, [id, started, settingsOpen]);
+  }, [id, started, settingsOpen, zoom]);
 
   const go = () => {
     const next = webUrl(/^[a-z][a-z\d+.-]*:/i.test(draft) ? draft : `http://${draft}`);

@@ -98,10 +98,6 @@ const DIRECTION_TO_POSITION: Record<PaneDirection, Position> = {
 };
 
 export interface DockviewController {
-  /** Add a new terminal panel split off the active panel (or "chat" if no
-   * panel is active yet) in the given direction. Mirrors how the existing
-   * toolbar "Open terminal" button (`App.tsx`) adds panels. */
-  addTerminalPanel(direction: "right" | "below"): void;
   /** Close the active panel — unless it's the primary "chat" panel, which
    * must always remain (there is always exactly one Chat panel; "closing"
    * it would leave the session with no view). No-op if the active panel is
@@ -215,15 +211,6 @@ export function createDockviewController(api: DockviewApi, endShell?: (shellPane
     api.removePanel(panel);
   }
   return {
-    addTerminalPanel(direction) {
-      const referencePanel = api.activePanel?.id ?? PRIMARY_CHAT_PANEL_ID;
-      api.addPanel({
-        id: newPanelId(),
-        component: TERMINAL_COMPONENT,
-        title: "Terminal",
-        position: { referencePanel, direction },
-      });
-    },
     closeActiveTerminalPanel() {
       const panel = api.activePanel;
       if (!panel || panel.id === PRIMARY_CHAT_PANEL_ID) return false;

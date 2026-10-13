@@ -38,12 +38,17 @@ pub async fn browser_show(
     y: f64,
     width: f64,
     height: f64,
+    // The UI's zoom factor (Cmd/Ctrl +/-); None leaves the page's own zoom alone.
+    zoom: Option<f64>,
 ) -> Result<(), String> {
     let label = label(&id)?;
     let (position, size) = (LogicalPosition::new(x, y), LogicalSize::new(width, height));
     if let Some(view) = app.get_webview(&label) {
         view.set_position(position).map_err(|e| e.to_string())?;
         view.set_size(size).map_err(|e| e.to_string())?;
+        if let Some(zoom) = zoom {
+            view.set_zoom(zoom).map_err(|e| e.to_string())?;
+        }
         return view.show().map_err(|e| e.to_string());
     }
     let window = app.get_window("main").ok_or("no main window")?;
@@ -56,10 +61,13 @@ pub async fn browser_show(
             }
             NewWindowResponse::Deny
         });
-    window
+    let view = window
         .add_child(builder, position, size)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(zoom) = zoom {
+        view.set_zoom(zoom).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Hide the page (its tab is not on screen, or something is drawn over it); it keeps its state.

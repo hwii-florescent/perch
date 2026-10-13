@@ -1,9 +1,10 @@
-/** Pane actions for the layout actually on screen. Dockview owns session-internal
- * panes; a drag-created split tiles top-row tabs. Both use the same keymap. */
+/** Pane actions for the layout actually on screen. A split (drag, shortcut or menu) tiles
+ * top-row tabs; Dockview only keeps the session's own panels. Both use the same keymap. */
 import { getDockviewController, type PaneDirection } from "./dockview/dockviewController";
 import { activateTab, currentTabs, tabOrderKey } from "./workspaceTabs";
 import { layout, MAX_SPLIT, MIN_PANE_PX, useSplitSets, visibleSplit, type SplitNode } from "./splitSets";
 import { saveTabOrder } from "./tabOrder";
+import { dropTab } from "./tabDrag";
 import { usePerchStore, effectiveWorkspace } from "./store";
 import { useFileTabs } from "./fileTabs";
 import { requestCloseSession } from "./closeGuard";
@@ -103,13 +104,14 @@ function resize(delta: number) {
 }
 
 let pendingSplit = false;
-/** A split shortcut in a tiled canvas creates a normal Terminal tab, not a
- * hidden Dockview shell. Match the new session to the captured nest/host. */
-function addTerminal(direction: "right" | "below") {
-  const split = focusedSplit();
+/** Split the active tab with a new Terminal tab, placed exactly as if dragged onto that side of
+ * it. The session is matched to the captured nest/host. */
+export function splitActiveTab(direction: "right" | "below") {
+  const { activeId } = currentTabs();
   const state = usePerchStore.getState();
   const workspace = effectiveWorkspace(state);
-  if (!split || !workspace || pendingSplit || split.ids.length >= MAX_SPLIT) return;
+  const home = useSplitSets.getState().sets.find((set) => set.ids.includes(activeId ?? ""));
+  if (!activeId || !workspace || pendingSplit || (home?.ids.length ?? 1) >= MAX_SPLIT) return;
   const known = new Set(state.sessions.map((session) => session.id));
   pendingSplit = true;
   const cleanup = () => { stop(); clearTimeout(timer); pendingSplit = false; };
@@ -125,10 +127,8 @@ function addTerminal(direction: "right" | "below") {
     const created = next.sessions.find((session) => session.id === next.sessionId && !known.has(session.id) && session.workspaceId === workspace.id && (session.hostId ?? "local") === workspace.hostId);
     if (!created) return;
     cleanup();
-    const zone = direction === "right" ? "right" : "down";
-    // Across the set's direction this nests: the active pane becomes a row/column of the two.
-    useSplitSets.getState().drop(created.id, split.activeId, zone);
     useSplitSets.getState().zoom(null);
+    dropTab(created.id, activeId, direction === "right" ? "right" : "down");
   });
   const timer = setTimeout(cleanup, 20_000);
   state.createSessionOnHost(workspace.hostId, workspace.path, "terminal");
@@ -141,7 +141,6 @@ export function getPaneController() {
   if (!dock || !focusedSplit()) return dock;
   return {
     ...dock,
-    addTerminalPanel: addTerminal,
     closeActiveTerminalPanel: () => { const split = focusedSplit(); if (!split) return false; closeTab(split.activeId); return true; },
     toggleMaximizeActive: () => {
       const split = focusedSplit();

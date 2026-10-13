@@ -42,6 +42,9 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
     <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-[rgba(0,0,0,0.55)]">
       <div
         className="max-h-[calc(100dvh_-_4rem)] w-[min(480px,calc(100vw_-_2rem))] overflow-y-auto rounded-ui border border-accent bg-panel-bg px-[1.4rem] pt-5 pb-[1.4rem] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Welcome to perch"
         data-testid="onboarding"
       >
         <h2 className="m-0 mb-[0.6rem] text-[1.15rem] font-semibold text-fg">Welcome to perch</h2>

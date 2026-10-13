@@ -17,6 +17,7 @@ import type { DockviewController } from "../dockview/dockviewController";
 import { canStopAgent, stopAgent } from "../agentTerminals";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { useSplitSets } from "../splitSets";
+import { splitActiveTab } from "../tiledPanes";
 
 export interface PaneContextMenuProps {
   panelId: string;
@@ -110,8 +111,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
             className={menuItem()}
             data-testid="pane-menu-split-right"
             onClick={() => {
-              controller.setActivePanel(panelId);
-              controller.addTerminalPanel("right");
+              splitActiveTab("right");
               onClose();
             }}
           >
@@ -122,8 +122,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
             className={menuItem()}
             data-testid="pane-menu-split-down"
             onClick={() => {
-              controller.setActivePanel(panelId);
-              controller.addTerminalPanel("below");
+              splitActiveTab("below");
               onClose();
             }}
           >

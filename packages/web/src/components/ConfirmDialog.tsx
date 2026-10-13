@@ -55,6 +55,9 @@ export function ConfirmDialog({
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={onCancel}>
       <div
         className="w-[min(360px,calc(100vw_-_2rem))] rounded-ui border border-accent bg-panel-bg p-4 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm"
         data-testid="confirm-dialog"
         onClick={(e) => e.stopPropagation()}
       >

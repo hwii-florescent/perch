@@ -3,7 +3,8 @@ import { cn } from "../lib/cn";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { useTabOrderVersion } from "../tabOrder";
-import { useFileTabs, type FileTab } from "../fileTabs";
+import { isBlankBrowser, openBlankBrowser, useFileTabs, type FileTab } from "../fileTabs";
+import { FileEntryMenu } from "./FileEntryMenu";
 import { activateTab, sessionLabel, tabName, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
 import { beginTabDrag, useTabDrag } from "../tabDrag";
@@ -67,6 +68,8 @@ export function TabBar() {
   const tabShape = usePerchStore((s) => s.settings?.tabShape === "round" ? "round" : "square");
 
   const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
+  // The "+" menu's New file: the explorer's name prompt, creating in the workspace root.
+  const [newFile, setNewFile] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -222,11 +225,33 @@ export function TabBar() {
           anchorRect={popoverAnchor}
           onClose={() => setPopoverAnchor(null)}
           onSelect={(selectedCwd, provider) => createSessionOnHost(hostId, selectedCwd, provider)}
+          extras={ws ? [
+            { id: "browser", label: "New browser", icon: <BrowserIcon />, onSelect: () => openBlankBrowser(ws.id) },
+            { id: "file", label: "New file", icon: <FileIcon />, onSelect: () => setNewFile(true) },
+          ] : undefined}
+        />
+      )}
+      {newFile && ws && (
+        <FileEntryMenu
+          workspaceId={ws.id}
+          workspacePath={ws.path}
+          target={null}
+          x={0}
+          y={0}
+          initialStage="newFile"
+          onClose={() => setNewFile(false)}
+          onOpenFile={(path) => useFileTabs.getState().open(ws.id, path)}
+          onExpand={() => {}}
+          onRefresh={() => {}}
         />
       )}
     </div>
   );
 }
+
+const ICON = { viewBox: "0 0 16 16", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
+const BrowserIcon = () => <svg {...ICON}><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" /></svg>;
+const FileIcon = () => <svg {...ICON}><path d="M9 2H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5.5zM9 2v3.5h3.5" /></svg>;
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
 function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
@@ -261,7 +286,7 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
           dragging && "opacity-40",
         )}
         data-testid={testId}
-        title={review ? "Changes" : tab.path}
+        title={review ? "Changes" : isBlankBrowser(tab) ? "New browser" : tab.path}
         onPointerDown={(e) => beginTabDrag(e, id, name)}
         onClick={() => activateTab({ id, kind: "resource", tab })}
         onDoubleClick={() => pin(id)}

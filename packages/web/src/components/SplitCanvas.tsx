@@ -3,7 +3,7 @@ import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
 import { ChatView } from "../views/Chat";
 import { effectiveWorkspace, usePerchStore } from "../store";
-import { fileTabKey, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
+import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
 import { acquirePassthrough } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
@@ -248,7 +248,7 @@ export function SplitCanvas() {
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
           ) : tab.kind === "browser" ? (
-            <WorkspaceBrowser tabId={id} initialUrl={tab.path} />
+            <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} />
           ) : (
             <WorkspaceFilesView layout="editor" workspaceId={tab.workspaceId} initialPath={tab.path} />
           )}

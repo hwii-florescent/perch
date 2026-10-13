@@ -23,7 +23,7 @@ import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { sessionDotState, type AgentDotState } from "../statusDot";
 import type { SessionSummary } from "@perch/shared";
-import { getDockviewController } from "../dockview/dockviewController";
+import { splitActiveTab } from "../tiledPanes";
 
 const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_none_solid] border-current border-l-2 border-l-transparent";
 const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1 border-l-accent" : "[background:none]");
@@ -73,7 +73,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   const commands = useMemo(() => {
     if (filter !== "all") return [];
     const choices = [
-      ...(connected && sessionId && current?.cwd ? [{ id: "terminal", label: "New Terminal", detail: current.cwd, run: () => getDockviewController()?.addTerminalPanel("right") }] : []),
+      ...(connected && sessionId && current?.cwd ? [{ id: "terminal", label: "New Terminal", detail: current.cwd, run: () => splitActiveTab("right") }] : []),
       ...(connected && cwd ? (catalog?.manifests ?? [])
         .filter((entry) => entry.available && entry.enabled !== false && entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"))
         .map((entry) => ({ id: entry.id, label: entry.displayName, detail: cwd, run: () => createSession(hostId, cwd, entry.id) })) : []),
@@ -161,6 +161,9 @@ export function Navigator({ open, onClose }: NavigatorProps) {
     <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-[rgba(0,0,0,0.55)] pt-[12vh]" onClick={onClose}>
       <div
         className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[min(480px,calc(100dvh_-_16vh_-_2rem))] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigator"
         data-testid="navigator"
         onClick={(e) => e.stopPropagation()}
       >

@@ -31,11 +31,12 @@
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./store";
 import { activateTab, currentTabs } from "./workspaceTabs";
-import { getPaneController as getDockviewController } from "./tiledPanes";
+import { getPaneController as getDockviewController, splitActiveTab } from "./tiledPanes";
 import { useFileTabs } from "./fileTabs";
 import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
+import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
 
 const LEADER_TIMEOUT_MS = 1500;
@@ -107,6 +108,12 @@ shortcut("global.help", "global", "mod+/", "Open this keybind help", (h) => h.op
 shortcut("global.sidebar", "global", "mod+b", "Toggle sidebar", () => chrome().toggleSidebar());
 shortcut("global.drawer", "global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (files and Git)", (h) => h.toggleDrawer());
 
+// Zoom the tab area (terminals, files, browser pages): VS Code's keys, ⌘ on a Mac, Ctrl elsewhere
+shortcut("view.zoomIn", "global", ["cmd+=", "ctrl+="], "Zoom in", () => zoomIn());
+shortcut("view.zoomInShift", "global", ["cmd+shift+=", "ctrl+shift+="], "Zoom in (the + key)", () => zoomIn());
+shortcut("view.zoomOut", "global", ["cmd+-", "ctrl+-"], "Zoom out", () => zoomOut());
+shortcut("view.zoomReset", "global", ["cmd+0", "ctrl+0"], "Reset zoom", () => zoomReset());
+
 // Tabs (browser style)
 shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
 shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
@@ -135,8 +142,8 @@ shortcut("nests.addBirdhouse", "nests", "mod+o", "Add birdhouse (project)", () =
 shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New scratchpad chat", () => newScratchpad());
 
 // Splits and panes (iTerm2/Ghostty)
-shortcut("panes.splitRight", "panes", "mod+d", "Split right", () => controller()?.addTerminalPanel("right"));
-shortcut("panes.splitDown", "panes", ["cmd+shift+d", "alt+shift+d"], "Split down", () => controller()?.addTerminalPanel("below"));
+shortcut("panes.splitRight", "panes", "mod+d", "Split right", () => splitActiveTab("right"));
+shortcut("panes.splitDown", "panes", ["cmd+shift+d", "alt+shift+d"], "Split down", () => splitActiveTab("below"));
 shortcut("panes.prev", "panes", "mod+[", "Previous pane", () => controller()?.cycleToPreviousPane());
 shortcut("panes.next", "panes", "mod+]", "Next pane", () => controller()?.cycleToNextPane());
 shortcut("panes.zoom", "panes", "mod+shift+enter", "Zoom / restore the focused pane", () => controller()?.toggleMaximizeActive());
@@ -432,13 +439,13 @@ const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
   n: () => switchTabRelative(1),
   p: () => switchTabRelative(-1),
   x: () => closeCurrent(),
-  v: () => getDockviewController()?.addTerminalPanel("right"),
+  v: () => splitActiveTab("right"),
   // Wave 2 item 8: split-horizontal moved from leader,- to leader,_ (shift+-)
   // to free up leader,-/leader,+ for the new grow/shrink resize chords below
   // — a plain minus/equals pair mirrors how resize is usually spoken about
   // ("shrink"/"grow"), and `s` was already taken by Settings so `_`/`-`/`+`
   // (all reachable off the same physical key) was the cleanest free slot.
-  "_": () => getDockviewController()?.addTerminalPanel("below"),
+  "_": () => splitActiveTab("below"),
   z: () => getDockviewController()?.toggleMaximizeActive(),
   b: () => usePerchStore.getState().toggleSidebar(),
   s: () => usePerchStore.getState().setSettingsOpen(true),

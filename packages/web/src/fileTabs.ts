@@ -20,6 +20,11 @@ export interface FileTab {
 // NUL cannot occur in a path, so a review never collides with a file.
 export const fileTabKey = (tab: FileTab) => `${tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.path}`;
 
+/** A browser tab starts blank under a unique `blank:` path (a tab is keyed by its path, so two blank
+ * pages need distinct ones); the page's own address lives in the webview, not the tab. */
+export const isBlankBrowser = (tab: Pick<FileTab, "kind" | "path">) => tab.kind === "browser" && tab.path.startsWith("blank:");
+export const openBlankBrowser = (workspaceId: string) => useFileTabs.getState().open(workspaceId, `blank:${crypto.randomUUID()}`, "browser");
+
 interface FileTabsState {
   tabs: FileTab[];
   /** The file shown in the main area instead of the session, if any. */
