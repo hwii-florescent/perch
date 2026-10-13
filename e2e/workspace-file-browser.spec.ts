@@ -150,16 +150,21 @@ test("editor (CodeMirror): find, replace, go to line, save, Tab indent", async (
     await expect(editor).toBeFocused();
 
     // Find: CodeMirror's panel; every match in view is decorated.
+    const firstLineY = (await page.locator(".cm-line").first().boundingBox())!.y;
     await page.keyboard.press(`${MOD}+f`);
     const find = page.locator(".cm-search input[name=search]");
     await expect(find).toBeFocused();
     // CodeMirror commits the term on keyup/change: type it, as a user does (fill() sends neither).
     await find.pressSequentially("alpha");
     await expect(page.locator(".cm-searchMatch")).toHaveCount(2);
-    // The panel is in the layout flow: the selected match is never underneath it.
+    // The panel floats over the corner (like VS Code's widget): the text does not move down for it, it sits
+    // at the editor's right edge, and the selected match stays inside the editor.
     await find.press("Enter");
-    const [panel, selected] = await Promise.all([page.locator(".cm-search").boundingBox(), page.locator(".cm-searchMatch-selected").boundingBox()]);
-    expect(selected!.y).toBeGreaterThanOrEqual(panel!.y + panel!.height);
+    expect((await page.locator(".cm-line").first().boundingBox())!.y).toBe(firstLineY);
+    const [panel, box, selected] = await Promise.all([page.locator(".cm-search").boundingBox(), editor.locator("xpath=ancestor::*[contains(@class,'cm-editor')]").boundingBox(), page.locator(".cm-searchMatch-selected").boundingBox()]);
+    expect(panel!.x + panel!.width).toBeLessThanOrEqual(box!.x + box!.width);
+    expect(panel!.x + panel!.width).toBeGreaterThan(box!.x + box!.width - 40);
+    expect(selected!.y).toBeGreaterThanOrEqual(box!.y);
     await page.keyboard.press("Escape");
     await expect(find).toHaveCount(0);
     await expect(editor).toBeFocused();

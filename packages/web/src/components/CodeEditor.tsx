@@ -62,13 +62,17 @@ const theme = EditorView.theme({
   "&.cm-editor .cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "color-mix(in srgb, var(--yellow) 55%, transparent)" },
   "&.cm-editor .cm-matchingBracket": { backgroundColor: "color-mix(in srgb, var(--overlay-1) 30%, transparent)", outline: "none" },
   "&.cm-editor .cm-nonmatchingBracket": { backgroundColor: "color-mix(in srgb, var(--red) 30%, transparent)" },
-  // The find/replace panel stays in the layout flow (CodeMirror's default): it pushes the text down, so
-  // a match scrolled into view is never underneath it. Colours only.
-  "&.cm-editor .cm-panels": { backgroundColor: "var(--surface-0)", color: "var(--text)" },
-  "&.cm-editor .cm-panels-top": { borderBottom: "1px solid var(--overlay-0)" },
-  "&.cm-editor .cm-panel.cm-search": { padding: "0.3rem 1.6rem 0.3rem 0.5rem", fontSize: "0.78rem" },
+  // The find/replace and go-to-line panels float over the top-right corner like VS Code's widget, in the
+  // look of the app's popup menus (`ui/menu.ts` `menuPanel`: surface-1, rounded, shadow). They leave the
+  // layout flow; CodeMirror still adds their height to the scroll margin, so a match scrolled into view clears them.
+  "&.cm-editor .cm-panels": { backgroundColor: "transparent", color: "var(--text)", border: "none", position: "absolute", top: "0.5rem", right: "1rem", left: "auto", pointerEvents: "none" },
+  "&.cm-editor .cm-panel": {
+    pointerEvents: "auto", boxSizing: "border-box", maxWidth: "calc(100vw - 3rem)", fontSize: "0.78rem",
+    backgroundColor: "var(--surface-1)", borderRadius: "var(--radius)", boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+  },
+  "&.cm-editor .cm-panel.cm-search": { width: "22rem", padding: "0.5rem 1.8rem 0.5rem 0.6rem" },
   "&.cm-editor .cm-panel.cm-search label": { color: "var(--subtext-0)" },
-  "&.cm-editor .cm-panel.cm-search [name=close]": { color: "var(--subtext-0)" },
+  "&.cm-editor .cm-panel.cm-search [name=close]": { color: "var(--subtext-0)", top: "0.4rem", right: "0.5rem" },
   "&.cm-editor .cm-textfield": {
     backgroundColor: "var(--panel-bg)", color: "var(--text)", border: "1px solid var(--overlay-0)",
     borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit", padding: "0.15rem 0.35rem",
