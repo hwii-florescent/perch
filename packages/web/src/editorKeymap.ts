@@ -15,6 +15,7 @@
  */
 import { defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { closeSearchPanel, findNext, findPrevious, gotoLine, openSearchPanel } from "@codemirror/search";
+import { openReplace, whenOpen } from "./editorSearchPanel";
 import type { KeyBinding } from "@codemirror/view";
 import { SHORTCUTS } from "./keybinds";
 import { normalizeCombo } from "./keyCombo";
@@ -24,11 +25,13 @@ const SEARCH_SCOPE = "editor search-panel";
 /** Find, replace, go to line: VS Code's keys where they don't clash with the app. */
 export const ownBindings: KeyBinding[] = [
   { key: "Mod-f", run: openSearchPanel, scope: SEARCH_SCOPE },
-  // CodeMirror's panel always shows the replace row, so "replace" is "open the panel".
-  { key: "Ctrl-h", mac: "Mod-Alt-f", run: openSearchPanel, scope: SEARCH_SCOPE },
-  { key: "F3", run: findNext, shift: findPrevious, scope: SEARCH_SCOPE, preventDefault: true },
+  // Replace: the panel with its replace row unfolded (it is folded when opened with Mod-f).
+  { key: "Ctrl-h", mac: "Mod-Alt-f", run: openReplace, scope: SEARCH_SCOPE },
+  { mac: "Mod-Shift-f", run: openReplace, scope: SEARCH_SCOPE },
+  // Next/previous match only while the panel is open: they never open it.
+  { key: "F3", run: whenOpen(findNext), shift: whenOpen(findPrevious), scope: SEARCH_SCOPE, preventDefault: true },
   // macOS Cmd+G; elsewhere Ctrl+G is go to line, as in VS Code.
-  { mac: "Mod-g", run: findNext, shift: findPrevious, scope: SEARCH_SCOPE, preventDefault: true },
+  { mac: "Mod-g", run: whenOpen(findNext), shift: whenOpen(findPrevious), scope: SEARCH_SCOPE, preventDefault: true },
   { key: "Ctrl-g", run: gotoLine, preventDefault: true },
   { key: "Escape", run: closeSearchPanel, scope: SEARCH_SCOPE },
 ];

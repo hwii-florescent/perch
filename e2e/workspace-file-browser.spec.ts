@@ -151,12 +151,23 @@ test("editor (CodeMirror): find, replace, go to line, save, Tab indent", async (
 
     // Find: CodeMirror's panel; every match in view is decorated.
     const firstLineY = (await page.locator(".cm-line").first().boundingBox())!.y;
+    // Find next / previous never open the panel (Cmd+G on a Mac, F3 elsewhere).
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+g" : "F3");
+    await expect(page.locator(".cm-search")).toHaveCount(0);
     await page.keyboard.press(`${MOD}+f`);
     const find = page.locator(".cm-search input[name=search]");
     await expect(find).toBeFocused();
     // CodeMirror commits the term on keyup/change: type it, as a user does (fill() sends neither).
     await find.pressSequentially("alpha");
     await expect(page.locator(".cm-searchMatch")).toHaveCount(2);
+    // Replace is folded until the arrow is clicked.
+    const replaceField = page.locator(".cm-search input[name=replace]");
+    await expect(replaceField).toBeHidden();
+    await page.locator(".cm-search [name=toggleReplace]").click();
+    await expect(replaceField).toBeVisible();
+    await page.locator(".cm-search [name=toggleReplace]").click();
+    await expect(replaceField).toBeHidden();
+    await find.focus();
     // The panel floats over the corner (like VS Code's widget): the text does not move down for it, it sits
     // at the editor's right edge, and the selected match stays inside the editor.
     await find.press("Enter");
@@ -177,8 +188,9 @@ test("editor (CodeMirror): find, replace, go to line, save, Tab indent", async (
     await page.keyboard.press(`${MOD}+s`);
     await expect.poll(() => fs.readFileSync(file, "utf8")).toBe("  xalpha\nbeta\nalpha again\n");
 
-    // Replace: the same panel (Cmd+Option+F on a Mac, Ctrl+H elsewhere), "replace all".
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+Alt+f" : "Control+h");
+    // Replace: the same panel, opened unfolded with its field focused (Cmd+Shift+F on a Mac, Ctrl+H elsewhere).
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+f" : "Control+h");
+    await expect(page.locator(".cm-search input[name=replace]")).toBeFocused();
     await find.fill("");
     await find.pressSequentially("alpha");
     await page.locator(".cm-search input[name=replace]").pressSequentially("omega");

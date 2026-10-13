@@ -16,6 +16,7 @@ import { history } from "@codemirror/commands";
 import { bracketMatching, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { gotoLine, highlightSelectionMatches, search } from "@codemirror/search";
 import { editorKeymap } from "../editorKeymap";
+import { createSearchPanel } from "../editorSearchPanel";
 import { MAX_HIGHLIGHT_CHARS, loadLanguage, syntaxStyle } from "../editorSyntax";
 
 export interface CodeEditorHandle {
@@ -70,7 +71,14 @@ const theme = EditorView.theme({
     pointerEvents: "auto", boxSizing: "border-box", maxWidth: "calc(100vw - 3rem)", fontSize: "0.78rem",
     backgroundColor: "var(--surface-1)", borderRadius: "var(--radius)", boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
   },
-  "&.cm-editor .cm-panel.cm-search": { width: "22rem", padding: "0.5rem 1.8rem 0.5rem 0.6rem" },
+  "&.cm-editor .cm-panel.cm-search": { width: "22rem", padding: "0.5rem 1.8rem 0.5rem 0.4rem" },
+  "&.cm-editor .cm-search-row": { display: "flex", flexWrap: "wrap", alignItems: "center", paddingLeft: "1.1rem" },
+  "&.cm-editor .cm-search-row:first-child": { paddingLeft: "0" },
+  "&.cm-editor .cm-search [name=toggleReplace]": {
+    width: "1.1rem", flex: "none", background: "transparent", border: "none", color: "var(--subtext-0)", cursor: "pointer", padding: "0", font: "inherit",
+  },
+  "&.cm-editor .cm-search [name=toggleReplace]:hover": { color: "var(--text)" },
+  "&.cm-editor .cm-search-row[hidden]": { display: "none" },
   "&.cm-editor .cm-panel.cm-search label": { color: "var(--subtext-0)" },
   "&.cm-editor .cm-panel.cm-search [name=close]": { color: "var(--subtext-0)", top: "0.4rem", right: "0.5rem" },
   "&.cm-editor .cm-textfield": {
@@ -117,7 +125,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
           drawSelection(),
           bracketMatching(),
           highlightSelectionMatches(),
-          search({ top: true }),
+          search({ top: true, createPanel: createSearchPanel }),
           indentUnit.of("  "),
           EditorState.tabSize.of(2),
           wrapping.of(wrapped ? EditorView.lineWrapping : []),
