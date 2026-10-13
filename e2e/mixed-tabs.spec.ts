@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { addProject, startChat } from "./projects";
+import { expectDoc } from "./editor";
 
 const RUN_ID = `${Date.now()}-${process.pid}`;
 // One folder per project: the core remembers a project by path, so a deleted and
@@ -447,7 +448,7 @@ test("a file with an unsaved draft keeps its tab when closed", async ({ page }) 
     await page.waitForTimeout(1000);
     expect(await strip(page)).toContain(a.fileTab);
     await page.getByTestId(a.fileTab).click();
-    await expect(page.getByTestId("workspace-file-editor")).toHaveValue("an unsaved draft\n");
+    await expectDoc(page.getByTestId("workspace-file-editor"), "an unsaved draft\n");
   } finally {
     cleanup();
   }

@@ -78,7 +78,7 @@ export function SplitCanvas() {
         // A file previewed from the explorer with the keyboard (Space) leaves focus in the list.
         if (document.activeElement?.closest('[data-explorer-keynav="true"]')) return;
         const pane = [...host.querySelectorAll<HTMLElement>("[data-tab-id]")].find((element) => element.dataset.tabId === activeKey);
-        const editor = pane?.querySelector<HTMLTextAreaElement>('[data-testid="workspace-file-editor"]');
+        const editor = pane?.querySelector<HTMLElement>('[data-testid="workspace-file-editor"]');
         if (!editor) return;
         editor.focus({ preventScroll: true });
         observer.disconnect();

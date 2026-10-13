@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { DirectoryEntry, FileMetadata } from "@perch/shared";
-import { usePerchStore, type WorkspaceRecord } from "../store";
+import { usePerchStore } from "../store";
 import {
   normalizeWorkspacePath,
   useWorkspaceFilesStore,
@@ -16,6 +16,11 @@ import { FileEntryMenu } from "./FileEntryMenu";
 import { WorkspaceFileAsset } from "./WorkspaceFileAsset";
 import { assetKind } from "./workspaceFileKind";
 import { explorerKey, flattenTree } from "../explorerNav";
+import { IS_MAC } from "../keyCombo";
+import type { CodeEditorHandle } from "./CodeEditor";
+
+// CodeMirror is its own chunk: it loads when the first file opens, not with the app.
+const CodeEditor = lazy(() => import("./CodeEditor").then((module) => ({ default: module.CodeEditor })));
 
 /** The row under the keyboard cursor, ringed while the tree has focus. */
 const CURSOR_RING = "group-focus/tree:ring-1 group-focus/tree:ring-inset group-focus/tree:ring-overlay-1";
@@ -31,8 +36,6 @@ const PREVIEW_STATE = "shrink-0 px-[0.7rem] py-[0.55rem] text-[0.68rem] text-sub
 const COMPARE_LABEL = "mb-[0.2rem] block text-subtext-0 uppercase";
 const BTN = "min-h-[1.8rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.48rem] py-[0.28rem] text-subtext-0";
 const BTN_HOVER = "hover:border-accent hover:text-fg focus-visible:border-accent focus-visible:text-fg";
-const TOOL = `${BTN} ${BTN_HOVER} disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]`;
-const TOOL_ACTIVE = "min-h-[1.8rem] cursor-pointer rounded-ui border border-accent bg-transparent px-[0.48rem] py-[0.28rem] text-accent hover:text-fg focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]";
 const DANGER = "border-red! text-red!";
 const ACTIONS = "flex shrink-0 items-center gap-[0.35rem]";
 const TREE_STATE = "px-[0.65rem] py-[0.45rem] text-[0.68rem] text-subtext-0";
@@ -122,7 +125,7 @@ function FileTree({
             >
               <Chevron open={isOpen} size={16} className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} />
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
-              {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" aria-label="symlink">↗</span>}
+              {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" role="img" aria-label="symlink">↗</span>}
               {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}
             </button>
             {isDirectory && isOpen && childTree && (
@@ -157,45 +160,6 @@ function FileTree({
       {tree.state === "ready" && tree.entries.length === 0 && <div className={TREE_STATE}>Empty folder</div>}
     </div>
   );
-}
-
-function lineCount(content: string): number {
-  return Math.max(1, content.split("\n").length);
-}
-
-/** Return one gutter row for every visual row in a wrapped textarea. The
- * editor uses a monospace face, so measuring its available character columns
- * keeps the gutter in lockstep with soft wrapping while retaining stable
- * logical line numbers on the first row of each wrapped line. */
-function visualLineNumbers(content: string, editorWidth: number): Array<number | null> {
-  const glyphWidth = 7.2;
-  const padding = 24;
-  const columns = Math.max(1, Math.floor((editorWidth - padding) / glyphWidth) || 80);
-  const rows: Array<number | null> = [];
-  for (const [index, line] of content.split("\n").entries()) {
-    let expandedLength = 0;
-    for (const character of line) {
-      expandedLength += character === "\t" ? 2 : 1;
-    }
-    const visualRows = Math.max(1, Math.ceil(Math.max(1, expandedLength) / columns));
-    rows.push(index + 1);
-    for (let row = 1; row < visualRows; row += 1) rows.push(null);
-  }
-  return rows.length > 0 ? rows : [1];
-}
-
-function matchCount(content: string, query: string): number {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return 0;
-  let count = 0;
-  let offset = 0;
-  const haystack = content.toLowerCase();
-  while (true) {
-    const index = haystack.indexOf(normalized, offset);
-    if (index < 0) return count;
-    count += 1;
-    offset = index + normalized.length;
-  }
 }
 
 function metadataSummary(metadata?: FileMetadata): string {
@@ -339,10 +303,11 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [search, setSearch] = useState("");
   const [fileQuery, setFileQuery] = useState("");
   const query = fileQuery.trim();
   const [wrap, setWrap] = useState(false);
+  // The caret for the status bar; find/replace/go-to-line live inside the editor (CodeEditor.tsx).
+  const [caret, setCaret] = useState({ line: 1, col: 1 });
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false);
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(true);
@@ -351,16 +316,13 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   // The keyboard cursor over the explorer's rows (`explorerNav.ts`); `treeRef` is the focusable list.
   const [cursor, setCursor] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
-  const gutterRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
-  const [editorWidth, setEditorWidth] = useState(0);
+  const editorRef = useRef<CodeEditorHandle | null>(null);
   const restoredPath = normalizeWorkspacePath(initialPath);
 
   useEffect(() => {
     setExpanded(new Set());
     setSelectedPath(restoredPath || null);
     setPreviewOpen(false);
-    setSearch("");
     setFileQuery("");
     setNotice(null);
     setReloadConfirmOpen(false);
@@ -375,29 +337,12 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     return () => clearTimeout(timer);
   }, [connected, layout, query, searchFiles, workspaceId]);
 
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const updateWidth = () => setEditorWidth(editor.clientWidth);
-    updateWidth();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(editor);
-    return () => observer.disconnect();
-  }, [selectedPath]);
-
   const rootTree = trees[""];
   const document = selectedPath ? documents[selectedPath] : undefined;
   const preview = selectedPath ? previews[selectedPath] : undefined;
   const dirty = document != null && document.content !== document.savedContent;
-  const matches = document ? matchCount(document.content, search) : 0;
-  const lines = useMemo(() => lineCount(document?.content ?? ""), [document?.content]);
-  const gutterLines = useMemo(
-    () => wrap
-      ? visualLineNumbers(document?.content ?? "", editorWidth)
-      : Array.from({ length: lines }, (_, index) => index + 1),
-    [document?.content, editorWidth, lines, wrap],
-  );
+  const canEdit = document != null && !document.metadata?.readonly && document.state !== "loading" && document.state !== "error";
+  const canSave = document != null && !document.metadata?.readonly && dirty && document.state !== "saving" && document.state !== "loading" && document.state !== "error";
 
   function handleReload() {
     if (!selectedPath || !document || document.state === "saving" || document.bufferState === "saving") return;
@@ -457,9 +402,8 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   }
 
   // What the cursor can reach: the search results while searching, else the expanded tree.
-  const rows = query
-    ? (searchResult?.query === query && searchResult.state === "ready" ? searchResult.entries : [])
-    : flattenTree(trees, expanded);
+  const searchRows = searchResult?.query === query && searchResult.state === "ready" ? searchResult.entries : [];
+  const rows = query ? searchRows : flattenTree(trees, expanded);
 
   // Keep the cursor row on screen.
   useEffect(() => {
@@ -484,6 +428,10 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
       if (treeRef.current) treeRef.current.dataset.keynav = result.open.pin ? "false" : "true";
       handleOpenFile(file, result.open.pin);
     }
+  }
+
+  function saveCurrent() {
+    if (selectedPath && canSave) saveFile(workspaceId, selectedPath);
   }
 
   const explorerOpen = layout === "explorer" || (!layout && mobileExplorerOpen);
@@ -610,38 +558,31 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
               ‹ Explorer
             </button>
           )}
-          {!selectedPath || !document ? (
+          {(!selectedPath || !document) && (
             <div className={EMPTY}>
               <span className="text-accent">⌘</span>
               <strong className="text-[0.9rem] text-fg">Open a file to edit</strong>
               <span>Folders load one level at a time. Files stay inside this workspace.</span>
             </div>
-          ) : showAsset ? (
+          )}
+          {selectedPath && document && showAsset && (
             <WorkspaceFileAsset key={selectedPath} workspaceId={workspaceId} metadata={document.metadata!} />
-          ) : (
+          )}
+          {selectedPath && document && !showAsset && (
             <>
-              <div className="flex shrink-0 items-center justify-between gap-[0.65rem] border-b border-b-overlay-0 px-[0.65rem] py-[0.42rem] [@container(max-width:460px)]:flex-wrap">
-                <div className="workspace-files__file-title flex min-w-0 items-baseline gap-[0.45rem] [@container(max-width:460px)]:flex-[1_1_9rem]">
-                  <strong className="overflow-hidden text-[0.78rem] text-ellipsis whitespace-nowrap text-fg" title={selectedPath}>{basename(selectedPath)}</strong>
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-subtext-0" title={selectedPath}>{selectedPath}</span>
-                  {dirty && <span className="text-[0.65rem] text-yellow" title="Unsaved changes">●</span>}
+              <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-[0.2rem] text-[0.72rem] [@container(max-width:460px)]:flex-wrap">
+                <div className="workspace-files__file-title flex min-w-0 items-center gap-[0.4rem] text-subtext-0 [@container(max-width:460px)]:flex-[1_1_9rem]" title={`${selectedPath}\n${metadataSummary(document.metadata)}${document.version ? ` · v ${document.version.slice(0, 12)}` : ""}`}>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">{selectedPath}</span>
+                  {dirty && <span className="text-[0.65rem] text-fg" title="Unsaved changes">●</span>}
                 </div>
-                <div className={cn(ACTIONS, "[@container(max-width:460px)]:max-w-full [@container(max-width:460px)]:min-w-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:flex-wrap [@container(max-width:460px)]:gap-[0.2rem]")}>
-                  <button type="button" className={wrap ? TOOL_ACTIVE : TOOL} onClick={() => setWrap((value) => !value)}>Wrap</button>
-                  <button type="button" className={previewOpen ? TOOL_ACTIVE : TOOL} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
-                  <button type="button" className={TOOL} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"}>Reload</button>
-                  <button type="button" className="workspace-files__save min-h-[1.8rem] cursor-pointer rounded-ui border border-accent bg-accent px-[0.48rem] py-[0.28rem] font-bold text-panel-bg disabled:cursor-not-allowed disabled:opacity-[0.45] [@container(max-width:460px)]:min-h-[2.5rem] [@container(max-width:460px)]:px-[0.42rem]" onClick={() => saveFile(workspaceId, selectedPath)} disabled={document.metadata?.readonly || !dirty || document.state === "saving" || document.state === "loading" || document.state === "error"}>
+                <div className={cn(ACTIONS, "gap-[0.1rem] [@container(max-width:460px)]:max-w-full [@container(max-width:460px)]:min-w-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:flex-wrap")}>
+                  <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap((value) => !value)} title="Toggle word wrap">Wrap</button>
+                  <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
+                  <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
+                  <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(workspaceId, selectedPath)} disabled={!canSave} title={`Save (${IS_MAC ? "⌘S" : "Ctrl+S"})`}>
                     {document.state === "saving" ? "Saving…" : "Save"}
                   </button>
                 </div>
-              </div>
-              <div className="flex min-h-[1.55rem] items-center gap-[0.65rem] overflow-hidden px-[0.65rem] whitespace-nowrap text-subtext-0">
-                <span className="overflow-hidden text-ellipsis">{metadataSummary(document.metadata)}</span>
-                {document.version && <code className={CODE}>v {document.version.slice(0, 12)}</code>}
-                {search && <span>{matches} match{matches === 1 ? "" : "es"}</span>}
-                {document.bufferState === "saving" && <span role="status">Draft syncing…</span>}
-                {document.bufferState === "error" && <span className="text-red" role="alert">Draft recovery unavailable</span>}
-                {document.error && document.state !== "conflict" && <span className="text-red" role="alert">{document.error}</span>}
               </div>
               {document.state === "conflict" && (
                 <ConflictPanel
@@ -662,29 +603,31 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
                   </div>
                 </div>
               )}
-              <label className="flex shrink-0 items-center gap-[0.4rem] border-y border-y-[color:color-mix(in_srgb,var(--overlay-0)_65%,transparent)] px-[0.65rem] py-1 text-subtext-0">
-                <span>Find</span>
-                <input className="min-w-0 flex-1 rounded-ui border border-overlay-0 bg-surface-0 px-[0.3rem] py-1 text-fg [font:inherit] focus:border-accent focus:[outline:2px_solid_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:[outline-offset:1px]" data-testid="workspace-file-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search in file" />
-                {search && <span>{matches}</span>}
-              </label>
-              <div className="flex min-h-[12rem] min-w-0 flex-1 overflow-hidden bg-surface-dim">
-                <div className="flex-[0_0_3.2rem] overflow-hidden border-r border-r-overlay-0 bg-surface-0 pt-[0.7rem] pr-[0.7rem] pb-4 pl-[0.3rem] text-right text-overlay-1 select-none" ref={gutterRef} aria-hidden="true">
-                  {gutterLines.map((line, index) => <span className="block h-[1.55em]" key={index}>{line ?? ""}</span>)}
-                </div>
-                <textarea
-                  className={cn("min-h-0 min-w-0 flex-1 resize-none overflow-auto bg-transparent pt-[0.7rem] pr-3 pb-4 pl-3 text-fg [border:0] [font:inherit] [outline:0] [tab-size:2]", wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre")}
-                  data-testid="workspace-file-editor"
-                  ref={editorRef}
-                  value={document.content}
-                  onChange={(event) => updateDraft(workspaceId, selectedPath, event.target.value)}
-                  onScroll={(event) => { if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop; }}
-                  wrap={wrap ? "soft" : "off"}
-                  spellCheck={false}
-                  readOnly={document.metadata?.readonly || document.state === "loading" || document.state === "error"}
-                  aria-label={`${document.metadata?.readonly ? "Viewing" : "Editing"} ${selectedPath}`}
-                />
+              <div className="relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden">
+                <Suspense fallback={<div className={PREVIEW_STATE} role="status">Loading editor…</div>}>
+                  <CodeEditor
+                    key={selectedPath}
+                    ref={editorRef}
+                    value={document.content}
+                    onChange={(content) => updateDraft(workspaceId, selectedPath, content)}
+                    onSave={saveCurrent}
+                    onCaret={setCaret}
+                    readOnly={!canEdit}
+                    wrap={wrap}
+                    label={`${document.metadata?.readonly ? "Viewing" : "Editing"} ${selectedPath}`}
+                  />
+                </Suspense>
               </div>
               {previewOpen && <PreviewPanel preview={preview ?? { workspaceId, path: selectedPath, requiresSandbox: false, truncated: false, state: "loading" }} />}
+              <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-[0.15rem] text-[0.68rem] whitespace-nowrap text-subtext-0">
+                <span className="flex min-w-0 gap-[0.65rem] overflow-hidden">
+                  {document.bufferState === "saving" && <span role="status">Draft syncing…</span>}
+                  {document.bufferState === "error" && <span className="text-red" role="alert">Draft recovery unavailable</span>}
+                  {document.error && document.state !== "conflict" && <span className="overflow-hidden text-ellipsis text-red" role="alert">{document.error}</span>}
+                  {document.metadata?.readonly && <span>Read-only</span>}
+                </span>
+                <button type="button" className={cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]")} onClick={() => editorRef.current?.openGoto()} title="Go to line (Ctrl+G)">Ln {caret.line}, Col {caret.col}</button>
+              </div>
             </>
           )}
         </div>}

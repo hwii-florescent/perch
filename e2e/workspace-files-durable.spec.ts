@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
+import { MOD, expectDoc } from "./editor";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -173,7 +174,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect(page.getByTestId("workspace-file-entry-src/main.txt")).toBeVisible({ timeout: 10000 });
       await page.getByTestId("workspace-file-entry-src/main.txt").click();
       const editor = page.getByTestId("workspace-file-editor");
-      await expect(editor).toHaveValue("initial sentinel\n", { timeout: 15000 });
+      await expectDoc(editor, "initial sentinel\n", { timeout: 15000 });
 
       await editor.fill("draft survives page reload\n");
       await waitForDraftSync(page);
@@ -220,8 +221,8 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await page.getByTestId(`file-tab-${RELATIVE_FILE}`).click({ timeout: 20000 });
       await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20000 });
       const restoredEditor = page.getByTestId("workspace-file-editor");
-      await expect(restoredEditor).toHaveValue("draft survives beforeunload\n", { timeout: 20000 });
-      await expect(page.locator(".workspace-files__file-title strong")).toHaveText("main.txt");
+      await expectDoc(restoredEditor, "draft survives beforeunload\n", { timeout: 20000 });
+      await expect(page.locator(".workspace-files__file-title")).toContainText("main.txt");
       const restored = await readDurableBuffer(workspaceId, RELATIVE_FILE);
       expect(restored.content).toBe("draft survives beforeunload\n");
       expect(restored.dirty).toBe(true);
@@ -229,9 +230,9 @@ test.describe("V-05/V-06 durable file workflow", () => {
       // Save the sentinel and verify the actual fixture bytes changed.
       await restoredEditor.fill("saved sentinel\n");
       await waitForDraftSync(page);
-      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await restoredEditor.press(`${MOD}+s`);
       await expect.poll(() => fs.readFileSync(FILE_PATH, "utf8"), { timeout: 15000 }).toBe("saved sentinel\n");
-      await expect(restoredEditor).toHaveValue("saved sentinel\n");
+      await expectDoc(restoredEditor, "saved sentinel\n");
 
       // The save must be visible as a Git change, not just as bytes on disk —
       // this is the combined edit/save/status half of V-05.
@@ -253,7 +254,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
         await page.getByTestId("workspace-file-entry-src").click();
       }
       await page.getByTestId("workspace-file-entry-src/main.txt").click();
-      await expect(restoredEditor).toHaveValue("saved sentinel\n", { timeout: 15000 });
+      await expectDoc(restoredEditor, "saved sentinel\n", { timeout: 15000 });
 
       // An external write must preserve the editor draft and offer explicit
       // compare/reload/overwrite actions rather than silently replacing it.
@@ -261,7 +262,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await waitForDraftSync(page);
       fs.writeFileSync(FILE_PATH, "external sentinel\n");
       await expect(page.getByTestId("workspace-file-conflict")).toBeVisible({ timeout: 15000 });
-      await expect(restoredEditor).toHaveValue("local draft after save\n");
+      await expectDoc(restoredEditor, "local draft after save\n");
       const conflict = await readDurableBuffer(workspaceId, RELATIVE_FILE);
       expect(conflict.content).toBe("local draft after save\n");
       expect(conflict.conflict).toBe(true);
@@ -272,10 +273,10 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await page.getByRole("button", { name: "Reload disk", exact: true }).click();
       await expect(page.getByTestId("workspace-file-reload-confirm")).toBeVisible({ timeout: 5000 });
       await page.getByRole("button", { name: "Keep draft", exact: true }).click();
-      await expect(restoredEditor).toHaveValue("local draft after save\n");
+      await expectDoc(restoredEditor, "local draft after save\n");
       await page.getByRole("button", { name: "Reload disk", exact: true }).click();
       await page.getByRole("button", { name: "Discard and reload", exact: true }).click();
-      await expect(restoredEditor).toHaveValue("external sentinel\n", { timeout: 15000 });
+      await expectDoc(restoredEditor, "external sentinel\n", { timeout: 15000 });
       const reloaded = await readDurableBuffer(workspaceId, RELATIVE_FILE);
       expect(reloaded.content).toBe("external sentinel\n");
       expect(reloaded.dirty).toBe(false);
@@ -295,7 +296,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await page.getByTestId("workspace-file-entry-src/main.txt").click();
       const mobileEditor = page.getByTestId("workspace-file-editor");
       await expect(mobileEditor).toBeVisible({ timeout: 15000 });
-      await expect(mobileEditor).toHaveValue("external sentinel\n", { timeout: 15000 });
+      await expectDoc(mobileEditor, "external sentinel\n", { timeout: 15000 });
       await page.screenshot({ path: testInfo.outputPath("files-durable-mobile.png"), fullPage: true });
       const mobileBounds = await page.evaluate(() => {
         const save = document.querySelector(".workspace-files__save")?.getBoundingClientRect();

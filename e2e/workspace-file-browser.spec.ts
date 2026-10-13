@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { addProject } from "./projects";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
+import { MOD, docOf, expectDoc } from "./editor";
 
 // Synthetic 16×16 gray H.264 clip, generated with ffmpeg, gzip/base64 for a
 // self-contained fixture (no ffmpeg required to run this test).
@@ -31,7 +32,7 @@ function pdf(): string {
   const xref = content.length;
   content += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
   content += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  return content + `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return `${content}trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 }
 
 test("search, media tabs, readonly files and safe extraction", async ({ page, request }, testInfo) => {
@@ -57,13 +58,13 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
     await search.fill("nested/note");
     await page.getByTestId("workspace-file-entry-nested/note.txt").click();
     await expect(page.getByTestId("file-tab-nested/note.txt")).toHaveClass(/tab-bar__tab--active/);
-    await expect(page.getByTestId("workspace-file-editor")).toHaveValue("nested file\n");
+    await expectDoc(page.getByTestId("workspace-file-editor"), "nested file\n");
     await search.fill("does-not-exist");
     await expect(page.getByText("No matching files", { exact: true })).toBeVisible();
     await search.fill("");
     await page.getByTestId("workspace-file-entry-readonly.txt").click();
-    await expect(page.getByTestId("workspace-file-editor")).toHaveValue("readonly\n");
-    await expect(page.getByTestId("workspace-file-editor")).toHaveAttribute("readonly", "");
+    await expectDoc(page.getByTestId("workspace-file-editor"), "readonly\n");
+    await expect(page.getByTestId("workspace-file-editor")).toHaveAttribute("data-readonly", "true");
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
     await page.getByTestId("workspace-file-entry-picture.svg").click();
@@ -130,6 +131,99 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
     await expect(page.getByTestId("workspace-file-image")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("file-browser-mobile.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } finally {
+    fs.rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("editor (CodeMirror): find, replace, go to line, save, Tab indent", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-editor-"));
+  try {
+    const file = path.join(root, "code.txt");
+    fs.writeFileSync(file, "alpha\nbeta\nalpha again\n");
+    await page.goto("/");
+    await addProject(page, root);
+    const project = page.locator(".workspace-project").filter({ hasText: path.basename(root) });
+    await openWorkspaceTool(page, await firstWorkspaceId(project), "files");
+    await page.getByTestId("workspace-file-entry-code.txt").click();
+    const editor = page.getByTestId("workspace-file-editor");
+    await expect(editor).toBeFocused();
+
+    // Find: CodeMirror's panel; every match in view is decorated.
+    await page.keyboard.press(`${MOD}+f`);
+    const find = page.locator(".cm-search input[name=search]");
+    await expect(find).toBeFocused();
+    // CodeMirror commits the term on keyup/change: type it, as a user does (fill() sends neither).
+    await find.pressSequentially("alpha");
+    await expect(page.locator(".cm-searchMatch")).toHaveCount(2);
+    // The panel is in the layout flow: the selected match is never underneath it.
+    await find.press("Enter");
+    const [panel, selected] = await Promise.all([page.locator(".cm-search").boundingBox(), page.locator(".cm-searchMatch-selected").boundingBox()]);
+    expect(selected!.y).toBeGreaterThanOrEqual(panel!.y + panel!.height);
+    await page.keyboard.press("Escape");
+    await expect(find).toHaveCount(0);
+    await expect(editor).toBeFocused();
+
+    // Tab indents; the draft reaches the store as one document.
+    await page.keyboard.press(`${MOD}+Home`);
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("x");
+    await expectDoc(editor, "  xalpha\nbeta\nalpha again\n");
+    await page.keyboard.press(`${MOD}+s`);
+    await expect.poll(() => fs.readFileSync(file, "utf8")).toBe("  xalpha\nbeta\nalpha again\n");
+
+    // Replace: the same panel (Cmd+Option+F on a Mac, Ctrl+H elsewhere), "replace all".
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Alt+f" : "Control+h");
+    await find.fill("");
+    await find.pressSequentially("alpha");
+    await page.locator(".cm-search input[name=replace]").pressSequentially("omega");
+    await page.locator(".cm-search button[name=replaceAll]").click();
+    await expectDoc(editor, "  xomega\nbeta\nomega again\n");
+    await page.keyboard.press("Escape");
+
+    // Go to line: Ctrl+G, then Enter jumps the caret there (line:column).
+    await page.keyboard.press("Control+g");
+    await page.locator(".cm-goto-line input[name=line]").fill("3:3");
+    await page.keyboard.press("Enter");
+    await expect(editor).toBeFocused();
+    // CodeMirror's ":3" is 3 characters in, so the status bar's 1-based column reads 4.
+    await expect(page.getByRole("button", { name: /Ln 3, Col 4/ })).toBeVisible();
+    expect((await docOf(editor)).split("\n")[2]).toBe("omega again");
+  } finally {
+    fs.rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("editor (CodeMirror): fast typing keeps every key; a reload replaces the live document", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-sync-"));
+  try {
+    const file = path.join(root, "sync.txt");
+    fs.writeFileSync(file, "disk one\n");
+    await page.goto("/");
+    await addProject(page, root);
+    const project = page.locator(".workspace-project").filter({ hasText: path.basename(root) });
+    await openWorkspaceTool(page, await firstWorkspaceId(project), "files");
+    await page.getByTestId("workspace-file-entry-sync.txt").click();
+    const editor = page.getByTestId("workspace-file-editor");
+    await expect(editor).toBeFocused();
+
+    // No keystroke is dropped or reordered while the store echoes drafts back (the `pending` guard).
+    const typed = "the quick brown fox jumps over the lazy dog 0123456789";
+    await page.keyboard.press(`${MOD}+End`);
+    await page.keyboard.type(typed, { delay: 0 });
+    await expectDoc(editor, `disk one\n${typed}`);
+
+    // The store replaces the document under a mounted view (Reload, discarding the draft).
+    await page.getByRole("button", { name: "Reload", exact: true }).click();
+    await page.getByRole("button", { name: "Discard and reload" }).click();
+    await expectDoc(editor, "disk one\n");
+    // Typing continues on the replaced document, and saving writes exactly it.
+    await editor.click();
+    await page.keyboard.press(`${MOD}+End`);
+    await page.keyboard.type("two");
+    await expectDoc(editor, "disk one\ntwo");
+    await page.keyboard.press(`${MOD}+s`);
+    await expect.poll(() => fs.readFileSync(file, "utf8")).toBe("disk one\ntwo");
   } finally {
     fs.rmSync(root, { force: true, recursive: true });
   }

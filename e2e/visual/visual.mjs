@@ -291,9 +291,15 @@ const SKIP_SEL = ".xterm, .dv-render-overlay, .dv-tabs-and-actions-container svg
 // ------------------------------------------------------------------ states --
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const git = (args, cwd) => execSync(`git ${args}`, { cwd, stdio: "pipe", input: "", env: { ...process.env, GIT_AUTHOR_NAME: "v", GIT_AUTHOR_EMAIL: "v@v", GIT_COMMITTER_NAME: "v", GIT_COMMITTER_EMAIL: "v@v", GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z" } });
+const git = (args, cwd) => {
+  try {
+    return execSync(`git ${args}`, { cwd, stdio: "pipe", input: "", env: { ...process.env, GIT_AUTHOR_NAME: "v", GIT_AUTHOR_EMAIL: "v@v", GIT_COMMITTER_NAME: "v", GIT_COMMITTER_EMAIL: "v@v", GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z" } });
+  } catch (error) {
+    // Fail closed: a broken fixture must stop the run, not produce a baseline.
+    throw new Error(`git ${args} failed in ${cwd}: ${error.stderr?.toString() || error.message}`, { cause: error });
+  }
+};
 
-async function press(page, k) { await page.keyboard.press(k); await sleep(250); }
 async function closeOverlays(page) { await page.keyboard.press("Escape"); await sleep(150); await page.keyboard.press("Escape"); await sleep(150); }
 
 /** Ordered: later states build on earlier ones. A state returns nothing; it
@@ -456,7 +462,7 @@ const STATES = [
   { name: "05e-statusbar-restored", run: async (page) => {
     await page.evaluate(() => {
       const st = window.usePerchStore;
-      const { contextTokens, costUsd, ...rest } = st.getState().status ?? {};
+      const { contextTokens: _contextTokens, costUsd: _costUsd, ...rest } = st.getState().status ?? {};
       st.setState({ connected: true, status: rest.cwd ? rest : st.getState().status });
     });
     await sleep(300);
@@ -616,7 +622,9 @@ const STATES = [
   } },
   { name: "12c-file-wrap-find", run: async (page) => {
     await page.getByRole("button", { name: "Wrap", exact: true }).click();
-    await page.getByTestId("workspace-file-search").fill("sentinel");
+    await page.getByTestId("workspace-file-editor").focus();
+    await page.keyboard.press("Control+f");
+    await page.locator(".cm-search input[name=search]").fill("sentinel");
     await sleep(300);
   } },
   { name: "12d-file-preview", run: async (page) => {
@@ -645,10 +653,10 @@ const STATES = [
     const PINNED = new Date("2026-01-01T12:00:00Z");
     fs.utimesSync(`${REPO}/src/main.txt`, PINNED, PINNED);
     await page.getByRole("button", { name: "Reload", exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-file-editor"]')?.value === "modified sentinel with a fairly long line of content\n", null, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-file-editor"]')?.__doc?.() === "modified sentinel with a fairly long line of content\n", null, { timeout: 15000 });
     await page.getByRole("button", { name: "Preview", exact: true }).click();
     await page.getByRole("button", { name: "Wrap", exact: true }).click();
-    await page.getByTestId("workspace-file-search").fill("");
+    await page.keyboard.press("Escape");
     await sleep(500);
   } },
   // More tree rows: symlink glyph, RO badge, an empty folder, an unreadable folder (error + Retry), the HTML preview.
@@ -1000,7 +1008,11 @@ const STATES = [
     const before = { head: git("rev-parse HEAD", REPO).toString(), status: git("status --porcelain", REPO).toString() };
     const blob = (text) => { fs.writeFileSync(`${WORK}/blob.tmp`, text); return git(`hash-object -w ${WORK}/blob.tmp`, REPO).toString().trim(); };
     const [base, ours, theirs] = [blob("base\n"), blob("ours\n"), blob("theirs\n")];
-    execSync("git update-index --index-info", { cwd: REPO, stdio: "pipe", input: `100644 ${base} 1\tconflict.txt\n100644 ${ours} 2\tconflict.txt\n100644 ${theirs} 3\tconflict.txt\n` });
+    try {
+      execSync("git update-index --index-info", { cwd: REPO, stdio: "pipe", input: `100644 ${base} 1\tconflict.txt\n100644 ${ours} 2\tconflict.txt\n100644 ${theirs} 3\tconflict.txt\n` });
+    } catch (error) {
+      throw new Error(`conflict fixture failed: ${error.stderr?.toString() || error.message}`, { cause: error });
+    }
     fs.writeFileSync(`${REPO}/conflict.txt`, "<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n");
     fs.utimesSync(`${REPO}/conflict.txt`, new Date("2026-01-01T12:00:00Z"), new Date("2026-01-01T12:00:00Z"));
     if (!/^UU conflict\.txt$/m.test(git("status --porcelain", REPO).toString())) throw new Error("14z5: git does not report conflict.txt as UU");
@@ -1288,7 +1300,7 @@ const STATES = [
     await page.getByTestId("mobile-active-pane-terminal").waitFor();
     await sleep(800);
   } },
-  { name: "21e-phone-pane-empty", viewport: { width: 390, height: 844 }, run: async (page, ctx) => {
+  { name: "21e-phone-pane-empty", viewport: { width: 390, height: 844 }, run: async (page) => {
     await page.evaluate(() => { window.__visWs = window.usePerchStore.getState().activeWorkspaceId; window.usePerchStore.setState({ activeWorkspaceId: null }); });
     await page.getByTestId("mobile-pane-files").click();
     await page.getByText("Choose a workspace from Switch before opening files.").waitFor();

@@ -41,6 +41,22 @@ it("cancels the leader on keyup without swallowing ordinary Space or text input"
     expect(press(editor, "g")).toBe(false);
     expect(navigations).toBe(1);
     expect(press(editor, "n")).toBe(true); // no armed chord: normal typing
+    // CodeMirror: the testid is on the editable area only, so the find panel's input (a sibling inside
+    // the same .cm-editor) is still a plain form field that keeps Ctrl+Space.
+    const cm = document.createElement("div");
+    cm.className = "cm-editor";
+    const content = document.createElement("div");
+    content.className = "cm-content";
+    content.contentEditable = "true";
+    content.dataset.testid = "workspace-file-editor";
+    const searchInput = document.createElement("input");
+    const panel = document.createElement("div");
+    panel.className = "cm-search";
+    panel.append(searchInput);
+    cm.append(content, panel);
+    host.append(cm);
+    expect(press(searchInput, " ", true)).toBe(true);
+    expect(press(content, " ", true)).toBe(false);
   } finally {
     await act(async () => { root.unmount(); });
     env.IS_REACT_ACT_ENVIRONMENT = previous;

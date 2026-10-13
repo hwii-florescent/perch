@@ -18,6 +18,7 @@
  */
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "node:fs";
+import { expectDoc } from "./editor";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -198,7 +199,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await page.getByTestId("workspace-file-entry-src").click();
     await page.getByTestId(`workspace-file-entry-${RELATIVE_FILE}`).click();
     const editor = page.getByTestId("workspace-file-editor");
-    await expect(editor).toHaveValue("initial sentinel\n", { timeout: 15000 });
+    await expectDoc(editor, "initial sentinel\n", { timeout: 15000 });
     await editor.fill("draft that must survive the kill\n");
     await page.waitForTimeout(1200); // let the durable-buffer debounce settle
     fs.writeFileSync(filePath, "external sentinel\n");
@@ -261,7 +262,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     await page.getByTestId("workspace-file-entry-src").click();
     await page.getByTestId(`workspace-file-entry-${RELATIVE_FILE}`).click();
     const recoveredEditor = page.getByTestId("workspace-file-editor");
-    await expect(recoveredEditor).toHaveValue("draft that must survive the kill\n", { timeout: 25000 });
+    await expectDoc(recoveredEditor, "draft that must survive the kill\n", { timeout: 25000 });
     await expect(page.getByTestId("workspace-file-conflict")).toBeVisible({ timeout: 20000 });
 
     // The anchored comment is still on the review list.
