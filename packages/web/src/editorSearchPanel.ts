@@ -2,26 +2,38 @@
  * editorSearchPanel.ts — the editor's find panel, with the replace row collapsed by default.
  *
  * `@codemirror/search`'s own panel always shows replace, and its class is not exported, so this is
- * the same panel rebuilt: same DOM names (`search`, `next`, `prev`, `replace`, `replaceAll`, `close`)
- * and the same commands, plus an arrow that unfolds the replace row. Cmd+Option+F / Cmd+Shift+F
- * (Ctrl+H elsewhere) open it already unfolded (`openReplace`).
+ * the same panel rebuilt: same DOM names (`search`, `replace`, `replaceAll`) and the same commands,
+ * plus an arrow that unfolds the replace row. Cmd+Option+F / Cmd+Shift+F (Ctrl+H elsewhere) open it
+ * already unfolded (`openReplace`).
+ *
+ * Look: the panel's chrome is `CodeEditor.tsx`'s theme (the `menuPanel` values); the controls use the
+ * app's Tailwind values (fields as `ui/settings.ts` INPUT, buttons as `ui/icon-button.ts`), all one
+ * height (`h-7`) and one size (`text-[0.82rem]`) so every row lines up. Classes are layered, so
+ * `CodeEditor.tsx` zeroes CodeMirror's own unlayered margins and label size for this panel.
  */
 import { StateEffect } from "@codemirror/state";
 import { EditorView, runScopeHandlers, type Panel, type ViewUpdate } from "@codemirror/view";
 import {
   SearchQuery, closeSearchPanel, findNext, findPrevious, getSearchQuery, openSearchPanel, replaceAll,
-  replaceNext, searchPanelOpen, selectMatches, setSearchQuery,
+  replaceNext, searchPanelOpen, setSearchQuery,
 } from "@codemirror/search";
 
 const unfold = StateEffect.define<null>();
 
-type Props = Record<string, string | boolean | ((event: Event) => void)>;
+const ROW = "flex items-center gap-1";
+const CONTROL = "box-border h-7 rounded-ui text-[0.82rem] leading-none";
+const FIELD = `${CONTROL} min-w-0 flex-1 border border-overlay-0 bg-surface-0 px-[0.55rem] text-fg [font-family:inherit] placeholder:text-subtext-0 focus:[outline:1px_solid_var(--accent)]`;
+const BUTTON = `${CONTROL} inline-flex shrink-0 cursor-pointer items-center justify-center bg-transparent px-2 text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-0 hover:text-fg focus-visible:bg-surface-0 focus-visible:text-fg`;
+const SQUARE = `${BUTTON} w-7 px-0`;
+// A checkbox label drawn as a toggle: the real checkbox stays (screen readers, `checked`), the ring marks "on".
+const TOGGLE = `${SQUARE} has-[:checked]:bg-surface-0 has-[:checked]:text-fg has-[:checked]:[box-shadow:inset_0_0_0_1px_var(--overlay-1)] has-[:focus-visible]:bg-surface-0`;
+
+type Props = Record<string, string | ((event: Event) => void)>;
 
 function elt<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = {}, children: (Node | string)[] = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
     if (typeof value === "function") node.addEventListener(key.slice(2), value);
-    else if (typeof value === "boolean") { if (value) node.setAttribute(key, ""); }
     else node.setAttribute(key, value);
   }
   node.append(...children);
@@ -31,27 +43,40 @@ function elt<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = {}, c
 export function createSearchPanel(view: EditorView): Panel {
   let query = getSearchQuery(view.state);
   const readOnly = view.state.readOnly;
-  const field = (name: string, placeholder: string, value: string, extra: Props = {}) =>
-    elt("input", { name, value, placeholder, "aria-label": placeholder, class: "cm-textfield", form: "", onchange: commit, onkeyup: commit, ...extra });
-  const check = (name: string, checked: boolean) => elt("input", { type: "checkbox", name, form: "", checked, onchange: commit });
-  const button = (name: string, onclick: () => void, text: string) => elt("button", { class: "cm-button", name, type: "button", onclick }, [text]);
+  const field = (name: string, placeholder: string, value: string) =>
+    elt("input", { name, value, placeholder, "aria-label": placeholder, class: FIELD, form: "", onchange: commit, onkeyup: commit });
+  const button = (name: string, onclick: () => void, text: string, label: string, square = false) =>
+    elt("button", { name, type: "button", class: square ? SQUARE : BUTTON, title: label, "aria-label": label, onclick }, [text]);
+  const check = (name: string, checked: boolean) => {
+    const box = elt("input", { type: "checkbox", name, form: "", class: "sr-only", onchange: commit });
+    box.checked = checked;
+    return box;
+  };
+  const toggleLabel = (box: HTMLInputElement, text: string, label: string) =>
+    elt("label", { class: TOGGLE, title: label }, [box, elt("span", { "aria-hidden": "true" }, [text])]);
 
-  const search = field("search", "Find", query.search, { "main-field": "true" });
+  const search = field("search", "Find", query.search);
   const replace = field("replace", "Replace", query.replace);
   const caseBox = check("case", query.caseSensitive);
   const reBox = check("re", query.regexp);
   const wordBox = check("word", query.wholeWord);
-  const toggle = elt("button", { name: "toggleReplace", type: "button", "aria-label": "Toggle replace", "aria-expanded": "false", onclick: () => setFolded(replaceRow.hidden === false) }, ["▸"]);
-  const replaceRow = elt("div", { class: "cm-search-row", hidden: true }, [
+  caseBox.setAttribute("aria-label", "Match case");
+  reBox.setAttribute("aria-label", "Use regular expression");
+  wordBox.setAttribute("aria-label", "Match whole word");
+
+  const arrow = button("toggleReplace", () => setFolded(!replaceRow.classList.contains("hidden")), "▸", "Toggle replace", true);
+  arrow.setAttribute("aria-expanded", "false");
+  const replaceRow = elt("div", { class: `${ROW} hidden` }, [
+    elt("span", { class: "w-7 shrink-0" }), // lines the field up under the find field
     replace,
-    button("replace", () => replaceNext(view), "replace"),
-    button("replaceAll", () => replaceAll(view), "replace all"),
+    button("replace", () => replaceNext(view), "Replace", "Replace"),
+    button("replaceAll", () => replaceAll(view), "All", "Replace all"),
   ]);
 
   function setFolded(folded: boolean) {
-    replaceRow.hidden = folded;
-    toggle.textContent = folded ? "▸" : "▾";
-    toggle.setAttribute("aria-expanded", String(!folded));
+    replaceRow.classList.toggle("hidden", folded);
+    arrow.textContent = folded ? "▸" : "▾";
+    arrow.setAttribute("aria-expanded", String(!folded));
   }
 
   function commit() {
@@ -63,7 +88,7 @@ export function createSearchPanel(view: EditorView): Panel {
   }
 
   const dom = elt("div", {
-    class: "cm-search",
+    class: "cm-search flex flex-col gap-1",
     onkeydown: (event: Event) => {
       if (!(event instanceof KeyboardEvent)) return;
       if (runScopeHandlers(view, event, "search-panel")) event.preventDefault();
@@ -71,20 +96,18 @@ export function createSearchPanel(view: EditorView): Panel {
       else if (event.key === "Enter" && event.target === replace) { event.preventDefault(); replaceNext(view); }
     },
   }, [
-    elt("div", { class: "cm-search-row" }, [
-      ...(readOnly ? [] : [toggle]),
+    elt("div", { class: ROW }, [
+      // Read-only: nothing to replace, so no arrow; an empty spacer keeps the field where it is.
+      readOnly ? elt("span", { class: "w-7 shrink-0" }) : arrow,
       search,
-      button("next", () => findNext(view), "next"),
-      button("prev", () => findPrevious(view), "previous"),
-      button("select", () => selectMatches(view), "all"),
-    ]),
-    elt("div", { class: "cm-search-row" }, [
-      elt("label", {}, [caseBox, "match case"]),
-      elt("label", {}, [reBox, "regexp"]),
-      elt("label", {}, [wordBox, "by word"]),
+      toggleLabel(caseBox, "Aa", "Match case"),
+      toggleLabel(reBox, ".*", "Use regular expression"),
+      toggleLabel(wordBox, "ab", "Match whole word"),
+      button("prev", () => findPrevious(view), "↑", "Previous match", true),
+      button("next", () => findNext(view), "↓", "Next match", true),
+      button("closeSearch", () => closeSearchPanel(view), "×", "Close", true),
     ]),
     ...(readOnly ? [] : [replaceRow]),
-    elt("button", { name: "close", type: "button", "aria-label": "close", onclick: () => closeSearchPanel(view) }, ["×"]),
   ]);
 
   return {
@@ -114,7 +137,7 @@ export function openReplace(view: EditorView): boolean {
   if (view.state.readOnly) return openSearchPanel(view);
   openSearchPanel(view);
   view.dispatch({ effects: unfold.of(null) });
-  (view.dom.querySelector(".cm-search input[name=replace]") as HTMLInputElement | null)?.focus();
+  view.dom.querySelector<HTMLInputElement>(".cm-search input[name=replace]")?.focus();
   return true;
 }
 

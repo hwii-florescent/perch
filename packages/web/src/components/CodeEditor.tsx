@@ -68,29 +68,28 @@ const theme = EditorView.theme({
   // layout flow; CodeMirror still adds their height to the scroll margin, so a match scrolled into view clears them.
   "&.cm-editor .cm-panels": { backgroundColor: "transparent", color: "var(--text)", border: "none", position: "absolute", top: "0.5rem", right: "1rem", left: "auto", pointerEvents: "none" },
   "&.cm-editor .cm-panel": {
-    pointerEvents: "auto", boxSizing: "border-box", maxWidth: "calc(100vw - 3rem)", fontSize: "0.78rem",
+    pointerEvents: "auto", boxSizing: "border-box", maxWidth: "calc(100vw - 3rem)", fontSize: "0.82rem",
     backgroundColor: "var(--surface-1)", borderRadius: "var(--radius)", boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
   },
-  "&.cm-editor .cm-panel.cm-search": { width: "22rem", padding: "0.5rem 1.8rem 0.5rem 0.4rem" },
-  "&.cm-editor .cm-search-row": { display: "flex", flexWrap: "wrap", alignItems: "center", paddingLeft: "1.1rem" },
-  "&.cm-editor .cm-search-row:first-child": { paddingLeft: "0" },
-  "&.cm-editor .cm-search [name=toggleReplace]": {
-    width: "1.1rem", flex: "none", background: "transparent", border: "none", color: "var(--subtext-0)", cursor: "pointer", padding: "0", font: "inherit",
-  },
-  "&.cm-editor .cm-search [name=toggleReplace]:hover": { color: "var(--text)" },
-  "&.cm-editor .cm-search-row[hidden]": { display: "none" },
-  "&.cm-editor .cm-panel.cm-search label": { color: "var(--subtext-0)" },
-  "&.cm-editor .cm-panel.cm-search [name=close]": { color: "var(--subtext-0)", top: "0.4rem", right: "0.5rem" },
+  // The find panel (`editorSearchPanel.ts`) styles its controls with Tailwind classes; these unlayered
+  // rules only undo CodeMirror's own spacing, which would otherwise beat the layered utilities.
+  "&.cm-editor .cm-panel.cm-search": { width: "24rem", padding: "0.5rem" },
+  "&.cm-editor .cm-panel.cm-search input, &.cm-editor .cm-panel.cm-search button, &.cm-editor .cm-panel.cm-search label": { margin: "0", fontSize: "0.82rem" },
+  // The go-to-line dialog (CodeMirror's own DOM) on the same measures: 1.75rem controls, 0.82rem text.
+  "&.cm-editor .cm-dialog": { display: "flex", alignItems: "center", gap: "0.25rem", padding: "0.5rem" },
+  "&.cm-editor .cm-dialog form": { display: "flex", alignItems: "center", gap: "0.25rem", margin: "0" },
+  "&.cm-editor .cm-dialog label": { display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.82rem", color: "var(--subtext-0)" },
+  "&.cm-editor .cm-dialog-close": { position: "static", width: "1.75rem", height: "1.75rem", fontSize: "0.82rem", color: "var(--subtext-0)", borderRadius: "var(--radius)", cursor: "pointer" },
   "&.cm-editor .cm-textfield": {
-    backgroundColor: "var(--panel-bg)", color: "var(--text)", border: "1px solid var(--overlay-0)",
-    borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit", padding: "0.15rem 0.35rem",
+    boxSizing: "border-box", height: "1.75rem", minWidth: "0", backgroundColor: "var(--surface-0)", color: "var(--text)",
+    border: "1px solid var(--overlay-0)", borderRadius: "var(--radius)", fontFamily: "inherit", fontSize: "0.82rem", padding: "0 0.55rem",
   },
-  "&.cm-editor .cm-textfield:focus": { outline: "none", borderColor: "var(--overlay-1)" },
+  "&.cm-editor .cm-textfield:focus": { outline: "1px solid var(--accent)" },
   "&.cm-editor .cm-button": {
-    backgroundImage: "none", backgroundColor: "transparent", color: "var(--subtext-0)",
-    border: "1px solid var(--overlay-0)", borderRadius: "4px", fontFamily: "inherit", cursor: "pointer",
+    boxSizing: "border-box", height: "1.75rem", backgroundImage: "none", backgroundColor: "transparent", color: "var(--subtext-0)",
+    border: "0", borderRadius: "var(--radius)", fontFamily: "inherit", fontSize: "0.82rem", padding: "0 0.5rem", cursor: "pointer",
   },
-  "&.cm-editor .cm-button:hover": { backgroundColor: "var(--surface-1)", color: "var(--text)" },
+  "&.cm-editor .cm-button:hover, &.cm-editor .cm-dialog-close:hover": { backgroundColor: "var(--surface-0)", color: "var(--text)" },
 });
 
 export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, ref }: CodeEditorProps) {
