@@ -274,9 +274,14 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
 
     await page.getByTestId("mobile-switch").click();
     await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
-    await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
+    // The file left open on the desktop covers the pane, as it would there: its editor, with Files to go back.
+    await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("workspace-file-editor")).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(shots, "files-phone.png"), fullPage: false });
-    expect(await clippedControls(page.getByTestId("workspace-files-view")), "file controls clipped at phone width").toEqual([]);
+    expect(await clippedControls(page.getByTestId("mobile-active-pane-files")), "file controls clipped at phone width").toEqual([]);
+    await page.getByTestId("mobile-files-back").click();
+    await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 15000 });
+    expect(await clippedControls(page.getByTestId("workspace-files-view")), "explorer controls clipped at phone width").toEqual([]);
     await expectNoPageOverflow(page);
 
     // --- Wide desktop: the same surfaces, plus terminal and settings -----
@@ -326,7 +331,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await expectReadableStatus(page.getByTestId("mobile-header"));
 
     // Every workspace surface stays reachable from the phone shell.
-    for (const pane of ["chat", "terminal", "files", "git"] as const) {
+    for (const pane of ["chat", "files", "git"] as const) {
       const tab = page.getByTestId(`mobile-pane-${pane}`);
       if (!(await tab.count())) continue;
       await tab.click();

@@ -126,6 +126,9 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByTestId("mobile-pane-files").click();
+    // A file left open on the desktop covers the explorer; go back to it, then search.
+    if (await page.getByTestId("mobile-files-back").isVisible().catch(() => false)) await page.getByTestId("mobile-files-back").click();
+    await page.getByRole("button", { name: "Search files" }).click();
     await page.getByRole("searchbox", { name: "Search workspace files" }).fill("picture.svg");
     await page.getByTestId("workspace-file-entry-picture.svg").click();
     await expect(page.getByTestId("workspace-file-image")).toBeVisible();

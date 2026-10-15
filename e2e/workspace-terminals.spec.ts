@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as net from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
+import { startChat } from "./projects";
 
 async function command(page: Page, text: string) {
   const input = page.locator(".terminal--persistent:visible .xterm-helper-textarea");
@@ -11,7 +12,7 @@ async function command(page: Page, text: string) {
   await input.press("Enter");
 }
 
-test("shell state survives reload, multiple panes, and mobile view release", async ({ page, context }, testInfo) => {
+test("shell state survives reload and multiple panes", async ({ page, context }, testInfo) => {
   const opened = new Map<string, { sessionId: string; terminalId: string }>();
   const errors: string[] = [];
   const observe = (view: Page) => {
@@ -66,39 +67,14 @@ test("shell state survives reload, multiple panes, and mobile view release", asy
     await shell.getByRole("button", { name: "New shell", exact: true }).click();
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/);
     await expect(shell).not.toHaveAttribute("data-terminal-id", firstId);
-    const secondId = (await shell.getAttribute("data-terminal-id"))!;
-    const secondPane = (await shell.getAttribute("data-pane-id"))!;
     await command(page, `printf 'isolated_%s\\n' "\${PERCH_CHECK-unset}"`);
     await expect(shell.locator(".xterm-rows")).toContainText("isolated_unset");
 
-    const phone = await context.newPage();
-    observe(phone);
-    await phone.setViewportSize({ width: 390, height: 844 });
-    await phone.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
-    await phone.getByTestId("mobile-pane-terminal").click();
-    await phone.getByRole("combobox", { name: "Shell pane" }).selectOption(firstPane);
-    const phoneShell = phone.locator(".terminal--persistent");
-    await expect(phoneShell).toHaveAttribute("data-terminal-id", firstId);
-    await command(phone, `printf 'phone_%s_PID_%s_END\\n' "$PERCH_CHECK" "$$"`);
-    await expect(phoneShell.locator(".xterm-rows")).toContainText(`phone_${marker}_PID_${pid}_END`);
-    await phone.getByTestId("mobile-pane-chat").click();
-    await expect(phone.locator(".xterm")).toHaveCount(0);
-    await phone.getByTestId("mobile-pane-terminal").click();
-    await phone.getByRole("combobox", { name: "Shell pane" }).selectOption(firstPane);
-    await expect(phoneShell).toHaveAttribute("data-terminal-id", firstId);
-    await expect(phoneShell.locator(".xterm-rows")).toContainText(`phone_${marker}_PID_${pid}_END`);
-    expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const name of ["New shell", "Close shell"]) expect((await phone.getByRole("button", { name, exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
-
     const shots = path.resolve(__dirname, "../.impeccable/review");
     fs.mkdirSync(shots, { recursive: true });
-    await phone.screenshot({ path: path.join(shots, `shell-mobile-${testInfo.project.name}.png`) });
     await page.screenshot({ path: path.join(shots, `shell-desktop-${testInfo.project.name}.png`) });
-    await phone.getByRole("combobox", { name: "Shell pane" }).selectOption(secondPane);
-    await expect(phoneShell).toHaveAttribute("data-terminal-id", secondId);
-    await phone.getByRole("button", { name: "Close shell", exact: true }).click();
-    await expect(phoneShell).toContainText("Shell closed.");
-    await expect(shell).toContainText("Shell exited");
+    await shell.getByRole("button", { name: "Close shell", exact: true }).click();
+    await expect(shell).toContainText("Shell closed.");
     expect(errors).toEqual([]);
   } finally {
     // Only these fixture identities are closed; no global terminal cleanup.
@@ -134,8 +110,6 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
   const hosts = path.join(fixture, "hosts.json");
   fs.writeFileSync(hosts, JSON.stringify({ hosts: [] }));
   let core: ChildProcess | null = null;
-  let terminalId: string | null = null;
-  let backend: string | null = null;
   const errors: string[] = [];
   async function boot() {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--cwd", fixture], {
@@ -154,33 +128,25 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
   }
   await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const message = JSON.parse(String(payload));
-    if (message.type === "terminal.opened") { terminalId = message.terminal.id; backend = message.terminal.backend; }
-  }));
   try {
     await boot();
-    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByTestId("mobile-pane-terminal").click();
-    const shell = page.locator(".terminal--persistent");
+    // A plain terminal is a session of the `Terminal` provider: the same perchd-backed terminal every agent runs in.
+    await startChat(page);
+    const shell = page.getByTestId("persistent-agent-terminal");
     await expect(shell).toHaveAttribute("data-terminal-id", /.+/);
-    expect(backend).toBe("daemon");
-    const originalId = terminalId!;
+    // Surviving the core's SIGKILL below (same pid, same environment) is what proves perchd owns the shell.
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     await command(page, `PERCH_RESTART=survived; printf 'before_%s_PID_%s_END\\n' "$PERCH_RESTART" "$$"`);
     await expect(shell.locator(".xterm-rows")).toContainText(/before_survived_PID_\d+_END/);
     const pid = (await shell.locator(".xterm-rows").innerText()).match(/before_survived_PID_(\d+)_END/)![1];
 
     await stop();
-    await expect(page.getByText("Connecting to terminal…", { exact: true })).toBeVisible();
     await boot();
-    await expect(shell).toHaveAttribute("data-terminal-id", originalId, { timeout: 20_000 });
+    await expect(shell).toHaveAttribute("data-controlling", "true", { timeout: 30_000 });
     expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(sessionId);
     await command(page, `printf 'after_%s_PID_%s_END\\n' "$PERCH_RESTART" "$$"`);
     await expect(shell.locator(".xterm-rows")).toContainText(`after_survived_PID_${pid}_END`);
-    await shell.getByRole("button", { name: "Close shell", exact: true }).click();
-    await expect(shell).toContainText("Shell closed.");
     expect(errors).toEqual([]);
   } finally {
     await stop();

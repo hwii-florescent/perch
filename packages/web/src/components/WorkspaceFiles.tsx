@@ -44,7 +44,6 @@ const TREE_BUTTON = "ml-[0.35rem] cursor-pointer rounded-ui border border-curren
 const CODE = "text-overlay-1 [font:inherit]";
 const PRE = "m-0 overflow-auto border border-overlay-0 bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
 const BANNER = "shrink-0 border-b border-b-[color:color-mix(in_srgb,var(--yellow)_35%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
-const MOBILE_BTN = "hidden min-h-[2.5rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.55rem] py-[0.35rem] text-accent hover:border-accent focus-visible:border-accent";
 
 // VS Code's explorer: 13px text in 22px rows (workbench `font-size`, `explorerviewlet.css`), times the zoom.
 const ROW_FONT = "text-[length:calc(13px*var(--zoom,1))]";
@@ -286,14 +285,11 @@ export interface WorkspaceFilesViewProps {
    * React-only state lets a saved mixed layout reopen the same file tab. */
   initialPath?: string;
   onPathChange?: (path: string) => void;
-  onClose?: () => void;
-  /** Drop the title header (and its ×): the phone's app header already names the workspace and its tab bar leaves the pane. */
-  bare?: boolean;
-  /** Desktop splits the surface: `"explorer"` is just the tree (the right
-   * drawer), which hands a clicked file to `onOpenFile`; `"editor"` is just
-   * `initialPath`'s editor (a pane tab in the main area). Unset = both, with
-   * the narrow-width toggle between them (the phone). */
-  layout?: "explorer" | "editor";
+  /** The surface is split in two, on the phone as on the desktop: `"explorer"` is just
+   * the tree (the right drawer; on the phone the Files pane), which hands a clicked file
+   * to `onOpenFile`; `"editor"` is just `initialPath`'s editor (a pane tab in the main
+   * area; on the phone the screen a tapped file opens). */
+  layout: "explorer" | "editor";
   /** `pinned`: a double click or an explicit action, so the tab is a regular one, not a preview. */
   onOpenFile?: (path: string, pinned?: boolean) => void;
 }
@@ -303,7 +299,7 @@ export interface WorkspaceFilesViewProps {
  * server-owned buffers; media uses a descriptor-confined HTTP stream. */
 let wrapPreference = false;
 
-export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose, bare, layout, onOpenFile }: WorkspaceFilesViewProps) {
+export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, layout, onOpenFile }: WorkspaceFilesViewProps) {
   const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
   const documents = useWorkspaceFilesStore((state) => state.documents[workspaceId] ?? EMPTY_DOCUMENTS);
@@ -333,7 +329,6 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
   const [caret, setCaret] = useState({ line: 1, col: 1 });
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false);
-  const [mobileExplorerOpen, setMobileExplorerOpen] = useState(true);
   // The explorer's right-click menu: the entry (null = the empty space, i.e. the root) and where.
   const [menu, setMenu] = useState<{ entry: DirectoryEntry | null; x: number; y: number; stage?: "newFile" | "newFolder" } | null>(null);
   // The keyboard cursor over the explorer's rows (`explorerNav.ts`); `treeRef` is the focusable list.
@@ -350,7 +345,6 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     setSearchOpen(false);
     setNotice(null);
     setReloadConfirmOpen(false);
-    setMobileExplorerOpen(!restoredPath);
     if (workspaceId && layout !== "editor") requestTree(workspaceId, "");
     if (workspaceId && restoredPath && layout !== "explorer") openFile(workspaceId, restoredPath, true);
   }, [layout, openFile, requestTree, restoredPath, workspaceId]);
@@ -421,7 +415,6 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     setNotice(null);
     setSelectedPath(entry.path);
     onPathChange?.(entry.path);
-    setMobileExplorerOpen(false);
     if (!existing || existing.state === "error") openFile(workspaceId, entry.path);
   }
 
@@ -458,7 +451,6 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
     if (selectedPath && canSave) saveFile(workspaceId, selectedPath);
   }
 
-  const explorerOpen = layout === "explorer" || (!layout && mobileExplorerOpen);
   // Media, archives and binary files (a failed text read) open in the asset viewer.
   const showAsset = !dirty && document?.metadata != null
     && (document.state === "error" || assetKind(document.metadata.mediaType) !== undefined);
@@ -483,24 +475,13 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
       data-testid={layout === "editor" ? "workspace-file-pane" : "workspace-files-view"}
       aria-label={`Files for ${workspace.name}`}
     >
-      {!layout && !bare && <header className="flex min-h-[3.1rem] items-center justify-between gap-3 border-b border-b-overlay-0 bg-surface-0 px-[0.7rem] py-2 [@container(max-width:460px)]:min-h-[3.4rem]">
-        <div className="grid min-w-0 gap-[0.12rem]">
-          <span className="tracking-[0.1em] text-accent uppercase">Files</span>
-          <strong className="overflow-hidden text-[0.86rem] text-ellipsis whitespace-nowrap" title={workspace.path}>{workspace.name || basename(workspace.path)}</strong>
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-subtext-0" title={workspace.path}>{workspace.path}</span>
-        </div>
-        <div className={ACTIONS}>
-          <button type="button" className={cn(BTN, BTN_HOVER, "w-[1.8rem] p-0 text-[1rem] [@container(max-width:460px)]:h-[2.5rem] [@container(max-width:460px)]:w-[2.5rem]")} onClick={onClose} aria-label="Close files">×</button>
-        </div>
-      </header>}
       {layout === "explorer" && notice && <div className={cn(BANNER, "px-[0.65rem] py-[0.3rem]")} role="status">{notice}</div>}
 
       <div className="flex min-h-0 min-w-0 flex-1">
         {layout !== "editor" && <aside
           className={cn(
             "flex min-h-0 flex-col overflow-hidden bg-surface-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:[border-right:none]",
-            layout === "explorer" ? "flex-[1_1_100%]" : "flex-[0_0_230px] border-r border-r-overlay-0",
-            !explorerOpen && "[@container(max-width:460px)]:hidden",
+            "flex-[1_1_100%]",
           )}
           aria-label="Workspace file tree"
         >
@@ -526,15 +507,6 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[length:calc(11px*var(--zoom,1))] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
             <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
-              {!layout && selectedPath && (
-                <button
-                  type="button"
-                  className={cn(BTN, BTN_HOVER, "hidden min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem] [@container(max-width:460px)]:inline-block")}
-                  onClick={() => setMobileExplorerOpen(false)}
-                >
-                  Editor
-                </button>
-              )}
               <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={refreshTree} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
             </div>
           </div>
@@ -582,16 +554,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           </div>
         </aside>}
 
-        {layout !== "explorer" && <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-panel-bg", explorerOpen && "[@container(max-width:460px)]:hidden", !explorerOpen && "[@container(max-width:460px)]:flex-[1_1_100%]")}>
-          {!layout && (
-            <button
-              type="button"
-              className={cn("workspace-files__mobile-explorer", MOBILE_BTN, "[@container(max-width:460px)]:mt-[0.4rem] [@container(max-width:460px)]:mr-[0.65rem] [@container(max-width:460px)]:ml-[0.65rem] [@container(max-width:460px)]:block [@container(max-width:460px)]:self-start")}
-              onClick={() => setMobileExplorerOpen(true)}
-            >
-              ‹ Explorer
-            </button>
-          )}
+        {layout !== "explorer" && <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel-bg">
           {(!selectedPath || !document) && (
             <div className={EMPTY}>
               <span className="text-accent">⌘</span>

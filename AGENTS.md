@@ -334,8 +334,15 @@ there, not here.
   - **Phone (≤700px, `useIsMobileWidth`):** one header row (`MobileHeader`:
     session, `project · branch`, ⚙; tapping the session opens `MobileSwitcher`,
     which holds the host picker, projects/sessions and plan usage), the active
-    pane, and a bottom bar `Session | Shell | Files | Git` (`MobilePaneShell`;
-    one pane mounted at a time). No sidebar, tab strip, drawer or status bar.
+    pane, and a bottom bar `Session | Files | Git` (`MobilePaneShell`;
+    one pane mounted at a time; a plain terminal is a session of the
+    `Terminal` provider, not a pane of its own). The phone reuses the desktop's
+    components, never a copy: Files is the drawer's explorer, and a tapped file
+    opens through `openFilePreview` into the shared `fileTabs` store and shows
+    in the tab's editor (`MobileFiles`, `layout="explorer"` / `"editor"`); Git
+    is `WorkspaceGitReviewPane`, shown only for a git checkout
+    (`useToolsContext`); the switcher is `WorkspaceOverview` / `ProjectList` /
+    `NewSessionPopover` / `HostSwitcherPopover`. No sidebar, tab strip, drawer or status bar.
     Settings is a section list with a back row (`MobileSettings`, no Keyboard
     section). A controlled agent terminal gets a quick-key bar
     (`MobileKeyBar`: Esc, Tab, ⇧Tab, arrows by cursor-key mode, Enter, ^C) so a

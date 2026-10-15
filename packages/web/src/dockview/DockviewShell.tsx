@@ -174,7 +174,6 @@ function FilesPanel(props: IDockviewPanelProps) {
       layout="editor"
       workspaceId={workspaceId}
       initialPath={initialPath}
-      onClose={() => props.api.close()}
     />
   );
 }

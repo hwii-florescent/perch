@@ -203,6 +203,21 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // R8: Files and Git are the desktop drawer's own components and rules.
+  // -------------------------------------------------------------------------
+  test("R8. phone Files is the drawer's explorer; Git only for a git workspace", async ({ page }) => {
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await freshPage(page);
+    await startChat(page); // Chats: the scratch folder, not a git checkout
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    await page.getByTestId("mobile-pane-files").click();
+    await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Search files" })).toBeVisible();
+    await expect(page.getByTestId("mobile-pane-git")).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // R7: remote hosts are manageable and reachable from the phone.
   // -------------------------------------------------------------------------
   test("R7. a host added on the phone appears in the switcher's host picker", async ({ page }) => {

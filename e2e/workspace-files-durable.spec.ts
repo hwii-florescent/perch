@@ -131,12 +131,12 @@ async function waitForDraftSync(page: Page): Promise<void> {
 }
 
 /**
- * A narrow file pane (phone, or a cramped dockview pane on desktop) shows the
- * tree and the editor one at a time. Reopen the tree before walking it.
+ * On the phone a file covers the explorer (as an open tab covers the session on
+ * the desktop). Go back to the tree before walking it.
  */
 async function showExplorer(page: Page): Promise<void> {
-  const toggle = page.locator(".workspace-files__mobile-explorer");
-  if (await toggle.isVisible().catch(() => false)) await toggle.click();
+  const back = page.getByTestId("mobile-files-back");
+  if (await back.isVisible().catch(() => false)) await back.click();
 }
 
 test.describe("V-05/V-06 durable file workflow", () => {

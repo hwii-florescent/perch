@@ -732,28 +732,55 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
   );
 }
 
+/** The session list of a host with no workspace support (`workspace.snapshot`): the sidebar's fallback, and the phone switcher's. */
+export function ProjectList() {
+  const sessionId = usePerchStore((s) => s.sessionId);
+  const sessions = usePerchStore((s) => s.sessions);
+  const activeHostId = usePerchStore((s) => s.activeHostId);
+  const activeProject = usePerchStore((s) => s.activeProject);
+  const switchSession = usePerchStore((s) => s.switchSession);
+  const setActiveProject = usePerchStore((s) => s.setActiveProject);
+  const deleteSession = usePerchStore((s) => s.deleteSession);
+  const navState = { sessions, sessionId, activeHostId, activeProject };
+  const projects = projectsForHost(navState, activeHostId);
+  const active = effectiveActiveProject(navState);
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-[3px] py-[3px]" data-testid="project-list">
+      {projects.length === 0 ? (
+        <p className="mx-[0.65rem] my-[0.6rem] text-[0.72rem] text-subtext-0">No projects yet.</p>
+      ) : (
+        projects.map((group) => (
+          <ProjectRow
+            key={group.key}
+            group={group}
+            hostId={activeHostId}
+            isActiveProject={active != null && active.cwd === group.cwd}
+            sessionId={sessionId}
+            onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
+            onSwitch={switchSession}
+            onDelete={deleteSession}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 
 export function Sidebar() {
   const connected = usePerchStore((s) => s.connected);
-  const sessionId = usePerchStore((s) => s.sessionId);
-  const sessions = usePerchStore((s) => s.sessions);
   const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const serverInfo = usePerchStore((s) => s.serverInfo);
   const status = usePerchStore((s) => s.status);
   const hosts = usePerchStore((s) => s.hosts);
-  const hostStates = usePerchStore((s) => s.hostStates);
   const activeHostId = usePerchStore((s) => s.activeHostId);
-  const activeProject = usePerchStore((s) => s.activeProject);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
-  const switchSession = usePerchStore((s) => s.switchSession);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const setActiveHost = usePerchStore((s) => s.setActiveHost);
-  const setActiveProject = usePerchStore((s) => s.setActiveProject);
   const upsertHost = usePerchStore((s) => s.upsertHost);
-  const deleteSession = usePerchStore((s) => s.deleteSession);
   const workspaceCapabilities = usePerchStore((s) => s.workspaceCapabilities);
   const workspaceCapabilitiesByHost = usePerchStore((s) => s.workspaceCapabilitiesByHost);
 
@@ -762,9 +789,6 @@ export function Sidebar() {
 
   const { choices, activeHostEntry, activeHostInfo, activeHostState } = useHostChoices();
 
-  const navState = { sessions, sessionId, activeHostId, activeProject };
-  const projects = projectsForHost(navState, activeHostId);
-  const active = effectiveActiveProject(navState);
   const workspaceNavigationEnabled = (activeHostId === "local"
     ? workspaceCapabilities
     : workspaceCapabilitiesByHost[activeHostId] ?? []
@@ -833,24 +857,7 @@ export function Sidebar() {
         {workspaceNavigationEnabled ? (
           <WorkspaceOverview />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-[3px] py-[3px]" data-testid="project-list">
-            {projects.length === 0 ? (
-              <p className="mx-[0.65rem] my-[0.6rem] text-[0.72rem] text-subtext-0">No projects yet.</p>
-            ) : (
-              projects.map((group) => (
-                <ProjectRow
-                  key={group.key}
-                  group={group}
-                  hostId={activeHostId}
-                  isActiveProject={active != null && active.cwd === group.cwd}
-                  sessionId={sessionId}
-                  onSelectProject={(cwd) => setActiveProject(activeHostId, cwd)}
-                  onSwitch={switchSession}
-                  onDelete={deleteSession}
-                />
-              ))
-            )}
-          </div>
+          <ProjectList />
         )}
       </div>
 

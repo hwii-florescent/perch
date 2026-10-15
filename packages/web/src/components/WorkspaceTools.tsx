@@ -20,8 +20,8 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
   { id: "browser", label: "Browser" },
 ];
 
-/** The workspace the drawer shows and whether it offers Git. */
-function useToolsContext(requestedWorkspaceId?: string | null) {
+/** The workspace the drawer shows and whether it offers Git (the phone's pane bar asks the same). */
+export function useToolsContext(requestedWorkspaceId?: string | null) {
   const activeId = usePerchStore((state) =>
     state.activeWorkspaceId ?? state.sessions.find((candidate) => candidate.id === state.sessionId)?.workspaceId ?? null);
   const workspaceId = requestedWorkspaceId ?? activeId;
