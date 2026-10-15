@@ -47,7 +47,6 @@ const GLYPH = `w-[1.7rem] shrink-0 self-stretch cursor-pointer rounded-ui p-0 le
 const PROJECT_ICON = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/ph:opacity-100 aria-[expanded=false]:opacity-100`;
 const SESSION_CLOSE = `${GLYPH} text-overlay-1 ${REVEAL} group-hover/row:opacity-100`;
 const HEADER_PLUS = "h-auto w-[1.7rem] self-stretch rounded-ui p-0 text-[0.95rem] leading-none opacity-0 group-hover/ph:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100";
-const FILES_BTN = `workspace-entry__files rounded-ui border border-transparent bg-surface-1 px-[0.28rem] py-[0.14rem] text-[0.58rem] leading-[1.1] text-subtext-0 [font-family:inherit] cursor-pointer opacity-0 [transition:opacity_0.12s_ease,border-color_0.12s_ease,color_0.12s_ease] group-hover/entry:opacity-100 hover:border-accent hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:opacity-100 ${FOCUS} [@media(max-width:700px)]:static [@media(max-width:700px)]:mt-0 [@media(max-width:700px)]:m-0 [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.6rem] [@media(max-width:700px)]:py-[0.45rem] [@media(max-width:700px)]:text-left [@media(max-width:700px)]:opacity-100 [@media(max-width:700px)]:border-overlay-0 [@media(max-width:700px)]:hover:border-accent`;
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -71,7 +70,7 @@ function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label:
       document.removeEventListener("keydown", key);
     };
   }, [onClose]);
-  const height = items.length * 30;
+  const height = items.length * (window.innerWidth <= 700 ? 44 : 30);
   return createPortal(
     <div
       className={menuPanel}
@@ -88,7 +87,7 @@ function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label:
           key={item.testId}
           type="button"
           role="menuitem"
-          className={menuItem({ danger: !!item.danger })}
+          className={cn(menuItem({ danger: !!item.danger }), "max-[700px]:min-h-11")}
           data-testid={item.testId}
           onClick={() => { onClose(); item.onSelect(); }}
         >
@@ -99,6 +98,39 @@ function RowMenu({ x, y, label, items, onClose }: { x: number; y: number; label:
     document.body,
   );
 }
+
+/** The phone's right-click: hold a row for half a second. Spread the result on
+ * the row; the click that ends the hold is swallowed so it doesn't also navigate.
+ * Touch/pen only, a mouse keeps its real contextmenu. Scrolling cancels it
+ * (pointercancel), as does moving more than a few pixels. */
+let heldTimer: number | undefined;
+let held = false;
+function longPress(open: (x: number, y: number) => void) {
+  const cancel = () => window.clearTimeout(heldTimer);
+  let from = { x: 0, y: 0 };
+  return {
+    onPointerDown: (event: React.PointerEvent) => {
+      held = false;
+      if (event.pointerType === "mouse") return;
+      cancel();
+      from = { x: event.clientX, y: event.clientY };
+      heldTimer = window.setTimeout(() => { held = true; open(from.x, from.y); }, 450);
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      if (Math.hypot(event.clientX - from.x, event.clientY - from.y) > 10) cancel();
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    onClickCapture: (event: React.MouseEvent) => {
+      if (!held) return;
+      held = false;
+      event.stopPropagation();
+      event.preventDefault();
+    },
+  };
+}
+/** Stops iOS from selecting text / showing its callout while a row is held. */
+const HOLDABLE = "select-none [-webkit-touch-callout:none]";
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text).catch(() => { /* no clipboard: nothing to do */ });
@@ -369,6 +401,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       focusWorkspace(workspace.id);
       if (tool === "files") openWorkspaceFiles(workspace.id);
       else openWorkspaceGitReview(workspace.id);
+      onNavigate?.();
     };
     return [
       { label: "Rename", testId: `workspace-rename-item-${workspace.id}`, onSelect: () => setRenamingId(workspace.id) },
@@ -762,7 +795,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
+                  {...longPress((x, y) => setMenu({ x, y, label: "Project actions", items: projectMenu(project) }))}
+                  className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", HOLDABLE, single && "workspace-entry", single && single.id === activeWorkspaceId && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {
                     if (renamingProjectId === project.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -869,7 +903,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                       return (
                         <div className="flex flex-col gap-[2px]" data-testid={`workspace-node-${workspace.id}`} key={workspace.id}>
                         <div
-                          className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui hover:bg-surface-1", workspaceActive && "bg-surface-1")}
+                          {...longPress((x, y) => setMenu({ x, y, label: "Workspace actions", items: workspaceMenu(project, workspace) }))}
+                          className={cn("workspace-entry group/entry relative cursor-pointer rounded-ui hover:bg-surface-1", HOLDABLE, workspaceActive && "bg-surface-1")}
                           data-testid={`workspace-entry-${workspace.id}`}
                           onClick={(event) => {
                             if (renamingId === workspace.id || (event.target as HTMLElement).closest("button, input, a")) return;
@@ -946,84 +981,6 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                           {sessionView === "compact" && workspaceSessions.length > 0 && (
                             <SessionDots sessions={tabOrderedSessions(workspace)} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
                           )}
-                          </div>
-                          )}
-                          {/* Desktop uses the right-click menu; the phone has no
-                              right-click, so it keeps these buttons. */}
-                          {compact && (
-                          <div className="flex flex-wrap gap-[0.3rem] pr-[0.3rem] pb-[0.35rem] pl-[1.5rem]">
-                          <button
-                            type="button"
-                            className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
-                            data-testid={`workspace-pin-${workspace.id}`}
-                            aria-pressed={workspace.pinned === true}
-                            title={workspace.pinned ? "Unpin" : "Pin to the top of the project"}
-                            aria-label={workspace.pinned ? "Unpin" : "Pin"}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              pinWorkspace(workspace.id, !workspace.pinned);
-                            }}
-                          >
-                            {workspace.pinned ? "⇣" : "⇡"}
-                          </button>
-                          {workspace.parentWorkspaceId && project.repoPath && (
-                            <button
-                              type="button"
-                              className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
-                              data-testid={`workspace-delete-${workspace.id}`}
-                              title="Delete this worktree and its branch"
-                              aria-label="Delete worktree"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                requestWorktreeMenu(`${project.hostId}:${project.repoPath}`, { path: workspace.path, branch: workspace.branch || undefined });
-                              }}
-                            >
-                              {"\u{1F5D1}\u{FE0E}"}
-                            </button>
-                          )}
-                          {workspace.parentWorkspaceId && (
-                            <button
-                              type="button"
-                              className={cn(FILES_BTN, "px-[0.3rem] py-[0.05rem] text-[0.78rem] leading-[1.1]")}
-                              data-testid={`workspace-hide-${workspace.id}`}
-                              title="Hide from the sidebar (the checkout stays)"
-                              aria-label="Hide worktree"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setWorkspaceHidden(workspace.id, true);
-                              }}
-                            >
-                              ⊖
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className={FILES_BTN}
-                            data-testid={`workspace-files-${workspace.id}`}
-                            title={`Open files for ${workspace.name || basename(workspace.path)}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              focusWorkspace(workspace.id);
-                              openWorkspaceFiles(workspace.id);
-                              onNavigate?.();
-                            }}
-                          >
-                            Files
-                          </button>
-                          {(workspace.branch || project.repoPath) && <button
-                            type="button"
-                            className={FILES_BTN}
-                            data-testid={`workspace-git-${workspace.id}`}
-                            title={`Open Git and review for ${workspace.name || basename(workspace.path)}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              focusWorkspace(workspace.id);
-                              openWorkspaceGitReview(workspace.id);
-                              onNavigate?.();
-                            }}
-                          >
-                            Git
-                          </button>}
                           </div>
                           )}
                           {workspace.state === "sleeping" && (

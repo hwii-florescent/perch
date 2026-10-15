@@ -19,7 +19,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
-import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
+import { firstWorkspaceId, holdRow, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
 const LONG_DIFF_LINE = "long-unbroken-token".repeat(16);
@@ -263,7 +263,8 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByTestId("mobile-header")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("mobile-switch").click();
-    await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-git-${workspaceId}"]`).click();
+    await holdRow(page, page.getByTestId("mobile-switcher").getByTestId(`workspace-entry-${workspaceId}`));
+    await page.getByTestId(`workspace-menu-git-${workspaceId}`).click();
     await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("git-diff")).toContainText("modified sentinel", { timeout: 20000 });
     await expect(page.getByTestId("git-diff-file-select")).toBeVisible();
@@ -273,7 +274,8 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await expectNoPageOverflow(page);
 
     await page.getByTestId("mobile-switch").click();
-    await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
+    await holdRow(page, page.getByTestId("mobile-switcher").getByTestId(`workspace-entry-${workspaceId}`));
+    await page.getByTestId(`workspace-menu-files-${workspaceId}`).click();
     // The file left open on the desktop covers the pane, as it would there: its editor, with Files to go back.
     await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("workspace-file-editor")).toBeVisible({ timeout: 15000 });

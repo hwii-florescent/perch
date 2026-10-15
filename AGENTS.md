@@ -319,8 +319,9 @@ there, not here.
     (the whole row collapses it, per viewer) ⋯ (Rename, Copy path, Close all sessions, Remove project) and +
     (new workspace = the worktree create form). Workspace actions (Rename,
     Copy path/branch, Pin, Files, Git, Hide, Delete worktree) are in its
-    right-click menu; only the phone switcher, which has no right-click,
-    keeps them as buttons. A workspace shows a state only when it needs
+    right-click menu; the phone switcher opens the same menu by holding a row
+    for half a second (`longPress`, `WorkspaceOverview.tsx`), never as
+    buttons on the row. A workspace shows a state only when it needs
     attention (pinned, dirty, sleeping), never "ready".
   - The status bar has no keybind hint, and ctx/cost appear only when a
     turn reports them. The Ctrl+Space leader still works (`?` and Cmd+/ list it).

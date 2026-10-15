@@ -14,6 +14,7 @@
  *   R5 — Settings is a section list with a back row, no Keyboard section.
  *   R6 — a controlled agent terminal gets a quick-key bar that types into it.
  *   R7 	a host added on the phone shows up in the switcher's host picker.
+ *   R9 — holding a workspace row in the switcher opens its action menu.
  *
  * All tests are headless; viewport changes use `page.setViewportSize` (never
  * a real device emulation reload) so the same page/context can flip between
@@ -22,7 +23,9 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { restoreChatMode } from "./chatMode";
-import { startChat } from "./projects";
+import { addProject, startChat } from "./projects";
+import { firstWorkspaceId, holdRow } from "./workspaceTools";
+import path from "node:path";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const MOBILE_VIEWPORT = { width: 375, height: 700 };
@@ -215,6 +218,31 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     await expect(page.getByTestId("workspace-files-view")).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: "Search files" })).toBeVisible();
     await expect(page.getByTestId("mobile-pane-git")).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // R9: the desktop's right-click menu, as a long hold; no buttons on the row.
+  // -------------------------------------------------------------------------
+  test("R9. holding a workspace row opens its actions; the row has no buttons", async ({ page }) => {
+    const repo = path.resolve(__dirname, "..");
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await freshPage(page);
+    await addProject(page, repo);
+    await startChat(page, "terminal", repo);
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    await page.getByTestId("mobile-switch").click();
+    const switcher = page.getByTestId("mobile-switcher");
+    const id = await firstWorkspaceId(switcher.getByTestId("project-list"));
+    await expect(switcher.getByTestId(`workspace-files-${id}`)).toHaveCount(0);
+    await expect(switcher.getByTestId(`workspace-pin-${id}`)).toHaveCount(0);
+
+    await holdRow(page, switcher.getByTestId(`workspace-entry-${id}`));
+    await expect(page.getByTestId("row-menu")).toBeVisible();
+    const pin = page.getByTestId(`workspace-pin-${id}`);
+    expect((await pin.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.getByTestId(`workspace-menu-files-${id}`).click();
+    await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
   });
 
   // -------------------------------------------------------------------------

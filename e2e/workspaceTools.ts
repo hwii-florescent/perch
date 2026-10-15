@@ -9,6 +9,18 @@ export async function openWorkspaceTool(page: Page, workspaceId: string, tab: "f
   await expect(page.getByTestId(tab === "files" ? "workspace-files-view" : "workspace-git-review")).toBeVisible({ timeout: 20000 });
 }
 
+/** The phone's right-click: a real touch held on `target` (pointerType touch) for longer than the row's 450ms threshold. */
+export async function holdRow(page: Page, target: Locator): Promise<void> {
+  const box = (await target.boundingBox())!;
+  const x = box.x + 6;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await page.waitForTimeout(650);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
 /** The id of the first workspace row inside `scope`. */
 export async function firstWorkspaceId(scope: Locator): Promise<string> {
   const entry = scope.locator('xpath=descendant-or-self::*[starts-with(@data-testid, "workspace-entry-")]').first();
