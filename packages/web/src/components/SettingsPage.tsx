@@ -23,6 +23,8 @@ import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { Chevron } from "./ui/chevron";
+import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
 import {
   ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
   LIST, MODEL_ROW, MUTED, NAME, SELECT, SELECT_HOST,
@@ -113,6 +115,7 @@ function ChatModeSection() {
   // authoritative value (and drives every open chat pane) once it lands.
   const [chatMode, setChatMode] = useState<"hosted" | "cli">(settings?.chatMode ?? "cli");
   const { choices: agentChoices } = useAgentChoices(usePerchStore((s) => s.activeHostId));
+  const isMobile = useIsMobileWidth();
 
   useEffect(() => {
     if (!settings) return;
@@ -132,9 +135,9 @@ function ChatModeSection() {
       <SettingRow title="Warn before closing an agent" description="Ask first when closing a tab that runs an agent. Terminals close without asking.">
         <Switch label="Warn before closing an agent" testId="settings-warn-close-agent" checked={settings?.warnCloseAgent !== false} onChange={(on) => updateSettings({ warnCloseAgent: on })} />
       </SettingRow>
-      <SettingRow title="Preview files in tabs" description="A single-clicked file opens in an italic preview tab that the next clicked file replaces. Edit or double-click it to keep it. Off opens every clicked file in its own tab.">
+      {!isMobile && <SettingRow title="Preview files in tabs" description="A single-clicked file opens in an italic preview tab that the next clicked file replaces. Edit or double-click it to keep it. Off opens every clicked file in its own tab.">
         <Switch label="Preview files in tabs" testId="settings-preview-tabs" checked={settings?.previewTabs !== false} onChange={(on) => updateSettings({ previewTabs: on })} />
-      </SettingRow>
+      </SettingRow>}
       <SettingRow title="Empty workspace opens" description="What clicking a workspace with no open tabs starts.">
         <select
           className={SELECT}
@@ -233,7 +236,7 @@ function SshHostsSection() {
                   <option value="direct">direct</option>
                 </select>
                 {state === "error" && info?.error && (
-                  <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-red" title={info.error}>
+                  <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-red max-[700px]:basis-full" title={info.error}>
                     {info.error.length > 40 ? info.error.slice(0, 40) + "…" : info.error}
                   </span>
                 )}
@@ -550,6 +553,8 @@ function InterfaceSection() {
   // here, just a direct read/write against that module (mirrors how
   // `dockviewController.ts`'s state is module-level rather than store state).
   const [paneLabels, setPaneLabels] = useState(getPaneLabelsEnabled);
+  // Its only row labels a tab the phone doesn't have.
+  if (useIsMobileWidth()) return null;
 
   const handleChange = (checked: boolean) => {
     setPaneLabels(checked);
@@ -750,6 +755,52 @@ function TabContent({ tab }: { tab: SettingsTab }) {
   }
 }
 
+/** The phone's settings: a section list, then one section at a time with a back
+ * row (iOS-style), instead of the desktop's sidebar. Keyboard shortcuts are left
+ * out: a touch screen has none to rebind. */
+function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTab: (tab: SettingsTab | null) => void; onClose: () => void }) {
+  const current = TABS.find((t) => t.id === tab);
+  return (
+    <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
+      <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-b-overlay-0 bg-surface-0 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[max(0.25rem,env(safe-area-inset-left))]">
+        <button
+          type="button"
+          className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] items-center gap-1 justify-self-start px-3 text-[0.9rem]")}
+          data-testid={current ? "settings-back" : "settings-close"}
+          aria-label={current ? "Back to settings" : "Close settings"}
+          onClick={() => (current ? onTab(null) : onClose())}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5" /></svg>
+          {current ? "Settings" : "Back"}
+        </button>
+        <h1 className="m-0 min-w-0 truncate text-center text-[0.95rem] font-semibold text-fg">{current?.label ?? "Settings"}</h1>
+      </header>
+      {current ? (
+        <main className="settings-modal__body min-w-0 flex-1 overflow-y-auto px-4 pt-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+          <TabContent tab={current.id} />
+        </main>
+      ) : (
+        <nav className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" aria-label="Settings sections">
+          <div className="overflow-hidden rounded-ui bg-surface-0">
+            {TABS.filter((t) => t.id !== "keyboard").map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] w-full items-center justify-between rounded-none border-b border-b-overlay-0 px-4 text-left text-[0.95rem] text-fg last:border-b-0")}
+                data-testid={`settings-nav-${id}`}
+                onClick={() => onTab(id)}
+              >
+                {label}
+                <Chevron open={false} />
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
+    </div>
+  );
+}
+
 /** Settings as a page of its own: it fills the window (the app stays mounted
  * underneath, so terminals keep running), with a section list on the left and
  * the chosen section on the right. Not a popup. */
@@ -759,12 +810,14 @@ export function SettingsPage() {
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const fetchSettings = usePerchStore((s) => s.fetchSettings);
   const fetchHosts = usePerchStore((s) => s.fetchHosts);
-  const [tab, setTab] = useState<SettingsTab>("general");
+  const isMobile = useIsMobileWidth();
+  // `null` = the phone's section list.
+  const [tab, setTab] = useState<SettingsTab | null>("general");
 
   // Fetch data every time the page opens, on the section the opener asked for.
   useEffect(() => {
     if (settingsOpen) {
-      setTab(settingsPage === "agents" ? "agents" : "general");
+      setTab(settingsPage === "agents" ? "agents" : window.matchMedia(`(max-width: ${MOBILE_WIDTH_BREAKPOINT}px)`).matches ? null : "general");
       fetchSettings();
       fetchHosts();
     }
@@ -778,7 +831,8 @@ export function SettingsPage() {
   }, [settingsOpen, setSettingsOpen]);
 
   if (!settingsOpen) return null;
-  const current = TABS.find((t) => t.id === tab)!;
+  if (isMobile) return <MobileSettings tab={tab} onTab={setTab} onClose={() => setSettingsOpen(false)} />;
+  const current = TABS.find((t) => t.id === (tab ?? "general"))!;
 
   return (
     <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
@@ -801,9 +855,9 @@ export function SettingsPage() {
             <button
               key={id}
               type="button"
-              className={cn(GHOST_BUTTON, "px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:shrink-0", id === tab && "bg-surface-1 text-fg")}
+              className={cn(GHOST_BUTTON, "px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:shrink-0", id === current.id && "bg-surface-1 text-fg")}
               data-testid={`settings-nav-${id}`}
-              aria-current={id === tab ? "page" : undefined}
+              aria-current={id === current.id ? "page" : undefined}
               onClick={() => setTab(id)}
             >
               {label}
@@ -813,7 +867,7 @@ export function SettingsPage() {
         <main className="settings-modal__body min-w-0 flex-1 overflow-y-auto px-8 py-8 max-[700px]:px-4">
           <div className={cn("mx-auto", tab === "agents" ? "max-w-[60rem]" : "max-w-[46rem]")}>
             <h1 className="m-0 mb-8 text-[1.6rem] font-semibold text-fg">{current.label}</h1>
-            <TabContent tab={tab} />
+            <TabContent tab={current.id} />
           </div>
         </main>
       </div>

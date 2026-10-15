@@ -27,7 +27,7 @@ function resetTitle(w: UsageWindow): string {
 }
 
 /** One clickable status-bar block opens all provider windows and reset times. */
-function UsageSummary({
+export function UsageSummary({
   usage,
   updatedAt,
 }: {
@@ -111,7 +111,7 @@ function UsageSummary({
           role="dialog"
           aria-label="Plan usage details"
           data-testid="usage-details"
-          className={cn(menuPanel, "fixed z-[2100] w-[min(340px,calc(100vw-16px))] overflow-y-auto p-3 text-fg")}
+          className={cn(menuPanel, "fixed z-[3100] w-[min(340px,calc(100vw-16px))] overflow-y-auto p-3 text-fg")}
           style={popoverStyle}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
@@ -175,7 +175,8 @@ function UsageSummary({
   );
 }
 
-export function StatusBar() {
+/** Plan usage from the store, kept fresh while the caller is mounted. */
+export function useUsage() {
   const connected = usePerchStore((s) => s.connected);
   const usage = usePerchStore((s) => s.usage);
   const usageUpdatedAt = usePerchStore((s) => s.usageUpdatedAt);
@@ -187,6 +188,12 @@ export function StatusBar() {
     const id = setInterval(ask, 180_000);
     return () => clearInterval(id);
   }, [connected]);
+  return { usage, usageUpdatedAt };
+}
+
+export function StatusBar() {
+  const connected = usePerchStore((s) => s.connected);
+  const { usage, usageUpdatedAt } = useUsage();
   const zoom = useZoom();
   const status = usePerchStore((s) => s.status);
   const sessionId = usePerchStore((s) => s.sessionId);

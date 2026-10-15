@@ -11,11 +11,12 @@ export function SettingsGroup({ title, children, testId }: { title?: string; chi
 }
 
 /** One setting inside a card: label and description on the left, the control
- * on the right, a hairline between rows. */
+ * on the right, a hairline between rows. On a phone a control too wide to sit
+ * beside its label wraps under it. */
 export function SettingRow({ title, description, children }: { title: string; description?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6 py-[0.8rem] [&:not(:last-child)]:border-b [&:not(:last-child)]:border-b-overlay-0">
-      <div className="min-w-0">
+    <div className="flex items-center justify-between gap-6 py-[0.8rem] max-[700px]:flex-wrap max-[700px]:gap-y-2 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-b-overlay-0">
+      <div className="min-w-0 max-[700px]:flex-1 max-[700px]:basis-56">
         <div className="text-[0.85rem] text-fg">{title}</div>
         {description && <div className="mt-[0.15rem] text-[0.75rem] text-subtext-0">{description}</div>}
       </div>

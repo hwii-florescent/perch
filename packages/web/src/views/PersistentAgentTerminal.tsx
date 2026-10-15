@@ -8,6 +8,8 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
+import { MobileKeyBar } from "../components/MobileKeyBar";
+import { useIsMobileWidth } from "../responsive";
 
 /** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
 const SIZE_MARKER = /\x1b\[8;(\d+);(\d+)t/g;
@@ -111,6 +113,11 @@ class AgentView extends KeptTerminal<ViewState> {
     this.stop = () => { opened.release(); input.dispose(); stopExit(); created.dispose(); };
   }
 
+  /** Type `data` as if on the keyboard, while this view holds input. */
+  sendKey(data: string) {
+    if (this.inputId) usePerchStore.getState().sendTerminalInput(this.inputId, data);
+  }
+
   async takeControl() {
     if (this.state.pending) return;
     this.set({ pending: true, error: null });
@@ -140,6 +147,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     view?.subscribe ?? noSubscription, view?.getState ?? openingState,
   );
   const search = useTerminalSearch(view?.created.term ?? null);
+  const isMobile = useIsMobileWidth();
 
   useEffect(() => {
     if (!connected || !container.current) return;
@@ -180,6 +188,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     </div>}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
+    {isMobile && controlling && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
     {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
       <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>

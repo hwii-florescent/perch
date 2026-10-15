@@ -57,8 +57,8 @@ export default function App() {
   // store.ts's diff minimal) so it renders at most once per browser/profile.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasSeenOnboarding());
   // Phase 5 (narrow-width collapse): below MOBILE_WIDTH_BREAKPOINT, swap the
-  // desktop Sidebar+TabBar/Dockview canvas for MobileHeader+MobileSwitcher
-  // and one mounted pane. StatusBar stays mounted either way. Overlay open
+  // desktop Sidebar+TabBar/Dockview canvas and StatusBar for MobileHeader,
+  // MobileSwitcher and one mounted pane over a bottom bar. Overlay open
   // state lives here, same rationale as navigatorOpen/keybindHelpOpen above.
   const isMobile = useIsMobileWidth();
   const [mobileSwitcherOpen, setMobileSwitcherOpen] = useState(false);
@@ -95,9 +95,9 @@ export default function App() {
   useEffect(() => setToolsWorkspaceId(null), [activeWorkspaceId]);
   const lastTools = useRef<WorkspaceToolsTab>(tools ?? "files");
   if (tools) lastTools.current = tools;
+  // The phone has no drawer: its bottom bar switches panes.
   const toggleTerminal = useCallback(() => {
-    if (isMobile) setMobilePane((pane) => pane === "terminal" ? "chat" : "terminal");
-    else setTools((tab) => tab ? null : lastTools.current);
+    if (!isMobile) setTools((tab) => tab ? null : lastTools.current);
   }, [isMobile]);
 
   // Sidebar Files/Git requests open the drawer on that tab, focused on the
@@ -164,20 +164,8 @@ export default function App() {
   const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - MAIN_MIN);
   const toolsWidth = Math.min(toolsMax, Math.max(TOOLS_MIN, toolsWidthRaw));
 
-  // Desktop: the drawer holds Files and Git, so its toggle is a right-panel
-  // glyph. The phone's button still opens just the terminal.
-  const terminalButton = isMobile ? (
-    <button
-      type="button"
-      className="min-h-[44px] rounded-ui border border-overlay-0 bg-surface-1 px-[0.6rem] py-[0.3rem] text-[0.9rem] leading-none text-fg [font-family:inherit] hover:border-accent"
-      title="Open terminal"
-      aria-label="Open terminal"
-      aria-pressed={mobilePane === "terminal"}
-      onClick={toggleTerminal}
-    >
-      {"›_"}
-    </button>
-  ) : (
+  // The drawer holds Files and Git, so its toggle is a right-panel glyph.
+  const terminalButton = (
     <button
       type="button"
       className={ICON_BUTTON}
@@ -217,10 +205,7 @@ export default function App() {
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as CSSProperties}
     >
       {isMobile ? (
-        <>
-          <div className="flex shrink-0 justify-end border-b border-b-overlay-0 bg-surface-0 px-2 pb-[0.35rem] pt-[calc(0.35rem+env(safe-area-inset-top))]">{terminalButton}</div>
-          <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
-        </>
+        <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
       ) : (
         // One row (Orca): brand + sidebar toggle above the sidebar, tabs, then
         // the drawer toggle. In the macOS app it is also the title bar: the
@@ -273,7 +258,6 @@ export default function App() {
               activePane={mobilePane}
               workspaceFilesWorkspaceId={workspaceFilesWorkspaceId}
               workspaceGitReviewWorkspaceId={workspaceGitReviewWorkspaceId}
-              fallbackWorkspaceId={activeWorkspaceId}
               onPaneChange={setMobilePane}
               onCloseFiles={closeWorkspaceFiles}
               onCloseGitReview={closeWorkspaceGitReview}
@@ -300,13 +284,13 @@ export default function App() {
         {!isMobile && tools && <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} />}
       </div>
 
-      <StatusBar />
+      {!isMobile && <StatusBar />}
       <SettingsPage />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       <CloseAgentGuard />
       {isMobile && (
-        <MobileSwitcher open={mobileSwitcherOpen} onClose={() => setMobileSwitcherOpen(false)} />
+        <MobileSwitcher open={mobileSwitcherOpen} onClose={() => setMobileSwitcherOpen(false)} onPicked={() => setMobilePane("chat")} />
       )}
       <Toast />
       {onboardingOpen && (

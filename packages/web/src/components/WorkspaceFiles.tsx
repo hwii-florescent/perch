@@ -287,6 +287,8 @@ export interface WorkspaceFilesViewProps {
   initialPath?: string;
   onPathChange?: (path: string) => void;
   onClose?: () => void;
+  /** Drop the title header (and its ×): the phone's app header already names the workspace and its tab bar leaves the pane. */
+  bare?: boolean;
   /** Desktop splits the surface: `"explorer"` is just the tree (the right
    * drawer), which hands a clicked file to `onOpenFile`; `"editor"` is just
    * `initialPath`'s editor (a pane tab in the main area). Unset = both, with
@@ -301,7 +303,7 @@ export interface WorkspaceFilesViewProps {
  * server-owned buffers; media uses a descriptor-confined HTTP stream. */
 let wrapPreference = false;
 
-export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose, layout, onOpenFile }: WorkspaceFilesViewProps) {
+export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onClose, bare, layout, onOpenFile }: WorkspaceFilesViewProps) {
   const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
   const documents = useWorkspaceFilesStore((state) => state.documents[workspaceId] ?? EMPTY_DOCUMENTS);
@@ -481,7 +483,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
       data-testid={layout === "editor" ? "workspace-file-pane" : "workspace-files-view"}
       aria-label={`Files for ${workspace.name}`}
     >
-      {!layout && <header className="flex min-h-[3.1rem] items-center justify-between gap-3 border-b border-b-overlay-0 bg-surface-0 px-[0.7rem] py-2 [@container(max-width:460px)]:min-h-[3.4rem]">
+      {!layout && !bare && <header className="flex min-h-[3.1rem] items-center justify-between gap-3 border-b border-b-overlay-0 bg-surface-0 px-[0.7rem] py-2 [@container(max-width:460px)]:min-h-[3.4rem]">
         <div className="grid min-w-0 gap-[0.12rem]">
           <span className="tracking-[0.1em] text-accent uppercase">Files</span>
           <strong className="overflow-hidden text-[0.86rem] text-ellipsis whitespace-nowrap" title={workspace.path}>{workspace.name || basename(workspace.path)}</strong>
@@ -524,12 +526,11 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, onC
           <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[length:calc(11px*var(--zoom,1))] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
             <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
-              {!layout && (
+              {!layout && selectedPath && (
                 <button
                   type="button"
                   className={cn(BTN, BTN_HOVER, "hidden min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem] [@container(max-width:460px)]:inline-block")}
                   onClick={() => setMobileExplorerOpen(false)}
-                  disabled={!selectedPath}
                 >
                   Editor
                 </button>

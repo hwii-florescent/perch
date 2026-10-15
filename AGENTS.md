@@ -331,6 +331,16 @@ there, not here.
     `settingsOpen`), not a popup: left section list, right cards of
     `SettingRow`s. The app stays mounted under it. Add project picks its
     host in the dialog.
+  - **Phone (≤700px, `useIsMobileWidth`):** one header row (`MobileHeader`:
+    session, `project · branch`, ⚙; tapping the session opens `MobileSwitcher`,
+    which holds the host picker, projects/sessions and plan usage), the active
+    pane, and a bottom bar `Session | Shell | Files | Git` (`MobilePaneShell`;
+    one pane mounted at a time). No sidebar, tab strip, drawer or status bar.
+    Settings is a section list with a back row (`MobileSettings`, no Keyboard
+    section). A controlled agent terminal gets a quick-key bar
+    (`MobileKeyBar`: Esc, Tab, ⇧Tab, arrows by cursor-key mode, Enter, ^C) so a
+    phone can answer a CLI's prompts. Keep new phone UI to this shape; touch
+    targets are 44px.
   - Menus offer only what perch does. Don't add Orca items with no perch
     feature behind them (status columns, groups, icons, mark unread).
   - perch is an app: `main.tsx` cancels every `contextmenu` that has no menu

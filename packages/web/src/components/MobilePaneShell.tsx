@@ -2,97 +2,88 @@ import { ChatView } from "../views/Chat";
 import { TerminalView } from "../views/Terminal";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
+import { effectiveWorkspace, usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 
-const TAB = "min-h-[44px] min-w-[4.2rem] flex-[1_0_auto] cursor-pointer rounded-ui border px-[0.55rem] py-[0.32rem] text-[0.72rem] [font-family:inherit] [line-height:inherit] hover:border-accent focus-visible:border-accent";
-const tab = (active: boolean) =>
-  cn(TAB, active ? "border-accent bg-accent font-bold text-panel-bg" : "border-overlay-0 bg-surface-0 text-overlay-1 hover:text-fg focus-visible:text-fg");
-
 export type MobilePaneKind = "chat" | "terminal" | "files" | "gitReview";
+
+const ICON = { width: 20, height: 20, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
+
+// The same glyphs as the desktop chrome where one exists (Files/Git drawer tabs, the `›_` shell button).
+const PANES: { kind: MobilePaneKind; label: string; testId: string; icon: React.ReactNode }[] = [
+  { kind: "chat", label: "Session", testId: "mobile-pane-chat", icon: <svg {...ICON}><rect x="1.5" y="2.5" width="13" height="11" rx="2" /><path d="m4.5 6 2 2-2 2M8 10.5h3" /></svg> },
+  { kind: "terminal", label: "Shell", testId: "mobile-pane-terminal", icon: <svg {...ICON}><path d="m3 4.5 3.5 3.5L3 11.5M8 12h5" /></svg> },
+  { kind: "files", label: "Files", testId: "mobile-pane-files", icon: <svg {...ICON}><path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /></svg> },
+  { kind: "gitReview", label: "Git", testId: "mobile-pane-git", icon: <svg {...ICON}><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="6" r="1.5" /><path d="M4.5 5v6M11.5 7.5c0 2-3 2-7 3.5" /></svg> },
+];
 
 export interface MobilePaneShellProps {
   activePane: MobilePaneKind;
   workspaceFilesWorkspaceId?: string | null;
   workspaceGitReviewWorkspaceId?: string | null;
-  fallbackWorkspaceId?: string | null;
   onPaneChange: (pane: MobilePaneKind) => void;
   onCloseFiles: () => void;
   onCloseGitReview: () => void;
 }
 
 /**
- * Narrow-width canvas. Exactly one content component is mounted at a time;
- * inactive desktop Dockview panels are not merely hidden, which keeps mobile
- * memory, keyboard focus, and terminal lifecycle bounded to the pane the user
- * is actually viewing.
+ * Narrow-width canvas: the active pane over a bottom tab bar (thumb reach, and
+ * the agent gets the full height above it). Exactly one content component is
+ * mounted at a time; inactive desktop Dockview panels are not merely hidden,
+ * which keeps mobile memory, keyboard focus, and terminal lifecycle bounded to
+ * the pane the user is actually viewing.
+ *
+ * Files and Git show the workspace a Switcher request named, else the active
+ * session's. Leaving either pane drops its request, so it never goes stale.
  */
 export function MobilePaneShell({
   activePane,
   workspaceFilesWorkspaceId,
   workspaceGitReviewWorkspaceId,
-  fallbackWorkspaceId,
   onPaneChange,
   onCloseFiles,
   onCloseGitReview,
 }: MobilePaneShellProps) {
-  const filesWorkspaceId = workspaceFilesWorkspaceId ?? fallbackWorkspaceId ?? null;
-  const gitWorkspaceId = workspaceGitReviewWorkspaceId ?? fallbackWorkspaceId ?? null;
+  const fallbackWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
+  const filesWorkspaceId = workspaceFilesWorkspaceId ?? fallbackWorkspaceId;
+  const gitWorkspaceId = workspaceGitReviewWorkspaceId ?? fallbackWorkspaceId;
 
   function selectPane(pane: MobilePaneKind) {
-    if (activePane === "gitReview" && pane !== "gitReview") onCloseGitReview();
+    if (pane !== "gitReview") onCloseGitReview();
+    if (pane !== "files") onCloseFiles();
     onPaneChange(pane);
   }
 
   return (
     <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-panel-bg" data-testid="mobile-pane-shell" aria-label="Mobile workspace pane">
-      <nav className="flex shrink-0 gap-[0.15rem] overflow-x-auto border-b border-b-overlay-0 bg-panel-bg px-[0.45rem] py-[0.3rem]" aria-label="Mobile panes">
-        <button
-          type="button"
-          className={tab(activePane === "chat")}
-          data-testid="mobile-pane-chat"
-          aria-pressed={activePane === "chat"}
-          onClick={() => selectPane("chat")}
-        >
-          Chat
-        </button>
-        <button
-          type="button"
-          className={tab(activePane === "terminal")}
-          data-testid="mobile-pane-terminal"
-          aria-pressed={activePane === "terminal"}
-          onClick={() => selectPane("terminal")}
-        >
-          Terminal
-        </button>
-        <button
-          type="button"
-          className={tab(activePane === "files")}
-          data-testid="mobile-pane-files"
-          aria-pressed={activePane === "files"}
-          onClick={() => selectPane("files")}
-        >
-          Files
-        </button>
-        <button
-          type="button"
-          className={tab(activePane === "gitReview")}
-          data-testid="mobile-pane-git"
-          aria-pressed={activePane === "gitReview"}
-          onClick={() => selectPane("gitReview")}
-        >
-          Git
-        </button>
-      </nav>
       <div className="mobile-pane-shell__content flex min-h-0 w-full min-w-0 flex-1 overflow-hidden" data-testid={`mobile-active-pane-${activePane}`}>
         {activePane === "chat" && <ChatView />}
         {activePane === "terminal" && <TerminalView active />}
         {activePane === "files" && (filesWorkspaceId
-          ? <WorkspaceFilesView workspaceId={filesWorkspaceId} onClose={() => { onCloseFiles(); selectPane("chat"); }} />
-          : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Choose a workspace from Switch before opening files.</div>)}
+          ? <WorkspaceFilesView workspaceId={filesWorkspaceId} bare />
+          : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Pick a workspace from the header before opening files.</div>)}
         {activePane === "gitReview" && (gitWorkspaceId
           ? <WorkspaceGitReviewPane workspaceId={gitWorkspaceId} />
-          : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Choose a workspace from Switch before opening Git review.</div>)}
+          : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Pick a workspace from the header before opening Git.</div>)}
       </div>
+      <nav className="flex shrink-0 border-t border-t-overlay-0 bg-surface-0 pb-[env(safe-area-inset-bottom)]" aria-label="Mobile panes">
+        {PANES.map(({ kind, label, testId, icon }) => (
+          <button
+            key={kind}
+            type="button"
+            className={cn(
+              "flex min-h-[3.25rem] flex-1 cursor-pointer flex-col items-center justify-center gap-[0.15rem] bg-transparent text-[0.68rem] [border:0] [font-family:inherit] focus-visible:bg-surface-1",
+              activePane === kind ? "text-fg" : "text-subtext-0",
+            )}
+            data-testid={testId}
+            aria-pressed={activePane === kind}
+            onClick={() => selectPane(kind)}
+          >
+            {icon}
+            {label}
+          </button>
+        ))}
+      </nav>
     </section>
   );
 }

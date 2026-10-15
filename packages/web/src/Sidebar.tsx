@@ -159,9 +159,57 @@ interface HostChoice {
 
 const POPOVER_PICK = "flex w-full cursor-pointer flex-col bg-transparent px-3 pt-[0.45rem] pb-[0.35rem] text-left text-[0.82rem] font-semibold text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-1";
 const POPOVER_PICK_CWD = "mt-[0.1rem] overflow-hidden text-[0.7rem] font-normal text-ellipsis whitespace-nowrap text-subtext-0";
-const POPOVER_ITEM = "flex min-w-0 flex-1 cursor-pointer items-center gap-[0.45rem] bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.8rem] text-fg [font-family:inherit] [border:none] hover:bg-surface-1";
+const POPOVER_ITEM = "flex min-h-0 max-[700px]:min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-[0.45rem] bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.8rem] text-fg [font-family:inherit] [border:none] hover:bg-surface-1";
 
-function HostSwitcherPopover({
+/** Where the host switcher can go (this machine, then each configured SSH host) and the active host's state. */
+export function useHostChoices() {
+  const connected = usePerchStore((s) => s.connected);
+  const serverInfo = usePerchStore((s) => s.serverInfo);
+  const hosts = usePerchStore((s) => s.hosts);
+  const hostStates = usePerchStore((s) => s.hostStates);
+  const activeHostId = usePerchStore((s) => s.activeHostId);
+
+  const activeHostEntry = hosts.find((h: SshHostEntry) => h.id === activeHostId);
+  const activeHostInfo = hostStates[activeHostId];
+  const activeHostState: HostConnectionState =
+    activeHostId === "local"
+      ? connected
+        ? "connected"
+        : "connecting"
+      : activeHostInfo
+        ? activeHostInfo.state
+        : activeHostEntry?.enabled
+          ? "connecting"
+          : "disabled";
+
+  const choices: HostChoice[] = [
+    {
+      id: "local",
+      name: serverInfo?.hostname ? `local (${serverInfo.hostname})` : "local",
+      state: connected ? "connected" : "connecting",
+      detail: serverInfo?.platform,
+    },
+    ...hosts.map((h: SshHostEntry) => {
+      const info = hostStates[h.id];
+      const state: HostConnectionState = info ? info.state : h.enabled ? "connecting" : "disabled";
+      return {
+        id: h.id,
+        name: h.name,
+        state,
+        error: info?.error,
+        detail:
+          h.mode === "direct"
+            ? `${h.sshHost} (direct)`
+            : h.directUrl || `${h.sshHost}:${h.remotePort}`,
+        entry: h,
+        direct: h.mode === "direct",
+      };
+    }),
+  ];
+  return { choices, activeHostEntry, activeHostInfo, activeHostState };
+}
+
+export function HostSwitcherPopover({
   choices,
   activeHostId,
   anchorRect,
@@ -712,18 +760,7 @@ export function Sidebar() {
   const [hostAnchor, setHostAnchor] = useState<DOMRect | null>(null);
   const [newAnchor, setNewAnchor] = useState<DOMRect | null>(null);
 
-  const activeHostEntry = hosts.find((h: SshHostEntry) => h.id === activeHostId);
-  const activeHostInfo = hostStates[activeHostId];
-  const activeHostState: HostConnectionState =
-    activeHostId === "local"
-      ? connected
-        ? "connected"
-        : "connecting"
-      : activeHostInfo
-        ? activeHostInfo.state
-        : activeHostEntry?.enabled
-          ? "connecting"
-          : "disabled";
+  const { choices, activeHostEntry, activeHostInfo, activeHostState } = useHostChoices();
 
   const navState = { sessions, sessionId, activeHostId, activeProject };
   const projects = projectsForHost(navState, activeHostId);
@@ -737,31 +774,6 @@ export function Sidebar() {
   const projectCwds = workspaceProjects
     .filter((project) => project.hostId === activeHostId)
     .map((project) => project.path);
-
-  const choices: HostChoice[] = [
-    {
-      id: "local",
-      name: serverInfo?.hostname ? `local (${serverInfo.hostname})` : "local",
-      state: connected ? "connected" : "connecting",
-      detail: serverInfo?.platform,
-    },
-    ...hosts.map((h: SshHostEntry) => {
-      const info = hostStates[h.id];
-      const state: HostConnectionState = info ? info.state : h.enabled ? "connecting" : "disabled";
-      return {
-        id: h.id,
-        name: h.name,
-        state,
-        error: info?.error,
-        detail:
-          h.mode === "direct"
-            ? `${h.sshHost} (direct)`
-            : h.directUrl || `${h.sshHost}:${h.remotePort}`,
-        entry: h,
-        direct: h.mode === "direct",
-      };
-    }),
-  ];
 
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
