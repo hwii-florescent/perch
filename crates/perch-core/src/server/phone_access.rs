@@ -291,3 +291,70 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 }
+
+/// A reverse proxy in front of perch (Tailscale Serve is the expected one)
+/// connects from loopback, so the peer address alone would make every phone
+/// behind it "local" and skip pairing. These are the requests that must still
+/// be treated as remote.
+#[cfg(test)]
+mod proxy_tests {
+    use super::super::local_request;
+    use axum::http::{HeaderMap, HeaderName, HeaderValue};
+    use std::net::SocketAddr;
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        pairs
+            .iter()
+            .map(|(k, v)| {
+                (
+                    HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                    HeaderValue::from_str(v).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn proxied_and_lan_requests_are_never_local() {
+        let loopback: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        let lan: SocketAddr = "192.168.1.9:50000".parse().unwrap();
+        let own = [("host", "127.0.0.1:47788")];
+
+        // The desktop web view and a curl on this machine.
+        assert!(local_request(&loopback, &headers(&own)));
+        assert!(local_request(
+            &loopback,
+            &headers(&[("host", "localhost:47788")])
+        ));
+
+        // Tailscale Serve: loopback peer, the tailnet name as Host, identity headers.
+        assert!(!local_request(
+            &loopback,
+            &headers(&[
+                ("host", "mac.tail1234.ts.net"),
+                ("tailscale-user-login", "me@example.com"),
+            ])
+        ));
+        // A proxy that rewrites Host to the upstream but still says who called.
+        for marker in [
+            "x-forwarded-for",
+            "x-forwarded-proto",
+            "x-forwarded-host",
+            "forwarded",
+            "x-real-ip",
+            "via",
+            "cf-connecting-ip",
+            "tailscale-user-login",
+        ] {
+            assert!(
+                !local_request(&loopback, &headers(&[own[0], (marker, "100.64.0.2")])),
+                "{marker} must mark a request as remote"
+            );
+        }
+        // A LAN peer is remote even when it claims a loopback Host.
+        assert!(!local_request(&lan, &headers(&own)));
+        // Known limit: a proxy that rewrites Host to loopback and adds no header
+        // at all looks exactly like a local client. `PERCH_REQUIRE_PAIRING=1`
+        // demands a token from everyone for such a setup.
+    }
+}

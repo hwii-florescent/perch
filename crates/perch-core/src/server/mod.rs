@@ -1543,9 +1543,7 @@ fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.parse::<axum::http::uri::Authority>().ok());
     peer.ip().is_loopback()
-        && !headers.contains_key("forwarded")
-        && !headers.contains_key("x-forwarded-host")
-        && !headers.contains_key("x-forwarded-for")
+        && !proxied(headers)
         && host.is_some_and(|host| {
             host.host().eq_ignore_ascii_case("localhost")
                 || host
@@ -1557,6 +1555,19 @@ fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
 }
 
 /// Resolve authorization to a paired device identity, or a trusted local
+/// Headers a reverse proxy adds (Tailscale Serve, Cloudflare, nginx, etc.).
+/// A request carrying any of them did not come from this machine, whatever its
+/// peer address says: the proxy itself is the loopback peer.
+fn proxied(headers: &HeaderMap) -> bool {
+    headers.keys().any(|name| {
+        let name = name.as_str();
+        matches!(name, "forwarded" | "via" | "x-real-ip")
+            || name.starts_with("x-forwarded-")
+            || name.starts_with("tailscale-")
+            || name.starts_with("cf-")
+    })
+}
+
 /// client (None). Retain the identity for the lifetime of a WebSocket.
 fn authorize_request(
     state: &AppState,

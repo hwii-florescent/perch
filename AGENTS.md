@@ -89,7 +89,13 @@ there, not here.
     closes device sockets. Headless `perch-core` is always on (`alwaysOn`).
     Addresses come from the Tailscale CLI and the OS's default route
     (`phone.access.status`). Pairing shows a QR of `<address>#pair=<code>`
-    (`PhoneAccess.tsx`, `qrcode-generator`).
+    (`PhoneAccess.tsx`, `qrcode-generator`). A reverse proxy such as Tailscale
+    Serve connects from loopback, so `local_request` also treats any proxy
+    header (`x-forwarded-*`, `forwarded`, `via`, `tailscale-*`, `cf-*`) or a
+    non-loopback `Host` as remote: its phones need a token, and Phone access
+    on. Not tested against a real Serve yet (Tailscale isn't installed on the
+    dev Mac); a proxy that rewrites `Host` to loopback and adds no header is
+    indistinguishable from local, so set `PERCH_REQUIRE_PAIRING=1` behind one.
 - **Data:**
   - `db/`: `~/.perch/history.sqlite`.
   - `settings.rs`, `hosts.rs`: `~/.perch/*.json`, written atomically.
