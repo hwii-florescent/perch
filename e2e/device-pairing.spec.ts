@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { addProject } from "./projects";
+import { holdRow } from "./workspaceTools";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 
 const AGENT_SCRIPT = [
@@ -182,7 +183,8 @@ test("a phone pairs over the network, drives the session, and loses access when 
     expect(code).toMatch(/^[A-Z0-9]{8}$/);
 
     // 3. The phone pairs and the app appears.
-    await phone.getByTestId("pairing-code").fill(code);
+    // Pasting the whole pairing link works as well as typing the code.
+    await phone.getByTestId("pairing-code").fill(`${phoneUrl}/#pair=${code}`);
     await phone.getByTestId("pairing-name").fill("e2e phone");
     await phone.getByTestId("pairing-submit").click();
     await expect(phone.getByTestId("pairing-gate")).toHaveCount(0, { timeout: 20_000 });
@@ -219,10 +221,12 @@ test("a phone pairs over the network, drives the session, and loses access when 
     // 6. Files and Git from the phone-sized surface.
     await phone.getByTestId("mobile-switch").click();
     const switcher = phone.getByTestId("mobile-switcher");
-    const gitButton = switcher.locator('[data-testid^="workspace-git-"]').first();
-    await expect(gitButton).toBeVisible({ timeout: 20_000 });
-    const workspaceId = (await gitButton.getAttribute("data-testid"))!.slice("workspace-git-".length);
-    await gitButton.click();
+    // A held row opens the workspace menu (the phone's right-click).
+    const row = switcher.locator('[data-testid^="workspace-entry-"]').first();
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    const workspaceId = (await row.getAttribute("data-testid"))!.slice("workspace-entry-".length);
+    await holdRow(phone, row);
+    await phone.getByTestId(`workspace-menu-git-${workspaceId}`).click();
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS", { timeout: 20_000 });
     // Session creation records this workspace's boundary before starting
     // the CLI, so the phone can compare against the original committed line.
@@ -230,7 +234,8 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await expect(phone.getByTestId("git-diff")).toContainText("committed line");
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS");
     await phone.getByTestId("mobile-switch").click();
-    await phone.getByTestId("mobile-switcher").locator(`[data-testid="workspace-files-${workspaceId}"]`).click();
+    await holdRow(phone, phone.getByTestId("mobile-switcher").getByTestId(`workspace-entry-${workspaceId}`));
+    await phone.getByTestId(`workspace-menu-files-${workspaceId}`).click();
     await expect(phone.getByTestId("workspace-files-view")).toBeVisible({ timeout: 20_000 });
     await expect(phone.getByTestId("workspace-file-entry-src")).toBeVisible({ timeout: 20_000 });
     await phone.screenshot({ path: testInfo.outputPath("pairing-phone-files.png"), fullPage: true });

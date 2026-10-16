@@ -347,7 +347,13 @@ there, not here.
     Settings is a section list with a back row (`MobileSettings`, no Keyboard
     section). A controlled agent terminal gets a quick-key bar
     (`MobileKeyBar`: Esc, Tab, ⇧Tab, arrows by cursor-key mode, Enter, ^C) so a
-    phone can answer a CLI's prompts. Keep new phone UI to this shape; touch
+    phone can answer a CLI's prompts. perch runs on the user's laptop and the
+    phone only drives it, so the phone shows no app without one: an unpaired
+    phone gets "Connect to your laptop" (`PairingGate phone`: a code, or a
+    pasted/opened link with `pair=` in its query or #hash, `pairing.ts`) and a
+    phone that has never reached its laptop gets "Can't reach your laptop"
+    (`LaptopUnreachable`, after 6s, auto-retrying); once connected, a drop keeps
+    the app with "Reconnecting…". Keep new phone UI to this shape; touch
     targets are 44px.
   - Menus offer only what perch does. Don't add Orca items with no perch
     feature behind them (status columns, groups, icons, mark unread).

@@ -9,11 +9,19 @@ export async function openWorkspaceTool(page: Page, workspaceId: string, tab: "f
   await expect(page.getByTestId(tab === "files" ? "workspace-files-view" : "workspace-git-review")).toBeVisible({ timeout: 20000 });
 }
 
-/** The phone's right-click: a real touch held on `target` (pointerType touch) for longer than the row's 450ms threshold. */
+/** The phone's right-click: a touch held on `target` for longer than the row's 450ms threshold.
+ * Chromium gets a real touch through CDP; WebKit has no CDP, so it gets the pointer events the row listens to. */
 export async function holdRow(page: Page, target: Locator): Promise<void> {
   const box = (await target.boundingBox())!;
   const x = box.x + 6;
   const y = box.y + box.height / 2;
+  if (page.context().browser()?.browserType().name() !== "chromium") {
+    const init = { pointerType: "touch", clientX: x, clientY: y, bubbles: true };
+    await target.dispatchEvent("pointerdown", init);
+    await page.waitForTimeout(650);
+    await target.dispatchEvent("pointerup", init);
+    return;
+  }
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   await page.waitForTimeout(650);

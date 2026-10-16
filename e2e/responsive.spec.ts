@@ -15,6 +15,7 @@
  *   R6 — a controlled agent terminal gets a quick-key bar that types into it.
  *   R7 	a host added on the phone shows up in the switcher's host picker.
  *   R9 — holding a workspace row in the switcher opens its action menu.
+ *   R10 — a phone that cannot reach its laptop says so, then recovers.
  *
  * All tests are headless; viewport changes use `page.setViewportSize` (never
  * a real device emulation reload) so the same page/context can flip between
@@ -243,6 +244,31 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
     expect((await pin.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await page.getByTestId(`workspace-menu-files-${id}`).click();
     await expect(page.getByTestId("mobile-active-pane-files")).toBeVisible({ timeout: 10000 });
+  });
+
+  // -------------------------------------------------------------------------
+  // R10: no laptop, no app.
+  // -------------------------------------------------------------------------
+  test("R10. an unreachable laptop shows the connect screen, and the app returns once it answers", async ({ page }) => {
+    // Point every socket at a closed port until the flag is cleared.
+    await page.addInitScript(() => {
+      const Real = window.WebSocket;
+      (window as unknown as { __blockWs: boolean }).__blockWs = true;
+      window.WebSocket = class extends Real {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super((window as unknown as { __blockWs: boolean }).__blockWs ? "ws://127.0.0.1:1/ws" : url, protocols);
+        }
+      } as typeof WebSocket;
+    });
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("laptop-unreachable")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("laptop-unreachable")).toContainText("127.0.0.1:7799");
+    await expect(page.getByTestId("mobile-header")).toHaveCount(0);
+
+    await page.evaluate(() => { (window as unknown as { __blockWs: boolean }).__blockWs = false; });
+    await expect(page.getByTestId("mobile-header")).toBeVisible({ timeout: 25000 });
+    await expect(page.getByTestId("laptop-unreachable")).toHaveCount(0);
   });
 
   // -------------------------------------------------------------------------

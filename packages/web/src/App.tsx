@@ -16,7 +16,7 @@ import { useIsMobileWidth } from "./responsive";
 import { useLeaderKey } from "./keybinds";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
-import { PairingGate } from "./components/PairingGate";
+import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
 import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
@@ -157,7 +157,22 @@ export default function App() {
       cancelled = true;
     };
   }, [connected]);
-  if (unpaired) return <PairingGate onPaired={() => window.location.reload()} />;
+  // A phone has no perch of its own: if it has never reached its laptop, say
+  // so rather than show an app with nothing behind it. Once it has connected,
+  // a later drop keeps the app (the header says "Reconnecting…").
+  const [everConnected, setEverConnected] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
+  useEffect(() => {
+    if (connected) {
+      setEverConnected(true);
+      setGaveUp(false);
+      return;
+    }
+    const timer = setTimeout(() => setGaveUp(true), 6000);
+    return () => clearTimeout(timer);
+  }, [connected]);
+  if (unpaired) return <PairingGate phone={isMobile} onPaired={() => window.location.reload()} />;
+  if (isMobile && gaveUp && !everConnected && !connected) return <LaptopUnreachable />;
 
   const showSidebar = !isMobile && !sidebarCollapsed;
   const sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthRaw));

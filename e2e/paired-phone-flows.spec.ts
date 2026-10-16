@@ -31,6 +31,7 @@ import * as path from "node:path";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv } from "./cheapModel";
+import { holdRow } from "./workspaceTools";
 
 const RUN_ID = Math.random().toString(36).slice(2, 8);
 const WORKTREE_TEXT = `PHONE_REVIEWS_THIS_${RUN_ID}`;
@@ -245,9 +246,11 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     const switcher = phone.getByTestId("mobile-switcher");
     const project = switcher.locator(".workspace-project").filter({ hasText: repoName });
     await expect(project).toBeVisible({ timeout: 20_000 });
-    const gitButton = project.locator('[data-testid^="workspace-git-"]').first();
-    await expect(gitButton).toBeVisible({ timeout: 20_000 });
-    await gitButton.click();
+    const row = project.locator('[data-testid^="workspace-entry-"]').first();
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    const workspaceId = (await row.getAttribute("data-testid"))!.slice("workspace-entry-".length);
+    await holdRow(phone, row);
+    await phone.getByTestId(`workspace-menu-git-${workspaceId}`).click();
     await expect(phone.getByTestId("git-diff")).toContainText(WORKTREE_TEXT, { timeout: 30_000 });
     const firstNote = `Keep the sentinel readable ${RUN_ID}`;
     const secondNote = `And explain the committed line ${RUN_ID}`;

@@ -27,6 +27,31 @@ export async function isPaired(): Promise<boolean> {
   }
 }
 
+/** The pairing code in whatever the user pasted: the bare code, or a link
+ * carrying it as `pair=` (in the query or the #hash, which a QR will use so
+ * the code stays out of server logs). */
+export function extractPairingCode(input: string): string {
+  const text = input.trim();
+  const fromLink = /[?#&]pair=([A-Za-z0-9]+)/.exec(text)?.[1];
+  return (fromLink ?? text).replace(/\s+/g, "").toUpperCase();
+}
+
+/** A code a pairing link put in this page's address, removed from the address
+ * bar so it isn't left in history or a bookmark. */
+export function takePairingCodeFromUrl(): string | null {
+  const { pathname, search, hash } = window.location;
+  const query = new URLSearchParams(search);
+  const fragment = new URLSearchParams(hash.slice(1));
+  const code = fragment.get("pair") ?? query.get("pair");
+  if (!code) return null;
+  query.delete("pair");
+  fragment.delete("pair");
+  const q = query.toString();
+  const f = fragment.toString();
+  window.history.replaceState(null, "", `${pathname}${q ? `?${q}` : ""}${f ? `#${f}` : ""}`);
+  return extractPairingCode(code);
+}
+
 /** Exchange a pairing code for this device's token. Throws with the host's
  * own message ("that pairing code has expired", …) so the user sees why. */
 export async function claimPairing(code: string, name: string): Promise<void> {
@@ -34,7 +59,7 @@ export async function claimPairing(code: string, name: string): Promise<void> {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: code.trim(), name: name.trim() }),
+    body: JSON.stringify({ code: extractPairingCode(code), name: name.trim() }),
   });
   if (!response.ok) throw new Error((await response.text()) || "pairing failed");
 }
