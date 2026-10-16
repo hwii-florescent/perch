@@ -83,6 +83,10 @@ pub struct DeviceStore {
     /// replaces the first, so an abandoned code cannot stay usable.
     pending: Mutex<Option<PendingCode>>,
     revoked: tokio::sync::watch::Sender<()>,
+    /// Whether paired devices may connect at all. The desktop app turns this
+    /// off while "Phone access" is off: tokens stay on disk but stop working
+    /// and open device sockets close, exactly as for a revoked device.
+    remote_enabled: std::sync::atomic::AtomicBool,
 }
 
 /// What a successful claim hands back to the device.
@@ -100,7 +104,22 @@ impl DeviceStore {
             inner: Mutex::new(inner),
             pending: Mutex::new(None),
             revoked: tokio::sync::watch::channel(()).0,
+            remote_enabled: std::sync::atomic::AtomicBool::new(true),
         }
+    }
+
+    pub fn set_remote_enabled(&self, enabled: bool) {
+        let was = self
+            .remote_enabled
+            .swap(enabled, std::sync::atomic::Ordering::SeqCst);
+        if was && !enabled {
+            self.revoked.send_replace(());
+        }
+    }
+
+    fn remote_enabled(&self) -> bool {
+        self.remote_enabled
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn load_default() -> Self {
@@ -124,12 +143,14 @@ impl DeviceStore {
     }
 
     pub fn is_paired(&self, id: &str) -> bool {
-        self.inner
-            .lock()
-            .unwrap()
-            .devices
-            .iter()
-            .any(|device| device.id == id)
+        self.remote_enabled()
+            && self
+                .inner
+                .lock()
+                .unwrap()
+                .devices
+                .iter()
+                .any(|device| device.id == id)
     }
 
     pub fn subscribe_revocations(&self) -> tokio::sync::watch::Receiver<()> {
@@ -208,6 +229,9 @@ impl DeviceStore {
     /// Serialize persistence with claim/revoke so a timestamp refresh cannot
     /// restore a revoked token on disk.
     pub fn authenticate(&self, token: &str, now_ms: i64) -> Option<DeviceRecord> {
+        if !self.remote_enabled() {
+            return None;
+        }
         let hash = hash_token(token);
         let mut guard = self.inner.lock().unwrap();
         let device = guard

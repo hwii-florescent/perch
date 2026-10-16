@@ -15,8 +15,20 @@ pub(super) fn handle_settings_get(state: &Arc<ConnState>) {
 
 pub(super) fn handle_settings_update(
     state: &Arc<ConnState>,
-    patch: crate::protocol::SettingsPatch,
+    mut patch: crate::protocol::SettingsPatch,
 ) {
+    // A paired phone must not be able to cut off (or widen) its own way in:
+    // Phone access is changed only from this computer, never by a device token.
+    if patch.phone_access.is_some() && state.device_id.is_some() {
+        patch.phone_access = None;
+        let app = state.app.clone();
+        let out = state.out_tx.clone();
+        tokio::spawn(async move {
+            let error =
+                Some("Phone access can only be changed on the computer itself.".to_string());
+            let _ = out.send(phone_access_status(&app, String::new(), error).await);
+        });
+    }
     // Convert protocol::SettingsPatch → settings::SettingsPatch.
     let store_patch = crate::settings::SettingsPatch {
         custom_models: patch.custom_models.map(custom_models_to_store),
@@ -32,9 +44,14 @@ pub(super) fn handle_settings_update(
         warn_close_agent: patch.warn_close_agent,
         preview_tabs: patch.preview_tabs,
         tab_shape: patch.tab_shape,
+        phone_access: patch.phone_access,
     };
+    let phone_access = patch.phone_access;
     match state.app.settings.update(store_patch) {
         Ok(updated) => {
+            if phone_access.is_some() {
+                apply_phone_access(state.app.clone());
+            }
             // Settings are global (one chat mode for every client), so every
             // connection hears the change, the requester included.
             let _ = state
@@ -54,6 +71,47 @@ pub(super) fn handle_settings_update(
             });
         }
     }
+}
+
+/// Turn the LAN listener on or off to match the saved setting (re-read when
+/// it is this call's turn, so quick toggles end in the last one), then tell
+/// every client where phones can reach this host. A listener that cannot start
+/// (no network, no free port) puts the setting back rather than showing "on".
+fn apply_phone_access(app: AppState) {
+    tokio::spawn(async move {
+        let mut error = None;
+        if let Err(e) = app.phone.apply(|| app.settings.get().phone_access).await {
+            error = Some(format!("could not open the port: {e}"));
+            let _ = app.settings.update(crate::settings::SettingsPatch {
+                phone_access: Some(false),
+                ..Default::default()
+            });
+        }
+        let status = phone_access_status(&app, String::new(), error).await;
+        let _ = app.hub.hub_events_tx.send(Arc::new(status));
+    });
+}
+
+pub(super) async fn phone_access_status(
+    app: &AppState,
+    request_id: String,
+    error: Option<String>,
+) -> ServerMessage {
+    ServerMessage::PhoneAccessStatus {
+        request_id,
+        enabled: app.phone.enabled(),
+        always_on: app.phone.always_on(),
+        addresses: app.phone.addresses().await,
+        error,
+    }
+}
+
+pub(super) fn handle_phone_access_get(state: &Arc<ConnState>, request_id: String) {
+    let app = state.app.clone();
+    let out = state.out_tx.clone();
+    tokio::spawn(async move {
+        let _ = out.send(phone_access_status(&app, request_id, None).await);
+    });
 }
 
 pub(super) fn handle_hosts_list(state: &Arc<ConnState>) {
@@ -126,6 +184,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         warn_close_agent: s.warn_close_agent,
         preview_tabs: s.preview_tabs,
         tab_shape: s.tab_shape.clone(),
+        phone_access: s.phone_access,
     }
 }
 

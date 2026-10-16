@@ -307,6 +307,9 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             config::handle_device_pair_cancel(state, request_id)
         }
         ClientMessage::DeviceList { request_id } => config::handle_device_list(state, request_id),
+        ClientMessage::PhoneAccessGet { request_id } => {
+            config::handle_phone_access_get(state, request_id)
+        }
         ClientMessage::DeviceRevoke {
             request_id,
             device_id,

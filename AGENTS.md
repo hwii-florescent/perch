@@ -81,6 +81,15 @@ there, not here.
   - `detached.rs`: direct-mode turns in tmux.
   - `ssh.rs`: every remote call goes through it, always via the `ssh` CLI
     and never an ssh crate.
+  - `devices.rs` + `server/phone_access.rs`: paired phones. The desktop app
+    serves loopback only; Settings → Devices → "Phone access"
+    (`settings.phoneAccess`, off by default) serves the same router on a second
+    `0.0.0.0` listener (port 47789, else any) and is the master switch for
+    paired devices: off closes the listener, stops every token from working and
+    closes device sockets. Headless `perch-core` is always on (`alwaysOn`).
+    Addresses come from the Tailscale CLI and the OS's default route
+    (`phone.access.status`). Pairing shows a QR of `<address>#pair=<code>`
+    (`PhoneAccess.tsx`, `qrcode-generator`).
 - **Data:**
   - `db/`: `~/.perch/history.sqlite`.
   - `settings.rs`, `hosts.rs`: `~/.perch/*.json`, written atomically.

@@ -158,6 +158,8 @@ export interface SettingsData {
   previewTabs?: boolean;
   /** Tab corner style. Absent = "square" for older peers. */
   tabShape?: "square" | "round";
+  /** The desktop app also listens on the LAN for paired phones. Absent = off. */
+  phoneAccess?: boolean;
 }
 
 /**
@@ -184,6 +186,7 @@ export interface SettingsPatch {
   warnCloseAgent?: boolean;
   previewTabs?: boolean;
   tabShape?: "square" | "round";
+  phoneAccess?: boolean;
 }
 
 export type HostMode = "perch" | "direct";
@@ -1056,6 +1059,28 @@ export interface DeviceListMessage {
   type: "device.list";
   requestId: string;
 }
+/** Ask whether phones can reach this host, and where. */
+export interface PhoneAccessGetMessage {
+  type: "phone.access.get";
+  requestId: string;
+}
+/** One URL a phone can open to reach this host: the same Wi-Fi (`lan`) or the tailnet. */
+export interface PhoneAddress {
+  kind: "lan" | "tailscale";
+  url: string;
+}
+/** Whether phones can reach this host and where. `alwaysOn`: the main
+ * listener already serves the LAN (headless), so there is no switch.
+ * `addresses` is empty while access is off; an empty `requestId` is a push
+ * after the setting changed. */
+export interface PhoneAccessStatusMessage {
+  type: "phone.access.status";
+  requestId: string;
+  enabled: boolean;
+  alwaysOn: boolean;
+  addresses: PhoneAddress[];
+  error?: string;
+}
 /** Revoke one paired device; its token stops working immediately. */
 export interface DeviceRevokeMessage {
   type: "device.revoke";
@@ -1676,6 +1701,7 @@ export type ClientMessage =
   | DevicePairStartMessage
   | DevicePairCancelMessage
   | DeviceListMessage
+  | PhoneAccessGetMessage
   | DeviceRevokeMessage
   | SettingsGetMessage
   | SettingsUpdateMessage
@@ -2449,6 +2475,7 @@ export type ServerMessage =
   | WorkspaceGitMessage
   | DevicePairCodeMessage
   | DeviceListResultMessage
+  | PhoneAccessStatusMessage
   | GitStatusResultMessage
   | GitRefsResultMessage
   | GitDiffResultMessage

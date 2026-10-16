@@ -22,6 +22,7 @@ import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { KeybindingsSection } from "./KeybindingsSection";
+import { PhoneAccessRows, QrCode, pickAddress, usePhoneAccess } from "./PhoneAccess";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { Chevron } from "./ui/chevron";
 import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
@@ -636,12 +637,17 @@ function TerminalSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * perch's host binds `0.0.0.0`, so a phone on the same network can reach it.
- * A device only gets in once someone here hands it a code (see
- * `crates/perch-core/src/devices.rs`); this is where that code is produced and
- * where access is taken back.
+ * A phone reaches the desktop app only while "Phone access" is on (the headless
+ * `perch-core` is always reachable), and gets in only once someone here hands
+ * it a code (see `crates/perch-core/src/devices.rs`); this is where access is
+ * switched, the code and its QR are produced, and access is taken back.
  */
 function DevicesSection() {
+  const phone = usePhoneAccess();
+  // A phone must not be able to switch off the only way it reaches the laptop.
+  const isMobile = useIsMobileWidth();
+  const [addressKind, setAddressKind] = useState<string | null>(null);
+  const address = pickAddress(phone, addressKind);
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [code, setCode] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
@@ -672,17 +678,26 @@ function DevicesSection() {
   }, [code, remaining]);
 
   return (
+    <>
+    {!phone?.alwaysOn && !isMobile && (
+      <SettingsGroup title="Phone access" testId="settings-phone-access">
+        <PhoneAccessRows status={phone} kind={addressKind} onKind={setAddressKind} />
+      </SettingsGroup>
+    )}
     <SettingsGroup testId="settings-devices">
       <div className="py-3">
       <p className={MUTED}>
         Anything reaching this host from another machine needs a paired device. Local access never does.
       </p>
       {code ? (
-        <div className="my-2 flex flex-wrap items-center gap-[0.6rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
+        <div className="my-2 flex flex-wrap items-center gap-[0.8rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
+          {address && <QrCode text={`${address.url}#pair=${code}`} />}
+          <div className="flex min-w-0 flex-1 basis-[14rem] flex-col gap-[0.4rem]">
           <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono)]">{code}</strong>
           <span className={MUTED}>
-            Enter it on the other device. Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
+            {address ? "Scan the QR with the phone, or open the address above and enter the code." : "Enter it on the other device."} Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
           </span>
+          </div>
           <button
             type="button"
             data-testid="pair-cancel"
@@ -694,6 +709,8 @@ function DevicesSection() {
             Cancel
           </button>
         </div>
+      ) : phone?.enabled === false ? (
+        <p className={MUTED} data-testid="pair-needs-access">Turn on Phone access to pair a phone.</p>
       ) : (
         <button
           type="button"
@@ -726,6 +743,7 @@ function DevicesSection() {
       )}
       </div>
     </SettingsGroup>
+    </>
   );
 }
 

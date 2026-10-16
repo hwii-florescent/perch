@@ -42,11 +42,17 @@ export function PairingGate({ phone = false, onPaired }: { phone?: boolean; onPa
     }
   }
 
-  // A pairing link opened on this device carries its own code.
+  // A pairing link opened on this device carries its own code, whether it
+  // loads this page or only changes the #hash of the one already open.
   useEffect(() => {
-    const fromLink = takePairingCodeFromUrl();
-    if (fromLink) void claim(fromLink);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival
+    const fromLink = () => {
+      const linked = takePairingCodeFromUrl();
+      if (linked) void claim(linked);
+    };
+    fromLink();
+    window.addEventListener("hashchange", fromLink);
+    return () => window.removeEventListener("hashchange", fromLink);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribe once; `claim` only reads state at call time
   }, []);
 
   return (
@@ -102,7 +108,7 @@ export function LaptopUnreachable() {
           retrying on its own. Check that:
         </p>
         <ul className={`${BODY} m-0 list-disc pl-5`}>
-          <li>the laptop is awake and perch is open</li>
+          <li>the laptop is awake and perch is open, with Phone access on (Settings → Devices)</li>
           <li>this phone is on the same Wi-Fi, or both are on Tailscale</li>
         </ul>
         <button type="button" className={PRIMARY} data-testid="laptop-retry" onClick={() => window.location.reload()}>

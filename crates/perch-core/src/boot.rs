@@ -319,6 +319,7 @@ pub async fn boot(
             devices_path: args.devices_path,
             providers_path: args.providers_path,
             ready_tx,
+            phone_access_port: None,
         },
         registry,
         db,

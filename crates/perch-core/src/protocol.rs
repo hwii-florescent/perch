@@ -92,6 +92,9 @@ pub struct SettingsData {
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
+    /// Also listen on the LAN for paired phones (desktop app; see `phone_access.rs`).
+    #[serde(default)]
+    pub phone_access: bool,
 }
 
 fn default_theme() -> String {
@@ -156,6 +159,8 @@ pub struct SettingsPatch {
     pub preview_tabs: Option<bool>,
     #[serde(default)]
     pub tab_shape: Option<String>,
+    #[serde(default)]
+    pub phone_access: Option<bool>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -522,6 +527,15 @@ pub struct DeviceSummary {
     pub name: String,
     pub created_at: i64,
     pub last_seen_at: i64,
+}
+
+/// One URL a phone can open to reach this host. `kind` is `"lan"` (same
+/// Wi-Fi) or `"tailscale"` (the tailnet address).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhoneAddress {
+    pub kind: String,
+    pub url: String,
 }
 
 /// How much of a recorded turn is actually reviewable. A turn's boundary is
@@ -1115,6 +1129,10 @@ pub enum ClientMessage {
 
     #[serde(rename = "device.list", rename_all = "camelCase")]
     DeviceList { request_id: String },
+
+    /// Ask whether phones can reach this host, and at which addresses.
+    #[serde(rename = "phone.access.get", rename_all = "camelCase")]
+    PhoneAccessGet { request_id: String },
 
     /// Revoke one paired device. Its token stops working immediately.
     #[serde(rename = "device.revoke", rename_all = "camelCase")]
@@ -2050,6 +2068,20 @@ pub enum ServerMessage {
         request_id: String,
         code: String,
         expires_in_ms: i64,
+    },
+
+    /// Whether phones can reach this host and where. `always_on` = the main
+    /// listener already serves the LAN (headless `perch-core`), so there is
+    /// nothing to switch. `addresses` is empty while access is off. An empty
+    /// `request_id` marks an unsolicited push after the setting changed.
+    #[serde(rename = "phone.access.status", rename_all = "camelCase")]
+    PhoneAccessStatus {
+        request_id: String,
+        enabled: bool,
+        always_on: bool,
+        addresses: Vec<PhoneAddress>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 
     #[serde(rename = "device.list.result", rename_all = "camelCase")]

@@ -82,6 +82,11 @@ pub struct Settings {
     /// Tab corner style: "square" or "round". Defaults to square.
     #[serde(default = "default_tab_shape")]
     pub tab_shape: String,
+    /// The desktop app also listens on the LAN so a paired phone can reach it
+    /// (`server/phone_access.rs`). Off by default: nothing but loopback listens
+    /// until the user turns it on.
+    #[serde(default)]
+    pub phone_access: bool,
 }
 
 impl Default for Settings {
@@ -100,6 +105,7 @@ impl Default for Settings {
             warn_close_agent: true,
             preview_tabs: true,
             tab_shape: default_tab_shape(),
+            phone_access: false,
         }
     }
 }
@@ -143,7 +149,7 @@ fn default_tab_shape() -> String {
 /// - `theme: None` → leave current theme alone
 /// - `theme: Some("...")` → set to that theme (no "clear" case — a theme
 ///   name is never nullable, unlike `default_cwd`)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
     pub custom_models: Option<CustomModelsData>,
@@ -164,6 +170,7 @@ pub struct SettingsPatch {
     pub warn_close_agent: Option<bool>,
     pub preview_tabs: Option<bool>,
     pub tab_shape: Option<String>,
+    pub phone_access: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -273,6 +280,9 @@ impl SettingsStore {
         }
         if let Some(tab_shape) = patch.tab_shape {
             guard.tab_shape = tab_shape;
+        }
+        if let Some(phone_access) = patch.phone_access {
+            guard.phone_access = phone_access;
         }
         let snapshot = guard.clone();
         drop(guard);

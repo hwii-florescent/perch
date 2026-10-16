@@ -73,6 +73,7 @@ use crate::terminal::{
 mod config;
 use config::{host_to_wire, settings_to_wire};
 mod git;
+mod phone_access;
 use git::{git_error_response, resolve_git_target_or_fail};
 mod reviews;
 #[cfg(test)]
@@ -219,6 +220,9 @@ pub struct ServerOptions {
     /// shell learn the actual port when port 0 is used.  The headless binary
     /// passes `None`.
     pub ready_tx: Option<tokio::sync::oneshot::Sender<std::net::SocketAddr>>,
+    /// Start phone access on this port at boot whatever the saved setting says
+    /// (tests; `0` = any free port). `None` follows the setting.
+    pub phone_access_port: Option<u16>,
 }
 
 /// Fired on the broadcast channel whenever a session's running status changes
@@ -316,6 +320,8 @@ struct AppState {
     /// `0.0.0.0`, so anything off the loopback interface must present a token
     /// this store issued — see `authorize_request`.
     devices: Arc<crate::devices::DeviceStore>,
+    /// The LAN listener phones connect through (desktop app); see `phone_access.rs`.
+    phone: Arc<phone_access::PhoneAccess>,
     workspace_terminals: Arc<crate::workspace_terminals::WorkspaceTerminals>,
     /// Process-wide provider/lifecycle bridge used by local CLI attaches.
     /// Keeping this beside the shared terminal registry prevents a second WS
@@ -460,7 +466,8 @@ pub async fn run(
 
     // Bind the TCP listener first so we know the actual port (important when
     // port 0 is requested — the OS assigns a free port).
-    let bind_addr = if options.port == 0 || options.ready_tx.is_some() {
+    let loopback_only = options.port == 0 || options.ready_tx.is_some();
+    let bind_addr = if loopback_only {
         // Port 0 (the OS picks a free port) and the in-process desktop shell
         // (`ready_tx`, which may ask for a fixed port to keep its web origin)
         // bind loopback only.
@@ -606,6 +613,22 @@ pub async fn run(
         db.clone(),
     )?);
     crate::surfaces::ensure_schema(&db)?;
+    let devices = Arc::new(match options.devices_path {
+        Some(path) => crate::devices::DeviceStore::load(path),
+        None => crate::devices::DeviceStore::load_default(),
+    });
+    let phone_port = options.phone_access_port.unwrap_or_else(|| {
+        std::env::var("PERCH_PHONE_PORT")
+            .ok()
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(phone_access::PREFERRED_PORT)
+    });
+    let phone = Arc::new(phone_access::PhoneAccess::new(
+        (!loopback_only).then_some(bound_addr.port()),
+        base_path.clone(),
+        devices.clone(),
+        phone_port,
+    ));
     let state = AppState {
         registry,
         db,
@@ -627,10 +650,8 @@ pub async fn run(
         detached,
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
-        devices: Arc::new(match options.devices_path {
-            Some(path) => crate::devices::DeviceStore::load(path),
-            None => crate::devices::DeviceStore::load_default(),
-        }),
+        devices,
+        phone: phone.clone(),
         agent_terminals,
         workspace_terminals,
         agent_runtime,
@@ -740,6 +761,7 @@ pub async fn run(
     spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
 
+    let phone_saved = options.phone_access_port.is_some() || state.settings.get().phone_access;
     let pair_path = format!("{base_path}pair");
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
@@ -767,6 +789,12 @@ pub async fn run(
         });
     }
 
+    phone.set_router(router.clone());
+    if phone_saved {
+        if let Err(error) = phone.apply(|| true).await {
+            tracing::warn!("phone access could not start: {error}");
+        }
+    }
     tracing::info!(
         "[perch] listening on port {} (base path {base_path}, ws at {ws_path})",
         bound_addr.port()
@@ -3487,6 +3515,7 @@ mod boot_smoke_tests {
                 providers_path: None,
                 devices_path: Some(devices_path.clone()),
                 ready_tx: Some(ready_tx),
+                phone_access_port: Some(0),
             },
             Arc::new(SessionRegistry::new()),
             Arc::new(HistoryDb::open(&db_path).unwrap()),
@@ -3579,6 +3608,7 @@ mod boot_smoke_tests {
                 providers_path: None,
                 devices_path: Some(hosts_path.with_file_name("smoke-devices.json")),
                 ready_tx: Some(ready_tx),
+                phone_access_port: None,
             },
             Arc::new(SessionRegistry::new()),
             db,
