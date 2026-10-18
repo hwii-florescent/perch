@@ -122,7 +122,9 @@ function key(init: Partial<KeyboardEvent>): KeyboardEvent {
 describe("terminalKeyHandler", () => {
   it("keeps Ctrl+Space (the leader) away from the PTY and passes Enter variants to xterm", () => {
     expect(terminalKeyHandler(key({ key: " ", code: "Space", ctrlKey: true }))).toBe(false);
-    expect(terminalKeyHandler(key({ key: "Enter", ctrlKey: true }))).toBe(true);
+    const ctrlEnter = key({ key: "Enter", code: "Enter", ctrlKey: true });
+    for (const mac of [true, false]) expect(shortcutFor(ctrlEnter, true, mac)).toBeUndefined();
+    expect(terminalKeyHandler(ctrlEnter)).toBe(true);
     expect(terminalKeyHandler(key({ key: "Enter", shiftKey: true }))).toBe(true);
   });
 
@@ -134,23 +136,29 @@ describe("terminalKeyHandler", () => {
 });
 
 describe("kitty keyboard protocol", () => {
-  it("sends plain \\r until a CLI opts in, then distinct Ctrl/Shift+Enter", async () => {
+  it.each([1, 7])("passes Ctrl/Shift+Enter through Perch with Kitty flags %i, and restores legacy Enter on pop", async (flags) => {
     // jsdom has no matchMedia or canvas; xterm only uses them to measure.
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }) })) as never;
     window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {} })) as never;
     const term = new Terminal({ vtExtensions: { kittyKeyboard: true } });
     term.open(document.createElement("div"));
+    term.attachCustomKeyEventHandler(terminalKeyHandler);
     const sent: string[] = [];
     term.onData((d) => sent.push(d));
     const press = (init: KeyboardEventInit) =>
       term.textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true, ...init } as KeyboardEventInit));
 
     press({ ctrlKey: true });
-    await new Promise<void>((r) => term.write("\x1b[>1u", r)); // what claude/codex push at startup
+    // Pi pushes flags 7 and queries support; other CLIs use flags 1.
+    await new Promise<void>((r) => term.write(`\x1b[>${flags}u\x1b[?u`, r));
+    expect(sent).toEqual(["\r", `\x1b[?${flags}u`]);
+    sent.length = 0;
     press({});
     press({ ctrlKey: true });
     press({ shiftKey: true });
-    expect(sent).toEqual(["\r", "\r", "\x1b[13;5u", "\x1b[13;2u"]);
+    await new Promise<void>((r) => term.write("\x1b[<u", r));
+    press({ ctrlKey: true });
+    expect(sent).toEqual(["\r", "\x1b[13;5u", "\x1b[13;2u", "\r"]);
     term.dispose();
   });
 });
