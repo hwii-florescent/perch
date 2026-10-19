@@ -11,10 +11,8 @@
 // `WebSocket` — same problem store.test.ts already has, same fix: install a
 // no-op stub before import (see that file's comment for the details).
 //
-// This file still never calls `createPerchTerminal` itself — it only
-// exercises the two pure helpers below, never constructing a real xterm
-// `Terminal` or touching `ResizeObserver`/`document.fonts`.
-import { describe, it, expect } from "vitest";
+// Constructor tests below stub the canvas and observers needed by real xterm.
+import { describe, it, expect, vi } from "vitest";
 
 class FakeWebSocket {
   static CONNECTING = 0;
@@ -116,5 +114,92 @@ describe("createPerchTerminal", () => {
     expect(fired).toEqual(["replay", "live"]);
     expect(term.buffer.active.getLine(0)?.translateToString(true)).toBe("live");
     dispose();
+  });
+
+  it.each([0, 1, 5, 7])("recovers macOS's context-menu-only Ctrl+Enter through xterm (Kitty flags %i)", async (flags) => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const userAgent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15");
+    const { createPerchTerminal } = await import("./xtermSetup");
+    const { terminalKeyHandler } = await import("./keybinds");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const { term, dispose } = createPerchTerminal(container, () => {});
+    term.attachCustomKeyEventHandler(terminalKeyHandler);
+    const sent: string[] = [];
+    term.onData((data) => sent.push(data));
+    const textarea = term.textarea!;
+    const key = (type: string, key: string, ctrlKey = true) => textarea.dispatchEvent(new KeyboardEvent(type, {
+      key, code: key === "Control" ? "ControlLeft" : "Enter", keyCode: key === "Control" ? 17 : 13,
+      ctrlKey, bubbles: true, cancelable: true,
+    }));
+    // Native keyboard menus target the hovered sidebar/gutter, not the focused textarea.
+    const menu = (ctrlKey = false) => document.body.dispatchEvent(new MouseEvent("contextmenu", { button: 2, ctrlKey, bubbles: true, cancelable: true }));
+    const expected = flags ? "\x1b[13;5u" : "\r";
+    try {
+      await new Promise<void>((resolve) => term.write(`\x1b[=${flags}u`, resolve));
+      term.focus();
+      key("keydown", "Control");
+      menu(); // Physical macOS Ctrl+Return: no keydown, menu has ctrlKey=false.
+      key("keyup", "Enter");
+      key("keyup", "Control", false);
+      expect(sent.splice(0)).toEqual([expected]);
+
+      key("keydown", "Control");
+      menu();
+      key("keyup", "Control", false); // Modifier released before Enter.
+      key("keyup", "Enter", false);
+      expect(sent.splice(0)).toEqual([expected]);
+
+      key("keydown", "Control");
+      key("keydown", "Enter");
+      menu(); // A browser that also delivered keydown must not double-send.
+      key("keyup", "Enter");
+      key("keyup", "Control", false);
+      expect(sent.splice(0)).toEqual([expected]);
+
+      menu(); // A mouse menu alone is never terminal input.
+      expect(sent).toEqual([]);
+      key("keydown", "Control");
+      menu(true); // Ctrl+click without an Enter release must not type anything.
+      key("keyup", "Control", false);
+      expect(sent).toEqual([]);
+      key("keydown", "Enter", false);
+      key("keyup", "Enter", false);
+      expect(sent.splice(0)).toEqual(["\r"]);
+      key("keyup", "Enter"); // A stray keyup/focus transfer has no menu to recover.
+      expect(sent).toEqual([]);
+
+      key("keydown", "Control");
+      menu();
+      textarea.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      key("keyup", "Enter");
+      expect(sent).toEqual([]);
+
+      const other = document.createElement("input");
+      container.append(other);
+      other.focus();
+      menu();
+      key("keyup", "Enter");
+      expect(sent).toEqual([]); // A terminal that isn't focused cannot claim the menu.
+      other.remove();
+      term.focus();
+      term.options.disableStdin = true;
+      key("keydown", "Control");
+      menu();
+      key("keyup", "Enter");
+      expect(sent).toEqual([]); // A watcher still cannot type through recovery.
+      term.options.disableStdin = false;
+      term.attachCustomKeyEventHandler(() => false);
+      menu();
+      key("keyup", "Enter");
+      expect(sent).toEqual([]); // Perch/custom key gates still own intercepted keys.
+    } finally {
+      dispose();
+      container.remove();
+      userAgent.mockRestore();
+    }
   });
 });

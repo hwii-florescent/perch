@@ -299,6 +299,52 @@ export function createPerchTerminal(
   term.open(container);
   const stopTuiWheel = attachTerminalTuiWheel(term);
 
+  // macOS can consume Ctrl+Return as a contextual-menu shortcut before WebKit
+  // dispatches keydown. The page gets contextmenu (without ctrlKey) and Enter
+  // keyup only. Recover that missing press, not a new PTY encoding or shortcut.
+  // ponytail: recovery waits for keyup, so this native path has no auto-repeat;
+  // a native contextMenuKeyDown override would be needed for press-time input.
+  const keySurface = term.element;
+  let enterDown = false;
+  let ctrlDown = false;
+  let menuPending = false;
+  let menuCtrl = false;
+  const nativeMenuKeys = /Macintosh.*AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
+  const resetMenuKey = () => { enterDown = ctrlDown = menuPending = menuCtrl = false; };
+  const trackMenuKey = (event: KeyboardEvent) => {
+    ctrlDown = event.ctrlKey;
+    if (event.key === "Enter") enterDown = true;
+    menuPending = menuCtrl = false;
+  };
+  const trackMenu = () => {
+    menuPending = !enterDown && document.activeElement === term.textarea;
+    menuCtrl = ctrlDown;
+  };
+  const recoverMenuKey = (event: KeyboardEvent) => {
+    ctrlDown = event.ctrlKey;
+    if (event.key !== "Enter") return;
+    const textarea = term.textarea;
+    if (textarea && menuPending && !enterDown && (menuCtrl || event.ctrlKey) && !event.isComposing && document.activeElement === textarea) {
+      const press = new KeyboardEvent("keydown", {
+        key: "Enter", code: event.code, ctrlKey: true, shiftKey: event.shiftKey,
+        altKey: event.altKey, metaKey: event.metaKey, bubbles: true, cancelable: true,
+      });
+      // The legacy xterm encoder uses these even where KeyboardEventInit ignores them.
+      Object.defineProperties(press, { keyCode: { value: 13 }, which: { value: 13 } });
+      textarea.dispatchEvent(press);
+    }
+    enterDown = menuPending = menuCtrl = false;
+  };
+  if (nativeMenuKeys && keySurface) {
+    // Parent capture runs before xterm's textarea keyup, preserving press/release order.
+    keySurface.addEventListener("keydown", trackMenuKey, true);
+    // Keyboard context menus target the mouse location (even the sidebar),
+    // not the focused textarea. Only that textarea may claim the later Enter release.
+    document.addEventListener("contextmenu", trackMenu, true);
+    keySurface.addEventListener("keyup", recoverMenuKey, true);
+    keySurface.addEventListener("focusout", resetMenuKey);
+  }
+
   // xterm 5.5's Viewport schedules constructor/reset callbacks without
   // cancelling them on dispose. A short-lived Dockview pane can disappear
   // before those callbacks run and they then read a destroyed renderer.
@@ -499,6 +545,10 @@ export function createPerchTerminal(
       dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);
       stopTuiWheel();
+      keySurface?.removeEventListener("keydown", trackMenuKey, true);
+      document.removeEventListener("contextmenu", trackMenu, true);
+      keySurface?.removeEventListener("keyup", recoverMenuKey, true);
+      keySurface?.removeEventListener("focusout", resetMenuKey);
       term.dispose();
     },
   };
