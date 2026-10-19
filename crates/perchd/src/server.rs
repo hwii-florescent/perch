@@ -176,6 +176,7 @@ struct Inner {
     /// Seq of the first byte still in the log file.
     log_start: u64,
     log: Option<File>,
+    history_error: Option<String>,
     screen: crate::screen::Screen,
     cols: u16,
     rows: u16,
@@ -194,21 +195,37 @@ struct Meta {
     cols: u16,
     rows: u16,
     exit_code: Option<i32>,
+    #[serde(default)]
+    history_error: Option<String>,
+    #[serde(default)]
+    seq: Option<u64>,
 }
 
 /// A connection's outbound queue. `queued` counts payload bytes not yet
 /// written to the socket, which is what backpressure is measured against.
 #[derive(Clone)]
 struct Outbox {
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::SyncSender<Vec<u8>>,
     queued: Arc<AtomicUsize>,
+    socket: Arc<UnixStream>,
 }
 
 impl Outbox {
     fn send(&self, frame: &Frame) {
         let bytes = proto::encode(frame);
-        self.queued.fetch_add(bytes.len(), Ordering::SeqCst);
-        let _ = self.tx.send(bytes);
+        let len = bytes.len();
+        let reserved = self
+            .queued
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
+                (queued + len <= MAX_QUEUED).then_some(queued + len)
+            })
+            .is_ok();
+        if !reserved {
+            let _ = self.socket.shutdown(std::net::Shutdown::Both);
+        } else if self.tx.try_send(bytes).is_err() {
+            self.queued.fetch_sub(len, Ordering::SeqCst);
+            let _ = self.socket.shutdown(std::net::Shutdown::Both);
+        }
     }
     fn msg(&self, msg: &ServerMsg) {
         self.send(&Frame::Json(serde_json::to_vec(msg).unwrap()));
@@ -260,6 +277,8 @@ fn write_meta(dir: &Path, s: &Session, inner: &Inner) {
         cols: inner.cols,
         rows: inner.rows,
         exit_code: inner.exit_code,
+        history_error: inner.history_error.clone(),
+        seq: Some(inner.seq),
     };
     let path = meta_path(dir, &s.id);
     let tmp = path.with_extension("json.tmp");
@@ -298,7 +317,14 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
             let _ = fs::remove_file(&path);
             continue;
         }
-        let len = fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
+        // A failed append may also have failed to truncate the old file.
+        // Never relabel those stale bytes as output after the lost range.
+        let invalid = meta.history_error.is_some() && meta.seq == Some(meta.log_start);
+        let len = if invalid {
+            0
+        } else {
+            fs::metadata(&log).map(|m| m.len()).unwrap_or(0)
+        };
         let session = Session {
             id: meta.id.clone(),
             argv: meta.argv,
@@ -306,9 +332,10 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
             created_ms: meta.created_ms,
             pid: None,
             inner: Mutex::new(Inner {
-                seq: meta.log_start + len,
+                seq: meta.seq.unwrap_or(0).max(meta.log_start + len),
                 log_start: meta.log_start,
                 log: None,
+                history_error: meta.history_error,
                 screen: crate::screen::Screen::new(meta.cols, meta.rows),
                 cols: meta.cols,
                 rows: meta.rows,
@@ -329,10 +356,11 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
     state.conns.fetch_add(1, Ordering::SeqCst);
     state.touch();
     let conn = state.next_conn.fetch_add(1, Ordering::SeqCst);
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2048);
     let outbox = Outbox {
         tx,
         queued: Arc::new(AtomicUsize::new(0)),
+        socket: Arc::new(stream.try_clone().unwrap()),
     };
 
     let writer_queue = outbox.queued.clone();
@@ -340,6 +368,7 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
         Ok(s) => s,
         Err(_) => return,
     };
+    let _ = write_half.set_write_timeout(Some(Duration::from_secs(10)));
     let writer = std::thread::spawn(move || {
         for bytes in rx {
             let len = bytes.len();
@@ -375,7 +404,8 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
     for s in state.sessions.lock().unwrap().values() {
         s.inner.lock().unwrap().subscribers.remove(&conn);
     }
-    drop(outbox); // the writer exits once every queued frame is flushed
+    let _ = outbox.socket.shutdown(std::net::Shutdown::Both);
+    drop(outbox);
     let _ = writer.join();
     state.conns.fetch_sub(1, Ordering::SeqCst);
     state.touch();
@@ -510,6 +540,7 @@ fn info(s: &Session) -> SessionInfo {
         rows: inner.rows,
         seq: inner.seq,
         created_ms: s.created_ms,
+        history_error: inner.history_error.clone(),
     }
 }
 
@@ -552,21 +583,22 @@ fn create(
     for (k, v) in &env {
         cmd.env(k, v);
     }
-    let mut child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("spawn: {e}"))?;
-    drop(pair.slave);
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-
+    // Acquire storage and PTY handles before any child can be launched. An
+    // unwritable disk must not leave an unregistered invisible process.
     let log = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .mode(0o600)
         .open(log_path(&state.dir, &id))
-        .map_err(|e| format!("history log: {e}"))?;
+        .map_err(|e| format!("history log: {e}; no process started"))?;
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn: {e}"))?;
+    drop(pair.slave);
     let session = Arc::new(Session {
         id: id.clone(),
         argv,
@@ -577,6 +609,7 @@ fn create(
             seq: 0,
             log_start: 0,
             log: Some(log),
+            history_error: None,
             screen: crate::screen::Screen::new(cols, rows),
             cols,
             rows,
@@ -649,10 +682,30 @@ fn pump_output(dir: &Path, s: &Session, mut reader: Box<dyn Read + Send>) {
         let bytes = &buf[..n];
         let mut inner = s.inner.lock().unwrap();
         let seq = inner.seq;
-        if let Some(log) = inner.log.as_mut() {
-            let _ = log.write_all(bytes);
-        }
         inner.seq += n as u64;
+        let retrying = inner.log.is_none();
+        if retrying {
+            // Retry on actual new output after the user frees disk space.
+            inner.log_start = seq;
+            inner.log = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(log_path(dir, &s.id))
+                .ok();
+        }
+        let written = inner
+            .log
+            .as_mut()
+            .ok_or_else(|| io::Error::other("history storage unavailable"))
+            .and_then(|log| log.write_all(bytes));
+        if let Err(error) = written {
+            degrade_history(dir, s, &mut inner, error);
+        } else if retrying {
+            // Mark the newly truncated file valid before a daemon restart.
+            write_meta(dir, s, &inner);
+        }
         inner.screen.process(bytes);
         if inner.seq - inner.log_start > LOG_CAP {
             compact(dir, s, &mut inner);
@@ -677,6 +730,30 @@ fn pump_output(dir: &Path, s: &Session, mut reader: Box<dyn Read + Send>) {
     }
 }
 
+/// A failed append may be partial. Never advertise unwritten bytes as retained.
+/// The current screen and live output still work; history retries on new output.
+fn degrade_history(dir: &Path, s: &Session, inner: &mut Inner, error: io::Error) {
+    inner.log = None;
+    inner.log_start = inner.seq;
+    // Do not replay an old/partially written file under new sequence offsets.
+    let _ = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(log_path(dir, &s.id));
+    let message = format!("Could not save terminal output ({error}). Execution continues; free disk space or restore access");
+    if inner.history_error.is_none() {
+        eprintln!("perchd: {}: {message}", s.id);
+        for out in inner.subscribers.values() {
+            out.msg(&ServerMsg::HistoryError {
+                id: s.id.clone(),
+                message: message.clone(),
+            });
+        }
+    }
+    inner.history_error = Some(message);
+    write_meta(dir, s, inner);
+}
+
 /// Keep the newest half of the log.
 fn compact(dir: &Path, s: &Session, inner: &mut Inner) {
     let path = log_path(dir, &s.id);
@@ -684,12 +761,23 @@ fn compact(dir: &Path, s: &Session, inner: &mut Inner) {
     let new_start = inner.seq - keep;
     let tail = read_range(&path, inner.log_start, new_start, inner.seq);
     let tmp = path.with_extension("log.tmp");
-    if fs::write(&tmp, &tail).is_err() || fs::rename(&tmp, &path).is_err() {
-        return;
+    let result = if tail.len() as u64 != keep {
+        Err(io::Error::other("could not read retained terminal history"))
+    } else {
+        fs::write(&tmp, &tail)
+            .and_then(|_| fs::rename(&tmp, &path))
+            .and_then(|_| OpenOptions::new().append(true).open(&path))
+            .map(|log| {
+                inner.log = Some(log);
+                inner.log_start = new_start;
+            })
+    };
+    if let Err(error) = result {
+        let _ = fs::remove_file(&tmp);
+        degrade_history(dir, s, inner, error);
+    } else {
+        write_meta(dir, s, inner);
     }
-    inner.log = OpenOptions::new().append(true).open(&path).ok();
-    inner.log_start = new_start;
-    write_meta(dir, s, inner);
 }
 
 fn read_range(path: &Path, log_start: u64, from: u64, to: u64) -> Vec<u8> {
@@ -715,6 +803,16 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
         .unwrap_or(end.saturating_sub(DEFAULT_REPLAY))
         .clamp(inner.log_start, end);
     let mut replay = read_range(&log_path(&state.dir, &s.id), inner.log_start, start, end);
+    if replay.len() as u64 != end - start {
+        degrade_history(
+            &state.dir,
+            s,
+            &mut inner,
+            io::Error::other("retained history is missing or unreadable"),
+        );
+        start = end;
+        replay.clear();
+    }
     if since.is_none() && start > inner.log_start {
         // A default window starts mid-stream; begin at the next line so the
         // first replayed bytes aren't half an escape sequence or character.
@@ -724,6 +822,8 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
         }
     }
     let attached = Attached {
+        history_error: inner.history_error.clone(),
+        gap: since.is_some_and(|seq| seq < start),
         start,
         end,
         alive: inner.alive,
@@ -764,6 +864,113 @@ fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture(name: &str) -> State {
+        let dir =
+            std::env::temp_dir().join(format!("perchd-storage-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("history")).unwrap();
+        State {
+            dir,
+            sessions: Mutex::new(HashMap::new()),
+            conns: AtomicUsize::new(0),
+            next_conn: AtomicU64::new(1),
+            last_activity: Mutex::new(Instant::now()),
+        }
+    }
+
+    #[test]
+    fn failed_history_open_never_launches_a_child() {
+        let state = Arc::new(fixture("open"));
+        let marker = state.dir.join("child-started");
+        // A path collision/unwritable history location is an ordinary storage
+        // failure. The command would leave a marker if it were ever spawned.
+        fs::create_dir(log_path(&state.dir, "shell")).unwrap();
+        let result = create(
+            &state,
+            "shell".into(),
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("touch '{}'", marker.display()),
+            ],
+            None,
+            vec![],
+            80,
+            24,
+        );
+        assert!(result.unwrap_err().contains("no process started"));
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(!marker.exists());
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
+
+    #[test]
+    fn history_write_failure_is_visible_and_live_output_survives() {
+        let state = fixture("append");
+        let path = log_path(&state.dir, "shell");
+        fs::write(&path, b"").unwrap();
+        let session = Session {
+            id: "shell".into(),
+            argv: vec![],
+            cwd: None,
+            pid: None,
+            created_ms: now_ms(),
+            writer: Mutex::new(None),
+            master: Mutex::new(None),
+            inner: Mutex::new(Inner {
+                seq: 0,
+                log_start: 0,
+                // A real failing write, portable to macOS without /dev/full.
+                log: Some(File::open(&path).unwrap()),
+                history_error: None,
+                screen: crate::screen::Screen::new(80, 24),
+                cols: 80,
+                rows: 24,
+                alive: true,
+                exit_code: None,
+                subscribers: HashMap::new(),
+            }),
+        };
+        pump_output(
+            &state.dir,
+            &session,
+            Box::new(io::Cursor::new(b"still running")),
+        );
+        let inner = session.inner.lock().unwrap();
+        assert!(inner.alive);
+        assert_eq!(inner.seq, 13);
+        assert_eq!(inner.log_start, 13);
+        assert!(inner
+            .history_error
+            .as_ref()
+            .unwrap()
+            .contains("Execution continues"));
+        assert!(inner.screen.screen().contents().contains("still running"));
+        drop(inner);
+        // Even if truncating the old log also failed, daemon restart cannot
+        // reinterpret old bytes under a new offset.
+        fs::write(&path, b"stale bytes").unwrap();
+        let restored = load_sessions(&state.dir);
+        assert_eq!(restored["shell"].inner.lock().unwrap().seq, 13);
+        // The next actual output retries storage after a user repairs/free space.
+        pump_output(
+            &state.dir,
+            &session,
+            Box::new(io::Cursor::new(b"after repair")),
+        );
+        let inner = session.inner.lock().unwrap();
+        assert_eq!(inner.log_start, 13);
+        assert_eq!(fs::read(&path).unwrap(), b"after repair");
+        assert!(
+            inner.history_error.is_some(),
+            "earlier lost output stays disclosed"
+        );
+        drop(inner);
+        let restored = load_sessions(&state.dir);
+        assert_eq!(restored["shell"].inner.lock().unwrap().seq, 25);
+        fs::remove_dir_all(&state.dir).unwrap();
+    }
 
     #[test]
     fn a_long_dir_gets_a_socket_path_that_fits() {

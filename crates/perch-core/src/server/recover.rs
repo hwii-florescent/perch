@@ -6,15 +6,13 @@
 //! agent whose daemon process is alive gets its runtime back before the first
 //! client connects; a view opened later just joins it.
 //!
-//! An agent that exited while no core ran (killed from Activity Monitor: pi
-//! catches SIGTERM and exits 0, so the status says nothing) left a marker, see
-//! `agent_runtime::in_shell`. Its pane is a plain shell by now; that shell is
-//! replaced with the agent resumed on its recorded provider session.
+//! Recovery only observes existing processes. If an agent ended while Perch
+//! was closed, its wrapper's shell is preserved; boot never replaces it or
+//! resumes a conversation behind the user's back.
 
 use super::*;
 use crate::agent_fleet::{AgentRegistration, AgentSnapshot, AgentState};
 use crate::agent_runtime::terminal_key;
-use terminal::claude_conversation_exists;
 
 pub(super) fn recover_agents(app: &AppState) {
     for snapshot in app.agent_runtime.lifecycle().list() {
@@ -39,7 +37,7 @@ fn recover_one(app: &AppState, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
     }
     let marker = crate::daemon::exit_marker(&tk);
     // Consumed whatever happens: it describes the quit period only.
-    let killed = std::fs::remove_file(&marker).is_ok();
+    let _ = std::fs::remove_file(&marker);
     let Some(info) = crate::daemon::client()?
         .session(&tk)?
         .filter(|session| session.alive)
@@ -52,27 +50,16 @@ fn recover_one(app: &AppState, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
     if !(row.host_id.is_empty() || row.host_id == "local") {
         return Ok(());
     }
-    let mut extra = Vec::new();
-    let mut resume = true;
-    if killed && snapshot.resumable {
-        // Replace the shell the killed agent left behind. A conversation the
-        // CLI never wrote (killed before the first message) restarts fresh
-        // under the same id, as `open_agent_terminal` does.
-        resume = conversation_exists(snapshot);
-        crate::daemon::discard(&tk);
-        anyhow::ensure!(
-            !crate::daemon::session_alive(&tk),
-            "could not end the shell left by the killed agent"
-        );
-        extra = launch_args(key, provider_id, &row)?;
-        if let (false, "claude", Some(id)) =
-            (resume, provider_id, snapshot.provider_session_id.as_ref())
-        {
-            extra.extend(["--session-id".to_string(), id.clone()]);
-        }
-        tracing::info!(session = %key.session_id, provider_id, resume, "restarting agent killed while perch was closed");
-    }
-    // The attach resizes a live process to the size it is given: pass its own.
+    // Even if the process ends between this lookup and attach, boot must not
+    // replace it. Reconnecting only permits an existing-process attachment.
+    app.agent_runtime.signal(
+        key,
+        crate::agent_fleet::ProviderSignal::TransportLost {
+            reason: "reattaching existing process after core restart".into(),
+        },
+        now_millis(),
+    )?;
+    // Reattach at the process's existing size without taking a resize lease.
     let client = ClientIdentity::new("__perch_recover__", "local", ClientKind::Desktop)?;
     let on_data: crate::terminal::TerminalDataListener = Arc::new(|_, _| {});
     let on_exit: crate::terminal::TerminalExitListener = Arc::new(|_, _| {});
@@ -88,8 +75,8 @@ fn recover_one(app: &AppState, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
         client.clone(),
         info.cols,
         info.rows,
-        &extra,
-        resume,
+        &[],
+        true,
         on_data,
         on_exit,
         |_, _| {},
@@ -105,50 +92,4 @@ fn recover_one(app: &AppState, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
         tracing::warn!(%error, "could not checkpoint recovered agent");
     }
     Ok(())
-}
-
-/// Is there a conversation to resume under the recorded provider session?
-fn conversation_exists(snapshot: &AgentSnapshot) -> bool {
-    let Some(id) = snapshot.provider_session_id.as_deref() else {
-        return false;
-    };
-    match snapshot.provider_id.as_str() {
-        "claude" => claude_conversation_exists(id) != Some(false),
-        // Pi reports its session file; a path that is gone resumes nothing.
-        "pi" | "omp" if id.starts_with('/') => Path::new(id).exists(),
-        _ => true,
-    }
-}
-
-/// The same dynamic flags `open_agent_terminal` gives a fresh launch.
-fn launch_args(
-    key: &AgentKey,
-    provider_id: &str,
-    row: &crate::db::SessionRow,
-) -> anyhow::Result<Vec<String>> {
-    let mut extra = Vec::new();
-    if !matches!(provider_id, "codex" | "opencode") {
-        if let Some(model) = row
-            .last_model
-            .clone()
-            .filter(|_| row.last_agent.as_deref() == Some(provider_id))
-        {
-            extra.extend(["--model".to_string(), model]);
-        }
-    }
-    if crate::native_ui::supported(provider_id) {
-        let paths = crate::native_ui::prepare(key, provider_id, true)?;
-        if !matches!(provider_id, "codex" | "opencode") {
-            extra.extend([
-                if provider_id == "claude" {
-                    "--settings"
-                } else {
-                    "--extension"
-                }
-                .into(),
-                paths.extension.to_string_lossy().into_owned(),
-            ]);
-        }
-    }
-    Ok(extra)
 }

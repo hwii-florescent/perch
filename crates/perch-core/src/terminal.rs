@@ -18,6 +18,8 @@ use uuid::Uuid;
 
 pub type TerminalDataListener = Arc<dyn Fn(String, String) + Send + Sync>;
 pub type TerminalExitListener = Arc<dyn Fn(String, i32) + Send + Sync>;
+/// Internal attachment end, never a process exit code on the wire.
+pub const TRANSPORT_LOST: i32 = i32::MIN;
 
 /// The scrollback a newly opened view gets: what perchd hands a reattaching
 /// runtime (`perchd::proto::DEFAULT_REPLAY`). Views kept alive across tab
@@ -401,7 +403,6 @@ impl Write for DaemonWriter {
 /// dance).
 struct SpawnedPty {
     id: String,
-    process_id: Option<u32>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: Box<dyn Read + Send>,
@@ -422,6 +423,8 @@ struct Spawned {
     /// until this attachment ends for another reason (-1).
     wait: Box<dyn FnOnce() -> i32 + Send>,
     daemon_session: Option<String>,
+    cols: u16,
+    rows: u16,
 }
 
 /// Attach to `key` in perchd, creating it first unless a live process with
@@ -435,13 +438,14 @@ fn attach_daemon(
     command: Vec<String>,
     existing_only: bool,
 ) -> anyhow::Result<Spawned> {
-    let alive = client.session(key)?.is_some_and(|s| s.alive);
+    let info = client.session(key)?.filter(|s| s.alive);
+    let alive = info.is_some();
     if existing_only && !alive {
         anyhow::bail!("persisted terminal process is no longer available");
     }
-    if alive {
-        let _ = client.resize(key, cols, rows);
-    } else {
+    // Attaching is observation, not resize authority. Only a lease holder
+    // may resize an existing process (including the first attach after boot).
+    if !alive {
         anyhow::ensure!(!command.is_empty(), "no command to start");
         let cwd = cwd.or_else(|| {
             std::env::current_dir()
@@ -470,9 +474,11 @@ fn attach_daemon(
         killer: Box::new(terminal),
         wait: Box::new(move || match waiter.wait() {
             perchd::client::AttachEnd::Exited(code) => code,
-            _ => -1,
+            _ => TRANSPORT_LOST,
         }),
         daemon_session: Some(key.to_string()),
+        cols: info.as_ref().map_or(cols, |s| s.cols),
+        rows: info.as_ref().map_or(rows, |s| s.rows),
     })
 }
 
@@ -556,7 +562,6 @@ fn spawn_pty(
 
     Ok(SpawnedPty {
         id,
-        process_id: child.process_id(),
         master: pair.master,
         writer,
         reader,
@@ -593,7 +598,6 @@ impl TerminalManager {
     ) -> anyhow::Result<String> {
         let SpawnedPty {
             id,
-            process_id: _,
             master,
             writer,
             reader,
@@ -874,7 +878,7 @@ impl AgentTerminalRegistry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn attach_inner(
+    pub(crate) fn attach_inner(
         &self,
         session_id: &str,
         viewer_id: &str,
@@ -899,32 +903,12 @@ impl AgentTerminalRegistry {
         // The process lives in perchd under `session_id`, so it outlives this
         // runtime: a viewer disconnect, a crash or a restart only loses the
         // attachment, and the next attach finds the same process by key.
-        // An unreachable daemon degrades to an in-process spawn (persistence is
-        // a bonus; CLI mode itself must keep working) — except for recovery,
-        // which must never start a replacement for a process it can't see.
-        let spawned = match crate::daemon::client() {
-            Ok(client) => {
-                attach_daemon(&client, session_id, cols, rows, cwd, command, existing_only)?
-            }
-            Err(err) if !existing_only => {
-                tracing::warn!(session_id, error = %err, "perchd unavailable; spawning a non-persistent terminal");
-                let pty = spawn_pty(cols, rows, cwd, Some(command), false)?;
-                let mut child = pty.child;
-                Spawned {
-                    id: pty.id,
-                    process_id: pty.process_id,
-                    writer: pty.writer,
-                    resize: Box::new(pty.master),
-                    reader: pty.reader,
-                    killer: pty.killer,
-                    wait: Box::new(move || {
-                        child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1)
-                    }),
-                    daemon_session: None,
-                }
-            }
-            Err(err) => return Err(err.context("persisted terminal process is not reachable")),
-        };
+        // Never silently weaken durability or duplicate an unreachable CLI.
+        let client = crate::daemon::client().with_context(|| format!(
+            "Persistent terminal unavailable: cannot reach perchd in {}. Retry after restoring daemon access; no replacement process was started",
+            crate::daemon::dir().display()
+        ))?;
+        let spawned = attach_daemon(&client, session_id, cols, rows, cwd, command, existing_only)?;
         let Spawned {
             id,
             process_id,
@@ -934,6 +918,8 @@ impl AgentTerminalRegistry {
             killer,
             wait,
             daemon_session,
+            cols,
+            rows,
         } = spawned;
 
         let mut viewers = HashMap::new();
@@ -1288,19 +1274,33 @@ impl AgentTerminalRegistry {
     /// Check whether the exact runtime identity is still live. For a daemon
     /// process this asks the daemon directly (same key, same pid), so a
     /// dropped attachment does not look like a dead provider process.
-    pub fn runtime_alive(&self, identity: &TerminalRuntimeIdentity) -> bool {
+    pub fn runtime_state(&self, identity: &TerminalRuntimeIdentity) -> crate::daemon::RuntimeState {
+        use crate::daemon::RuntimeState;
         if let Some(key) = identity.daemon_session.as_deref() {
-            return crate::daemon::client()
-                .and_then(|c| Ok(c.session(key)?))
-                .is_ok_and(|s| s.is_some_and(|s| s.alive && s.pid == identity.process_id));
+            return match crate::daemon::client().and_then(|c| Ok(c.session(key)?)) {
+                Ok(Some(s)) if s.alive && s.pid == identity.process_id => RuntimeState::Alive,
+                Ok(_) => RuntimeState::Exited,
+                Err(_) => RuntimeState::Unknown,
+            };
         }
-        self.entries
+        if self
+            .entries
             .lock()
             .unwrap()
             .get(&identity.session_id)
             .is_some_and(|entry| {
                 entry.terminal_id == identity.terminal_id && entry.process_id == identity.process_id
             })
+        {
+            RuntimeState::Alive
+        } else {
+            RuntimeState::Exited
+        }
+    }
+
+    /// Unknown is conservatively live: it cannot authorize cleanup/restart.
+    pub fn runtime_alive(&self, identity: &TerminalRuntimeIdentity) -> bool {
+        self.runtime_state(identity) != crate::daemon::RuntimeState::Exited
     }
 
     /// Stop the exact runtime represented by `identity` before a lifecycle
@@ -1606,6 +1606,33 @@ mod tests {
             Arc::new(|_id: String, _data: String| {}),
             Arc::new(|_id: String, _code: i32| {}),
         )
+    }
+
+    #[test]
+    fn attaching_after_core_restart_does_not_resize_the_existing_pty() {
+        let key = "reconnect-keeps-size";
+        let daemon = crate::daemon::client().unwrap();
+        daemon
+            .create(
+                key,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 30".into()],
+                None,
+                vec![],
+                132,
+                40,
+            )
+            .unwrap();
+        let pid = daemon.session(key).unwrap().unwrap().pid;
+        let registry = AgentTerminalRegistry::new(Arc::new(|_| {}));
+        let (data, exit) = noop_listeners();
+        registry
+            .attach_existing(key, "phone", 40, 12, None, data, exit)
+            .unwrap();
+        let current = daemon.session(key).unwrap().unwrap();
+        assert_eq!(current.pid, pid);
+        assert_eq!((current.cols, current.rows), (132, 40));
+        assert_eq!(registry.size(key), Some((132, 40)));
+        assert!(crate::daemon::terminate(key));
     }
 
     /// Task 1's core correctness fix: a second `agentAttach` for a session

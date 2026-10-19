@@ -692,6 +692,53 @@ pub(super) fn handle_worktree_create(
     });
 }
 
+/// Refuse destructive removal until the user closes execution and resolves
+/// editor drafts. Force only overrides Git's on-disk dirty check, never this.
+fn worktree_remove_preflight(db: &HistoryDb, path: &str) -> anyhow::Result<()> {
+    let wanted = std::fs::canonicalize(path)?;
+    for workspace in db.list_workspaces("local", None)? {
+        let root = std::fs::canonicalize(&workspace.path)
+            .unwrap_or_else(|_| PathBuf::from(&workspace.path));
+        if !root.starts_with(&wanted) {
+            continue;
+        }
+        let buffers =
+            db.list_file_buffer_metadata(&workspace.id, crate::db::MAX_FILE_BUFFERS_PER_WORKSPACE)?;
+        if let Some(buffer) = buffers.iter().find(|b| b.dirty || b.conflict) {
+            anyhow::bail!(
+                "Save or discard the unsaved draft '{}' before deleting this worktree",
+                buffer.path
+            );
+        }
+        // A blank session minted on connect is not execution and has no tab
+        // the user could close. Only listed tabs block; daemon work is checked
+        // independently below, including anything whose attachment was lost.
+        let has_tabs = db
+            .list_sessions()?
+            .iter()
+            .any(|session| session.workspace_id.as_deref() == Some(&workspace.id));
+        anyhow::ensure!(!has_tabs,
+            "Close this nest's terminal and agent tabs before deleting its worktree; their processes must be confirmed stopped");
+    }
+    // Includes daemon work whose core attachment was lost; never equate a
+    // failed lookup with permission to remove its working directory.
+    for session in crate::daemon::client()?.list()? {
+        if session.alive
+            && session.cwd.as_deref().is_some_and(|cwd| {
+                std::fs::canonicalize(cwd)
+                    .unwrap_or_else(|_| PathBuf::from(cwd))
+                    .starts_with(&wanted)
+            })
+        {
+            anyhow::bail!(
+                "Stop terminal '{}' before deleting this worktree",
+                session.id
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `worktree.remove`: the checkout (and with `delete_branch`, its merged
 /// branch) goes, and its workspace row is archived — history, comments and
 /// buffers stay inspectable, but the sidebar no longer lists it.
@@ -712,7 +759,12 @@ pub(super) fn handle_worktree_remove(
     let out_tx = state.out_tx.clone();
     let app = state.app.clone();
     tokio::spawn(async move {
-        let result = if delete_branch {
+        let result = if let Err(error) = worktree_remove_preflight(&app.db, &path) {
+            Err(crate::worktree::WorktreeOpError {
+                message: error.to_string(),
+                dirty: false,
+            })
+        } else if delete_branch {
             crate::worktree::delete(&repo_path, &path, force).await
         } else {
             crate::worktree::remove(&repo_path, &path, force)
@@ -1230,6 +1282,51 @@ pub(super) fn handle_workspace_restore(
 #[cfg(test)]
 mod worktree_registration_tests {
     use super::*;
+
+    #[test]
+    fn removal_refuses_sessions_and_unsaved_drafts_without_discarding_them() {
+        let root = std::env::temp_dir().join(format!("perch-remove-preflight-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = HistoryDb::open(":memory:").unwrap();
+        let (_, ws) = db
+            .create_project("local", &root.to_string_lossy(), None, None)
+            .unwrap();
+        db.create_session("still-open", &root.to_string_lossy())
+            .unwrap();
+        worktree_remove_preflight(&db, &root.to_string_lossy()).unwrap(); // blank connect row is not work
+        db.mark_cli_activity("still-open").unwrap();
+        assert!(worktree_remove_preflight(&db, &root.to_string_lossy())
+            .unwrap_err()
+            .to_string()
+            .contains("Close this nest"));
+        db.delete_session("still-open").unwrap();
+        let update = crate::db::FileBufferUpdate {
+            content: "valuable draft".into(),
+            base_content: String::new(),
+            base_version: None,
+            external_version: None,
+            dirty: true,
+            conflict: false,
+        };
+        db.ensure_file_buffer(&ws.id, "draft.txt", update, 128)
+            .unwrap();
+        assert!(worktree_remove_preflight(&db, &root.to_string_lossy())
+            .unwrap_err()
+            .to_string()
+            .contains("draft.txt"));
+        assert_eq!(
+            db.get_file_buffer(&ws.id, "draft.txt")
+                .unwrap()
+                .unwrap()
+                .content,
+            "valuable draft"
+        );
+        assert!(root.exists());
+        db.close_file_buffer(&ws.id, "draft.txt", Some(0), true)
+            .unwrap();
+        worktree_remove_preflight(&db, &root.to_string_lossy()).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn row(
         branch: Option<&str>,

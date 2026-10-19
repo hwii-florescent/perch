@@ -256,12 +256,16 @@ there, not here.
   - Closing an agent session (tab ×, Cmd+W, sidebar close; not a terminal)
     asks first (`closeGuard.ts`, `CloseAgentGuard.tsx`); "Don't show this
     warning again" sets `settings.warnCloseAgent` off, Settings turns it back
-    on. Cmd+Shift+T reopens the last closed tab, terminals, agents and files
+    on. The dialog distinguishes "Stop for everyone" from dismissing this view;
+    a watcher can only dismiss its observation, leaving execution discoverable
+    in its nest, and the core rechecks ownership before session deletion.
+    Cmd+Shift+T reopens the last closed tab, terminals, agents and files
     alike: a file or review opens again; a session starts a fresh one of the
     same harness in the same nest (`closedTabs.ts`, per viewer, 20 entries, 7
     days, descriptors only, cleared on Remove project); it does not resume
     the agent's conversation yet.
-  - perch never archives: closing is deleting. Tab and session-row ×,
+  - perch never archives: a global close is deleting (watcher dismissal is
+    local observation only, not a global close). Tab and session-row ×,
     the agent terminal exiting (the agent, then its login shell), "Close
     all sessions" and "Remove project" delete the sessions (their agents
     and shells are killed) and, for Remove project, the project. The folder
@@ -269,7 +273,10 @@ there, not here.
     (`claude --resume <id>`), and adding the folder again registers a fresh
     project. Closing a terminal pane ends its shell; only switching sessions
     leaves one running unseen. No process perch starts may outlive what the
-    UI shows. (Archived workspaces are removed worktrees, a separate thing.)
+    UI shows. Stop must be confirmed before bookkeeping is removed. Worktree
+    deletion, including force, refuses open tabs, unsaved drafts, live daemon
+    processes and unknown daemon state. (Archived workspaces are removed
+    worktrees, a separate thing.)
   - A session starts only in a listed project's workspace or in Chats
     (`~/.perch/scratch`, `session::chats_pair`): "No project", and the blank
     session minted on connect, go to Chats. There is no "start in any

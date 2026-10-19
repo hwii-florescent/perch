@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { sessionLabel } from "../workspaceTabs";
-import { useCloseGuard } from "../closeGuard";
+import { dismissSessionView, useCloseGuard } from "../closeGuard";
 import { usePerchStore } from "../store";
 
 /** Mounted once in App: the warning `requestCloseSession` raises for an agent session. */
@@ -12,8 +12,8 @@ export function CloseAgentGuard() {
   const dismiss = () => { useCloseGuard.setState({ pending: null }); setNever(false); };
   return (
     <ConfirmDialog
-      message={`Close "${sessionLabel(pending)}"?\n\nClosing this tab stops its agent and any shells in it. The agent's own transcript stays on disk.`}
-      confirmLabel="Close"
+      message={`Close "${sessionLabel(pending)}"?\n\nClosing this tab stops its agent and shells for everyone watching. The agent's own transcript stays on disk.`}
+      confirmLabel="Stop for everyone"
       onCancel={dismiss}
       onConfirm={() => {
         if (never) usePerchStore.getState().updateSettings({ warnCloseAgent: false });
@@ -21,6 +21,7 @@ export function CloseAgentGuard() {
         dismiss();
       }}
     >
+      <button type="button" className="mb-4 text-sm underline" onClick={() => { dismissSessionView(pending.id); dismiss(); }}>Keep running and dismiss this view</button>
       <label className="mb-4 flex cursor-pointer items-center gap-2 text-[0.8rem] text-subtext-0">
         <input type="checkbox" data-testid="close-agent-never" checked={never} onChange={(e) => setNever(e.target.checked)} />
         Don't show this warning again

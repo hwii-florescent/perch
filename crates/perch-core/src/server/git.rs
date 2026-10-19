@@ -68,7 +68,7 @@ pub(super) fn resolve_git_target_or_fail(
     app: &AppState,
     workspace_id: &str,
     request_id: &str,
-    out_tx: &UnboundedSender<ServerMessage>,
+    out_tx: &Outbox,
 ) -> Option<WorkspaceTarget> {
     match git_workspace_target(app, workspace_id) {
         Ok(target) => Some(target),
@@ -245,11 +245,7 @@ fn git_preview_wire(
     }
 }
 
-fn send_git_action_error(
-    out_tx: &UnboundedSender<ServerMessage>,
-    request_id: String,
-    message: impl Into<String>,
-) {
+fn send_git_action_error(out_tx: &Outbox, request_id: String, message: impl Into<String>) {
     fail(out_tx, request_id, "git_action_failed", message, false);
 }
 

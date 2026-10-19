@@ -106,6 +106,8 @@ describe("createPerchTerminal", () => {
     globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
     globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
     const { createPerchTerminal } = await import("./xtermSetup");
+    const { socket } = await import("./ws");
+    const recover = vi.spyOn(socket, "recoverTerminalStream").mockImplementation(() => {});
     const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
     const fired: string[] = [];
     term.write("", () => fired.push("replay"));
@@ -113,7 +115,18 @@ describe("createPerchTerminal", () => {
     term.resize(100, 30); // flushes queued writes synchronously
     expect(fired).toEqual(["replay", "live"]);
     expect(term.buffer.active.getLine(0)?.translateToString(true)).toBe("live");
+    term.write(new Uint8Array(16 * 1024 * 1024 + 1));
+    term.write("ignored until reconnect");
+    expect(recover).toHaveBeenCalledTimes(1);
     dispose();
+    // terminalKeeper disposes disconnected views. The reconnected view gets
+    // a fresh parser and budget rather than remaining in overload forever.
+    const fresh = createPerchTerminal(document.createElement("div"), () => {});
+    fresh.term.write("fresh replay");
+    fresh.term.resize(100, 30);
+    expect(fresh.term.buffer.active.getLine(0)?.translateToString(true)).toBe("fresh replay");
+    fresh.dispose();
+    recover.mockRestore();
   });
 
   it.each([0, 1, 5, 7])("recovers macOS's context-menu-only Ctrl+Enter through xterm (Kitty flags %i)", async (flags) => {

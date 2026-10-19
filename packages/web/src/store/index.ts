@@ -3,6 +3,7 @@ import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal
 import { create } from "zustand";
 import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
+import { useWorkspaceFilesStore } from "../filesystemStore";
 import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
@@ -1744,6 +1745,17 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   },
 
   removeWorktree: (hostId, repoPath, path, force, deleteBranch) => {
+    // The editor may be ahead of its debounced durable draft. Refuse locally
+    // before sending; force only applies to Git's on-disk dirty guard.
+    const files = useWorkspaceFilesStore.getState();
+    const root = path.replace(/\/$/, "");
+    for (const workspace of get().workspaces) {
+      if (workspace.hostId !== hostId || (workspace.path !== root && !workspace.path.startsWith(root + "/"))) continue;
+      const draft = Object.values(files.documents[workspace.id] ?? {}).find((doc) =>
+        doc.content !== doc.savedContent || doc.conflict || doc.state === "saving" || doc.bufferState === "saving");
+      if (draft) return Promise.resolve({ type: "worktree.error" as const, requestId: newId(),
+        hostId, message: `Save or discard the unsaved draft '${draft.path}' before deleting this worktree`, dirty: false });
+    }
     return sendWorktreeRequest({
       type: "worktree.remove",
       requestId: "",

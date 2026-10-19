@@ -203,12 +203,31 @@ fn connect() -> anyhow::Result<Client> {
     }
 }
 
-/// Is `key`'s process running in the daemon? `false` when the daemon can't be
-/// reached — callers use this to decide whether to resume, never to kill.
+/// Losing contact is not evidence that a process stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeState {
+    Alive,
+    Exited,
+    Unknown,
+}
+
+pub fn session_state(key: &str) -> RuntimeState {
+    match client().and_then(|c| session_state_with(&c, key)) {
+        Ok(state) => state,
+        Err(_) => RuntimeState::Unknown,
+    }
+}
+
+fn session_state_with(client: &Client, key: &str) -> anyhow::Result<RuntimeState> {
+    Ok(match client.session(key)? {
+        Some(info) if info.alive => RuntimeState::Alive,
+        _ => RuntimeState::Exited,
+    })
+}
+
+/// Conservative compatibility check: unknown must not authorize replacement.
 pub fn session_alive(key: &str) -> bool {
-    client()
-        .and_then(|c| Ok(c.session(key)?))
-        .is_ok_and(|s| s.is_some_and(|s| s.alive))
+    session_state(key) != RuntimeState::Exited
 }
 
 /// Terminate `key`'s process group and wait for the daemon to confirm the
@@ -216,19 +235,23 @@ pub fn session_alive(key: &str) -> bool {
 /// Returns whether the process is confirmed gone.
 pub fn terminate(key: &str) -> bool {
     let Ok(client) = client() else { return false };
+    terminate_with(&client, key)
+}
+
+fn terminate_with(client: &Client, key: &str) -> bool {
     for signal in [libc::SIGHUP, libc::SIGKILL] {
         if client.kill(key, signal).is_err() {
-            return !session_alive(key);
+            return session_state_with(client, key).ok() == Some(RuntimeState::Exited);
         }
         let deadline = Instant::now() + Duration::from_millis(1500);
         while Instant::now() < deadline {
-            if !session_alive(key) {
+            if session_state_with(client, key).ok() == Some(RuntimeState::Exited) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    !session_alive(key)
+    session_state_with(client, key).ok() == Some(RuntimeState::Exited)
 }
 
 /// Terminate `key` and delete its history — for terminals closed for good.
@@ -250,6 +273,14 @@ pub fn terminal_env() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn losing_daemon_contact_cannot_confirm_exit_or_successful_stop() {
+        let client = perchd::client::Client::from_transport(std::io::empty(), std::io::sink());
+        // Both list and kill now fail on a genuinely closed transport.
+        assert!(super::session_state_with(&client, "still-running").is_err());
+        assert!(!super::terminate_with(&client, "still-running"));
+    }
+
     /// launchd silently refuses a malformed job, which would leave perch
     /// with no daemon; `plutil` is the same parser launchctl uses.
     #[cfg(target_os = "macos")]

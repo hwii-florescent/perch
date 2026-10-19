@@ -1617,6 +1617,34 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
         return;
     }
 
+    // A watcher must not turn its local close into a global stop. Recheck
+    // here as control can transfer after a close dialog opens.
+    let client = match connection_client_identity(state) {
+        Ok(client) => client,
+        Err(error) => {
+            fail(&state.out_tx, None, "agent_control_required", error, false);
+            return;
+        }
+    };
+    if state
+        .app
+        .agent_runtime
+        .lifecycle()
+        .list()
+        .iter()
+        .any(|snapshot| {
+            snapshot.key.session_id == session_id
+                && snapshot
+                    .input_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.client.id != client.id)
+        })
+    {
+        fail(&state.out_tx, None, "agent_control_required",
+            "Another view controls this session. Dismiss your view, or take control before stopping it for everyone", false);
+        return;
+    }
+
     // Cancel any in-flight turn and drop this connection's runtime
     // for the session (claude_runner, pending_turn, etc.).
     if let Some(runtime) = state.runtimes.lock().unwrap().remove(&session_id) {
@@ -1695,7 +1723,11 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
             .remove(key)
             .map_err(|error| anyhow::anyhow!("could not stop its agent: {error}"))?;
     }
-    app.agent_terminals.kill(session_id);
+    if !crate::daemon::terminate(session_id) {
+        anyhow::bail!("could not confirm legacy terminal stopped; session retained");
+    }
+    // Close shells before forgetting any session bookkeeping.
+    app.workspace_terminals.delete_session(session_id)?;
     app.registry.remove(session_id);
     super::agent_history::forget_session(session_id);
     for set in [
@@ -1706,7 +1738,6 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
         set.lock().unwrap().remove(session_id);
     }
     app.session_viewers.lock().unwrap().remove(session_id);
-    app.workspace_terminals.delete_session(session_id)?;
     for key in &agent_keys {
         let _ = app.agent_persistence.delete_snapshot(key);
         app.agent_modes.lock().unwrap().remove(key);

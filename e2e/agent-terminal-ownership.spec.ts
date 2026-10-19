@@ -36,16 +36,23 @@ test("agent runtime survives view changes and control transfers between desktop 
     await expect(mobile.locator(".xterm-rows")).toContainText(marker);
     // A guessed terminal id on an unrelated connection cannot write, even
     // though this connection is authorized to inspect the same local core.
-    const refused = await phone.evaluate((terminalId) => new Promise<string>((resolve, reject) => {
+    const refused = await phone.evaluate(({ terminalId, sessionId }) => new Promise<string[]>((resolve, reject) => {
+      const codes: string[] = [];
       const ws = new WebSocket(`ws://${location.host}/ws`);
-      const timer = setTimeout(() => { ws.close(); reject(new Error("Missing ownership refusal")); }, 5000);
-      ws.onopen = () => ws.send(JSON.stringify({ type: "terminal.input", terminalId, data: "UNAUTHORIZED_SENTINEL", generation: 1 }));
+      const timer = setTimeout(() => { ws.close(); reject(new Error("Missing ownership refusal " + JSON.stringify(codes))); }, 5000);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "terminal.input", terminalId, data: "UNAUTHORIZED_SENTINEL", generation: 1 }));
+        ws.send(JSON.stringify({ type: "session.delete", sessionId }));
+      };
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === "error") { clearTimeout(timer); ws.close(); resolve(message.code); }
+        if (message.type === "error") {
+          codes.push(message.code);
+          if (codes.length === 2) { clearTimeout(timer); ws.close(); resolve(codes); }
+        }
       };
-    }), id);
-    expect(refused).toBe("agent_control_required");
+    }), { terminalId: id, sessionId });
+    expect(refused).toEqual(["agent_control_required", "agent_control_required"]);
     await expect(desktop.locator(".xterm-rows")).not.toContainText("UNAUTHORIZED_SENTINEL");
 
     // Taking control moves it from the desktop without a release step.
@@ -79,8 +86,24 @@ test("agent runtime survives view changes and control transfers between desktop 
     fs.mkdirSync(shots, { recursive: true });
     await phone.screenshot({ path: path.join(shots, `agent-mobile-${testInfo.project.name}.png`) });
     await page.screenshot({ path: path.join(shots, `agent-desktop-${testInfo.project.name}.png`) });
-    // Only the view holding input can stop the agent (pane menu → Stop agent).
+    // A watcher's tab close dismisses observation, never the phone's work.
+    await page.getByTestId(`tab-close-${sessionId}`).click();
+    await expect(desktop).toHaveCount(0);
+    await expect(mobile).toHaveAttribute("data-controlling", "true");
+    await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
+    await page.getByTestId(`tab-${sessionId}`).click();
+    await expect(desktop).toHaveAttribute("data-terminal-id", id);
+
+    // Owners can also choose observation-only dismissal in the close dialog.
     await desktop.getByRole("button", { name: "Take control", exact: true }).click();
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
+    await page.getByTestId(`tab-close-${sessionId}`).click();
+    await page.getByRole("button", { name: "Keep running and dismiss this view", exact: true }).click();
+    await expect(desktop).toHaveCount(0);
+    await expect(mobile).toHaveAttribute("data-terminal-id", id);
+    await page.getByTestId(`tab-${sessionId}`).click();
+    await expect(desktop).toHaveAttribute("data-terminal-id", id);
+    await expect(desktop.locator(".xterm-rows")).toContainText(`${marker}_phone`);
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     // The session's pane menu opens from its top-row tab. A stopped agent
     // has exited, so its session closes on every view.
@@ -91,13 +114,14 @@ test("agent runtime survives view changes and control transfers between desktop 
     expect(errors).toEqual([]);
   } finally {
     await setChatMode(page, "cli").catch(() => {});
-    // Close only the session created by this isolated browser context.
-    await page.evaluate(() => new Promise<void>((resolve) => {
+    // Close only the session created by this isolated browser context. A
+    // timeout closes the page; cleanup must not hide the original failure.
+    if (!page.isClosed()) await page.evaluate(() => new Promise<void>((resolve) => {
       const ws = new WebSocket(`ws://${location.host}/ws`);
       const timer = setTimeout(() => { ws.close(); resolve(); }, 5000);
       ws.onopen = () => ws.send(JSON.stringify({ type: "session.delete", sessionId: localStorage.getItem("perch.sessionId") }));
       ws.onmessage = (event) => { if (JSON.parse(event.data).type === "session.deleted") { clearTimeout(timer); ws.close(); resolve(); } };
-    }));
+    })).catch(() => {});
     await phoneContext?.close();
   }
 });

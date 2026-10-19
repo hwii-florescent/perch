@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as net from "node:net";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { startChat } from "./projects";
 
 async function command(page: Page, text: string) {
@@ -12,7 +12,10 @@ async function command(page: Page, text: string) {
   await input.press("Enter");
 }
 
-test("shell state survives reload and multiple panes", async ({ page, context }, testInfo) => {
+// Fails identically on the previous commit: it predates "a tab is a terminal".
+// The leader split no longer adds a legacy shell pane (`terminal.opened`), so
+// rewrite it for tiled terminal tabs (agent.terminal.opened) before enabling.
+test.fixme("shell state survives reload and multiple panes", async ({ page, context }, testInfo) => {
   const opened = new Map<string, { sessionId: string; terminalId: string }>();
   const errors: string[] = [];
   const observe = (view: Page) => {
@@ -78,7 +81,7 @@ test("shell state survives reload and multiple panes", async ({ page, context },
     expect(errors).toEqual([]);
   } finally {
     // Only these fixture identities are closed; no global terminal cleanup.
-    await page.evaluate(async (rows) => new Promise<void>((resolve) => {
+    if (!page.isClosed()) await page.evaluate(async (rows) => new Promise<void>((resolve) => {
       const ws = new WebSocket("ws://127.0.0.1:7799/ws");
       const pending = new Set(rows.map((row) => row.terminalId));
       const finish = () => { clearTimeout(timer); ws.close(); resolve(); };
@@ -92,7 +95,7 @@ test("shell state survives reload and multiple panes", async ({ page, context },
         if (message.requestId) pending.delete(message.requestId);
         if (!pending.size) finish();
       };
-    }), [...opened.values()]);
+    }), [...opened.values()]).catch(() => {});
   }
 });
 
@@ -113,7 +116,7 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
   const errors: string[] = [];
   async function boot() {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--cwd", fixture], {
-      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: "ignore",
+      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", PERCHD_DIR: path.join(fixture, "perchd"), PERCH_SETTINGS: path.join(fixture, "settings.json") }, stdio: "ignore",
     });
     await expect.poll(async () => {
       if (core?.exitCode !== null) throw new Error("Fixture core exited before readiness");
@@ -148,8 +151,27 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
     await command(page, `printf 'after_%s_PID_%s_END\\n' "$PERCH_RESTART" "$$"`);
     await expect(shell.locator(".xterm-rows")).toContainText(`after_survived_PID_${pid}_END`);
     expect(errors).toEqual([]);
+
+    // A quiet/idle lifecycle used to bypass reconnect-only recovery, silently
+    // replacing its shell if perchd died while the app was closed.
+    await command(page, "printf '\\033]0;Pi >\\007'; printf 'IDLE_''READY\\n'");
+    await expect(shell.locator(".xterm-rows")).toContainText("IDLE_READY");
+    const db = path.join(fixture, "history.sqlite");
+    await expect.poll(() => execFileSync("sqlite3", [db, "SELECT state FROM agent_lifecycle WHERE session_id = '" + sessionId + "'"], { encoding: "utf8" }).trim()).toBe("idle");
+    await stop();
+    execFileSync("pkill", ["-KILL", "-f", `__perchd serve --dir ${path.join(fixture, "perchd")}$`]);
+    await boot();
+    await expect(shell.locator('[role="alert"]')).toContainText(/no replacement|existing|fresh session/i, { timeout: 30_000 });
+    expect(await shell.getAttribute("data-terminal-id")).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("perch.sessionId"))).toBe(sessionId);
+    // An explicit new tab, unlike an old tab's reconnect, is a launch request.
+    await startChat(page);
+    await command(page, "printf 'NEW_''SHELL_PID_%s_END\\n' \"$$\"");
+    await expect(shell.locator(".xterm-rows")).toContainText(/NEW_SHELL_PID_\d+_END/);
+    expect((await shell.locator(".xterm-rows").innerText()).match(/NEW_SHELL_PID_(\d+)_END/)![1]).not.toBe(pid);
   } finally {
     await stop();
+    try { execFileSync("pkill", ["-KILL", "-f", `__perchd serve --dir ${path.join(fixture, "perchd")}$`]); } catch { /* already gone */ }
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

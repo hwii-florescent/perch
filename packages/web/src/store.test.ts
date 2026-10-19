@@ -719,6 +719,28 @@ describe("agent catalog revisions", () => {
 });
 
 describe("deleteSession (tab close)", () => {
+  it("worktree deletion refuses a local draft before debounce, including force", async () => {
+    const { useWorkspaceFilesStore } = await import("./filesystemStore");
+    const before = usePerchStore.getState().workspaces;
+    const documents = useWorkspaceFilesStore.getState().documents;
+    try {
+      usePerchStore.setState({ workspaces: [{ id: "draft-ws", hostId: "local", path: "/draft-checkout" } as never] });
+      useWorkspaceFilesStore.setState({ documents: { "draft-ws": { "note.txt": {
+        workspaceId: "draft-ws", path: "note.txt", content: "new unsaved work",
+        savedContent: "old text", persistedContent: "old text", state: "ready",
+      } } } });
+      FakeWebSocket.sent.length = 0;
+      const reply = await usePerchStore.getState().removeWorktree("local", "/repo", "/draft-checkout", true, true);
+      expect(reply).toMatchObject({ type: "worktree.error", dirty: false });
+      expect("message" in reply && reply.message).toContain("note.txt");
+      expect(FakeWebSocket.sent).toEqual([]);
+      expect(useWorkspaceFilesStore.getState().documents["draft-ws"]["note.txt"].content).toBe("new unsaved work");
+    } finally {
+      usePerchStore.setState({ workspaces: before });
+      useWorkspaceFilesStore.setState({ documents });
+    }
+  });
+
   it("closing the active tab lands on a sibling in the same project, not the newest session elsewhere", () => {
     usePerchStore.setState({
       sessionId: "A",

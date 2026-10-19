@@ -36,3 +36,4 @@ pub mod uploads;
 pub mod usage;
 pub mod workspace_terminals;
 pub mod worktree;
+pub mod ws_outbox;

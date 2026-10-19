@@ -60,6 +60,9 @@ import { usePerchStore } from "./store";
 import { scrollbarWidth } from "./components/ui/scrollbar";
 import { onZoom, zoomFactor } from "./zoom";
 import { attachTerminalTuiWheel } from "./terminalTuiWheel";
+import { socket } from "./ws";
+
+export const MAX_PENDING_TERMINAL_BYTES = 16 * 1024 * 1024;
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the
  * agent CLIs (and essentially every TUI) treat as the minimum sane width. */
@@ -220,7 +223,24 @@ export function createPerchTerminal(
   // empty Uint8Array is truthy and parses to nothing, keeping write order.
   // Drop this once xterm's flushSync checks `!== undefined`.
   const write = term.write.bind(term);
-  term.write = (data, callback) => write(data.length ? data : new Uint8Array(0), callback);
+  let pendingBytes = 0;
+  let overloaded = false;
+  term.write = (data, callback) => {
+    if (overloaded) return;
+    // JS strings occupy up to two bytes per code unit. Release only after
+    // xterm parses the write, not when the WebSocket delivers it.
+    const bytes = typeof data === "string" ? data.length * 2 : data.byteLength;
+    if (pendingBytes + bytes > MAX_PENDING_TERMINAL_BYTES) {
+      overloaded = true;
+      socket.recoverTerminalStream();
+      return;
+    }
+    pendingBytes += bytes;
+    write(data.length ? data : new Uint8Array(0), () => {
+      pendingBytes -= bytes;
+      callback?.();
+    });
+  };
 
   // Re-apply on OS appearance change so an already-open terminal picks up
   // the other palette live rather than only at next mount.

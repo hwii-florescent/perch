@@ -227,6 +227,54 @@ fn a_client_over_connect_stdio_drives_sessions() {
 /// The app quits and comes back long after a TUI's only full paint: the
 /// default window no longer holds it, or the modes the TUI set at startup.
 #[test]
+fn a_stalled_attachment_drops_without_stopping_the_shell_and_can_replay() {
+    let dir = test_dir("slow-consumer");
+    let client = connect(&dir);
+    sh(&client, "fast");
+    let pid = client.session("fast").unwrap().unwrap().pid;
+    let (_, unread, waiter) = client.attach("fast", None).unwrap();
+    client
+        .input(
+            "fast",
+            b"head -c 40000000 /dev/zero | tr '\\000' x; printf '\\nOUTPUT_DONE\\n'\n",
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while waiter.try_end().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "stalled attachment was not bounded"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(waiter.wait(), AttachEnd::Dropped);
+    assert_eq!(client.session("fast").unwrap().unwrap().pid, pid);
+    assert!(
+        client.health().unwrap().alive > 0,
+        "a stalled reader must not block replies"
+    );
+    drop(unread);
+    while !client
+        .snapshot("fast")
+        .unwrap()
+        .text
+        .contains("OUTPUT_DONE")
+    {
+        assert!(Instant::now() < deadline, "output did not finish");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (attached, replay, _) = client.attach("fast", None).unwrap();
+    assert_eq!(attached.pid, pid);
+    let mut seen = Vec::new();
+    wait_for(&collector(replay), &mut seen, "OUTPUT_DONE");
+    client.detach("fast").unwrap();
+    let (gap, reader, _) = client.attach("fast", Some(0)).unwrap();
+    assert!(gap.gap, "compaction must disclose unavailable history");
+    drop(reader);
+    let _ = client.kill("fast", libc::SIGKILL);
+}
+
+#[test]
 fn a_default_attach_ends_with_the_exact_screen() {
     let dir = test_dir("restore");
     let a = connect(&dir);

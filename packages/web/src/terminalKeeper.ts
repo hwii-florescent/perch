@@ -67,6 +67,11 @@ export function forgetTerminal(key: string) {
   kept.delete(key);
 }
 
+/** Dismiss observation only; releasing bindings never stops execution. */
+export function forgetSessionTerminals(sessionId: string) {
+  for (const [key, entry] of [...kept]) if (entry.sessionId === sessionId) forgetTerminal(key);
+}
+
 socket.onConnectionChange((connected) => {
   if (!connected) for (const key of [...kept.keys()]) forgetTerminal(key);
 });

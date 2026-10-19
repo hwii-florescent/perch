@@ -17,6 +17,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::ws_outbox::Sender as Outbox;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Query, State};
@@ -27,7 +28,7 @@ use axum::Router;
 use futures::{SinkExt, StreamExt};
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -35,8 +36,8 @@ use crate::agent::{
     AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions,
 };
 use crate::agent_fleet::{
-    now_millis, AgentKey, AgentLifecycleRegistry, AgentMode, ClientIdentity, ClientKind,
-    ControlChannel,
+    now_millis, AgentKey, AgentLifecycleRegistry, AgentMode, AgentState, ClientIdentity,
+    ClientKind, ControlChannel,
 };
 use crate::agent_persistence::{AgentPersistence, EffectiveModeScope};
 use crate::agent_runtime::AgentRuntimeAdapter;
@@ -691,10 +692,29 @@ pub async fn run(
             }
         }))?;
 
-    // Persist restart recovery's Reconnecting revision before any asynchronous
-    // attach callback can race a delayed pre-restart snapshot write.
+    // Mark every previously launched local runtime attach-only BEFORE accepting
+    // clients, including idle agents and plain Terminal sessions. Probing perchd
+    // asynchronously must not leave a window that silently replaces a lost shell.
+    // Confirmed exits stay exited; sleeping agents still require explicit wake.
     for record in &restored_agents {
-        if let Err(error) = state.agent_persistence.save_snapshot(record) {
+        let key = &record.snapshot.key;
+        if !matches!(
+            record.snapshot.state,
+            AgentState::Sleeping | AgentState::Exited
+        ) && state
+            .db
+            .get_session(&key.session_id)?
+            .is_some_and(|row| row.host_id.is_empty() || row.host_id == "local")
+        {
+            state.agent_runtime.signal(
+                key,
+                crate::agent_fleet::ProviderSignal::TransportLost {
+                    reason: "core restarted; reconnect to the existing process only".into(),
+                },
+                now_millis(),
+            )?;
+        }
+        if let Err(error) = persist_agent_runtime(&state, key) {
             tracing::warn!(
                 key = ?record.snapshot.key,
                 %error,
@@ -1384,8 +1404,8 @@ fn spawn_agent_turn_state_task(state: AppState) {
     });
 }
 
-/// Default idle window before a safe agent is hibernated, overridable with
-/// `PERCH_HIBERNATE_AFTER_SECS` (0 disables hibernation entirely). This is a
+/// Hibernation is opt-in via `PERCH_HIBERNATE_AFTER_SECS` (default 0).
+/// Preserving a conversation is not preserving a process. This is a
 /// process-wide constant rather than a setting on purpose — every blocker in
 /// `HibernationPolicy::evaluate` (a viewer, input ownership, an unfinished
 /// state, a missing resume identity) already refuses the unsafe cases, so the
@@ -1397,7 +1417,7 @@ fn hibernate_after() -> Option<std::time::Duration> {
     let seconds = std::env::var("PERCH_HIBERNATE_AFTER_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(15 * 60);
+        .unwrap_or(0);
     (seconds > 0).then(|| std::time::Duration::from_secs(seconds))
 }
 
@@ -1537,6 +1557,19 @@ fn same_origin(headers: &HeaderMap) -> bool {
             .is_some_and(|(origin, host)| origin.as_str().eq_ignore_ascii_case(host))
 }
 
+/// Headers a reverse proxy adds (Tailscale Serve, Cloudflare, nginx, etc.).
+/// A request carrying any of them did not come from this machine, whatever its
+/// peer address says: the proxy itself is the loopback peer.
+fn proxied(headers: &HeaderMap) -> bool {
+    headers.keys().any(|name| {
+        let name = name.as_str();
+        matches!(name, "forwarded" | "via" | "x-real-ip")
+            || name.starts_with("x-forwarded-")
+            || name.starts_with("tailscale-")
+            || name.starts_with("cf-")
+    })
+}
+
 fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
     let host = headers
         .get(axum::http::header::HOST)
@@ -1555,19 +1588,6 @@ fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
 }
 
 /// Resolve authorization to a paired device identity, or a trusted local
-/// Headers a reverse proxy adds (Tailscale Serve, Cloudflare, nginx, etc.).
-/// A request carrying any of them did not come from this machine, whatever its
-/// peer address says: the proxy itself is the loopback peer.
-fn proxied(headers: &HeaderMap) -> bool {
-    headers.keys().any(|name| {
-        let name = name.as_str();
-        matches!(name, "forwarded" | "via" | "x-real-ip")
-            || name.starts_with("x-forwarded-")
-            || name.starts_with("tailscale-")
-            || name.starts_with("cf-")
-    })
-}
-
 /// client (None). Retain the identity for the lifetime of a WebSocket.
 fn authorize_request(
     state: &AppState,
@@ -1853,7 +1873,7 @@ struct ConnState {
     conn_id: String,
     /// Authenticated pairing identity; local clients have no paired device.
     device_id: Option<String>,
-    out_tx: UnboundedSender<ServerMessage>,
+    out_tx: Outbox,
     runtimes: Mutex<HashMap<String, SessionRuntime>>,
     terminals: TerminalManager,
     /// The local session id this connection is currently viewing (its most
@@ -1920,7 +1940,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let _conn_count_guard = ConnCountGuard(app.connected_clients.clone());
 
     let (mut sender, mut receiver) = socket.split();
-    let (out_tx, mut out_rx) = unbounded_channel::<ServerMessage>();
+    let (out_tx, mut out_rx) = crate::ws_outbox::channel();
 
     // Unique id for this browser connection — used to scope unicast registrations
     // so they can all be cleaned up atomically when the socket closes.
@@ -1928,21 +1948,31 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
 
     let writer_devices = app.devices.clone();
     let writer_device_id = device_id.clone();
+    let writer_out = out_tx.clone();
     let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
+        loop {
+            let next = tokio::select! {
+                biased;
+                _ = writer_out.failed() => break,
+                next = out_rx.recv() => next,
+            };
+            let Some((text, _permit)) = next else { break };
             if writer_device_id
                 .as_ref()
                 .is_some_and(|id| !writer_devices.is_paired(id))
             {
                 break;
             }
-            let Ok(text) = serde_json::to_string(&message) else {
-                continue;
+            let sent = tokio::select! {
+                _ = writer_out.failed() => break,
+                sent = tokio::time::timeout(std::time::Duration::from_secs(10), sender.send(Message::Text(text))) => sent,
             };
-            if sender.send(Message::Text(text)).await.is_err() {
+            if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
         }
+        // A failed writer must also wake the receiver and release leases.
+        writer_out.disconnect();
     });
 
     let terminal_tx = out_tx.clone();
@@ -1993,6 +2023,10 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let on_exit_agent_sessions = terminal_agent_sessions.clone();
     let on_exit_tails = terminal_tails.clone();
     let on_exit = Arc::new(move |terminal_id: String, code: i32| {
+        if code == crate::terminal::TRANSPORT_LOST {
+            terminal_tx.disconnect();
+            return;
+        }
         on_exit_tails.lock().unwrap().remove(&terminal_id);
         // PTY end clears any blocked flag for the session it was attached to
         // — there's no longer a live prompt to answer.
@@ -2118,7 +2152,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let event_blocked = app.blocked_sessions.clone();
     let event_stale = app.stale_sessions.clone();
     let event_runtime = app.agent_runtime.clone();
-    tokio::spawn(async move {
+    let event_task = tokio::spawn(async move {
         loop {
             match events_rx.recv().await {
                 Ok(evt) => {
@@ -2171,7 +2205,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let hub_out_tx = state.out_tx.clone();
     let hub_app = app.clone();
     let hub_conn_id = conn_id.clone();
-    tokio::spawn(async move {
+    let hub_task = tokio::spawn(async move {
         loop {
             match hub_rx.recv().await {
                 Ok(msg) => {
@@ -2222,6 +2256,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     loop {
         let message = tokio::select! {
             biased;
+            _ = state.out_tx.failed() => break,
             _ = revoked.changed() => {
                 if device_id.as_ref().is_some_and(|id| !app.devices.is_paired(id)) {
                     break;
@@ -2302,6 +2337,8 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             runner.cancel();
         }
     }
+    event_task.abort();
+    hub_task.abort();
     writer.abort();
 }
 
@@ -2396,7 +2433,7 @@ fn request_error(
 /// `retryable`, and `request_id` optionality — do not normalize divergent
 /// error codes or retryable flags.
 fn fail(
-    out_tx: &UnboundedSender<ServerMessage>,
+    out_tx: &Outbox,
     request_id: impl Into<Option<String>>,
     code: &str,
     message: impl Into<String>,
@@ -3515,6 +3552,8 @@ mod boot_smoke_tests {
         let paired = devices.claim(&code, "test phone", now, 1).unwrap();
         drop(devices);
         let db_path = root.join("history.sqlite");
+        // Paired devices only work while Phone access is on (the desktop shell
+        // keeps it off by default), so start this host with it on.
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(run(
             ServerOptions {

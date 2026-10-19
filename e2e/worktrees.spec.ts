@@ -269,7 +269,7 @@ test.describe("Git worktrees", () => {
   // -------------------------------------------------------------------------
   // WT4 — remove a clean worktree.
   // -------------------------------------------------------------------------
-  test("WT4. Removing a clean worktree drops it from the list and disk", async ({ page }) => {
+  test("WT4. Removal refuses open execution, then deletes after its tab closes", async ({ page }) => {
     await freshPage(page);
     const popover = await openWorktreeMenu(page);
 
@@ -284,6 +284,26 @@ test.describe("Git worktrees", () => {
     // `worktree.delete` hosts delete the checkout and its (merged) branch.
     await expect(page.locator('[data-testid="confirm-accept"]')).toHaveText("Delete");
     await page.locator('[data-testid="confirm-accept"]').click();
+    // WT3 left a real agent here. Even a clean checkout must not disappear
+    // underneath it, and force is not permission to discard running work.
+    await expect(popover.getByTestId("worktree-error")).toContainText("Close this nest");
+    expect(fs.existsSync(worktreePath)).toBe(true);
+    expect(execSync("git branch", { cwd: FIXTURE, input: "" }).toString()).toContain("wt-feature");
+
+    await page.keyboard.press("Escape");
+    await page.locator(`.workspace-entry__button[title="${worktreePath}"]`).click();
+    await expect(page.getByTestId("persistent-agent-terminal")).toHaveAttribute("data-controlling", "true");
+    const close = page.locator('[data-testid^="tab-close-"]').first();
+    await close.click();
+    // A plain shell (the agent may already have ended) closes without the
+    // agent warning; otherwise confirm the explicit stop-for-everyone.
+    await expect.poll(async () => await close.count() === 0 || await page.getByTestId("confirm-accept").count() > 0).toBe(true);
+    if (await page.getByTestId("confirm-accept").count()) await page.getByTestId("confirm-accept").click();
+    // A deleted-session broadcast is sent only after perchd confirms stop.
+    await expect(page.locator('[data-testid^="tab-close-"]')).toHaveCount(0);
+    await openWorktreeMenu(page);
+    await entry.locator('[data-testid^="worktree-remove-"]').click();
+    await page.getByTestId("confirm-accept").click();
 
     await expect(entry).toHaveCount(0, { timeout: 30000 });
     expect(fs.existsSync(worktreePath)).toBe(false);
@@ -592,12 +612,17 @@ test.describe("Git worktrees", () => {
     const popover = await openWorktreeMenu(page);
     if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click();
     await popover.locator('[data-testid="worktree-agent-select"]').selectOption("terminal");
-    await popover.locator('[data-testid="worktree-create-submit"]').click();
     const row = page.locator(".workspace-entry button[title]").filter({ hasText: /^[a-z]+-[a-z]+$/ });
-    await expect(row.first()).toBeVisible({ timeout: 30000 });
-    // The pane started in the new checkout: its path is the terminal's cwd.
-    const worktreePath = (await row.first().getAttribute("title"))!;
-    await expect(page.locator(".terminal--persistent:visible .xterm-rows")).toContainText(path.basename(worktreePath), { timeout: 30000 });
+    const before = await row.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("title")));
+    await popover.locator('[data-testid="worktree-create-submit"]').click();
+    // Older worktrees also match the bird-name regex. Observe the new row,
+    // not whichever happens to sort first in this persistent fixture.
+    let worktreePath: string | null | undefined;
+    await expect.poll(async () => {
+      worktreePath = (await row.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("title")))).find((p) => !before.includes(p));
+      return worktreePath;
+    }, { timeout: 30000 }).toBeTruthy();
+    await expect(page.locator(".terminal--persistent:visible .xterm-rows")).toContainText(path.basename(worktreePath!), { timeout: 30000 });
   });
 
   test("WT11. External worktrees start hidden, show, hide and clean up", async ({ page }) => {

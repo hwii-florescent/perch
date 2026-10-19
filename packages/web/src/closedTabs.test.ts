@@ -4,6 +4,7 @@ import type { SessionSummary } from "@perch/shared";
 import { forgetClosedTabs, recordClosedTab, takeClosedTab } from "./closedTabs";
 import { isAgentSession, requestCloseSession, useCloseGuard } from "./closeGuard";
 import { usePerchStore } from "./store";
+import * as agentTerminals from "./agentTerminals";
 
 const session = (init: Partial<SessionSummary>): SessionSummary => ({
   id: "s", title: "t", cwd: "/p", createdAt: 0, status: "idle", cliProviderId: "claude", ...init,
@@ -17,7 +18,9 @@ class FakeStorage {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("localStorage", new FakeStorage()); vi.useRealTimers(); useCloseGuard.setState({ pending: null }); });
+  vi.stubGlobal("localStorage", new FakeStorage()); vi.useRealTimers(); useCloseGuard.setState({ pending: null });
+  usePerchStore.setState({ settings: { warnCloseAgent: true } as never });
+});
 
 describe("closed tabs (Cmd+Shift+T)", () => {
   it("returns the newest first, keeps 20 and drops entries older than 7 days", () => {
@@ -45,6 +48,19 @@ describe("closed tabs (Cmd+Shift+T)", () => {
 });
 
 describe("close warning", () => {
+  it("dismisses a watcher without deleting execution, even with warnings off", () => {
+    const deleted = vi.fn();
+    const home = vi.fn();
+    const watching = vi.spyOn(agentTerminals, "isWatchingAgent").mockReturnValue(true);
+    usePerchStore.setState({ sessionId: "watched", sessions: [session({ id: "watched" })],
+      settings: { warnCloseAgent: false } as never, deleteSession: deleted, showWorkspaceHome: home });
+    requestCloseSession("watched");
+    expect(deleted).not.toHaveBeenCalled();
+    expect(home).toHaveBeenCalledOnce();
+    expect(useCloseGuard.getState().pending).toBeNull();
+    watching.mockRestore();
+  });
+
   it("warns for agents, not terminals, and can be switched off", () => {
     expect(isAgentSession(session({ cliProviderId: "claude" }))).toBe(true);
     expect(isAgentSession(session({ cliProviderId: "terminal" }))).toBe(false);

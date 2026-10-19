@@ -85,10 +85,37 @@ perchd: PTYs · history logs · vt100     remote perch / direct host
 - **Output path:** PTY → on-disk history log (the only replay source; capped
   at 8 MiB, keeping the newest half) → vt100 screen → subscribers.
   - An attach replays from any byte offset, then continues live.
-  - A subscriber more than 16 MiB behind gets `Dropped` and must reattach
-    from its last seq.
+  - A stalled subscriber is disconnected rather than losing arbitrary chunks.
+    Daemon socket output is bounded to 16 MiB/2048 frames; client attachment
+    queues to 32 MiB/512 frames (plus one frame being read); browser socket
+    output to 32 MiB/2048 messages; xterm's pending parser writes to 16 MiB.
+    Slow browser views reconnect for fresh replay without stopping execution.
+  - Retention gaps and history append/read/compaction failures are disclosed
+    in the terminal. A failed append does not stop the process or live output;
+    new output retries storage, and later attachments still disclose the gap.
+    History is bounded best-effort storage, not a complete transcript or an
+    fsync-per-write guarantee.
   - A restarted daemon reloads its sessions as exited but still replayable,
-    and keeps them for 7 days.
+    and keeps them for 7 days. Processes survive a **core/app** restart while
+    perchd lives, not a daemon crash, machine reboot, or an explicit stop.
+- **Process lifetime:** persistent launches require perchd; failure is visible,
+  never a silent in-process fallback. A lost connection means **unknown**, not
+  process exit or permission to replace a shell. Reconnect/boot attach only
+  to surviving processes and preserve their dimensions until resize authority
+  is acquired; they never restart a conversation. Idle local lifecycles are
+  marked attach-only synchronously before clients connect; confirmed exits stay
+  exited and a new tab is the explicit fresh-launch path. Remote/direct runtime
+  recovery is outside this local perchd guarantee. Explicit wake from sleep
+  remains a new launch. Idle hibernation is off unless
+  `PERCH_HIBERNATE_AFTER_SECS` is set.
+- **Destructive actions:** stop must be confirmed before a session is forgotten.
+  Watching a CLI cannot authorize global deletion; dismissing a view releases
+  observation and leaves the session discoverable in its nest. Owners can
+  choose an explicit stop for everyone. Worktree deletion (including force)
+  refuses listed tabs, live daemon processes, unsaved durable drafts or unknown
+  daemon state; it also checks the requesting view's not-yet-debounced draft.
+  Another disconnected view's untransmitted edits cannot be checked by the
+  core. These are refusal checks, not a distributed edit/delete transaction.
 - **Transport for remotes:** `perchd connect` bridges stdin/stdout to the
   socket, starting the daemon if needed. It's built and tested locally but
   not wired to ssh yet.

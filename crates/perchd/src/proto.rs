@@ -171,6 +171,8 @@ pub enum ServerMsg {
     /// The server dropped this subscription (the client fell too far behind).
     /// Reattach with `since` = the next unseen seq to resume without loss.
     Dropped { id: String },
+    /// Storage failed; execution continues, but history is incomplete.
+    HistoryError { id: String, message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -188,6 +190,10 @@ pub struct Attached {
     pub alive: bool,
     pub exit_code: Option<i32>,
     pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_error: Option<String>,
+    #[serde(default)]
+    pub gap: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -202,6 +208,8 @@ pub struct SessionInfo {
     pub rows: u16,
     pub seq: u64,
     pub created_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

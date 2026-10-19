@@ -204,8 +204,10 @@ impl WorkspaceTerminals {
                 let id = row.id.clone();
                 let db = self.db.clone();
                 let exit = Arc::new(move |_: String, code: i32| {
+                    let lost = code == crate::terminal::TRANSPORT_LOST;
                     let _ = db.with_connection(|conn| {
-                        conn.execute("UPDATE workspace_terminals SET state = 'exited', exit_code = ?2 WHERE id = ?1", params![id, code])?;
+                        conn.execute("UPDATE workspace_terminals SET state = ?3, exit_code = ?2 WHERE id = ?1",
+                            params![id, if lost { None } else { Some(code) }, if lost { "running" } else { "exited" }])?;
                         Ok(())
                     });
                     let streams = streams.lock().unwrap();
@@ -243,8 +245,10 @@ impl WorkspaceTerminals {
                     )
                 };
                 if let Err(error) = attached {
-                    row.state = "lost".to_string();
-                    self.update(&row)?;
+                    if created {
+                        row.state = "lost".to_string();
+                        self.update(&row)?;
+                    }
                     return Err(error.context("could not open persistent shell"));
                 }
                 row.backend = if self
@@ -387,11 +391,12 @@ impl WorkspaceTerminals {
             bail!("terminal does not belong to this session");
         }
         let key = format!("shell-{terminal_id}");
-        // An in-process fallback shell has no daemon session; kill it here.
-        self.runtime.kill(&key);
-        // A daemon shell may not even be attached after a restart. Closing is
-        // final, so its history goes too.
-        std::thread::spawn(move || crate::daemon::discard(&key));
+        // Do not forget the pane until the daemon confirms its process stopped.
+        // A transport error leaves it visible and retryable, not orphaned.
+        if !crate::daemon::terminate(&key) {
+            bail!("could not confirm shell stopped; terminal retained. Reconnect and retry");
+        }
+        crate::daemon::discard(&key);
         self.db.with_connection(|conn| {
             conn.execute(
                 "DELETE FROM workspace_terminals WHERE id = ?1 AND session_id = ?2",

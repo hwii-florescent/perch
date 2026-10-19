@@ -228,8 +228,19 @@ fn open_agent_terminal(
             let _ = tx.send(ServerMessage::TerminalData { terminal_id, data });
         });
         let tx = state.out_tx.clone();
+        let runtime = state.app.agent_runtime.clone();
         let on_exit: crate::terminal::TerminalExitListener = Arc::new(move |terminal_id, code| {
-            let _ = tx.send(ServerMessage::TerminalExit { terminal_id, code });
+            if code == crate::terminal::TRANSPORT_LOST
+                || runtime
+                    .key_for_terminal(&terminal_id)
+                    .is_some_and(|key| runtime.runtime_alive(&key))
+            {
+                // A lost daemon attachment is not a process exit. The browser
+                // reconnects with backoff and reattaches without a spawn.
+                tx.disconnect();
+            } else {
+                let _ = tx.send(ServerMessage::TerminalExit { terminal_id, code });
+            }
         });
         (on_data, on_exit)
     };
@@ -532,7 +543,11 @@ pub(super) fn handle_terminal_open(
                 let _ = data_tx.send(ServerMessage::TerminalData { terminal_id, data });
             }),
             Arc::new(move |terminal_id, code| {
-                let _ = exit_tx.send(ServerMessage::TerminalExit { terminal_id, code });
+                if code == crate::terminal::TRANSPORT_LOST {
+                    exit_tx.disconnect();
+                } else {
+                    let _ = exit_tx.send(ServerMessage::TerminalExit { terminal_id, code });
+                }
             }),
             |terminal, replay| {
                 let _ = state.out_tx.send(ServerMessage::TerminalOpened {

@@ -11,11 +11,12 @@ use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_ATTACH_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum Error {
@@ -77,9 +78,30 @@ impl EndState {
 }
 
 struct Sink {
-    data: mpsc::Sender<Vec<u8>>,
+    data: mpsc::SyncSender<Vec<u8>>,
     end: Arc<EndState>,
     next_seq: Arc<AtomicU64>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl Sink {
+    fn send(&self, bytes: Vec<u8>) -> bool {
+        let len = bytes.len();
+        if self
+            .queued
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n + len <= MAX_ATTACH_BYTES).then_some(n + len)
+            })
+            .is_err()
+        {
+            return false;
+        }
+        if self.data.try_send(bytes).is_ok() {
+            return true;
+        }
+        self.queued.fetch_sub(len, Ordering::SeqCst);
+        false
+    }
 }
 
 struct Inner {
@@ -258,7 +280,10 @@ impl Client {
         id: &str,
         since: Option<u64>,
     ) -> Result<(Attached, AttachReader, AttachWaiter), Error> {
-        let (data_tx, data_rx) = mpsc::channel();
+        // 512 x 64 KiB frames, enough for the full retained replay. A stalled
+        // attachment must not block reply routing or grow without bound.
+        let (data_tx, data_rx) = mpsc::sync_channel(512);
+        let queued = Arc::new(AtomicUsize::new(0));
         let end = Arc::new(EndState::default());
         let next_seq = Arc::new(AtomicU64::new(0));
         // Registered before the request: replay frames can arrive right
@@ -269,6 +294,7 @@ impl Client {
                 data: data_tx,
                 end: end.clone(),
                 next_seq: next_seq.clone(),
+                queued: queued.clone(),
             },
         );
         if let Some(previous) = previous {
@@ -308,10 +334,17 @@ impl Client {
             });
         }
         Ok((
-            attached,
+            attached.clone(),
             AttachReader {
                 rx: data_rx,
-                buf: Vec::new(),
+                queued,
+                buf: if let Some(error) = attached.history_error.as_deref() {
+                    history_notice(error)
+                } else if attached.gap {
+                    history_notice("Earlier output is no longer retained; replay starts at the available history")
+                } else {
+                    Vec::new()
+                },
                 pos: 0,
             },
             AttachWaiter { end, next_seq },
@@ -384,10 +417,16 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
     while let Ok(Some(frame)) = proto::read_frame(&mut reader) {
         match frame {
             Frame::Data { id, seq, bytes } => {
-                if let Some(sink) = inner.sinks.lock().unwrap().get(&id) {
-                    sink.next_seq
-                        .store(seq + bytes.len() as u64, Ordering::SeqCst);
-                    let _ = sink.data.send(bytes);
+                let mut sinks = inner.sinks.lock().unwrap();
+                if let Some(sink) = sinks.get(&id) {
+                    let end_seq = seq + bytes.len() as u64;
+                    if sink.send(bytes) {
+                        sink.next_seq.store(end_seq, Ordering::SeqCst);
+                    } else {
+                        // Preserve the last accepted offset for a gap-free retry.
+                        sink.end.set(AttachEnd::Dropped);
+                        sinks.remove(&id);
+                    }
                 }
             }
             Frame::Json(json) => match serde_json::from_slice::<ServerMsg>(&json) {
@@ -402,6 +441,15 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
                 Ok(ServerMsg::Exit { id, code }) => {
                     if let Some(sink) = inner.sinks.lock().unwrap().remove(&id) {
                         sink.end.set(AttachEnd::Exited(code));
+                    }
+                }
+                Ok(ServerMsg::HistoryError { id, message }) => {
+                    let mut sinks = inner.sinks.lock().unwrap();
+                    if let Some(sink) = sinks.get(&id) {
+                        if !sink.send(history_notice(&message)) {
+                            sink.end.set(AttachEnd::Dropped);
+                            sinks.remove(&id);
+                        }
                     }
                 }
                 Ok(ServerMsg::Dropped { id }) => {
@@ -425,9 +473,14 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
     }
 }
 
+fn history_notice(message: &str) -> Vec<u8> {
+    format!("\r\n[perch: terminal history incomplete — {message}]\r\n").into_bytes()
+}
+
 /// Output of one attachment. Returns EOF when the attachment ends.
 pub struct AttachReader {
     rx: mpsc::Receiver<Vec<u8>>,
+    queued: Arc<AtomicUsize>,
     buf: Vec<u8>,
     pos: usize,
 }
@@ -437,6 +490,7 @@ impl Read for AttachReader {
         if self.pos >= self.buf.len() {
             match self.rx.recv() {
                 Ok(chunk) => {
+                    self.queued.fetch_sub(chunk.len(), Ordering::SeqCst);
                     self.buf = chunk;
                     self.pos = 0;
                 }
@@ -474,5 +528,43 @@ impl AttachWaiter {
     /// Seq of the next byte not yet received — pass as `since` to resume.
     pub fn next_seq(&self) -> u64 {
         self.next_seq.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attachment_bytes_are_bounded_even_with_large_replay_frames() {
+        let (tx, rx) = mpsc::sync_channel(512);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let sink = Sink {
+            data: tx,
+            end: Arc::default(),
+            next_seq: Arc::default(),
+            queued: queued.clone(),
+        };
+        let chunk = 4 * 1024 * 1024;
+        for _ in 0..MAX_ATTACH_BYTES / chunk {
+            assert!(sink.send(vec![0; chunk]));
+        }
+        assert!(
+            !sink.send(vec![0; chunk]),
+            "frame count alone permits huge replay queues"
+        );
+        assert_eq!(queued.load(Ordering::SeqCst), MAX_ATTACH_BYTES);
+        let mut reader = AttachReader {
+            rx,
+            queued: queued.clone(),
+            buf: vec![],
+            pos: 0,
+        };
+        assert_eq!(reader.read(&mut [0]).unwrap(), 1);
+        assert_eq!(queued.load(Ordering::SeqCst), MAX_ATTACH_BYTES - chunk);
+        assert!(
+            sink.send(vec![0; chunk]),
+            "consuming a frame releases its queue budget"
+        );
     }
 }

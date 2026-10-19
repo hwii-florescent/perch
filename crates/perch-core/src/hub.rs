@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use crate::ws_outbox::Sender as Outbox;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{broadcast, watch};
@@ -52,7 +53,7 @@ pub enum PendingKey {
 /// plus the channel to send replies back to that connection's out task.
 struct PendingUnicast {
     conn_id: String,
-    tx: UnboundedSender<ServerMessage>,
+    tx: Outbox,
 }
 
 /// Cached `server.info` metadata from a successfully connected remote.
@@ -1570,8 +1571,8 @@ impl HubManager {
             | ServerMessage::WorktreeJobs { .. }
             | ServerMessage::DevicePairCode { .. }
             | ServerMessage::DeviceListResult { .. }
-            | ServerMessage::SettingsCurrent { .. }
             | ServerMessage::PhoneAccessStatus { .. }
+            | ServerMessage::SettingsCurrent { .. }
             | ServerMessage::HostsList { .. }
             | ServerMessage::HostsUpdated { .. }
             | ServerMessage::HostInfo { .. }
@@ -1630,10 +1631,7 @@ impl HubManager {
 
     /// Find a Session unicast key that was registered by `register_terminal_create`
     /// and atomically move it to a Terminal key.  Returns the sender for the found entry.
-    fn swap_session_to_terminal_key(
-        &self,
-        terminal_id: &str,
-    ) -> Option<UnboundedSender<ServerMessage>> {
+    fn swap_session_to_terminal_key(&self, terminal_id: &str) -> Option<Outbox> {
         let mut map = self.pending_unicast.lock().unwrap();
         // We look for a key stored as PendingKey::Session("__terminal_create__:<anything>")
         // Actually the convention (set in server.rs) is that for terminal.create the
@@ -1750,12 +1748,7 @@ impl HubManager {
 
     /// Register a unicast receiver for the given key.  `conn_id` is the
     /// browser connection that should receive the replies.
-    pub fn register_unicast(
-        &self,
-        key: PendingKey,
-        conn_id: String,
-        tx: UnboundedSender<ServerMessage>,
-    ) {
+    pub fn register_unicast(&self, key: PendingKey, conn_id: String, tx: Outbox) {
         self.pending_unicast
             .lock()
             .unwrap()

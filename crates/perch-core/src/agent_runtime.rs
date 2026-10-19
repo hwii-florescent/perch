@@ -615,8 +615,8 @@ impl AgentRuntimeAdapter {
         if snapshot.state == AgentState::Sleeping {
             return Err(RuntimeAdapterError::RequiresWake(key));
         }
-        // A shell has no conversation identity: if its daemon process is
-        // gone, reopening starts a new login shell. Agents still fail closed.
+        // A reconnect is not a launch request, even without a continuation ID.
+        // A missing daemon process must not become a new conversation.
         if snapshot.state == AgentState::Reconnecting
             && provider_id != crate::agent_fleet::TERMINAL_PROVIDER
             && provider_session_id.is_none()
@@ -805,7 +805,9 @@ impl AgentRuntimeAdapter {
             }
             let alive = identity
                 .as_ref()
-                .is_some_and(|identity| terminal_registry.runtime_alive(identity));
+                .map_or(code == crate::terminal::TRANSPORT_LOST, |identity| {
+                    terminal_registry.runtime_alive(identity)
+                });
             if !intentional_stop {
                 if !alive {
                     if let Some(record) = turn_boundary.get() {
@@ -819,7 +821,7 @@ impl AgentRuntimeAdapter {
                 // reconnectable; a direct PTY exit is terminal.
                 let signal = if alive {
                     ProviderSignal::TransportLost {
-                        reason: "terminal transport disconnected; provider runtime remains alive"
+                        reason: "terminal connection lost; process exit is not confirmed. Reconnect to retry"
                             .to_string(),
                     }
                 } else {
@@ -847,7 +849,9 @@ impl AgentRuntimeAdapter {
         // marker; a fast provider must not be put back into Working afterward.
         self.lifecycle
             .signal(&key, ProviderSignal::Started, now_millis())?;
-        let outcome = match self.terminals.attach(
+        let existing_only = snapshot.state == AgentState::Exited
+            || (snapshot.state == AgentState::Reconnecting && snapshot.reason != "wake requested");
+        let outcome = match self.terminals.attach_inner(
             &terminal_key(&key),
             RUNTIME_VIEWER,
             cols,
@@ -856,13 +860,16 @@ impl AgentRuntimeAdapter {
             prepared.argv,
             wrapped_on_data,
             wrapped_on_exit,
+            existing_only,
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
                 let _ = self.lifecycle.signal(
                     &key,
-                    ProviderSignal::Error {
-                        reason: format!("provider launch failed: {error}"),
+                    if existing_only {
+                        ProviderSignal::TransportLost { reason: format!("Reconnect failed: {error}. Retry when perchd is available; no replacement was started") }
+                    } else {
+                        ProviderSignal::Error { reason: format!("provider launch failed: {error}") }
                     },
                     now_millis(),
                 );
@@ -1210,6 +1217,10 @@ impl AgentRuntimeAdapter {
             self.terminals
                 .terminate_for_hibernation(&handle.terminal)
                 .map_err(RuntimeAdapterError::Process)?;
+        } else if !crate::daemon::terminate(&terminal_key(key)) {
+            return Err(RuntimeAdapterError::Process(anyhow::anyhow!(
+                "could not confirm that the daemon process stopped; session retained"
+            )));
         }
         self.active.lock().unwrap().remove(key);
         self.lifecycle.remove(key)?;
@@ -1378,6 +1389,17 @@ fn process_snapshot(text: &str) -> HashMap<u32, ForegroundProcess<'_>> {
                     names.push(script);
                 }
             }
+            // Claude Code installs a versioned binary (.../claude/versions/2.1.301)
+            // whose process name never says "claude"; its install directory does.
+            let parts: Vec<_> = Path::new(command).components().collect();
+            if let Some(i) = parts
+                .iter()
+                .rposition(|part| part.as_os_str() == "versions")
+            {
+                if let Some(name) = i.checked_sub(1).and_then(|i| parts[i].as_os_str().to_str()) {
+                    names.push(name);
+                }
+            }
             // ponytail: ps's text format cannot identify executable paths with
             // whitespace reliably; move names/argv into perchd metadata for those.
             Some((
@@ -1475,9 +1497,13 @@ mod tests {
 
     #[test]
     fn foreground_identity_tracks_shell_agents_tools_and_background_jobs() {
-        let providers = [("pi".into(), "pi".into()), ("codex".into(), "codex".into())]
-            .into_iter()
-            .collect();
+        let providers = [
+            ("pi".into(), "pi".into()),
+            ("codex".into(), "codex".into()),
+            ("claude".into(), "claude".into()),
+        ]
+        .into_iter()
+        .collect();
         let cases = [
             ("10 1 S+ /bin/zsh -zsh", Some("terminal")),
             ("10 1 S /bin/zsh -zsh\n11 10 S+ pi pi", Some("pi")),
@@ -1499,6 +1525,12 @@ mod tests {
                 Some("terminal"),
             ),
             ("10 1 S zsh zsh\n11 10 S+ codex codex", Some("codex")),
+            (
+                "10 1 S zsh zsh\n11 10 S+ /h/.local/share/claude/versions/2.1.301 /h/.local/share/claude/versions/2.1.301 --settings x",
+                Some("claude"),
+            ),
+            // A versions directory that isn't an agent's is not an identity.
+            ("10 1 S zsh zsh\n11 10 S+ /opt/tool/versions/1 /opt/tool/versions/1", Some("terminal")),
             // Equal-depth pipeline agents have a stable PID tie-breaker.
             (
                 "10 1 S zsh zsh\n11 10 S+ pi pi\n12 10 S+ codex codex",
@@ -1646,6 +1678,62 @@ mod tests {
                 self.adapter.terminals.kill(&terminal_key(key));
             }
         }
+    }
+
+    #[test]
+    fn lost_attachment_reconnects_to_the_same_process_without_resize() {
+        let adapter = adapter();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        let registration = AgentRegistration {
+            key: key.clone(),
+            provider_id: "fixture".into(),
+            provider_session_id: Some("existing-conversation".into()),
+            resumable: true,
+            now_ms: now_millis(),
+        };
+        let first = adapter
+            .attach_cli(
+                registration.clone(),
+                "/tmp",
+                client("desktop"),
+                132,
+                40,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let daemon = crate::daemon::client().unwrap();
+        daemon.detach(&terminal_key(&key)).unwrap(); // same attachment-end path as socket loss
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while adapter.snapshot(&key).unwrap().state != AgentState::Reconnecting {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "transport loss was not reconciled"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(adapter.runtime_alive(&key));
+        let second = adapter
+            .attach_cli(
+                registration,
+                "/tmp",
+                client("phone"),
+                40,
+                12,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert_eq!(
+            second.handle.terminal.process_id,
+            first.handle.terminal.process_id
+        );
+        let info = daemon.session(&terminal_key(&key)).unwrap().unwrap();
+        assert_eq!((info.cols, info.rows), (132, 40));
     }
 
     #[test]
@@ -1851,7 +1939,7 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_without_a_surviving_shell_starts_a_terminal() {
+    fn reconnect_without_a_surviving_shell_never_starts_a_replacement() {
         let adapter = adapter();
         adapter
             .providers
@@ -1879,7 +1967,7 @@ mod tests {
                 now_millis(),
             )
             .unwrap();
-        let attach = adapter
+        assert!(adapter
             .attach_cli(
                 registration,
                 "/tmp",
@@ -1889,9 +1977,9 @@ mod tests {
                 Arc::new(|_, _| {}),
                 Arc::new(|_, _| {}),
             )
-            .unwrap();
-        assert!(attach.handle.provider_session_id.is_none());
-        assert!(adapter.runtime_alive(&key));
+            .is_err());
+        assert!(!adapter.runtime_alive(&key));
+        assert!(!crate::daemon::session_alive(&terminal_key(&key)));
     }
 
     #[test]

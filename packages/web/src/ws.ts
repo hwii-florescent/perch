@@ -45,7 +45,10 @@ class PerchSocket {
     this.ws = ws;
 
     ws.addEventListener("open", () => {
-      this.backoffMs = INITIAL_BACKOFF_MS;
+      // Reset only after a stable connection, not each reconnect in an
+      // output-overflow loop on a slow device.
+      const stable = setTimeout(() => { this.backoffMs = INITIAL_BACKOFF_MS; }, 30_000);
+      ws.addEventListener("close", () => clearTimeout(stable), { once: true });
       for (const handler of this.connectionHandlers) handler(true);
       // Resume the last known session (persisted in localStorage) on every
       // (re)connect — including transient WS drops, not just page loads —
@@ -89,6 +92,11 @@ class PerchSocket {
       this.open();
     }, this.backoffMs);
     this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
+  }
+
+  /** Recover a stalled terminal from bounded server replay, not queued writes. */
+  recoverTerminalStream(): void {
+    this.ws?.close(4000, "Terminal viewer fell behind; reconnecting for replay");
   }
 
   send(msg: ClientMessage): void {

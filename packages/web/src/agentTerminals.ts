@@ -115,6 +115,11 @@ export function stopAgent(sessionId: string): boolean {
   return false;
 }
 
+/** This view observes execution but does not hold input authority. */
+export function isWatchingAgent(sessionId: string): boolean {
+  return [...views.values()].some((view) => view.status.key.sessionId === sessionId) && !canStopAgent(sessionId);
+}
+
 export function canStopAgent(sessionId: string): boolean {
   return [...views.values()].some((view) => view.status.key.sessionId === sessionId && !!view.leases.input);
 }
