@@ -1052,6 +1052,34 @@ impl AgentTerminalRegistry {
         }
     }
 
+    /// Shared keyboard input is allowed only from a viewer of this exact PTY.
+    /// Serialize with detach through the writer, but release fan-out before
+    /// daemon I/O: output callbacks need fan-out while a socket write can block.
+    pub fn input_for_view(
+        &self,
+        identity: &TerminalRuntimeIdentity,
+        client: &ClientIdentity,
+        data: &str,
+    ) -> std::result::Result<(), TerminalAuthorityError> {
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(&identity.session_id)
+            .filter(|entry| entry.terminal_id == identity.terminal_id)
+            .cloned()
+            .ok_or(TerminalAuthorityError::NoTerminal)?;
+        let mut writer = entry.writer.lock().unwrap();
+        if !entry.viewers.lock().unwrap().contains_key(&client.id)
+            || entry.exited.load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(TerminalAuthorityError::NotOwned);
+        }
+        writer
+            .input(data.as_bytes())
+            .map_err(|_| TerminalAuthorityError::WriteFailed)
+    }
+
     /// Install or clear the lease that owns keyboard input for this terminal.
     /// The adapter calls this immediately after acquiring/releasing the
     /// corresponding lifecycle lease.

@@ -62,6 +62,29 @@ import { onZoom, zoomFactor } from "./zoom";
 import { attachTerminalTuiWheel } from "./terminalTuiWheel";
 import { socket } from "./ws";
 
+/**
+ * Classify input without guessing from bytes (a paste can contain any escape
+ * sequence). Only one viewer should answer terminal queries, but all may type.
+ */
+export function onTerminalInput(term: Terminal, listener: (data: string, user: boolean) => void) {
+  // ponytail: pinned xterm 6.1 private event fires synchronously before onData,
+  // including paste and SGR mouse input. Replace with a public source flag if
+  // xterm adds one; a missing hook falls back to exclusive input in the caller.
+  // SAFETY: this optional private event is present in the exact pinned xterm;
+  // tracksUserInput disables shared input if an upgrade removes it.
+  const core = (term as unknown as {
+    _core?: { coreService?: { onUserInput?: (listener: () => void) => { dispose(): void } } };
+  })._core?.coreService;
+  let user = false;
+  const source = core?.onUserInput?.(() => { user = true; });
+  const data = term.onData((value) => {
+    const wasUser = user;
+    user = false;
+    listener(value, wasUser);
+  });
+  return { tracksUserInput: !!source, dispose: () => { source?.dispose(); data.dispose(); } };
+}
+
 export const MAX_PENDING_TERMINAL_BYTES = 16 * 1024 * 1024;
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the

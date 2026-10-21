@@ -1051,6 +1051,38 @@ impl AgentRuntimeAdapter {
         at_ms: u64,
     ) -> Result<ControlLease, RuntimeAdapterError> {
         let _authority = self.authority.lock().unwrap();
+        self.acquire_control_locked(key, channel, client, at_ms)
+    }
+
+    /// Automatic recovery never takes control from another live view, even
+    /// when several connections noticed the same vacant lease.
+    pub fn acquire_control_if_unowned(
+        &self,
+        key: &AgentKey,
+        channel: ControlChannel,
+        client: ClientIdentity,
+        at_ms: u64,
+    ) -> Result<Option<ControlLease>, RuntimeAdapterError> {
+        let _authority = self.authority.lock().unwrap();
+        let snapshot = self.lifecycle.get(key)?;
+        let owner = match channel {
+            ControlChannel::Input => snapshot.input_owner,
+            ControlChannel::Resize => snapshot.resize_owner,
+        };
+        if let Some(owner) = owner {
+            return Ok((owner.client == client).then_some(owner));
+        }
+        self.acquire_control_locked(key, channel, client, at_ms)
+            .map(Some)
+    }
+
+    fn acquire_control_locked(
+        &self,
+        key: &AgentKey,
+        channel: ControlChannel,
+        client: ClientIdentity,
+        at_ms: u64,
+    ) -> Result<ControlLease, RuntimeAdapterError> {
         let lease = self
             .lifecycle
             .acquire_control(key, channel, client, at_ms)?;
@@ -1123,6 +1155,43 @@ impl AgentRuntimeAdapter {
             at_ms,
             active_for,
         )?;
+        self.prepare_input(key, data, at_ms)?;
+        self.terminals
+            .input_owned(&terminal_key(key), &lease.client, lease.generation, data)?;
+        Ok(())
+    }
+
+    /// All live attached views may type. This does not move resize or stop
+    /// authority; the exact PTY identity and attachment are checked at the writer.
+    pub fn input_from_view(
+        &self,
+        key: &AgentKey,
+        terminal_id: &str,
+        client: &ClientIdentity,
+        data: &str,
+        at_ms: u64,
+    ) -> Result<(), RuntimeAdapterError> {
+        let _authority = self.authority.lock().unwrap();
+        let handle = self
+            .runtime(key)
+            .filter(|handle| handle.terminal.terminal_id == terminal_id)
+            .ok_or_else(|| RuntimeAdapterError::RuntimeMismatch(key.clone()))?;
+        if !self.lifecycle.get(key)?.observers.contains(&client.id) {
+            return Err(TerminalAuthorityError::NotOwned.into());
+        }
+        self.lifecycle.record_activity(key, at_ms)?;
+        self.prepare_input(key, data, at_ms)?;
+        self.terminals
+            .input_for_view(&handle.terminal, client, data)?;
+        Ok(())
+    }
+
+    fn prepare_input(
+        &self,
+        key: &AgentKey,
+        data: &str,
+        at_ms: u64,
+    ) -> Result<(), RuntimeAdapterError> {
         let native_ready = self.has_native_status(&key.session_id);
         if data.contains(['\r', '\n'])
             && (!crate::native_ui::supported(&key.agent_id) || native_ready)
@@ -1139,8 +1208,6 @@ impl AgentRuntimeAdapter {
                     .signal(key, ProviderSignal::TurnStarted, at_ms)?;
             }
         }
-        self.terminals
-            .input_owned(&terminal_key(key), &lease.client, lease.generation, data)?;
         Ok(())
     }
 
@@ -1887,6 +1954,162 @@ mod tests {
         assert!(adapter.snapshot(&first).is_err());
         assert!(adapter.runtime_alive(&second));
         assert_eq!(adapter.lifecycle.list().len(), 1);
+    }
+
+    #[test]
+    fn shared_input_requires_exact_attached_runtime_and_preserves_control_leases() {
+        let providers = Arc::new(ProviderRegistry::empty());
+        let mut manifest = fixture_manifest();
+        manifest
+            .launch
+            .mode_overrides
+            .get_mut(&AgentMode::Cli)
+            .unwrap()
+            .prefix_args = vec![
+            "-c".into(),
+            "while IFS= read -r line; do printf 'received_%s\\n' \"$line\"; done".into(),
+        ];
+        providers.register(manifest).unwrap();
+        let adapter = AgentRuntimeAdapter::new(
+            providers,
+            Arc::new(AgentLifecycleRegistry::new()),
+            Arc::new(AgentTerminalRegistry::new(Arc::new(|_| {}))),
+        );
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        let registration = AgentRegistration {
+            key: key.clone(),
+            provider_id: "fixture".into(),
+            provider_session_id: Some("shared-test".into()),
+            resumable: true,
+            now_ms: now_millis(),
+        };
+        let desktop = client("desktop");
+        let phone = client("phone");
+        let first = adapter
+            .attach_cli(
+                registration.clone(),
+                "/tmp",
+                desktop.clone(),
+                132,
+                40,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let second = adapter
+            .attach_cli(
+                registration,
+                "/tmp",
+                phone.clone(),
+                40,
+                20,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert_eq!(first.handle.terminal, second.handle.terminal);
+        let input = adapter
+            .acquire_control(&key, ControlChannel::Input, desktop.clone(), now_millis())
+            .unwrap();
+        let resize = adapter
+            .acquire_control(&key, ControlChannel::Resize, desktop.clone(), now_millis())
+            .unwrap();
+        let id = &first.handle.terminal.terminal_id;
+        let input_barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let barrier = &input_barrier;
+            let writes: Vec<_> = [(&phone, "phone\r"), (&desktop, "desktop\r")]
+                .into_iter()
+                .map(|(viewer, data)| {
+                    let adapter = &adapter;
+                    let key = &key;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        adapter
+                            .input_from_view(key, id, viewer, data, now_millis())
+                            .unwrap();
+                    })
+                })
+                .collect();
+            for write in writes {
+                write.join().unwrap();
+            }
+        });
+        let snapshot = adapter.snapshot(&key).unwrap();
+        assert_eq!(snapshot.input_owner.unwrap().generation, input.generation);
+        assert_eq!(snapshot.resize_owner.unwrap().generation, resize.generation);
+        assert_eq!(adapter.terminals.size(&terminal_key(&key)), Some((132, 40)));
+        assert!(adapter
+            .input_from_view(&key, id, &client("stranger"), "BAD\r", now_millis())
+            .is_err());
+        assert!(adapter
+            .input_from_view(&key, "old-terminal-id", &phone, "BAD\r", now_millis())
+            .is_err());
+        adapter
+            .release_control(&key, ControlChannel::Resize, &desktop, resize.generation)
+            .unwrap();
+        let claim_barrier = std::sync::Barrier::new(2);
+        let winners = std::thread::scope(|scope| {
+            let barrier = &claim_barrier;
+            let claims: Vec<_> = [&desktop, &phone]
+                .into_iter()
+                .map(|viewer| {
+                    let adapter = &adapter;
+                    let key = &key;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        adapter
+                            .acquire_control_if_unowned(
+                                key,
+                                ControlChannel::Resize,
+                                viewer.clone(),
+                                now_millis(),
+                            )
+                            .unwrap()
+                    })
+                })
+                .collect();
+            claims
+                .into_iter()
+                .filter_map(|claim| claim.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            winners.len(),
+            1,
+            "simultaneous automatic claims must not steal from each other"
+        );
+        assert_eq!(
+            adapter
+                .snapshot(&key)
+                .unwrap()
+                .resize_owner
+                .unwrap()
+                .generation,
+            winners[0].generation
+        );
+        assert_eq!(adapter.terminals.size(&terminal_key(&key)), Some((132, 40)));
+        adapter.detach(&key, &phone).unwrap();
+        assert!(adapter
+            .input_from_view(&key, id, &phone, "BAD\r", now_millis())
+            .is_err());
+        let replay = adapter.active.lock().unwrap()[&key].replay.clone();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            let text = replay.lock().unwrap().text();
+            if text.contains("received_desktop") && text.contains("received_phone") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let text = replay.lock().unwrap().text();
+        assert!(text.contains("received_phone"));
+        assert!(text.contains("received_desktop"));
+        assert!(!text.contains("BAD"));
     }
 
     #[test]

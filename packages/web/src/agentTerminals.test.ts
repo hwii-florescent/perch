@@ -6,7 +6,7 @@ import type { AgentControlLease, AgentLifecycleStatus, AgentTerminalOpenedMessag
 const transport = vi.hoisted(() => ({ send: vi.fn(), connection: (_: boolean) => {} }));
 vi.mock("./ws", () => ({ socket: { send: transport.send, onConnectionChange: (handler: (connected: boolean) => void) => { transport.connection = handler; } } }));
 import { emitTerminalData } from "./terminalBus";
-import { handleAgentTerminalMessage, openAgentTerminal, sendAgentTerminalInput } from "./agentTerminals";
+import { handleAgentTerminalMessage, openAgentTerminal, sendAgentTerminalInput, resizeAgentTerminal, canStopAgent } from "./agentTerminals";
 
 beforeEach(() => transport.send.mockClear());
 afterEach(() => { transport.connection(false); vi.useRealTimers(); });
@@ -70,6 +70,47 @@ it("keeps new lease replies ahead of old status pushes, then revokes input on tr
   const count = transport.send.mock.calls.length;
   expect(sendAgentTerminalInput("controlled", "must-not-send")).toBe(true);
   expect(transport.send).toHaveBeenCalledTimes(count);
+  binding.release();
+});
+
+it("shared views type without a lease, including after reload, without resizing or gaining stop authority", async () => {
+  const owner: AgentControlLease = { clientId: "desktop", deviceId: "local", generation: 7, acquiredAtMs: 0, lastActivityMs: 0 };
+  const attach = async () => {
+    const index = transport.send.mock.calls.length;
+    const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {}, undefined, true);
+    handleAgentTerminalMessage({ ...opened(index, "shared"), status: { ...snapshot("claude"), inputOwner: owner, resizeOwner: owner } });
+    await binding.ready;
+    return binding;
+  };
+  let binding = await attach();
+  for (const data of ["phone", "\x1b[200~\x1b[1;2R\x1b[201~"]) {
+    expect(sendAgentTerminalInput("shared", data)).toBe(true);
+    expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.input", terminalId: "shared", data, shared: true });
+  }
+  const count = transport.send.mock.calls.length;
+  resizeAgentTerminal("shared", 40, 20);
+  expect(transport.send).toHaveBeenCalledTimes(count);
+  expect(canStopAgent("session")).toBe(false);
+  binding.release();
+  transport.connection(false);
+  binding = await attach(); // Old connection still appears as owner in the open reply.
+  sendAgentTerminalInput("shared", "after-reload");
+  expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.input", terminalId: "shared", data: "after-reload", shared: true });
+  binding.release();
+  expect(sendAgentTerminalInput("shared", "late")).toBe(false);
+});
+
+it("automatic resize recovery cannot steal an occupied lease or resize without one", async () => {
+  const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {}, undefined, true);
+  handleAgentTerminalMessage(opened(0, "auto-resize"));
+  await binding.ready;
+  const claiming = binding.takeResize(true);
+  const message = transport.send.mock.calls.at(-1)![0];
+  expect(message).toMatchObject({ type: "agent.control.acquire", channel: "resize", ifUnowned: true });
+  const owner: AgentControlLease = { clientId: "other-view", deviceId: "local", generation: 7, acquiredAtMs: 0, lastActivityMs: 0 };
+  handleAgentTerminalMessage({ type: "agent.control", requestId: message.requestId, sessionId: "session", agentId: "claude", channel: "resize", status: { ...snapshot("claude", 2), resizeOwner: owner } });
+  await claiming;
+  expect(transport.send).toHaveBeenLastCalledWith(message); // No terminal.resize.
   binding.release();
 });
 

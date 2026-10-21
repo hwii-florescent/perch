@@ -1016,6 +1016,10 @@ pub enum ClientMessage {
         /// rejected rather than bypassing the lease.
         #[serde(default)]
         generation: Option<u64>,
+        /// With terminal.sharedInput, a currently attached view may type
+        /// without taking the resize/stop lease. Never authorizes by id alone.
+        #[serde(default)]
+        shared: bool,
     },
 
     #[serde(rename = "terminal.resize", rename_all = "camelCase")]
@@ -1097,6 +1101,9 @@ pub enum ClientMessage {
         workspace_id: Option<String>,
         agent_id: String,
         channel: crate::agent_fleet::ControlChannel,
+        /// With terminal.sharedInput, automatic recovery must not steal a lease.
+        #[serde(default)]
+        if_unowned: bool,
     },
 
     /// Release the exact generation returned by `agent.control.acquire`.

@@ -2375,6 +2375,7 @@ fn foundation_capabilities() -> Vec<String> {
         "agent.control.acquire",
         "agent.control.release",
         "terminal.open",
+        "terminal.sharedInput",
         "terminal.list",
         "terminal.release",
         "terminal.close",

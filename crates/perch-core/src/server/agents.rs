@@ -420,6 +420,7 @@ pub(super) fn handle_agent_control_acquire(
     workspace_id: Option<String>,
     agent_id: String,
     channel: ControlChannel,
+    if_unowned: bool,
 ) {
     if route_to_remote_host_or_fail(state, &session_id, &request_id, raw_text) {
         return;
@@ -466,31 +467,41 @@ pub(super) fn handle_agent_control_acquire(
         );
         return;
     }
-    match state
-        .app
-        .agent_runtime
-        .acquire_control(&key, channel, client, now_millis())
-    {
+    let result = if if_unowned {
+        state
+            .app
+            .agent_runtime
+            .acquire_control_if_unowned(&key, channel, client, now_millis())
+    } else {
+        state
+            .app
+            .agent_runtime
+            .acquire_control(&key, channel, client, now_millis())
+            .map(Some)
+    };
+    match result {
         Ok(lease) => {
-            let key_name = lifecycle_control_key(&key, channel);
-            match channel {
-                ControlChannel::Input => state
-                    .agent_input_leases
-                    .lock()
-                    .unwrap()
-                    .insert(key_name, lease.clone()),
-                ControlChannel::Resize => state
-                    .agent_resize_leases
-                    .lock()
-                    .unwrap()
-                    .insert(key_name, lease.clone()),
-            };
+            if let Some(lease) = &lease {
+                let key_name = lifecycle_control_key(&key, channel);
+                match channel {
+                    ControlChannel::Input => state
+                        .agent_input_leases
+                        .lock()
+                        .unwrap()
+                        .insert(key_name, lease.clone()),
+                    ControlChannel::Resize => state
+                        .agent_resize_leases
+                        .lock()
+                        .unwrap()
+                        .insert(key_name, lease.clone()),
+                };
+            }
             let _ = state.out_tx.send(ServerMessage::AgentControl {
                 request_id,
                 session_id,
                 agent_id,
                 channel,
-                lease: Some(control_lease_to_wire(&lease)),
+                lease: lease.as_ref().map(control_lease_to_wire),
                 status: state
                     .app
                     .agent_runtime

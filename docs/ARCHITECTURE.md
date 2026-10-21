@@ -246,9 +246,12 @@ checkpoint commit.
 
 Polish CLI mode first; phone and UI mode come after (decided 2026-10-02).
 
-- **Phone: control after reload.** Leases are per connection, so a reloaded
-  view can open before the server drops the old connection's lease, and it
-  comes up as a watcher (agent-terminal-ownership fails under load).
+CLI input is shared across attached views (`terminal.sharedInput`): a phone
+can type while its laptop stays open, including after reload, without moving
+the PTY size. Resize and stop/delete authority remain exclusive; `Fit here`
+moves them explicitly. The old reload lease race no longer blocks CLI typing.
+Older peers and frozen UI mode retain exclusive input.
+
 - **Phone: review delivery.** paired-phone-flows intermittently gets
   "Delivery could not be confirmed" (2 of 9 runs on 2026-10-02; cause not
   found).

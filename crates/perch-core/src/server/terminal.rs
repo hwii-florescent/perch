@@ -1021,6 +1021,7 @@ pub(super) fn handle_terminal_input(
     terminal_id: String,
     data: String,
     generation: Option<u64>,
+    shared: bool,
 ) {
     // Route remote terminals through the hub.
     if let Some(host_id) = state.app.hub.route_for_terminal(&terminal_id) {
@@ -1028,14 +1029,37 @@ pub(super) fn handle_terminal_input(
         return;
     }
     if let Some(key) = state.app.agent_runtime.key_for_terminal(&terminal_id) {
+        // Hold through the write: releasing a view must revoke shared input
+        // before a later frame on this connection can use it.
+        let views = state.agent_views.lock().unwrap();
+        if shared && !views.contains_key(&key) {
+            fail(
+                &state.out_tx,
+                None,
+                "agent_view_required",
+                "Open this agent before typing".to_string(),
+                false,
+            );
+            return;
+        }
         let lease = state
             .agent_input_leases
             .lock()
             .unwrap()
             .get(&lifecycle_control_key(&key, ControlChannel::Input))
             .cloned();
-        if let Some(lease) = lease.filter(|lease| Some(lease.generation) == generation) {
-            if state
+        let result = if shared {
+            connection_client_identity(state)
+                .map_err(anyhow::Error::msg)
+                .and_then(|client| {
+                    state
+                        .app
+                        .agent_runtime
+                        .input_from_view(&key, &terminal_id, &client, &data, now_millis())
+                        .map_err(anyhow::Error::from)
+                })
+        } else if let Some(lease) = lease.filter(|lease| Some(lease.generation) == generation) {
+            state
                 .app
                 .agent_runtime
                 .input(
@@ -1045,8 +1069,12 @@ pub(super) fn handle_terminal_input(
                     now_millis(),
                     std::time::Duration::from_secs(2),
                 )
-                .is_ok()
-            {
+                .map_err(anyhow::Error::from)
+        } else {
+            Err(anyhow::anyhow!("Take control of this agent before typing"))
+        };
+        match result {
+            Ok(()) => {
                 if state
                     .app
                     .cli_active_sessions
@@ -1068,14 +1096,13 @@ pub(super) fn handle_terminal_input(
                 }
                 maybe_capture_cli_title(&state.app, &key.session_id, &data);
             }
-        } else {
-            fail(
+            Err(error) => fail(
                 &state.out_tx,
                 None,
                 "agent_control_required",
-                "Take control of this agent before typing".to_string(),
+                error.to_string(),
                 false,
-            );
+            ),
         }
         return;
     }

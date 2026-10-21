@@ -159,6 +159,14 @@ there, not here.
     The server sends it in-band (`terminal::pty_size_marker`, at each resize
     and at the head of every replay); other views follow it and never fit
     (`PersistentAgentTerminal.tsx`), or a narrower view garbles the CLI.
+  - With capability `terminal.sharedInput`, every live attached CLI view may
+    type (`terminal.input shared: true`), including after reload while the
+    laptop stays open. Typing never takes the resize/stop lease. Only the
+    resize owner answers terminal queries; replay answers are suppressed.
+    `xtermSetup.ts::onTerminalInput` uses the pinned xterm source event so
+    user bytes are never guessed at or filtered. Older peers retain exclusive
+    input. `Fit here` explicitly moves size/stop authority; closing a view
+    without stop authority still only dismisses it.
 - **CLI mode:**
   - It mounts no terminal until the session is started (`CliStartPanel`).
   - It shows no provider/model/effort UI; that chrome is Hosted-only.
@@ -241,8 +249,10 @@ there, not here.
     remains but the client doesn't use it). An agent with no UI surface
     (Terminal, or a CLI with no native bridge) is always CLI (`noUiSurface`
     in `Chat.tsx`). Switching to CLI resumes a session with Hosted history.
-  - There is no Release control / Stop CLI bar: taking control takes the
-    lease ("last actor drives"), and Stop agent is in the pane ⋯ menu.
+  - There is no Release control / Stop CLI bar. CLI typing is shared among
+    attached views; `Fit here` takes size/stop authority. Stop agent remains
+    in the pane ⋯ menu and requires its lease (as does global session deletion).
+    Frozen UI mode and older peers retain explicit Take control.
   - The tab bar shows only the active workspace's sessions
     (`activeWorkspaceSessions` in `store/selectors.ts`), and `+` creates in
     that workspace's path. Selecting a tab focuses its terminal input or
@@ -367,7 +377,7 @@ there, not here.
     (`useToolsContext`); the switcher is `WorkspaceOverview` / `ProjectList` /
     `NewSessionPopover` / `HostSwitcherPopover`. No sidebar, tab strip, drawer or status bar.
     Settings is a section list with a back row (`MobileSettings`, no Keyboard
-    section). A controlled agent terminal gets a quick-key bar
+    section). A writable agent terminal gets a quick-key bar
     (`MobileKeyBar`: Esc, Tab, ⇧Tab, arrows by cursor-key mode, Enter, ^C) so a
     phone can answer a CLI's prompts. perch runs on the user's laptop and the
     phone only drives it, so the phone shows no app without one: an unpaired
@@ -447,10 +457,6 @@ there, not here.
   - Known failures (as of 2026-10-02; the full run is otherwise green):
     - Every opencode spec: opencode is deliberately not installed on this
       Mac; don't install it.
-    - agent-terminal-ownership can fail under load at "phone keeps control
-      after reload". Leases are per connection, so the reloaded view can
-      open before the server drops the old connection's lease, and it then
-      comes up as a watcher.
     - paired-phone-flows intermittently gets "Delivery could not be
       confirmed" for the review packet (2 of 9 runs on 2026-10-02, cause not
       found; 3 of 3 passed at d14bf9f).

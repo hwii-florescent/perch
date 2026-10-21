@@ -129,6 +129,38 @@ describe("createPerchTerminal", () => {
     recover.mockRestore();
   });
 
+  it("classifies real xterm user input separately from replies without inspecting or rewriting bytes", async () => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal, onTerminalInput } = await import("./xtermSetup");
+    const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
+    const events: { data: string; user: boolean }[] = [];
+    const input = onTerminalInput(term, (data, user) => events.push({ data, user }));
+    const write = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
+    try {
+      expect(input.tracksUserInput, "the pinned xterm source hook must exist").toBe(true);
+      term.input("typed");
+      await write("\x1b[6n"); // Fresh cursor-position query, not user input.
+      expect(events.splice(0)).toEqual([{ data: "typed", user: true }, { data: "\x1b[1;1R", user: false }]);
+      await write("\x1b[?2004h");
+      term.input("\x1b[1;2R"); // Reply-shaped user input is never filtered.
+      expect(events.splice(0)).toEqual([{ data: "\x1b[1;2R", user: true }]);
+      term.paste("\x1b[1;2R\x1b]11;rgb:00/00/00\x07");
+      // Preserve exactly what xterm emits, including its own paste sanitization.
+      expect(events.splice(0)).toEqual([{ data: "\x1b[200~␛[1;2R␛]11;rgb:00/00/00\x07\x1b[201~", user: true }]);
+      await write("\x1b]11;?\x07");
+      expect(events).toHaveLength(1);
+      expect(events[0].user).toBe(false);
+      expect(events[0].data).toContain("\x1b]11;");
+      events.length = 0;
+      term.options.disableStdin = true;
+      await write("\x1b[6n");
+      expect(events, "replay replies are suppressed even for the size owner").toEqual([]);
+    } finally { input.dispose(); dispose(); }
+  });
+
   it.each([0, 1, 5, 7])("recovers macOS's context-menu-only Ctrl+Enter through xterm (Kitty flags %i)", async (flags) => {
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
     window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;

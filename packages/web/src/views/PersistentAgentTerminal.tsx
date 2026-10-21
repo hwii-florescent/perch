@@ -3,7 +3,7 @@ import type { AgentLifecycleStatus } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { socket } from "../ws";
 import { openAgentTerminal } from "../agentTerminals";
-import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
+import { createPerchTerminal, onTerminalInput, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
@@ -18,11 +18,13 @@ interface ViewState {
   terminalId: string | null;
   status: AgentLifecycleStatus | null;
   controlling: boolean;
+  writable: boolean;
+  shared: boolean;
   pending: boolean;
   error: string | null;
   exitCode: number | null;
 }
-const OPENING: ViewState = { terminalId: null, status: null, controlling: false, pending: false, error: null, exitCode: null };
+const OPENING: ViewState = { terminalId: null, status: null, controlling: false, writable: false, shared: false, pending: false, error: null, exitCode: null };
 
 /** One agent terminal and its connection, kept across unmounts
  * (`terminalKeeper.ts`). */
@@ -38,6 +40,10 @@ class AgentView extends KeptTerminal<ViewState> {
     let attachedId: string | null = null;
     let replayDone = false;
     let ownsInput = false;
+    let ownsResize = false;
+    let sharedInput = false;
+    let ready = false;
+    let claimingResize = false;
     let exited = false;
     let initialControl = false;
     let responses = "";
@@ -45,7 +51,7 @@ class AgentView extends KeptTerminal<ViewState> {
     // only the controlling view sizes it and the others follow its markers.
     const created = createPerchTerminal(this.host, (cols, rows) => {
       if (this.inputId) usePerchStore.getState().resizeTerminal(this.inputId, cols, rows);
-    }, usePerchStore.getState().terminalProfile, () => !attachedId || ownsInput);
+    }, usePerchStore.getState().terminalProfile, () => !attachedId || ownsResize);
     this.created = created;
     const write = (data: string, callback?: () => void) => {
       let last = 0;
@@ -58,12 +64,29 @@ class AgentView extends KeptTerminal<ViewState> {
     };
     created.term.options.disableStdin = true;
     const updateInput = () => {
-      this.inputId = !this.disposed && replayDone && ownsInput && !exited ? attachedId : null;
+      this.inputId = !this.disposed && replayDone && (sharedInput || ownsInput) && !exited ? attachedId : null;
       created.term.options.disableStdin = this.inputId === null;
-      if (this.inputId && responses) {
+      this.set({ writable: this.inputId !== null });
+      if (this.inputId && (sharedInput ? ownsResize : ownsInput) && responses) {
         usePerchStore.getState().sendTerminalInput(this.inputId, responses);
         responses = "";
       }
+    };
+    const input = onTerminalInput(created.term, (data, user) => {
+      if (this.inputId && (!sharedInput || user || ownsResize)) usePerchStore.getState().sendTerminalInput(this.inputId, data);
+      // Only fresh query replies may wait for a response-owner lease. Never
+      // send replies to history replay, or let passive views answer twice.
+      else if (replayDone && !user && (initialControl || claimingResize || (sharedInput && !this.state.status?.resizeOwner)) && !exited && responses.length + data.length <= 2048) responses += data;
+    });
+    const advertised = usePerchStore.getState().serverInfo?.capabilities?.includes("terminal.sharedInput") === true;
+    sharedInput = advertised && input.tracksUserInput;
+    this.set({ shared: sharedInput, ...(advertised && !input.tracksUserInput ? { error: "Shared typing is unavailable in this terminal version. Use Take control." } : {}) });
+    const claimUnownedResize = async () => {
+      if (!sharedInput || !ready || this.disposed || exited || claimingResize || this.state.status?.resizeOwner) return;
+      claimingResize = true;
+      try { await opened.takeResize(true); }
+      catch (reason) { if (!this.disposed) this.set({ error: (reason as Error).message }); }
+      finally { claimingResize = false; if (!ownsResize) responses = ""; }
     };
     const opened = openAgentTerminal(sessionId, agent, created.term.cols, created.term.rows,
       (id, snapshot, replay) => {
@@ -79,41 +102,41 @@ class AgentView extends KeptTerminal<ViewState> {
         });
       },
       (data) => { if (!this.disposed) write(data); },
-      (snapshot, owned) => {
+      (snapshot, owned, resizing) => {
         if (this.disposed) return;
         ownsInput = owned;
+        ownsResize = resizing;
         this.set({ status: snapshot, controlling: owned });
         updateInput();
+        if (ownsResize) created.fit();
+        void claimUnownedResize();
       },
       () => ({ cols: created.term.cols, rows: created.term.rows }),
+      sharedInput,
     );
     this.binding = opened;
     opened.ready.then(async () => {
       if (!this.disposed && initialControl) {
         this.set({ pending: true });
-        try { await opened.takeControl(); }
+        try { await opened.takeControl(sharedInput); }
         catch (reason) { if (!this.disposed) this.set({ error: (reason as Error).message }); }
         finally { initialControl = false; responses = ""; if (!this.disposed) { this.set({ pending: false }); created.fit(); } }
       }
+      ready = true;
+      await claimUnownedResize();
     }).catch((reason: Error) => { if (!this.disposed) this.set({ error: reason.message }); });
-    const input = created.term.onData((data) => {
-      if (this.inputId) usePerchStore.getState().sendTerminalInput(this.inputId, data);
-      // Historical queries are dropped. Fresh startup queries can wait for
-      // this viewer's initial lease without accepting keyboard input early.
-      else if (replayDone && initialControl && !ownsInput && !exited && responses.length + data.length <= 2048) responses += data;
-    });
     const stopExit = socket.onMessage((message) => {
       if (message.type !== "terminal.exit" || message.terminalId !== attachedId) return;
       exited = true;
       ownsInput = false;
       this.inputId = null;
       created.term.options.disableStdin = true;
-      this.set({ controlling: false, exitCode: message.code });
+      this.set({ controlling: false, writable: false, exitCode: message.code });
     });
     this.stop = () => { opened.release(); input.dispose(); stopExit(); created.dispose(); };
   }
 
-  /** Type `data` as if on the keyboard, while this view holds input. */
+  /** Type `data` as if on the keyboard from any writable attached view. */
   sendKey(data: string) {
     if (this.inputId) usePerchStore.getState().sendTerminalInput(this.inputId, data);
   }
@@ -143,7 +166,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   const container = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<AgentView | null>(null);
   const [restart, setRestart] = useState(0);
-  const { terminalId, status, controlling, pending, error, exitCode } = useSyncExternalStore(
+  const { terminalId, status, controlling, writable, shared, pending, error, exitCode } = useSyncExternalStore(
     view?.subscribe ?? noSubscription, view?.getState ?? openingState,
   );
   const search = useTerminalSearch(view?.created.term ?? null);
@@ -175,20 +198,20 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   // exit — but its conversation is kept and reattaching resumes it. Saying
   // "exited (code 0)" for that would read as lost work.
   const sleeping = status?.state === "sleeping";
-  // Only a view that can't type gets a bar: driving the agent is the normal
-  // case and needs no chrome. Taking control moves it from any other view.
-  const label = !connected ? "Reconnecting…" : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
-  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined}>
+  // Shared typing never needs takeover. The optional Fit here action moves
+  // sizing/stop authority, without making the other screens read-only.
+  const label = !connected ? "Reconnecting…" : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? "Shared terminal" : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
+  return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
     {label && <div className="terminal__toolbar terminal__toolbar--overlay">
       <span role="status">{label}</span>
       {!terminalId && error && connected && <button type="button" disabled={pending} onClick={startOver}>Retry CLI</button>}
       {terminalId && status && !controlling && <button type="button" disabled={pending || !connected} onClick={() => void view?.takeControl()}>
-        {pending ? "Taking control…" : "Take control"}
+        {pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control"}
       </button>}
     </div>}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
-    {isMobile && controlling && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
+    {isMobile && writable && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
     {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
       <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>

@@ -119,6 +119,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             agent_id,
             channel,
+            if_unowned,
         } => agents::handle_agent_control_acquire(
             state,
             raw_text,
@@ -127,6 +128,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             agent_id,
             channel,
+            if_unowned,
         ),
         ClientMessage::AgentControlRelease {
             request_id,
@@ -286,7 +288,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             terminal_id,
             data,
             generation,
-        } => terminal::handle_terminal_input(state, raw_text, terminal_id, data, generation),
+            shared,
+        } => {
+            terminal::handle_terminal_input(state, raw_text, terminal_id, data, generation, shared)
+        }
         ClientMessage::TerminalResize {
             terminal_id,
             cols,

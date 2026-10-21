@@ -959,6 +959,8 @@ export interface TerminalInputMessage {
   data: string;
   /** Generation token when this terminal has explicit input ownership. */
   generation?: number;
+  /** With terminal.sharedInput, type from a live attached view without taking the resize/stop lease. */
+  shared?: boolean;
 }
 
 export interface TerminalResizeMessage {
@@ -1013,6 +1015,8 @@ export interface AgentControlAcquireMessage {
   workspaceId?: string;
   agentId: string;
   channel: AgentControlChannel;
+  /** With terminal.sharedInput, automatic recovery must not steal a lease. */
+  ifUnowned?: boolean;
 }
 
 export interface AgentControlReleaseMessage {

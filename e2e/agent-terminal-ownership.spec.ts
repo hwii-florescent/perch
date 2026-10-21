@@ -32,7 +32,7 @@ test("agent runtime survives view changes and control transfers between desktop 
     await phone.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
     const mobile = phone.getByTestId("persistent-agent-terminal");
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
-    await expect(mobile).toContainText("Another view is typing in this agent");
+    await expect(mobile).toHaveAttribute("data-writable", "true");
     await expect(mobile.locator(".xterm-rows")).toContainText(marker);
     // A guessed terminal id on an unrelated connection cannot write, even
     // though this connection is authorized to inspect the same local core.
@@ -42,23 +42,24 @@ test("agent runtime survives view changes and control transfers between desktop 
       const timer = setTimeout(() => { ws.close(); reject(new Error("Missing ownership refusal " + JSON.stringify(codes))); }, 5000);
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "terminal.input", terminalId, data: "UNAUTHORIZED_SENTINEL", generation: 1 }));
+        ws.send(JSON.stringify({ type: "terminal.input", terminalId, data: "UNAUTHORIZED_SENTINEL", shared: true }));
         ws.send(JSON.stringify({ type: "session.delete", sessionId }));
       };
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         if (message.type === "error") {
           codes.push(message.code);
-          if (codes.length === 2) { clearTimeout(timer); ws.close(); resolve(codes); }
+          if (codes.length === 3) { clearTimeout(timer); ws.close(); resolve(codes); }
         }
       };
     }), { terminalId: id, sessionId });
-    expect(refused).toEqual(["agent_control_required", "agent_control_required"]);
+    expect(refused).toEqual(["agent_control_required", "agent_view_required", "agent_control_required"]);
     await expect(desktop.locator(".xterm-rows")).not.toContainText("UNAUTHORIZED_SENTINEL");
 
-    // Taking control moves it from the desktop without a release step.
-    await mobile.getByRole("button", { name: "Take control", exact: true }).click();
+    // Typing needs no takeover. Fit here explicitly moves size/stop authority.
+    await mobile.getByRole("button", { name: "Fit here", exact: true }).click();
     await expect(mobile).toHaveAttribute("data-controlling", "true");
-    await expect(desktop).toContainText("Another view is typing in this agent");
+    await expect(desktop).toHaveAttribute("data-writable", "true");
     await mobile.locator(".xterm-helper-textarea").pressSequentially("_phone", { delay: 15 });
     await expect(desktop.locator(".xterm-rows")).toContainText(`${marker}_phone`);
 
@@ -79,9 +80,9 @@ test("agent runtime survives view changes and control transfers between desktop 
     await phone.reload({ waitUntil: "networkidle" });
     await expect(mobile).toHaveAttribute("data-terminal-id", id);
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
-    await expect(mobile).toHaveAttribute("data-controlling", "true");
+    await expect(mobile).toHaveAttribute("data-writable", "true");
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    expect((await desktop.getByRole("button", { name: "Take control", exact: true }).boundingBox())!.height).toBeGreaterThan(0);
+    expect((await desktop.getByRole("button", { name: "Fit here", exact: true }).boundingBox())!.height).toBeGreaterThan(0);
     const shots = path.resolve(__dirname, "../.impeccable/review");
     fs.mkdirSync(shots, { recursive: true });
     await phone.screenshot({ path: path.join(shots, `agent-mobile-${testInfo.project.name}.png`) });
@@ -89,13 +90,13 @@ test("agent runtime survives view changes and control transfers between desktop 
     // A watcher's tab close dismisses observation, never the phone's work.
     await page.getByTestId(`tab-close-${sessionId}`).click();
     await expect(desktop).toHaveCount(0);
-    await expect(mobile).toHaveAttribute("data-controlling", "true");
+    await expect(mobile).toHaveAttribute("data-writable", "true");
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
     await page.getByTestId(`tab-${sessionId}`).click();
     await expect(desktop).toHaveAttribute("data-terminal-id", id);
 
     // Owners can also choose observation-only dismissal in the close dialog.
-    await desktop.getByRole("button", { name: "Take control", exact: true }).click();
+    await desktop.getByRole("button", { name: "Fit here", exact: true }).click();
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     await page.getByTestId(`tab-close-${sessionId}`).click();
     await page.getByRole("button", { name: "Keep running and dismiss this view", exact: true }).click();

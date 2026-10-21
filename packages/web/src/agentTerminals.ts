@@ -11,9 +11,10 @@ interface Pending {
   releaseLate?: ClientMessage;
 }
 interface View {
+  sharedInput: boolean;
   status: AgentLifecycleStatus;
   leases: Partial<Record<AgentControlChannel, AgentControlLease>>;
-  listeners: Map<string, (status: AgentLifecycleStatus, controlling: boolean) => void>;
+  listeners: Map<string, (status: AgentLifecycleStatus, controlling: boolean, resizing: boolean) => void>;
 }
 const pending = new Map<string, Pending>();
 // Request ids that already settled, so their late replies are swallowed; one
@@ -42,7 +43,7 @@ function request(message: ClientMessage & { requestId: string }, accept: (reply:
   });
 }
 function notify(view: View) {
-  for (const listener of view.listeners.values()) listener(view.status, !!view.leases.input);
+  for (const listener of view.listeners.values()) listener(view.status, !!view.leases.input, !!view.leases.resize);
 }
 
 /** Dispatch before generic chat errors; attach installs the data listener in
@@ -94,7 +95,7 @@ export function agentInputGeneration(terminalId: string): number | undefined {
 export function sendAgentTerminalInput(terminalId: string, data: string): boolean {
   const view = views.get(terminalId);
   if (!view) return false;
-  if (view.leases.input) socket.send({ type: "terminal.input", terminalId, data, generation: view.leases.input.generation });
+  if (view.sharedInput || view.leases.input) socket.send({ type: "terminal.input", terminalId, data, ...(view.sharedInput ? { shared: true } : { generation: view.leases.input!.generation }) });
   return true;
 }
 export function resizeAgentTerminal(terminalId: string, cols: number, rows: number): boolean {
@@ -115,7 +116,7 @@ export function stopAgent(sessionId: string): boolean {
   return false;
 }
 
-/** This view observes execution but does not hold input authority. */
+/** This view may type, but does not hold authority to stop/delete execution. */
 export function isWatchingAgent(sessionId: string): boolean {
   return [...views.values()].some((view) => view.status.key.sessionId === sessionId) && !canStopAgent(sessionId);
 }
@@ -128,8 +129,9 @@ export function openAgentTerminal(
   sessionId: string, providerId: string, cols: number, rows: number,
   onReady: (terminalId: string, status: AgentLifecycleStatus, replay: string) => void,
   onData: (data: string) => void,
-  onStatus: (status: AgentLifecycleStatus, controlling: boolean) => void,
+  onStatus: (status: AgentLifecycleStatus, controlling: boolean, resizing: boolean) => void,
   dimensions: () => { cols: number; rows: number } = () => ({ cols, rows }),
+  sharedInput = false,
 ) {
   const viewId = newId();
   let terminalId: string | undefined;
@@ -147,13 +149,13 @@ export function openAgentTerminal(
       if (!view?.listeners.size) views.delete(terminalId);
     }
   };
-  async function acquire(channel: AgentControlChannel) {
+  async function acquire(channel: AgentControlChannel, ifUnowned = false) {
     if (released || !terminalId) return;
     const view = views.get(terminalId);
     if (!view) return;
     await request({
       type: "agent.control.acquire",
-      requestId: newId(), sessionId, agentId: providerId, workspaceId: view.status.key.workspaceId, channel,
+      requestId: newId(), sessionId, agentId: providerId, workspaceId: view.status.key.workspaceId, channel, ...(ifUnowned ? { ifUnowned: true } : {}),
     }, (reply) => {
       if (reply.type !== "agent.control" || reply.sessionId !== sessionId || reply.agentId !== providerId || reply.channel !== channel) throw new Error("Unexpected agent control response");
       // A released view cannot reclaim a lease after its response arrives.
@@ -168,7 +170,7 @@ export function openAgentTerminal(
     if (reply.type !== "agent.terminal.opened" || reply.status.key.sessionId !== sessionId || reply.status.providerId !== providerId) throw new Error("Unexpected agent terminal response");
     terminalId = reply.terminalId;
     if (released) { releaseRemote(); return; }
-    const view = views.get(terminalId) ?? { status: reply.status, leases: {}, listeners: new Map() };
+    const view = views.get(terminalId) ?? { sharedInput, status: reply.status, leases: {}, listeners: new Map() };
     view.status = reply.status;
     view.listeners.set(viewId, onStatus);
     views.set(terminalId, view);
@@ -176,17 +178,16 @@ export function openAgentTerminal(
     onReady(terminalId, reply.status, reply.replay);
     notify(view);
   }, releaseMessage);
+  const takeResize = async (ifUnowned = false) => {
+    await acquire("resize", ifUnowned);
+    // The local fit may predate this lease. Synchronize the current grid.
+    if (!released && terminalId) {
+      const size = dimensions();
+      resizeAgentTerminal(terminalId, size.cols, size.rows);
+    }
+  };
   return {
-    ready, release,
-    takeControl: async () => {
-      await acquire("input");
-      await acquire("resize");
-      // The local fit may predate this lease, so it will not emit another
-      // resize just because control changed. Synchronize the current grid.
-      if (!released && terminalId) {
-        const size = dimensions();
-        resizeAgentTerminal(terminalId, size.cols, size.rows);
-      }
-    },
+    ready, release, takeResize,
+    takeControl: async (ifUnowned = false) => { await acquire("input", ifUnowned); await takeResize(ifUnowned); },
   };
 }

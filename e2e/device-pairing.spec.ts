@@ -30,6 +30,7 @@ const AGENT_SCRIPT = [
   "printf 'phonebot ready\\n'",
   "while IFS= read -r line; do",
   "  printf 'phonebot_reply %s\\n' \"$line\"",
+  "  if [ \"$line\" = probe-query ]; then printf '\\033[6n'; fi",
   "done",
 ].join("\n");
 
@@ -111,7 +112,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json"), "--devices-path", devicesPath, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", PERCHD_DIR: path.join(fixture, "d"), PERCH_SETTINGS: path.join(fixture, "settings.json") }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -147,13 +148,29 @@ test("a phone pairs over the network, drives the session, and loses access when 
   const phoneErrors: string[] = [];
   let agentState: string | undefined;
   let inputDevice: string | undefined;
-  phone.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+  let resizeDevice: string | undefined;
+  let trackPhoneResizes = false;
+  const sizeFrames: string[] = [];
+  const queryReplies = { phone: 0, desktop: 0 };
+  page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
+    const message = JSON.parse(String(payload));
+    if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.desktop++;
+  }));
+  phone.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload));
+      if (trackPhoneResizes && message.type === "terminal.resize") sizeFrames.push(String(payload));
+      if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.phone++;
+    });
+    socket.on("framereceived", ({ payload }) => {
     const frame = JSON.parse(String(payload));
     if (frame.type === "agent.lifecycle.changed" && frame.status.key.agentId === "phonebot") {
       agentState = frame.status.state;
       if (frame.status.inputOwner) inputDevice = frame.status.inputOwner.deviceId;
+      resizeDevice = frame.status.resizeOwner?.deviceId;
     }
-  }));
+    });
+  });
   phone.on("pageerror", (error) => phoneErrors.push(error.message));
 
   try {
@@ -208,15 +225,58 @@ test("a phone pairs over the network, drives the session, and loses access when 
     // not fabricate one, even beyond the former 20-second idle sweep cutoff.
     await expect.poll(() => agentState).toBe("working");
     const pairedId = JSON.parse(fs.readFileSync(devicesPath, "utf8")).devices[0].id;
-    await expect.poll(() => inputDevice, { message: "input ownership must identify the paired phone" }).toBe(pairedId);
+    // Concurrent host attachment may win the lease; either view can still type.
+    await expect.poll(() => inputDevice === pairedId || inputDevice === "local").toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 22_000));
     expect(agentState, "PTY silence must not make an unfinished agent idle").toBe("working");
     await phone.screenshot({ path: testInfo.outputPath("pairing-phone-agent.png"), fullPage: true });
 
-    // 5. Scrollback survives a reload on the phone.
+    // The laptop stays open on the same agent and owns its terminal size.
+    const sessionId = await phone.evaluate(() => localStorage.getItem("perch.sessionId"));
+    await page.getByTestId(`workspace-session-${sessionId}`).click({ timeout: 15_000 });
+    const desktop = page.getByTestId("persistent-agent-terminal");
+    await expect(desktop).toHaveAttribute("data-writable", "true");
+    await desktop.getByRole("button", { name: "Fit here", exact: true }).click();
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
+    await expect(terminal).toHaveAttribute("data-writable", "true");
+    await expect(terminal).not.toHaveAttribute("data-controlling", "true");
+    trackPhoneResizes = true;
+    await input.pressSequentially("while-laptop-open", { delay: 10 });
+    await phone.getByTestId("mobile-key-bar").getByRole("button", { name: "Enter", exact: true }).click();
+    await expect(desktop.locator(".xterm-rows")).toContainText("phonebot_reply while-laptop-open");
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
+    await expect.poll(() => inputDevice, { message: "shared phone typing must not take the laptop lease" }).toBe("local");
+    await desktop.locator(".xterm-helper-textarea").pressSequentially("from-desktop", { delay: 10 });
+    await desktop.locator(".xterm-helper-textarea").press("Enter");
+    await expect(terminal.locator(".xterm-rows")).toContainText("phonebot_reply from-desktop");
+    await input.pressSequentially("probe-query", { delay: 10 });
+    await input.press("Enter");
+    await expect.poll(() => queryReplies.desktop).toBe(1);
+    expect(queryReplies.phone, "only the resize owner answers live terminal queries").toBe(0);
+    await desktop.locator(".xterm-helper-textarea").press("Control+u"); // Clear the fixture's echoed query reply.
+    await page.screenshot({ path: testInfo.outputPath("shared-desktop.png") });
+    await phone.screenshot({ path: testInfo.outputPath("shared-phone.png") });
+
+    // 5. Reload remains writable even while the laptop still holds both leases.
     await phone.reload({ waitUntil: "networkidle" });
-    await expect(phone.getByTestId("persistent-agent-terminal").locator(".xterm-rows"))
-      .toContainText("phonebot_reply from-the-phone", { timeout: 30_000 });
+    await expect(terminal).toHaveAttribute("data-writable", "true");
+    await expect(terminal.locator(".xterm-rows")).toContainText("phonebot_reply from-the-phone", { timeout: 30_000 });
+    await input.pressSequentially("after-phone-reload", { delay: 10 });
+    await input.press("Enter");
+    await expect(desktop.locator(".xterm-rows")).toContainText("phonebot_reply after-phone-reload");
+    expect(sizeFrames, "phone typing/reloading must not resize the laptop's PTY").toEqual([]);
+    expect(queryReplies, "reload must not answer historical queries").toEqual({ desktop: 1, phone: 0 });
+    await expect(desktop).toHaveAttribute("data-controlling", "true");
+
+    // Closing the sizing view leaves the phone able to answer fresh queries.
+    trackPhoneResizes = false;
+    await page.goto("about:blank");
+    await expect.poll(() => resizeDevice).toBe(pairedId);
+    await input.pressSequentially("probe-query", { delay: 10 });
+    await input.press("Enter");
+    await expect.poll(() => queryReplies.phone).toBe(1);
+    expect(queryReplies.desktop).toBe(1);
+    await input.press("Control+u");
 
     // 6. Files and Git from the phone-sized surface.
     await phone.getByTestId("mobile-switch").click();
@@ -261,12 +321,14 @@ test("a phone pairs over the network, drives the session, and loses access when 
     expect(phoneErrors).toEqual([]);
   } finally {
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
-    await phoneContext.close();
+    // Release fixture processes before potentially slow WebKit teardown.
     await stop();
     const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
     for (const name of ownedTmux) {
       try { execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" }); } catch { /* already exited */ }
     }
+    try { execFileSync("pkill", ["-f", `__perchd serve --dir ${path.join(fixture, "d")}`]); } catch { /* already exited */ }
     fs.rmSync(fixture, { recursive: true, force: true });
+    await phoneContext.close();
   }
 });
