@@ -6,6 +6,7 @@
 //! supplies the native window chrome.
 
 mod browser;
+mod permissions;
 
 use perch_core::boot::{
     adopt_login_shell_path, augment_path_with_local_bin, boot, resolve_web_dist_dir,
@@ -208,6 +209,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             open_external,
             reveal_in_finder,
+            permissions::permissions_status,
+            permissions::permissions_allow,
+            permissions::permissions_verify,
             browser::browser_show,
             browser::browser_hide,
             browser::browser_close,

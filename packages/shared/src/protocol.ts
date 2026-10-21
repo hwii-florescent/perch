@@ -160,6 +160,8 @@ export interface SettingsData {
   tabShape?: "square" | "round";
   /** The desktop app also listens on the LAN for paired phones. Absent = off. */
   phoneAccess?: boolean;
+  /** Setup completed or skipped, not an OS grant. Absent = false. */
+  permissionsSetupDismissed?: boolean;
 }
 
 /**
@@ -187,6 +189,7 @@ export interface SettingsPatch {
   previewTabs?: boolean;
   tabShape?: "square" | "round";
   phoneAccess?: boolean;
+  permissionsSetupDismissed?: boolean;
 }
 
 export type HostMode = "perch" | "direct";

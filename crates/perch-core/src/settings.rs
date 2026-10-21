@@ -87,6 +87,9 @@ pub struct Settings {
     /// until the user turns it on.
     #[serde(default)]
     pub phone_access: bool,
+    /// The user completed or skipped macOS permission setup; never a grant.
+    #[serde(default)]
+    pub permissions_setup_dismissed: bool,
 }
 
 impl Default for Settings {
@@ -106,6 +109,7 @@ impl Default for Settings {
             preview_tabs: true,
             tab_shape: default_tab_shape(),
             phone_access: false,
+            permissions_setup_dismissed: false,
         }
     }
 }
@@ -171,6 +175,7 @@ pub struct SettingsPatch {
     pub preview_tabs: Option<bool>,
     pub tab_shape: Option<String>,
     pub phone_access: Option<bool>,
+    pub permissions_setup_dismissed: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -284,6 +289,9 @@ impl SettingsStore {
         if let Some(phone_access) = patch.phone_access {
             guard.phone_access = phone_access;
         }
+        if let Some(dismissed) = patch.permissions_setup_dismissed {
+            guard.permissions_setup_dismissed = dismissed;
+        }
         let snapshot = guard.clone();
         drop(guard);
         self.write_to_disk(&snapshot)?;
@@ -327,11 +335,12 @@ mod keybinding_tests {
         std::fs::write(&path, r#"{"theme":"perch"}"#).unwrap();
         let store = SettingsStore::load(&path);
         assert!(store.get().keybindings.is_empty());
+        assert!(!store.get().permissions_setup_dismissed);
         assert!(store.get().warn_close_agent);
         assert_eq!(store.get().tab_shape, "square");
 
         let patch: SettingsPatch = serde_json::from_str(
-            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false,"tabShape":"round"}"#,
+            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false,"tabShape":"round","permissionsSetupDismissed":true}"#,
         )
         .unwrap();
         store.update(patch).unwrap();
@@ -349,6 +358,7 @@ mod keybinding_tests {
         );
         assert!(!reloaded.warn_close_agent);
         assert_eq!(reloaded.tab_shape, "round");
+        assert!(reloaded.permissions_setup_dismissed);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

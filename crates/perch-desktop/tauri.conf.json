@@ -21,7 +21,10 @@
       "icons/icon.icns"
     ],
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist",
+      "minimumSystemVersion": "10.15"
     },
     "category": "DeveloperTool",
     "shortDescription": "Agent-babysitting IDE for Claude Code and Codex"

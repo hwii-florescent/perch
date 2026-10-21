@@ -1,6 +1,7 @@
 //! perchd — the perch terminal daemon. See `docs/ARCHITECTURE.md` §3.
 
 pub mod client;
+pub mod permissions;
 pub mod proto;
 pub mod screen;
 pub mod server;
@@ -71,6 +72,13 @@ pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
                 1
             }
         },
+        "permissions" => {
+            println!(
+                "PERCH_PERMISSIONS_BEGIN\n{}\nPERCH_PERMISSIONS_END",
+                serde_json::to_string_pretty(&permissions::snapshot()).unwrap()
+            );
+            0
+        }
         "version" => {
             println!("perchd protocol {}", proto::PROTOCOL_VERSION);
             0

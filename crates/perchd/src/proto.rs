@@ -145,7 +145,11 @@ pub enum Request {
     Snapshot {
         id: String,
     },
-    Health,
+    Health {
+        /// Optional diagnostic; old daemons ignore this field.
+        #[serde(default)]
+        permissions: bool,
+    },
 }
 
 /// Default replay window for an attach with no `since`: the scrollback a
@@ -227,11 +231,32 @@ pub struct Health {
     pub pid: u32,
     pub sessions: usize,
     pub alive: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<crate::permissions::PermissionSnapshot>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_health_is_additive_for_old_peers() {
+        #[derive(Deserialize)]
+        #[serde(tag = "op", rename_all = "snake_case")]
+        enum OldRequest {
+            Health,
+        }
+        assert!(
+            serde_json::from_str::<OldRequest>(r#"{"op":"health","permissions":true}"#).is_ok()
+        );
+        assert_eq!(
+            serde_json::from_str::<Request>(r#"{"op":"health"}"#).unwrap(),
+            Request::Health { permissions: false }
+        );
+        let old: Health =
+            serde_json::from_str(r#"{"version":1,"pid":1,"sessions":0,"alive":0}"#).unwrap();
+        assert!(old.permissions.is_none());
+    }
 
     #[test]
     fn frames_round_trip() {

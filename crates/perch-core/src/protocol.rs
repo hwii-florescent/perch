@@ -95,6 +95,9 @@ pub struct SettingsData {
     /// Also listen on the LAN for paired phones (desktop app; see `phone_access.rs`).
     #[serde(default)]
     pub phone_access: bool,
+    /// Setup completed or skipped, not an OS permission grant.
+    #[serde(default)]
+    pub permissions_setup_dismissed: bool,
 }
 
 fn default_theme() -> String {
@@ -161,6 +164,8 @@ pub struct SettingsPatch {
     pub tab_shape: Option<String>,
     #[serde(default)]
     pub phone_access: Option<bool>,
+    #[serde(default)]
+    pub permissions_setup_dismissed: Option<bool>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
