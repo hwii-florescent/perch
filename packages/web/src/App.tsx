@@ -22,6 +22,8 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
+import { NeedsYouButton } from "./components/NeedsYou";
+import "./attention";
 import "./surfaceSync";
 import "./workspaceCleanup";
 
@@ -240,6 +242,7 @@ export default function App() {
             {sidebarToggle}
           </div>
           <TabBar />
+          <NeedsYouButton className={ICON_BUTTON} />
           {/* With the drawer open, its Files/Git switch heads the same column. */}
           {tools ? (
             <div
