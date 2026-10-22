@@ -14,7 +14,7 @@ import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { menuPanel } from "./ui/menu";
 import {
-  ago, certaintyNote, dismissAttention, needsYou, openAttention, openAttentionFile, openAttentionReview,
+  ago, certaintyNote, dismissAttention, needsYou, openAttention, openAttentionFile, openAttentionReview, openAttentionWorkspace,
   reasonLabel, recentUpdates, useAttention, welcomeLine, welcomeSummary,
 } from "../attention";
 import { sessionLabel } from "../workspaceTabs";
@@ -47,7 +47,12 @@ function Row({ event, now }: { event: AttentionEvent; now: number }) {
         <span className="ml-auto shrink-0 text-[0.72rem] text-subtext-0" title={new Date(event.occurredAt).toLocaleString()}>{ago(event.occurredAt, now)}</span>
       </div>
       <div className="flex min-w-0 items-center gap-1 pl-5 text-[0.75rem] text-subtext-0">
-        <span className="min-w-0 truncate">{session ? sessionLabel(session) : "Closed session"}{where ? ` · ${where}` : ""}</span>
+        <span className="min-w-0 shrink truncate">{session ? sessionLabel(session) : "Closed session"}</span>
+        {where && (
+          <button type="button" className={cn(GHOST_BUTTON, "min-w-0 shrink truncate px-1 text-[0.75rem]")} title={`Go to ${where}`} data-testid="attention-workspace" disabled={!event.workspaceId} onClick={() => openAttentionWorkspace(event)}>
+            {where}
+          </button>
+        )}
         {!event.read && <span className="size-1.5 shrink-0 rounded-full bg-teal" aria-label="Unread" role="img" />}
       </div>
       {note && <div className="pl-5 text-[0.72rem] italic text-subtext-0">{note}</div>}

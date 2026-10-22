@@ -140,6 +140,14 @@ export function openAttentionReview(event: AttentionEvent): void {
   useFileTabs.getState().open(event.workspaceId, "", "review");
 }
 
+/** The event's workspace (nest): sidebar focus, its own tabs and drawer. */
+export function openAttentionWorkspace(event: AttentionEvent): void {
+  if (!event.workspaceId) return;
+  useAttention.getState().setOpen(false);
+  useFileTabs.getState().showSession();
+  usePerchStore.getState().focusWorkspace(event.workspaceId);
+}
+
 export function openAttentionFile(event: AttentionEvent, path: string): void {
   if (!event.workspaceId) return;
   useAttention.getState().setOpen(false);
