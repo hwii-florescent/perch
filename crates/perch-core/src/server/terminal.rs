@@ -1130,6 +1130,7 @@ pub(super) fn handle_terminal_input(
             .unwrap()
             .remove(&session_id);
         if was_blocked {
+            super::attention::answered(&state.app, &session_id);
             notify_session_updated(&state.app, &session_id);
         }
         // First keystroke into an agent-attached CLI terminal makes
@@ -1255,6 +1256,7 @@ pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, termi
             .unwrap()
             .remove(&session_id);
         if was_blocked {
+            super::attention::answered(&state.app, &session_id);
             notify_session_updated(&state.app, &session_id);
         }
     }

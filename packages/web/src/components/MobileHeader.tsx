@@ -15,6 +15,7 @@ import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { NeedsYouButton } from "./NeedsYou";
 import type { SessionSummary } from "@perch/shared";
 
 function basename(cwd: string): string {
@@ -66,6 +67,7 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
         </span>
         <Chevron open />
       </button>
+      <NeedsYouButton className={cn(GHOST_BUTTON, "flex size-11 shrink-0 items-center justify-center p-0")} />
       <button
         type="button"
         className={cn(GHOST_BUTTON, "grid size-11 shrink-0 place-items-center p-0 text-[1.1rem]")}

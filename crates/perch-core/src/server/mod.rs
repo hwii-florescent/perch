@@ -87,6 +87,7 @@ mod worktree_jobs;
 use workspace::effective_focus;
 mod agent_history;
 mod agents;
+mod attention;
 mod native_ui;
 mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -394,8 +395,13 @@ impl TurnSink for DetachedSink {
                 .unwrap()
                 .insert(session_id.to_string());
         } else {
-            self.app.running_sessions.lock().unwrap().remove(session_id);
+            let was_running = self.app.running_sessions.lock().unwrap().remove(session_id);
             mark_unseen_if_unviewed(&self.app, session_id);
+            // ponytail: the sink is not told how a detached turn ended, so a
+            // failed one reads "Finished"; pass the run status here to split it.
+            if was_running {
+                attention::settled(&self.app, session_id, false);
+            }
         }
         notify_session_updated(&self.app, session_id);
     }
@@ -762,6 +768,9 @@ pub async fn run(
         tracing::warn!("could not reconcile review packet states: {error}");
     }
     state.detached.recover_all();
+    attention::reconcile_at_boot(&state);
+    // Read before recovery turns them Reconnecting with another reason.
+    let open_turns = attention::turns_open_at_boot(&state);
 
     // Complete any save that reached the filesystem but not SQLite buffer
     // reconciliation before accepting clients. This is intentionally bounded
@@ -777,7 +786,7 @@ pub async fn run(
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
-    spawn_agent_turn_state_task(state.clone());
+    spawn_agent_turn_state_task(state.clone(), open_turns);
     spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
 
@@ -1346,7 +1355,7 @@ fn refresh_stale_sessions(state: &AppState, snapshots: &[crate::agent_fleet::Age
 
 /// Consume provider transitions in order, including a whole turn that fits
 /// between lifecycle snapshot polls. Native and configured providers share it.
-fn spawn_agent_turn_state_task(state: AppState) {
+fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenTurns) {
     let mut transitions = state
         .agent_runtime
         .lifecycle()
@@ -1365,6 +1374,7 @@ fn spawn_agent_turn_state_task(state: AppState) {
                 }
             };
             use crate::agent_fleet::AgentState;
+            attention::on_transition(&state, &key, &transition, starts_turn, &mut open_turns);
             let running = match transition.to {
                 // Repainting a completed terminal is output, not a new turn.
                 AgentState::Working if !starts_turn => continue,
@@ -2013,6 +2023,14 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                     .lock()
                     .unwrap()
                     .insert(session_id.clone());
+                let agent = on_data_app
+                    .db
+                    .get_session(&session_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|row| row.cli_provider_id.or(row.last_agent))
+                    .unwrap_or_default();
+                attention::question(&on_data_app, &session_id, &agent, "heuristic");
                 notify_session_updated(&on_data_app, &session_id);
             }
         }
@@ -2037,6 +2055,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
                 .unwrap()
                 .remove(&session_id);
             if was_blocked {
+                attention::answered(&on_exit_app, &session_id);
                 notify_session_updated(&on_exit_app, &session_id);
             }
         }
@@ -2380,6 +2399,7 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.release",
         "terminal.close",
         "surface.v1",
+        "attention.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

@@ -226,6 +226,7 @@ fn set_active_session(state: &Arc<ConnState>, session_id: &str) {
     if was_unseen {
         notify_session_updated(&state.app, session_id);
     }
+    super::attention::viewed_session(&state.app, session_id);
 }
 
 /// Build a fresh `ClaudeRunner` (optionally primed to `--resume` a known
@@ -477,6 +478,7 @@ fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEven
                 .unwrap()
                 .remove(session_id);
             mark_unseen_if_unviewed(&state.app, session_id);
+            super::attention::settled(&state.app, session_id, false);
             notify_session_updated(&state.app, session_id);
         }
         AgentEvent::Error(message) => {
@@ -489,6 +491,7 @@ fn handle_agent_event(state: &Arc<ConnState>, session_id: &str, event: AgentEven
                 .unwrap()
                 .remove(session_id);
             mark_unseen_if_unviewed(&state.app, session_id);
+            super::attention::settled(&state.app, session_id, true);
             notify_session_updated(&state.app, session_id);
             emit(
                 state,
@@ -1730,6 +1733,7 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
     app.workspace_terminals.delete_session(session_id)?;
     app.registry.remove(session_id);
     super::agent_history::forget_session(session_id);
+    super::attention::forget_session(app, session_id);
     for set in [
         &app.running_sessions,
         &app.unseen_sessions,

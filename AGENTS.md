@@ -123,6 +123,9 @@ there, not here.
   - `views/`: `Chat.tsx` is Hosted mode; `NativeCliChat.tsx` is UI mode
     over a CLI session.
   - `statusDot.ts`: status glyphs.
+  - `attention.ts` + `components/NeedsYou.tsx`: Needs You / Welcome Back
+    over the core's `attention.snapshot` (`server/attention.rs`,
+    `db/attention.rs`, capability `attention.v1`).
 
 ## Invariants
 
@@ -355,6 +358,18 @@ there, not here.
     for half a second (`longPress`, `WorkspaceOverview.tsx`), never as
     buttons on the row. A workspace shows a state only when it needs
     attention (pinned, dirty, sleeping), never "ready".
+  - **Needs You / Welcome Back** (`server/attention.rs`): one durable Rust
+    projection (`attention_events`) fed by the same transition bridge and
+    blocked/answered sites as the sidebar, never by output silence. A
+    question stays until the agent leaves Blocked, is typed into or its PTY
+    ends: viewing reads, never resolves, and a live question has no Dismiss.
+    Failures are Needs You until the next turn; finished turns and exits are
+    Recent updates, recorded only when unwatched, coalesced per session.
+    Uncertainty is labelled (`heuristic`, `unconfirmed` after a restart),
+    never upgraded. The top-row bell shows a count only for Needs You; the
+    panel opens itself (Welcome Back line) on load or after 10 minutes hidden
+    only for news since this browser last looked. Cmd/Alt+Shift+U opens the
+    oldest waiting agent. Local host only; remote hosts show as offline.
   - The status bar has no keybind hint, and ctx/cost appear only when a
     turn reports them. The Ctrl+Space leader still works (`?` and Cmd+/ list it).
   - Shared UI primitives live in `components/ui/` (`Chevron`, `Dialog`,

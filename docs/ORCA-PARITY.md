@@ -39,7 +39,7 @@ check a row against the code before building on it.
 | Floating terminal | ❌ | renderer |
 | Jump palette Cmd-J (recent agents by attention, worktrees, tabs, create-from-query) | 🟡 Navigator (Ctrl+K) | renderer |
 | Quick Open Cmd-P (files, gitignored second pass) | ❌ | `main/runtime` |
-| Agent dashboard kanban (Needs you / Working / Done / Idle) | ❌ | renderer, `main/agent-hooks` |
+| Agent dashboard kanban (Needs you / Working / Done / Idle) | ➖ replaced by the Needs You queue + Welcome Back (`server/attention.rs`, `NeedsYou.tsx`), by design not a kanban | renderer, `main/agent-hooks` |
 | Themes: Ghostty import, iTerm profile, Warp import | 🟡 iTerm + Ghostty profile | `main/ghostty`, `main/warp-themes` |
 
 ## Tier 2: review and ship
