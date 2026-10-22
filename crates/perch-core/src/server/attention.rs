@@ -165,6 +165,62 @@ pub(super) fn turns_open_at_boot(app: &AppState) -> OpenTurns {
         .collect()
 }
 
+/// What one lifecycle transition admits.
+#[derive(Debug, PartialEq, Eq)]
+enum Admit {
+    Nothing,
+    Question,
+    NewTurn,
+    Finished { away: bool },
+    Failed,
+    Exited,
+}
+
+/// The admission rules, pure. Returns whether an open question is now
+/// answered, and what to record. Silence never reaches here: only a
+/// provider/title/marker transition does.
+fn admit(
+    key: &AgentKey,
+    from: AgentState,
+    to: AgentState,
+    starts_turn: bool,
+    open: &mut OpenTurns,
+) -> (bool, Admit) {
+    if matches!(to, AgentState::Reconnecting | AgentState::Sleeping) {
+        return (false, Admit::Nothing);
+    }
+    // Leaving Blocked, or the first report after a restart that is not
+    // Blocked, is evidence that no prompt is waiting any more.
+    let answered =
+        to != AgentState::Blocked && matches!(from, AgentState::Blocked | AgentState::Reconnecting);
+    let admit = match to {
+        AgentState::Blocked => {
+            open.entry(key.clone()).or_insert(false);
+            Admit::Question
+        }
+        AgentState::Working if starts_turn => {
+            open.insert(key.clone(), false);
+            Admit::NewTurn
+        }
+        // A provider starting up or repainting is not a turn.
+        AgentState::Working => Admit::Nothing,
+        AgentState::Done | AgentState::Idle => match open.remove(key) {
+            Some(away) => Admit::Finished { away },
+            None => Admit::Nothing,
+        },
+        AgentState::Error => {
+            open.remove(key);
+            Admit::Failed
+        }
+        AgentState::Exited => {
+            open.remove(key);
+            Admit::Exited
+        }
+        AgentState::Reconnecting | AgentState::Sleeping => Admit::Nothing,
+    };
+    (answered, admit)
+}
+
 /// Lifecycle transitions of CLI agents, in order (`spawn_agent_turn_state_task`).
 pub(super) fn on_transition(
     app: &AppState,
@@ -178,52 +234,25 @@ pub(super) fn on_transition(
     }
     let session = key.session_id.as_str();
     let agent = key.agent_id.as_str();
-    if matches!(
-        transition.to,
-        AgentState::Reconnecting | AgentState::Sleeping
-    ) {
-        return;
-    }
-    // Leaving Blocked, or the first report after a restart that is not
-    // Blocked, is evidence that no prompt is waiting any more.
-    if transition.to != AgentState::Blocked
-        && matches!(
-            transition.from,
-            AgentState::Blocked | AgentState::Reconnecting
-        )
-    {
+    let (was_answered, admitted) = admit(key, transition.from, transition.to, starts_turn, open);
+    if was_answered {
         answered(app, session);
     }
     let certainty = certainty(app, session);
-    match transition.to {
-        AgentState::Blocked => {
-            open.entry(key.clone()).or_insert(false);
-            question(app, session, agent, certainty);
+    match admitted {
+        Admit::Nothing => {}
+        Admit::Question => question(app, session, agent, certainty),
+        Admit::NewTurn => changed(app, app.db.resolve_attention(session, "failed", now())),
+        Admit::Finished { away } => {
+            let summary = if away {
+                "Finished while Perch was closed"
+            } else {
+                "Finished"
+            };
+            record(app, session, agent, "finished", certainty, summary);
         }
-        AgentState::Working if starts_turn => {
-            open.insert(key.clone(), false);
-            changed(app, app.db.resolve_attention(session, "failed", now()));
-        }
-        AgentState::Working => {}
-        AgentState::Done | AgentState::Idle => {
-            if let Some(away) = open.remove(key) {
-                let summary = if away {
-                    "Finished while Perch was closed"
-                } else {
-                    "Finished"
-                };
-                record(app, session, agent, "finished", certainty, summary);
-            }
-        }
-        AgentState::Error => {
-            open.remove(key);
-            record(app, session, agent, "failed", certainty, "Agent error");
-        }
-        AgentState::Exited => {
-            open.remove(key);
-            record(app, session, agent, "exited", "verified", "Agent exited");
-        }
-        AgentState::Reconnecting | AgentState::Sleeping => {}
+        Admit::Failed => record(app, session, agent, "failed", certainty, "Agent error"),
+        Admit::Exited => record(app, session, agent, "exited", "verified", "Agent exited"),
     }
 }
 
@@ -268,4 +297,69 @@ pub(super) fn handle_list(state: &Arc<ConnState>) {
 
 pub(super) fn handle_update(state: &Arc<ConnState>, ids: &[String], dismiss: bool) {
     changed(&state.app, state.app.db.update_attention(ids, dismiss));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use AgentState::*;
+
+    #[test]
+    fn only_evidence_admits_and_startup_is_not_a_finished_turn() {
+        let key = AgentKey::new("w", "s", "claude").unwrap();
+        let mut open = OpenTurns::new();
+        // A provider starting up idle, or repainting, is not a turn.
+        assert_eq!(
+            admit(&key, Idle, Working, false, &mut open),
+            (false, Admit::Nothing)
+        );
+        assert_eq!(
+            admit(&key, Working, Idle, false, &mut open),
+            (false, Admit::Nothing)
+        );
+        // A submitted turn that asks, is answered, then completes.
+        assert_eq!(
+            admit(&key, Idle, Working, true, &mut open),
+            (false, Admit::NewTurn)
+        );
+        assert_eq!(
+            admit(&key, Working, Blocked, false, &mut open),
+            (false, Admit::Question)
+        );
+        assert_eq!(
+            admit(&key, Blocked, Working, false, &mut open),
+            (true, Admit::Nothing)
+        );
+        assert_eq!(
+            admit(&key, Working, Done, false, &mut open),
+            (false, Admit::Finished { away: false })
+        );
+        // Transport loss is unknown, not completion or failure.
+        assert_eq!(
+            admit(&key, Done, Reconnecting, false, &mut open),
+            (false, Admit::Nothing)
+        );
+        assert!(open.is_empty());
+    }
+
+    #[test]
+    fn a_turn_open_across_a_restart_reports_it_finished_while_closed() {
+        let key = AgentKey::new("w", "s", "codex").unwrap();
+        let mut open = OpenTurns::from([(key.clone(), true)]);
+        // The first report after reattaching answers any stale question.
+        assert_eq!(
+            admit(&key, Reconnecting, Done, false, &mut open),
+            (true, Admit::Finished { away: true })
+        );
+        let mut open = OpenTurns::from([(key.clone(), true)]);
+        assert_eq!(
+            admit(&key, Reconnecting, Blocked, false, &mut open),
+            (false, Admit::Question)
+        );
+        assert_eq!(
+            admit(&key, Blocked, Exited, false, &mut open),
+            (true, Admit::Exited)
+        );
+        assert!(open.is_empty());
+    }
 }
