@@ -17,14 +17,15 @@ import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 const MENU_W = 230;
 /** The key the editor answers to (`editorKeymap.ts`, CodeMirror's defaults), as the platform writes it. */
 const hint = (mac: string, other: string) => formatCombo(IS_MAC ? mac : other);
-const MENU_H = 320;
+const MENU_H = 370;
 
-export function EditorContextMenu({ view, x, y, readOnly, onClose }: {
+export function EditorContextMenu({ view, x, y, readOnly, onAskAgent, onClose }: {
   view: EditorView;
   x: number;
   y: number;
   readOnly: boolean;
   onClose: () => void;
+  onAskAgent?: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -77,6 +78,10 @@ export function EditorContextMenu({ view, x, y, readOnly, onClose }: {
       }}
       onContextMenu={(event) => event.preventDefault()}
     >
+      {onAskAgent && <>
+        {item(hasSelection ? "Ask agent about selection…" : "Ask agent about file…", () => { onClose(); onAskAgent(); }, "editor-menu-ask-agent", "")}
+        <div className={menuDivider} />
+      </>}
       {item("Undo", act(() => undo(view)), "editor-menu-undo", hint("cmd+z", "ctrl+z"), readOnly || undoDepth(state) === 0)}
       {item("Redo", act(() => redo(view)), "editor-menu-redo", hint("cmd+shift+z", "ctrl+y"), readOnly || redoDepth(state) === 0)}
       <div className={menuDivider} />

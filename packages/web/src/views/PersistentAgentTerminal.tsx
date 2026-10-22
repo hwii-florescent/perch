@@ -51,7 +51,7 @@ class AgentView extends KeptTerminal<ViewState> {
     // only the controlling view sizes it and the others follow its markers.
     const created = createPerchTerminal(this.host, (cols, rows) => {
       if (this.inputId) usePerchStore.getState().resizeTerminal(this.inputId, cols, rows);
-    }, usePerchStore.getState().terminalProfile, () => !attachedId || ownsResize);
+    }, usePerchStore.getState().terminalProfile, () => !attachedId || ownsResize, sessionId);
     this.created = created;
     const write = (data: string, callback?: () => void) => {
       let last = 0;

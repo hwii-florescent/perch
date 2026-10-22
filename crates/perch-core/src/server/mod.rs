@@ -87,6 +87,7 @@ mod worktree_jobs;
 use workspace::effective_focus;
 mod agent_history;
 mod agents;
+mod context_bridge;
 mod native_ui;
 mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -2376,6 +2377,7 @@ fn foundation_capabilities() -> Vec<String> {
         "agent.control.release",
         "terminal.open",
         "terminal.sharedInput",
+        "context.bridge.v1",
         "terminal.list",
         "terminal.release",
         "terminal.close",

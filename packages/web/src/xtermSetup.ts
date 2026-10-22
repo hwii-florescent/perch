@@ -61,6 +61,7 @@ import { scrollbarWidth } from "./components/ui/scrollbar";
 import { onZoom, zoomFactor } from "./zoom";
 import { attachTerminalTuiWheel } from "./terminalTuiWheel";
 import { socket } from "./ws";
+import { attachTerminalContext } from "./contextBridge";
 
 /**
  * Classify input without guessing from bytes (a paste can contain any escape
@@ -175,6 +176,7 @@ export function createPerchTerminal(
   profile?: TerminalProfile | null,
   /** False while the view follows a PTY size it doesn't own. */
   shouldFit: () => boolean = () => true,
+  contextSessionId?: string,
 ): PerchTerminal {
   // The profile's font is the one the user's TUIs are designed around — for a
   // Nerd Font (powerline glyphs, icons) a substitute renders the wrong glyph
@@ -569,6 +571,7 @@ export function createPerchTerminal(
     fit();
   });
 
+  const stopContext = attachTerminalContext(container, term, contextSessionId);
   return {
     term,
     fit,
@@ -588,6 +591,7 @@ export function createPerchTerminal(
       dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);
       stopTuiWheel();
+      stopContext();
       keySurface?.removeEventListener("keydown", trackMenuKey, true);
       document.removeEventListener("contextmenu", trackMenu, true);
       keySurface?.removeEventListener("keyup", recoverMenuKey, true);

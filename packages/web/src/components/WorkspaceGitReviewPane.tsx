@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { WorkspaceGitReview } from "./WorkspaceGitReview";
 import { EMPTY_GIT_REVIEW_STATE, gitCapabilityForWorkspace, useWorkspaceGitReviewStore } from "../gitReviewStore";
+import { askAgent, contextBridgeAvailable } from "../contextBridge";
 import { usePerchStore } from "../store";
 
 /**
@@ -57,6 +58,7 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
       sessions={workspaceSessions}
       currentRevision={state.diff?.sourceRevision}
       actions={actions}
+      onAskAgent={contextBridgeAvailable(workspaceId) ? (source) => askAgent(workspaceId, source) : undefined}
     />
   );
 }

@@ -23,6 +23,49 @@ export interface ModelEntry {
   isDefault?: boolean;
 }
 
+/** Captures are frozen view excerpts, never promises about current disk/Git. */
+export type ContextSource =
+  | { kind: "file"; path: string }
+  | { kind: "editor"; path: string; text: string; startLine: number; endLine: number; dirty: boolean }
+  | { kind: "diff"; path: string; text: string; revision: string; comparison: string }
+  | { kind: "terminal"; sessionId: string; text: string };
+
+export interface ContextPacket {
+  workspaceId: string;
+  markdown: string;
+  digest: string;
+}
+export interface ContextAgent {
+  sessionId: string;
+  title: string;
+  providerId: string;
+  canSend: boolean;
+  reason: string;
+}
+export interface ContextPreviewMessage {
+  type: "context.preview";
+  requestId: string;
+  workspaceId: string;
+  source: ContextSource;
+  instruction: string;
+}
+export interface ContextSendMessage {
+  type: "context.send";
+  requestId: string;
+  workspaceId: string;
+  source: ContextSource;
+  instruction: string;
+  digest: string;
+  targetSessionId: string;
+  operationId: string;
+}
+export interface ContextPreviewResultMessage {
+  type: "context.preview.result";
+  requestId: string;
+  packet: ContextPacket;
+  agents: ContextAgent[];
+}
+
 export interface NativeUiTool {
   name: string;
   input: string;
@@ -1672,6 +1715,8 @@ export interface WorkspaceRestoreMessage {
 }
 
 export type ClientMessage =
+  | ContextPreviewMessage
+  | ContextSendMessage
   | SessionCreateMessage
   | SessionSubscribeMessage
   | SessionResumeMessage
@@ -2440,6 +2485,7 @@ export interface WorkspaceFocusResponseMessage {
 }
 
 export type ServerMessage =
+  | ContextPreviewResultMessage
   | SessionCreatedMessage
   | SessionHistoryMessage
   | SessionListResponseMessage

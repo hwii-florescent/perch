@@ -15,6 +15,7 @@ import type {
   ReviewTargetSession,
   WorkspaceGitReviewActions,
 } from "./gitReviewModels";
+import type { ContextSource } from "@perch/shared";
 import { newId } from "../ids";
 import { cn } from "../lib/cn";
 
@@ -92,6 +93,7 @@ export interface WorkspaceGitReviewProps {
   sessions?: ReviewTargetSession[];
   currentRevision?: string;
   actions: WorkspaceGitReviewActions;
+  onAskAgent?: (source: ContextSource) => void;
 }
 
 type ConfirmAction =
@@ -293,6 +295,7 @@ export function WorkspaceGitReview({
   sessions = [],
   currentRevision,
   actions,
+  onAskAgent,
 }: WorkspaceGitReviewProps) {
   const [target, setTarget] = useState<GitDiffTarget>({ kind: "workingTree" });
   // Which named preset produced a `compare` target, so the selector can tell
@@ -439,6 +442,24 @@ export function WorkspaceGitReview({
   );
   const unplacedComments = comments.filter((comment) => !inlineCommentIds.has(comment.id));
   const stagedCount = changedFiles.filter((entry) => entry.staged).length;
+  function askAboutDiff(file: GitDiffFile, range?: LineSelection | null) {
+    if (!diff || !onAskAgent) return;
+    const text = [
+      `--- ${file.oldPath ?? "/dev/null"}`,
+      `+++ ${file.newPath ?? "/dev/null"}`,
+      ...(range ? [`Selected ${range.side} lines ${range.start}–${range.end}`] : []),
+      ...(diff.truncated ? ["WARNING: this displayed diff is truncated."] : []),
+      ...file.hunks.flatMap((hunk) => {
+        const lines = hunk.lines.filter((line) => {
+          const number = range ? lineNumber(line, range.side) : undefined;
+          return !range || (number !== undefined && number >= range.start && number <= range.end);
+        });
+        return lines.length ? [hunk.header, ...lines.map((line) => `${line.oldLine ?? "-"}:${line.newLine ?? "-"} ${statusSymbol(line.kind)}${line.content}`)] : [];
+      }),
+    ].join("\n");
+    onAskAgent({ kind: "diff", path: range?.path ?? filePath(file), text, comparison: targetLabel(diff.target), revision: diff.sourceRevision ?? "unversioned displayed snapshot" });
+  }
+
   const selectedCount = selectedPaths.size;
   const selectedFile = activeFile && diffFiles.some((file) => filePath(file) === activeFile) ? activeFile : undefined;
   const displayedFiles = selectedFile ? diffFiles.filter((file) => filePath(file) === selectedFile) : diffFiles;
@@ -826,7 +847,7 @@ export function WorkspaceGitReview({
                     const displayPath = filePath(file);
                     return (
                       <article className="min-w-max" key={displayPath}>
-                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`} title={displayPath}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span></header>
+                        <header className={`flex justify-between gap-4 border-b border-b-[color:var(--git-border)] bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-2 [@container(max-width:700px)]:min-w-0`}><strong className={`[font-family:var(--font-mono)] text-[0.75rem] [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`} title={displayPath}>{displayPath}</strong><span className={`text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:min-w-0 [@container(max-width:700px)]:overflow-hidden [@container(max-width:700px)]:text-ellipsis [@container(max-width:700px)]:whitespace-nowrap`}>{file.status}{file.isBinary ? " · binary" : ""}</span>{onAskAgent && <button type="button" className={BTN_QUIET} disabled={file.isBinary || diffState !== "ready"} onClick={() => askAboutDiff(file)}>Ask agent about diff…</button>}</header>
                         {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
                           <section className="border-b border-b-[color:var(--git-border)]" key={`${displayPath}:${hunkIndex}`}>
                             <div className={`bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-1 text-accent [font-family:var(--font-mono)] text-[0.68rem]`}>{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
@@ -867,7 +888,7 @@ export function WorkspaceGitReview({
                     <div className="workspace-git__comment-composer m-[0.7rem] min-w-0 rounded-ui border border-accent p-[0.65rem]" data-testid="git-comment-composer">
                       <div className="mb-[0.4rem] flex justify-between gap-2"><strong>Comment on {selection.path}</strong><span className="text-[0.68rem] text-subtext-0">{selection.side} lines {selection.start}–{selection.end}</span></div>
                       <textarea className={COMMENT_FIELD} data-testid="git-comment-body" value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a focused note for the agent…" aria-label="New review comment" />
-                      <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}><button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
+                      <div className={`${COMMENT_ACTIONS} mt-[0.4rem]`}>{onAskAgent && <button type="button" className={CA_BTN} onClick={() => { const file = diffFiles.find((candidate) => filePathForSide(candidate, selection.side) === selection.path); if (file) askAboutDiff(file, selection); }}>Ask agent about lines…</button>}<button type="button" className={CA_BTN} disabled={!commentBody.trim()} onClick={submitComment}>Add comment</button><button type="button" className={CA_BTN} onClick={() => { setSelection(null); setAnchor(null); }}>Cancel</button></div>
                     </div>
                   )}
                 </>

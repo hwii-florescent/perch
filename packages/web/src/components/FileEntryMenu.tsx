@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DirectoryEntry } from "@perch/shared";
+import { askAgentAboutFile, contextBridgeAvailable } from "../contextBridge";
 import { freeName, joinPath, mutateEntry, namesIn, parentPath, useEntryClipboard } from "../fileOps";
 import { tauriInvoke } from "../links";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
@@ -36,7 +37,7 @@ export interface FileEntryMenuProps {
 type Stage = "menu" | "newFile" | "newFolder" | "rename" | "delete" | "error";
 
 const MENU_W = 210;
-const MENU_H = 400;
+const MENU_H = 450;
 const basename = (path: string) => path.split("/").pop() ?? path;
 
 export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClose, onOpenFile, onExpand, onRefresh, initialStage }: FileEntryMenuProps) {
@@ -172,6 +173,7 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
       onContextMenu={(event) => event.preventDefault()}
     >
       {target && !isDirectory && item("Open", () => { onOpenFile(target.path); onClose(); }, "file-menu-open")}
+      {target && !isDirectory && contextBridgeAvailable(workspaceId) && item("Ask agent about file…", () => { askAgentAboutFile(workspaceId, target.path); onClose(); }, "file-menu-ask-agent")}
       {target && !isDirectory && <div className={menuDivider} />}
       {item("New File…", () => setStage("newFile"), "file-menu-new-file")}
       {item("New Folder…", () => setStage("newFolder"), "file-menu-new-folder")}

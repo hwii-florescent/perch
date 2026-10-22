@@ -8,6 +8,7 @@ pub mod boot;
 pub mod cli_title;
 pub mod clipboard_image;
 pub mod commands;
+pub mod context_bridge;
 pub mod daemon;
 pub mod db;
 pub mod detached;

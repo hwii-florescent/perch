@@ -26,6 +26,7 @@ import { MAX_HIGHLIGHT_CHARS, loadLanguage, syntaxStyle } from "../editorSyntax"
 export interface CodeEditorHandle {
   openGoto: () => void;
   focus: () => void;
+  askAgent: () => void;
 }
 
 export interface CodeEditorProps {
@@ -40,6 +41,7 @@ export interface CodeEditorProps {
   path: string;
   /** Identifies the document (workspace + path) for parking its editor state across unmounts. */
   docKey: string;
+  onAskAgent?: (text: string, startLine: number, endLine: number) => void;
   ref?: Ref<CodeEditorHandle>;
 }
 
@@ -107,12 +109,12 @@ const theme = EditorView.theme({
   "&.cm-editor .cm-button:hover, &.cm-editor .cm-dialog-close:hover": { backgroundColor: "var(--surface-0)", color: "var(--text)" },
 });
 
-export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, ref }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, label, path, docKey, onAskAgent, ref }: CodeEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   // Latest callbacks, so the editor is built once.
-  const callbacks = useRef({ onChange, onSave, onCaret });
-  callbacks.current = { onChange, onSave, onCaret };
+  const callbacks = useRef({ onChange, onSave, onCaret, onAskAgent });
+  callbacks.current = { onChange, onSave, onCaret, onAskAgent };
   // Strings sent to `onChange` that the store has not echoed back yet. A render can lag a fast
   // typist by a keystroke; its older `value` is an echo, not an external change to apply.
   const pending = useRef(new Set<string>());
@@ -121,9 +123,19 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
   const eol = useRef<Eol>(detectEol(value) ?? "\n");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
+  function askAgent() {
+    const state = view.current?.state;
+    if (!state) return;
+    const selection = state.selection.main;
+    const from = selection.empty ? 0 : selection.from;
+    const to = selection.empty ? state.doc.length : selection.to;
+    callbacks.current.onAskAgent?.(state.sliceDoc(from, to), state.doc.lineAt(from).number, state.doc.lineAt(Math.max(from, to - 1)).number);
+  }
+
   useImperativeHandle(ref, () => ({
     openGoto: () => { if (view.current) { gotoLine(view.current); view.current.focus(); } },
     focus: () => view.current?.focus(),
+    askAgent,
   }), []);
 
   // A layout effect: its cleanup must run before React detaches the DOM, because a detached scroller
@@ -251,7 +263,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
   return (
     <>
       <div ref={host} className="min-h-0 min-w-0 flex-1 overflow-hidden" onContextMenu={handleContextMenu} />
-      {menu && view.current && <EditorContextMenu view={view.current} x={menu.x} y={menu.y} readOnly={readOnly} onClose={() => setMenu(null)} />}
+      {menu && view.current && <EditorContextMenu view={view.current} x={menu.x} y={menu.y} readOnly={readOnly} onAskAgent={onAskAgent ? askAgent : undefined} onClose={() => setMenu(null)} />}
     </>
   );
 }

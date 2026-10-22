@@ -1567,7 +1567,8 @@ impl HubManager {
             // business, and this instance's gate only ever consults its own
             // store.
             // Background worktree jobs are local-host only (`worktree_jobs.rs`).
-            ServerMessage::WorktreeJobStarted { .. }
+            ServerMessage::ContextPreviewResult { .. }
+            | ServerMessage::WorktreeJobStarted { .. }
             | ServerMessage::WorktreeJobs { .. }
             | ServerMessage::DevicePairCode { .. }
             | ServerMessage::DeviceListResult { .. }

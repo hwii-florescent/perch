@@ -5,6 +5,7 @@ import { SplitCanvas } from "./components/SplitCanvas";
 import { SettingsPage } from "./components/SettingsPage";
 import { TabBar } from "./components/TabBar";
 import { Navigator } from "./components/Navigator";
+import { ContextBridge } from "./components/ContextBridge";
 import { CloseAgentGuard } from "./components/CloseAgentGuard";
 import { KeybindHelp } from "./components/KeybindHelp";
 import { Onboarding } from "./components/Onboarding";
@@ -306,6 +307,7 @@ export default function App() {
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       <CloseAgentGuard />
+      <ContextBridge />
       {isMobile && (
         <MobileSwitcher open={mobileSwitcherOpen} onClose={() => setMobileSwitcherOpen(false)} onPicked={() => setMobilePane("chat")} />
       )}

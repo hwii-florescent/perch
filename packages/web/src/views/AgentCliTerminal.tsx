@@ -71,6 +71,8 @@ function LegacyAgentCliTerminal({
       // once per connection and never changes mid-session, and xterm takes
       // its font/theme at construction anyway.
       usePerchStore.getState().terminalProfile,
+      undefined,
+      sessionId,
     );
     const term = perchTerm.term;
     xtermRef.current = term;

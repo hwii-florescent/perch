@@ -1,3 +1,4 @@
+import { handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
@@ -2425,7 +2426,7 @@ export function handleServerMessage(msg: ServerMessage): void {
   // so e.g. chat.done/error see the fully up-to-date message text instead of
   // racing a still-pending animation frame (see flushChunkBuffer above).
   if (msg.type !== "chat.chunk") flushChunkBuffer();
-  if (handleNativeUiMessage(msg) || handleAgentTerminalMessage(msg) || handleWorkspaceTerminalMessage(msg)) return;
+  if (handleContextBridgeMessage(msg) || handleNativeUiMessage(msg) || handleAgentTerminalMessage(msg) || handleWorkspaceTerminalMessage(msg)) return;
   if (handleWorkspaceMessage(msg)) return;
   switch (msg.type) {
     case "session.created": {

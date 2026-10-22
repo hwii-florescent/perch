@@ -53,6 +53,12 @@ there, not here.
   message. `server/{session,terminal,agents,native_ui,workspace,git,fs,reviews,config}.rs`;
   `server/worktree_jobs.rs` runs background worktree creates (`worktree.job.*`).
 - **Protocol:** `protocol.rs` ⇄ `packages/shared/src/protocol.ts`.
+- **Context Bridge:** `context_bridge.rs` builds bounded reference packets;
+  `server/context_bridge.rs` handles `context.preview` / `context.send`.
+  `docs/CONTEXT-BRIDGE.md` records sources, safety boundaries and validation.
+  The shared preview/copy dialog is `components/ContextBridge.tsx`. Never
+  replace its explicit send with arbitrary PTY paste: direct delivery is
+  Claude-only until another provider has an equivalent empty-prompt check.
 - **Agents:**
   - `agent_fleet.rs`: provider manifests and the `AgentLifecycleRegistry`
     state machine.

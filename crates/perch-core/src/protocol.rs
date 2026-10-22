@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+use crate::context_bridge::{ContextAgent, ContextPacket, ContextSource};
 use crate::filesystem::{DirectoryEntry, FileMetadata, PreviewKind};
 use crate::iterm_profile::TerminalProfile;
 use crate::review::{ReviewComment, ReviewPacket};
@@ -807,6 +808,23 @@ pub enum FsMutateOp {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
+    #[serde(rename = "context.preview", rename_all = "camelCase")]
+    ContextPreview {
+        request_id: String,
+        workspace_id: String,
+        source: ContextSource,
+        instruction: String,
+    },
+    #[serde(rename = "context.send", rename_all = "camelCase")]
+    ContextSend {
+        request_id: String,
+        workspace_id: String,
+        source: ContextSource,
+        instruction: String,
+        digest: String,
+        target_session_id: String,
+        operation_id: String,
+    },
     #[serde(rename = "session.create", rename_all = "camelCase")]
     SessionCreate {
         cwd: Option<String>,
@@ -1742,6 +1760,12 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    #[serde(rename = "context.preview.result", rename_all = "camelCase")]
+    ContextPreviewResult {
+        request_id: String,
+        packet: ContextPacket,
+        agents: Vec<ContextAgent>,
+    },
     #[serde(rename = "session.created", rename_all = "camelCase")]
     SessionCreated { session_id: String },
 

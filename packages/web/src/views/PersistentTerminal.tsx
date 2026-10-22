@@ -30,7 +30,7 @@ class ShellView extends KeptTerminal<ShellState> {
     let exitCode: number | undefined;
     const created = createPerchTerminal(this.host, (cols, rows) => {
       if (this.inputId) usePerchStore.getState().resizeTerminal(this.inputId, cols, rows);
-    }, usePerchStore.getState().terminalProfile);
+    }, usePerchStore.getState().terminalProfile, undefined, sessionId);
     this.created = created;
     created.term.options.disableStdin = true;
     const binding = openWorkspaceTerminal(sessionId, paneId, created.term.cols, created.term.rows, (row, replay) => {

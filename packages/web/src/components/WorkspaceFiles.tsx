@@ -9,6 +9,7 @@ import {
   type WorkspaceSearchState,
   type WorkspaceTreeState,
 } from "../filesystemStore";
+import { askAgent, contextBridgeAvailable } from "../contextBridge";
 import { cn } from "../lib/cn";
 import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -573,6 +574,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   {dirty && <span className="text-[0.65rem] text-fg" title="Unsaved changes">●</span>}
                 </div>
                 <div className={cn(ACTIONS, "gap-[0.1rem] [@container(max-width:460px)]:max-w-full [@container(max-width:460px)]:min-w-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:flex-wrap")}>
+                  {contextBridgeAvailable(workspaceId) && <button type="button" className={cn(GHOST_BUTTON, "min-h-7 px-2 max-[700px]:min-h-11")} disabled={document.state !== "ready" && document.state !== "conflict"} onClick={() => editorRef.current?.askAgent()}>Ask agent…</button>}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap((value) => !value)} title="Toggle word wrap">Wrap</button>
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
@@ -611,6 +613,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                     onChange={(content) => updateDraft(workspaceId, selectedPath, content)}
                     onSave={saveCurrent}
                     onCaret={setCaret}
+                    onAskAgent={contextBridgeAvailable(workspaceId) ? (text, startLine, endLine) => askAgent(workspaceId, { kind: "editor", path: selectedPath, text, startLine, endLine, dirty: useWorkspaceFilesStore.getState().documents[workspaceId]?.[selectedPath]?.content !== useWorkspaceFilesStore.getState().documents[workspaceId]?.[selectedPath]?.savedContent }) : undefined}
                     readOnly={!canEdit}
                     wrap={wrap}
                     label={`${document.metadata?.readonly ? "Viewing" : "Editing"} ${selectedPath}`}

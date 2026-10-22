@@ -54,6 +54,8 @@ function LegacyTerminalView({ active }: { active: boolean }) {
         if (id) usePerchStore.getState().resizeTerminal(id, cols, rows);
       },
       usePerchStore.getState().terminalProfile,
+      undefined,
+      usePerchStore.getState().sessionId ?? undefined,
     );
     const term = perchTerm.term;
     xtermRef.current = term;

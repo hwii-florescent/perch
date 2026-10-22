@@ -8,6 +8,30 @@ use super::*;
 
 pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
     match msg {
+        ClientMessage::ContextPreview {
+            request_id,
+            workspace_id,
+            source,
+            instruction,
+        } => context_bridge::preview(state, request_id, workspace_id, source, instruction),
+        ClientMessage::ContextSend {
+            request_id,
+            workspace_id,
+            source,
+            instruction,
+            digest,
+            target_session_id,
+            operation_id,
+        } => context_bridge::send(
+            state,
+            request_id,
+            workspace_id,
+            source,
+            instruction,
+            digest,
+            target_session_id,
+            operation_id,
+        ),
         ClientMessage::SessionCreate { cwd, host_id } => {
             session::handle_session_create(state, cwd, host_id)
         }
