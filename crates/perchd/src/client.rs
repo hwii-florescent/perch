@@ -408,7 +408,12 @@ impl Client {
     }
 
     pub fn health(&self) -> Result<Health, Error> {
-        self.call_as(Request::Health)
+        self.call_as(Request::Health { permissions: false })
+    }
+
+    /// Only explicit permission diagnostics opt in to native preflight checks.
+    pub fn permission_health(&self) -> Result<Health, Error> {
+        self.call_as(Request::Health { permissions: true })
     }
 }
 

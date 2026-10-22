@@ -423,17 +423,20 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
     let not_found = || Err(ERR_NOT_FOUND.to_string());
     match msg.req {
         Request::Hello { .. } => reply(Ok(serde_json::json!({ "version": PROTOCOL_VERSION }))),
-        Request::Health => {
+        Request::Health { permissions } => {
             let sessions = state.sessions.lock().unwrap();
             let alive = sessions
                 .values()
                 .filter(|s| s.inner.lock().unwrap().alive)
                 .count();
+            let count = sessions.len();
+            drop(sessions); // native preflight must never hold up terminal mutations
             reply(Ok(serde_json::to_value(Health {
                 version: PROTOCOL_VERSION,
                 pid: std::process::id(),
-                sessions: sessions.len(),
+                sessions: count,
                 alive,
+                permissions: permissions.then(crate::permissions::snapshot),
             })
             .unwrap()))
         }

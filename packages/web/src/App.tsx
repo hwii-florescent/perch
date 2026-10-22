@@ -8,6 +8,7 @@ import { Navigator } from "./components/Navigator";
 import { CloseAgentGuard } from "./components/CloseAgentGuard";
 import { KeybindHelp } from "./components/KeybindHelp";
 import { Onboarding } from "./components/Onboarding";
+import { MacPermissionSetup } from "./components/MacPermissions";
 import { hasSeenOnboarding, markOnboardingSeen } from "./onboarding";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileSwitcher } from "./components/MobileSwitcher";
@@ -301,6 +302,7 @@ export default function App() {
 
       {!isMobile && <StatusBar />}
       <SettingsPage />
+      <MacPermissionSetup enabled={!onboardingOpen} />
       <Navigator open={navigatorOpen} onClose={() => setNavigatorOpen(false)} />
       <KeybindHelp open={keybindHelpOpen} onClose={() => setKeybindHelpOpen(false)} />
       <CloseAgentGuard />

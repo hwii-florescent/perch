@@ -10,6 +10,7 @@ import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSum
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
+import { MacPermissions, macPermissionsAvailable } from "./MacPermissions";
 import { socket } from "../ws";
 import { AgentCatalog } from "./AgentCatalog";
 import { useAgentChoices } from "./AgentPicker";
@@ -747,7 +748,7 @@ function DevicesSection() {
   );
 }
 
-type SettingsTab = "general" | "appearance" | "agents" | "keyboard" | "terminal" | "notifications" | "hosts" | "devices";
+type SettingsTab = "general" | "appearance" | "agents" | "keyboard" | "terminal" | "notifications" | "hosts" | "devices" | "permissions";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
@@ -758,6 +759,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "notifications", label: "Notifications" },
   { id: "hosts", label: "SSH hosts" },
   { id: "devices", label: "Devices" },
+  ...(macPermissionsAvailable ? [{ id: "permissions" as const, label: "Permissions" }] : []),
 ];
 
 function TabContent({ tab }: { tab: SettingsTab }) {
@@ -770,6 +772,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
     case "notifications": return <NotificationsSection />;
     case "hosts": return <SshHostsSection />;
     case "devices": return <DevicesSection />;
+    case "permissions": return <MacPermissions />;
   }
 }
 

@@ -6,6 +6,9 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "open_external",
             "reveal_in_finder",
+            "permissions_status",
+            "permissions_allow",
+            "permissions_verify",
             "browser_show",
             "browser_hide",
             "browser_close",
