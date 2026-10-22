@@ -57,11 +57,17 @@ test.describe("Needs You", () => {
 
   test("N2. Cmd/Alt+Shift+U with nothing waiting opens the panel and says so", async ({ page }) => {
     await open(page);
-    await page.locator("body").click();
+    // From inside a focused terminal, where the shortcut is usually pressed:
+    // Escape must close the panel, not reach the shell.
+    await startChat(page);
+    const terminal = page.getByTestId("persistent-agent-terminal");
+    await expect(terminal).toHaveAttribute("data-writable", "true", { timeout: 15_000 });
+    await terminal.locator(".xterm-helper-textarea").focus();
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+U" : "Alt+Shift+U");
     await expect(page.getByTestId("needs-you-panel")).toBeVisible();
     await expect(page.getByTestId("needs-you-empty")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("needs-you-panel")).toHaveCount(0);
+    await expect(page.getByTestId("needs-you-toggle")).toBeFocused();
   });
 });

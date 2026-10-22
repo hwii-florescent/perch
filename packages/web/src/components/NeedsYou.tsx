@@ -107,16 +107,21 @@ function Panel({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () =>
       const target = event.target as Node;
       if (!panel.current?.contains(target) && !anchor?.contains(target)) onClose();
     };
+    // Capture phase: the panel opens from inside a focused terminal (its
+    // shortcut works there), and xterm would otherwise send this Escape to
+    // the CLI, possibly interrupting a turn, and stop it reaching us.
     const key = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
       onClose();
       anchor?.focus();
     };
     document.addEventListener("pointerdown", down, true);
-    document.addEventListener("keydown", key);
+    document.addEventListener("keydown", key, true);
     return () => {
       document.removeEventListener("pointerdown", down, true);
-      document.removeEventListener("keydown", key);
+      document.removeEventListener("keydown", key, true);
     };
   }, [anchor, onClose]);
 
