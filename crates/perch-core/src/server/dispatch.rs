@@ -175,6 +175,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session::handle_session_subscribe(state, raw_text, session_id)
         }
         ClientMessage::SessionList {} => session::handle_session_list(state),
+        ClientMessage::AttentionList {} => super::attention::handle_list(state),
+        ClientMessage::AttentionUpdate { ref ids, dismiss } => {
+            super::attention::handle_update(state, ids, dismiss)
+        }
         ClientMessage::ChatSend {
             ref session_id,
             ref text,

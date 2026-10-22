@@ -336,6 +336,36 @@ pub struct SessionSummary {
     pub current_provider_id: Option<String>,
 }
 
+/// One durable attention event (`server/attention.rs`). `kind`: `question`
+/// (Needs You until answered), `failed` (Needs You until the next turn),
+/// `finished` / `exited` (Recent updates). `certainty`: `verified` (native
+/// bridge or lifecycle evidence), `heuristic` (title/output guess) or
+/// `unconfirmed` (evidence predates a restart). Read is not resolved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionEvent {
+    pub id: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub agent_id: String,
+    pub kind: String,
+    pub requires_action: bool,
+    pub certainty: String,
+    pub summary: String,
+    pub occurred_at: i64,
+    /// Unread turns folded into this row.
+    pub count: u32,
+    pub read: bool,
+    /// Files the agent's last recorded turn changed (finished events only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_path_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_paths: Vec<String>,
+}
+
 /// Durable editor draft returned by the workspace buffer endpoints. Both the
 /// draft and its original bounded baseline are server-owned so a reconnect
 /// can offer compare/merge after an external change.
@@ -836,6 +866,19 @@ pub enum ClientMessage {
 
     #[serde(rename = "session.list")]
     SessionList {},
+
+    /// Ask for the current `attention.snapshot` (capability `attention.v1`).
+    #[serde(rename = "attention.list")]
+    AttentionList {},
+
+    /// Mark attention events read, or (`dismiss`) hide them. A live
+    /// question is never dismissed: it clears when the agent is answered.
+    #[serde(rename = "attention.update", rename_all = "camelCase")]
+    AttentionUpdate {
+        ids: Vec<String>,
+        #[serde(default)]
+        dismiss: bool,
+    },
 
     #[serde(rename = "session.subscribe", rename_all = "camelCase")]
     SessionSubscribe { session_id: String },
@@ -1774,6 +1817,12 @@ pub enum ServerMessage {
 
     #[serde(rename = "session.updated", rename_all = "camelCase")]
     SessionUpdated { session: SessionSummary },
+
+    /// Every unresolved, undismissed attention event of the last week, newest
+    /// first (at most 100). Broadcast whenever one changes, and in reply to
+    /// `attention.list`. Local host only.
+    #[serde(rename = "attention.snapshot", rename_all = "camelCase")]
+    AttentionSnapshot { events: Vec<AttentionEvent> },
 
     /// Effective session mode after session/workspace/device precedence.
     #[serde(rename = "session.mode", rename_all = "camelCase")]

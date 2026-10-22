@@ -138,11 +138,11 @@ Do not install missing providers merely to make a support matrix larger. Existin
 
 ### D. Trustworthy attention
 
-- [ ] Small Needs You view, not dashboard/kanban.
-- [ ] Verified question/needs-input signal with exact resource navigation for a tested provider locally and remotely.
-- [ ] Viewing and resolving are separate; question remains until evidence resolves it.
-- [ ] Completion, process exit, successful tests and review readiness are not conflated.
-- [ ] Silence/stale observation is not confirmed idle/done; transport loss is unknown/reconnecting.
+- [x] Small Needs You view, not dashboard/kanban. (`components/NeedsYou.tsx`, 2026-10-21)
+- [ ] Verified question/needs-input signal with exact resource navigation for a tested provider locally and remotely. **Local done** (Claude, `e2e/needs-you.spec.ts`); remote hosts not yet relayed.
+- [x] Viewing and resolving are separate; question remains until evidence resolves it. (`db/attention.rs` tests, needs-you N1)
+- [x] Completion, process exit, successful tests and review readiness are not conflated. (`attention` kinds: question/failed/finished/exited; no test/review admission)
+- [x] Silence/stale observation is not confirmed idle/done; transport loss is unknown/reconnecting. (`server/attention.rs::admit` tests; open questions become `unconfirmed` across a restart)
 - [ ] Host disconnect is deduplicated rather than generating one false failure per terminal.
 - [ ] Events do not duplicate on reconnect; background restoration does not clear unread.
 - [ ] OS notifications, if enabled, navigate correctly and do not expose sensitive content by default. Unsupported delivery is explicit.
