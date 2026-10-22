@@ -7,6 +7,23 @@ The proposal behind them is [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md); the
 Rust-side ownership contracts (viewer identity, runtime incarnation, dirty-buffer
 recovery) are Linear PER-12, not decided here.
 
+## 2026-10-21 — Needs You + Welcome Back (first slice)
+
+Implements UI-UX-DIRECTION §10 for the local host. Spec in `AGENTS.md`
+(Workspace UX → Needs You / Welcome Back) and `server/attention.rs`.
+
+- **Shipped:** durable `attention_events`; questions (until answered),
+  failures (until the next turn), finished turns and exits (Recent updates,
+  only when unwatched, coalesced). Read ≠ resolved. Certainty labelled
+  (`verified` / `heuristic` / `unconfirmed`). Top-row bell + anchored panel,
+  Welcome Back line on load or after 10 minutes hidden, Cmd/Alt+Shift+U.
+  Rows open the agent, its changed files or the workspace review.
+- **Deferred:** relaying a remote host's events (remote hosts appear only as
+  "offline" in Welcome Back), per-user read state across paired devices
+  (read is server-wide today), snooze, OS-notification deep links, and
+  provider question text (rows say "Waiting for you" rather than invent it).
+  The existing toasts/sound are unchanged.
+
 ## 2026-10-05 — Visual polish pass
 
 Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md).
