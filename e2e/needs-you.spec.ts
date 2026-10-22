@@ -49,7 +49,9 @@ test.describe("Needs You", () => {
     await expect(count).toHaveText("1");
 
     // Answer in the CLI itself (first option), and the item leaves the queue.
-    await page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea").press("Enter");
+    // Keys typed before the reopened view attaches are dropped: wait for it.
+    await expect(terminal).toHaveAttribute("data-writable", "true", { timeout: 15_000 });
+    await terminal.locator(".xterm-helper-textarea").press("Enter");
     await expect(count).toHaveCount(0, { timeout: 60_000 });
   });
 
