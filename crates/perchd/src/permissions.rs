@@ -40,17 +40,25 @@ fn checks() -> Vec<PermissionCheck> {
     Vec::new()
 }
 
-/// Read-only *heuristic*, not a public FDA status API. Other failures (missing
-/// database, unusual home directory) must stay unknown rather than a false tick.
+/// Read-only *heuristic*, not a public FDA status API. Any readable probe is
+/// evidence of access; missing databases and unrelated errors prove neither
+/// grant nor denial and must not mask another probe's result.
 #[cfg(any(target_os = "macos", test))]
-fn file_access_state(result: std::io::Result<std::fs::File>) -> PermissionState {
-    match result {
-        Ok(_) => PermissionState::Granted,
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::PermissionDenied) => {
-            PermissionState::NotGranted
-        }
-        Err(_) => PermissionState::Unknown,
-    }
+fn file_access_state(
+    results: impl IntoIterator<Item = std::io::Result<std::fs::File>>,
+) -> PermissionState {
+    results
+        .into_iter()
+        .fold(PermissionState::Unknown, |state, result| match result {
+            Ok(_) => PermissionState::Granted,
+            Err(e)
+                if state != PermissionState::Granted
+                    && e.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
+                PermissionState::NotGranted
+            }
+            Err(_) => state,
+        })
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -66,11 +74,16 @@ fn automation_state(status: i32) -> PermissionState {
 fn checks() -> Vec<PermissionCheck> {
     use PermissionState::{Granted, NotGranted, Unknown};
     let home = user_home();
-    let fda = home.as_ref().map_or(Unknown, |home| {
-        file_access_state(std::fs::File::open(
-            home.join("Library/Application Support/com.apple.TCC/TCC.db"),
+    // The per-user database may not exist, even with FDA enabled. Probe the
+    // system database too; only open/close these files, never read their content.
+    let fda = file_access_state(
+        std::iter::once(std::fs::File::open(
+            "/Library/Application Support/com.apple.TCC/TCC.db",
         ))
-    });
+        .chain(home.as_ref().map(|home| {
+            std::fs::File::open(home.join("Library/Application Support/com.apple.TCC/TCC.db"))
+        })),
+    );
     let state = |allowed| if allowed { Granted } else { NotGranted };
     let mut checks = vec![
         PermissionCheck {
@@ -115,7 +128,7 @@ fn checks() -> Vec<PermissionCheck> {
     checks
 }
 
-/// TCC belongs to the logged-in account, not a tool's mutable HOME environment.
+/// User-specific checks belong to the logged-in account, not a tool's mutable HOME.
 #[cfg(target_os = "macos")]
 fn user_home() -> Option<std::path::PathBuf> {
     use std::os::unix::ffi::OsStrExt;
@@ -332,13 +345,36 @@ mod tests {
         for code in [-600, -1] {
             assert_eq!(automation_state(code), PermissionState::Unknown);
         }
+    }
+
+    #[test]
+    fn fda_probe_handles_missing_user_database_without_masking_access() {
+        let error = |code| Err(std::io::Error::from_raw_os_error(code));
+        let readable = || std::fs::File::open(std::env::current_exe().unwrap());
+        for code in [libc::ENOENT, libc::EPERM, libc::EACCES, libc::EIO] {
+            assert_eq!(
+                file_access_state([readable(), error(code)]),
+                PermissionState::Granted
+            );
+            assert_eq!(
+                file_access_state([error(code), readable()]),
+                PermissionState::Granted
+            );
+        }
+        for code in [libc::EPERM, libc::EACCES] {
+            assert_eq!(
+                file_access_state([error(code), error(libc::ENOENT)]),
+                PermissionState::NotGranted
+            );
+            assert_eq!(
+                file_access_state([error(libc::ENOENT), error(code)]),
+                PermissionState::NotGranted
+            );
+        }
         assert_eq!(
-            file_access_state(Err(std::io::Error::from_raw_os_error(libc::EPERM))),
-            PermissionState::NotGranted
-        );
-        assert_eq!(
-            file_access_state(Err(std::io::Error::from_raw_os_error(libc::ENOENT))),
+            file_access_state([error(libc::ENOENT), error(libc::EIO)]),
             PermissionState::Unknown
         );
+        assert_eq!(file_access_state([]), PermissionState::Unknown);
     }
 }

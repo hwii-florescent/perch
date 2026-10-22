@@ -21,8 +21,12 @@ A click never changes a tick optimistically. Refresh/returning to the app runs
 non-prompting checks. Ticks mean granted; crosses mean not granted (including
 consent not requested); question marks mean the API could not determine access,
 for example when an Automation target is not running. The Full Disk Access
-check resolves the account's real home through macOS (not the shell's HOME) and
-only opens/closes the user's TCC.db read-only; it does not read its content.
+check only opens/closes the system TCC.db and, when the account's real home can
+be resolved through macOS (not the shell's HOME), the user's TCC.db read-only;
+it does not read their content. The per-user database does not exist on every
+Mac, so its absence must not hide a successful system probe. Any successful
+open means granted; a permission denial without a successful open means not
+granted; only missing files or unrelated errors means unable to verify.
 This is a heuristic because macOS has no public Full Disk Access status API.
 
 These controls enable OS access for tools the user chooses to run. They do not
