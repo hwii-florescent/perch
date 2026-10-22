@@ -1040,6 +1040,19 @@ export interface SessionListMessage {
   type: "session.list";
 }
 
+/** Ask for the current `attention.snapshot` (capability `attention.v1`). */
+export interface AttentionListMessage {
+  type: "attention.list";
+}
+
+/** Mark attention events read, or (`dismiss`) hide them. A live question is
+ * never dismissed: it clears when the agent is answered. */
+export interface AttentionUpdateMessage {
+  type: "attention.update";
+  ids: string[];
+  dismiss?: boolean;
+}
+
 // Stage D — settings & hosts client messages
 
 /**
@@ -1678,6 +1691,8 @@ export type ClientMessage =
   | SessionModeGetMessage
   | SessionModeSetMessage
   | SessionListMessage
+  | AttentionListMessage
+  | AttentionUpdateMessage
   | ChatSendMessage
   | ChatCancelMessage
   | CommandsListMessage
@@ -1955,6 +1970,37 @@ export interface SessionListResponseMessage {
 export interface SessionUpdatedMessage {
   type: "session.updated";
   session: SessionSummary;
+}
+
+/** One durable attention event (`server/attention.rs`). `kind`: `question`
+ * (Needs You until answered), `failed` (Needs You until the next turn),
+ * `finished` / `exited` (Recent updates). `certainty`: `verified`,
+ * `heuristic` (title/output guess) or `unconfirmed` (evidence predates a
+ * restart). Read is not resolved. */
+export interface AttentionEvent {
+  id: string;
+  sessionId: string;
+  workspaceId?: string;
+  projectId?: string;
+  agentId: string;
+  kind: "question" | "failed" | "finished" | "exited" | (string & {});
+  requiresAction: boolean;
+  certainty: "verified" | "heuristic" | "unconfirmed" | (string & {});
+  summary: string;
+  occurredAt: number;
+  /** Unread turns folded into this row. */
+  count: number;
+  read: boolean;
+  /** Files the agent's last recorded turn changed (finished events only). */
+  changedPathCount?: number;
+  changedPaths?: string[];
+}
+
+/** Every unresolved, undismissed attention event of the last week, newest
+ * first (at most 100). Broadcast on change and in reply to `attention.list`. */
+export interface AttentionSnapshotMessage {
+  type: "attention.snapshot";
+  events: AttentionEvent[];
 }
 
 /** Broadcast to every connection (mirrors HostsUpdatedMessage's fan-out) when
@@ -2444,6 +2490,7 @@ export type ServerMessage =
   | SessionHistoryMessage
   | SessionListResponseMessage
   | SessionUpdatedMessage
+  | AttentionSnapshotMessage
   | SessionModeMessage
   | SessionDeletedMessage
   | ServerInfoMessage

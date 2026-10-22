@@ -1593,6 +1593,7 @@ impl HubManager {
             | ServerMessage::FsBufferResult { .. }
             | ServerMessage::FsBufferCloseResult { .. }
             | ServerMessage::FsChanged { .. }
+            | ServerMessage::AttentionSnapshot { .. }
             | ServerMessage::FsError { .. } => {
                 // Remote settings/hosts are not propagated to our clients.
                 // Project/workspace federation is not advertised by this

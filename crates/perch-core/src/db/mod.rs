@@ -17,6 +17,8 @@ use crate::agent_persistence::SqliteConnectionAdapter;
 use crate::protocol::HistoryMessage;
 use crate::review::{ReviewComment, ReviewPacket};
 
+mod attention;
+pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod detached;
 pub use detached::DetachedRunRow;
 mod prompts;
@@ -495,6 +497,7 @@ impl HistoryDb {
         if !detached_run_columns.contains("operation_id") {
             conn.execute("ALTER TABLE detached_runs ADD COLUMN operation_id TEXT", [])?;
         }
+        Self::migrate_attention(&conn)?;
         // Materialize first-class project/workspace metadata for every old
         // session. This is a metadata-only pass: it never creates a runtime,
         // resumes an agent, or changes an existing archived project flag.

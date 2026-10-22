@@ -37,11 +37,18 @@ fn recover_one(app: &AppState, snapshot: &AgentSnapshot) -> anyhow::Result<()> {
     }
     let marker = crate::daemon::exit_marker(&tk);
     // Consumed whatever happens: it describes the quit period only.
-    let _ = std::fs::remove_file(&marker);
+    let exited_while_closed = std::fs::remove_file(&marker).is_ok();
     let Some(info) = crate::daemon::client()?
         .session(&tk)?
         .filter(|session| session.alive)
     else {
+        // Welcome Back: say what happened while Perch was closed, without
+        // claiming the turn finished. A marker is the wrapper's own record.
+        let was_working = snapshot.state == AgentState::Reconnecting
+            && snapshot.reason.starts_with("runtime restarted");
+        if exited_while_closed || was_working {
+            super::attention::gone_while_closed(app, key, exited_while_closed);
+        }
         return Ok(());
     };
     let Some(row) = app.db.get_session(&key.session_id)? else {
