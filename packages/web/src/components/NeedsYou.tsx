@@ -20,7 +20,8 @@ import {
 import { sessionLabel } from "../workspaceTabs";
 
 const ROW = "grid gap-0.5 rounded-ui px-2 py-1.5 hover:bg-surface-0";
-const LINK = cn(GHOST_BUTTON, "px-1.5 py-0.5 text-[0.75rem]");
+// 44px touch targets on the phone (AGENTS.md).
+const LINK = cn(GHOST_BUTTON, "px-1.5 py-0.5 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:px-3");
 const FINISHED = { glyph: "✓", color: "var(--subtext-0)", label: "Finished" };
 const GLYPH: Record<string, typeof FINISHED> = {
   question: { glyph: "?", color: "var(--yellow)", label: "Waiting for you" },
@@ -114,14 +115,16 @@ function Panel({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () =>
     };
   }, [anchor, onClose]);
 
+  // Right-aligned under the bell, clamped inside the viewport (a phone's bell
+  // sits near the middle of a narrow row).
   const rect = anchor?.getBoundingClientRect();
-  const style = rect
-    ? { top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }
-    : { top: 44, right: 8 };
+  const width = Math.min(416, window.innerWidth - 16);
+  const left = Math.max(8, Math.min((rect?.right ?? window.innerWidth - 8) - width, window.innerWidth - width - 8));
+  const style = { top: (rect?.bottom ?? 38) + 6, left, width };
   return createPortal(
     <div
       ref={panel}
-      className={cn(menuPanel, "fixed z-[2050] flex max-h-[min(70vh,36rem)] w-[min(26rem,calc(100vw-1rem))] flex-col px-1.5 py-1.5")}
+      className={cn(menuPanel, "fixed z-[2050] flex max-h-[min(70vh,36rem)] flex-col px-1.5 py-1.5")}
       style={style}
       role="dialog"
       aria-label={welcome ? "Welcome back" : "Needs You"}
