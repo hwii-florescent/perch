@@ -159,13 +159,33 @@ export function openNextAttention(): void {
 let hiddenAt: number | null = null;
 let launched = false;
 
+/** When this browser last looked at the panel: Welcome Back shows only what
+ * is newer, so a stale unread update does not reopen it on every load. */
+const SEEN_KEY = "perch.attention.seenAt";
+function seenAt(): number | null {
+  try {
+    const n = Number(localStorage.getItem(SEEN_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+function markSeen(): void {
+  try { localStorage.setItem(SEEN_KEY, String(Date.now())); } catch { /* per-browser convenience */ }
+}
+useAttention.subscribe((state, previous) => {
+  if (state.open !== previous.open) markSeen();
+});
+
 /** First snapshot of a page load, or a return after `AWAY_AFTER_MS` hidden:
- * open the panel quietly when something new happened or something waits. */
-function maybeWelcome(since: number): void {
+ * open the panel quietly when something happened since this browser last
+ * looked. A browser that never looked starts from now (nothing to compare). */
+function maybeWelcome(hiddenSince: number): void {
   const { events, open, setOpen } = useAttention.getState();
+  const seen = seenAt();
+  if (seen === null) return markSeen();
   if (open) return;
-  const news = events.some((event) => !event.read && event.occurredAt >= since);
-  if (news || needsYou(events).length) setOpen(true, { since });
+  const since = Math.max(hiddenSince, seen);
+  const news = events.some((event) => (!event.read || event.kind === "question") && event.occurredAt > since);
+  if (news) setOpen(true, { since });
 }
 
 export function handleAttentionMessage(message: ServerMessage): boolean {

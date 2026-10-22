@@ -14,6 +14,12 @@ const session = (init: Partial<SessionSummary>): SessionSummary => ({
 }) as SessionSummary;
 
 beforeEach(() => {
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+  });
   useAttention.setState({ events: [], supported: false, open: false, welcome: null });
   vi.restoreAllMocks();
 });
@@ -57,8 +63,10 @@ describe("Needs You", () => {
     expect(send).not.toHaveBeenCalled();
     handleAttentionMessage({ type: "server.info", capabilities: ["attention.v1"] } as never);
     expect(send).toHaveBeenCalledWith({ type: "attention.list" });
-    handleAttentionMessage({ type: "attention.snapshot", events: [event({ kind: "question", requiresAction: true })] });
-    expect(useAttention.getState()).toMatchObject({ open: true, welcome: { since: 0 } });
+    // This browser last looked at t=100: only what happened after reopens it.
+    localStorage.setItem("perch.attention.seenAt", "100");
+    handleAttentionMessage({ type: "attention.snapshot", events: [event({ kind: "question", requiresAction: true, occurredAt: 150 })] });
+    expect(useAttention.getState()).toMatchObject({ open: true, welcome: { since: 100 } });
   });
 
   it("Cmd-Shift-U opens the oldest waiting agent, else the panel", () => {
