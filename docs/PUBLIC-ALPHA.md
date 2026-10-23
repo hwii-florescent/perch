@@ -2,18 +2,36 @@
 
 ## Release intent and status
 
-Recorded 2026-10-04. Planning baseline: `1212d5e1e554b646e97827a51dfa9d1ad47b2b6d`.
+Release contract recorded 2026-10-04. Implementation summary refreshed against
+`8dae768`; this documentation refresh does not certify a release candidate.
 
 **Goal: the earliest differentiated release, not the earliest release of today's agent-terminal application.** The repository is already public. Here, launch means a publicly promoted, downloadable alpha with a demonstrated product distinction—not merely changing GitHub visibility or publishing a terminal wrapper.
 
-Owner direction is to build a meaningful separation from existing terminals/agent workspaces before launch. This document scopes that work. It does not claim a feature is unique, a requirement is implemented, or a test has passed. Every checkbox begins unchecked even if related functionality already exists: passing requires evidence against the release candidate.
+Owner direction is to build a meaningful separation from existing terminals/agent workspaces before launch. This document scopes that work. It does not claim a feature is unique or a test has passed. Unchecked means candidate evidence is still owed, **not necessarily that implementation is missing**. Existing checked local-attention entries retain their cited historical evidence; they do not certify the whole current candidate.
 
 - [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md): full product, research, target architecture, technical decisions and sources.
 - [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md): detailed proposed interaction contract.
-- [ARCHITECTURE.md](ARCHITECTURE.md): current implementation reference.
-- [AGENTS.md](../AGENTS.md): current coding/behavior/testing invariants; update affected invariants explicitly before implementing their replacement.
+- [ROADMAP.md](ROADMAP.md): current remaining functionality and priorities.
+- [ARCHITECTURE.md](ARCHITECTURE.md): current ownership and safety contracts.
+- [TESTING.md](TESTING.md): commands, isolation and known limitations.
+- [DECISIONS.md](DECISIONS.md): approved UX; proposals do not override newer decisions.
 
 The complete long-term architecture is **not** an alpha requirement. This file is the release scope boundary. No calendar deadline overrides a correctness/security/differentiation gate.
+
+### Implementation is ahead of the original checklist
+
+These are source/test starting points, not new gate passes:
+
+| Area | Implemented locally | Still to complete / verify |
+|---|---|---|
+| Mixed canvas | Canonical surfaces, mixed strip/splits and per-viewer restoration (`surfaces.rs`, `surfaceSync.ts`, `e2e/mixed-tabs.spec.ts`). | Candidate D1 recovery/migration/authority evidence; remote surface routing; session-free connect. |
+| Resources | CodeMirror/durable drafts, file search, image/PDF/media, archive extraction/download and desktop default-app opening (`e2e/workspace-file-browser.spec.ts`). | File Quick Open, Markdown preview, image controls, Open With, explicit Run and candidate D2 trust/safety evidence. |
+| Context | Local bounded Context Bridge, Claude explicit delivery (`docs/CONTEXT-BRIDGE.md`). | Retest source/draft/busy-target boundaries; remote and other safe send transports are not implied. |
+| Attention | Local Needs You / Welcome Back (`e2e/needs-you.spec.ts`). | Remote question path/dedupe and documented deferred notification/device features. |
+| Durability | Tri-state liveness, fail-closed persistent launch, bounded output, gap/error disclosure, guarded deletion. | Candidate fault/load/close/restart evidence; implementation is not proof of every gate. |
+| Remote | Selected Git/review/worktree federation (`e2e/remote-git.spec.ts`). | Full remote workspace and actual authorized Linux-host D3. |
+
+Do not rebuild these local foundations because a checklist below remains open.
 
 ## 1. Alpha promise
 
@@ -99,7 +117,7 @@ Do not install missing providers merely to make a support matrix larger. Existin
 - [ ] Order, selected member and split geometry restore per viewer.
 - [ ] File/session legacy state migrates idempotently without killing/restarting any process or losing drafts.
 - [ ] Unsupported/stale resources produce an actionable placeholder, not a substitute or auto-run.
-- [ ] No duplicate sidebar/tab inventory is required to navigate the new workflow; exact sidebar simplification is ratified rather than bundled with unapproved restyling.
+- [ ] Workspace navigation is coherent without a second mandatory session hierarchy. Preserve the approved compact-session sidebar choice; the older sessionless proposal is not a release requirement.
 
 **Not required:** arbitrary grouping, window tear-off, cross-context runtime dragging, new layout engine, full visual redesign, or a public surface-provider API. Preserve old complex layouts even if new UI has a smaller creation ceiling. Pins/safe reopen are long-term designs, not prerequisites to the first mixed-canvas slice; if shipped, they must follow the documented lifecycle contract.
 
@@ -190,50 +208,35 @@ These gate all alpha promotion regardless of feature completion or performance e
 - [ ] Merely adding/opening a project never executes its setup/tasks/plugins/hooks.
 - [ ] Run/external-open actions validate scheme/path/host and require user intent.
 - [ ] Markdown/HTML/SVG cannot reach privileged DOM, Perch credentials or Tauri authority; adversarial file tests cover this.
-- [ ] No untrusted web content is embedded in the privileged app window. Active embedded-browser features are excluded until separately secured.
+- [ ] Untrusted web content has no access to privileged app DOM, credentials or Tauri authority. Existing native child-webview browser features require separate security evidence; browser presence does not waive the gate.
 
-## 6. First implementation order
+## 6. Completion and verification order
 
-Each slice ends with a focused runnable regression check, relevant existing suites, an isolated real probe and a local checkpoint commit. No push or release publication without owner instruction.
+[ROADMAP](ROADMAP.md) owns implementation priorities. The original first-slice
+sequence is retired: local mixed canvas, attention and much of resource handling
+already exist. Each implementation slice still needs a focused regression,
+relevant suites, an isolated probe and a local checkpoint; no push/publication
+without instruction.
 
-### Slice 0 — ratify contracts and capture baseline
+For the release candidate:
 
-- Confirm ownership/close/restore semantics, viewer identity, vocabulary and alpha support matrix.
-- Reconcile affected AGENTS invariants before their implementation, without reopening unrelated style decisions.
-- Capture reproducible current memory/startup/terminal/recovery baseline.
-- Turn source-review risks into bounded reproductions; do not assume every hypothesis is a reproduced bug.
+1. Freeze the support matrix and any remaining product/security decisions;
+   record reproducible performance/recovery baselines.
+2. Reuse existing local mixed-canvas/recovery tests to establish D1. Retain
+   legacy state and runtime identity; fix any reproduced blocker, not a dated
+   source-review hypothesis.
+3. Close remaining D2 gaps (Quick Open, explicit Run, Markdown/resource actions
+   and session-free browsing), then verify the non-Git/no-agent workflow.
+4. Complete D3 on an authorized actual Linux host, including file/Git/worktree
+   operations, reconnect, no local fallback and confirmed cleanup. No host means
+   this evidence is blocked, not waived.
+5. Verify local and remote questions plus reconnect/dedupe and all section 5
+   safety/trust gates. Fix prerequisites earlier whenever needed.
+6. Measure the packaged candidate, run the differentiation tasks, finish public
+   docs and clean install/upgrade checks, then record the launch decision.
 
-**Exit:** agreed scope plus baseline/evidence pointers and known blockers. This is not an open-ended research phase.
-
-### Slice 1 — Terminal/File/Diff mixed-canvas restoration
-
-The **first product implementation slice**. Use existing viewers/services; preserve Dockview, xterm and PTY identities. Add the minimum canonical descriptors and viewer presentation required for D1. Fix lifecycle/migration prerequisites that would make the demonstration unsafe.
-
-**Exit:** D1 passes locally, with a regression for migration and two-viewer independent focus. Do not concurrently replace the editor, renderer, style system and remote transport.
-
-### Slice 2 — resources and shared actions
-
-Complete D2: safe Markdown/images, bounded binary access/fallback, external open, Quick Open and one explicit run path. Share action targets/guards across entry points. Preserve draft recovery.
-
-**Exit:** no-agent/non-Git resource workflow is useful and safe, including malicious/unknown/oversized inputs.
-
-### Slice 3 — real remote workspace
-
-Extend the existing hub/core route to the supported full workspace path. Test on an actual isolated Linux host, not private user machines or placeholder hosts. The host must be provided/authorized before the probe.
-
-**Exit:** D3 passes, including disconnect/reattach, files/Git/worktree operations, no local fallback and cleanup confirmation. No test host means this gate is blocked, not implicitly waived.
-
-### Slice 4 — attention and lifecycle hardening
-
-Complete the small Needs You slice, exact navigation and dedupe. Close remaining durability, backpressure, process ownership and trust blockers from section 5. Some fixes should land earlier when prerequisite to a slice.
-
-**Exit:** all nonnegotiable gates have evidence; questions work on the tested local and remote provider path.
-
-### Slice 5 — differentiation check and packaged alpha
-
-Run the comparison tasks, calibrate/retest budgets, install the actual package in a clean environment, and finish public docs/distribution requirements.
-
-**Exit:** launch decision recorded with evidence and explicit limitations. Feature count alone does not pass.
+This is an evidence sequence, not a requirement to delay remote implementation
+until all local acceptance work is finished.
 
 ## 7. Acceptance scenario catalogue
 
@@ -282,7 +285,7 @@ Minimum release evidence:
 
 Performance exception policy: an unmet numerical target can receive a written, scoped owner-approved exception after measurement. Record actual value, user impact, mitigation and follow-up. Unbounded memory, data loss, false lifecycle state, security failure or failure of D1–D3 cannot receive a routine performance exception. Do not rewrite the frontend to avoid profiling, or kill/evict unrecoverable state to improve benchmark numbers.
 
-WebGL/native rendering is **not** an alpha prerequisite. Production WebGL requires the existing invariant/testing changes and evidence of benefit; the benchmark can run independently of product slices.
+Production WebGL is already implemented; WebDriver retains DOM for e2e text assertions. Measure the current renderer and verify context replacement/release rather than scheduling adoption again. A native renderer rewrite is not an alpha prerequisite.
 
 ## 9. Differentiation validation gate
 
@@ -331,11 +334,16 @@ Preserve existing features/data during migration; excluded does not mean delete 
 
 ## 11. Packaging and public-facing readiness
 
-At documentation time the repository was public, no published GitHub release was listed, and no tracked root README/license was found. Recheck rather than treating these observations as permanent. The existing release workflow builds draft macOS/Linux installers and Linux daemon artifacts; use it instead of inventing distribution infrastructure.
+The repository is public and already contains GPL-3.0-only LICENSE and
+THIRD_PARTY_NOTICES; a tracked root README and public security/privacy guidance
+are still absent at this source refresh. Published-release status needs a live
+check at release time. The existing release workflow builds draft macOS/Linux
+installers and Linux daemon artifacts; use it rather than inventing distribution
+infrastructure.
 
 - [ ] README explains the actual differentiated workflow, supported platforms, installation, quick start and limitations.
 - [ ] Short screenshot/demo shows D1–D3 honestly; no unimplemented features or unmeasured speed/memory claims.
-- [ ] Owner explicitly selects a license; review THIRD_PARTY_NOTICES and dependency/distribution obligations. Do not assume permission from repository visibility.
+- [ ] Review the existing GPL-3.0-only license, THIRD_PARTY_NOTICES and dependency/distribution obligations against the actual shipped artifacts. License selection is not an open feature task.
 - [ ] SECURITY/contact guidance explains command authority, project trust, remote access, pairing, credentials and responsible reporting.
 - [ ] Privacy/retention docs describe local metadata, terminal history, drafts, provider-owned data transfer and deletion behavior.
 - [ ] Issue template/report instructions request version/platform/provider and redact secrets, terminal contents and hostnames by default.
@@ -350,7 +358,7 @@ At documentation time the repository was public, no published GitHub release was
 
 ## 12. Verification discipline
 
-Follow AGENTS rather than running tests against the installed user's app:
+Follow [TESTING](TESTING.md), not the installed user's app:
 
 - Relevant Rust core/daemon suites, web tests/build, formatting/clippy with no new warnings, focused headless e2e and isolated real probe per slice.
 - New e2e specs enter the appropriate testMatch/config.

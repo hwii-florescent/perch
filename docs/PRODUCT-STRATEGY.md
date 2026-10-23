@@ -6,15 +6,15 @@ Recorded 2026-10-04 from the product/architecture research and subsequent owner 
 
 **Owner direction:** aim for the earliest **differentiated** public release, not the earliest release of the current agent-terminal application. Durable terminals alone are insufficient. Build and validate a coherent project workspace before launch.
 
-This document is the long-term product and architecture proposal. It does not claim the design is implemented, certify the code, or silently amend the current behavior in [AGENTS.md](../AGENTS.md). Specific invariant changes need ratification before their implementation slice. The research found no exclusive feature moat; differentiation remains a hypothesis to validate against alternatives.
+This is long-term rationale and dated research, not the current backlog or an implementation certification. [ROADMAP.md](ROADMAP.md) tracks remaining work; [ARCHITECTURE.md](ARCHITECTURE.md) describes current contracts; [DECISIONS.md](DECISIONS.md) records approved departures from proposals here. The research found no exclusive feature moat; differentiation remains a hypothesis to validate against alternatives.
 
 Read together:
 
-- [PUBLIC-ALPHA.md](PUBLIC-ALPHA.md): bounded first-release requirements, build order, acceptance scenarios, and launch gates. This controls alpha scope; the whole strategy is not a launch prerequisite.
-- [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md): detailed interaction design, including proposed changes awaiting approval. Reuse it rather than inventing another UI specification.
-- [ARCHITECTURE.md](ARCHITECTURE.md): implementation baseline and historical build sequence. Its older parity-led roadmap is not the new product priority.
-- [ORCA-PARITY.md](ORCA-PARITY.md): reference inventory, not requirements.
-- [TAILWIND-MIGRATION.md](TAILWIND-MIGRATION.md): required procedure before implementation touches styles.
+- [PUBLIC-ALPHA.md](PUBLIC-ALPHA.md): bounded release requirements, acceptance scenarios and evidence gates; the whole strategy is not a launch prerequisite.
+- [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md): interaction proposals and shared UI conventions; newer decisions take precedence.
+- [ROADMAP.md](ROADMAP.md): current status, gaps and priorities; replaces historical build sequences.
+- [ARCHITECTURE.md](ARCHITECTURE.md), [TESTING.md](TESTING.md): current ownership/safety and verification guidance.
+- [ORCA-PARITY.md](ORCA-PARITY.md): selected comparison, not requirements.
 
 ### Evidence conventions
 
@@ -137,7 +137,12 @@ These are defensible engineering investments, not exclusive moats.
 
 The alpha must exhibit a useful portion of all four. The complete long-term feature set is not required; see the separate release contract.
 
-## 6. Existing implementation and evidence
+## 6. Implementation research and follow-up
+
+The source survey below originated at the 2026-10-04 baseline. Follow-up status
+was refreshed against `8dae768`; it is source inspection, not candidate acceptance
+evidence. Do not turn historical observations into new bug reports without
+checking the current path.
 
 ### Foundations to keep
 
@@ -155,26 +160,21 @@ The alpha must exhibit a useful portion of all four. The complete long-term feat
 | Tauri/React/Dockview/xterm; terminal-profile import and faithful input. | Keep pending measurements. |
 | Review anchoring, packets and delivery receipts. | Improve their placement in the canvas, not rewrite them. |
 
-### Concrete gaps and risks to investigate
+### Source-risk follow-up
 
-| FACT / source observation | INTERPRETATION | RECOMMENDATION |
-|---|---|---|
-| `terminal.rs::runtime_alive` maps daemon lookup failure to false; agent exit handling uses that boolean. | Unreachable can look dead. | Typed Alive / Exited / Unknown; never finalize termination from uncertainty. |
-| `attach_inner` can spawn an in-process fallback if perchd is unavailable. | Durability silently becomes weaker apart from logs. | Fail/retry by default; temporary non-durable mode only with explicit visible consent, if retained at all. |
-| `attach_daemon` resizes an existing daemon process during attachment. | Attach and resize authority are not cleanly separated on that path. | Preserve host dimensions until a lease-authorized resize. |
-| Core replay is 128 KiB; daemon default attach tail 512 KiB; history cap 8 MiB, compacting to newest half. | Persistence is bounded, not full history or complete terminal-state restore. | Publish retention and report gaps. |
-| Daemon attach clamps old offsets to retained range. | Slow-reader recovery is not unconditionally lossless. | Typed gap/reset; never silently imply complete replay. |
-| Core WS output and daemon-client paths include unbounded channels. | Daemon subscriber limit is not end-to-end backpressure. | Bound every stage and acknowledge processed output. |
-| Daemon output pump ignores log-write errors. | Live output may continue while persistence fails silently. | Report degraded history, distinguish captured/persisted offsets. |
-| Worktree removal calls Git then archives metadata without a comprehensive live-work/draft preflight. | Execution and drafts can become stranded. | One revalidated server deletion plan, including running work and recoverable buffers. |
-| Files are separate localStorage tabs; layouts belong to sessions; active files lose to session switching. | Competing ownership models prevent uniform splits/restoration. | Canonical surfaces and viewer-scoped presentation. |
-| WS connection resumes/creates a session. | Viewing a file/project can inherit chat-first assumptions. | Connect/negotiate/subscribe without creating work; keep legacy handshake compatible. |
-| Hub capability allowlist excludes full workspace metadata/fs and newer unverified agent paths. | Remote foundation is not complete local/remote parity. | Host-owned remote workspace slice, capability-gated. |
-| Lifecycle state is projected into additional running/blocked sets; heuristics and stale display rules still exist. | Do not describe every signal as equally trustworthy. | One authoritative projection, explicit provenance and uncertainty. |
-| Native bridges normalize transcripts as well as status. | Metadata observation can carry unnecessary chat coupling. | Separate lightweight observations from frozen transcript views. |
-| Auto-hibernation can terminate an eligible agent PTY and later resume its conversation. | Conversation continuity is not process preservation. | Prefer explicit/opt-in hibernation; prove safety before promising durability. |
+| Original concern | Current implementation / remaining evidence |
+|---|---|
+| Unreachable daemon treated as dead; silent in-process fallback; attach-time resize | Local runtime now has Alive / Exited / Unknown, fail-closed persistent launch and attach-only recovery preserving size. Retest supported recovery/authority paths against the release candidate. |
+| Unbounded output, retention gaps and ignored history errors | Bounded daemon/client/WS/parser stages and visible gap/storage-failure reporting now exist. Fault/load evidence remains a release gate; history is bounded, not a complete transcript. |
+| Worktree removal under live work/drafts | Preflight now refuses open work, live/unknown daemon state and durable drafts. Disconnected untransmitted edits remain outside a server-only guard. |
+| Session-owned file/layout/focus | Canonical surfaces, mixed splits and per-viewer local restoration now exist; remote presentation and session-free connect remain incomplete. |
+| Hub missing workspace metadata/fs/runtime families | Still a core gap: finish the host-owned managed remote workspace path. |
+| Heuristic status and transcript coupling | Local durable attention labels uncertainty; provider capabilities still differ and Hosted UI remains frozen. Remote attention remains unfinished. |
+| Automatic hibernation weakens process continuity | Idle hibernation is now opt-in via `PERCH_HIBERNATE_AFTER_SECS`; wake is a new launch, not preservation of the old process. |
 
-These observations need focused reproductions and regression checks, not an indiscriminate rewrite. Provider-launch wrapper, daemon-end and shell-exit are different events.
+Provider-launch wrapper, daemon-end and shell-exit are different events.
+Use [ROADMAP](ROADMAP.md) for actionable remaining work and [PUBLIC-ALPHA](PUBLIC-ALPHA.md)
+for acceptance evidence, not this dated audit as a second backlog.
 
 Source anchors:
 [terminal](../crates/perch-core/src/terminal.rs), [daemon client](../crates/perch-core/src/daemon.rs), [agent runtime](../crates/perch-core/src/agent_runtime.rs), [lifecycle](../crates/perch-core/src/agent_fleet.rs), [daemon server](../crates/perchd/src/server.rs), [daemon protocol](../crates/perchd/src/proto.rs), [daemon stream client](../crates/perchd/src/client.rs), [filesystem](../crates/perch-core/src/filesystem.rs), [buffers](../crates/perch-core/src/db/file_buffers.rs), [Git](../crates/perch-core/src/source_control.rs), [review](../crates/perch-core/src/review.rs), [worktree operations](../crates/perch-core/src/worktree.rs), [workspace adapter](../crates/perch-core/src/server/workspace.rs), [hub](../crates/perch-core/src/hub.rs), [SSH](../crates/perch-core/src/ssh.rs), [server](../crates/perch-core/src/server/mod.rs), [native bridges](../crates/perch-core/src/native_ui/mod.rs), [file tabs](../packages/web/src/fileTabs.ts), [layout](../packages/web/src/dockview/DockviewShell.tsx), [socket](../packages/web/src/ws.ts), [terminal setup](../packages/web/src/xtermSetup.ts), [file UI](../packages/web/src/components/WorkspaceFiles.tsx).
@@ -226,8 +226,8 @@ Keep desktop core in-process initially. An always-running core service may event
 
 | Option | What changes | Assessment |
 |---|---|---|
-| xterm.js DOM | Current frontend emulator/renderer | Baseline; established integration and broad web portability. |
-| xterm.js WebGL | Renderer, not parser/transport | Best first performance experiment; GPU memory/context loss and tests must be included. |
+| xterm.js DOM | WebDriver/test renderer | Keeps `.xterm-rows` assertions available. |
+| xterm.js WebGL | Production renderer, not parser/transport | Visibility-scoped contexts with loss replacement; include GPU memory and lifecycle checks. |
 | libghostty-vt | VT parsing/state/input facilities | Not a drop-in renderer. Upstream header explicitly says incomplete/unstable API. |
 | Embedded native Ghostty surface | Terminal integration/rendering | Viable in products such as cmux; upstream `ghostty.h` is an internal embedder API, not a stable general embedding contract. |
 | SwiftTerm | Swift emulator with AppKit/UIKit frontends | Plausible native-client component, not an improvement to the shared web UI by itself. |
@@ -242,7 +242,7 @@ Profile queues, string/JSON conversion, copies, repeated parsing, inactive mount
 
 Keep interactive emulation frontend-side for now. Server-rendered cells would create another display protocol and require selection/search/accessibility/input/font coordination. Do not build one.
 
-Use perchd's VT state for bounded reads, diagnostics, titles and headless observations. Current snapshot text/title/cursor/alternate-screen data is not full xterm state. It is not yet a reliable basis for arbitrary emulator eviction/restoration.
+Use perchd's VT state for bounded reads, diagnostics, titles and headless observations. The daemon now also supplies screen/mode repaint for first attachment. This is not a reason to evict parked xterms or claim unlimited scrollback; arbitrary eviction/restoration still needs proof against the supported terminal corpus.
 
 A checkpoint experiment must prove modes, dimensions, ordered resize history, alternate screen, Unicode and stream offsets. Historical clipboard writes, notifications and terminal queries must not replay as live side effects. Only one designated endpoint may answer terminal device queries; an observer must not race the controlling emulator. If headless behavior needs more terminal protocol coverage, adopt a mature engine rather than extend an ad hoc emulator.
 
@@ -250,14 +250,14 @@ Do not present an arbitrary raw-stream tail as exact state restoration. On reten
 
 ### Decision
 
-Keep xterm DOM now. Benchmark WebGL separately. No emulator rewrite or raw Metal renderer. Current AGENTS prohibits WebGL because tests read `.xterm-rows`; adoption requires explicit invariant revision and renderer-independent buffer assertions plus visual tests, not silently blinding the test suite. Terminal input, kitty keyboard behavior, theme/font, `convertEol: false`, and resize leases remain nonnegotiable.
+Keep the implemented xterm split: production WebGL, DOM under WebDriver. Use `e2e/memory/memory.mjs` for context replacement/release and terminal disposal checks. No emulator rewrite or raw Metal renderer. Terminal input, kitty keyboard behavior, profile-derived theme/font, `convertEol: false`, resize leases and replay safety remain nonnegotiable; release performance claims still require measurements.
 
 ## 9. Desktop frontend architecture
 
 | Architecture | Benefit hypothesis | Cost / decision |
 |---|---|---|
 | Current Tauri + React | Shared desktop/web/PWA; lowest change cost | Keep. Memory/latency remain to be measured. |
-| Current stack + WebGL | Faster rendering on some workloads | Benchmark; can increase GPU memory. |
+| Current stack + WebGL | Implemented production renderer | Measure latency and aggregate memory, including GPU contexts. |
 | Optimized Tauri/WebView | Lazy resources, small updates, fewer wakeups | First investment; benefits browser too. |
 | SwiftUI/AppKit | Native behavior and possibly lower overhead | Rebuild UI, layout, IME/accessibility, testing. Not justified now. |
 | Shared web + separate Mac client | Platform specialization | Two frontend products/test matrices; only with demonstrated demand and resources. |
@@ -378,7 +378,7 @@ Authorized ResourceRef
   → selected Surface provider
 ```
 
-Reuse FileService and durable buffers. Current previews are bounded; image preview is metadata-only, PDF MIME recognition is not a PDF viewer, and the current editor is a textarea. Do not advertise a rich viewer catalogue as existing.
+Reuse FileService and durable buffers. Current implementation includes CodeMirror, images, lazy PDF.js, audio/video, archive extraction, bounded file transport/download and local desktop default-app opening. Rendered Markdown file preview, richer image controls and Open With remain incomplete; see [ROADMAP](ROADMAP.md). The policy below is a target catalogue, not a claim that every specialized viewer exists.
 
 ### Resolution and associations
 
@@ -405,7 +405,7 @@ Frontend: lazy rendering, selection, zoom, navigation and bounded display parsin
 | Logs | Bounded ranges/tail, optional follow. | Rotation-aware later; do not load entire huge files. |
 | HTML | Source default, explicit inert preview. | Live app is a separate trust context. |
 | Media | Native browser controls where safe/supported; paused. | Range access and external codec fallback; no media editor. |
-| Archives | Metadata/external open first. | Later bounded listing/extraction with traversal/link/bomb defenses. |
+| Archives | Bounded safe extraction/download already available. | Keep traversal/link/bomb defenses; no archive-editor suite. |
 | Notebooks | Source or static read view. | No kernel/environment manager initially. |
 | Scripts | Text. Run is separate. | No execution on open/drop/preview. |
 | Executables/binaries | Information, Open With if meaningful. | Execute only through explicit supported action. |
@@ -534,7 +534,7 @@ Durable PTYs do not automatically preserve semantic events. Bridges may retain o
 - No implicit project creation from shell cwd, opened subfolder or remote reply.
 - Close last tab keeps the same context selected. Remove project removes registration/owned execution, not the original folder. Delete a linked worktree is separately destructive.
 
-Vocabulary and sidebar changes remain explicit migrations from current AGENTS, not schema-renaming projects. See UI-UX-DIRECTION for detailed disclosure rules.
+Vocabulary and sidebar changes are product decisions, not schema-renaming projects. See DECISIONS for approved naming/compact sessions; its newer choices override the older sessionless-sidebar proposal in UI-UX-DIRECTION.
 
 ## 17. Remote architecture
 
@@ -641,7 +641,7 @@ A process-group kill does not universally kill all descendants: jobs may change 
 
 ### Resources/previews
 
-Preserve no-follow/root-descriptor confinement. Handle symlinks intentionally. No active HTML/SVG in privileged DOM; bound decode/parse/cache/archive work. No truncated-save overwrite. Block extraction traversal, escaping links and decompression bombs if extraction is added.
+Preserve no-follow/root-descriptor confinement. Handle symlinks intentionally. No active HTML/SVG in privileged DOM; bound decode/parse/cache/archive work. No truncated-save overwrite. Keep the existing archive extraction's traversal, escaping-link and decompression-bomb defenses in every extension.
 
 Live previews need a separate unprivileged security context with no Perch credentials/native commands, constrained navigation/download/permission policy and explicit local-network handling. Different origin alone is not the whole policy. Use external browser fallback until isolation is demonstrated.
 
@@ -677,7 +677,7 @@ No arbitrary lifecycle interception, cross-provider DOM access, unrestricted cor
 | PR open/status/checks | Important, later | Thin integration with existing tools such as gh. |
 | Usage/context display | Nice later | Report available facts, no accounting/quota product. |
 | Mobile/PWA | Nice later expansion | Preserve existing access; focus on check-in, not full mobile IDE. |
-| Isolated app preview | Nice later | Security/tunnel gate first. |
+| Isolated app preview | Existing browser; remote expansion later | Validate isolation; remote service forwarding is separate work. |
 | Floating terminal | Unnecessary | Terminals already have tabs/splits. |
 | Separate Cmd-J navigator | Unnecessary | Consolidate with Cmd-K/Cmd-P. |
 | Agent dashboard | Remove from roadmap | Needs You replaces it. |
@@ -688,25 +688,15 @@ No arbitrary lifecycle interception, cross-provider DOM access, unrestricted cor
 | Computer use/design mode | Probably never | Different product/security surface. |
 | Native editor/front-end rewrite | Not planned | Measurement gate; not cleaner-code intuition. |
 | Public plugin system | Defer | Internal registries first. |
-| Automatic hibernation | Reconsider default | Explicit/opt-in unless process/continuation semantics are proven. |
+| Idle hibernation | Now opt-in | Wake is a new launch, not preservation of the old process. |
 
-### NOW
+### Current scheduling
 
-Document/ratify contracts, baseline performance/recovery, build the Terminal/File/Diff restoration slice, and fix the lifecycle/security prerequisites it exposes. Reproduce uncertain liveness, non-durable fallback, resize authority, replay/backpressure and safe deletion risks. Establish renderer-independent terminal test access without changing renderer.
-
-### NEXT — differentiated alpha work
-
-Unify tab state and shared actions, quick open, useful resource handling (text/Markdown/images/external fallback), a small attention queue, full-canvas review, and the managed remote workspace slice. Meet PUBLIC-ALPHA gates. Reliability fixes are part of these slices, not a separate excuse to ship an undifferentiated terminal app.
-
-### LATER
-
-Specialized PDF/CSV/JSON/log viewers, richer saved runs, forwarding/isolated preview, thin PR workflow, scoped CLI, phone refinement, justified external providers, Windows if demand funds a real port.
-
-### PROBABLY NEVER
-
-Custom agent harness/chat center, full IDE/debugger, kanban/orchestration console, account/quota manager, issue-tracker clone, browser design mode, computer-use platform, plugin marketplace, terminal emulator or raw Metal renderer.
-
-Retire parity tiers as the scheduling mechanism. Delete unsupported roadmap promises rather than build them for completeness.
+[ROADMAP.md](ROADMAP.md) is the single remaining-work list. Mixed local canvas,
+local attention, PDF/media viewing, Context Bridge and production WebGL have
+landed since this research. Do not repeat the original NOW/NEXT sequence or
+schedule from parity tiers. [PUBLIC-ALPHA](PUBLIC-ALPHA.md) still controls launch
+evidence; source implementation does not automatically pass a gate.
 
 ## 22. Technical risks and mitigations
 
@@ -727,13 +717,17 @@ Retire parity tiers as the scheduling mechanism. Delete unsupported roadmap prom
 | Too many platforms | Mac/Linux/browser foundation; explicitly supported alpha matrix. |
 | Scope outruns quality | Three differentiating scenarios and release checklist, not parity count. |
 
-## 23. Five bounded prototypes
+## 23. Original bounded experiments
+
+Historical research proposals, not another implementation queue. Several now
+have implementations; use existing checks before proposing a replacement.
+ROADMAP owns remaining work.
 
 Each has a report/pass-fail result; do not turn experiments into hidden implementation programs.
 
 1. **Durability/replay fault harness.** Core crash, daemon disconnect, slow consumer, compaction, disk failure, resize during replay, close while disconnected. Pass: no false exit, duplicate launch, unexplained loss or acknowledged destruction while still unknown.
 2. **Mixed-surface restoration.** Existing Terminal/File/Diff, order, split, restart, two viewers, dirty draft, close versus detach. Pass: same runtime identity, drafts intact, independent focus. No new viewer catalogue.
-3. **DOM/WebGL benchmark.** Identical data/options/grid; latency/CPU/JS/native/GPU memory, multi-visible panes, context loss, Unicode/IME/accessibility. Pass: material measured gain without correctness/regression cost. Production adoption separately approved.
+3. **DOM/WebGL benchmark.** Identical data/options/grid; latency/CPU/JS/native/GPU memory, multi-visible panes, context loss, Unicode/IME/accessibility. Pass: material measured gain without correctness/regression cost. Production WebGL has since been adopted; this remains a regression/measurement comparison, not an adoption prerequisite.
 4. **Complete remote workspace.** Actual isolated test host, consented setup, project/CLI/files/Git/worktree, disconnect/reconnect/local-core restart. Pass: authoritative remote identity, no local fallback or duplicated execution. Compare daemon-only only to quantify what it loses/saves.
 5. **Safe generic opener.** Text, Markdown, PNG, PDF/external fallback, misnamed HTML, unknown binary, oversized input, remote download. Pass: useful bounded action for each, no execution on open and no authorization bypass.
 
@@ -792,20 +786,16 @@ External docs/repositories were consulted during the 2026-10-04 research; moving
 - A4: [MCP](https://modelcontextprotocol.io/). Tool annotations are advisory, not enforcement.
 - A5: [Agent Host Protocol](https://microsoft.github.io/agent-host-protocol/).
 
-## 26. Implementation decisions to ratify
+## 26. Decision discipline
 
-Before a slice changes behavior, record the decision and update AGENTS plus the relevant contract together. Documentation work alone does not enact these migrations.
+Record deliberate product/safety changes in [DECISIONS](DECISIONS.md) and the
+affected contract. AGENTS is a brief contributor entry point, not a detailed
+behavior specification. Documentation alone does not enact a migration.
 
-- [ ] Generic tabs replace terminal/session-only ownership; session compatibility mapping and watcher close semantics agreed.
-- [ ] Workspace remains internal; optional Context UI and simplified sidebar agreed.
-- [ ] Viewer identity, persistence placement, layout migration and independent focus agreed.
-- [ ] Close/stop/interrupt/reopen distinctions and pending remote-close behavior agreed.
-- [ ] Durable launch fails closed; hibernation/defaults reconciled with the product promise.
-- [ ] Stale/unknown evidence no longer reads as confirmed idle/completion.
-- [ ] Shared command targets and client-specific shortcut rules agreed.
-- [ ] Managed remote core is the full-feature path; direct mode's reduced scope documented.
-- [ ] Local authentication/network defaults, project execution trust and SSH forwarding defaults agreed.
-- [ ] Alpha platform/provider/version matrix and performance exception policy agreed.
-- [ ] Any visual changes (system-sans chrome, status bar, picker order, Scratchpad naming) approved separately; they are not prerequisites hidden inside the architecture migration.
-
-Immediate implementation priority after ratification: the smallest Terminal/File/Diff mixed-canvas restoration slice, with lifecycle and migration safety built into its acceptance checks. No feature implementation is part of this documentation checkpoint.
+The original ratification checklist is retired: local mixed surfaces/viewers,
+watcher close, fail-closed launch and opt-in hibernation are now implemented.
+Do not reopen approved choices or call implemented work missing. Remaining
+remote/action/restore work lives in [ROADMAP](ROADMAP.md); release support,
+security policy and measured performance decisions live in [PUBLIC-ALPHA](PUBLIC-ALPHA.md).
+System-sans chrome and picker reordering are not implicitly approved by this
+proposal, nor prerequisites hidden inside an architecture migration.

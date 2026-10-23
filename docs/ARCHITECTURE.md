@@ -1,259 +1,139 @@
-# perch architecture
+# Perch architecture
 
-## Document scope and current planning direction
+Current implementation reference, refreshed against `8dae768`.
+[ROADMAP](ROADMAP.md) tracks what remains; [PUBLIC-ALPHA](PUBLIC-ALPHA.md)
+defines acceptance evidence. Source presence is not a release certification.
 
-This file describes the implementation baseline and its earlier build plan.
-For the next implementation phase, start with:
+## Process and data ownership
 
-- [Product and technical strategy](PRODUCT-STRATEGY.md): full target architecture,
-  research evidence, ownership contracts, risks and performance targets.
-- [Differentiated public alpha](PUBLIC-ALPHA.md): bounded release scope,
-  implementation order, acceptance scenarios and launch gates.
-- [UI/UX direction](UI-UX-DIRECTION.md): detailed proposed interaction design.
-
-The goal is the earliest **differentiated** release, not simply publishing the
-current terminal application. The older build order below (including Cmd-J,
-floating terminal, dashboard and parity tiers) is historical, not the new
-roadmap. The new strategy also recommends a managed remote core for the complete
-remote workspace, rather than treating remote perchd alone as sufficient.
-
-These are target designs, not claims of completed implementation or automatic
-changes to [AGENTS.md](../AGENTS.md). Ratify affected invariants before changing
-behavior. See the strategy's source audit for limitations in current liveness,
-replay, flow control and remote support; durability is not unlimited history or
-complete emulator-state restoration.
-
-## Implementation baseline
-
-perch is a Rust agent IDE, CLI mode first. It is not a port of
-[Orca](https://github.com/stablyai/orca) (MIT): Orca is the reference we learn
-from, and perch also builds what Orca lacks (for example `direct` hosts,
-which need only the agent CLI and tmux). `ORCA-PARITY.md` lists
-which Orca features perch has. The Orca checkout is `~/Github/orca` (commit
-`564f1352`), and its `docs/reference/*.md` explain *why* things are built the
-way they are. When borrowing, take behaviour and invariants, not Orca's file
-layout, which follows Electron IPC.
-
-## Invariants learned from Orca
-
-1. **The daemon owns PTYs.** Quitting, crashing or updating the app never
-   kills an agent. The runtime *adopts* a live daemon; it never replaces one.
-2. **One status store per execution host.** Every signal (hooks, native
-   events, OSC, process exit) writes through one path, and readers only
-   display what it holds.
-3. **The execution host owns execution.** Nothing remote falls back to local.
-   Losing contact means `unverifiable`, never `exited`.
-
-## Processes
-
-| Orca | perch |
-|---|---|
-| Electron main (the runtime) | `perch-core`: axum HTTP+WS, SQLite |
-| Renderer | `packages/web`: React, dockview, xterm |
-| Terminal daemon | `perchd` ✅ |
-| `orcad` (headless runtime) | `perch-core --headless` |
-| Relay over ssh | host modes `perch` (a remote perch behind an ssh tunnel) and `direct` (tmux over ssh; moving to perchd, backlog) |
-| `orca` CLI for agents | not built (phase 6) |
-| Mobile | PWA + device pairing |
-
-```
-browser / Tauri web view (packages/web)
-        │ WS  protocol.rs ⇄ protocol.ts
-perch-core (runtime): projects · worktrees · git · fs · status · SQLite
-        │ unix socket (framed)          │ ssh (host modes)
-perchd: PTYs · history logs · vt100     remote perch / direct host
+```text
+React / Zustand / Dockview / xterm
+  browser, paired phone/PWA, or Tauri webview
+                      │ HTTP + WebSocket
+perch-core: axum, Rust domain services, SQLite
+       │ private socket              │ OpenSSH
+perchd: PTYs, history, VT state       remote perch-core / direct tmux host
+       │
+shells, real agent CLIs
 ```
 
-## perchd (built, phase 1)
+- **Core** owns domain logic, authorization, projects/workspaces, files/drafts,
+  Git/review, agent lifecycle and attention. Server adapters dispatch to domain
+  services rather than implementing another model in React.
+- **Desktop** runs the same core in-process and adds narrow OS integration,
+  notifications and native child browser webviews.
+- **Web** renders WS-driven state and owns view-local presentation. Do not
+  confuse focus/layout with runtime authority.
+- **perchd** is detached from core lifetime. Core starts it as
+  `<exe> __perchd serve`; a standalone binary is also built for remote use.
+  It does not own project/filesystem/Git/agent-product semantics.
+- SQLite metadata defaults to `~/.perch/history.sqlite`; settings/hosts are
+  atomic JSON files under `~/.perch`. Actual files remain on disk.
+- Every protocol change updates Rust and TypeScript together. Optional/default
+  fields and capability negotiation preserve older clients and federated peers.
 
-- **Packaging:** `crates/perchd` depends only on portable-pty, vt100,
-  serde_json and libc (no tokio or SQLite). The runtime spawns it as
-  `<exe> __perchd serve`, a detached re-run of the app binary. A standalone
-  `perchd` binary exists for remote hosts.
-- **Endpoint:** `~/.perch/daemon/daemon-v<N>.sock`, mode 0600, one instance
-  per directory via `flock`.
-  - `N` is the protocol version.
-  - A socket path too long for the OS limit falls back to
-    `/tmp/perchd-<uid>-<hash>-v<N>.sock`.
-  - The daemon exits after 60 s with no live sessions and no clients.
-- **Wire** (`proto.rs`): frames of `[u32 len][kind]`.
-  - `J` frames carry JSON requests and replies.
-  - `D` frames carry `[u64 seq][id][raw bytes]`: terminal output, or input
-    going the other way.
-  - Ops: `hello`, `create`, `attach{since}`, `detach`, `resize`, `kill`
-    (signals the process group), `remove`, `list`, `snapshot`, `health`.
-- **Output path:** PTY → on-disk history log (the only replay source; capped
-  at 8 MiB, keeping the newest half) → vt100 screen → subscribers.
-  - An attach replays from any byte offset, then continues live.
-  - A stalled subscriber is disconnected rather than losing arbitrary chunks.
-    Daemon socket output is bounded to 16 MiB/2048 frames; client attachment
-    queues to 32 MiB/512 frames (plus one frame being read); browser socket
-    output to 32 MiB/2048 messages; xterm's pending parser writes to 16 MiB.
-    Slow browser views reconnect for fresh replay without stopping execution.
-  - Retention gaps and history append/read/compaction failures are disclosed
-    in the terminal. A failed append does not stop the process or live output;
-    new output retries storage, and later attachments still disclose the gap.
-    History is bounded best-effort storage, not a complete transcript or an
-    fsync-per-write guarantee.
-  - A restarted daemon reloads its sessions as exited but still replayable,
-    and keeps them for 7 days. Processes survive a **core/app** restart while
-    perchd lives, not a daemon crash, machine reboot, or an explicit stop.
-- **Process lifetime:** persistent launches require perchd; failure is visible,
-  never a silent in-process fallback. A lost connection means **unknown**, not
-  process exit or permission to replace a shell. Reconnect/boot attach only
-  to surviving processes and preserve their dimensions until resize authority
-  is acquired; they never restart a conversation. Idle local lifecycles are
-  marked attach-only synchronously before clients connect; confirmed exits stay
-  exited and a new tab is the explicit fresh-launch path. Remote/direct runtime
-  recovery is outside this local perchd guarantee. Explicit wake from sleep
-  remains a new launch. Idle hibernation is off unless
-  `PERCH_HIBERNATE_AFTER_SECS` is set.
-- **Destructive actions:** stop must be confirmed before a session is forgotten.
-  Watching a CLI cannot authorize global deletion; dismissing a view releases
-  observation and leaves the session discoverable in its nest. Owners can
-  choose an explicit stop for everyone. Worktree deletion (including force)
-  refuses listed tabs, live daemon processes, unsaved durable drafts or unknown
-  daemon state; it also checks the requesting view's not-yet-debounced draft.
-  Another disconnected view's untransmitted edits cannot be checked by the
-  core. These are refusal checks, not a distributed edit/delete transaction.
-- **Transport for remotes:** `perchd connect` bridges stdin/stdout to the
-  socket, starting the daemon if needed. It's built and tested locally but
-  not wired to ssh yet.
+Read module `//!` headers for local details, not a duplicate directory catalogue.
 
-**Historical remote plan (1b, backlog; see the new strategy above).** Upload `perchd-linux-<arch>` (from the release
-workflow) to `~/.perch/bin/perchd-v<N>` and run `ssh host … connect` through
-the existing ControlMaster. CLI panes and Hosted turns on direct hosts then
-become daemon sessions, and the tmux/`nohup`/`tail -F` code in `detached.rs`
-is deleted. Blocked on having a test host.
+## Terminal continuity and authority
 
-## Status (phase 2)
+Local persistent launches require perchd. Daemon failure is visible, not an
+in-process fallback or permission to launch a duplicate. Core distinguishes
+Alive / Exited / Unknown; Unknown cannot authorize restart or cleanup.
+Boot/reconnect attaches to surviving execution, preserving dimensions; it does
+not restart a conversation. Idle hibernation is off unless
+`PERCH_HIBERNATE_AFTER_SECS` is set; explicit wake is a new launch.
 
-- **Store:** `agent_fleet::AgentLifecycleRegistry` (states `working`,
-  `blocked`, `done`, `idle`, `sleeping`, `exited`, `error`, `reconnecting`),
-  persisted by `agent_persistence.rs`. There is no parallel store.
-- **Producers**, strongest first; each one silences the ones below it:
-  1. `native_ui/*` snapshots `{running, blocked}`:
-     - Claude: per-launch hooks, `PermissionRequest` or
-       `PreToolUse(AskUserQuestion)` → blocked.
-     - Codex: app-server `activeFlags` `waitingOnApproval` /
-       `waitingOnUserInput` → blocked.
-     - Pi/OMP (`pi-extension.ts`): an ask tool in flight
-       (`AskUserQuestion`/`request_user_input` for Pi, `ask` for OMP), or
-       OMP's `tool_approval_requested` until `…_resolved` → blocked; the
-       turn's `agent_end` clears both. Pi 0.84 has no event for an
-       extension's own `ctx.ui` dialog, so those are not seen.
-     - OpenCode (`opencode-plugin.mjs`): the TUI's pending
-       `session.permission`/`session.question` for the session or any
-       subagent session below it → blocked.
-  2. Configured output markers (`StatusDetection::OutputPatterns`).
-  3. The OSC title (`agent_title.rs`, Orca's `agent-title-status.ts` rules):
-     working / permission / idle. The first classified title makes the
-     title own status: repaints only count as activity, and an Enter no
-     longer starts a turn (the title's working edge does). vt100 tracks the
-     title in the runtime's own output path, so it works with or without
-     perchd and with no view attached.
-  4. Any output = working (the old fallback), plus the approval-prompt
-     regex in `server/mod.rs::handle_socket` while a view is attached.
-  5. Process exit.
-- **Projection:** `server/mod.rs::spawn_agent_turn_state_task` turns
-  lifecycle transitions into the sidebar's `running_sessions` and
-  `blocked_sessions`. The UI (`statusDot.ts`) then draws glyphs and fires
-  notifications on the running→idle and →blocked edges. In the desktop app
-  those are native OS notifications via `tauri-plugin-notification`.
-- **Reader policy** (`server/session.rs`, after Orca's
-  `agent-attention-policy.ts` and `agent-status-freshness.ts`), one place:
-  - Unread (`unseen`): a turn settles while no connection views the
-    session; viewing it clears it. Blocked is not unread.
-  - Decay (`stale`): running or blocked with no status evidence (lifecycle
-    activity or transition: native snapshots, title changes, output) for 30
-    minutes reads as idle. Display only: no unread, no notification, and a
-    later real completion still notifies. Orca splits this into idle and
-    "unverifiable" (PTY alive); perch shows idle for both.
-- **Not built:** an HTTP `/hook` endpoint (the file-based hooks work);
-  Orca's title normaliser and per-agent tracker quirks (Gemini/Grok display
-  titles, the 3-second stale-working-title clear).
+Execution survives an **app/core** restart while perchd lives, not daemon death,
+reboot or explicit stop. Dead-daemon descriptors/history are retained for seven
+days. History is bounded (8 MiB, compacted to its newest half), not an unlimited
+transcript or an fsync-per-write guarantee. Replay includes retained output and
+a screen/mode repaint; gaps and storage failures are disclosed.
 
-## Runtime domains
+Output budgets exist across daemon subscribers, client attachments, core WS
+outbox and xterm parser writes. A stalled viewer disconnects and replays rather
+than growing memory indefinitely. Exact budgets live in those modules; candidate
+fault/performance checks still gate release.
 
-The pattern: a domain module with no protocol dependency, plus a thin
-`server/*` adapter.
+Terminal-specific contracts:
+- Always use `xtermSetup.ts::createPerchTerminal`; `convertEol` stays false.
+  Font/theme come from the server's `terminalProfile`, not UI tokens.
+- Production uses visibility-scoped WebGL when available, with bounded context-
+  loss retries; unsupported/repeatedly failing GPUs can fall back to DOM.
+  WebDriver uses DOM so e2e text assertions work. Parked/inactive views release
+  GPU contexts.
+- A terminal outlives its mounted pane; switching parks it. Do not let caches
+  retain disposed xterm/view callbacks.
+- One resize lease owns the PTY dimensions. Other views follow, never fit.
+  Shared CLI input does not acquire resize/stop authority. Only the resize
+  owner answers terminal queries; replay must not replay live side effects.
+- Preserve xterm's native input (including kitty keyboard); do not guess or
+  re-encode keystrokes. Shortcuts belong in `keybinds.ts::SHORTCUTS`, not
+  scattered handlers; plain Ctrl letters must still reach the PTY.
 
-| Domain | perch module | Orca source |
-|---|---|---|
-| Projects | `db/projects.rs`, `server/workspace.rs` | `main/persistence`, `main/project-groups` |
-| Worktrees (phase 3): background create with progress, cancel and retry; a start-from ref (branch, SHA or remote); branch naming; `.worktreeinclude` and shared dirs; delete with branch review; sleep, archive, pin, rename, nesting; showing external worktrees | `worktree.rs` | `main/git`, `main/runtime/rpc/methods/worktree*.ts` |
-| Agent launch | `agent_fleet.rs`, `agent_runtime.rs`, `agent_catalog.rs` | `main/agent-launch`, `main/providers` |
-| Terminals | `terminal.rs`, `workspace_terminals.rs`, `daemon.rs` | `main/pty`, `main/daemon` |
-| Layout: tabs, splits and focus per worktree (phase 4) | today a session's dockview layout (`session.layout.*`, `db/sessions.rs`); per-worktree tabs/focus planned | `rpc/methods/session-tabs*.ts` |
-| Quick commands (phase 4) | new `db/quick_commands.rs` | `terminal-quick-command-rpc-schema.ts` |
-| Git / review | `source_control.rs`, `review.rs`, `server/git.rs` | `main/git`, `main/source-control` |
-| Files | `filesystem.rs`, `db/file_buffers.rs` | `rpc/methods/files*.ts` |
-| Remote | `hub.rs`, `ssh.rs`, `detached.rs` | `main/ssh`, `src/relay` |
+## Resources, drafts and lifecycle
 
-State lives in `~/.perch/history.sqlite` and `settings.json`; Orca's JSON
-store isn't copied. **Protocol:** a new field is optional. A new message
-family is gated behind a capability in `server.info`, because older peers drop
-unknown messages silently. `worktree.*` is built; the planned
-message families are `layout.*`, `pane.*` and `quickCommand.*`.
+`surfaces.rs` gives Terminal/File/Diff host-qualified identities and per-viewer
+presentation (`surface.v1`). Legacy import is idempotent and retains originals.
+The web's tab/split stores remain live and `surfaceSync.ts` mirrors/restores
+local workspace presentation. Remote surface synchronization is not implemented.
+Browser tabs exist separately; do not imply they are canonical surface kinds.
 
-## Agent CLI (phase 6)
+Viewer focus/layout are independent across windows. Files/reviews have no
+session parent in the resource model, but the current WS client still resumes
+or creates a session on connect. Session-free browsing remains unfinished.
 
-`perch-core <noun> <verb>`, connecting to `$PERCH_RUNTIME_URL` with a token
-injected into every PTY. First commands: `worktree create|list|ps|remove`,
-`terminal list|read|send|wait --for idle`, and `notify`. The reference is
-Orca's `cli/reference.mdx`.
+FileService owns confined, bounded access and versioned saves. Durable buffers,
+save intents/receipts and external-change conflicts protect drafts. Never save
+a truncated preview over the original or bypass confinement for a new viewer.
+Context Bridge's bounded copy/explicit delivery rules live in
+[CONTEXT-BRIDGE](CONTEXT-BRIDGE.md); direct send is currently Claude-only.
 
-## UI (CLI mode)
+Switching/quitting is different from explicit close:
+- A global session close stops and deletes it; a watcher only dismisses its
+  observation. Keep execution discoverable and confirm stop before forgetting it.
+- Closing the final tab leaves the same workspace, never unrelated work.
+  Removing a project leaves its folder and provider-owned transcripts on disk.
+- Worktree deletion, including force, refuses open work, durable drafts, live
+  daemon processes and unknown daemon state; it rechecks before deletion.
+  Untransmitted edits from a disconnected viewer cannot be checked by core.
+  These are refusal guards, not a distributed edit/delete transaction.
+- Reopen currently creates a fresh harness session; it does not resume the old
+  conversation. See [DECISIONS](DECISIONS.md) and [ROADMAP](ROADMAP.md).
 
-Keep React, dockview and xterm (`createPerchTerminal` rules in AGENTS.md).
-Build order:
-1. ✅ Sidebar: projects → workspaces (checkout + worktrees), with status glyphs.
-2. 🟡 A per-workspace tab strip (built) with splits that persist (to verify).
-3. ✅ Worktree create dialog with a start-from picker and progress.
-4. Cmd-J.
-5. Cmd-P.
-6. Quick commands.
-7. Floating terminal.
-8. Agent dashboard.
+## Agent observations and attention
 
-## Budgets (measure, don't claim)
+`agent_fleet::AgentLifecycleRegistry` is the lifecycle authority, persisted by
+`agent_persistence.rs`. Native bridges, configured markers, OSC titles and
+fallback output heuristics have different confidence. The transition bridge
+`spawn_agent_turn_state_task` projects lifecycle into sidebar running/blocked
+sets; do not add a competing state machine.
 
-Each phase records:
-- Runtime idle memory, and perchd memory with 0 and 10 PTYs.
-- Cold start to first frame.
-- Keystroke-to-echo latency.
-- Output throughput (`yes | head -c 100M`) with no dropped bytes.
+Local Needs You / Welcome Back persists `attention_events`. Viewing reads,
+never resolves, a question. Silence is not completion; uncertainty stays
+labelled. Failures and finished/exited events are distinct. Remote event relay,
+per-user read state and notification deep links remain deferred.
 
-## Historical build order
+Hosted/UI chat is frozen. When maintaining legacy message code, call
+`flushChunkBuffer()` before reading/replacing messages (see its store comment);
+preserve name-only attachments and plan-mode-off approval sends.
 
-Each phase ends with `cargo test` + `npm test`, one real probe, and a
-checkpoint commit.
+## Remote and network boundaries
 
-1. ✅ **perchd**, running local agents and shells. `kill -9` on the runtime
-   → the shell survives → a new runtime reattaches with the same pid and
-   scrollback.
-   - 1b. Remote perchd. Backlog: no test host.
-2. 🟡 **Status**: see above.
-3. ✅ **Worktree lifecycle** (`e2e/worktree-lifecycle.config.ts`). Gaps
-   are in the parity matrix's Tier 1.
-4. **Layout and restore**, quick commands, floating terminal, terminal
-   extras (link popover, copy context, kitty keyboard).
-5. **Navigation**: Cmd-J, Cmd-P, dashboard.
-6. **Agent CLI.**
-7. Tiers 2–4 of the parity matrix. Tier 5 is deferred.
+Remote calls go through `ssh.rs` and the OpenSSH CLI, not an SSH crate.
+Mode `perch` federates with a remote core; `direct` is reduced SSH/tmux
+compatibility. The hub currently relays selected worktree/Git/review families,
+not remote workspace filesystem/metadata/surfaces/attention. Full remote
+workspace ownership remains the target; nothing remote may fall back locally.
+`perchd connect` exists, but alone is not a remote workspace service.
 
-## Backlog
+Desktop serves loopback by default. Enabling Phone access opens a second
+network listener and enables paired tokens; disabling it closes remote access
+and device sockets. Headless core is always network-enabled. Proxy headers or
+a non-loopback Host are remote even from a loopback socket and require pairing.
+A proxy rewriting Host to loopback with no identifying headers is
+indistinguishable from local: set `PERCH_REQUIRE_PAIRING=1` behind one.
+Real Tailscale Serve has not been verified. See `server/phone_access.rs`.
 
-Polish CLI mode first; phone and UI mode come after (decided 2026-10-02).
-
-CLI input is shared across attached views (`terminal.sharedInput`): a phone
-can type while its laptop stays open, including after reload, without moving
-the PTY size. Resize and stop/delete authority remain exclusive; `Fit here`
-moves them explicitly. The old reload lease race no longer blocks CLI typing.
-Older peers and frozen UI mode retain exclusive input.
-
-- **Phone: review delivery.** paired-phone-flows intermittently gets
-  "Delivery could not be confirmed" (2 of 9 runs on 2026-10-02; cause not
-  found).
-- **Phone: watching a wider agent.** A watcher renders at the PTY's size
-  and shows its left part; scale the font to fit the width instead.
+Active web content must stay outside privileged app DOM/Tauri authority.
+The existing desktop browser uses native child webviews, not an iframe;
+its existence is not evidence that every alpha security gate has passed.

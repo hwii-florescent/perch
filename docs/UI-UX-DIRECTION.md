@@ -2,7 +2,14 @@
 
 ## Status and scope
 
-**Opinionated design specification for approval. Not an implementation change.**
+**Dated interaction proposal, not a current implementation checklist.**
+
+[DECISIONS.md](DECISIONS.md) records approval and overrides: compact sidebar
+sessions remain, naming is Birdhouse/Nest/Scratchpad, and the chrome-font change
+still needs a trial. [ROADMAP.md](ROADMAP.md) tracks remaining work;
+[ARCHITECTURE.md](ARCHITECTURE.md) describes current behavior. Mixed local tabs/
+splits, per-viewer restoration, rich file viewing, Context Bridge, browser tabs
+and local Needs You have landed since the research below.
 
 For the full product/technical proposal, read [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md).
 For what must actually ship before the differentiated public alpha, read
@@ -13,13 +20,17 @@ specific interaction proposal below is already approved.
 
 Research baseline: Perch commit `82eb210a438932f54fd3445fb2364fb0e1541b6b`, inspected on 2026-10-03. Orca reference checkout: `564f1352`. External documentation describes the versions available during this research; it is not a version-pinned compatibility guarantee.
 
-This specification covers the desktop product, with constraints for the existing headless/browser client and phone. It does not reopen Hosted chat development. It proposes deliberate changes to some current UX invariants; those must be approved and reconciled with `AGENTS.md` before implementation.
+This specification covers desktop interactions, with constraints for browser and phone. It does not reopen Hosted chat development. Proposed departures from current behavior require explicit approval in DECISIONS and an update to the affected contract; AGENTS is a brief contributor entry point, not the detailed UX spec.
 
 ### The decision in one paragraph
 
 Perch is **a project browser with development capabilities**. Pick a project, open things in tabs, and return to them later. A terminal is a first-class tab; an agent is a terminal with useful, trustworthy metadata. Files and reviews are equally first-class. Isolated work is available when requested, not imposed on every task. The left sidebar answers **where**, the tab strip answers **what is open**, the canvas shows **the work**, and a small Needs You queue answers **what requires a decision**. None of these should become a dashboard.
 
-### Decisions at a glance
+### Original proposals at a glance
+
+These are not all approved. In particular, sessionless sidebar, system-sans
+chrome, Terminal-first launcher and new Cmd-P/Cmd-K behavior must not override
+newer decisions or current bindings merely because they appear here.
 
 | Question | Decision |
 |---|---|
@@ -54,7 +65,12 @@ Perch is **a project browser with development capabilities**. Pick a project, op
 
 Research used source bodies, not just README descriptions. It also inspected Perch screenshot artifacts, official screenshots for Zen, Vivaldi, Conductor, Emdash and Zed, and four sequential frames of Orca's tab-split demo. The Perch artifacts are recent but not reproducibly tied to this exact commit; current source takes precedence where they disagree. Competitors were not installed or benchmarked. Arc's official pages blocked direct fetching; its findings have lower confidence and rely on search-indexed official documentation. Reported issues are regression examples, not assertions that a current release remains broken.
 
-### What Perch actually does today
+### What Perch did at the research baseline
+
+Historical observations at `82eb210`, not current defects. In particular, the
+separate-file-overlay/textarea/metadata-only-media descriptions below predate
+mixed tabs, SplitCanvas, CodeMirror and actual media/PDF viewers. Use ROADMAP
+and ARCHITECTURE before choosing implementation work.
 
 | Observed implementation | Consequence for this design |
 |---|---|
@@ -887,7 +903,10 @@ Reported token/cost data lives in agent details, not an always-on dashboard. Nev
 
 Do not abstract every label, row and view before two real consumers need it. No universal “workspace framework,” speculative plugin API or duplicate client lifecycle state machine.
 
-### Remove from the default experience
+### Original simplification proposal
+
+This is not a removal checklist: the later compact-session decision explicitly
+keeps sessions in the sidebar. Review DECISIONS before changing working UI.
 
 - Session rows duplicated under contexts.
 - Project → original-workspace name duplication.
@@ -902,25 +921,24 @@ Do not delete legacy Hosted/UI views or old protocol fields just to remove their
 
 ---
 
-## 13. Migration plan
+## 13. Migration and verification
 
-Each phase is independently reviewable. No combined style-system rewrite, navigation rewrite and runtime rewrite. A phase ships only after its stated acceptance check. Baseline memory, startup, keystroke latency and throughput must be measured, not assumed from visual simplicity.
+The original phase sequence has been replaced by [ROADMAP](ROADMAP.md).
+Mixed local canvas/restoration, local Needs You and several file viewers are
+already implemented; do not rebuild them from this proposal. Current work is
+remote continuity, Quick Open/shared actions, explicit Run and the remaining
+resource/attention gaps.
 
-| Phase | Changes | Dependencies | UX benefit | Technical risk / acceptance gate |
-|---|---|---|---|---|
-| 0. Ratify contracts | Approve vocabulary, runtime close guards, Scratchpad, split policy and per-viewer ownership. Update roadmap/invariants; capture current behavior and performance. | Product approval. | Avoids contradictory implementations. | Low code risk; high decision importance. Sign off every deliberate departure listed below. |
-| 1. Simplify navigation | Hide original-only row; remove duplicated session list; stable project/context ordering; hide local-only host block; new copy and contextual menus. Existing tabs remain. | Phase 0; status access on tab/attention path retained. | Immediate reduction in depth and chrome. | Medium: local/remote fallback and empty-project routing. Must never show another project's session after last-tab close. |
-| 2. Canonical tabs and restoration | Add versioned/capability-gated surface/layout records; migrate file descriptors and terminal references; unified mixed order/focus/close handling. | Existing IDs, draft service, viewer identity. | Tabs finally behave alike. | High: data/runtime loss. Migration must be idempotent, retain old records until validated, and support older peers. Never kill/relaunch a PTY during conversion. |
-| 3. Shared navigation/actions | Cmd-K, Cmd-P, New Tab launcher, keyboard parity, context-menu target semantics. Retire separate navigator filters as primary attention UI. | Phase 2 descriptors; bounded Rust file search. | Fast, predictable access without another palette. | Medium: shortcut conflicts and large repositories. Verify Tauri + browser and terminal-focused cases separately. |
-| 4. Needs You | Separate certainty/unread/attention projection; persistent actionable queue; native notification deep links and dedupe. | Runtime event identities; protocol capability; user read state. | Interruptions become useful rather than noisy. | High semantic risk: false completion/approval. Test native events, heuristics, stale evidence, disconnects and multiple viewers. |
-| 5. Unified canvas and splits | Remove file overlay; context/viewer Dockview adapter; mixed split sets, pinning and safe reopen. | Phase 2 plus close/restore contract. | Agent + file + review in one coherent model. | High: resize leases, hidden views, legacy layout conversion. Restore existing oversized/nested layouts without dropping panes. |
-| 6. Files and review | Safe Open With; Markdown/images/PDF first; Folder tab; full-canvas diffs; read-only support; move permanent editor tools into contextual controls. | SurfaceHost; bounded resource transport; existing file/review services. | Perch becomes useful beyond agents/code editing. | Medium–high: binary transport, memory and sandboxing. Unknown/oversized/remote files must fail safely and remain actionable. |
-| 7. Explicit execution/preview | Known Run tasks, run-output ownership, contextual Ask Agent handoff; isolated localhost/web preview only after security gate. Add CSV/JSON/log viewers as justified. | Actions, surface lifecycle, trust policy and transport. | Short open → inspect → run → review loop. | High security/ownership risk. No auto-run, active-pane injection, secret upload or unowned process. External fallback until safe. |
-| 8. Visual consolidation | System-sans chrome, tokens/density, local status, compact defaults, responsive/adaptive behavior. | Settled interaction model; existing Tailwind harness. | Cohesive browser-like finish without decorative complexity. | Medium regression risk. Intentionally approve new goldens; keep style-only refactors separate from visual changes. |
+Keep slices independently reviewable: no bundled style-system, navigation and
+runtime rewrite. Preserve existing PTY/resource identities, drafts and legacy
+layouts. Measure performance rather than assuming it from a simpler appearance.
+[PUBLIC-ALPHA](PUBLIC-ALPHA.md) owns candidate acceptance; the regression checks
+below remain useful across slices.
 
-Some Phase 8 token work can accompany earlier approved UI slices; it must not obscure behavioral review. Specialized viewers do not block the core direction: safe external opening is a valid shipping state.
+### Original proposed departures (not blanket approval)
 
-### Deliberate changes requiring invariant updates
+Some have shipped, some were amended and some still need approval. DECISIONS
+and current contracts take precedence; this list is not remaining work.
 
 - “A tab is a terminal” → a tab presents any supported resource/runtime.
 - Sidebar sessions → tabs appear once, in the strip.
@@ -964,7 +982,7 @@ These are proposed validation targets, not measured results:
 - A question requiring action is found in one click from Needs You; a completion does not masquerade as a question.
 - No user in the check expects Cmd-Shift-T to recover an already-killed process after reading the stopped-tab state.
 - Test 1, 10 and 30 open tabs; 1 and 8 contexts; large filenames; disconnected hosts; keyboard-only and 200% UI zoom.
-- Compare idle memory, cold-start-to-interactive, terminal latency and 100MB output throughput against Phase 0. Inactive viewers should not eagerly decode every PDF/image or mount every terminal.
+- Compare idle memory, cold-start-to-interactive, terminal latency and 100MB output throughput against a recorded candidate baseline. Inactive viewers should not eagerly decode every PDF/image or mount every terminal.
 
 ---
 
@@ -1127,13 +1145,13 @@ If a future feature requires a more complicated explanation before these six sta
 
 Findings from a screenshot review of the shipped app. Each item says whether the
 doc already specified it (a deviation to fix) or is new. Decisions are in
-[DECISIONS.md](DECISIONS.md) (2026-10-05); `AGENTS.md` invariants are rewritten in
-the slice that implements each.
+[DECISIONS.md](DECISIONS.md) (2026-10-05). These are historical findings, not
+proof that a deviation is still present; update affected contracts with changes.
 
 | # | Finding | Status | Spec |
 |---|---|---|---|
 | D1 | Panes and tabs are boxed: every Dockview group has a 1px border and the active tab is a bordered pill. | Deviation from §11 ("one subtle 1px separator", "no pill-card"). | Groups are borderless. A single 1px sash separates split groups; the active group is marked by tab/header weight or fill, never a border. The active tab is a neutral fill with label weight, no outline. The terminal and the strip share one surface. |
-| D2 | Workspace rows show a branch subtitle, a `dirty` label and an indented session list. | Deviation from §5 (one line, no subtitles) and the approved sessionless sidebar. | Follows §5 row anatomy. Dirty is a small neutral marker, not a word. |
+| D2 | Workspace rows showed a branch subtitle, a `dirty` label and an indented session list. | Original diagnosis; the later D6a decision keeps compact sessions. | Quiet row anatomy; do not remove compact sessions based on the superseded sessionless proposal. |
 | D3 | Local host card (`LOCAL`, hostname, OS, path) and a full-width `+ New session` button sit above the projects. | Deviation from §11 ("What disappears") and §5 inventory. | Hidden on local-only installs. New work starts from a project's menu or the tab strip `+`. |
 | D4 | `Chats ⌄` sits on a different baseline from its `✎` glyph; the glyph is a text/emoji icon. | Alignment is new; icon is a deviation from §11 ("no emoji action buttons"). | Header row is one flex line, vertically centred, with a 16px line icon. |
 | D5 | The `↻` Refresh button on the Projects header. | New. Refresh is not a user task (the snapshot is pushed). | Removed. Replaced by a view/sort control (see D6). |

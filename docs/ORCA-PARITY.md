@@ -1,81 +1,36 @@
-# Orca parity: CLI mode
+# Orca reference, not a roadmap
 
-**Reference inventory, not the release plan.** See
-[PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md) for Perch's own direction and
-[PUBLIC-ALPHA.md](PUBLIC-ALPHA.md) for differentiated launch requirements.
-Missing Orca features are not automatically Perch work items; the tier numbers
-below do not set implementation priority.
+Perch learns from [Orca](https://github.com/stablyai/orca), but is not a port or
+a completeness exercise. [ROADMAP](ROADMAP.md) owns priorities;
+[PUBLIC-ALPHA](PUBLIC-ALPHA.md) owns release gates.
 
-Which of [Orca](https://github.com/stablyai/orca)'s features perch has. This
-is a reference list for learning from Orca, not a spec to match: skip what
-doesn't fit perch, and features perch has that Orca lacks aren't listed
-here. The design is in `ARCHITECTURE.md`. Orca's user-facing spec is
-`~/Github/orca/docs/site/content/docs/**/*.mdx`, and its logic is under
-`src/main/*`.
+This selected inventory replaces the old tiered grep survey, whose missing
+markers had become stale. Implementation summary refreshed against `8dae768`;
+not a fresh runtime comparison. Orca reference revision: `564f1352`.
 
-✅ exists · 🟡 partial · ❌ missing. This was built from a grep survey, so
-check a row against the code before building on it.
-
-## Tier 1: the core loop (worktree → agent → watch → restore)
-
-| Feature (Orca doc) | perch | Orca source |
+| Area | Perch implementation | Relevant gap / deliberate limit |
 |---|---|---|
-| Worktree create: background with progress row, cancel, retry (`model/worktrees`) | ✅ `server/worktree_jobs.rs` (`worktree.job.*`): phase row, cancel undoes only what the job made, retry/dismiss. Local host only; remote hosts keep the synchronous `worktree.create`. On a remote perch the menu has start-from and Delete with branch review, and a project row opens Git & review (`host.info` relays the `worktree`/`git`/`review` capabilities, `e2e/remote-git.spec.ts`). Remote worktrees still have no rows in the workspace tree: project/workspace metadata is local only | `main/git`, `main/runtime` |
-| Start-from picker: base ref / local branch / SHA / remote branch | ✅ `worktree.startFrom`: default `origin/HEAD`, remote refs fetched first, new branches `--no-track` | `main/git` |
-| Branch name derived from task name, explicit override | ✅ Orca's slug, `-2`… past local/remote branches and taken paths. No branch-prefix setting | `main/git` |
-| Shared paths, `.worktreeinclude` copies, shared dirs (APFS clone / symlink) | 🟡 `.worktreeinclude` (literal, gitignored paths) copied with clonefile; `orca.yaml` `worktree.sharedDirectories` symlinked and excluded. No per-user shared-paths setting | `main/git`, `main/runtime` |
-| Delete worktree + branch, preserved-branch review, archive, sleep, pin, rename, parent nesting | ✅ `worktree.delete`: `branch -d`, unmerged commits reviewed before a guarded force delete; `workspace.pin`/`workspace.nest`, inline rename. No squash-merge detection, no live-agent check before delete, nesting only chosen at create in the UI | `main/runtime`, `main/persistence` |
-| External (`git worktree add`) worktrees: show/hide | ✅ `workspace.visibility`: found on the git poll (`.git/worktrees` fingerprint), start hidden behind a Show card, a `git worktree move` keeps the row, CLI removal archives it and re-creating the path revives it. No per-source visibility settings | `main/runtime` |
-| Launch any supported CLI with autonomy flags; per-agent editable launch args + reset | 🟡 `agent_fleet.rs` manifests | `main/agent-launch`, `main/providers` |
-| Status glyphs working / needs-you / done / blocked / idle from hooks + OSC title (`model/agents-sessions`) | ✅ Native bridges for Claude, Codex, Pi/OMP (ask tool, OMP approvals) and OpenCode (permission/question, incl. subagents); OSC title rules (`agent_title.rs`) for every other CLI. No "unverifiable" glyph | `main/agent-hooks` (+ `server/`), `shared/agent-title-status.ts` |
-| Restart chip keeps cwd (and account) | ✅ Restart CLI | `main/pty` |
-| Agent-finished notification, unread state | 🟡 done/blocked toasts + sound; native OS notifications in the desktop app; one reader policy (`server/session.rs`): unread = `unseen`, 30-minute decay = `stale`. No click-to-switch on desktop | `main/agent-hooks`, renderer `attention/` |
-| Tabs, splits right/down, per-worktree layout that persists (`model/tabs-panes-splits`) | 🟡 dockview; the tab bar shows only the active workspace's sessions (`activeWorkspaceSessions`); per-worktree layout persistence to verify | renderer |
-| Unified tabs: a tab is a terminal; an agent exiting leaves its shell (`model/tabs-panes-splits`) | ✅ built-in `terminal` provider (`ProviderManifest::terminal`, last in the + picker); agent CLIs run under `agent_runtime.rs::in_shell`, so `/exit` drops to a login shell in the same pane | renderer, `main/pty` |
-| Right sidebar: explorer + source control for the active worktree | ✅ the right drawer (`WorkspaceTools.tsx`): explorer / Git (Git only for a git workspace; terminals are tabs; a clicked file opens as a top-row tab beside the sessions), app-level and following the clicked workspace. Sidebar and drawer widths drag-resize (`ResizeHandle.tsx`) | renderer |
-| PTYs survive app quit; scrollback (incl. output while closed) restored; focused tab restored (`model/session-restore`) | 🟡 perchd owns agent + workspace shells locally (survive runtime crash, scrollback replayed); remote hosts and focused-tab restore pending | `main/daemon`, `main/orcad` |
-| Terminal: find in scrollback, link action popover, OSC 52, kitty keyboard, copy context | 🟡 search + OSC 52 exist; kitty, link popover, copy context missing | renderer, `main/pty` |
-| Quick Commands (global/project, run in new tab or insert) | ❌ | `main/runtime`, renderer |
-| Floating terminal | ❌ | renderer |
-| Jump palette Cmd-J (recent agents by attention, worktrees, tabs, create-from-query) | 🟡 Navigator (Ctrl+K) | renderer |
-| Quick Open Cmd-P (files, gitignored second pass) | ❌ | `main/runtime` |
-| Agent dashboard kanban (Needs you / Working / Done / Idle) | ➖ replaced by the Needs You queue + Welcome Back (`server/attention.rs`, `NeedsYou.tsx`), by design not a kanban | renderer, `main/agent-hooks` |
-| Themes: Ghostty import, iTerm profile, Warp import | 🟡 iTerm + Ghostty profile | `main/ghostty`, `main/warp-themes` |
+| Real CLI agents/shells | Provider manifests, native observations and OSC-title fallback; exited agents leave a shell. | Provider-specific evidence differs; not a second harness/chat product. |
+| Worktrees | Background local create/cancel/retry, start-from, include/shared paths, external discovery, rename/pin/nesting and guarded deletion. | Remote workspace inventory/jobs incomplete; per-user shared paths and squash-merge detection are not implemented. |
+| Tabs and splits | Mixed terminal/file/review order, splits and per-viewer local restoration. | Remote canonical surfaces not routed; not arbitrary grouping/tear-off. |
+| Continuity | Local perchd, retained history, screen repaint, tri-state liveness and bounded queues. | Bounded history, not infinite transcript; app/core survival is not reboot/daemon survival. |
+| Attention | Local Needs You / Welcome Back, toasts/sound and desktop notifications. | Remote event relay, per-user read state and notification deep links deferred. |
+| Terminal extras | Search, OSC 52, kitty keyboard, link-to-browser tabs, bounded context copy. | No need to treat these as missing because an old inventory did. |
+| Navigation | Navigator for sessions/agent launch; drawer file search. | Workspace file Quick Open and broader shared actions remain. |
+| Files | CodeMirror/drafts/conflicts, images/PDF/media, archive extraction/download, desktop default-app open. | Markdown rendered file preview, image controls and richer Open With remain. |
+| Git/review | Status/diffs, commit/push, anchored comments and agent packets. | Thin PR/status/checks integration later. |
+| Context handoff | Local bounded Context Bridge; Claude explicit send, other harnesses Copy. | No arbitrary PTY injection; remote and further safe provider transports later. |
+| Usage/profiles | Plan usage windows and iTerm/Ghostty profiles. | Not an account/quota manager; Warp import not implemented. |
+| Remote/phone | Perch federation, reduced direct SSH/tmux, paired browser/PWA and shared CLI input. | Full managed remote workspace and phone refinements remain. |
+| Browser | Browser tabs/drawer; desktop native child webviews. | Remote service forwarding/security verification are distinct from merely having a viewer. |
+| Agent-facing CLI | No scoped Perch CLI yet. | Later, through core's services and authority model. |
 
-## Tier 2: review and ship
+## Not parity tasks
 
-| Feature | perch | Orca source |
-|---|---|---|
-| Diff vs start-from ref (`review/diff-viewer`) | 🟡 turn diffs + Git review | `main/git`, `main/source-control` |
-| Annotate AI diff → send to agent (`review/annotate-ai-diff`) | ✅ review packets | `main/runtime` |
-| Attribution (which agent changed which lines) | 🟡 per-turn capture | `main/agent-hooks` |
-| Commit, push, open PR, wait on checks (`review/commit-push`) | 🟡 commit/push; no PR/checks | `main/github`, `main/source-control` |
-| File explorer, editor with autosave, Markdown/image/PDF viewers, drag files into prompt (`editing/*`) | 🟡 file buffers + fs | `main/runtime`, renderer |
+Orca features such as floating terminals, kanban, orchestration/automations,
+account hot-swap, issue-system suites, browser design mode and computer use do
+not become Perch requirements by appearing in a comparison.
 
-## Tier 3: agent operations
-
-| Feature | perch | Orca source |
-|---|---|---|
-| Hibernation (`agents/hibernation`) | ✅ | `main/runtime` |
-| Usage tracking and rate-limit resets (`agents/usage-tracking`) | ❌ | `main/rate-limits`, `main/claude-usage`, `main/codex-usage` |
-| Account hot-swap (`agents/codex-hot-swap`) | ❌ | `main/codex-accounts`, `main/claude-accounts` |
-| Session history (`agents/session-history`) | 🟡 | `main/ai-vault` |
-| Hooks memory (`agents/hooks-memory`) | ❌ | `main/agent-hooks`, `main/memory` |
-| CLI that agents drive: worktree create, terminal read/wait/send (`cli/overview`, `cli/reference`) | ❌ | `src/cli`, `main/cli` |
-| Orchestration, automations, worktree checkpoints, skills (`cli/*`) | ❌ | `main/automations`, `main/skills` |
-
-## Tier 4: integrations and remote
-
-| Feature | perch | Orca source |
-|---|---|---|
-| SSH worktrees, auto-reconnect, port forwarding (`ssh`) | 🟡 hosts (perch/direct modes) | `main/ssh`, `main/ports` |
-| Remote Orca server / paired clients (`remote-servers`) | 🟡 federation + pairing | `main/runtime`, `relay` |
-| GitHub PRs/issues, Linear, Jira, GitLab (`review/*`) | ❌ | `main/github`, `main/linear`, `main/jira`, `main/gitlab` |
-
-## Tier 5: heavy surfaces (deferred until Tiers 1–4 are done)
-
-| Feature | perch | Orca source |
-|---|---|---|
-| Embedded browser + Design Mode (`browser/*`) | ❌ | `main/browser` (42k lines) |
-| Computer use, emulator, speech | ❌ | `main/computer`, `main/emulator`, `main/speech` |
-| Native mobile app | 🟡 PWA + device pairing | `mobile/` |
+For current Perch contracts read [ARCHITECTURE](ARCHITECTURE.md); for dated
+competitive research see [PRODUCT-STRATEGY](PRODUCT-STRATEGY.md). Consult Orca
+source for ideas/invariants, not a file layout or an implicit to-do list.

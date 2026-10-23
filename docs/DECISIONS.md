@@ -1,16 +1,16 @@
 # Decisions
 
-Dated product decisions, newest first. Each says what is approved, what is
-deferred, and which `AGENTS.md` invariant it replaces **when the change is
-implemented**. Until then `AGENTS.md` stays the truth for shipped behavior.
-The proposal behind them is [UI-UX-DIRECTION.md](UI-UX-DIRECTION.md); the
-Rust-side ownership contracts (viewer identity, runtime incarnation, dirty-buffer
-recovery) are Linear PER-12, not decided here.
+Approved product choices and deferred alternatives. Newer decisions override
+older proposals; approval is not proof of implementation. Current ownership
+contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
+[ROADMAP](ROADMAP.md), and release evidence in [PUBLIC-ALPHA](PUBLIC-ALPHA.md).
+[UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
+conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
 ## 2026-10-21 — Needs You + Welcome Back (first slice)
 
-Implements UI-UX-DIRECTION §10 for the local host. Spec in `AGENTS.md`
-(Workspace UX → Needs You / Welcome Back) and `server/attention.rs`.
+Implements UI-UX-DIRECTION §10 for the local host. Contracts are in
+`server/attention.rs`, `db/attention.rs` and ARCHITECTURE.
 
 - **Shipped:** durable `attention_events`; questions (until answered),
   failures (until the next turn), finished turns and exits (Recent updates,
@@ -35,8 +35,8 @@ Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md
   modal directory browser. Never an inline sidebar form. Replaces "`+ Add`
   expands a form" in the sidebar. The rule "`+ Add` is the only way a folder
   becomes a project" is unchanged.
-- **Files / Git switch moves to the top row** beside the drawer toggle. Replaces
-  the "one top row, three sections" invariant in `AGENTS.md` when implemented.
+- **Files / Git switch moves to the top row** beside the drawer toggle.
+  The current drawer also offers Browser; this is not a second tab strip.
 - **Files tree** scrolls and follows the VS Code explorer look.
 - **Organize sidebar** (header menu): By project (default) or In one list
   (every session, projects and Chats alike, as a flat list, newest first). This
@@ -56,9 +56,12 @@ Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md
 
 Decided with the owner.
 
-### Approved (phased: each lands in its own slice, PER-7 onward)
+### Approved (phased; later decisions above take precedence)
 
-| Area | Decision | Replaces in AGENTS.md |
+The 2026-10-05 compact-session choice supersedes the sessionless-sidebar row
+below. Naming is approved for phased adoption, not a reason to rename schemas.
+
+| Area | Decision | Original behavior / migration note |
 |---|---|---|
 | Roles | Sidebar answers *where*, tabs *what is open*, canvas *the work*, drawer *browses files/changes*. | Workspace UX: "A tab is a terminal"; drawer holds explorer and Git only (drawer unchanged; tabs generalize to files/diffs, PER-7). |
 | Vocabulary | **Workspace → Nest** and **Project → Birdhouse** in user-facing copy (renamed by the owner after the first draft, which said Context and kept Project). A Birdhouse is an added folder on a host; a Nest is its original folder or a linked Git worktree. The original is labelled **Original** only when a Birdhouse has several Nests. Internal records, protocol, database and docs prose keep `project` / `workspace`. | "Naming: Projects are folders; Workspaces are…" |
@@ -83,15 +86,53 @@ Decided with the owner.
 
 - **Chrome font.** Proposal: system-sans UI chrome. Owner wants a side-by-side
   trial of system-sans vs a Nerd Font before choosing. Until then chrome stays
-  monospace. Decide at Phase 8 (visual consolidation); style changes ship
-  separately from behavior changes.
+  monospace. Decide in a separate visual trial; style changes ship separately
+  from behavior changes.
 
-### Deferred
+### Follow-up
 
-- Everything else in UI-UX-DIRECTION.md (Cmd-K/Cmd-P, Needs You, splits,
-  pinning, viewers, Run/preview) follows its own phase and ticket (PER-7…11).
+Mixed local tabs/splits, per-viewer restoration and local Needs You have since
+landed. Quick Open, Run, richer reopen and remote continuity remain in ROADMAP;
+do not interpret the original phase/ticket sequence as today's backlog.
+Update the affected product/architecture contract with behavior changes, not a
+component-by-component catalogue in AGENTS.
 
-### Next
+## Product constraints to preserve
 
-1. As each slice lands, rewrite the matching `AGENTS.md` invariant in the same commit.
-2. PER-12 records viewer identity, runtime incarnation and dirty-buffer recovery; the close/reopen rules above depend on it before any schema change.
+These summarize intentional choices previously buried in AGENTS. They are not
+an exhaustive description of every component or a fresh acceptance result.
+
+- **Workspace scope:** only explicit Add registers a folder. Sessions stay in
+  their original project regardless of terminal cwd. The launcher is scoped to
+  the selected nest/Scratchpad; cancel starts nothing. Closing the last tab
+  stays there. No mandatory Git, agent, model/account wizard or task object.
+- **CLI-first:** no provider/model/effort chrome over a live CLI. Chat mode is
+  one global setting, not per-session/device. Hosted/UI remains frozen.
+  Terminal is currently last in the harness picker; the older Terminal-first
+  proposal is not approval to reorder it.
+- **Close:** confirm agent close (with a user-controlled warning preference);
+  distinguish owner stop-for-everyone from watcher dismissal. No hidden managed
+  execution or lost drafts. Reopen/resume limitations above remain explicit.
+- **Navigation:** one mixed strip for the active nest; drawer browses Files/Git/
+  Browser, not another terminal layout. Selecting a tab focuses its content.
+  Compact sidebar sessions remain approved, not a sessionless sidebar rewrite.
+- **Files:** single click previews, double click/explicit open pins; editing
+  protects a preview. Explorer arrows only move/fold, Space previews preserving
+  list focus, Enter opens pinned and focuses the editor. External open uses the
+  on-disk file, never silently saves a draft. Preserve this distinction.
+- **Layout:** borderless tabs/panes, sash-only split boundaries, no header for
+  a lone pane. Pointer-based tab dragging, not HTML5 OS drag-and-drop. A new
+  split set has at most four tabs on one axis; retain older saved layouts.
+- **Quiet UI:** neutral Perch theme, color for status, no accent-filled active
+  panes or speculative menu actions. Shared tokens/defaults must agree across
+  Rust and web. Use Tailwind v4 and shared UI primitives (UI-UX Appendix E),
+  not competing unlayered CSS on the same element. Font change still needs the
+  trial above. Settings is a page; Add project is a modal with an explicitly
+  clicked native Browse option, never an automatic OS dialog.
+- **Phone:** reuse desktop resource components; one header, active pane and
+  Session/Files/Git bottom bar, with quick keys for writable terminals. No
+  second mobile IDE/sidebar; keep 44px touch targets and honest unpaired/
+  unreachable/reconnecting states.
+- **Identity and attention:** observed foreground harness changes only display
+  identity, never saved launch/resume choice. Viewing a question does not
+  resolve it; uncertainty is labelled and never upgraded by silence.
