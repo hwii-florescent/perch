@@ -49,7 +49,8 @@ function ask(build: (requestId: string) => ClientMessage): Promise<ServerMessage
   registerSurfaceRequest(requestId);
   return new Promise((resolve) => {
     const message = build(requestId);
-    waiting.set(requestId, { workspaceId: "workspaceId" in message ? message.workspaceId ?? "" : "", resolve });
+    const workspaceId = "workspaceId" in message ? message.workspaceId ?? "" : "";
+    waiting.set(requestId, { workspaceId, resolve });
     socket.send(message);
   });
 }
@@ -84,8 +85,9 @@ function supported(workspaceId: string): boolean {
   const state = usePerchStore.getState();
   const host = state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId;
   if (!host || !socket.connected) return false;
-  return host === "local" ? state.serverInfo?.capabilities?.includes("surface.v1") === true
-    : state.hostStates[host]?.state === "connected" && state.workspaceCapabilitiesByHost[host]?.includes("surface.v1") === true;
+  if (host === "local") return state.serverInfo?.capabilities?.includes("surface.v1") === true;
+  return state.hostStates[host]?.state === "connected"
+    && state.workspaceCapabilitiesByHost[host]?.includes("surface.v1") === true;
 }
 
 async function openTab(tab: FileTab): Promise<void> {
@@ -121,7 +123,10 @@ async function closeTab(tab: FileTab): Promise<void> {
   // In particular a remote disconnect must not hide a recoverable draft.
   if (reply.type === "error") {
     resourceIds.set(key, resourceId);
-    useFileTabs.setState((state) => state.tabs.some((candidate) => fileTabKey(candidate) === key) ? state : { tabs: [...state.tabs, tab] });
+    useFileTabs.setState((state) => {
+      if (state.tabs.some((candidate) => fileTabKey(candidate) === key)) return state;
+      return { tabs: [...state.tabs, tab] };
+    });
   }
 }
 
@@ -276,7 +281,9 @@ function restoreSession(workspaceId: string, presentation: ViewerPresentation): 
 /** Reselect the file or review this viewer had selected, unless it has already chosen this load. */
 function restoreSelected(workspaceId: string, presentation: ViewerPresentation): void {
   if (!presentation.activeResourceId || selectedKey(workspaceId) !== undefined) return;
-  const workspaceKeys = new Set(useFileTabs.getState().tabs.filter((tab) => tab.workspaceId === workspaceId).map(fileTabKey));
+  const workspaceKeys = new Set(useFileTabs.getState().tabs
+    .filter((tab) => tab.workspaceId === workspaceId)
+    .map(fileTabKey));
   const key = [...resourceIds].find(([key, id]) => workspaceKeys.has(key) && id === presentation.activeResourceId)?.[0];
   if (key && useFileTabs.getState().tabs.some((tab) => fileTabKey(tab) === key)) selectResource(workspaceId, key);
 }
@@ -324,9 +331,17 @@ usePerchStore.subscribe((state, previous) => {
 });
 socket.onMessage((message) => {
   if (message.type !== "host.info") return;
-  const workspaces = new Set(usePerchStore.getState().workspaces.filter((workspace) => workspace.hostId === message.hostId).map((workspace) => workspace.id));
-  for (const id of workspaces) { synced.delete(id); lastSent.delete(id); }
-  if (message.state === "connected") { syncShown(); return; }
+  const workspaces = new Set(usePerchStore.getState().workspaces
+    .filter((workspace) => workspace.hostId === message.hostId)
+    .map((workspace) => workspace.id));
+  for (const id of workspaces) {
+    synced.delete(id);
+    lastSent.delete(id);
+  }
+  if (message.state === "connected") {
+    syncShown();
+    return;
+  }
   for (const [requestId, pending] of waiting) {
     if (!workspaces.has(pending.workspaceId)) continue;
     waiting.delete(requestId);

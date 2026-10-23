@@ -5,8 +5,11 @@ import * as path from "node:path";
 // app's DB, hosts, settings or daemon (nor the main e2e suite's state).
 const root = path.resolve(__dirname, "..");
 const scratch = "/tmp/perch-e2e-remote-workspace";
-process.env.PERCH_E2E_HUB_PORT = "7794";
-process.env.PERCH_E2E_REMOTE_PORT = "7795";
+const hubPort = 7794;
+const remotePort = 7795;
+const hubUrl = `http://127.0.0.1:${hubPort}`;
+process.env.PERCH_E2E_HUB_PORT = String(hubPort);
+process.env.PERCH_E2E_REMOTE_PORT = String(remotePort);
 export default defineConfig({
   testDir: ".",
   testMatch: ["remote-workspace.spec.ts", "remote-git.spec.ts"],
@@ -14,12 +17,18 @@ export default defineConfig({
   workers: 1,
   timeout: 60000,
   use: {
-    baseURL: "http://127.0.0.1:7794",
+    baseURL: hubUrl,
     headless: true,
-    storageState: { cookies: [], origins: [{ origin: "http://127.0.0.1:7794", localStorage: [{ name: "perch.onboarding.seen", value: "1" }] }] },
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: hubUrl,
+        localStorage: [{ name: "perch.onboarding.seen", value: "1" }],
+      }],
+    },
   },
   projects: [{ name: "chromium", use: devices["Desktop Chrome"] }],
-  webServer: [7794, 7795].map((port) => ({
+  webServer: [hubPort, remotePort].map((port) => ({
     command: `mkdir -p ${scratch}/${port} && cargo run -p perch-core -- --port ${port}`,
     cwd: root,
     url: `http://127.0.0.1:${port}/`,

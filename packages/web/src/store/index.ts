@@ -3153,10 +3153,14 @@ export function handleServerMessage(msg: ServerMessage): void {
       usePerchStore.setState((state) => ({
         hostStates: { ...state.hostStates, [msg.hostId]: msg },
         ...(msg.state !== "connected" ? {
-          workspaceSnapshotByHost: { ...state.workspaceSnapshotByHost, [msg.hostId]: {
-            ...state.workspaceSnapshotByHost[msg.hostId], state: "error" as const,
-            error: "Remote disconnected. Showing the last known workspace inventory.",
-          } },
+          workspaceSnapshotByHost: {
+            ...state.workspaceSnapshotByHost,
+            [msg.hostId]: {
+              ...state.workspaceSnapshotByHost[msg.hostId],
+              state: "error" as const,
+              error: "Remote disconnected. Showing the last known workspace inventory.",
+            },
+          },
         } : {}),
         workspaceCapabilitiesByHost: {
           ...state.workspaceCapabilitiesByHost,
@@ -3168,7 +3172,10 @@ export function handleServerMessage(msg: ServerMessage): void {
       if (msg.state === "connected" && previousHostState !== "connected") {
         const state = usePerchStore.getState();
         state.fetchWorkspaceSnapshot(msg.hostId);
-        resyncPendingBuffersAfterReconnect(new Set(state.workspaces.filter((workspace) => workspace.hostId === msg.hostId).map((workspace) => workspace.id)));
+        const workspaceIds = new Set(state.workspaces
+          .filter((workspace) => workspace.hostId === msg.hostId)
+          .map((workspace) => workspace.id));
+        resyncPendingBuffersAfterReconnect(workspaceIds);
       }
       // When the host transitions to connected and carries model lists,
       // update hostModels so the ModelChip can show the correct list when

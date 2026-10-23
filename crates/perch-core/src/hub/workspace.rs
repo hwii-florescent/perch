@@ -119,15 +119,17 @@ fn target(request: &Value) -> Result<Option<(String, Value)>, &'static str> {
         .map(str::to_string);
     let mut forwarded = request.clone();
     for key in ["workspaceId", "projectId", "parentWorkspaceId"] {
-        if let Some(id) = request[key].as_str() {
-            if let Some((owner, id)) = split(id)? {
-                if host.as_ref().is_some_and(|host| host != &owner) {
-                    return Err("identities belong to different hosts");
-                }
-                host = Some(owner);
-                forwarded[key] = json!(id);
-            }
+        let Some(id) = request[key].as_str() else {
+            continue;
+        };
+        let Some((owner, id)) = split(id)? else {
+            continue;
+        };
+        if host.as_ref().is_some_and(|host| host != &owner) {
+            return Err("identities belong to different hosts");
         }
+        host = Some(owner);
+        forwarded[key] = json!(id);
     }
     let Some(host) = host else { return Ok(None) };
     if request["hostId"]
@@ -366,7 +368,12 @@ impl HubManager {
             host: host.clone(),
             conn: conn.into(),
             // Keep correlation/error context, not another copy of file text.
-            request: json!({"type":request["type"], "requestId":request["requestId"], "workspaceId":request["workspaceId"], "path":request["path"]}),
+            request: json!({
+                "type": request["type"],
+                "requestId": request["requestId"],
+                "workspaceId": request["workspaceId"],
+                "path": request["path"],
+            }),
             tx: tx.clone(),
             _budget: budget,
         };
@@ -637,6 +644,31 @@ mod tests {
         let mut bad = request;
         bad["hostId"] = json!("b");
         assert!(target(&bad).is_err());
+    }
+
+    #[test]
+    fn identity_validation_preserves_error_precedence() {
+        for (request, error) in [
+            (
+                json!({"hostId": "b", "workspaceId": "remote:broken"}),
+                "malformed remote identity",
+            ),
+            (
+                json!({"hostId": "b", "workspaceId": qualify("a", "w"), "parentWorkspaceId": "remote:broken"}),
+                "identities belong to different hosts",
+            ),
+            (
+                json!({"hostId": "local", "workspaceId": qualify("a", "w"), "parentWorkspaceId": "local-parent"}),
+                "explicit host does not match the remote identity",
+            ),
+            (
+                json!({"workspaceId": qualify("a", "w"), "parentWorkspaceId": "local-parent"}),
+                "remote request requires host-qualified identities",
+            ),
+        ] {
+            assert_eq!(target(&request), Err(error));
+        }
+        assert_eq!(target(&json!({"workspaceId": "local-workspace"})), Ok(None));
     }
 
     #[test]

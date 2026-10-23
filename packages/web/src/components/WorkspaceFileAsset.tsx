@@ -19,6 +19,9 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   const remote = usePerchStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId !== "local");
   const archive = kind === "archive";
   const hasPreview = kind !== undefined && !archive && !remote;
+  let unavailableDescription = "Download this file to open it in another app. Media support depends on your browser and codecs.";
+  if (remote) unavailableDescription = "Use your SSH tools to download this file. Perch will not open a remote path on this machine.";
+  else if (archive) unavailableDescription = "Extract into a new folder beside this archive. Existing files are never overwritten.";
   let unavailableTitle = "No preview for this file type";
   if (remote) unavailableTitle = "Remote media is not available yet";
   else if (archive) unavailableTitle = "Compressed archive";
@@ -37,7 +40,7 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
       {!hasPreview || failed ? (
         <div className="grid flex-1 content-center justify-items-center gap-2 p-5 text-center text-[0.8rem] text-subtext-0">
           <strong className="text-fg">{unavailableTitle}</strong>
-          <span>{remote ? "Use your SSH tools to download this file. Perch will not open a remote path on this machine." : archive ? "Extract into a new folder beside this archive. Existing files are never overwritten." : "Download this file to open it in another app. Media support depends on your browser and codecs."}</span>
+          <span>{unavailableDescription}</span>
         </div>
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-3">

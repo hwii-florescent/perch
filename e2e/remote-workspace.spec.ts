@@ -21,20 +21,26 @@ function git(...args: string[]) {
 }
 
 async function request(message: Message, until?: (reply: Message) => boolean, url = HUB): Promise<Message> {
+  const matches = until ?? ((reply: Message) => reply.requestId === message.requestId);
   const ws = new WebSocket(url);
   try {
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Timed out: ${message.type}`)), 15000);
-      ws.onerror = () => { clearTimeout(timer); reject(new Error("WebSocket failed")); };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("WebSocket failed"));
+      };
       ws.onopen = () => ws.send(JSON.stringify(message));
       ws.onmessage = (event) => {
         const reply = JSON.parse(String(event.data));
-        if (!(until ? until(reply) : reply.requestId === message.requestId)) return;
+        if (!matches(reply)) return;
         clearTimeout(timer);
         resolve(reply);
       };
     });
-  } finally { ws.close(); }
+  } finally {
+    ws.close();
+  }
 }
 
 async function configure(id: string, enabled = true) {
@@ -117,7 +123,8 @@ test.describe("Managed remote workspace", () => {
     expect(conflict.code).toBe("conflict");
     expect((await ask("fs.read", { workspaceId, path: "../outside" })).type).toBe("fs.error");
     const url = new URL("http://127.0.0.1:7794/workspace-file");
-    url.searchParams.set("workspaceId", workspaceId); url.searchParams.set("path", "hello.txt");
+    url.searchParams.set("workspaceId", workspaceId);
+    url.searchParams.set("path", "hello.txt");
     expect((await fetch(url)).status).toBe(501);
   });
 
