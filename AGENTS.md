@@ -416,8 +416,10 @@ there, not here.
     explorer's is `FileEntryMenu.tsx` over `fs.mutate` (`fileOps.ts`): new
     file/folder, cut/copy/paste/duplicate (an in-app clipboard, `useEntryClipboard`;
     paste = `rename`/`copy`, never overwriting), rename, delete (permanent,
-    confirmed), copy path, and Reveal in Finder (desktop app only: the
-    `reveal_in_finder` Tauri command).
+    confirmed), copy path, and Open in Default App / Reveal in Finder (local workspaces in
+    the desktop app only: `open_in_default_app` / `reveal_in_finder` Tauri commands).
+    Opening externally uses the on-disk file and the OS association; it never saves
+    a perch draft or changes single-click preview / double-click pin behavior.
 - **Store:** anything that reads or replaces `messages` calls
   `flushChunkBuffer()` first (see its doc comment). A late flush silently
   drops text.

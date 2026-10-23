@@ -1,6 +1,6 @@
 /**
  * FileEntryMenu.tsx — right-click menu of the file explorer (right drawer), VS
- * Code / Finder style: New File, New Folder, Reveal in Finder (desktop app),
+ * Code / Finder style: Open in Default App, Reveal in Finder (local desktop), New File, New Folder,
  * Cut / Copy / Paste / Duplicate, Rename, Delete, Copy Path, Copy Relative
  * Path, Refresh. `target` is the entry clicked, or null for the
  * explorer's empty space (the workspace root). The menu, then the dialog its
@@ -8,12 +8,13 @@
  * explorer only tracks "which entry, where". Mutations go through
  * `fileOps.ts` (`fs.mutate`); nothing is ever overwritten.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DirectoryEntry } from "@perch/shared";
 import { askAgentAboutFile, contextBridgeAvailable } from "../contextBridge";
 import { freeName, joinPath, mutateEntry, namesIn, parentPath, useEntryClipboard } from "../fileOps";
 import { tauriInvoke } from "../links";
+import { usePerchStore } from "../store";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { Dialog } from "./ui/dialog";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -37,7 +38,6 @@ export interface FileEntryMenuProps {
 type Stage = "menu" | "newFile" | "newFolder" | "rename" | "delete" | "error";
 
 const MENU_W = 210;
-const MENU_H = 450;
 const basename = (path: string) => path.split("/").pop() ?? path;
 
 export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClose, onOpenFile, onExpand, onRefresh, initialStage }: FileEntryMenuProps) {
@@ -46,6 +46,13 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
   const [busy, setBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const held = useEntryClipboard((state) => state.entry);
+  const localWorkspace = usePerchStore((state) => state.workspaces.some((workspace) => workspace.id === workspaceId && workspace.hostId === "local"));
+  const nativeAvailable = !!tauriInvoke && localWorkspace;
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (menu) menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.getBoundingClientRect().height - 8))}px`;
+  }, [stage, x, y, nativeAvailable, target]);
 
   useEffect(() => {
     if (stage !== "menu") return;
@@ -105,6 +112,12 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
     const dir = parentPath(target.path);
     void run(() => mutateEntry(workspaceId, "copy", target.path, joinPath(dir, freeName(target.name, namesIn(workspaceId, dir)))));
   };
+  const openInDefaultApp = () => {
+    if (!nativeAvailable || !target || busy) return;
+    void run(async () => {
+      await tauriInvoke!("open_in_default_app", { path: absolute(target.path) });
+    });
+  };
   const reveal = () => {
     void tauriInvoke?.("reveal_in_finder", { path: absolute(target?.path ?? "") }).catch(() => undefined);
     onClose();
@@ -160,28 +173,29 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
   }
 
   const left = Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8));
-  const top = Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8));
+  const top = Math.max(8, y);
   const item = (label: string, onSelect: () => void, testId: string, danger = false) => (
-    <button type="button" className={menuItem({ danger })} data-testid={testId} onClick={onSelect}>{label}</button>
+    <button type="button" className={menuItem({ danger })} data-testid={testId} disabled={busy} onClick={onSelect}>{label}</button>
   );
   return createPortal(
     <div
       ref={menuRef}
       className={menuPanel}
       data-testid="file-entry-menu"
-      style={{ position: "fixed", top, left, zIndex: 9999, minWidth: MENU_W }}
+      style={{ position: "fixed", top, left, zIndex: 9999, minWidth: MENU_W, maxHeight: "calc(100vh - 16px)", overflowY: "auto" }}
       onContextMenu={(event) => event.preventDefault()}
     >
       {target && !isDirectory && item("Open", () => { onOpenFile(target.path); onClose(); }, "file-menu-open")}
+      {target && nativeAvailable && item("Open in Default App", openInDefaultApp, "file-menu-open-default")}
       {target && !isDirectory && contextBridgeAvailable(workspaceId) && item("Ask agent about file…", () => { askAgentAboutFile(workspaceId, target.path); onClose(); }, "file-menu-ask-agent")}
       {target && !isDirectory && <div className={menuDivider} />}
       {item("New File…", () => setStage("newFile"), "file-menu-new-file")}
       {item("New Folder…", () => setStage("newFolder"), "file-menu-new-folder")}
-      {tauriInvoke && item("Reveal in Finder", reveal, "file-menu-reveal")}
+      {nativeAvailable && item("Reveal in Finder", reveal, "file-menu-reveal")}
       <div className={menuDivider} />
       {target && item("Cut", () => hold(true), "file-menu-cut")}
       {target && item("Copy", () => hold(false), "file-menu-copy")}
-      <button type="button" className={menuItem()} data-testid="file-menu-paste" disabled={!canPaste} onClick={paste}>Paste</button>
+      <button type="button" className={menuItem()} data-testid="file-menu-paste" disabled={!canPaste || busy} onClick={paste}>Paste</button>
       {target && item("Duplicate", duplicate, "file-menu-duplicate")}
       {target && <div className={menuDivider} />}
       {target && item("Rename…", () => setStage("rename"), "file-menu-rename")}

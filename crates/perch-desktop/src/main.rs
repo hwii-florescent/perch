@@ -85,6 +85,44 @@ fn open_external(url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Explicit explorer action, with Finder semantics: the OS association decides what
+/// opens (including launching executable documents or application bundles).
+/// Only the trusted main webview has this IPC; never accept URLs or relative paths.
+#[tauri::command]
+async fn open_in_default_app(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path);
+    if !path.is_absolute() || !path.exists() {
+        return Err("not an existing absolute path".into());
+    }
+    let mut command = tokio::process::Command::new(if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "linux") {
+        "xdg-open"
+    } else {
+        return Err("opening files is not supported on this platform".into());
+    });
+    command.arg(path);
+    // Some Linux handlers keep xdg-open alive until the app closes. Stop waiting
+    // after five seconds, but keep the task alive to drain output and reap it.
+    let launch = tokio::spawn(async move {
+        let output = command.output().await.map_err(|e| e.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            Err(format!(
+                "Could not open in the default app ({}). {}",
+                output.status,
+                detail.trim()
+            ))
+        }
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(5), launch).await {
+        Ok(result) => result.map_err(|e| e.to_string())?,
+        Err(_) => Ok(()),
+    }
+}
+
 /// Shows a file in Finder (macOS) or its folder in the file manager. The UI sends the
 /// absolute path of an explorer entry; anything else is refused (and `open` never sees a
 /// leading `-`).
@@ -208,6 +246,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             open_external,
+            open_in_default_app,
             reveal_in_finder,
             permissions::permissions_status,
             permissions::permissions_allow,
@@ -256,4 +295,25 @@ fn main() {
 
     // Keep the runtime alive until Tauri exits (runtime drop joins all tasks).
     drop(runtime);
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn default_app_refuses_nonlocal_or_missing_paths_without_launching() {
+        for path in [
+            "",
+            "relative/file.txt",
+            "-a",
+            "https://example.com/file.pdf",
+            "file:///tmp/file.pdf",
+            "/dev/null/perch-missing-file",
+        ] {
+            assert_eq!(
+                super::open_in_default_app(path.into()).await,
+                Err("not an existing absolute path".into()),
+                "{path}"
+            );
+        }
+    }
 }

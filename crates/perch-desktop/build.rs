@@ -5,6 +5,7 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "open_external",
+            "open_in_default_app",
             "reveal_in_finder",
             "permissions_status",
             "permissions_allow",
