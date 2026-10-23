@@ -28,6 +28,7 @@ const {
   handleFilesystemConnectionChange,
   handleWorkspaceFilesMessage,
   MAX_CACHED_DOCUMENTS,
+  resyncPendingBuffersAfterReconnect,
   useWorkspaceFilesStore,
 } = await import("./filesystemStore");
 type ServerMessage = import("@perch/shared").ServerMessage;
@@ -475,6 +476,27 @@ describe("workspace filesystem store", () => {
     expect(secondSet?.content).toBe("retry draft");
     expect(secondSet?.expectedBufferRevision).toBe(0);
     expect(firstSet.content).toBe("draft before drop");
+  });
+
+  it("reconciles only the reconnected host's buffers and never blindly repeats a save", () => {
+    const remote = 'remote:["host-a","workspace"]';
+    openAndLoad(remote, "README.md", "original");
+    openAndLoad("local-workspace", "README.md", "local");
+    useWorkspaceFilesStore.getState().updateDraft(remote, "README.md", "remote draft");
+    useWorkspaceFilesStore.getState().updateDraft("local-workspace", "README.md", "local draft");
+    flushPendingBuffers();
+    const pending = outgoing("fs.buffer.set", remote, "README.md");
+    respond({ type: "fs.error", requestId: pending.requestId as string, workspaceId: remote, path: "README.md", code: "remote_outcome_unknown", message: "Remote disconnected; reconcile before retrying" });
+    FakeWebSocket.sent = [];
+    resyncPendingBuffersAfterReconnect(new Set([remote]));
+    const requests = FakeWebSocket.sent.map((raw) => JSON.parse(raw));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ type: "fs.buffer.get", workspaceId: remote });
+    // Lost acknowledgement: the owning core already has this exact draft.
+    respond(bufferResult(requests[0].requestId, remote, "README.md", "remote draft", "original", 1));
+    expect(FakeWebSocket.sent.map((raw) => JSON.parse(raw)).filter((message) => message.type === "fs.write" || message.type === "fs.buffer.set")).toEqual([]);
+    expect(useWorkspaceFilesStore.getState().documents[remote]["README.md"].content).toBe("remote draft");
+    expect(useWorkspaceFilesStore.getState().documents["local-workspace"]["README.md"].content).toBe("local draft");
   });
 
   it("warns before unload while a pending local draft still lacks an acknowledgement", () => {

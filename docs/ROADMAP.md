@@ -51,14 +51,22 @@ safety fixes land whenever needed.
 
 ### 1. Complete one managed remote workspace path
 
-The hub supports selected worktree/Git/review operations, not full remote
-workspace metadata, filesystem, canonical surfaces or attention.
+First slice implemented: host-qualified inventory and nests/worktrees, text
+files/durable drafts/search, Git/review and canonical file/diff surfaces with
+per-viewer presentation now route to their owning core. In-flight resource
+requests fail with an unknown outcome on disconnect; drafts reconcile by
+reading before retrying. Remote inventory stays visibly stale while offline.
+An actual Linux resource/core-restart probe passed; this is **not full D3**
+([evidence](evidence/remote-workspace-2026-10-23.md)).
 
-- Route host-qualified inventory, files/drafts, search and viewer presentation
-  to their owning remote core; never interpret a remote path locally.
-- Show remote nests/worktrees in the workspace UI, including background jobs.
-- Reconcile runtime identity and uncertain start/save/stop after disconnect;
-  no blind mutation retry, queued keystrokes, duplicate launch or local fallback.
+Remaining:
+
+- Complete persistent owned-shell/provider-runtime routing and incarnation/
+  uncertain start/stop reconciliation. No blind mutation retry, queued
+  keystrokes, duplicate launch or local fallback; test lost save acknowledgements.
+- Relay remote background worktree jobs (synchronous worktree operations work).
+- Add bounded authenticated remote media/download transport. It is explicitly
+  unavailable today; OS-default opening remains local-only.
 - Consent-based compatible-runtime install/update; preserve running execution.
 - Prove D3 on an explicitly authorized actual Linux host, including cleanup.
   No host means blocked evidence, not a loopback substitute.

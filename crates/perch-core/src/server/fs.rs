@@ -473,6 +473,17 @@ pub(super) async fn file_content(
     let (Some(workspace_id), Some(path)) = (params.get("workspaceId"), params.get("path")) else {
         return (StatusCode::BAD_REQUEST, "workspaceId and path are required").into_response();
     };
+    match crate::hub::workspace::split(workspace_id) {
+        Ok(None) => {}
+        Ok(Some(_)) => {
+            return (
+                StatusCode::NOT_IMPLEMENTED,
+                "Remote media/download transport is not available; no local path was opened",
+            )
+                .into_response()
+        }
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    }
     let workspace_id = workspace_id.clone();
     let path = path.clone();
     let result = tokio::task::spawn_blocking(move || {

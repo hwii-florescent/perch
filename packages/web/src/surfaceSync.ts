@@ -14,8 +14,8 @@
  * state holds, so a window that lost or never had local state still gets its tabs, order,
  * splits and selection back.
  *
- * Local workspaces only (the core refuses a remote workspace's resources), and
- * an older core without the capability is left exactly as before.
+ * Remote workspaces use their owning core through the hub, with qualified
+ * workspace IDs. Older peers without the capability are left unchanged.
  */
 import type { ClientMessage, ServerMessage, SurfaceDescriptor, ViewerPresentation } from "@perch/shared";
 import { socket } from "./ws";
@@ -41,31 +41,35 @@ interface Layout {
   session?: string;
 }
 
-const waiting = new Map<string, (msg: ServerMessage) => void>();
+const waiting = new Map<string, { workspaceId: string; resolve: (msg: ServerMessage) => void }>();
 
 /** Send a request and resolve with its reply (or the correlated error). */
 function ask(build: (requestId: string) => ClientMessage): Promise<ServerMessage> {
   const requestId = newId();
   registerSurfaceRequest(requestId);
   return new Promise((resolve) => {
-    waiting.set(requestId, resolve);
-    socket.send(build(requestId));
+    const message = build(requestId);
+    waiting.set(requestId, { workspaceId: "workspaceId" in message ? message.workspaceId ?? "" : "", resolve });
+    socket.send(message);
   });
 }
 
 socket.onMessage((msg) => {
   const requestId = (msg as { requestId?: string }).requestId;
-  const resolve = requestId ? waiting.get(requestId) : undefined;
-  if (!requestId || !resolve) return;
+  const pending = requestId ? waiting.get(requestId) : undefined;
+  if (!requestId || !pending) return;
   waiting.delete(requestId);
   retireSurfaceRequest(requestId);
-  resolve(msg);
+  pending.resolve(msg);
 });
 
 socket.onConnectionChange((connected) => {
   if (connected) return;
   // A reply that never comes would hold its caller; a reconnect resyncs from scratch.
-  for (const [requestId, resolve] of waiting) resolve({ type: "error", message: "disconnected", requestId } as ServerMessage);
+  for (const [requestId, pending] of waiting) {
+    retireSurfaceRequest(requestId);
+    pending.resolve({ type: "error", message: "disconnected", requestId });
+  }
   waiting.clear();
   synced.clear();
   resourceIds.clear();
@@ -76,16 +80,17 @@ socket.onConnectionChange((connected) => {
 const resourceIds = new Map<string, string>();
 const synced = new Set<string>();
 
-function supported(): boolean {
-  return usePerchStore.getState().serverInfo?.capabilities?.includes("surface.v1") === true;
+function supported(workspaceId: string): boolean {
+  const state = usePerchStore.getState();
+  const host = state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId;
+  if (!host || !socket.connected) return false;
+  return host === "local" ? state.serverInfo?.capabilities?.includes("surface.v1") === true
+    : state.hostStates[host]?.state === "connected" && state.workspaceCapabilitiesByHost[host]?.includes("surface.v1") === true;
 }
-
-const isLocal = (workspaceId: string) =>
-  usePerchStore.getState().workspaces?.find((workspace) => workspace.id === workspaceId)?.hostId === "local";
 
 async function openTab(tab: FileTab): Promise<void> {
   // A browser page has no core resource; it stays a local tab.
-  if (tab.kind === "browser" || !supported() || !isLocal(tab.workspaceId)) return;
+  if (tab.kind === "browser" || !supported(tab.workspaceId)) return;
   const review = tab.kind === "review";
   const reply = await ask((requestId) => ({
     type: "surface.open",
@@ -112,9 +117,11 @@ async function closeTab(tab: FileTab): Promise<void> {
     workspaceId: tab.workspaceId,
     resourceId,
   }));
-  // An unsaved draft keeps its tab: put it back (no activation) rather than hide the draft.
-  if (reply.type === "error" && reply.code === "surface_dirty") {
-    useFileTabs.setState((state) => ({ tabs: [...state.tabs, tab] }));
+  // Dirty or unconfirmed close: keep the tab until its owning core confirms.
+  // In particular a remote disconnect must not hide a recoverable draft.
+  if (reply.type === "error") {
+    resourceIds.set(key, resourceId);
+    useFileTabs.setState((state) => state.tabs.some((candidate) => fileTabKey(candidate) === key) ? state : { tabs: [...state.tabs, tab] });
   }
 }
 
@@ -269,13 +276,14 @@ function restoreSession(workspaceId: string, presentation: ViewerPresentation): 
 /** Reselect the file or review this viewer had selected, unless it has already chosen this load. */
 function restoreSelected(workspaceId: string, presentation: ViewerPresentation): void {
   if (!presentation.activeResourceId || selectedKey(workspaceId) !== undefined) return;
-  const key = [...resourceIds].find(([, id]) => id === presentation.activeResourceId)?.[0];
+  const workspaceKeys = new Set(useFileTabs.getState().tabs.filter((tab) => tab.workspaceId === workspaceId).map(fileTabKey));
+  const key = [...resourceIds].find(([key, id]) => workspaceKeys.has(key) && id === presentation.activeResourceId)?.[0];
   if (key && useFileTabs.getState().tabs.some((tab) => fileTabKey(tab) === key)) selectResource(workspaceId, key);
 }
 
 /** First time this workspace is shown (per connection): import legacy state, open what is already here, restore. */
 async function sync(workspaceId: string): Promise<void> {
-  if (synced.has(workspaceId) || !supported() || !isLocal(workspaceId)) return;
+  if (synced.has(workspaceId) || !supported(workspaceId)) return;
   synced.add(workspaceId);
   const began = navigations;
   const tabs = useFileTabs.getState().tabs.filter((tab) => tab.workspaceId === workspaceId);
@@ -313,6 +321,18 @@ usePerchStore.subscribe((state, previous) => {
   if (state.activeWorkspaceId === previous.activeWorkspaceId && state.sessionId === previous.sessionId
     && state.serverInfo === previous.serverInfo && state.workspaces === previous.workspaces) return;
   syncShown(state);
+});
+socket.onMessage((message) => {
+  if (message.type !== "host.info") return;
+  const workspaces = new Set(usePerchStore.getState().workspaces.filter((workspace) => workspace.hostId === message.hostId).map((workspace) => workspace.id));
+  for (const id of workspaces) { synced.delete(id); lastSent.delete(id); }
+  if (message.state === "connected") { syncShown(); return; }
+  for (const [requestId, pending] of waiting) {
+    if (!workspaces.has(pending.workspaceId)) continue;
+    waiting.delete(requestId);
+    retireSurfaceRequest(requestId);
+    pending.resolve({ type: "error", requestId, message: "Remote disconnected; presentation outcome is unknown" });
+  }
 });
 trackSession(usePerchStore.getState());
 syncShown(); // state that arrived before this module loaded changes nothing to subscribe to

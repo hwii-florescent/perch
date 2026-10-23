@@ -4,7 +4,7 @@ import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal
 import { create } from "zustand";
 import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
-import { useWorkspaceFilesStore } from "../filesystemStore";
+import { resyncPendingBuffersAfterReconnect, useWorkspaceFilesStore } from "../filesystemStore";
 import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
 import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
@@ -3147,9 +3147,17 @@ export function handleServerMessage(msg: ServerMessage): void {
         protocolVersion?: number;
         capabilities?: string[];
       };
-      // Upsert into hostStates.
+      const previousHostState = usePerchStore.getState().hostStates[msg.hostId]?.state;
+      // Upsert into hostStates. Retain inventory and drafts while offline,
+      // but mark the last snapshot stale rather than claiming it is current.
       usePerchStore.setState((state) => ({
         hostStates: { ...state.hostStates, [msg.hostId]: msg },
+        ...(msg.state !== "connected" ? {
+          workspaceSnapshotByHost: { ...state.workspaceSnapshotByHost, [msg.hostId]: {
+            ...state.workspaceSnapshotByHost[msg.hostId], state: "error" as const,
+            error: "Remote disconnected. Showing the last known workspace inventory.",
+          } },
+        } : {}),
         workspaceCapabilitiesByHost: {
           ...state.workspaceCapabilitiesByHost,
           [msg.hostId]: Array.isArray(workspaceHostInfo.capabilities)
@@ -3157,6 +3165,11 @@ export function handleServerMessage(msg: ServerMessage): void {
             : [],
         },
       }));
+      if (msg.state === "connected" && previousHostState !== "connected") {
+        const state = usePerchStore.getState();
+        state.fetchWorkspaceSnapshot(msg.hostId);
+        resyncPendingBuffersAfterReconnect(new Set(state.workspaces.filter((workspace) => workspace.hostId === msg.hostId).map((workspace) => workspace.id)));
+      }
       // When the host transitions to connected and carries model lists,
       // update hostModels so the ModelChip can show the correct list when
       // this host is active.

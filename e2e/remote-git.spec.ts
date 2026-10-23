@@ -1,12 +1,12 @@
 /**
  * remote-git.spec.ts — git state and worktrees on a remote perch host.
  *
- * The hub (:7799) reaches the remote (:7800) by `directUrl`, no ssh. One real
- * turn, pinned to claude-haiku-4-5 on the wire, creates the remote session the
- * sidebar groups by cwd. Then, all through the hub:
+ * The hub reaches a second core by directUrl, no SSH or paid agent turns.
+ * Durable remote metadata makes the sidebar useful without a session.
+ * All operations go through the hub:
  *
- *   RG1 — `host.info` relays the remote's worktree/git/review capabilities
- *         and nothing else (`hub::RELAYED_CAPABILITIES`)
+ *   RG1 — `host.info` relays verified workspace/file/surface and Git/review
+ *         capabilities, not unsupported media/jobs/runtime families
  *   RG2 — the sidebar's branch line follows a branch switch on the remote
  *   RG3 — Git & review opens for the remote checkout; stage and commit land
  *         in the remote repo
@@ -24,11 +24,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const HUB_WS = "ws://127.0.0.1:7799/ws";
+const HUB_PORT = process.env.PERCH_E2E_HUB_PORT ?? "7799";
+const REMOTE_PORT = Number(process.env.PERCH_E2E_REMOTE_PORT ?? "7800");
+const HUB_URL = `http://127.0.0.1:${HUB_PORT}`;
+const HUB_WS = `ws://127.0.0.1:${HUB_PORT}/ws`;
+const REMOTE_WS = `ws://127.0.0.1:${REMOTE_PORT}/ws`;
 const HOST_ID = "e2e-remote-git";
 const HOST_NAME = "e2e remote git";
 const FIXTURE_NAME = `perch-e2e-remote-git-${Date.now().toString(36)}`;
 let FIXTURE = path.join(os.tmpdir(), FIXTURE_NAME);
+let REMOTE_PROJECT_ID = "";
+let REMOTE_WORKSPACE_ID = "";
 const WORKTREES_ROOT = path.join(os.homedir(), ".perch", "worktrees", FIXTURE_NAME);
 
 function sh(cmd: string, cwd = FIXTURE): string {
@@ -60,11 +66,11 @@ async function hubRequest(messages: object[], until: (m: Message) => boolean, ti
 }
 
 async function openRemoteHost(page: Page): Promise<Locator> {
-  await page.goto("http://127.0.0.1:7799", { waitUntil: "networkidle" });
+  await page.goto(HUB_URL, { waitUntil: "networkidle" });
   await page.locator('[data-testid="host-switcher"]').click();
   await page.locator(`[data-testid="host-option-${HOST_ID}"]`).click();
   await expect(page.locator('[data-testid="host-switcher"] .sidebar__env-host')).toHaveText(HOST_NAME, { timeout: 10000 });
-  const row = page.locator(".sidebar__project-header", { has: page.locator(`[data-project-cwd="${FIXTURE}"]`) });
+  const row = page.getByTestId(`workspace-project-${REMOTE_PROJECT_ID}`);
   await expect(row).toBeVisible({ timeout: 20000 });
   return row;
 }
@@ -81,33 +87,16 @@ test.describe("Remote host git and worktrees", () => {
     sh('git config user.name "perch e2e" && git config user.email e2e@perch.test');
     sh("git commit -q --allow-empty -m init");
     const info = await hubRequest(
-      [{ type: "hosts.upsert", host: { id: HOST_ID, name: HOST_NAME, sshHost: "", remotePort: 7800, enabled: true, directUrl: "ws://127.0.0.1:7800/ws" } }],
+      [{ type: "hosts.upsert", host: { id: HOST_ID, name: HOST_NAME, sshHost: "", remotePort: REMOTE_PORT, enabled: true, directUrl: REMOTE_WS } }],
       (m) => m.type === "host.info" && m.hostId === HOST_ID && m.state === "connected",
     );
     capabilities = (info.capabilities as string[] | undefined) ?? [];
-    // A session starts only in a listed project. The hub doesn't relay
-    // project metadata, so register the fixture on the remote directly.
-    await hubRequest([{ type: "project.create", requestId: "rg-project", path: FIXTURE }],
-      (m) => m.requestId === "rg-project", 20000, "ws://127.0.0.1:7800/ws");
-    // The one paid call: a haiku turn so the remote persists the session.
-    const ws = new WebSocket(HUB_WS);
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("remote turn timed out")), 150000);
-      let sessionId = "";
-      ws.onmessage = (event) => {
-        const m = JSON.parse(String(event.data)) as Message;
-        if (m.type === "session.created" && !sessionId) {
-          sessionId = m.sessionId as string;
-          ws.send(JSON.stringify({ type: "chat.send", sessionId, text: "Reply with just: OK", agent: "claude", model: "claude-haiku-4-5" }));
-        }
-        if (m.type === "chat.done" && m.sessionId === sessionId) {
-          clearTimeout(timer);
-          resolve();
-        }
-      };
-      ws.onopen = () => ws.send(JSON.stringify({ type: "session.create", cwd: FIXTURE, hostId: HOST_ID }));
-    });
-    ws.close();
+    const snapshot = await hubRequest([{ type: "project.create", requestId: "rg-project", hostId: HOST_ID, path: FIXTURE }],
+      (m) => m.requestId === "rg-project" && m.type === "workspace.snapshot");
+    const workspace = (snapshot.workspaces as Array<{ id: string; projectId: string; path: string }>).find((row) => row.path === FIXTURE)!;
+    REMOTE_PROJECT_ID = workspace.projectId;
+    REMOTE_WORKSPACE_ID = workspace.id;
+
   });
 
   test.afterAll(async () => {
@@ -116,24 +105,25 @@ test.describe("Remote host git and worktrees", () => {
     fs.rmSync(FIXTURE, { recursive: true, force: true });
   });
 
-  test("RG1. host.info relays only the worktree, git and review capabilities", () => {
-    expect(capabilities).toEqual(expect.arrayContaining(["worktree.startFrom", "worktree.delete", "git.status", "git.commit", "review.list"]));
-    expect(capabilities.every((cap) => /^(worktree\.(startFrom|delete)|git\.|review\.)/.test(cap))).toBe(true);
+  test("RG1. host.info relays verified workspace and resource capabilities", () => {
+    expect(capabilities).toEqual(expect.arrayContaining(["workspace.snapshot", "project.create", "fs.read", "fs.write", "surface.v1", "worktree.startFrom", "worktree.delete", "git.status", "git.commit", "review.list"]));
+    for (const unsupported of ["fs.content", "worktree.job", "attention.v1", "terminal.open"]) expect(capabilities).not.toContain(unsupported);
   });
 
   test("RG2. The sidebar branch line follows a branch switch on the remote", async ({ page }) => {
     const row = await openRemoteHost(page);
-    await expect(row.locator(`[data-testid="workspace-git-${HOST_ID}"]`)).toHaveText(/main/, { timeout: 20000 });
+    await expect(row.getByTestId(`project-toggle-${REMOTE_PROJECT_ID}`)).toHaveText(/main/, { timeout: 20000 });
     sh("git switch -q -c remote-feature");
-    await expect(row.locator(`[data-testid="workspace-git-${HOST_ID}"]`)).toHaveText(/remote-feature/, { timeout: 20000 });
+    await expect(row.getByTestId(`project-toggle-${REMOTE_PROJECT_ID}`)).toHaveText(/remote-feature/, { timeout: 20000 });
     sh("git switch -q main");
   });
 
   test("RG3. Git & review works on the remote checkout", async ({ page }) => {
     fs.writeFileSync(path.join(FIXTURE, "remote-change.txt"), "from the hub\n");
     const row = await openRemoteHost(page);
-    await row.locator(`[data-testid="project-git-review-${HOST_ID}"]`).click();
-    // No local workspace row names it, so the panel uses the session's folder.
+    await row.getByTestId(`workspace-entry-${REMOTE_WORKSPACE_ID}`).click({ button: "right" });
+    await page.getByTestId(`workspace-menu-git-${REMOTE_WORKSPACE_ID}`).click();
+    // The owning host's durable workspace names the review.
     await expect(page.locator('[data-testid="workspace-git-review"]')).toContainText(FIXTURE_NAME, { timeout: 20000 });
     const status = page.locator('[data-testid="git-status"]');
     await expect(status).toContainText("1 changed path", { timeout: 20000 });

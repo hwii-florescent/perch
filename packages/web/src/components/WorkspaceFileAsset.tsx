@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FileMetadata } from "@perch/shared";
 import { getWorkspaceFileUrl } from "../base";
 import { useWorkspaceFilesStore } from "../filesystemStore";
+import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { WorkspacePdf } from "./WorkspacePdf";
@@ -15,10 +16,12 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   const extract = useWorkspaceFilesStore((state) => state.extractArchive);
   const url = getWorkspaceFileUrl(workspaceId, metadata.path);
   const kind = assetKind(metadata.mediaType);
+  const remote = usePerchStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId !== "local");
   const archive = kind === "archive";
-  const hasPreview = kind !== undefined && !archive;
+  const hasPreview = kind !== undefined && !archive && !remote;
   let unavailableTitle = "No preview for this file type";
-  if (archive) unavailableTitle = "Compressed archive";
+  if (remote) unavailableTitle = "Remote media is not available yet";
+  else if (archive) unavailableTitle = "Compressed archive";
   else if (failed) unavailableTitle = "Preview unavailable";
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`Previewing ${metadata.path}`} data-testid="workspace-file-asset">
@@ -27,14 +30,14 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
         {archive && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={extraction?.state === "loading"} onClick={() => extract(workspaceId, metadata.path)}>
           {extraction?.state === "loading" ? "Extracting…" : "Extract"}
         </button>}
-        <a className={cn(GHOST_BUTTON, "inline-flex min-h-8 items-center px-2")} href={getWorkspaceFileUrl(workspaceId, metadata.path, true)} download={metadata.name}>Download</a>
+        {!remote && <a className={cn(GHOST_BUTTON, "inline-flex min-h-8 items-center px-2")} href={getWorkspaceFileUrl(workspaceId, metadata.path, true)} download={metadata.name}>Download</a>}
       </header>
       {extraction?.state === "ready" && <p role="status" className="m-0 px-3 py-2 text-[0.75rem] text-subtext-0">Extracted to {extraction.destination}. Find it in the file tree.</p>}
       {extraction?.state === "error" && <p role="alert" className="m-0 px-3 py-2 text-[0.75rem] text-red">{extraction.error}</p>}
       {!hasPreview || failed ? (
         <div className="grid flex-1 content-center justify-items-center gap-2 p-5 text-center text-[0.8rem] text-subtext-0">
           <strong className="text-fg">{unavailableTitle}</strong>
-          <span>{archive ? "Extract into a new folder beside this archive. Existing files are never overwritten." : "Download this file to open it in another app. Media support depends on your browser and codecs."}</span>
+          <span>{remote ? "Use your SSH tools to download this file. Perch will not open a remote path on this machine." : archive ? "Extract into a new folder beside this archive. Existing files are never overwritten." : "Download this file to open it in another app. Media support depends on your browser and codecs."}</span>
         </div>
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-3">

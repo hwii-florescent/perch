@@ -75,7 +75,9 @@ Terminal-specific contracts:
 `surfaces.rs` gives Terminal/File/Diff host-qualified identities and per-viewer
 presentation (`surface.v1`). Legacy import is idempotent and retains originals.
 The web's tab/split stores remain live and `surfaceSync.ts` mirrors/restores
-local workspace presentation. Remote surface synchronization is not implemented.
+workspace presentation locally and through the hub for compatible remote cores.
+Remote file/diff surfaces use the owning core; layouts stay opaque and are
+stored there, not imported into the hub's local DB.
 Browser tabs exist separately; do not imply they are canonical surface kinds.
 
 Viewer focus/layout are independent across windows. Files/reviews have no
@@ -121,8 +123,21 @@ preserve name-only attachments and plan-mode-off approval sends.
 
 Remote calls go through `ssh.rs` and the OpenSSH CLI, not an SSH crate.
 Mode `perch` federates with a remote core; `direct` is reduced SSH/tmux
-compatibility. The hub currently relays selected worktree/Git/review families,
-not remote workspace filesystem/metadata/surfaces/attention. Full remote
+compatibility. The hub relays project/workspace metadata, bounded text filesystem/draft/search
+operations, canonical file/diff surfaces and presentation, and selected
+worktree/Git/review families. Browser-facing remote project/workspace IDs are
+`remote:` plus a JSON `[stableHostId, owningCoreId]` pair; paths are never routed
+by resemblance. These opaque IDs keep cloned remote DB identities separate.
+`hub/workspace.rs` validates/decodes at the boundary, stamps authenticated
+origins, rewrites request IDs per connection/host and relays metadata events
+without another viewer's correlation ID. Pending resource requests are bounded
+by count/bytes/time; disconnect reports an unknown outcome, never a retry.
+Remote cores retain their own UUIDs and own all resource authorization/storage.
+
+Remote media/downloads, background worktree jobs, attention and the new owned
+shell/provider-runtime families remain unadvertised. File tabs remain open on
+an unconfirmed canonical close. Resource reconnect reads durable drafts before
+resubmitting; it is not proof of runtime start/stop reconciliation. Full remote
 workspace ownership remains the target; nothing remote may fall back locally.
 `perchd connect` exists, but alone is not a remote workspace service.
 

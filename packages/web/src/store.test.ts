@@ -662,6 +662,25 @@ describe("durable workspace navigation", () => {
     expect(usePerchStore.getState().activeHostId).toBe("host-b");
   });
 
+  it("retains stale remote inventory and refreshes it once when the host reconnects", () => {
+    const remoteProject = project('remote:["host-a","p"]', "host-a", "/remote");
+    const remoteWorkspace = workspace('remote:["host-a","w"]', remoteProject.id, "host-a", "/remote");
+    usePerchStore.setState({
+      connected: true, hostStates: {}, workspaceProjects: [remoteProject], workspaces: [remoteWorkspace],
+      workspaceSnapshotByHost: { "host-a": { state: "ready", revision: 5, snapshotEpoch: "old" } },
+    });
+    FakeWebSocket.sent = [];
+    handleServerMessage({ type: "host.info", hostId: "host-a", name: "test", state: "error" });
+    expect(usePerchStore.getState().workspaces).toEqual([remoteWorkspace]);
+    expect(usePerchStore.getState().workspaceSnapshotByHost["host-a"]).toMatchObject({ state: "error", revision: 5 });
+    const connected = { type: "host.info" as const, hostId: "host-a", name: "test", state: "connected" as const, capabilities: ["workspace.snapshot"] };
+    handleServerMessage(connected);
+    handleServerMessage(connected);
+    const requests = FakeWebSocket.sent.map((raw) => JSON.parse(raw)).filter((message) => message.type === "workspace.snapshot");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].hostId).toBe("host-a");
+  });
+
   it("keeps a failed registration editable and accepts a corrected retry", () => {
     FakeWebSocket.sent = [];
     usePerchStore.setState({

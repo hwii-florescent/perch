@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+pub(crate) mod workspace;
+
 use crate::ws_outbox::Sender as Outbox;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::UnboundedSender;
@@ -68,14 +70,38 @@ struct RemoteInfo {
     capabilities: Vec<String>,
 }
 
-/// Capability families a browser may use on a remote perch through this hub:
-/// their requests carry `hostId` and their replies are relayed by request id
-/// (worktree create/list/remove/branch delete, `git.*`, `review.*`). The rest
-/// stay off for remote hosts: project/workspace metadata and workspace fs are
-/// dropped below, background worktree jobs are local only, and the agent
-/// runtime families have no remote path tested yet.
+/// Capability families relayed through this hub. Metadata/files/surfaces use
+/// qualified identities and connection-scoped correlation in `workspace`;
+/// legacy Git/worktree entry points also accept explicit hostId + cwd.
+/// Media, background jobs, attention and unverified runtime families stay off.
 /// ponytail: an allow-list; widen it as each family is verified remotely.
-const RELAYED_CAPABILITIES: &[&str] = &["worktree.startFrom", "worktree.delete", "git.", "review."];
+const RELAYED_CAPABILITIES: &[&str] = &[
+    "worktree.startFrom",
+    "worktree.delete",
+    "git.",
+    "review.",
+    "project.list",
+    "project.create",
+    "project.rename",
+    "project.remove",
+    "project.focus",
+    "workspace.snapshot",
+    "workspace.focus",
+    "workspace.rename",
+    "workspace.restore",
+    "workspace.pin",
+    "workspace.nest",
+    "workspace.visibility",
+    "fs.tree",
+    "fs.search",
+    "fs.read",
+    "fs.preview",
+    "fs.write",
+    "fs.buffer.",
+    "fs.mutate",
+    "fs.extract",
+    "surface.v1",
+];
 
 fn relayed_capabilities(capabilities: &[String]) -> Vec<String> {
     capabilities
@@ -186,6 +212,7 @@ pub struct HubManager {
     remote_session_cache: Mutex<HashMap<String, SessionSummary>>,
     /// Per-outstanding-request unicast slot.  Key is Session(id) or Terminal(id).
     pending_unicast: Mutex<HashMap<PendingKey, PendingUnicast>>,
+    workspace_relay: workspace::WorkspaceRelay,
     /// Events broadcast to every browser connection: `host.info`, merged
     /// `session.list`, `session.updated`, `session.created`, relayed chat, …
     pub hub_events_tx: broadcast::Sender<Arc<ServerMessage>>,
@@ -220,6 +247,7 @@ impl HubManager {
             remote_terminals: Mutex::new(HashMap::new()),
             remote_session_cache: Mutex::new(HashMap::new()),
             pending_unicast: Mutex::new(HashMap::new()),
+            workspace_relay: workspace::WorkspaceRelay::default(),
             hub_events_tx,
             host_states: Mutex::new(HashMap::new()),
             host_names: Mutex::new(HashMap::new()),
@@ -368,6 +396,7 @@ impl HubManager {
         }
         // Remove the active WS sender so forward() fails cleanly.
         self.connections.lock().unwrap().remove(host_id);
+        self.fail_workspace_requests(host_id);
         self.remote_git
             .lock()
             .unwrap()
@@ -560,6 +589,7 @@ impl HubManager {
 
             sink_task.abort();
             self.connections.lock().unwrap().remove(&host_id);
+            self.fail_workspace_requests(&host_id);
 
             tracing::warn!("[hub] {host_id}: disconnected ({disconnect_reason}), reconnecting…");
             self.set_host_state(&host_id, &host_name, HostState::Error(disconnect_reason));
@@ -1098,6 +1128,9 @@ impl HubManager {
             }
         };
 
+        if self.relay_workspace_message(host_id, &msg) {
+            return;
+        }
         match msg {
             // ----------------------------------------------------------------
             // server.info → cache metadata, transition to Connected
@@ -1137,6 +1170,12 @@ impl HubManager {
                     cache.retain(|_, s| s.host_id != host_id);
                     for mut session in sessions {
                         session.host_id = host_id.to_string();
+                        session.project_id = session
+                            .project_id
+                            .map(|id| workspace::qualify(host_id, &id));
+                        session.workspace_id = session
+                            .workspace_id
+                            .map(|id| workspace::qualify(host_id, &id));
                         remote_sessions.insert(session.id.clone(), host_id.to_string());
                         cache.insert(session.id.clone(), session);
                     }
@@ -1172,6 +1211,12 @@ impl HubManager {
             // ----------------------------------------------------------------
             ServerMessage::SessionUpdated { mut session } => {
                 session.host_id = host_id.to_string();
+                session.project_id = session
+                    .project_id
+                    .map(|id| workspace::qualify(host_id, &id));
+                session.workspace_id = session
+                    .workspace_id
+                    .map(|id| workspace::qualify(host_id, &id));
                 {
                     let mut remote_sessions = self.remote_sessions.lock().unwrap();
                     remote_sessions.insert(session.id.clone(), host_id.to_string());
@@ -1526,6 +1571,7 @@ impl HubManager {
                 ref request_id,
                 action,
                 path,
+                workspace,
                 preserved_branch,
                 ..
             } => {
@@ -1537,7 +1583,15 @@ impl HubManager {
                         host_id: host_id.to_string(),
                         action,
                         path,
-                        workspace: None,
+                        workspace: workspace.map(|mut row| {
+                            row.id = workspace::qualify(host_id, &row.id);
+                            row.project_id = workspace::qualify(host_id, &row.project_id);
+                            row.parent_workspace_id = row
+                                .parent_workspace_id
+                                .map(|id| workspace::qualify(host_id, &id));
+                            row.host_id = host_id.to_string();
+                            row
+                        }),
                         preserved_branch,
                     },
                 );
@@ -1596,13 +1650,9 @@ impl HubManager {
             | ServerMessage::FsChanged { .. }
             | ServerMessage::AttentionSnapshot { .. }
             | ServerMessage::FsError { .. } => {
-                // Remote settings/hosts are not propagated to our clients.
-                // Project/workspace federation is not advertised by this
-                // first local-only slice, so do not expose remote metadata or
-                // accidentally merge it into the local namespace. The same
-                // applies to workspace-scoped fs replies: this slice accepts
-                // durable local workspace ids only and has no remote root
-                // authorization/relay path.
+                // Settings/pairing/attention remain host-private. Workspace
+                // replies/events were consumed by workspace's qualified relay
+                // above; never let an unowned late reply fall through here.
             }
         }
     }
@@ -1760,6 +1810,7 @@ impl HubManager {
     /// Remove all unicast registrations for the given connection id (called on
     /// socket close to prevent leaking senders to dead connections).
     pub fn unregister_all_for_connection(&self, conn_id: &str) {
+        self.workspace_relay.unregister(conn_id);
         self.pending_unicast
             .lock()
             .unwrap()
@@ -1957,11 +2008,13 @@ mod tests {
         assert_eq!(
             relayed_capabilities(&remote),
             [
+                "workspace.snapshot",
                 "worktree.startFrom",
                 "worktree.delete",
                 "git.status",
                 "git.commit",
-                "review.batch.send"
+                "review.batch.send",
+                "fs.tree"
             ]
         );
     }

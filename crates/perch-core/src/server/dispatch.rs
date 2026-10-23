@@ -7,6 +7,13 @@
 use super::*;
 
 pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_text: &str) {
+    if state
+        .app
+        .hub
+        .route_workspace_request(&state.conn_id, &state.out_tx, &msg, raw_text)
+    {
+        return;
+    }
     match msg {
         ClientMessage::ContextPreview {
             request_id,

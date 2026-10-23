@@ -55,8 +55,13 @@ Useful existing coverage (not a claim of a fresh passing run):
 - `agent-terminal-ownership.spec.ts`, `terminal-width.spec.ts`: authority/size.
 - `needs-you.spec.ts`: question persistence/resolution and navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
-- `remote-git.spec.ts`: relayed Git/review; loopback federation is **not**
-  the actual Linux-host D3 acceptance test.
+- `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated
+  headless metadata/files/drafts/surfaces/reconnect plus `remote-git.spec.ts`
+  Git/review/worktree checks, with no paid turns. Ports :7794/:7795 and all
+  state live under `/tmp/perch-e2e-remote-workspace`; no existing server reuse.
+  Loopback federation is **not** actual Linux-host D3 acceptance. The bounded
+  [real Linux resource probe](evidence/remote-workspace-2026-10-23.md) is
+  additional evidence, not runtime/D3 certification.
 
 ## Isolated manual probes
 

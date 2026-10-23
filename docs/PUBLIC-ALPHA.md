@@ -24,12 +24,12 @@ These are source/test starting points, not new gate passes:
 
 | Area | Implemented locally | Still to complete / verify |
 |---|---|---|
-| Mixed canvas | Canonical surfaces, mixed strip/splits and per-viewer restoration (`surfaces.rs`, `surfaceSync.ts`, `e2e/mixed-tabs.spec.ts`). | Candidate D1 recovery/migration/authority evidence; remote surface routing; session-free connect. |
+| Mixed canvas | Canonical surfaces, mixed strip/splits and per-viewer restoration; compatible remote file/diff surface routing (`surfaces.rs`, `surfaceSync.ts`, `e2e/mixed-tabs.spec.ts`, `e2e/remote-workspace.spec.ts`). | Candidate D1 recovery/migration/authority evidence; remote runtime integration; session-free connect. |
 | Resources | CodeMirror/durable drafts, file search, image/PDF/media, archive extraction/download and desktop default-app opening (`e2e/workspace-file-browser.spec.ts`). | File Quick Open, Markdown preview, image controls, Open With, explicit Run and candidate D2 trust/safety evidence. |
 | Context | Local bounded Context Bridge, Claude explicit delivery (`docs/CONTEXT-BRIDGE.md`). | Retest source/draft/busy-target boundaries; remote and other safe send transports are not implied. |
 | Attention | Local Needs You / Welcome Back (`e2e/needs-you.spec.ts`). | Remote question path/dedupe and documented deferred notification/device features. |
 | Durability | Tri-state liveness, fail-closed persistent launch, bounded output, gap/error disclosure, guarded deletion. | Candidate fault/load/close/restart evidence; implementation is not proof of every gate. |
-| Remote | Selected Git/review/worktree federation (`e2e/remote-git.spec.ts`). | Full remote workspace and actual authorized Linux-host D3. |
+| Remote | Host-qualified metadata/text files/drafts/search/surfaces and Git/review/worktree federation; [actual Linux resource/core-restart probe](evidence/remote-workspace-2026-10-23.md). | Runtime integration/fault evidence, media/jobs/attention, consent-based install/update and full authorized Linux-host D3. |
 
 Do not rebuild these local foundations because a checklist below remains open.
 

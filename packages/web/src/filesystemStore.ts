@@ -1291,10 +1291,11 @@ export function flushPendingBuffers(): boolean {
  * just before the socket dropped, so its acknowledgement and revision can be
  * missing locally. `fs.buffer.get` distinguishes that safe lost-ack case from
  * a real concurrent revision/content change before any retry is sent. */
-function resyncPendingBuffersAfterReconnect(): void {
+export function resyncPendingBuffersAfterReconnect(workspaceIds?: ReadonlySet<string>): void {
   if (!socket.connected) return;
   const documents = useWorkspaceFilesStore.getState().documents;
   for (const [workspaceId, workspaceDocuments] of Object.entries(documents)) {
+    if (workspaceIds && !workspaceIds.has(workspaceId)) continue;
     for (const [path, document] of Object.entries(workspaceDocuments)) {
       const key = documentKey(workspaceId, path);
       const pendingSave = pendingSaveAfterReconnect.get(key);
