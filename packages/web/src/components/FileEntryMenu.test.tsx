@@ -4,9 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { DirectoryEntry } from "@perch/shared";
 
-const native = vi.hoisted(() => ({ invoke: vi.fn() as ReturnType<typeof vi.fn> | undefined }));
+const native = vi.hoisted(() => ({ available: true, invoke: vi.fn() }));
 const state = vi.hoisted(() => ({ workspaces: [{ id: "w", hostId: "local" }] }));
-vi.mock("../links", () => ({ get tauriInvoke() { return native.invoke; } }));
+vi.mock("../links", () => ({ get tauriInvoke() { return native.available ? native.invoke : undefined; } }));
 vi.mock("../store", () => ({ usePerchStore: (select: (value: typeof state) => unknown) => select(state) }));
 vi.mock("../contextBridge", () => ({ contextBridgeAvailable: () => false, askAgentAboutFile: vi.fn() }));
 vi.mock("../fileOps", () => ({
@@ -23,17 +23,36 @@ const file = { name: "report #1.pdf", path: "docs/report #1.pdf", kind: "file" }
 const folder = { name: "docs", path: "docs", kind: "directory" } as DirectoryEntry;
 const button = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
 async function render(target: DirectoryEntry | null = file) {
-  await act(async () => root.render(<FileEntryMenu workspaceId="w" workspacePath="/repo with spaces/" target={target} x={100} y={window.innerHeight - 10} onClose={onClose} onOpenFile={onOpenFile} onExpand={() => {}} onRefresh={() => {}} />));
+  await act(async () => root.render(
+    <FileEntryMenu
+      workspaceId="w"
+      workspacePath="/repo with spaces/"
+      target={target}
+      x={100}
+      y={window.innerHeight - 10}
+      onClose={onClose}
+      onOpenFile={onOpenFile}
+      onExpand={() => {}}
+      onRefresh={() => {}}
+    />,
+  ));
 }
 async function click(id: string) { await act(async () => button(id)!.click()); }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  native.invoke = vi.fn().mockResolvedValue(undefined);
+  native.available = true;
+  native.invoke.mockReset().mockResolvedValue(undefined);
   state.workspaces = [{ id: "w", hostId: "local" }];
-  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); });
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.restoreAllMocks();
+});
 
 it("opens the exact on-disk path through native IPC without opening an editor or saving", async () => {
   await render();
@@ -63,7 +82,7 @@ it("keeps Open as the existing in-perch action", async () => {
 it.each(["remote", "missing", "browser"])("hides both native file actions for %s workspaces/clients", async (mode) => {
   if (mode === "remote") state.workspaces[0]!.hostId = "remote";
   if (mode === "missing") state.workspaces = [];
-  if (mode === "browser") native.invoke = undefined;
+  if (mode === "browser") native.available = false;
   await render();
   expect(button("file-menu-open-default")).toBeNull();
   expect(button("file-menu-reveal")).toBeNull();
@@ -71,7 +90,7 @@ it.each(["remote", "missing", "browser"])("hides both native file actions for %s
 });
 
 it("surfaces native failures instead of silently closing", async () => {
-  native.invoke!.mockRejectedValueOnce("No application is associated with this file.");
+  native.invoke.mockRejectedValueOnce("No application is associated with this file.");
   await render();
   await click("file-menu-open-default");
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("No application is associated");

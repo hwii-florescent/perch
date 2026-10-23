@@ -51,7 +51,9 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
-    if (menu) menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.getBoundingClientRect().height - 8))}px`;
+    if (!menu) return;
+    const maxTop = window.innerHeight - menu.getBoundingClientRect().height - 8;
+    menu.style.top = `${Math.max(8, Math.min(y, maxTop))}px`;
   }, [stage, x, y, nativeAvailable, target]);
 
   useEffect(() => {

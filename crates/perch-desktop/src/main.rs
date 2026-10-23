@@ -94,18 +94,21 @@ async fn open_in_default_app(path: String) -> Result<(), String> {
     if !path.is_absolute() || !path.exists() {
         return Err("not an existing absolute path".into());
     }
-    let mut command = tokio::process::Command::new(if cfg!(target_os = "macos") {
+    let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "linux") {
         "xdg-open"
     } else {
         return Err("opening files is not supported on this platform".into());
-    });
-    command.arg(path);
+    };
     // Some Linux handlers keep xdg-open alive until the app closes. Stop waiting
     // after five seconds, but keep the task alive to drain output and reap it.
     let launch = tokio::spawn(async move {
-        let output = command.output().await.map_err(|e| e.to_string())?;
+        let output = tokio::process::Command::new(opener)
+            .arg(path)
+            .output()
+            .await
+            .map_err(|e| e.to_string())?;
         if output.status.success() {
             Ok(())
         } else {
@@ -300,7 +303,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn default_app_refuses_nonlocal_or_missing_paths_without_launching() {
+    async fn default_app_refuses_relative_paths_urls_and_missing_files_without_launching() {
         for path in [
             "",
             "relative/file.txt",
