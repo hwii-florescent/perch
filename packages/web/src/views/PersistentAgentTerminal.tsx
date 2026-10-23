@@ -7,6 +7,7 @@ import { createPerchTerminal, onTerminalInput, type PerchTerminal } from "../xte
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
+import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
 import { MobileKeyBar } from "../components/MobileKeyBar";
 import { useIsMobileWidth } from "../responsive";
@@ -166,6 +167,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   const container = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<AgentView | null>(null);
   const [restart, setRestart] = useState(0);
+  const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
   const { terminalId, status, controlling, writable, shared, pending, error, exitCode } = useSyncExternalStore(
     view?.subscribe ?? noSubscription, view?.getState ?? openingState,
   );
@@ -177,8 +179,13 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     const surface = container.current;
     const shown = showTerminal(keyOf(sessionId, agent), sessionId, surface, () => new AgentView(sessionId, agent, surface));
     setView(shown.view);
-    const stopPaste = attachClipboardImagePaste(container.current, () => shown.view.inputId);
-    return () => { stopPaste(); shown.hide(); };
+    const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
+    setFileDrop(null);
+    const stopDrop = agent === "terminal" ? () => {} : attachAgentFileDrop(
+      surface, sessionId, () => shown.view.inputId,
+      (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
+    );
+    return () => { stopDrop(); stopPaste(); shown.hide(); };
   }, [connected, sessionId, agent, restart]);
 
   function startOver() {
@@ -211,6 +218,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     </div>}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
+    {fileDrop && <div className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"} role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
     {isMobile && writable && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
     {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>

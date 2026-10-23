@@ -9,6 +9,7 @@ import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
+import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 
 function LegacyAgentCliTerminal({
   sessionId,
@@ -27,6 +28,7 @@ function LegacyAgentCliTerminal({
   const terminalIdRef = useRef<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
+  const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
   // Bumped by "Restart CLI" — the attach effect below keys off it, so a bump
   // tears down the dead xterm+PTY pair and builds a fresh one (see the effect
   // comment for why a *fresh* xterm, not a reattach, is the only thing that
@@ -108,8 +110,21 @@ function LegacyAgentCliTerminal({
       ? attachClipboardImagePaste(containerRef.current, () => terminalIdRef.current)
       : () => {};
 
+    setFileDrop(null);
+    const detachFileDrop = attachAgentFileDrop(
+      containerRef.current, sessionId,
+      () => {
+        const state = usePerchStore.getState();
+        const id = terminalIdRef.current;
+        return !disposed && id && state.terminals[id]?.exitCode == null ? id : null;
+      },
+      (text) => { term.paste(text); term.focus(); }, setFileDrop,
+    );
+
     return () => {
       disposed = true;
+      terminalIdRef.current = null;
+      detachFileDrop();
       detachClipboardPaste();
       dataSub.dispose();
       perchTerm.dispose();
@@ -154,6 +169,7 @@ function LegacyAgentCliTerminal({
     <div className="terminal">
       <div className="terminal__surface" ref={containerRef} />
       <TerminalSearchBar controller={search} />
+      {fileDrop && <div className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"} role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
       {cliError && (
         <div className="terminal__cli-error">{cliError}</div>
       )}
