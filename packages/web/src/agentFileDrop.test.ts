@@ -46,7 +46,7 @@ it("uploads files and images in drop order and inserts one quoted native paste, 
   expect(event.defaultPrevented).toBe(true);
   expect(report).toHaveBeenCalledWith({ message: "Uploading 2 files…" });
   await vi.waitFor(() => expect(paste).toHaveBeenCalledOnce());
-  expect(upload.mock.calls.map(([id, f]) => [id, f])).toEqual(files.map((f) => ["agent", f]));
+  expect(upload.mock.calls).toEqual(files.map((file) => ["agent", file]));
   expect(paste).toHaveBeenCalledWith("'/uploads/a file'\\''s.txt' '/uploads/image.png' ");
   expect(paste.mock.calls[0][0]).not.toMatch(/[\r\n]/);
   expect(report).toHaveBeenLastCalledWith(null);

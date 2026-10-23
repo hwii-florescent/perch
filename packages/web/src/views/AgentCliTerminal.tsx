@@ -116,7 +116,8 @@ function LegacyAgentCliTerminal({
       () => {
         const state = usePerchStore.getState();
         const id = terminalIdRef.current;
-        return !disposed && id && state.terminals[id]?.exitCode == null ? id : null;
+        if (disposed || !id || state.terminals[id]?.exitCode != null) return null;
+        return id;
       },
       (text) => { term.paste(text); term.focus(); }, setFileDrop,
     );
@@ -169,7 +170,14 @@ function LegacyAgentCliTerminal({
     <div className="terminal">
       <div className="terminal__surface" ref={containerRef} />
       <TerminalSearchBar controller={search} />
-      {fileDrop && <div className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"} role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
+      {fileDrop && (
+        <div
+          className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"}
+          role={fileDrop.error ? "alert" : "status"}
+        >
+          {fileDrop.message}
+        </div>
+      )}
       {cliError && (
         <div className="terminal__cli-error">{cliError}</div>
       )}

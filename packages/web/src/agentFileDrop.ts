@@ -15,25 +15,25 @@ export function attachAgentFileDrop(
 ): () => void {
   let active = true;
   let uploading = false;
-  const target = () => {
+  const getWritableTerminalId = () => {
     const state = usePerchStore.getState();
     const session = state.sessions.find((entry) => entry.id === sessionId);
-    return active && state.connected && session && (session.hostId ?? "local") === "local"
-      ? getTerminalId() : null;
+    if (!active || !state.connected || !session || (session.hostId ?? "local") !== "local") return null;
+    return getTerminalId();
   };
-  const isFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
-  const dragover = (event: DragEvent) => {
-    if (!isFiles(event)) return;
+  const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  const handleDragOver = (event: DragEvent) => {
+    if (!hasFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = !uploading && target() ? "copy" : "none";
+    if (event.dataTransfer) event.dataTransfer.dropEffect = !uploading && getWritableTerminalId() ? "copy" : "none";
   };
-  const drop = (event: DragEvent) => {
-    if (!isFiles(event)) return;
+  const handleDrop = (event: DragEvent) => {
+    if (!hasFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (uploading) return;
-    const terminalId = target();
+    const terminalId = getWritableTerminalId();
     if (!terminalId) {
       report({ message: "File drops require a connected, writable agent on the local host.", error: true });
       return;
@@ -44,15 +44,16 @@ export function attachAgentFileDrop(
       return;
     }
     uploading = true;
-    report({ message: `Uploading ${files.length === 1 ? "file" : `${files.length} files`}…` });
-    void stage(files, terminalId);
+    const label = files.length === 1 ? "file" : `${files.length} files`;
+    report({ message: `Uploading ${label}…` });
+    void uploadFiles(files, terminalId);
   };
-  async function stage(files: File[], terminalId: string) {
+  async function uploadFiles(files: File[], terminalId: string) {
     const paths: string[] = [];
     const errors: string[] = [];
     try {
       for (const file of files) {
-        if (target() !== terminalId) break;
+        if (getWritableTerminalId() !== terminalId) break;
         try {
           const { path } = await uploadAttachment(sessionId, file);
           if (/[\x00-\x1f\x7f]/.test(path)) throw new Error("Upload returned an unsafe path");
@@ -62,7 +63,7 @@ export function attachAgentFileDrop(
         }
       }
       if (!active) return;
-      if (target() !== terminalId) {
+      if (getWritableTerminalId() !== terminalId) {
         report({ message: "Agent input changed during upload. No paths were inserted; drop again when the agent is writable.", error: true });
         return;
       }
@@ -72,11 +73,11 @@ export function attachAgentFileDrop(
       report(errors.length ? { message: errors.join("; "), error: true } : null);
     } finally { uploading = false; }
   }
-  element.addEventListener("dragover", dragover);
-  element.addEventListener("drop", drop);
+  element.addEventListener("dragover", handleDragOver);
+  element.addEventListener("drop", handleDrop);
   return () => {
     active = false;
-    element.removeEventListener("dragover", dragover);
-    element.removeEventListener("drop", drop);
+    element.removeEventListener("dragover", handleDragOver);
+    element.removeEventListener("drop", handleDrop);
   };
 }

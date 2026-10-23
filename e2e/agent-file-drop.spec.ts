@@ -61,7 +61,7 @@ test("external files reach only agent prompts through native paste, without subm
     if (message.type === "terminal.input") input.push(message);
   }));
   await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
-  const other = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--providers-path", providers], {
       cwd: root, env: {
@@ -97,11 +97,11 @@ test("external files reach only agent prompts through native paste, without subm
     await expect(terminal.locator(".xterm-rows")).not.toContainText("SUBMITTED_");
 
     // A second writable viewer can drop without taking the resize/stop lease.
-    await other.addInitScript((sessionId) => {
+    await phoneContext.addInitScript((sessionId) => {
       localStorage.setItem("perch.onboarding.seen", "1");
       localStorage.setItem("perch.sessionId", sessionId!);
     }, sessionId);
-    const phone = await other.newPage();
+    const phone = await phoneContext.newPage();
     const phoneInput: { data: string; shared?: boolean }[] = [];
     phone.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
       const message = JSON.parse(String(payload));
@@ -121,23 +121,24 @@ test("external files reach only agent prompts through native paste, without subm
     await startChat(page, "terminal");
     await expect(page.getByTestId("chat-tab-agent-badge")).toContainText("terminal");
     await expect(terminal).toHaveAttribute("data-writable", "true");
-    const before = uploads;
+    const uploadsBeforeShellDrop = uploads;
     await drop(surface, ["shell.png"], "dragover");
     expect(await drop(surface, ["shell.png"])).toBe(false);
     await expect(terminal.getByRole("status")).toHaveCount(0);
     await expect(terminal.getByRole("alert")).toHaveCount(0);
-    expect(uploads).toBe(before);
+    expect(uploads).toBe(uploadsBeforeShellDrop);
     expect(input.some((message) => message.data.includes("shell.png"))).toBe(false);
     await terminal.locator(".xterm-helper-textarea").pressSequentially("printf SHELL_INPUT_OK");
     await terminal.locator(".xterm-helper-textarea").press("Enter");
     await expect(terminal.locator(".xterm-rows")).toContainText("SHELL_INPUT_OK");
-    expect(uploads).toBe(before);
+    expect(uploads).toBe(uploadsBeforeShellDrop);
     expect(errors).toEqual([]);
   } finally {
-    await other.close();
+    await phoneContext.close();
     await context.close();
     if (core && core.exitCode === null && core.signalCode === null) {
-      await new Promise<void>((resolve) => { core!.once("exit", () => resolve()); core!.kill("SIGTERM"); });
+      const child = core;
+      await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGTERM"); });
     }
     // This daemon and its PTYs are private to this fixture, never the installed app.
     const daemonPattern = `__perchd serve --dir ${daemon}$`;

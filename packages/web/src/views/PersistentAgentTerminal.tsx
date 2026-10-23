@@ -181,11 +181,11 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     setView(shown.view);
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
     setFileDrop(null);
-    const stopDrop = agent === "terminal" ? () => {} : attachAgentFileDrop(
+    const stopDrop = agent === "terminal" ? undefined : attachAgentFileDrop(
       surface, sessionId, () => shown.view.inputId,
       (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
     );
-    return () => { stopDrop(); stopPaste(); shown.hide(); };
+    return () => { stopDrop?.(); stopPaste(); shown.hide(); };
   }, [connected, sessionId, agent, restart]);
 
   function startOver() {
@@ -218,7 +218,14 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     </div>}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
-    {fileDrop && <div className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"} role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
+    {fileDrop && (
+      <div
+        className={fileDrop.error ? "terminal__cli-error max-w-full break-words" : "terminal__exited"}
+        role={fileDrop.error ? "alert" : "status"}
+      >
+        {fileDrop.message}
+      </div>
+    )}
     {isMobile && writable && exitCode === null && !sleeping && view && <MobileKeyBar term={view.created.term} send={(data) => view.sendKey(data)} />}
     {(error || cliError) && <div className="terminal__cli-error" role="alert">{error || cliError}</div>}
     {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
