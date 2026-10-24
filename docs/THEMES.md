@@ -1,9 +1,11 @@
 # App theme palettes
 
 `packages/web/src/themes.ts` owns the app's 19 palettes: perch and Herdr's
-18 built-ins. Settings persists the theme **name**, not a copied palette.
-Terminal colors/fonts still come from the server's terminal profile; choosing
-an app theme must not recolor a running CLI.
+18 built-ins. Catppuccin Mocha/Latte import pinned upstream color data; the
+other 17 palettes retain their existing inline Perch adaptations. Settings
+persists the theme **name**, not a copied palette. Terminal colors/fonts still
+come from the server's terminal profile; choosing an app theme must not recolor
+a running CLI.
 
 ## Sources
 
@@ -13,7 +15,7 @@ Reviewed against original palette/VS Code sources, not marketplace screenshots:
 | --- | --- |
 | perch | The neutral UI palette in `docs/UI-UX-DIRECTION.md` |
 | All 18 named presets / semantic roles | [Herdr Palette](https://github.com/herdrdev/herdr/blob/2563803/src/app/state.rs) and [configuration](https://github.com/herdrdev/herdr/blob/2563803/src/config/theme.rs) |
-| Catppuccin Mocha, Latte | [Catppuccin palette](https://github.com/catppuccin/palette/blob/main/palette.json) |
+| Catppuccin Mocha, Latte | [Pinned Catppuccin palette](https://github.com/catppuccin/palette/blob/07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd/palette.json), version 1.8.0 |
 | Tokyo Night | [Tokyo Night palette](https://github.com/folke/tokyonight.nvim/blob/main/lua/tokyonight/colors/night.lua) |
 | Tokyo Night Day (light preset) | [Tokyo Night VS Code Light](https://github.com/enkia/tokyo-night-vscode-theme/blob/master/themes/tokyo-night-light-color-theme.json) |
 | Dracula | [Official VS Code theme](https://github.com/dracula/visual-studio-code/blob/master/src/dracula.yml) |
@@ -29,6 +31,56 @@ Reviewed against original palette/VS Code sources, not marketplace screenshots:
 [Oh My Zsh themes](https://github.com/ohmyzsh/ohmyzsh/blob/master/themes/terminalparty.zsh-theme)
 choose prompt layout and ANSI foreground names. They do not define a canonical
 RGB app palette: the terminal emulator resolves those colors.
+
+## Pinned palette data
+
+`packages/web/src/palettes/catppuccin.json` contains only the 26 named hex
+colors for each used flavor, Mocha and Latte, extracted from the upstream
+`palette.json`. RGB/HSL/OKLCH duplicates, ANSI colors and unused flavors are
+omitted. The snapshot records its immutable source URL, upstream version and
+SHA-256 of the **complete upstream file**:
+
+`4bc114bb6b3c9a9c9e156564aa84625aef32c5da514d9dd431cf1fcad433a05f`
+
+This is bundled data, not a runtime fetch, new package dependency or general
+editor-theme importer. `themes.ts` maps the upstream names to Perch's existing
+roles; `resolveTheme()` still handles contrast and `applyTheme()` supplies the
+same CSS variables to the shell and CodeMirror. Terminal profiles are separate.
+The upstream MIT license is retained in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
+Reproduce the snapshot from the repository root (requires only curl and Node):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/catppuccin/palette/07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd/palette.json | node -e '
+const { createHash } = require("node:crypto");
+const chunks = [];
+process.stdin.on("data", chunk => chunks.push(chunk)).on("end", () => {
+  const raw = Buffer.concat(chunks);
+  const data = JSON.parse(raw.toString("utf8"));
+  const colors = Object.fromEntries(["mocha", "latte"].map(flavor => [flavor,
+    Object.fromEntries(Object.entries(data[flavor].colors).map(([name, color]) => [name, color.hex]))]));
+  console.log(JSON.stringify({
+    source: "https://raw.githubusercontent.com/catppuccin/palette/07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd/palette.json",
+    sha256: createHash("sha256").update(raw).digest("hex"), version: data.version, colors
+  }, null, 2));
+});
+'
+```
+
+Updates are explicit: review the new upstream commit/license, regenerate the
+snapshot, review role mappings and update the integrity expectation in
+`themes.test.ts` only after checking the diff. Normal builds/tests never fetch
+palette data. `__fixtures__/themes.resolved.json` was captured from `2ff7736`
+**before** this import and locks all 19 resolved palettes plus their names/order;
+tests must not regenerate it. Intentional future color changes need a reviewed
+fixture update, not automatic acceptance of new upstream output.
+
+The current mapping preserves every existing color. Mocha uses `mantle` for
+`panelBg`, `surface0`/`surface1` for the corresponding surfaces and `base` for
+`surfaceDim`. Latte uses `base` for `panelBg`, `mantle` for `surface0`/`surfaceDim`
+and upstream `surface0` for `surface1`. No Perch-specific hex overrides are needed.
+Other theme families can adopt pinned data separately when useful; this slice
+does not claim they have already been imported.
 
 ## Web role mapping
 
@@ -98,6 +150,7 @@ cd e2e && PERCH_E2E_WEBKIT=1 npx playwright test theme.spec.ts
 ```
 
 The unit check covers every foreground/surface pair in every preset, source
-immutability, filled controls, native appearance, and fallback/default parity.
+immutability, filled controls, native appearance, fallback/default parity,
+Catppuccin snapshot integrity and unchanged resolved palettes/theme names/order.
 The browser check exercises real CSS on selected, hovered, and keyboard-focused
 harness badges across all presets, on desktop and phone-sized layouts.

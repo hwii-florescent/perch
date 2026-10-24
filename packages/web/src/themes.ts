@@ -6,6 +6,7 @@
  * keeps the source colors. Terminal rendering still uses the server profile,
  * not these app tokens. The default name agrees with Rust's `default_theme()`.
  */
+import catppuccin from "./palettes/catppuccin.json";
 
 export interface Palette {
   accent: string;
@@ -48,6 +49,23 @@ export const PERCH_DEFAULT: Palette = {
   peach: "#d39a6a",
 };
 
+/** Adapt pinned upstream color names to Perch's existing semantic roles. */
+function catppuccinPalette(flavor: keyof typeof catppuccin.colors): Palette {
+  const c = catppuccin.colors[flavor];
+  const light = flavor === "latte";
+  // Preserve Perch's existing surface roles; Latte's surface0 is our selection.
+  return {
+    accent: c.blue, panelBg: light ? c.base : c.mantle,
+    surface0: light ? c.mantle : c.surface0, surface1: light ? c.surface0 : c.surface1,
+    surfaceDim: light ? c.mantle : c.base, overlay0: c.overlay0, overlay1: c.overlay1,
+    text: c.text, subtext0: c.subtext0, mauve: c.mauve, green: c.green,
+    yellow: c.yellow, red: c.red, blue: c.blue, teal: c.teal, peach: c.peach,
+  };
+}
+
+/** Catppuccin Mocha — herdr's own default theme. */
+export const CATPPUCCIN_DEFAULT: Palette = catppuccinPalette("mocha");
+
 /**
  * Herdr's 18 built-in themes plus perch's neutral default. Named colors come
  * from the upstream palettes; surfaces use UI backgrounds, not syntax colors.
@@ -61,23 +79,10 @@ export const PERCH_DEFAULT: Palette = {
  * and maps `Reset` to a plain black background / light gray foreground —
  * the closest sane approximation of "whatever the terminal's default is".
  */
-/** Catppuccin Mocha — herdr's own default theme. */
-export const CATPPUCCIN_DEFAULT: Palette = {
-  accent: "#89b4fa", panelBg: "#181825", surface0: "#313244", surface1: "#45475a",
-  surfaceDim: "#1e1e2e", overlay0: "#6c7086", overlay1: "#7f849c", text: "#cdd6f4",
-  subtext0: "#a6adc8", mauve: "#cba6f7", green: "#a6e3a1", yellow: "#f9e2af",
-  red: "#f38ba8", blue: "#89b4fa", teal: "#94e2d5", peach: "#fab387",
-};
-
 export const THEMES: Record<string, Palette> = {
   perch: PERCH_DEFAULT,
   catppuccin: CATPPUCCIN_DEFAULT,
-  "catppuccin-latte": {
-    accent: "#1e66f5", panelBg: "#eff1f5", surface0: "#e6e9ef", surface1: "#ccd0da",
-    surfaceDim: "#e6e9ef", overlay0: "#9ca0b0", overlay1: "#8c8fa1", text: "#4c4f69",
-    subtext0: "#6c6f85", mauve: "#8839ef", green: "#40a02b", yellow: "#df8e1d",
-    red: "#d20f39", blue: "#1e66f5", teal: "#179299", peach: "#fe640b",
-  },
+  "catppuccin-latte": catppuccinPalette("latte"),
   terminal: {
     accent: "#0000ee", panelBg: "#000000", surface0: "#121212", surface1: "#1c1c1c",
     surfaceDim: "#000000", overlay0: "#e5e5e5", overlay1: "#ffffff", text: "#e5e5e5",
