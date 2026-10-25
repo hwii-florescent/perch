@@ -223,12 +223,14 @@ export function NeedsYouButton({ className, variant = "icon" }: { className?: st
         data-testid="needs-you-toggle"
         onClick={() => setOpen(!open)}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-          <path d="M4 6.5a4 4 0 0 1 8 0c0 3 1.3 4.2 1.5 4.5h-11C2.7 10.7 4 9.5 4 6.5Z" />
-          <path d="M6.5 13a1.6 1.6 0 0 0 3 0" />
+        <svg width={status ? 14 : 16} height={status ? 14 : 16} viewBox={status ? "0 0 20 20" : "0 0 16 16"} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {status ? <path d="M4 14h12l-2-3V8a4 4 0 0 0-8 0v3Zm4 3h4" /> : <>
+            <path d="M4 6.5a4 4 0 0 1 8 0c0 3 1.3 4.2 1.5 4.5h-11C2.7 10.7 4 9.5 4 6.5Z" />
+            <path d="M6.5 13a1.6 1.6 0 0 0 3 0" />
+          </>}
         </svg>
         {status && <span className="min-w-0 truncate">Needs You</span>}
-        {count > 0 && <span className="text-[0.75rem] font-semibold" data-testid="needs-you-count">{count}</span>}
+        {count > 0 && <span className={cn("text-[0.75rem] font-semibold", status && "grid h-4 min-w-4 place-items-center rounded-[5px] bg-surface-1 px-1 text-[10px] font-normal tabular-nums")} data-testid="needs-you-count">{count}</span>}
         {!count && unread && <span className={cn("size-1.5 rounded-full bg-teal", !status && "absolute top-[0.2rem] right-[0.3rem]")} aria-hidden="true" data-testid="needs-you-unread" />}
       </button>
       {open && <Panel anchor={button.current} onClose={() => setOpen(false)} above={status} />}

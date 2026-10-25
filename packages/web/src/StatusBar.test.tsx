@@ -26,7 +26,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  usePerchStore.setState({ connected: false, usage, usageUpdatedAt: 1_791_800_000_000 });
+  usePerchStore.setState({ connected: false, activeHostId: "local", hosts: [], hostStates: {}, sessions: [], sessionId: null, activeWorkspaceId: null, workspaces: [], status: null, usage, usageUpdatedAt: 1_791_800_000_000 });
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -43,7 +43,7 @@ it("opens reset details from the complete usage block and can force a fresh fetc
   render(<StatusBar />);
   const trigger = get("usage-summary") as HTMLButtonElement;
   expect(trigger.className).toContain("[border:0]");
-  expect(trigger.textContent).toContain("claude");
+  expect(trigger.textContent).toContain("Claude");
   expect(trigger.textContent).toContain("5h 41%");
   click(trigger);
 
@@ -96,7 +96,8 @@ it("keeps Needs You in a fixed, non-shrinking slot just left of the usage summar
   expect(footer.className).toContain("status-bar");
   // Needs You, then usage at the right end.
   expect(toggle.nextElementSibling).toBe(get("usage-summary").parentElement);
-  expect(footer.lastElementChild).toBe(toggle.nextElementSibling);
+  expect(footer.lastElementChild).toBe(get("status-connection"));
+  expect(footer.className).toContain("h-[26px]");
   expect(toggle.className).toContain("shrink-0");
   expect(toggle.className).toContain("w-[7.75rem]");
   expect(toggle.textContent).toContain("Needs You");
@@ -105,7 +106,7 @@ it("keeps Needs You in a fixed, non-shrinking slot just left of the usage summar
   // The fields before the slot truncate rather than push it.
   expect(footer.className).toContain("overflow-hidden");
   expect(get("usage-summary").parentElement!.className).toContain("overflow-hidden");
-  expect(footer.querySelector(".status-item--cwd")!.className).toContain("text-ellipsis");
+  expect(footer.querySelector(".status-item--cwd")!.className).toContain("truncate");
   expect(footer.querySelector(".status-item--cwd")!.className).toContain("min-w-0");
   expect(footer.querySelector(".status-bar__details")!.className).toContain("min-w-0");
 });
@@ -114,10 +115,31 @@ it("truncates a long branch instead of widening the bar", () => {
   const branch = "feature/".repeat(40);
   usePerchStore.setState({ status: { cwd: "/a".repeat(200), branch } as never });
   render(<StatusBar />);
-  const shown = [...document.querySelectorAll(".status-bar__details span")].find((span) => span.textContent === branch)!;
+  const shown = document.querySelector(".status-bar__branch > span")!;
   expect(shown.className).toContain("truncate");
   expect(shown.className).toContain("min-w-0");
-  expect(shown.getAttribute("title")).toBe(branch);
+  expect(shown.parentElement!.getAttribute("title")).toBe(branch);
+});
+
+it("orders host, path and branch before attention and usage, and never invents a branch", () => {
+  usePerchStore.setState({ connected: true, status: { cwd: "/tmp/nest", branch: "main" } });
+  render(<StatusBar />);
+  const location = document.querySelector(".status-bar__location")!;
+  expect(location.textContent).toBe("Local/tmp/nestmain");
+  expect(location.querySelector(".status-bar__branch svg")).not.toBeNull();
+  expect(get("status-connection").getAttribute("aria-label")).toBe("Connected");
+  act(() => usePerchStore.setState({ status: null }));
+  expect(location.querySelector(".status-bar__branch")).toBeNull();
+  expect(document.querySelector(".agent-status-dot")).toBeNull();
+});
+
+it("labels the actual remote host and does not report unknown remote connectivity as connected", () => {
+  usePerchStore.setState({ connected: true, activeHostId: "remote", hosts: [{ id: "remote", name: "Build host", sshHost: "example.test", remotePort: 7788, enabled: true, mode: "perch" }] });
+  render(<StatusBar />);
+  expect(get("status-host").textContent).toBe("Build host");
+  expect(get("status-connection").getAttribute("aria-label")).toBe("Reconnecting…");
+  act(() => usePerchStore.setState({ hostStates: { remote: { type: "host.info", hostId: "remote", name: "Build host", state: "connected" } } }));
+  expect(get("status-connection").getAttribute("aria-label")).toBe("Connected");
 });
 
 it("shows the unread dot, not a count, for recent updates, and nothing when the host lacks attention", () => {

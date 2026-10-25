@@ -31,8 +31,9 @@ test.describe("Status glyph system", () => {
 
   test("G1. a new session shows the idle dot", async ({ page }) => {
     await open(page);
-    await startChat(page);
-    const dot = page.locator(".status-bar .agent-status-dot");
+    const sessionId = await startChat(page);
+    // The v4 status bar shows host/path/branch; harness identity stays in the sidebar and tab.
+    const dot = page.getByTestId(`workspace-session-${sessionId}`).locator(".agent-status-dot");
     await expect(dot).toHaveClass(/agent-status-dot--idle/);
     await expect(dot).toHaveAttribute("data-provider", "terminal");
     await expect(dot.locator("svg")).toBeVisible();

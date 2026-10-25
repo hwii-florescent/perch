@@ -3,14 +3,13 @@ import { createPortal } from "react-dom";
 import { usePerchStore } from "./store";
 import { socket } from "./ws";
 import { cn } from "./lib/cn";
-import { StatusDot } from "./components/StatusDot";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./components/popoverPosition";
 import { GHOST_BUTTON } from "./components/ui/icon-button";
 import { menuPanel } from "./components/ui/menu";
 import { NeedsYouButton } from "./components/NeedsYou";
 import { useZoom, zoomReset } from "./zoom";
 import { IS_MAC, formatCombo } from "./keyCombo";
-import type { AccountUsage, SessionSummary, UsageWindow } from "@perch/shared";
+import type { AccountUsage, UsageWindow } from "@perch/shared";
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -74,7 +73,7 @@ export function UsageSummary({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="usage-details-popover"
-        className={cn(GHOST_BUTTON, "flex shrink-0 items-center gap-2.5 p-0 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+        className={cn(GHOST_BUTTON, "flex min-w-0 items-center gap-3 p-0 text-[9px] focus-visible:[outline:1px_solid_var(--overlay-1)]")}
         title="Open plan usage details"
         onClick={() => {
           if (open) {
@@ -91,13 +90,13 @@ export function UsageSummary({
           <span>Usage unavailable</span>
         ) : usage.map((account, i) => {
           const several = accountCount(account.provider) > 1;
-          const name = several && account.label ? `${account.provider} ${account.label}` : account.provider;
+          const provider = account.provider === "claude" ? "Claude" : account.provider === "codex" ? "Codex" : account.provider;
+          const name = several && account.label ? `${provider} ${account.label}` : provider;
           return (
-            <span key={`${account.provider}:${account.label ?? i}`} className="flex items-center gap-1.5">
-              {i > 0 && <span aria-hidden className="h-3 w-px shrink-0 bg-overlay-0" />}
-              <span className="font-medium">{name}</span>
-              {account.windows.map((w) => (
-                <span key={w.label} className={cn("tabular-nums", usageTone(w.usedPercent))}>
+            <span key={`${account.provider}:${account.label ?? i}`} className="flex items-center gap-1.5 text-[9px]">
+              <span>{name}</span>
+              {account.windows.map((w, index) => (
+                <span key={w.label} className={cn("tabular-nums", index === 0 && "text-fg", usageTone(w.usedPercent))}>
                   {w.label} {Math.round(w.usedPercent)}%
                 </span>
               ))}
@@ -199,40 +198,45 @@ export function StatusBar() {
   const status = usePerchStore((s) => s.status);
   const sessionId = usePerchStore((s) => s.sessionId);
   const knownSession = usePerchStore((s) => s.sessions.find((sess) => sess.id === sessionId));
-  // A session created via session.create has no DB row until its first message.
-  const activeSession: SessionSummary | undefined =
-    knownSession ??
-    (sessionId
-      ? { id: sessionId, title: "", cwd: "", createdAt: 0, status: "idle" }
-      : undefined);
+  const activeHostId = usePerchStore((s) => s.activeHostId);
+  const hostId = knownSession?.hostId ?? activeHostId;
+  const host = usePerchStore((s) => s.hosts.find((h) => h.id === hostId));
+  const hostState = usePerchStore((s) => s.hostStates[hostId]?.state);
+  const workspace = usePerchStore((s) => s.workspaces.find((w) => w.id === s.activeWorkspaceId));
+  const online = connected && (hostId === "local" || hostState === "connected");
+  const connectionLabel = online ? "Connected" : "Reconnecting…";
+  const cwd = status?.cwd || knownSession?.cwd || workspace?.path || "";
+  const branch = status?.branch ?? workspace?.branch;
 
   return (
-    // Same shell color as the canvas surround, no rule. Left to right: connection, path, branch and
-    // session numbers, then Needs You, then plan usage (docs/DECISIONS.md 2026-10-24). The Needs You slot
-    // is fixed-width and never shrinks; the path, branch and usage clip or ellipsize instead.
-    <footer className="status-bar box-border flex h-[34px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[0.78rem] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
-      <span
-        className={cn("size-2 shrink-0 rounded-[50%]", connected ? "bg-accent" : "bg-red")}
-        title={connected ? "connected" : "reconnecting..."}
-      />
-      {activeSession && <StatusDot session={activeSession} />}
-      <span className="status-item--cwd min-w-0 flex-1 basis-0 overflow-hidden text-ellipsis" title={status?.cwd}>
-        {status?.cwd ?? "-"}
-      </span>
-      <div className="status-bar__details flex min-w-0 max-w-[40%] shrink-[2] items-center justify-end gap-3 overflow-hidden">
+    // v4 mock: host, path and branch left; optional session details in the middle;
+    // Needs You, usage and the connection check right. Identity stays in tabs/sidebar.
+    <footer className="status-bar box-border flex h-[26px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
+      <div className="status-bar__location flex min-w-0 flex-1 items-center gap-[13px] overflow-hidden">
+        <span className={cn("size-1 shrink-0 rounded-full", online ? "bg-green" : "bg-yellow")} title={connectionLabel} />
+        <span className="max-w-24 shrink-0 truncate" title={`${host?.name ?? hostId} · ${connectionLabel}`} data-testid="status-host">{hostId === "local" ? "Local" : host?.name ?? hostId}</span>
+        <span className="status-item--cwd min-w-0 truncate" title={cwd}>{cwd}</span>
+        {branch && <span className="status-bar__branch flex min-w-0 max-w-[45%] shrink-0 items-center gap-1.5" title={branch}>
+          <svg width="12" height="12" className="shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="6" cy="4" r="2" /><circle cx="14" cy="5" r="2" /><circle cx="6" cy="16" r="2" /><path d="M6 6v8m0-3c8 0 8-2 8-4" /></svg>
+          <span className="min-w-0 truncate">{branch}</span>
+        </span>}
+      </div>
+      <div className="status-bar__details flex min-w-0 max-w-[25%] shrink-[2] items-center justify-end gap-3 overflow-hidden max-[900px]:hidden">
         {zoom !== 1 && (
           <button type="button" data-testid="zoom-indicator" className={cn(GHOST_BUTTON, "px-1 tabular-nums text-fg")} title={`Zoom ${Math.round(zoom * 100)}%. Click to reset (${formatCombo(IS_MAC ? "cmd+0" : "ctrl+0")})`} onClick={zoomReset}>
             {Math.round(zoom * 100)}%
           </button>
         )}
-        <span className="min-w-0 truncate" title={status?.branch}>{status?.branch ?? ""}</span>
         {status?.contextTokens !== undefined && <span className="shrink-0">ctx {formatTokens(status.contextTokens)}</span>}
         {status?.costUsd !== undefined && <span className="shrink-0">${status.costUsd.toFixed(3)}</span>}
       </div>
-      <NeedsYouButton variant="status" className="inline-flex h-6 w-[7.75rem] shrink-0 cursor-pointer items-center justify-center gap-[0.45rem] rounded-ui bg-surface-0 px-2 text-[0.72rem] text-fg [border:0] [font-family:inherit] hover:bg-surface-1" />
+      <NeedsYouButton variant="status" className="inline-flex h-6 w-[7.75rem] shrink-0 cursor-pointer items-center justify-center gap-[7px] rounded-ui bg-surface-0 px-2 text-[11px] text-fg [border:0] [font-family:inherit] hover:bg-surface-1 aria-expanded:bg-surface-1" />
       <div className="status-bar__usage min-w-0 max-w-[38%] shrink overflow-hidden">
         <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
       </div>
+      <span className="shrink-0" role="img" aria-label={connectionLabel} title={`${hostId === "local" ? "Local core" : host?.name ?? hostId}: ${connectionLabel}`} data-testid="status-connection">
+        <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={online ? "m4 10 4 4 8-8" : "M10 4v7m0 4v1"} /></svg>
+      </span>
     </footer>
   );
 }
