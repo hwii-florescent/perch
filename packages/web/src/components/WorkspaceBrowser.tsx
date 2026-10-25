@@ -6,7 +6,7 @@ import { usePerchStore } from "../store";
 import { useZoom } from "../zoom";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
-const BTN = cn(GHOST_BUTTON, "px-2 py-1 text-[0.8rem]");
+const BTN = cn(GHOST_BUTTON, "grid h-7 w-7 shrink-0 place-items-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-fg max-[700px]:size-11");
 
 /** What draws over the page in the main web view. A native webview sits above all HTML,
  * so the page is hidden while one of these is up (dialogs, context menus). */
@@ -103,31 +103,42 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const own = !nativeBrowser && parseUrl(url)?.origin === window.location.origin;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col" data-testid="workspace-browser">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-b-overlay-0 px-2">
-        {nativeBrowser && (
-          <>
-            <button type="button" className={BTN} title="Back" aria-label="Back" onClick={() => act("back")}>←</button>
-            <button type="button" className={BTN} title="Forward" aria-label="Forward" onClick={() => act("forward")}>→</button>
-          </>
-        )}
-        <button type="button" className={BTN} title="Reload" aria-label="Reload" onClick={() => act("reload")}>↻</button>
-        <input
-          className="min-w-0 flex-1 rounded-ui bg-surface-0 px-2 py-1 text-[0.8rem] text-fg [border:0] [font-family:inherit] outline-none focus-visible:bg-surface-1"
-          aria-label="Address"
-          data-testid="browser-address"
-          value={draft}
-          spellCheck={false}
-          onChange={(e) => setDraft(e.target.value)}
-          onFocus={() => { editing.current = true; }}
-          onBlur={() => { editing.current = false; }}
-          onKeyDown={(e) => { if (e.key === "Enter") go(); }}
-        />
-        <button type="button" className={BTN} data-testid="browser-open-external" onClick={() => openExternal(url)}>Open externally</button>
+    <div className="@container flex min-w-0 flex-1 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-browser">
+      <div className="browser-toolbar flex h-[43px] shrink-0 items-center gap-1 bg-surface-0 px-[10px] text-subtext-0 max-[700px]:h-12" data-testid="browser-toolbar">
+        <button type="button" className={BTN} title={nativeBrowser ? "Back" : "Back is available in the desktop app"} aria-label="Back" disabled={!nativeBrowser || !started} onClick={() => act("back")}>
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg>
+        </button>
+        <button type="button" className={BTN} title={nativeBrowser ? "Forward" : "Forward is available in the desktop app"} aria-label="Forward" disabled={!nativeBrowser || !started} onClick={() => act("forward")}>
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m8 5 5 5-5 5" /></svg>
+        </button>
+        <button type="button" className={BTN} title="Reload" aria-label="Reload" disabled={!started} onClick={() => act("reload")}>
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 7a6 6 0 1 0 0 6M16 3v4h-4" /></svg>
+        </button>
+        <div className="mx-[11px] flex h-7 min-w-0 flex-1 items-center gap-[7px] rounded-ui bg-[var(--bg)] px-[10px] focus-within:outline focus-within:outline-1 focus-within:outline-fg @max-[460px]:mx-1 max-[700px]:h-9">
+          <svg width="12" height="12" className="shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="10" cy="10" r="7" /><ellipse cx="10" cy="10" rx="3" ry="7" /><path d="M3 10h14" /></svg>
+          <input
+            className="h-full min-w-0 flex-1 bg-transparent p-0 text-[11px] text-fg [border:0] [font-family:inherit] outline-none placeholder:text-subtext-0"
+            aria-label="Address"
+            data-testid="browser-address"
+            placeholder="Enter an address"
+            value={draft}
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={() => { editing.current = true; }}
+            onBlur={() => { editing.current = false; }}
+            onKeyDown={(e) => { if (e.key === "Enter") go(); }}
+          />
+        </div>
+        <button type="button" className={cn(BTN, "w-auto gap-2 px-1 text-[10px] @min-[461px]:flex")} data-testid="browser-open-external" aria-label="Open externally" disabled={!started} onClick={() => openExternal(url)}>
+          <span className="@max-[460px]:hidden">Open externally</span>
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8m-1-7H4v12h12v-4" /></svg>
+        </button>
       </div>
       <div ref={host} className="host relative min-h-0 flex-1">
         {!started ? (
-          <div className="p-4 text-[0.85rem] text-subtext-0">Enter an address to browse.</div>
+          <div className="flex h-full items-center justify-center p-6 text-[12px] text-subtext-0">Enter an address above to browse.</div>
         ) : nativeBrowser ? null : own ? (
           <div className="p-4 text-[0.85rem] text-subtext-0">perch's own address can't be shown inside perch.</div>
         ) : (

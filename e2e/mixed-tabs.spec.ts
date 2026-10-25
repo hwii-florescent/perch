@@ -70,6 +70,35 @@ async function openAll(page: Page, ROOT: string) {
   return { sessionId, workspaceId, terminalTab, fileTab, reviewTab };
 }
 
+test("browser chrome matches the study and keeps its address field distinct inside dark and light panes", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await startChat(page, "terminal", root);
+    await page.getByTestId("tab-new").click();
+    await page.getByText("New browser", { exact: true }).click();
+    const toolbar = page.getByTestId("browser-toolbar");
+    const address = page.getByTestId("browser-address");
+    await expect(toolbar).toHaveCSS("height", "43px");
+    await expect(toolbar).toHaveCSS("border-bottom-width", "0px");
+    await expect(address.locator("..")).toHaveCSS("height", "28px");
+    await expect(address.locator("..")).toHaveCSS("border-radius", "8px");
+    await expect(page.locator("footer.status-bar")).toHaveCSS("height", "26px");
+    await expect(page.getByTestId("browser-open-external")).toBeDisabled();
+    for (const theme of ["perch", "catppuccin-latte"]) {
+      await page.evaluate((theme) => window.usePerchStore.getState().updateSettings({ theme }), theme);
+      await expect.poll(() => address.evaluate((input) => {
+        const field = getComputedStyle(input.parentElement!).backgroundColor;
+        const bar = getComputedStyle(input.closest('[data-testid="browser-toolbar"]')!).backgroundColor;
+        return field !== bar && field !== "rgba(0, 0, 0, 0)";
+      })).toBe(true);
+    }
+  } finally {
+    await page.evaluate(() => window.usePerchStore.getState().updateSettings({ theme: "perch" })).catch(() => {});
+    cleanup();
+  }
+});
+
 test("a terminal, a file and the review share one ordered strip", async ({ page }) => {
   const root = prepareFixture();
   try {
