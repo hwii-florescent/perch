@@ -7,6 +7,7 @@
     "frontendDist": "../../packages/web/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": []
   },
   "bundle": {

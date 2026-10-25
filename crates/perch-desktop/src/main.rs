@@ -6,6 +6,8 @@
 //! supplies the native window chrome.
 
 mod browser;
+#[cfg(target_os = "macos")]
+mod glass;
 mod permissions;
 
 use perch_core::boot::{
@@ -277,20 +279,25 @@ fn main() {
             // Orca-style: no separate title bar. The web view's top row (tabs
             // + ›_) runs under the traffic lights; it pads 78px for them and
             // is a drag region. The lights centre in a container `14 + y` tall,
-            // so y = 22 centres them on that 36px row (`.app--mac-desktop`).
+            // so y = 30 centres them on that 44px row (`App.tsx`).
+            // The window is transparent with vibrancy behind a translucent page (glass.rs).
             #[cfg(target_os = "macos")]
             {
                 builder = builder
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
                     .hidden_title(true)
-                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 22.0));
+                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 30.0))
+                    .transparent(true)
+                    .initialization_script(glass::INIT_SCRIPT);
             }
 
             if test_mode {
                 builder = builder.visible(false).focused(false);
             }
 
-            builder.build()?;
+            let _window = builder.build()?;
+            #[cfg(target_os = "macos")]
+            glass::apply(&_window);
             Ok(())
         })
         .run(tauri::generate_context!())

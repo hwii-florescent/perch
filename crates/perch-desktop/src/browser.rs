@@ -64,6 +64,9 @@ pub async fn browser_show(
     let view = window
         .add_child(builder, position, size)
         .map_err(|e| e.to_string())?;
+    // The page is an 8px-rounded card like the panes beside it (CSS cannot clip a child web view).
+    #[cfg(target_os = "macos")]
+    crate::glass::round_webview(&view);
     if let Some(zoom) = zoom {
         view.set_zoom(zoom).map_err(|e| e.to_string())?;
     }

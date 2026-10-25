@@ -9,13 +9,19 @@ build = "build.rs"
 [dependencies]
 perch-core = { path = "../perch-core" }
 # `unstable` is `Window::add_child`, the child webviews of the built-in browser (src/browser.rs).
-tauri = { version = "2", features = ["unstable"] }
+# `macos-private-api` is the transparent window the glass shell needs (src/glass.rs). It
+# keeps the app out of the Mac App Store, which perch is not in (a sandbox cannot run shells).
+tauri = { version = "2", features = ["unstable", "macos-private-api"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+window-vibrancy = "0.6"
+objc2 = "0.6"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -2687,6 +2687,7 @@ name = "perch-desktop"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "objc2",
  "perch-core",
  "tauri",
  "tauri-build",
@@ -2695,6 +2696,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "window-vibrancy",
 ]
 
 [[package]]
