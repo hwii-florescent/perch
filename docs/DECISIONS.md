@@ -26,7 +26,11 @@ Style changes still ship separately from behavior changes.
   Tauri feature, which Mac App Store review rejects (not a distribution channel).
 - **Native browser pages are rounded all round** (8px, WKWebView layer from Rust),
   replacing the "square at the bottom" limit below. Unverified on a real Mac.
-- **Needs You sits left of usage** in the status bar's right cluster.
+- **Status bar matches the v4 study:** 26px high, 10px chrome type and 9px
+  usage type. Connection dot, actual host name (Local for local), path, branch
+  icon and branch sit left; optional zoom/context/cost recede at narrow widths.
+  Needs You sits left of Claude/Codex usage, followed by a connection check
+  (not an agent-success indicator). Harness identity stays in tabs/sidebar.
 - **Sidebar:** Nests sit inside their Birdhouse. Compact mode puts up to three
   session chips inline at the Nest row's right end (more wrap to their own
   line); Session list mode expands only the active Nest. Both modes and the
@@ -36,6 +40,16 @@ Style changes still ship separately from behavior changes.
   dot instead of a glyph, one action per row.
 - **Per-pane header** (agent icon, name, state) on tiled sessions only; a lone
   pane has none. The drawer ends with a branch footer (change counts later).
+- **Session list correction:** one full-row selection, including the sibling
+  close action; no selected parent card around selected child rows. Titles
+  truncate, parents stay quiet, close reveals on hover or focus-within and
+  stays available on touch. Applies to grouped, flat and Scratchpad lists.
+  This follows familiar conversation-list hierarchy (T3 Code's thread rows,
+  ChatGPT/Claude), without copying their additional data model or features.
+- **Browser toolbar matches v4:** 43px toolbar, 28px inset address field,
+  consistent SVG chevrons/reload and external-link icon, no divider. The
+  address uses a neutral globe rather than claiming verified security. The
+  mock's bookmark star is omitted until bookmarks exist; no dead controls.
 
 ## 2026-10-24 — Soft separation desktop shell
 
@@ -64,7 +78,8 @@ synthetic study (not code). Desktop only; the phone layout is unchanged.
 - **Needs You moves to the status bar.** A fixed 124px slot at its right end
   (bell, "Needs You", count or unread dot); the panel opens upward. Path, branch
   and usage truncate before the slot. The top row no longer carries a bell.
-  Shortcut, Welcome Back and semantics are unchanged. The status bar is 34px.
+  Shortcut, Welcome Back and semantics are unchanged. Initially 34px high;
+  corrected to the v4 study's 26px in the follow-up above.
 - **No "perch" wordmark** beside the sidebar toggle. The drawer's header column
   is exactly the drawer's width. The sidebar has no duplicate bottom Add action
   to remove.

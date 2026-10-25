@@ -766,7 +766,7 @@ Roving focus for tabs; selected and focused are separate. Tree semantics for the
 
 **“What requires me right now?”** Not “What are all my agents doing?”
 
-The control (the status bar's right slot on desktop since 2026-10-24; the phone header otherwise) opens a compact anchored panel, about 380–440px wide. At zero there is no count; the action remains in Cmd-K/app menu. The panel has **Needs You** and a collapsed **Recent updates** section—not a kanban board.
+The control (left of usage in the desktop status bar's right cluster; the phone header otherwise) opens a compact anchored panel, about 380–440px wide. At zero there is no count; the action remains in Cmd-K/app menu. The panel has **Needs You** and a collapsed **Recent updates** section—not a kanban board.
 
 ### Event admission
 
