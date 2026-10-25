@@ -4,6 +4,7 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "../st
 import { NewSessionPopover } from "../Sidebar";
 import { useTabOrderVersion } from "../tabOrder";
 import { isBlankBrowser, openBlankBrowser, useFileTabs, type FileTab } from "../fileTabs";
+import { AgentIcon } from "./AgentIcon";
 import { FileEntryMenu } from "./FileEntryMenu";
 import { activateTab, sessionLabel, tabName, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
@@ -21,12 +22,12 @@ import { requestCloseSession } from "../closeGuard";
 // overlay-1 in every theme (themes.test.ts). The palettes set the absolute level.
 // The strip scrolls (overflow-x-auto), which clips outlines, so focus rings sit inside (-2px).
 const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-2px]";
-const TAB = `min-w-0 flex-1 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
+const TAB = `min-w-0 flex-1 gap-2 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
 // Small gutters inset each tab from its neighbors and the strip edge, like a browser tab bar.
 const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0 items-stretch";
 // "square" is the shell's soft corner (--radius-pane), not a literal square.
 const TAB_SHAPE = (shape: "square" | "round") => shape === "round" ? "rounded-full" : "rounded-ui";
-const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
+const CLOSE = `absolute top-1/2 right-[0.25rem] grid h-[1.25rem] w-[1.25rem] cursor-pointer place-items-center rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
 // The focused tab is filled, so its x hovers on panel-bg: fg is drawn against it in every theme
 // (overlay-0 is fg-coloured in the terminal theme and hid the x).
 const closeButton = (state: TabPaneState) => cn(CLOSE, state === "focused" ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
@@ -70,6 +71,7 @@ export function TabBar() {
   const fileTabs = useFileTabs((s) => s.tabs);
   const activeFile = useFileTabs((s) => s.active);
   const tabShape = usePerchStore((s) => s.settings?.tabShape === "round" ? "round" : "square");
+  const cliAgentBySession = usePerchStore((s) => s.cliAgentBySession);
 
   const [popoverAnchor, setPopoverAnchor] = useState<DOMRect | null>(null);
   // The "+" menu's New file: the explorer's name prompt, creating in the workspace root.
@@ -182,6 +184,9 @@ export function TabBar() {
             setRenameValue(s.title || "");
           }}
         >
+          <span className="shrink-0 opacity-80" aria-hidden="true">
+            <AgentIcon provider={s.currentProviderId ?? cliAgentBySession[s.id] ?? s.cliProviderId ?? s.lastAgent} size={14} />
+          </span>
           <span className="truncate">{sessionLabel(s)}</span>
         </button>
         {/* Like closing a tab in Orca: the session, its agent and its shells
@@ -194,7 +199,7 @@ export function TabBar() {
           aria-label={`Close ${sessionLabel(s)}`}
           onClick={() => requestCloseSession(s.id)}
         >
-          ×
+          <CloseIcon />
         </button>
         </span>
       )
@@ -202,7 +207,7 @@ export function TabBar() {
   }
 
   return (
-    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto bg-panel-bg px-2 py-1 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
+    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto px-2 py-[6px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry) => entry.kind === "resource" ? (
         <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} state={paneStates.get(entry.id) ?? "hidden"} tabShape={tabShape}
           dragging={entry.id === draggingId} />
@@ -216,7 +221,7 @@ export function TabBar() {
         aria-label="New session in this workspace"
         onClick={handleNewClick}
       >
-        {"+"}
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="M6 2v8M2 6h8" /></svg>
       </button>
       {splitMenu && <TabSplitMenu entries={entries} menu={splitMenu} />}
       <TabDragLayer />
@@ -255,6 +260,8 @@ export function TabBar() {
 const ICON = { viewBox: "0 0 16 16", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 const BrowserIcon = () => <svg {...ICON}><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" /></svg>;
 const FileIcon = () => <svg {...ICON}><path d="M9 2H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5.5zM9 2v3.5h3.5" /></svg>;
+const ReviewIcon = () => <svg {...ICON}><circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="3" r="1.5" /><path d="M4 4.5v7M4 9h4a4 4 0 0 0 4-4v-.5" /></svg>;
+const CloseIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m2 2 6 6m0-6-6 6" /></svg>;
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
 function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
@@ -298,6 +305,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
           useSplitSets.getState().openMenu(id, e.clientX, e.clientY);
         }}
       >
+        <span className="shrink-0 opacity-80" aria-hidden="true">{browser ? <BrowserIcon /> : review ? <ReviewIcon /> : <FileIcon />}</span>
         <span className={cn("block truncate", tab.preview && "italic")}>{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>
@@ -308,7 +316,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
         aria-label={`Close ${name}`}
         onClick={() => close(id)}
       >
-        ×
+        <CloseIcon />
       </button>
     </span>
   );

@@ -45,13 +45,21 @@
   --radius-pane: 8px;
   /* Native checkboxes/radios follow the theme, not the browser's blue. */
   accent-color: var(--accent);
-  /* herdr is a terminal app — the whole UI reads as a TUI, so the base font
-   * is a monospace stack rather than the system sans-serif perch used
-   * before. Falls through to the platform's default monospace if none of
-   * the named faces are installed. */
+  /* Chrome (tabs, sidebar, drawer, status bar, menus) is the platform's system
+   * UI face (owner decision 2026-10-24, docs/DECISIONS.md). Monospace is for
+   * content that is code or data: terminals (xtermSetup.ts, the server's
+   * profile), the editor, diffs, key caps and `code`/`pre`. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
+  font-family: var(--font-ui);
+}
+
+code,
+pre,
+kbd,
+samp {
   font-family: var(--font-mono);
 }
 
@@ -100,8 +108,20 @@ html {
   overscroll-behavior: none;
 }
 
+/* The shell's one background layer. The macOS app sets `data-glass` (main.tsx, from the
+ * desktop shell's `__PERCH_GLASS__`) when the window has vibrancy behind it; then this layer
+ * is a translucent mix of the theme's own --panel-bg. Everything that sits on the shell (title
+ * row, tabs, sidebar, drawer, status bar) is transparent, so the alpha is applied exactly once.
+ * Panes, menus, dialogs and the terminal stay opaque. Without `data-glass` it is plain --panel-bg. */
+html {
+  --shell-bg: var(--panel-bg);
+}
+html[data-glass] {
+  --shell-bg: color-mix(in srgb, var(--panel-bg) 86%, transparent);
+}
+
 body {
-  background: var(--panel-bg);
+  background: var(--shell-bg);
   color: var(--text);
   /* Terminal-dense line spacing instead of prose-comfortable 1.5+. */
   line-height: 1.3;

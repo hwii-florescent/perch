@@ -5,16 +5,19 @@ import { ChatView } from "../views/Chat";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
-import { acquirePassthrough, nativeBrowser } from "../browserNative";
+import { acquirePassthrough } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { AgentIcon } from "./AgentIcon";
+import { DOT_GLYPH, sessionDotState, type AgentDotState } from "../statusDot";
 import { useTabOrderVersion } from "../tabOrder";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
 const STEP = 0.02;
+const STATE_WORD: Record<AgentDotState, string> = { blocked: "Waiting for you", working: "Working", done: "Done", idle: "Idle", unknown: "" };
 
 /**
  * The canvas under the one tab strip. Normally the session's Dockview fills it
@@ -33,8 +36,8 @@ const STEP = 0.02;
  * neighbours are separated by a strip of shell and the sash sits in that strip.
  * A pane's content (a terminal fitting its box) follows the gapped rect.
  * A native browser page is a child webview above the DOM (`browser.rs`): CSS
- * cannot round or clip it, so a native browser pane is rounded at the top (its
- * toolbar) and square at the bottom (the page), matching what is on screen.
+ * cannot round or clip it, so the desktop app rounds its layer itself
+ * (`glass.rs`, `round_webview`).
  *
  * The Dockview stays mounted at one place in the tree (a terminal must never
  * be rebuilt for a layout change); it is only resized, and only while its
@@ -53,6 +56,7 @@ export function SplitCanvas() {
   const resize = useSplitSets((s) => s.resize);
   const zoomedId = useSplitSets((s) => s.zoomedId);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const cliAgentBySession = usePerchStore((s) => s.cliAgentBySession);
   const shownWorkspaceId = usePerchStore((s) => effectiveWorkspace(s)?.id ?? null);
   const hostRef = useRef<HTMLDivElement>(null);
   // A saved drag order changes the panes' order: re-render for it.
@@ -238,6 +242,15 @@ export function SplitCanvas() {
           onMouseDownCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
           onFocusCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
         >
+          {/* Only a shared canvas has pane headers; a lone pane has none. The tile controls sit over the right end. */}
+          <div className="flex h-[30px] shrink-0 items-center gap-2 pr-[4.5rem] pl-3 text-[0.68rem] text-subtext-0" data-testid={`pane-header-${entry.id}`}>
+            <AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId ?? entry.session.lastAgent} size={12} />
+            <span className="min-w-0 truncate">{entryLabel(entry)}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-[0.35rem]">
+              <span className="size-[5px] rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
+              {STATE_WORD[sessionDotState(entry.session)]}
+            </span>
+          </div>
           <ChatView sessionId={entry.id} />
           {focusBar(entry.id === activeId)}
         </div>
@@ -246,7 +259,7 @@ export function SplitCanvas() {
         <div
           key={id}
           // Files, reviews and browsers read as panes against the shell: inside, panel-bg is surface-dim.
-          className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0", tab.kind === "browser" && nativeBrowser && "rounded-b-none")}
+          className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0")}
           style={slot(id)}
           data-pane-id={id}
           data-pane-visible={tileVisible(id)}

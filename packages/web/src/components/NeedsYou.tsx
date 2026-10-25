@@ -21,15 +21,17 @@ import {
 } from "../attention";
 import { sessionLabel } from "../workspaceTabs";
 
-const ROW = "grid gap-0.5 rounded-ui px-2 py-1.5 hover:bg-surface-0";
+// Rows are quiet filled blocks, not hairline-separated list items (2026-10-24 soft separation).
+const ROW = "grid gap-1 rounded-ui bg-[color-mix(in_srgb,var(--text)_5%,transparent)] px-3 py-2.5";
 // 44px touch targets on the phone (AGENTS.md).
 const LINK = cn(GHOST_BUTTON, "px-1.5 py-0.5 text-[0.75rem] max-[700px]:min-h-11 max-[700px]:px-3");
-const FINISHED = { glyph: "✓", color: "var(--subtext-0)", label: "Finished" };
+// The kind is a tinted dot plus its label (also the accessible name), not a glyph.
+const FINISHED = { color: "var(--subtext-0)", label: "Finished" };
 const GLYPH: Record<string, typeof FINISHED> = {
-  question: { glyph: "?", color: "var(--yellow)", label: "Waiting for you" },
-  failed: { glyph: "!", color: "var(--red)", label: "Failed" },
+  question: { color: "var(--yellow)", label: "Waiting for you" },
+  failed: { color: "var(--red)", label: "Failed" },
   finished: FINISHED,
-  exited: { glyph: "■", color: "var(--subtext-0)", label: "Exited" },
+  exited: { color: "var(--subtext-0)", label: "Exited" },
 };
 
 function Row({ event, now }: { event: AttentionEvent; now: number }) {
@@ -43,7 +45,7 @@ function Row({ event, now }: { event: AttentionEvent; now: number }) {
   return (
     <li className={ROW} data-testid={`attention-row-${event.kind}`} data-session={event.sessionId}>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="w-3 shrink-0 text-center text-[0.8rem] font-semibold" style={{ color: glyph.color }} aria-label={glyph.label} role="img">{glyph.glyph}</span>
+        <span className="size-[7px] shrink-0 rounded-full" style={{ background: glyph.color }} aria-label={glyph.label} role="img" />
         <span className="shrink-0 text-subtext-0"><AgentIcon provider={event.agentId || undefined} size={13} /></span>
         <span className="min-w-0 truncate text-[0.82rem] text-fg">{reasonLabel(event)}</span>
         <span className="ml-auto shrink-0 text-[0.72rem] text-subtext-0" title={new Date(event.occurredAt).toLocaleString()}>{ago(event.occurredAt, now)}</span>
@@ -72,7 +74,7 @@ function Row({ event, now }: { event: AttentionEvent; now: number }) {
       ) : null}
       <div className="flex items-center gap-1 pl-4">
         {session && (
-          <button type="button" className={cn(LINK, "text-fg")} data-testid="attention-open" onClick={() => openAttention(event)}>
+          <button type="button" className={cn(LINK, "bg-surface-1 font-semibold text-fg")} data-testid="attention-open" onClick={() => openAttention(event)}>
             {event.kind === "question" ? "Answer" : "Open"}
           </button>
         )}
@@ -138,7 +140,7 @@ function Panel({ anchor, onClose, above }: { anchor: HTMLElement | null; onClose
   return createPortal(
     <div
       ref={panel}
-      className={cn(menuPanel, "fixed z-[2050] flex max-h-[min(70vh,36rem)] flex-col px-1.5 py-1.5")}
+      className={cn(menuPanel, "fixed z-[2050] flex max-h-[min(70vh,36rem)] flex-col rounded-xl p-2 shadow-[0_18px_38px_-14px_rgba(0,0,0,0.55)]")}
       style={style}
       role="dialog"
       aria-label={welcome ? "Welcome back" : "Needs You"}
@@ -150,19 +152,19 @@ function Panel({ anchor, onClose, above }: { anchor: HTMLElement | null; onClose
           <div className="text-[0.78rem] text-subtext-0">{line ?? "Nothing finished while you were away."}</div>
         </div>
       )}
-      <div className="flex items-center px-2 pb-1">
-        <span className="text-[0.78rem] font-semibold text-fg">Needs You</span>
-        {actionable.length > 0 && <span className="ml-1.5 text-[0.75rem] text-subtext-0">{actionable.length}</span>}
+      <div className="flex h-8 items-center px-2">
+        <span className="text-[0.8rem] font-semibold text-fg">Needs You</span>
+        {actionable.length > 0 && <span className="ml-2 grid h-[18px] min-w-[18px] place-items-center rounded-[6px] bg-surface-1 px-1 text-[0.68rem] text-fg tabular-nums">{actionable.length}</span>}
       </div>
       <div className="min-h-0 overflow-y-auto">
         {actionable.length ? (
-          <ul className="m-0 grid list-none gap-0.5 p-0" data-testid="needs-you-list">
+          <ul className="m-0 grid list-none gap-1 p-0" data-testid="needs-you-list">
             {actionable.map((event) => <Row key={event.id} event={event} now={now} />)}
           </ul>
         ) : (
           <p className="m-0 px-2 pb-2 text-[0.78rem] text-subtext-0" data-testid="needs-you-empty">No agent is waiting for you.</p>
         )}
-        <div className="mt-1 border-t border-t-overlay-0 pt-1">
+        <div className="mt-1">
           <div className="flex items-center">
             <button
               type="button"
@@ -182,7 +184,7 @@ function Panel({ anchor, onClose, above }: { anchor: HTMLElement | null; onClose
             )}
           </div>
           {showRecent && (recent.length ? (
-            <ul className="m-0 grid list-none gap-0.5 p-0" data-testid="recent-updates-list">
+            <ul className="m-0 grid list-none gap-1 p-0" data-testid="recent-updates-list">
               {recent.map((event) => <Row key={event.id} event={event} now={now} />)}
             </ul>
           ) : (

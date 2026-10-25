@@ -48,9 +48,13 @@ const { usePerchStore } = await import("./store");
 declare global {
   interface Window {
     usePerchStore: typeof usePerchStore;
+    /** Set by the macOS app before load when its window has vibrancy (crates/perch-desktop/src/glass.rs). */
+    __PERCH_GLASS__?: boolean;
   }
 }
 window.usePerchStore = usePerchStore;
+// Glass shell: base.css turns --shell-bg translucent. Web mode and other platforms never set it.
+if (window.__PERCH_GLASS__) document.documentElement.dataset.glass = "1";
 
 createRoot(container).render(
   <StrictMode>

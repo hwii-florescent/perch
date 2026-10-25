@@ -234,7 +234,7 @@ export default function App() {
         // and drawer widths below. In the macOS app it is also the title bar: the
         // traffic lights sit in the first column's left padding and empty space
         // drags the window (crates/perch-desktop/src/main.rs).
-        <div className={cn("box-border flex h-10 shrink-0 items-center bg-panel-bg", SOFT)} data-tauri-drag-region>
+        <div className={cn("box-border flex h-11 shrink-0 items-center", SOFT)} data-tauri-drag-region>
           <div
             className={cn(
               "box-border flex shrink-0 items-center self-stretch pr-2",

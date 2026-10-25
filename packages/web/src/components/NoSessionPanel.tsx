@@ -75,7 +75,7 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
         <p className={HINT}>Select a workspace from the sidebar to begin.</p>
         <div className="flex flex-wrap justify-center gap-[0.6rem]">
           <button type="button" className={ACTION} data-testid="home-add-project" onClick={addProject}>
-            Add project
+            Add birdhouse
           </button>
           <button
             type="button"

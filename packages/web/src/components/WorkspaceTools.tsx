@@ -79,7 +79,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
   const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
   return (
-    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col bg-panel-bg [--radius:var(--radius-pane)]" data-testid="workspace-tools" aria-label="Files, Git and Browser">
+    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-tools" aria-label="Files, Git and Browser">
       <div className="flex items-center gap-2 px-3 py-[3px]">
         <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}
@@ -107,6 +107,14 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
         {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}
         {tab === "browser" && (workspaceId ? <DrawerBrowser key={workspaceId} workspaceId={workspaceId} /> : missing)}
       </div>
+      {row?.branch && (
+        // The quiet footer of the drawer column. Change counts (+added/-removed) are not tracked client-side yet.
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2 text-[0.68rem] text-subtext-0" data-testid="workspace-tools-footer">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="3" r="1.5" /><path d="M4 4.5v7M4 9h4a4 4 0 0 0 4-4v-.5" /></svg>
+          <span className="min-w-0 truncate">{row.branch}</span>
+          {row.dirty && <span className="ml-auto shrink-0">Uncommitted changes</span>}
+        </div>
+      )}
     </aside>
   );
 }

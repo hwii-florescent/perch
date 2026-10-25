@@ -7,6 +7,36 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-25 — Glass shell, system UI font, Birdhouse/Nest/Scratchpad
+
+Owner-approved follow-up to the soft separation below, from the v3–v5 visual
+studies. Layout, glass and Needs You are desktop only; the system font and
+Birdhouse/Nest/Scratchpad copy also apply on the phone, whose layout is unchanged.
+Style changes still ship separately from behavior changes.
+
+- **System UI font for chrome.** Tabs, sidebar, status bar, panels and menus use
+  the system sans stack (`--font-ui`). Monospace stays for the terminal (server
+  profile), editor, diffs, code and keycaps. Settles the old "Chrome font" trial.
+- **Glass on macOS.** The desktop app's window is transparent with native
+  vibrancy behind one translucent shell layer (`--shell-bg`, a mix of the
+  theme's own `--panel-bg`). Panes, menus, dialogs and the terminal stay opaque.
+  Web mode and Windows/Linux keep the opaque shell with the identical layout.
+  Under Reduce Transparency macOS draws the vibrancy layer solid, so the shell is
+  effectively opaque (to confirm on a Mac). Costs the `macos-private-api`
+  Tauri feature, which Mac App Store review rejects (not a distribution channel).
+- **Native browser pages are rounded all round** (8px, WKWebView layer from Rust),
+  replacing the "square at the bottom" limit below. Unverified on a real Mac.
+- **Needs You sits left of usage** in the status bar's right cluster.
+- **Sidebar:** Nests sit inside their Birdhouse. Compact mode puts up to three
+  session chips inline at the Nest row's right end (more wrap to their own
+  line); Session list mode expands only the active Nest. Both modes and the
+  Organize menu stay. Section labels are small caps; the title row is 44px.
+- **Copy:** Birdhouse / Nest / Scratchpad (2026-10-04) now ships in the UI.
+- **Needs You panel:** quiet filled rows on the sidebar's fills, a tinted kind
+  dot instead of a glyph, one action per row.
+- **Per-pane header** (agent icon, name, state) on tiled sessions only; a lone
+  pane has none. The drawer ends with a branch footer (change counts later).
+
 ## 2026-10-24 — Soft separation desktop shell
 
 Owner-approved amendment to the 2026-10-05 layout choices below, from a
@@ -48,8 +78,8 @@ Implements UI-UX-DIRECTION §10 for the local host. Contracts are in
   failures (until the next turn), finished turns and exits (Recent updates,
   only when unwatched, coalesced). Read ≠ resolved. Certainty labelled
   (`verified` / `heuristic` / `unconfirmed`). Anchored panel from a bell (now the
-  status bar, 2026-10-24; first the top row), Welcome Back line on load or after 10 minutes hidden, Cmd/Alt+Shift+U.
-  Rows open the agent, its changed files or the workspace review.
+  status bar, 2026-10-24; first the top row), Welcome Back line on load or after
+  10 minutes hidden, Cmd/Alt+Shift+U. Rows open the agent, its changed files or the workspace review.
 - **Deferred:** relaying a remote host's events (remote hosts appear only as
   "offline" in Welcome Back), per-user read state across paired devices
   (read is server-wide today), snooze, OS-notification deep links, and
@@ -117,10 +147,7 @@ below. Naming is approved for phased adoption, not a reason to rename schemas.
 
 ### Undecided — trial first
 
-- **Chrome font.** Proposal: system-sans UI chrome. Owner wants a side-by-side
-  trial of system-sans vs a Nerd Font before choosing. Until then chrome stays
-  monospace. Decide in a separate visual trial; style changes ship separately
-  from behavior changes.
+None. (The chrome font was decided 2026-10-25: system UI sans.)
 
 ### Follow-up
 
@@ -156,14 +183,14 @@ an exhaustive description of every component or a fresh acceptance result.
 - **Layout:** soft separation (2026-10-24): no vertical rules, open shell-colored
   gutters, individually rounded panes 6px apart, no split marker in the strip
   (fills and weight show visible/focused panes), no header for a lone pane.
-  Native browser pages cannot be rounded at the bottom. Pointer-based tab
+  Native browser pages are rounded from Rust (2026-10-25). Pointer-based tab
   dragging, not HTML5 OS drag-and-drop. A new split set has at most four tabs
   on one axis; retain older saved layouts.
 - **Quiet UI:** neutral Perch theme, color for status, no accent-filled active
   panes or speculative menu actions. Shared tokens/defaults must agree across
   Rust and web. Use Tailwind v4 and shared UI primitives (UI-UX Appendix E),
-  not competing unlayered CSS on the same element. Font change still needs the
-  trial above. Settings is a page; Add project is a modal with an explicitly
+  not competing unlayered CSS on the same element. Chrome is system UI sans,
+  mono only for code (2026-10-25). Settings is a page; Add project is a modal with an explicitly
   clicked native Browse option, never an automatic OS dialog.
 - **Phone:** reuse desktop resource components; one header, active pane and
   Session/Files/Git bottom bar, with quick keys for writable terminals. No

@@ -28,13 +28,13 @@ import { useNestShortcutHints } from "../keybinds";
 const FOCUS = "focus-visible:[outline:1px_solid_var(--overlay-1)] focus-visible:[outline-offset:-1px]";
 const FONT = "[font-family:inherit] [font-size:inherit] [font-weight:inherit]";
 const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
-const SESSION = `${ROW_BTN} min-h-8 cursor-pointer gap-[0.4rem] rounded-ui bg-transparent px-[0.65rem] py-1 text-[13px] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
+const SESSION = `${ROW_BTN} min-h-8 cursor-pointer gap-[0.4rem] rounded-ui bg-transparent px-[0.65rem] py-1 text-[13px] min-[701px]:min-h-7 min-[701px]:text-[12px] hover:bg-surface-1 hover:text-fg ${FOCUS}`;
 const SESSION_TITLE = "overflow-hidden text-ellipsis whitespace-nowrap";
 const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
 const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
 const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-3 text-fg ${FOCUS}`;
-const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg";
-const WORKSPACE_TITLE = "min-w-0 overflow-hidden text-[13px] font-medium text-ellipsis whitespace-nowrap";
+const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg min-[701px]:text-[12.5px] min-[701px]:font-medium";
+const WORKSPACE_TITLE = "min-w-0 overflow-hidden text-[13px] font-medium text-ellipsis whitespace-nowrap min-[701px]:text-[12px]";
 const WORKSPACE_TREE = "workspace-tree flex flex-col gap-[2px]";
 const SPAN = "overflow-hidden text-[12px] text-ellipsis whitespace-nowrap text-subtext-0";
 const BODY = "grid min-w-0 flex-1 gap-[0.1rem]";
@@ -141,6 +141,7 @@ function readCollapsed(): string[] {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]; } catch { return []; }
 }
 
+const MAX_DOTS = 3;
 type SessionView = "compact" | "list";
 const SESSION_VIEW_KEY = "perch.sidebar.sessionView";
 function readSessionView(): SessionView {
@@ -156,10 +157,14 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   onPick: (id: string) => void;
   onMenu: (session: SessionSummary, x: number, y: number) => void;
 }) {
+  // Desktop: up to MAX_DOTS chips sit at the right end of the row (Nests inside the Birdhouse,
+  // docs/DECISIONS.md 2026-10-24). A crowded row keeps the strip on its own line under the name,
+  // like the phone, so no session is ever hidden.
+  const inline = sessions.length <= MAX_DOTS;
   return (
-    <span className="order-last w-full min-w-0 pb-1">
+    <span className={cn("order-last w-full min-w-0 pb-1", inline && "min-[701px]:order-none min-[701px]:ml-auto min-[701px]:w-auto min-[701px]:shrink-0 min-[701px]:self-center min-[701px]:pb-0")}>
     <span
-      className="mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-1 bg-transparent px-1"
+      className={cn("mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-1 bg-transparent px-1", inline && "min-[701px]:mx-0 min-[701px]:w-auto min-[701px]:items-center min-[701px]:border-0 min-[701px]:px-0")}
       data-testid="session-dots"
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
@@ -168,7 +173,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
         <button
           key={session.id}
           type="button"
-          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", session.id === activeId && "workspace-entry__session--active")}
+          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", inline && "min-[701px]:h-6 min-[701px]:w-6", session.id === activeId && "workspace-entry__session--active")}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -368,7 +373,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         onSelect: () => chooseSessionView(sessionViewStored === "compact" ? "list" : "compact"),
       }]),
       "divider",
-      { label: "Remove project", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
+      { label: "Remove birdhouse", testId: `workspace-project-remove-${project.id}`, danger: true, onSelect: () => setRemovingProject(project) },
     ];
   }
 
@@ -533,7 +538,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   );
   const listView = (
     <div className="py-[0.2rem]" data-testid="workspace-session-list">
-      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}
+      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">Nothing in the Scratchpad yet.</div>}
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
@@ -577,12 +582,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             <div className="group/ph flex items-stretch rounded-ui hover:bg-surface-1">
               <button
                 type="button"
-                className="flex min-h-8 flex-1 cursor-pointer items-center gap-[0.35rem] rounded-ui py-1 pr-[0.55rem] pl-[0.75rem] text-left text-[14px] font-semibold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg"
+                className="flex min-h-8 flex-1 cursor-pointer items-center gap-[0.35rem] rounded-ui py-1 pr-[0.55rem] pl-[0.75rem] text-left text-[14px] font-semibold text-subtext-0 [background:none] [border:0] [font-family:inherit] [line-height:inherit] hover:text-fg focus-visible:text-fg min-[701px]:pl-4 min-[701px]:text-[0.62rem] min-[701px]:tracking-[0.045em] min-[701px]:uppercase"
                 data-testid="workspace-chats-collapse"
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
               >
-                Chats
+                Scratchpad
                 <Chevron open={!chatsCollapsed} />
               </button>
               {chats.length > 0 && (
@@ -590,12 +595,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={PROJECT_ICON}
                   data-testid="workspace-chats-menu"
-                  title="Chats actions"
-                  aria-label="Chats actions"
+                  title="Scratchpad actions"
+                  aria-label="Scratchpad actions"
                   aria-haspopup="menu"
                   onClick={(event) => {
                     const rect = event.currentTarget.getBoundingClientRect();
-                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Chats actions", items: [
+                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Scratchpad actions", items: [
                       { label: "Close all chats", testId: "workspace-chats-close-all", danger: true, onSelect: () => { for (const chat of chats) deleteSession(chat.id); } },
                     ] });
                   }}
@@ -660,18 +665,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         // The phone keeps 6px; the desktop sidebar uses the shell's soft corner.
         "workspace-overview flex flex-col overflow-hidden [--radius:6px] min-[701px]:[--radius:var(--radius-pane)]",
         // compact = the phone switcher, where the panel owns the bottom edge
-        compact ? "min-h-full flex-1" : "min-h-0 flex-1 border-b border-b-overlay-0",
+        compact ? "min-h-full flex-1" : "min-h-0 flex-1 max-[700px]:border-b max-[700px]:border-b-overlay-0",
       )}
       data-testid="workspace-overview"
-      aria-label="Projects and workspaces"
+      aria-label="Birdhouses and nests"
     >
-      <div className="flex shrink-0 items-stretch justify-between gap-[0.45rem] border-b border-b-[color:color-mix(in_srgb,var(--overlay-0)_72%,transparent)] pl-[0.75rem]">
+      <div className="flex shrink-0 items-stretch justify-between gap-[0.45rem] pl-[0.75rem] min-[701px]:pr-1 min-[701px]:pl-4">
         <div className="flex min-w-0 items-center gap-[0.45rem] py-[0.55rem]">
-          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase">{organize === "list" ? "Chats" : "Projects"}</span>
-          <span className="text-[0.65rem] whitespace-nowrap text-subtext-0">
+          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase min-[701px]:text-[0.62rem] min-[701px]:font-semibold min-[701px]:tracking-[0.045em] min-[701px]:text-subtext-0">{organize === "list" ? "Sessions" : "Birdhouses"}</span>
+          <span className="text-[0.65rem] whitespace-nowrap text-subtext-0 min-[701px]:hidden">
             {organize === "list"
-              ? `${allSessions.length} chat${allSessions.length === 1 ? "" : "s"}`
-              : visibleProjects.length ? `${visibleProjects.length} project${visibleProjects.length === 1 ? "" : "s"}` : "No projects"}
+              ? `${allSessions.length} session${allSessions.length === 1 ? "" : "s"}`
+              : visibleProjects.length ? `${visibleProjects.length} birdhouse${visibleProjects.length === 1 ? "" : "s"}` : "No birdhouses"}
           </span>
         </div>
         <div className="flex shrink-0 items-stretch">
@@ -702,6 +707,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             type="button"
             className={cn(segment(), "px-[0.8rem] text-[0.68rem] font-bold text-fg min-[701px]:my-[3px] min-[701px]:mr-2 min-[701px]:rounded-ui [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
+            title="Add birdhouse"
+            aria-label="Add birdhouse"
             onClick={() => { setAddHostId(activeHostId); setAddOpen((open) => !open); }}
           >
             + Add
@@ -710,14 +717,14 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       </div>
 
       {addOpen && (
-        <Dialog title="Add project" onClose={() => setAddOpen(false)} testId="workspace-add-form">
+        <Dialog title="Add birdhouse" onClose={() => setAddOpen(false)} testId="workspace-add-form">
           <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
             <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
             <input
               className="w-full min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:border-overlay-1 focus:outline-none"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Project name"
+              placeholder="Birdhouse name"
               data-testid="workspace-project-name"
             />
           </label>
@@ -763,8 +770,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {organize === "project" && visibleProjects.length === 0 && snapshot?.state !== "loading" && (
         <div className="grid justify-items-start gap-[0.32rem] px-3 py-[1.1rem] text-[0.68rem] text-subtext-0">
           <span className="text-[1.3rem] leading-none text-accent" aria-hidden="true">＋</span>
-          <strong className="text-[0.77rem] text-fg">Register a project</strong>
-          <span>Projects keep sessions, checkouts, and files together.</span>
+          <strong className="text-[0.77rem] text-fg">Add a birdhouse</strong>
+          <span>A birdhouse keeps its nests, sessions and files together.</span>
           {!addOpen && (
             <button type="button" className="mt-[0.18rem] cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.45rem] py-[0.28rem] text-accent [font-family:inherit] hover:border-accent focus-visible:border-accent" onClick={() => setAddOpen(true)} data-testid="workspace-empty-add">
               Register folder
@@ -841,6 +848,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   onClick={onHeaderClick}
                   title={project.path}
                 >
+                  {collapsible && <Chevron open={!projectCollapsed} size={10} className="-ml-1 hidden shrink-0 text-subtext-0 min-[701px]:block" />}
                   <svg className="h-3 w-3 shrink-0 text-subtext-0" data-testid="project-folder-icon" viewBox="0 0 16 16" fill={project.favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                     <path d="M2 5V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5Z" />
                   </svg>
@@ -849,7 +857,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   </span>
                   {single?.branch && single.branch !== (project.name || basename(project.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{single.branch}</span>}
                   {single?.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
-                  {collapsible && <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0" />}
+                  {collapsible && <Chevron open={!projectCollapsed} className="shrink-0 text-subtext-0 min-[701px]:hidden" />}
                   {shortcutHint}
                 </button>
                 )}
@@ -860,8 +868,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={cn(PROJECT_ICON, shortcutHint && "invisible")}
                   data-testid={`workspace-project-menu-${project.id}`}
-                  title="Project actions"
-                  aria-label="Project actions"
+                  title="Birdhouse actions"
+                  aria-label="Birdhouse actions"
                   aria-haspopup="menu"
                   onClick={(event) => {
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -971,6 +979,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               {workspace.branch && workspace.branch !== (workspace.name || basename(workspace.path)) && <span className={cn(SPAN, "min-w-0 shrink-[3]")}>{workspace.branch}</span>}
                             </span>
                             {workspace.dirty && <span className={DOT} title="Uncommitted changes" aria-label="Uncommitted changes">●</span>}
+                            {/* A collapsed nest keeps only its session count; the active one lists them below. */}
+                            {sessionView === "list" && !workspaceActive && !compact && workspaceSessions.length > 0 && (
+                              <span className="shrink-0 text-[0.62rem] text-subtext-0 tabular-nums" data-testid={`workspace-session-count-${workspace.id}`} title={`${workspaceSessions.length} sessions`}>{workspaceSessions.length}</span>
+                            )}
                             {nestHint(workspace.id)}
                             {/* Only what needs attention; "ready" is the norm. */}
                             {(workspace.pinned || workspace.state === "sleeping") && (
@@ -993,7 +1005,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               Restore
                             </button>
                           )}
-                          {sessionView === "list" && workspaceSessions.length > 0 && sessionRows(tabOrderedSessions(workspace))}
+                          {sessionView === "list" && workspaceSessions.length > 0 && (workspaceActive || compact) && sessionRows(tabOrderedSessions(workspace))}
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>

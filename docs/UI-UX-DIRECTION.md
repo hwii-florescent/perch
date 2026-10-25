@@ -1162,8 +1162,7 @@ proof that a deviation is still present; update affected contracts with changes.
 | D9 | The Files tree does not scroll. | Bug against §7 (lazy-loaded tree). | The tree is the scroll container (`min-h-0` + `overflow-y-auto`). |
 | D10 | Files tree styling. | New. | VS Code explorer: 22px rows, chevrons, indent guides, quiet file-type icons, selection fill, no per-row borders. |
 
-Not done here: the system-sans chrome font is still undecided (DECISIONS.md,
-"Undecided — trial first").
+Chrome font: decided 2026-10-25 (system UI sans, mono for code only; DECISIONS.md).
 
 ---
 

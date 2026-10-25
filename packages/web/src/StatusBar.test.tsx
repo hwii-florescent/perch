@@ -88,13 +88,15 @@ const question = (id: string): AttentionEvent => ({
 });
 const finishedUnread: AttentionEvent = { ...question("done"), kind: "finished", requiresAction: false };
 
-it("keeps Needs You in a fixed, non-shrinking slot at the right end of the bar, with its count", () => {
+it("keeps Needs You in a fixed, non-shrinking slot just left of the usage summary, with its count", () => {
   useAttention.setState({ supported: true, events: [question("a"), question("b")] });
   render(<StatusBar />);
   const toggle = get("needs-you-toggle");
   const footer = toggle.closest("footer")!;
   expect(footer.className).toContain("status-bar");
-  expect(footer.lastElementChild).toBe(toggle);
+  // Needs You, then usage at the right end.
+  expect(toggle.nextElementSibling).toBe(get("usage-summary").parentElement);
+  expect(footer.lastElementChild).toBe(toggle.nextElementSibling);
   expect(toggle.className).toContain("shrink-0");
   expect(toggle.className).toContain("w-[7.75rem]");
   expect(toggle.textContent).toContain("Needs You");

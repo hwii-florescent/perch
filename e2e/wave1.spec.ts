@@ -126,7 +126,7 @@ test.describe("Wave 1 functionality gaps", () => {
     // No folder browser: a session never starts in a folder perch wasn't given.
     await expect(page.locator('[data-testid="dir-browser"]')).toHaveCount(0);
     const chats = page.locator('[data-testid="project-option-none"]');
-    await expect(chats).toContainText("Chats");
+    await expect(chats).toContainText("Scratchpad");
 
     // The popover closes synchronously (before the session.create round-trip
     // resolves), so poll localStorage rather than reading it right away.

@@ -213,7 +213,7 @@ export function CliStartPanel({ agent }: { agent: string }) {
           disabled={!selectedAvailable}
           onClick={() => createSessionOnHost(activeHostId, "~", selectedAgent)}
         >
-          No project (Chats)
+          No birdhouse (Scratchpad)
         </button>
       </div>
     </div>

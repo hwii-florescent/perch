@@ -207,9 +207,10 @@ export function StatusBar() {
       : undefined);
 
   return (
-    // Same shell color as the canvas surround, no rule. The Needs You slot at the right end is
-    // fixed-width and never shrinks; every text field before it clips or ellipsizes instead.
-    <footer className="status-bar box-border flex h-[34px] shrink-0 items-center gap-3 overflow-hidden bg-panel-bg px-3 text-[0.78rem] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
+    // Same shell color as the canvas surround, no rule. Left to right: connection, path, branch and
+    // session numbers, then Needs You, then plan usage (docs/DECISIONS.md 2026-10-24). The Needs You slot
+    // is fixed-width and never shrinks; the path, branch and usage clip or ellipsize instead.
+    <footer className="status-bar box-border flex h-[34px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[0.78rem] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
       <span
         className={cn("size-2 shrink-0 rounded-[50%]", connected ? "bg-accent" : "bg-red")}
         title={connected ? "connected" : "reconnecting..."}
@@ -218,10 +219,7 @@ export function StatusBar() {
       <span className="status-item--cwd min-w-0 flex-1 basis-0 overflow-hidden text-ellipsis" title={status?.cwd}>
         {status?.cwd ?? "-"}
       </span>
-      <div className="status-bar__usage min-w-0 max-w-[38%] shrink overflow-hidden">
-        <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
-      </div>
-      <div className="status-bar__details flex min-w-0 flex-1 basis-0 items-center justify-end gap-3 overflow-hidden">
+      <div className="status-bar__details flex min-w-0 max-w-[40%] shrink-[2] items-center justify-end gap-3 overflow-hidden">
         {zoom !== 1 && (
           <button type="button" data-testid="zoom-indicator" className={cn(GHOST_BUTTON, "px-1 tabular-nums text-fg")} title={`Zoom ${Math.round(zoom * 100)}%. Click to reset (${formatCombo(IS_MAC ? "cmd+0" : "ctrl+0")})`} onClick={zoomReset}>
             {Math.round(zoom * 100)}%
@@ -232,6 +230,9 @@ export function StatusBar() {
         {status?.costUsd !== undefined && <span className="shrink-0">${status.costUsd.toFixed(3)}</span>}
       </div>
       <NeedsYouButton variant="status" className="inline-flex h-6 w-[7.75rem] shrink-0 cursor-pointer items-center justify-center gap-[0.45rem] rounded-ui bg-surface-0 px-2 text-[0.72rem] text-fg [border:0] [font-family:inherit] hover:bg-surface-1" />
+      <div className="status-bar__usage min-w-0 max-w-[38%] shrink overflow-hidden">
+        <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
+      </div>
     </footer>
   );
 }

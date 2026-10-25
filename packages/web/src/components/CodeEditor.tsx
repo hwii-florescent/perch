@@ -63,7 +63,7 @@ const LINE_HEIGHT = IS_MAC ? "1.5" : "1.35";
 const theme = EditorView.theme({
   "&": { height: "100%", color: "var(--text)", backgroundColor: "transparent", fontSize: `calc(${FONT_PX}px * var(--zoom, 1))` },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: LINE_HEIGHT, overflow: "auto" },
+  ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: LINE_HEIGHT, overflow: "auto" },
   ".cm-content": { caretColor: "var(--text)", padding: "0.7rem 0 1rem" },
   ".cm-line": { padding: "0 0.75rem" },
   "&.cm-editor .cm-cursor": { borderLeftColor: "var(--text)" },

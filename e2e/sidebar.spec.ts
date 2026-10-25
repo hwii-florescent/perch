@@ -171,9 +171,8 @@ test.describe("Perch sidebar", () => {
       const ring = tree.locator(".agent-status-dot");
       await expect(ring).toHaveAttribute("data-provider", "terminal");
       await expect(ring.locator("svg")).toBeVisible();
-      // Navigation rows balance the session strip, without shrinking its hit targets.
-      await expect(project.locator('[data-testid^="project-toggle-"] strong')).toHaveCSS("font-size", "14px");
-      await expect(tree.locator("strong")).toHaveCSS("font-size", "13px");
+      // Desktop (soft separation, docs/DECISIONS.md 2026-10-24): Nests sit inside the Birdhouse and
+      // their session chips sit inline at the row's right end, 24px targets, no bordered bar.
       await expect(tree).toHaveCSS("border-radius", "8px");
       await expect(tree.getByTestId("workspace-checkout-icon")).toBeVisible();
       await expect(tree.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(3);
@@ -185,34 +184,24 @@ test.describe("Perch sidebar", () => {
       await expect(ring).toHaveCSS("width", "18px");
       await expect(ring).toHaveCSS("height", "18px");
       const target = tree.getByTestId(/^workspace-session-/);
-      await expect(target).toHaveCSS("width", "32px");
-      await expect(target).toHaveCSS("height", "32px");
+      await expect(target).toHaveCSS("width", "24px");
+      await expect(target).toHaveCSS("height", "24px");
       const nameRow = tree.locator(".workspace-entry__button");
-      expect((await nameRow.boundingBox())!.height).toBeGreaterThanOrEqual(32);
+      expect((await nameRow.boundingBox())!.height).toBeGreaterThanOrEqual(28);
       const strip = tree.getByTestId("session-dots");
-      await expect(strip).toHaveCSS("border-top-color", "rgb(122, 122, 122)");
-      await expect(strip).toHaveCSS("border-radius", "6px");
-      // Selection still covers the strip's gutter, not just the name row.
-      await expect(tree).toHaveCSS("background-color", "rgb(51, 51, 51)");
+      await expect(strip).toHaveCSS("border-top-width", "0px");
+      // The chips share the name's row, at its right end.
+      const [rowBox, stripBox] = await Promise.all([nameRow.boundingBox(), strip.boundingBox()]);
+      expect(stripBox!.y).toBeGreaterThanOrEqual(rowBox!.y - 1);
+      expect(stripBox!.y + stripBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
       const name = main.locator("strong");
       const branch = main.locator("span").filter({ hasText: /^main$/ }).last();
       const [nameBox, branchBox] = await Promise.all([name.boundingBox(), branch.boundingBox()]);
-      const projectName = await project.locator('[data-testid^="project-toggle-"] strong').boundingBox();
-      expect(Math.abs(nameBox!.x - projectName!.x)).toBeLessThanOrEqual(1);
       expect(branchBox!.x).toBeGreaterThan(nameBox!.x);
       expect(Math.abs(branchBox!.y - nameBox!.y)).toBeLessThan(8);
-      // The centered session bar is a separate target; its border/blank space
-      // does not navigate. The gutter alongside it still selects the workspace.
+      // Clicking a row selects its workspace; a chip switches to its session.
       const treeSession = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-      const bar = main.getByTestId("session-dots");
-      await bar.click({ position: { x: 120, y: 16 } });
-      await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
-      await bar.click({ position: { x: 1, y: 1 } });
-      await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
-      const [mainBox, barBox] = await Promise.all([main.boundingBox(), bar.boundingBox()]);
-      expect(barBox!.width / mainBox!.width).toBeCloseTo(0.85, 1);
-      expect(barBox!.x - mainBox!.x).toBeCloseTo((mainBox!.width - barBox!.width) / 2, 0);
-      await main.click({ position: { x: 2, y: barBox!.y - mainBox!.y + 16 } });
+      await main.click({ position: { x: 2, y: 8 } });
       await expect(page.getByTestId(`tab-${mainSession}`)).toHaveClass(/tab-bar__tab--active/);
       await page.getByTestId(`workspace-session-${treeSession}`).click();
       await expect(page.getByTestId(`tab-${treeSession}`)).toHaveClass(/tab-bar__tab--active/);
@@ -233,12 +222,10 @@ test.describe("Perch sidebar", () => {
       const mobileSession = page.getByTestId(`workspace-session-${treeSession}`);
       await expect(mobileSession).toBeVisible();
       const mobileTree = page.locator(".workspace-entry").filter({ has: mobileSession });
-      const actions = mobileTree.getByTestId(/^workspace-pin-/).locator("..");
+      // The phone keeps the session strip on its own line under the name.
       const headerBox = await mobileTree.locator(".workspace-entry__button").boundingBox();
-      const actionsBox = await actions.boundingBox();
       const sessionBox = await mobileSession.boundingBox();
-      expect(actionsBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
-      expect(sessionBox!.y).toBeGreaterThanOrEqual(actionsBox!.y + actionsBox!.height);
+      expect(sessionBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
       await page.screenshot({ path: testInfo.outputPath("worktree-harness-rings-mobile.png") });
     } finally {
       fs.rmSync(fixture, { recursive: true, force: true });

@@ -35,8 +35,8 @@ export interface SplitSet {
 export const MAX_SPLIT = 4;
 /** Space between neighbouring panes: a strip of the shell, so each pane's corners stay round. */
 export const PANE_GAP_PX = 6;
-/** A dragged divider never leaves a pane narrower than this (shared edges, before `gapped`): at least
- * 48px of it stays visible, barely visible, still grabbable. */
+/** A dragged divider never leaves a pane narrower than this (measured on shared edges, before `gapped`),
+ * so at least 48px of it stays visible: barely visible, still grabbable. */
 export const MIN_PANE_PX = 48 + PANE_GAP_PX;
 
 const equal = (n: number) => Array.from({ length: n }, () => 1 / n);
@@ -250,7 +250,7 @@ export function layout(tree: SplitNode, rect: Rect, options: { round?: boolean; 
 
 /** `r` with `gap / 2` taken off each side that borders another pane rather than the edge of `box`,
  * so two neighbours sharing an edge end up `gap` apart. A pane at the canvas edge stays flush with it. */
-export function gapped(r: Rect, box: { width: number; height: number }, gap: number = PANE_GAP_PX): Rect {
+export function gapped(r: Rect, box: { width: number; height: number }, gap = PANE_GAP_PX): Rect {
   const half = gap / 2;
   const left = r.x > 0.5 ? half : 0;
   const top = r.y > 0.5 ? half : 0;

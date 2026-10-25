@@ -45,6 +45,7 @@ import { CATALOG_ACTION } from "./components/ui/settings";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
+import { formatCombo } from "./keyCombo";
 import { ICON_BUTTON } from "./components/ui/icon-button";
 import { segment } from "./components/ui/segment";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
@@ -723,8 +724,8 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
         data-testid="project-option-none"
         onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
-        No project
-        <span className={POPOVER_PICK_CWD}>Chats</span>
+        No birdhouse
+        <span className={POPOVER_PICK_CWD}>Scratchpad</span>
       </button>
       </>}
     </div>,
@@ -845,12 +846,13 @@ export function Sidebar() {
         <div className="flex shrink-0 flex-col items-stretch px-2">
           <button
             type="button"
-            className={cn(segment(), "w-full shrink-0 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg")}
+            className={cn(segment(), "w-full shrink-0 gap-2 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg min-[701px]:px-3 min-[701px]:font-medium")}
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
           >
             + New session
+            <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("mod+t")}</span>
           </button>
         </div>
 
@@ -861,7 +863,7 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="flex shrink-0 items-stretch border-t border-t-overlay-0 p-1">
+      <div className="flex shrink-0 items-stretch p-1">
         <button
           type="button"
           className={cn(segment(), "w-full justify-end rounded-ui px-[0.9rem] py-[0.4rem] text-[1.1rem] leading-none")}
