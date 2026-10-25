@@ -7,6 +7,7 @@ import { isBlankBrowser, openBlankBrowser, useFileTabs, type FileTab } from "../
 import { FileEntryMenu } from "./FileEntryMenu";
 import { activateTab, sessionLabel, tabName, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
+import { TAB_PANE_CLASS, tabPaneStates, type TabPaneState } from "../tabPaneState";
 import { beginTabDrag, useTabDrag } from "../tabDrag";
 import { TabDragLayer } from "./TabDragLayer";
 import { TabSplitMenu } from "./TabSplitMenu";
@@ -23,13 +24,12 @@ const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[ou
 const TAB = `min-w-0 flex-1 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
 // Small gutters inset each tab from its neighbors and the strip edge, like a browser tab bar.
 const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0 items-stretch";
-const TAB_SHAPE = (shape: "square" | "round") => shape === "round" ? "rounded-full" : "rounded-none";
-// Members of a split set (shown side by side in the canvas) share a bottom rule.
-const TAB_SPLIT = "shadow-[inset_0_-2px_0_var(--overlay-1)]";
+// "square" is the shell's soft corner (--radius-pane), not a literal square.
+const TAB_SHAPE = (shape: "square" | "round") => shape === "round" ? "rounded-full" : "rounded-ui";
 const CLOSE = `absolute top-1/2 right-[0.25rem] h-[1.25rem] w-[1.25rem] cursor-pointer rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
-// The active tab is surface-1, so its x hovers on panel-bg: fg is drawn against it in every theme
+// The focused tab is filled, so its x hovers on panel-bg: fg is drawn against it in every theme
 // (overlay-0 is fg-coloured in the terminal theme and hid the x).
-const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
+const closeButton = (state: TabPaneState) => cn(CLOSE, state === "focused" ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
 
 /**
  * Tab strip for the sessions of the *current workspace*: a project checkout
@@ -53,6 +53,10 @@ const closeButton = (active: boolean) => cn(CLOSE, active ? "text-fg hover:bg-pa
  * (`fileTabs.ts`); the active one replaces the session view in the main area.
  * Right-clicking a session tab opens its pane menu (split, zoom, stop agent),
  * since a single-pane layout shows no pane header.
+ *
+ * The strip has no split marker: the canvas shows a split, and the tabs show which
+ * panes are on screen (subdued fill) and which has focus (stronger fill, heavier
+ * text). See `tabPaneState.ts`.
  */
 export function TabBar() {
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -90,12 +94,9 @@ export function TabBar() {
   const entries = workspaceTabs(navState, fileTabs);
   const fileShown = activeFile !== null && entries.some((entry) => entry.id === activeFile);
   const sets = useSplitSets((s) => s.sets);
+  const zoomedId = useSplitSets((s) => s.zoomedId);
   const splitMenu = useSplitSets((s) => s.menu);
-  const live = new Set(entries.map((entry) => entry.id));
-  const splitIds = new Set(sets.flatMap((set) => {
-    const members = set.ids.filter((id) => live.has(id));
-    return members.length >= 2 ? members : [];
-  }));
+  const paneStates = tabPaneStates(sets, entries.map((entry) => entry.id), fileShown ? activeFile : sessionId, zoomedId);
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.select();
@@ -137,6 +138,7 @@ export function TabBar() {
 
   function sessionTab(entry: Extract<TabEntry, { kind: "session" }>) {
     const s = entry.session;
+    const state = paneStates.get(s.id) ?? "hidden";
     return (
       renamingId === s.id ? (
         <input
@@ -159,13 +161,14 @@ export function TabBar() {
           type="button"
           className={cn(
             "tab-bar__tab",
-            segment({ active: s.id === sessionId && !fileShown }),
+            segment(),
             TAB,
             TAB_SHAPE(tabShape),
-            s.id === sessionId && !fileShown && "tab-bar__tab--active",
-            splitIds.has(s.id) && TAB_SPLIT,
+            TAB_PANE_CLASS[state],
+            state === "focused" && "tab-bar__tab--active",
             s.id === draggingId && "opacity-40",
           )}
+          data-pane-state={state}
           data-testid={`tab-${s.id}`}
           title={s.title || "New session"}
           onPointerDown={(e) => beginTabDrag(e, s.id, sessionLabel(s))}
@@ -185,7 +188,7 @@ export function TabBar() {
          * end (the agent's own transcript stays on disk). */}
         <button
           type="button"
-          className={closeButton(s.id === sessionId)}
+          className={closeButton(state)}
           data-testid={`tab-close-${s.id}`}
           title="Close session"
           aria-label={`Close ${sessionLabel(s)}`}
@@ -199,9 +202,9 @@ export function TabBar() {
   }
 
   return (
-    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-[2px] self-stretch overflow-x-auto bg-panel-bg px-[3px] py-[3px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
+    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto bg-panel-bg px-2 py-1 max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry) => entry.kind === "resource" ? (
-        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} active={entry.id === activeFile} tabShape={tabShape} split={splitIds.has(entry.id)}
+        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} state={paneStates.get(entry.id) ?? "hidden"} tabShape={tabShape}
           dragging={entry.id === draggingId} />
       ) : sessionTab(entry))}
 
@@ -254,12 +257,11 @@ const BrowserIcon = () => <svg {...ICON}><circle cx="8" cy="8" r="6" /><path d="
 const FileIcon = () => <svg {...ICON}><path d="M9 2H4.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5.5zM9 2v3.5h3.5" /></svg>;
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
-function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
+function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
   tab: FileTab;
   id: string;
-  active: boolean;
+  state: TabPaneState;
   tabShape: "square" | "round";
-  split: boolean;
   dragging: boolean;
 }) {
   const close = useFileTabs((s) => s.close);
@@ -278,13 +280,14 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
         type="button"
         className={cn(
           "tab-bar__tab",
-          segment({ active }),
+          segment(),
           TAB,
           TAB_SHAPE(tabShape),
-          active && "tab-bar__tab--active",
-          split && TAB_SPLIT,
+          TAB_PANE_CLASS[state],
+          state === "focused" && "tab-bar__tab--active",
           dragging && "opacity-40",
         )}
+        data-pane-state={state}
         data-testid={testId}
         title={review ? "Changes" : isBlankBrowser(tab) ? "New browser" : tab.path}
         onPointerDown={(e) => beginTabDrag(e, id, name)}
@@ -300,7 +303,7 @@ function ResourceTabButton({ tab, id, active, tabShape, split, dragging }: {
       </button>
       <button
         type="button"
-        className={closeButton(active)}
+        className={closeButton(state)}
         data-testid={review ? `review-tab-close-${tab.workspaceId}` : browser ? "browser-tab-close" : `file-tab-close-${tab.path}`}
         aria-label={`Close ${name}`}
         onClick={() => close(id)}

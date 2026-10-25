@@ -8,7 +8,7 @@ import { DrawerBrowser } from "./DrawerBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 
-const BTN = "px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
+const BTN = "h-7 self-center rounded-ui px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
 /** The drawer header's action (same as the Browser section's buttons): the ghost button, filled only on hover. */
 const HEADER_ACTION = cn(GHOST_BUTTON, "shrink-0 px-2 py-1 text-[0.75rem]");
 
@@ -34,7 +34,7 @@ export function useToolsContext(requestedWorkspaceId?: string | null) {
 }
 
 /** Files / Git / Browser switch. It lives in the top row beside the drawer toggle
- * (UI-UX-DIRECTION.md D8), not inside the drawer. */
+ * (UI-UX-DIRECTION.md D8), not inside the drawer; both are 28px tall and centered on the row. */
 export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   requestedWorkspaceId?: string | null;
   tab: WorkspaceToolsTab;
@@ -44,7 +44,7 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   const shown = tab === "gitReview" && !isGit ? "files" : tab;
   return (
-    <nav className="flex items-stretch gap-[2px] self-stretch px-[3px] py-[3px]" aria-label="Files, Git and Browser">
+    <nav className="flex items-center gap-[2px]" aria-label="Files, Git and Browser">
       {tabs.map(({ id, label }) => (
         <button
           key={id}
@@ -79,7 +79,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
   const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
   return (
-    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col border-l border-l-overlay-0 bg-panel-bg" data-testid="workspace-tools" aria-label="Files, Git and Browser">
+    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col bg-panel-bg [--radius:var(--radius-pane)]" data-testid="workspace-tools" aria-label="Files, Git and Browser">
       <div className="flex items-center gap-2 px-3 py-[3px]">
         <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}

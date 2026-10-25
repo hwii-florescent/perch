@@ -230,7 +230,7 @@ Keep **horizontal tabs**. Zen's lesson is scoped work and restrained chrome, not
 - Sidebar: default 224px. Collapses completely, not to a second icon rail.
 - Drawer: default 304px for Files/Changes. Closed initially; remembers user choice.
 - Canvas: gets the space. Reviews open here rather than demanding a 760px drawer.
-- Needs You control: count only when actionable items exist; reachable through menu/Cmd-K at zero.
+- Needs You control: count only when actionable items exist; reachable through menu/Cmd-K at zero. **Amended 2026-10-24 ([DECISIONS](DECISIONS.md)):** on desktop it is a fixed slot at the right end of the status bar, not in the top row (the diagram above and §10 predate this), and the shell uses open gutters and rounded panes instead of rules.
 - When the sidebar is hidden, the brand/location control shows `Project ▾`, plus context if non-original. It opens the same location picker, not a new navigation system.
 - No permanent global status bar by default. Optional resource-local status at the bottom of the canvas; critical connection errors get an inline banner.
 
@@ -318,7 +318,7 @@ Markdown opens as a document. Edit is local to this resource. Plain source files
 └─────────────────┴─────────────────────┴───────────────────────────┘
 ```
 
-The bracket denotes a linked split set, not another tab hierarchy. Clicking either member restores the split and focuses that member. Clicking Terminal shows Terminal alone. Thin pane labels exist only while split.
+The bracket denotes a linked split set, not another tab hierarchy. Clicking either member restores the split and focuses that member. Clicking Terminal shows Terminal alone. Thin pane labels exist only while split. **Amended 2026-10-24:** the strip draws no bracket or marker; on-screen members have a subdued fill and the focused one a stronger fill with heavier text.
 
 ### G. Agent needing attention
 
@@ -766,7 +766,7 @@ Roving focus for tabs; selected and focused are separate. Tree semantics for the
 
 **“What requires me right now?”** Not “What are all my agents doing?”
 
-The top-row control opens a compact anchored panel, about 380–440px wide. At zero there is no count; the action remains in Cmd-K/app menu. The panel has **Needs You** and a collapsed **Recent updates** section—not a kanban board.
+The control (the status bar's right slot on desktop since 2026-10-24; the phone header otherwise) opens a compact anchored panel, about 380–440px wide. At zero there is no count; the action remains in Cmd-K/app menu. The panel has **Needs You** and a collapsed **Recent updates** section—not a kanban board.
 
 ### Event admission
 

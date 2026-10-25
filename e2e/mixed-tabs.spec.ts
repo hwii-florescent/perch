@@ -295,10 +295,14 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
     // The strip is still one row of the same tabs; only the content splits.
     expect(await strip(page)).toEqual([terminalTab, fileTab, reviewTab]);
     await expect(page.getByTestId("tab-bar")).toHaveCount(1);
-    // Members share a rule under their labels; the unrelated review tab has none.
-    await expect(page.getByTestId(terminalTab)).toHaveCSS("box-shadow", /inset/);
-    await expect(page.getByTestId(fileTab)).toHaveCSS("box-shadow", /inset/);
-    await expect(page.getByTestId(reviewTab)).toHaveCSS("box-shadow", "none");
+    // No split marker: members are told apart by fill (visible vs focused), the unrelated review tab is plain.
+    const paneState = (id: string) => page.getByTestId(id).getAttribute("data-pane-state");
+    await expect.poll(async () => [await paneState(terminalTab), await paneState(fileTab)].sort()).toEqual(["focused", "visible"]);
+    await expect.poll(() => paneState(reviewTab)).toBe("hidden");
+    for (const id of [terminalTab, fileTab, reviewTab]) await expect(page.getByTestId(id)).toHaveCSS("box-shadow", "none");
+    await expect(page.getByTestId(reviewTab)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(page.locator(`[data-testid="tab-bar"] [data-pane-state="focused"]`)).toHaveCSS("font-weight", "600");
+    await expect(page.locator(`[data-testid="tab-bar"] [data-pane-state="visible"]`)).toHaveCSS("font-weight", "400");
     const terminal = await box(page, session);
     const file = await box(page, readme);
     expect(terminal.x).toBeLessThan(file.x);

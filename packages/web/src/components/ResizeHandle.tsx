@@ -7,6 +7,9 @@ const STEP = 16;
  * panel's right edge (dragging right grows it: the sidebar); `edge="right"`
  * sits on the panel's left edge (dragging left grows it: the drawer).
  * `onChange` fires live while dragging; `onCommit` once when it settles.
+ *
+ * The handle is the 8px open gutter between a column and the canvas (no line at
+ * rest); a short pill shows on hover, drag and keyboard focus.
  */
 export function ResizeHandle({ value, min, max, defaultValue, edge, onChange, onCommit, label, testId }: {
   value: number;
@@ -42,7 +45,7 @@ export function ResizeHandle({ value, min, max, defaultValue, edge, onChange, on
       aria-valuemax={max}
       tabIndex={0}
       data-testid={testId}
-      className="relative z-5 mx-[-2px] my-0 flex-[0_0_5px] cursor-col-resize bg-transparent [outline:none] after:absolute after:top-0 after:bottom-0 after:left-[2px] after:w-px after:bg-transparent after:content-[''] hover:after:bg-accent active:after:bg-accent focus-visible:after:bg-accent"
+      className="relative z-5 flex-[0_0_8px] cursor-col-resize bg-transparent [outline:none] after:absolute after:inset-0 after:m-auto after:h-12 after:w-[3px] after:rounded-full after:bg-transparent after:content-[''] hover:after:bg-overlay-1 active:after:bg-accent focus-visible:after:bg-accent"
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);

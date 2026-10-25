@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinSplit, leaveSplit, MAX_SPLIT, storeSizes, visibleSplit } from "./splitSets";
+import { gapped, joinSplit, layout, leaveSplit, MAX_SPLIT, MIN_PANE_PX, PANE_GAP_PX, storeSizes, visibleSplit } from "./splitSets";
 
 const ids = (sets: { ids: string[] }[]) => sets.map((set) => set.ids);
 
@@ -68,5 +68,47 @@ describe("storeSizes", () => {
   it("keeps dragged widths for a fully visible set", () => {
     const sets = storeSizes(joinSplit([], "a", "b"), ["a", "b"], [0.3, 0.7]);
     expect(sets[0]!.sizes).toEqual([0.3, 0.7]);
+  });
+});
+
+describe("gapped", () => {
+  const box = { width: 1000, height: 600 };
+
+  it("leaves a lone pane flush with the canvas", () => {
+    expect(gapped({ x: 0, y: 0, w: 1000, h: 600 }, box)).toEqual({ x: 0, y: 0, w: 1000, h: 600 });
+  });
+
+  it("puts the gap between two side-by-side panes and keeps the outer edges flush", () => {
+    const { panes } = layout({ dir: "row", kids: ["a", "b"], sizes: [0.4, 0.6] }, { x: 0, y: 0, w: 1000, h: 600 }, { round: true });
+    const a = gapped(panes.get("a")!, box);
+    const b = gapped(panes.get("b")!, box);
+    expect(a).toEqual({ x: 0, y: 0, w: 400 - PANE_GAP_PX / 2, h: 600 });
+    expect(b.x - (a.x + a.w)).toBe(PANE_GAP_PX);
+    expect(b.x + b.w).toBe(1000);
+  });
+
+  it("gaps every inner edge of a nested layout and never a canvas edge", () => {
+    const tree = { dir: "row" as const, kids: ["a", { dir: "col" as const, kids: ["b", "c"], sizes: [0.5, 0.5] }], sizes: [0.5, 0.5] };
+    const { panes } = layout(tree, { x: 0, y: 0, w: 1000, h: 600 }, { round: true });
+    const [a, b, c] = ["a", "b", "c"].map((id) => gapped(panes.get(id)!, box));
+    expect(a!.x).toBe(0);
+    expect(a!.y).toBe(0);
+    expect(a!.y + a!.h).toBe(600);
+    expect(b!.y).toBe(0);
+    expect(b!.x + b!.w).toBe(1000);
+    expect(c!.y - (b!.y + b!.h)).toBe(PANE_GAP_PX);
+    expect(c!.y + c!.h).toBe(600);
+    expect(b!.x - (a!.x + a!.w)).toBe(PANE_GAP_PX);
+  });
+
+  it("keeps at least 48px of any pane visible at the dragged-to minimum", () => {
+    const row = { dir: "row" as const, kids: ["a", "b", "c"], sizes: [1 / 3, 1 / 3, 1 / 3] };
+    const { panes } = layout(row, { x: 0, y: 0, w: 1000, h: 600 }, { round: true });
+    const middle = { ...panes.get("b")!, w: MIN_PANE_PX };
+    expect(gapped(middle, box).w).toBeGreaterThanOrEqual(48);
+  });
+
+  it("never returns a negative size for a pane thinner than the gap", () => {
+    expect(gapped({ x: 500, y: 0, w: 2, h: 600 }, box).w).toBe(0);
   });
 });

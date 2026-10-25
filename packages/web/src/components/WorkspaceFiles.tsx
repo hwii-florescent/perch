@@ -481,7 +481,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
       <div className="flex min-h-0 min-w-0 flex-1">
         {layout !== "editor" && <aside
           className={cn(
-            "flex min-h-0 flex-col overflow-hidden bg-surface-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:[border-right:none]",
+            "flex min-h-0 flex-col overflow-hidden bg-panel-bg [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:[border-right:none]",
             "flex-[1_1_100%]",
           )}
           aria-label="Workspace file tree"

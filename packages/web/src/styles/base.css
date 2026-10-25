@@ -38,6 +38,11 @@
    * bubbles and inline code/pre blocks intentionally keep their own (larger)
    * radius since they're chat content, not TUI chrome. */
   --radius: 3px;
+  /* Soft corners for the desktop shell (tabs, sidebar rows, drawer controls,
+   * canvas panes). Those regions opt in with `[--radius:var(--radius-pane)]`
+   * so every `rounded-ui` inside follows it; panes use `rounded-soft`.
+   * Menus and dialogs outside those regions keep --radius. */
+  --radius-pane: 8px;
   /* Native checkboxes/radios follow the theme, not the browser's blue. */
   accent-color: var(--accent);
   /* herdr is a terminal app — the whole UI reads as a TUI, so the base font

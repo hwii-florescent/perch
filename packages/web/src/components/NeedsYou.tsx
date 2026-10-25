@@ -1,5 +1,7 @@
 /**
- * Needs You: the top-row control and its anchored panel (UI-UX-DIRECTION §10).
+ * Needs You: the control and its anchored panel (UI-UX-DIRECTION §10). The desktop
+ * shows it in the status bar's right slot (the panel opens upward); the phone, in its header.
+ *
  * Answers "what requires me right now?", then a collapsed Recent updates list.
  * Opened by a return (Welcome Back) it leads with what changed while you were
  * away. Facts come from the core (`attention.ts`); nothing here guesses.
@@ -89,7 +91,7 @@ function Row({ event, now }: { event: AttentionEvent; now: number }) {
   );
 }
 
-function Panel({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () => void }) {
+function Panel({ anchor, onClose, above }: { anchor: HTMLElement | null; onClose: () => void; above: boolean }) {
   const events = useAttention((s) => s.events);
   const welcome = useAttention((s) => s.welcome);
   const sessions = usePerchStore((s) => s.sessions);
@@ -125,12 +127,14 @@ function Panel({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () =>
     };
   }, [anchor, onClose]);
 
-  // Right-aligned under the bell, clamped inside the viewport (a phone's bell
-  // sits near the middle of a narrow row).
+  // Right-aligned under (or, from the status bar, over) the control, clamped inside the
+  // viewport (a phone's bell sits near the middle of a narrow row).
   const rect = anchor?.getBoundingClientRect();
   const width = Math.min(416, window.innerWidth - 16);
   const left = Math.max(8, Math.min((rect?.right ?? window.innerWidth - 8) - width, window.innerWidth - width - 8));
-  const style = { top: (rect?.bottom ?? 38) + 6, left, width };
+  const style = above
+    ? { bottom: window.innerHeight - (rect?.top ?? window.innerHeight - 38) + 6, left, width }
+    : { top: (rect?.bottom ?? 38) + 6, left, width };
   return createPortal(
     <div
       ref={panel}
@@ -191,15 +195,17 @@ function Panel({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () =>
   );
 }
 
-/** Top-row control: a count only when something needs you, a quiet dot for
- * unread updates, nothing at all when the host lacks `attention.v1`. */
-export function NeedsYouButton({ className }: { className?: string }) {
+/** A count only when something needs you, a quiet dot for unread updates, nothing at
+ * all when the host lacks `attention.v1`. `variant="status"` is the desktop status-bar slot:
+ * bell, the "Needs You" label and the count or dot, with the panel opening upward. */
+export function NeedsYouButton({ className, variant = "icon" }: { className?: string; variant?: "icon" | "status" }) {
   const supported = useAttention((s) => s.supported);
   const events = useAttention((s) => s.events);
   const open = useAttention((s) => s.open);
   const setOpen = useAttention((s) => s.setOpen);
   const button = useRef<HTMLButtonElement>(null);
   if (!supported) return null;
+  const status = variant === "status";
   const count = needsYou(events).length;
   const unread = recentUpdates(events).some((event) => !event.read);
   const label = count ? `Needs You: ${count}` : unread ? "Needs You: recent updates" : "Needs You";
@@ -208,7 +214,7 @@ export function NeedsYouButton({ className }: { className?: string }) {
       <button
         ref={button}
         type="button"
-        className={cn(className, "relative gap-1", count > 0 && "text-yellow")}
+        className={cn(className, "relative", !status && "gap-1", count > 0 && "text-yellow")}
         title={label}
         aria-label={label}
         aria-expanded={open}
@@ -219,10 +225,11 @@ export function NeedsYouButton({ className }: { className?: string }) {
           <path d="M4 6.5a4 4 0 0 1 8 0c0 3 1.3 4.2 1.5 4.5h-11C2.7 10.7 4 9.5 4 6.5Z" />
           <path d="M6.5 13a1.6 1.6 0 0 0 3 0" />
         </svg>
+        {status && <span className="min-w-0 truncate">Needs You</span>}
         {count > 0 && <span className="text-[0.75rem] font-semibold" data-testid="needs-you-count">{count}</span>}
-        {!count && unread && <span className="absolute top-[0.2rem] right-[0.3rem] size-1.5 rounded-full bg-teal" aria-hidden="true" data-testid="needs-you-unread" />}
+        {!count && unread && <span className={cn("size-1.5 rounded-full bg-teal", !status && "absolute top-[0.2rem] right-[0.3rem]")} aria-hidden="true" data-testid="needs-you-unread" />}
       </button>
-      {open && <Panel anchor={button.current} onClose={() => setOpen(false)} />}
+      {open && <Panel anchor={button.current} onClose={() => setOpen(false)} above={status} />}
     </>
   );
 }

@@ -23,7 +23,6 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
-import { NeedsYouButton } from "./components/NeedsYou";
 import "./attention";
 import "./surfaceSync";
 import "./workspaceCleanup";
@@ -32,7 +31,11 @@ const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 // The Tauri app on macOS draws its traffic lights over the web view's top row.
 const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
 // The sidebar and drawer toggles blend into the top row and fill only on hover.
-const ICON_BUTTON = "inline-flex items-center rounded-ui border border-transparent bg-transparent px-2 py-[0.2rem] text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+const ICON_BUTTON = "inline-flex size-7 shrink-0 items-center justify-center rounded-ui border border-transparent bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+// Soft corners for the desktop chrome: every `rounded-ui` inside follows --radius-pane (base.css).
+const SOFT = "[--radius:var(--radius-pane)]";
+// The open gutter between a column and the canvas is the column's resize handle (ResizeHandle.tsx).
+const GUTTER = 8;
 const toolsDefault = () => Math.min(760, Math.round(window.innerWidth * 0.46));
 
 // Per-viewer column widths (px), set by dragging the dividers.
@@ -180,7 +183,7 @@ export default function App() {
 
   const showSidebar = !isMobile && !sidebarCollapsed;
   const sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthRaw));
-  const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - MAIN_MIN);
+  const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - 2 * GUTTER - MAIN_MIN);
   const toolsWidth = Math.min(toolsMax, Math.max(TOOLS_MIN, toolsWidthRaw));
 
   // The drawer holds Files and Git, so its toggle is a right-panel glyph.
@@ -226,34 +229,38 @@ export default function App() {
       {isMobile ? (
         <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
       ) : (
-        // One row (Orca): brand + sidebar toggle above the sidebar, tabs, then
-        // the drawer toggle. In the macOS app it is also the title bar: the
-        // traffic lights sit in the brand section's left padding and empty
-        // space drags the window (crates/perch-desktop/src/main.rs).
-        <div className="box-border flex h-9 shrink-0 items-center justify-end gap-2 border-b border-b-overlay-0 bg-panel-bg pr-2" data-tauri-drag-region>
+        // One row (Orca): the sidebar toggle above the sidebar, tabs, then the
+        // drawer's header column. No rules: the column widths equal the sidebar
+        // and drawer widths below. In the macOS app it is also the title bar: the
+        // traffic lights sit in the first column's left padding and empty space
+        // drags the window (crates/perch-desktop/src/main.rs).
+        <div className={cn("box-border flex h-10 shrink-0 items-center bg-panel-bg", SOFT)} data-tauri-drag-region>
           <div
             className={cn(
-              "box-border flex shrink-0 items-center justify-between gap-2 self-stretch pr-2",
+              "box-border flex shrink-0 items-center self-stretch pr-2",
               MAC_DESKTOP ? "pl-[78px]" : "pl-3",
-              !sidebarCollapsed && "-mr-2 w-[var(--sidebar-width,240px)] border-r border-r-overlay-0",
+              !sidebarCollapsed && "w-[var(--sidebar-width,240px)]",
             )}
             data-tauri-drag-region
           >
-            <span className="text-[0.85rem] font-semibold text-subtext-0 select-none" data-tauri-drag-region>perch</span>
             {sidebarToggle}
           </div>
           <TabBar />
-          <NeedsYouButton className={ICON_BUTTON} />
-          {/* With the drawer open, its Files/Git switch heads the same column. */}
+          {/* With the drawer open, its Files/Git switch heads a column as wide as the drawer. */}
           {tools ? (
             <div
-              className="box-border flex shrink-0 items-center justify-between gap-2 self-stretch border-l border-l-overlay-0 pr-2 w-[var(--tools-width)] -mx-2"
+              className="box-border flex w-[var(--tools-width)] shrink-0 items-center justify-between gap-2 self-stretch px-2"
+              data-testid="workspace-tools-header"
               data-tauri-drag-region
             >
               <WorkspaceToolsTabs requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} />
               {terminalButton}
             </div>
-          ) : terminalButton}
+          ) : (
+            <div className="box-border flex shrink-0 items-center self-stretch pr-2 pl-1" data-testid="workspace-tools-header" data-tauri-drag-region>
+              {terminalButton}
+            </div>
+          )}
         </div>
       )}
 
@@ -272,7 +279,9 @@ export default function App() {
             onCommit={(px) => writeWidth(SIDEBAR_KEY, px)}
           />
         )}
-        <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
+        {/* The canvas floats in the shell: 8px gutters at its sides (the resize handles, or a
+            margin where a column is closed) and 6px below, so its rounded panes have room. */}
+        <main className={cn("dock-area relative flex min-h-0 min-w-0 flex-1", !isMobile && "mb-[6px]", !isMobile && !showSidebar && "ml-2", !isMobile && !tools && "mr-2")}>
           {isMobile ? (
             <MobilePaneShell
               activePane={mobilePane}

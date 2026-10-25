@@ -7,6 +7,38 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-24 — Soft separation desktop shell
+
+Owner-approved amendment to the 2026-10-05 layout choices below, from a
+synthetic study (not code). Desktop only; the phone layout is unchanged.
+
+- **Open gutters, no rules.** No full-height lines between the sidebar, canvas
+  and drawer, in the top row, or above the status bar. The canvas floats in the
+  shell color with 8px gutters at its sides (the column resize handles, or a
+  margin where a column is closed) and 6px below. Handles show a short pill only
+  on hover, drag or keyboard focus.
+- **Soft corners and separate panes.** One `--radius-pane` (8px) for tabs,
+  sidebar rows, drawer controls and canvas panes. Each pane is rounded and
+  clipped on its own; split panes are 6px apart (sash in the gap) instead of one
+  shared 1px sash. Files, reviews and browsers use `surface-dim` inside so a
+  pane reads against the shell. A pane never shrinks below 48px of visible width.
+  **Browser limit:** on desktop a browser page is a native child webview that
+  CSS cannot round or clip, so a native browser pane is rounded at the top
+  (toolbar) and square at the bottom (page). Other panes, and the web/iframe
+  browser, are rounded on all four corners. Unverified in WKWebView.
+- **No split marker in the tab strip.** The split glyph/underline is gone; the
+  layout shows the split. A tab whose pane is on screen has a subdued fill; the
+  focused pane's tab has a stronger fill **and** heavier text; hidden tabs stay
+  plain (`tabPaneState.ts`; fills mix `--text` into `--panel-bg`, readable in
+  all 19 themes).
+- **Needs You moves to the status bar.** A fixed 124px slot at its right end
+  (bell, "Needs You", count or unread dot); the panel opens upward. Path, branch
+  and usage truncate before the slot. The top row no longer carries a bell.
+  Shortcut, Welcome Back and semantics are unchanged. The status bar is 34px.
+- **No "perch" wordmark** beside the sidebar toggle. The drawer's header column
+  is exactly the drawer's width. The sidebar has no duplicate bottom Add action
+  to remove.
+
 ## 2026-10-21 — Needs You + Welcome Back (first slice)
 
 Implements UI-UX-DIRECTION §10 for the local host. Contracts are in
@@ -15,8 +47,8 @@ Implements UI-UX-DIRECTION §10 for the local host. Contracts are in
 - **Shipped:** durable `attention_events`; questions (until answered),
   failures (until the next turn), finished turns and exits (Recent updates,
   only when unwatched, coalesced). Read ≠ resolved. Certainty labelled
-  (`verified` / `heuristic` / `unconfirmed`). Top-row bell + anchored panel,
-  Welcome Back line on load or after 10 minutes hidden, Cmd/Alt+Shift+U.
+  (`verified` / `heuristic` / `unconfirmed`). Anchored panel from a bell (now the
+  status bar, 2026-10-24; first the top row), Welcome Back line on load or after 10 minutes hidden, Cmd/Alt+Shift+U.
   Rows open the agent, its changed files or the workspace review.
 - **Deferred:** relaying a remote host's events (remote hosts appear only as
   "offline" in Welcome Back), per-user read state across paired devices
@@ -29,7 +61,8 @@ Implements UI-UX-DIRECTION §10 for the local host. Contracts are in
 Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md).
 
 - **Borderless panes and tabs.** Replaces the herdr-style 1px group border in
-  `styles/dockview.css`. Splits keep one 1px sash.
+  `styles/dockview.css`. Splits keep one 1px sash (2026-10-24: now a gap between
+  rounded panes).
 - **No Refresh button** on the Projects header.
 - **Add project** is a native folder dialog on desktop for a local host, else a
   modal directory browser. Never an inline sidebar form. Replaces "`+ Add`
@@ -120,9 +153,12 @@ an exhaustive description of every component or a fresh acceptance result.
   protects a preview. Explorer arrows only move/fold, Space previews preserving
   list focus, Enter opens pinned and focuses the editor. External open uses the
   on-disk file, never silently saves a draft. Preserve this distinction.
-- **Layout:** borderless tabs/panes, sash-only split boundaries, no header for
-  a lone pane. Pointer-based tab dragging, not HTML5 OS drag-and-drop. A new
-  split set has at most four tabs on one axis; retain older saved layouts.
+- **Layout:** soft separation (2026-10-24): no vertical rules, open shell-colored
+  gutters, individually rounded panes 6px apart, no split marker in the strip
+  (fills and weight show visible/focused panes), no header for a lone pane.
+  Native browser pages cannot be rounded at the bottom. Pointer-based tab
+  dragging, not HTML5 OS drag-and-drop. A new split set has at most four tabs
+  on one axis; retain older saved layouts.
 - **Quiet UI:** neutral Perch theme, color for status, no accent-filled active
   panes or speculative menu actions. Shared tokens/defaults must agree across
   Rust and web. Use Tailwind v4 and shared UI primitives (UI-UX Appendix E),

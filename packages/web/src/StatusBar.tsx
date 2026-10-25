@@ -7,6 +7,7 @@ import { StatusDot } from "./components/StatusDot";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./components/popoverPosition";
 import { GHOST_BUTTON } from "./components/ui/icon-button";
 import { menuPanel } from "./components/ui/menu";
+import { NeedsYouButton } from "./components/NeedsYou";
 import { useZoom, zoomReset } from "./zoom";
 import { IS_MAC, formatCombo } from "./keyCombo";
 import type { AccountUsage, SessionSummary, UsageWindow } from "@perch/shared";
@@ -206,7 +207,9 @@ export function StatusBar() {
       : undefined);
 
   return (
-    <footer className="status-bar flex shrink-0 items-center gap-3 overflow-x-auto border-t border-t-overlay-0 bg-surface-0 px-3 pt-[0.4rem] pb-[calc(0.4rem+env(safe-area-inset-bottom))] text-[0.78rem] whitespace-nowrap text-subtext-0">
+    // Same shell color as the canvas surround, no rule. The Needs You slot at the right end is
+    // fixed-width and never shrinks; every text field before it clips or ellipsizes instead.
+    <footer className="status-bar box-border flex h-[34px] shrink-0 items-center gap-3 overflow-hidden bg-panel-bg px-3 text-[0.78rem] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
       <span
         className={cn("size-2 shrink-0 rounded-[50%]", connected ? "bg-accent" : "bg-red")}
         title={connected ? "connected" : "reconnecting..."}
@@ -215,17 +218,20 @@ export function StatusBar() {
       <span className="status-item--cwd min-w-0 flex-1 basis-0 overflow-hidden text-ellipsis" title={status?.cwd}>
         {status?.cwd ?? "-"}
       </span>
-      <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
-      <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-3">
+      <div className="status-bar__usage min-w-0 max-w-[38%] shrink overflow-hidden">
+        <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
+      </div>
+      <div className="status-bar__details flex min-w-0 flex-1 basis-0 items-center justify-end gap-3 overflow-hidden">
         {zoom !== 1 && (
           <button type="button" data-testid="zoom-indicator" className={cn(GHOST_BUTTON, "px-1 tabular-nums text-fg")} title={`Zoom ${Math.round(zoom * 100)}%. Click to reset (${formatCombo(IS_MAC ? "cmd+0" : "ctrl+0")})`} onClick={zoomReset}>
             {Math.round(zoom * 100)}%
           </button>
         )}
-        <span>{status?.branch ?? ""}</span>
-        {status?.contextTokens !== undefined && <span>ctx {formatTokens(status.contextTokens)}</span>}
-        {status?.costUsd !== undefined && <span>${status.costUsd.toFixed(3)}</span>}
+        <span className="min-w-0 truncate" title={status?.branch}>{status?.branch ?? ""}</span>
+        {status?.contextTokens !== undefined && <span className="shrink-0">ctx {formatTokens(status.contextTokens)}</span>}
+        {status?.costUsd !== undefined && <span className="shrink-0">${status.costUsd.toFixed(3)}</span>}
       </div>
+      <NeedsYouButton variant="status" className="inline-flex h-6 w-[7.75rem] shrink-0 cursor-pointer items-center justify-center gap-[0.45rem] rounded-ui bg-surface-0 px-2 text-[0.72rem] text-fg [border:0] [font-family:inherit] hover:bg-surface-1" />
     </footer>
   );
 }

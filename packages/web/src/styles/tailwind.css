@@ -40,6 +40,7 @@
   --color-transparent: transparent;
   --color-current: currentColor;
   --radius-ui: var(--radius);
+  --radius-soft: var(--radius-pane);
 }
 
 @theme {

@@ -4,8 +4,8 @@ import { DockviewShell } from "../dockview/DockviewShell";
 import { ChatView } from "../views/Chat";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
-import { layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
-import { acquirePassthrough } from "../browserNative";
+import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
+import { acquirePassthrough, nativeBrowser } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -27,6 +27,14 @@ const STEP = 0.02;
  * Every visible pane is marked `data-pane-id` for the tab drag (`tabDrag.ts`),
  * which splits a pane by a tab dropped on one of its sides. The strip is untouched: every member stays an ordinary
  * tab, and only this area splits.
+ *
+ * Each pane is its own rounded, clipped box. Panes are laid out on shared edges
+ * (`layout`), then `gapped` takes half the pane gap off each inner side, so
+ * neighbours are separated by a strip of shell and the sash sits in that strip.
+ * A pane's content (a terminal fitting its box) follows the gapped rect.
+ * A native browser page is a child webview above the DOM (`browser.rs`): CSS
+ * cannot round or clip it, so a native browser pane is rounded at the top (its
+ * toolbar) and square at the bottom (the page), matching what is on screen.
  *
  * The Dockview stays mounted at one place in the tree (a terminal must never
  * be rebuilt for a layout change); it is only resized, and only while its
@@ -93,12 +101,13 @@ export function SplitCanvas() {
   const tiledSessions = entries.flatMap((entry) => (entry.kind === "session" && split?.ids.includes(entry.id) ? [entry] : []));
   const zoomed = split?.ids.includes(zoomedId ?? "") && zoomedId === activeId ? zoomedId : null;
   const tileVisible = (id: string) => !zoomed || zoomed === id;
-  // Shared rounded edges: no gaps, and no half-pixel canvas compositing.
+  // Whole-pixel shared edges: no half-pixel canvas compositing. Sashes sit on these edges.
   const placed = split ? layout(split.tree, { x: 0, y: 0, w: box.width, h: box.height }, { round: true, live }) : null;
   const slot = (id: string) => {
-    const r = placed?.panes.get(id);
-    if (!r) return undefined;
+    const shared = placed?.panes.get(id);
+    if (!shared) return undefined;
     if (zoomed) return tileVisible(id) ? { inset: 0 } : { display: "none" };
+    const r = gapped(shared, box);
     return { left: r.x, top: r.y, width: r.w, height: r.h };
   };
   const dividers = placed?.strips.flatMap((strip) => strip.edges.map((edge, i) => ({ strip, i, edge }))) ?? [];
@@ -208,7 +217,7 @@ export function SplitCanvas() {
   return (
     <div ref={hostRef} className="absolute inset-0" data-testid="split-canvas" data-split={split ? split.ids.length : 0}>
       <div
-        className={cn("absolute inset-0", primaryHidden && "hidden")}
+        className={cn("absolute inset-0 overflow-hidden rounded-soft", primaryHidden && "hidden")}
         data-testid={primaryHidden ? "split-dock-parked" : "split-pane-session"}
         data-pane-id={primaryHidden ? undefined : sessionId ?? undefined}
         data-pane-visible={!primaryHidden && !fileShown}
@@ -221,7 +230,7 @@ export function SplitCanvas() {
       {tiledSessions.map((entry) => (
         <div
           key={entry.id}
-          className="absolute z-10 flex min-h-0 min-w-0 flex-col bg-panel-bg"
+          className="absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg"
           style={slot(entry.id)}
           data-testid={entry.id === sessionId ? "split-pane-session" : `split-pane-session-${entry.id}`}
           data-pane-id={entry.id}
@@ -236,7 +245,8 @@ export function SplitCanvas() {
       {panes.map(([id, tab]) => (
         <div
           key={id}
-          className={cn("absolute z-10 flex bg-panel-bg", !split && "inset-0")}
+          // Files, reviews and browsers read as panes against the shell: inside, panel-bg is surface-dim.
+          className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0", tab.kind === "browser" && nativeBrowser && "rounded-b-none")}
           style={slot(id)}
           data-pane-id={id}
           data-pane-visible={tileVisible(id)}
@@ -278,8 +288,12 @@ export function SplitCanvas() {
             aria-valuenow={Math.round(strip.sizes.slice(0, i + 1).reduce((sum, size) => sum + size, 0) * 100)}
             tabIndex={0}
             data-testid={`split-divider-${n}`}
-            className={cn("absolute z-30 bg-transparent hover:bg-accent focus-visible:bg-accent", col ? "h-[5px] cursor-row-resize" : "w-[5px] cursor-col-resize")}
-            style={col ? { top: edge - 2, left: strip.rect.x, width: strip.rect.w } : { left: edge - 2, top: strip.rect.y, height: strip.rect.h }}
+            className={cn(
+              // An 8px hit area over the gap between panes; a short pill marks it on hover or focus, never a line at rest.
+              "absolute z-30 bg-transparent [outline:none] after:absolute after:inset-0 after:m-auto after:rounded-full after:bg-transparent after:content-[''] hover:after:bg-overlay-1 focus-visible:after:bg-accent",
+              col ? "h-2 cursor-row-resize after:h-[3px] after:w-8" : "w-2 cursor-col-resize after:h-8 after:w-[3px]",
+            )}
+            style={col ? { top: edge - 4, left: strip.rect.x, width: strip.rect.w } : { left: edge - 4, top: strip.rect.y, height: strip.rect.h }}
             onPointerDown={(e) => dragDivider(strip, i, e)}
             onKeyDown={(e) => nudgeDivider(strip, i, e)}
           />

@@ -2,12 +2,13 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AccountUsage } from "@perch/shared";
+import type { AccountUsage, AttentionEvent } from "@perch/shared";
 
 vi.mock("./ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 const { socket } = await import("./ws");
 const { usePerchStore } = await import("./store");
 const { StatusBar } = await import("./StatusBar");
+const { useAttention } = await import("./attention");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -31,6 +32,8 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   document.querySelector("[data-testid='usage-details']")?.remove();
+  document.querySelector("[data-testid='needs-you-panel']")?.remove();
+  useAttention.setState({ events: [], supported: false, open: false, welcome: null });
 });
 function render(node: ReactNode) { act(() => root.render(node)); }
 function click(element: Element) { act(() => element.dispatchEvent(new MouseEvent("click", { bubbles: true }))); }
@@ -77,4 +80,64 @@ it("shows a failed Claude account when refreshing could not restore usage", () =
   click(get("usage-summary"));
   expect(get("usage-details").textContent).toContain("Check Claude Code's sign-in.");
   expect(get("usage-refresh")).not.toBeNull();
+});
+
+const question = (id: string): AttentionEvent => ({
+  id, sessionId: "s", agentId: "claude", kind: "question", requiresAction: true,
+  certainty: "verified", summary: "", occurredAt: 1, count: 1, read: false,
+});
+const finishedUnread: AttentionEvent = { ...question("done"), kind: "finished", requiresAction: false };
+
+it("keeps Needs You in a fixed, non-shrinking slot at the right end of the bar, with its count", () => {
+  useAttention.setState({ supported: true, events: [question("a"), question("b")] });
+  render(<StatusBar />);
+  const toggle = get("needs-you-toggle");
+  const footer = toggle.closest("footer")!;
+  expect(footer.className).toContain("status-bar");
+  expect(footer.lastElementChild).toBe(toggle);
+  expect(toggle.className).toContain("shrink-0");
+  expect(toggle.className).toContain("w-[7.75rem]");
+  expect(toggle.textContent).toContain("Needs You");
+  expect(get("needs-you-count").textContent).toBe("2");
+  expect(toggle.getAttribute("aria-label")).toBe("Needs You: 2");
+  // The fields before the slot truncate rather than push it.
+  expect(footer.className).toContain("overflow-hidden");
+  expect(get("usage-summary").parentElement!.className).toContain("overflow-hidden");
+  expect(footer.querySelector(".status-item--cwd")!.className).toContain("text-ellipsis");
+  expect(footer.querySelector(".status-item--cwd")!.className).toContain("min-w-0");
+  expect(footer.querySelector(".status-bar__details")!.className).toContain("min-w-0");
+});
+
+it("truncates a long branch instead of widening the bar", () => {
+  const branch = "feature/".repeat(40);
+  usePerchStore.setState({ status: { cwd: "/a".repeat(200), branch } as never });
+  render(<StatusBar />);
+  const shown = [...document.querySelectorAll(".status-bar__details span")].find((span) => span.textContent === branch)!;
+  expect(shown.className).toContain("truncate");
+  expect(shown.className).toContain("min-w-0");
+  expect(shown.getAttribute("title")).toBe(branch);
+});
+
+it("shows the unread dot, not a count, for recent updates, and nothing when the host lacks attention", () => {
+  useAttention.setState({ supported: false });
+  render(<StatusBar />);
+  expect(document.querySelector("[data-testid='needs-you-toggle']")).toBeNull();
+  act(() => useAttention.setState({ supported: true, events: [finishedUnread] }));
+  expect(get("needs-you-toggle").getAttribute("aria-label")).toBe("Needs You: recent updates");
+  expect(document.querySelector("[data-testid='needs-you-count']")).toBeNull();
+  expect(get("needs-you-unread")).not.toBeNull();
+});
+
+it("opens the Needs You panel upward from the bar and closes it with Escape, returning focus", () => {
+  useAttention.setState({ supported: true, events: [question("a")] });
+  render(<StatusBar />);
+  const toggle = get("needs-you-toggle") as HTMLButtonElement;
+  click(toggle);
+  const panel = get("needs-you-panel") as HTMLElement;
+  expect(panel.style.bottom).not.toBe("");
+  expect(panel.style.top).toBe("");
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(document.querySelector("[data-testid='needs-you-panel']")).toBeNull();
+  expect(document.activeElement).toBe(toggle);
 });

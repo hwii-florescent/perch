@@ -174,7 +174,7 @@ test.describe("Perch sidebar", () => {
       // Navigation rows balance the session strip, without shrinking its hit targets.
       await expect(project.locator('[data-testid^="project-toggle-"] strong')).toHaveCSS("font-size", "14px");
       await expect(tree.locator("strong")).toHaveCSS("font-size", "13px");
-      await expect(tree).toHaveCSS("border-radius", "6px");
+      await expect(tree).toHaveCSS("border-radius", "8px");
       await expect(tree.getByTestId("workspace-checkout-icon")).toBeVisible();
       await expect(tree.getByTestId("workspace-checkout-icon").locator("circle")).toHaveCount(3);
       await expect(main.getByTestId("workspace-checkout-icon")).toBeVisible();

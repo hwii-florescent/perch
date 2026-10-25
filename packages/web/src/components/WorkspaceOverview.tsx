@@ -657,7 +657,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   return (
     <section
       className={cn(
-        "workspace-overview flex flex-col overflow-hidden [--radius:6px]",
+        // The phone keeps 6px; the desktop sidebar uses the shell's soft corner.
+        "workspace-overview flex flex-col overflow-hidden [--radius:6px] min-[701px]:[--radius:var(--radius-pane)]",
         // compact = the phone switcher, where the panel owns the bottom edge
         compact ? "min-h-full flex-1" : "min-h-0 flex-1 border-b border-b-overlay-0",
       )}
@@ -676,7 +677,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         <div className="flex shrink-0 items-stretch">
           <button
             type="button"
-            className={cn(segment(), "grid w-9 place-items-center p-0 [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
+            className={cn(segment(), "grid w-9 place-items-center p-0 min-[701px]:my-[3px] min-[701px]:rounded-ui [@media(max-width:700px)]:h-[2.75rem] [@media(max-width:700px)]:w-[2.75rem] [@media(max-width:700px)]:min-w-[2.75rem]")}
             title="Organize sidebar"
             aria-label="Organize sidebar"
             aria-haspopup="menu"
@@ -699,7 +700,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </button>
           <button
             type="button"
-            className={cn(segment(), "px-[0.8rem] text-[0.68rem] font-bold text-fg [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
+            className={cn(segment(), "px-[0.8rem] text-[0.68rem] font-bold text-fg min-[701px]:my-[3px] min-[701px]:mr-2 min-[701px]:rounded-ui [@media(max-width:700px)]:min-h-[2.75rem] [@media(max-width:700px)]:px-[0.65rem]")}
             data-testid="workspace-add-project"
             onClick={() => { setAddHostId(activeHostId); setAddOpen((open) => !open); }}
           >

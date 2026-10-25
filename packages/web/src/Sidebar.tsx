@@ -802,7 +802,7 @@ export function Sidebar() {
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
   return (
-    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden border-r border-r-overlay-0 bg-surface-0 max-[700px]:hidden">
+    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden bg-transparent [--radius:var(--radius-pane)] max-[700px]:hidden">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* A local-only install has nothing to switch between (UI-UX-DIRECTION.md §11). */}
         {(hosts.length > 0 || activeHostId !== "local") && <button
@@ -842,10 +842,10 @@ export function Sidebar() {
           <span className="shrink-0 pt-[0.6rem] pr-2 text-[0.7rem] text-subtext-0" aria-hidden="true">▾</span>
         </button>}
 
-        <div className="flex shrink-0 flex-col items-stretch">
+        <div className="flex shrink-0 flex-col items-stretch px-2">
           <button
             type="button"
-            className={cn(segment(), "w-full shrink-0 px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg")}
+            className={cn(segment(), "w-full shrink-0 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg")}
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
@@ -861,10 +861,10 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="flex shrink-0 items-stretch border-t border-t-overlay-0">
+      <div className="flex shrink-0 items-stretch border-t border-t-overlay-0 p-1">
         <button
           type="button"
-          className={cn(segment(), "w-full justify-end px-[0.9rem] py-[0.4rem] text-[1.1rem] leading-none")}
+          className={cn(segment(), "w-full justify-end rounded-ui px-[0.9rem] py-[0.4rem] text-[1.1rem] leading-none")}
           data-testid="settings-gear"
           title="Settings"
           aria-label="Settings"
