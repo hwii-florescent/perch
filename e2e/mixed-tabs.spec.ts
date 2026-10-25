@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { addProject, startChat } from "./projects";
 import { expectDoc } from "./editor";
+import { resolveTheme, THEME_NAMES } from "../packages/web/src/themes";
 
 const RUN_ID = `${Date.now()}-${process.pid}`;
 // One folder per project: the core remembers a project by path, so a deleted and
@@ -69,6 +70,64 @@ async function openAll(page: Page, ROOT: string) {
   await expect(page.getByTestId(reviewTab)).toBeVisible({ timeout: 15000 });
   return { sessionId, workspaceId, terminalTab, fileTab, reviewTab };
 }
+
+test("Files and Git share the drawer shell across every theme without making canvas panes transparent", async ({ page }, testInfo) => {
+  const root = prepareFixture();
+  fs.appendFileSync(path.join(root, "README.md"), Array.from({ length: 80 }, (_, i) => `\ndrawer surface regression ${i}`).join(""));
+  try {
+    const { fileTab, reviewTab } = await openAll(page, root);
+    const drawer = page.getByTestId("workspace-tools");
+    for (const glass of [false, true]) {
+      await page.evaluate((glass) => document.documentElement.toggleAttribute("data-glass", glass), glass);
+      for (const theme of THEME_NAMES) {
+        await page.evaluate((theme) => window.usePerchStore.getState().updateSettings({ theme }), theme);
+        await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--panel-bg").trim())).toBe(resolveTheme(theme).panelBg);
+        for (const tab of ["files", "gitReview"]) {
+          await page.getByTestId(`workspace-tools-${tab}`).click();
+          await expect(page.getByTestId(`workspace-tools-${tab}`)).toHaveAttribute("aria-pressed", "true");
+          const surface = drawer.getByTestId(tab === "files" ? "workspace-files-view" : "workspace-git-review");
+          await expect(surface).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+          // Every layer from content through the drawer must let the same shell show through.
+          expect(await surface.evaluate((el) => {
+            for (let node: Element | null = el; node; node = node.parentElement) {
+              if (getComputedStyle(node).backgroundColor !== "rgba(0, 0, 0, 0)") return false;
+              if (node.getAttribute("data-testid") === "workspace-tools") return true;
+            }
+            return false;
+          })).toBe(true);
+          if (tab === "gitReview") await expect(surface.getByTestId("git-diff-line").first()).toBeVisible();
+          if (["perch", "catppuccin", "catppuccin-latte"].includes(theme)) {
+            await page.getByTestId(`workspace-tools-${tab}`).blur();
+            await page.mouse.move(24, 44);
+            if (tab === "gitReview") {
+              const diff = surface.getByTestId("git-diff");
+              await diff.evaluate((el) => { el.scrollTop = 200; });
+              await expect.poll(() => diff.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+              // Only review comments/composers stick horizontally; compare/status controls are separate flex scroll regions.
+              expect(await surface.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => getComputedStyle(node).position === "sticky").every((node) => getComputedStyle(node).top === "auto"))).toBe(true);
+            }
+            await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`drawer-${theme}-${tab}-${glass ? "glass" : "opaque"}.png`) });
+          }
+        }
+        await page.getByTestId(reviewTab).click();
+        await expect(page.getByTestId("split-pane-review").getByTestId("workspace-git-review")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await page.getByTestId(fileTab).click();
+        await expect(page.getByTestId("workspace-file-pane")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      }
+    }
+    // The surface slot belongs to the desktop drawer, not the shared phone panes.
+    await page.evaluate(() => document.documentElement.removeAttribute("data-glass"));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("mobile-pane-files").click();
+    if (await page.getByTestId("mobile-files-back").count()) await page.getByTestId("mobile-files-back").click();
+    await expect(page.getByTestId("workspace-files-view")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await page.getByTestId("mobile-pane-git").click();
+    await expect(page.getByTestId("workspace-git-review")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  } finally {
+    await page.evaluate(() => { document.documentElement.removeAttribute("data-glass"); window.usePerchStore.getState().updateSettings({ theme: "perch" }); }).catch(() => {});
+    cleanup();
+  }
+});
 
 test("browser chrome matches the study and keeps its address field distinct inside dark and light panes", async ({ page }) => {
   const root = prepareFixture();

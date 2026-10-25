@@ -14,7 +14,8 @@
   width: 100%;
   height: 100%;
   color: var(--text);
-  background: var(--panel-bg);
+  /* Only the desktop drawer supplies this slot. Tabs/mobile keep their opaque pane. */
+  background: var(--workspace-tools-bg, var(--panel-bg));
   overflow: hidden;
   font-size: 0.78rem;
 }

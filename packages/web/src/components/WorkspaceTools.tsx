@@ -79,7 +79,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
   const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
   return (
-    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-tools" aria-label="Files, Git and Browser">
+    <aside className="flex min-h-0 w-[var(--tools-width,min(46vw,760px))] shrink-0 flex-col [--radius:var(--radius-pane)] [--workspace-tools-bg:transparent]" data-testid="workspace-tools" aria-label="Files, Git and Browser">
       <div className="flex items-center gap-2 px-3 py-[3px]">
         <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-subtext-0" title={row?.path}>
           {row ? row.name || row.path.split("/").pop() : ""}

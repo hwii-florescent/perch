@@ -32,7 +32,7 @@ const CURSOR_RING = "group-focus/tree:ring-1 group-focus/tree:ring-inset group-f
 // `[font:inherit]` only where an element would otherwise fall back to its UA font.
 // The pane's own width, not the viewport's, decides the narrow layout (`@container` below).
 // Tokens kept for e2e/CSS: `workspace-files`, `__mobile-explorer`, `__file-title`, `__save`.
-const SECTION = "workspace-files relative flex h-full min-h-0 w-full min-w-0 flex-col bg-panel-bg text-fg [box-shadow:none] [container-type:inline-size]";
+const SECTION = "workspace-files relative flex h-full min-h-0 w-full min-w-0 flex-col bg-[var(--workspace-tools-bg,var(--panel-bg))] text-fg [box-shadow:none] [container-type:inline-size]";
 const EMPTY = "grid min-h-full content-center justify-items-start gap-[0.35rem] p-5 text-[0.72rem] text-subtext-0";
 const PREVIEW_STATE = "shrink-0 px-[0.7rem] py-[0.55rem] text-[0.68rem] text-subtext-0";
 const COMPARE_LABEL = "mb-[0.2rem] block text-subtext-0 uppercase";
@@ -472,7 +472,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
 
   return (
     <section
-      className={cn(SECTION, layout === "editor" ? "z-auto" : "z-[3]")}
+      className={cn(SECTION, layout === "editor" ? "z-auto bg-panel-bg" : "z-[3]")}
       data-testid={layout === "editor" ? "workspace-file-pane" : "workspace-files-view"}
       aria-label={`Files for ${workspace.name}`}
     >
