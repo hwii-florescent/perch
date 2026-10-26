@@ -5,6 +5,7 @@
 #[cfg(target_os = "macos")]
 pub fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, PredefinedMenuItem as P, Submenu};
+    crate::shortcuts::install(app);
     let sep = || P::separator(app);
     Menu::with_items(
         app,

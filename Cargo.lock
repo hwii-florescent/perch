@@ -2687,6 +2687,7 @@ name = "perch-desktop"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "block2",
  "muda",
  "objc2",
  "perch-core",

@@ -11,6 +11,8 @@ mod glass;
 #[cfg(target_os = "macos")]
 mod menu;
 mod permissions;
+#[cfg(target_os = "macos")]
+mod shortcuts;
 
 use perch_core::boot::{
     adopt_login_shell_path, augment_path_with_local_bin, boot, resolve_web_dist_dir,
@@ -219,7 +221,7 @@ fn main() {
             browser::browser_go,
             browser::browser_action,
             browser::browser_url,
-            browser::browser_close_shortcut
+            browser::browser_shortcuts
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

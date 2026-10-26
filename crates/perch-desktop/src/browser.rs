@@ -9,6 +9,9 @@
 //! Isolation: the capability grants IPC to the `main` webview only (`capabilities/main.json`
 //! `webviews`), so a page here has no app commands even if it is served from loopback.
 
+/// Main-document compiled command id, physical code, layout letter, modifier bits.
+pub type NativeBinding = (String, String, Option<String>, u8);
+
 use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
@@ -92,14 +95,17 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 /// binding after a reload. The per-document epoch lets the UI restart its counter safely.
 /// This command remains main-view-only; browser pages gain no IPC.
 #[tauri::command]
-pub fn browser_close_shortcut(
+pub fn browser_shortcuts(
     app: AppHandle,
     accelerator: Option<String>,
     generation: u64,
     epoch: String,
+    bindings: Option<Vec<NativeBinding>>,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        let bindings = bindings.unwrap_or_default();
+        crate::shortcuts::validate(&bindings)?;
         let _main =
             objc2::MainThreadMarker::new().ok_or("Close Tab config must run on the main thread")?;
         let menu = app.try_state::<CloseTabMenu>().ok_or("no Close Tab menu")?;
@@ -139,12 +145,13 @@ pub fn browser_close_shortcut(
                 .map_err(|e| format!("{error}; restoring Close Tab: {e}"))?;
             return Err(error.to_string());
         }
+        crate::shortcuts::configure(&app, &epoch, generation, bindings);
         *binding = (epoch, generation, accelerator.is_some());
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, accelerator, generation, epoch);
+        let _ = (app, accelerator, generation, epoch, bindings);
         Ok(())
     }
 }
@@ -284,7 +291,10 @@ pub async fn browser_show(
         .map_err(|e| e.to_string())?;
     // The page is an 8px-rounded card like the panes beside it (CSS cannot clip a child web view).
     #[cfg(target_os = "macos")]
-    crate::glass::round_webview(&view);
+    {
+        crate::glass::round_webview(&view);
+        crate::shortcuts::tag_browser(&view, &id).map_err(|e| e.to_string())?;
+    }
     if let Some(zoom) = zoom {
         view.set_zoom(zoom).map_err(|e| e.to_string())?;
     }

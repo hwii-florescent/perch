@@ -1,0 +1,14 @@
+{
+  "global": [
+    ["tabs.jump1", "Digit1", null, 1],
+    ["nests.jump1", "Digit1", null, 10],
+    ["global.navigator", "KeyP", "p", 1]
+  ],
+  "close": {
+    "Super+KeyW": ["tabs.close", "KeyW", "w", 1],
+    "Super+Shift+KeyJ": ["tabs.close", "KeyJ", "j", 9],
+    "Super+KeyJ": ["tabs.close", "KeyJ", "j", 1],
+    "Control+KeyW": ["tabs.close", "KeyW", "w", 2],
+    "Control+KeyJ": ["tabs.close", "KeyJ", "j", 2]
+  }
+}

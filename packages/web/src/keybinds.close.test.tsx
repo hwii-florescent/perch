@@ -13,12 +13,13 @@ vi.mock("./tiledPanes", () => ({ getPaneController: () => ({ closeActiveTerminal
 vi.mock("./agentTerminals", () => ({ isWatchingAgent: mocks.watching }));
 vi.mock("./terminalKeeper", () => ({ forgetSessionTerminals: mocks.forget }));
 
-const { CLOSE_TAB_EVENT, useLeaderKey } = await import("./keybinds");
+const { CLOSE_TAB_EVENT, NATIVE_COMMAND_EVENT, SHORTCUTS, nativeShortcutBindings, useLeaderKey } = await import("./keybinds");
 const { usePerchStore } = await import("./store");
 const { useCloseGuard } = await import("./closeGuard");
 const { useFileTabs, fileTabKey } = await import("./fileTabs");
 const { useDrawerBrowsers, drawerPageKey } = await import("./drawerBrowsers");
 const { browserId } = await import("./browserNative");
+const { default: nativeFixture } = await import("./nativeShortcutBindings.fixture.json");
 const { KeybindingsSection } = await import("./components/KeybindingsSection");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,8 +29,12 @@ const handlers = { openNavigator: vi.fn(), openKeybindHelp: vi.fn(), toggleDrawe
 function Keys() { useLeaderKey(handlers); return null; }
 const settings = (keybindings: Record<string, string>) => ({ keybindings, warnCloseAgent: true }) as never;
 const session = (provider = "terminal") => ({ id: "session", workspaceId: "w", hostId: "local", cliProviderId: provider, status: "idle", createdAt: 1 }) as never;
-const currentConfig = () => mocks.invoke.mock.calls.filter(([command]) => command === "browser_close_shortcut").at(-1)?.[1] ?? { accelerator: "Super+KeyW", generation: 1, epoch: crypto.randomUUID() };
+const currentConfig = () => mocks.invoke.mock.calls.filter(([command]) => command === "browser_shortcuts").at(-1)?.[1] ?? { accelerator: "Super+KeyW", generation: 1, epoch: crypto.randomUUID() };
 const menu = (id = "", config = currentConfig()) => act(() => window.dispatchEvent(new CustomEvent(CLOSE_TAB_EVENT, { detail: { id, ...config } })));
+const nativeCommand = (command: string, id: string, config = currentConfig(), focused = true) => act(() => {
+  const index = config.bindings.findIndex((binding: [string]) => binding[0] === command);
+  window.dispatchEvent(new CustomEvent(NATIVE_COMMAND_EVENT, { detail: { index, id, epoch: config.epoch, generation: config.generation, focused } }));
+});
 const key = (key = "w", init: KeyboardEventInit = {}) => {
   const event = new KeyboardEvent("keydown", { key, code: `Key${key.toUpperCase()}`, metaKey: true, bubbles: true, cancelable: true, ...init });
   act(() => (document.activeElement ?? document).dispatchEvent(event));
@@ -129,6 +134,73 @@ describe("native capture preserves the existing close contract", () => {
     menu();
     expect(useDrawerBrowsers.getState().pages).toHaveLength(0);
     expect(useFileTabs.getState().tabs).toHaveLength(2);
+  });
+});
+
+describe("native pages share every global command", () => {
+  it.each(SHORTCUTS.filter((s) => s.scope !== "terminal" && s.id !== "tabs.close").map((s) => [s.id]))("dispatches %s through the same registry action", async (id) => {
+    const tab = file("browser", "https://example.com/");
+    await mount();
+    const shortcut = SHORTCUTS.find((s) => s.id === id)!;
+    const run = vi.spyOn(shortcut, "run").mockImplementation(() => {});
+    try {
+      nativeCommand(id!, browserId(fileTabKey(tab)));
+      expect(run).toHaveBeenCalledExactlyOnceWith(handlers);
+    } finally { run.mockRestore(); }
+  });
+
+  it("the universal browser bridge closes its exact owner through the existing close guard", async () => {
+    const tab = file("browser", "https://example.com/");
+    useFileTabs.setState({ active: fileTabKey({ workspaceId: "w", path: "keep.ts" }) });
+    await mount();
+    nativeCommand("tabs.close", browserId(fileTabKey(tab)));
+    expect(useFileTabs.getState().tabs.map((t) => t.path)).toEqual(["keep.ts"]);
+    expect(usePerchStore.getState().deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("the native probe fixture is produced by the effective Settings keymap", async () => {
+    await mount();
+    for (const binding of nativeFixture.global) expect(nativeShortcutBindings(true)).toContainEqual(binding);
+    for (const [accelerator, binding] of Object.entries(nativeFixture.close)) {
+      const spec = accelerator.toLowerCase().replace("super", "cmd").replace("control", "ctrl").replace("key", "");
+      await rebind({ "tabs.close": spec });
+      expect(nativeShortcutBindings(true)).toContainEqual(binding);
+    }
+  });
+
+  it("tab jumps and consecutive cycles advance from the latest selection, not the source browser", async () => {
+    const tab = file("browser", "https://example.com/");
+    await mount();
+    nativeCommand("tabs.jump1", browserId(fileTabKey(tab)));
+    expect(useFileTabs.getState().active).toBeNull();
+    nativeCommand("tabs.next", browserId(fileTabKey(tab)), currentConfig(), false);
+    expect(useFileTabs.getState().active).toBe(fileTabKey(tab));
+    nativeCommand("tabs.next", browserId(fileTabKey(tab)), currentConfig(), false);
+    expect(useFileTabs.getState().active).toBe(fileTabKey({ workspaceId: "w", path: "keep.ts" }));
+  });
+
+  it("compiles the full effective keymap, including shifted digits, and no terminal-only keys", async () => {
+    await mount();
+    expect(currentConfig().bindings).toEqual(nativeShortcutBindings(true));
+    expect(currentConfig().bindings).toContainEqual(["tabs.jump1", "Digit1", null, 1]);
+    expect(currentConfig().bindings).toContainEqual(["nests.jump1", "Digit1", null, 10]);
+    expect(currentConfig().bindings.some(([id]: [string]) => id.startsWith("terminal."))).toBe(false);
+    await rebind({ "tabs.jump1": "ctrl+alt+f8", "nests.jump1": "" });
+    expect(currentConfig().bindings).toContainEqual(["tabs.jump1", "F8", null, 6]);
+    expect(currentConfig().bindings.some(([id]: [string]) => id === "nests.jump1")).toBe(false);
+  });
+
+  it("rejects stale/foreign events and unknown pages for every command, not just Close Tab", async () => {
+    const tab = file("browser", "https://example.com/");
+    await mount();
+    const before = currentConfig();
+    await rebind({ "global.navigator": "cmd+j" });
+    nativeCommand("global.navigator", browserId(fileTabKey(tab)), before);
+    nativeCommand("global.navigator", browserId(fileTabKey(tab)), { ...currentConfig(), epoch: crypto.randomUUID() });
+    nativeCommand("global.navigator", "missing");
+    expect(handlers.openNavigator).not.toHaveBeenCalled();
+    nativeCommand("global.navigator", browserId(fileTabKey(tab)));
+    expect(handlers.openNavigator).toHaveBeenCalledOnce();
   });
 });
 
@@ -260,7 +332,7 @@ describe("configured shortcut ownership", () => {
     await mount();
     key("w", { metaKey: mac, ctrlKey: !mac, shiftKey: !mac });
     expect(useFileTabs.getState().tabs).toHaveLength(1);
-    expect(mocks.invoke.mock.calls.some(([command]) => command === "browser_close_shortcut")).toBe(false);
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "browser_shortcuts")).toBe(false);
   });
 
   it("keeps other default shortcuts and terminal Ctrl keys unchanged", async () => {

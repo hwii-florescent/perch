@@ -62,18 +62,20 @@ export const useDrawerBrowsers = create<DrawerBrowsersState>((set, get) => ({
   },
 }));
 
-/** Close the browser page (a top-row tab or a drawer page) whose native webview id is `id`.
- * False for an id nothing owns, so a stale native event closes nothing else. */
-export function closeBrowserById(id: string): boolean {
-  const files = useFileTabs.getState();
-  const tab = files.tabs.find((t) => t.kind === "browser" && browserId(fileTabKey(t)) === id);
-  if (tab) {
-    files.close(fileTabKey(tab));
-    return true;
-  }
+/** The actual owner of a native page; stale/unknown native targets never fall back to a tab. */
+export function browserOwner(id: string) {
+  const tab = useFileTabs.getState().tabs.find((t) => t.kind === "browser" && browserId(fileTabKey(t)) === id);
+  if (tab) return { kind: "tab" as const, tab };
   const page = useDrawerBrowsers.getState().pages.find((p) => browserId(drawerPageKey(p.id)) === id);
-  if (!page) return false;
-  useDrawerBrowsers.getState().close(page.id);
+  return page ? { kind: "drawer" as const, page } : null;
+}
+
+/** Close the specific browser, never an unrelated active tab or session. */
+export function closeBrowserById(id: string): boolean {
+  const owner = browserOwner(id);
+  if (!owner) return false;
+  if (owner.kind === "tab") useFileTabs.getState().close(fileTabKey(owner.tab));
+  else useDrawerBrowsers.getState().close(owner.page.id);
   return true;
 }
 

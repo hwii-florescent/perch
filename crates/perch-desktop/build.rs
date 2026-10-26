@@ -16,7 +16,7 @@ fn main() {
             "browser_go",
             "browser_action",
             "browser_url",
-            "browser_close_shortcut",
+            "browser_shortcuts",
         ]),
     ))
     .expect("failed to run tauri-build")

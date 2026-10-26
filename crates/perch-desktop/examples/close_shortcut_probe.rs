@@ -1,4 +1,4 @@
-//! Headless macOS regression: real menu accelerators, main/child WKWebView focus and IPC ACLs.
+//! Headless macOS regression: production native shortcut handler/menu, WKWebView focus and IPC ACLs.
 //! Run: cargo run -p perch-desktop --example close_shortcut_probe
 //! No core, daemon, shells, installed app, visible window or external network is used.
 #[cfg(target_os = "macos")]
@@ -13,6 +13,9 @@ mod glass;
 #[cfg(target_os = "macos")]
 #[path = "../src/menu.rs"]
 mod menu;
+#[cfg(target_os = "macos")]
+#[path = "../src/shortcuts.rs"]
+mod shortcuts;
 
 #[cfg(target_os = "macos")]
 mod probe {
@@ -56,8 +59,10 @@ mod probe {
         let accelerator = spec
             .map(|s| format!("'{s}'"))
             .unwrap_or_else(|| "null".into());
+        // Shared golden wire fixture is checked against nativeShortcutBindings() by Vitest.
+        let fixture = include_str!("../../../packages/web/src/nativeShortcutBindings.fixture.json");
         app.get_webview("main").unwrap().eval(format!(
-            "window.__TAURI_INTERNALS__.invoke('browser_close_shortcut', {{accelerator: {accelerator}, generation: {generation}, epoch: window.epoch}}).then(() => report('configured:{generation}')).catch(e => report('ERROR:' + e))"
+            "window.probeFixture = {fixture}; window.probeBindings = [...window.probeFixture.global, ...(window.probeFixture.close[{accelerator}] ? [window.probeFixture.close[{accelerator}]] : [])]; window.__TAURI_INTERNALS__.invoke('browser_shortcuts', {{accelerator: {accelerator}, generation: {generation}, epoch: window.epoch, bindings: window.probeBindings}}).then(() => report('configured:{generation}')).catch(e => report('ERROR:' + e))"
         ))?;
         report(rx, &format!("configured:{generation}")).await?;
         let file = file_menu(app);
@@ -100,7 +105,9 @@ mod probe {
         modifiers: usize,
     ) -> anyhow::Result<bool> {
         let (tx, rx) = tokio::sync::oneshot::channel();
+        let app_handle = app.clone();
         app.get_webview(view).unwrap().with_webview(move |platform| {
+            let app_handle = &app_handle;
             use objc2::{class, msg_send, runtime::{AnyObject, Bool}};
             // SAFETY: main-thread live WKWebView; all AppKit objects below are local to the call.
             // This sets only the hidden window's first responder, never the app/key-window focus.
@@ -110,7 +117,10 @@ mod probe {
                 let focused: Bool = msg_send![window, makeFirstResponder: view];
                 if !focused.as_bool() { let _ = tx.send(false); return; }
                 let chars: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: key.as_ptr()];
-                let event: *mut AnyObject = msg_send![class!(NSEvent), keyEventWithType: 10usize, location: Point { x: 0., y: 0. }, modifierFlags: modifiers, timestamp: 0f64, windowNumber: 0isize, context: std::ptr::null_mut::<AnyObject>(), characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0u16];
+                let number: isize = msg_send![window, windowNumber];
+                let hardware: u16 = match key.to_bytes() { b"w" => 13, b"j" => 38, b"1" | b"!" => 18, b"p" => 35, _ => 0 };
+                let event: *mut AnyObject = msg_send![class!(NSEvent), keyEventWithType: 10usize, location: Point { x: 0., y: 0. }, modifierFlags: modifiers, timestamp: 0f64, windowNumber: number, context: std::ptr::null_mut::<AnyObject>(), characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: hardware];
+                if crate::shortcuts::handle_key(app_handle, event) { let _ = tx.send(true); return; }
                 let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
                 let menu: *mut AnyObject = msg_send![application, mainMenu];
                 let result: Bool = msg_send![menu, performKeyEquivalent: event];
@@ -154,6 +164,36 @@ mod probe {
             tauri::LogicalPosition::new(0., 0.),
             tauri::LogicalSize::new(400., 300.),
         )?;
+        crate::shortcuts::tag_browser(&app.get_webview("browser-probe").unwrap(), "probe")?;
+        for (key, modifiers, command) in [
+            (c"1", CMD, "tabs.jump1"),
+            (c"!", CTRL | SHIFT, "nests.jump1"),
+            (c"p", CMD, "global.navigator"),
+        ] {
+            anyhow::ensure!(
+                press(&app, "browser-probe", key, modifiers).await?,
+                "universal browser shortcut missed"
+            );
+            report(&mut rx, &format!("command:{command}:probe:1")).await?;
+        }
+        // Main-view input resets the native source context, without changing the keymap.
+        anyhow::ensure!(
+            !press(&app, "main", c"a", CTRL).await?,
+            "unbound main key consumed"
+        );
+        anyhow::ensure!(
+            press(&app, "browser-probe", c"p", CMD).await?,
+            "refocused page shortcut missed"
+        );
+        report(&mut rx, "command:global.navigator:probe:1").await?;
+        app.get_webview("main")
+            .unwrap()
+            .eval("report('focus:' + window.focusMarks.join(','))")?;
+        report(&mut rx, "focus:true,false,false,true").await?;
+        anyhow::ensure!(
+            !press(&app, "browser-probe", c"a", CTRL).await?,
+            "unbound PTY/page key consumed"
+        );
         anyhow::ensure!(
             press(&app, "browser-probe", c"w", CMD).await?,
             "page shortcut was not consumed"
@@ -200,7 +240,7 @@ mod probe {
         configure(&app, &mut rx, Some("Super+Shift+KeyJ"), 6).await?;
         for (spec, generation) in [("invalid+key", 7), ("Super+KeyW", 2)] {
             app.get_webview("main").unwrap().eval(format!(
-                "window.__TAURI_INTERNALS__.invoke('browser_close_shortcut', {{accelerator: '{spec}', generation: {generation}, epoch: window.epoch}}).then(() => report('unexpected success')).catch(() => report('rejected'))"
+                "window.__TAURI_INTERNALS__.invoke('browser_shortcuts', {{accelerator: '{spec}', generation: {generation}, epoch: window.epoch}}).then(() => report('unexpected success')).catch(() => report('rejected'))"
             ))?;
             report(&mut rx, "rejected").await?;
         }
@@ -214,7 +254,7 @@ mod probe {
         // be able to configure its binding; no old async config task may win afterwards.
         configure(&app, &mut rx, Some("Super+KeyW"), 7).await?;
         app.get_webview("main").unwrap().eval(
-            "window.__TAURI_INTERNALS__.invoke('browser_close_shortcut', {accelerator: 'Super+Shift+KeyJ', generation: 8, epoch: window.epoch}); location.reload()"
+            "window.__TAURI_INTERNALS__.invoke('browser_shortcuts', {accelerator: 'Super+Shift+KeyJ', generation: 8, epoch: window.epoch}); location.reload()"
         )?;
         report(&mut rx, "ready").await?;
         configure(&app, &mut rx, Some("Super+KeyW"), 1).await?;
@@ -248,7 +288,7 @@ mod probe {
                     let body = if child {
                         "<!doctype html><title>Probe page</title><p>page</p>"
                     } else {
-                        "<!doctype html><title>Shortcut probe</title><script>window.epoch = crypto.randomUUID(); window.report = id => window.__TAURI_INTERNALS__.invoke('browser_url', {id}); window.addEventListener('perch:close-tab', e => report('close:' + e.detail.id + ':' + e.detail.generation)); report('ready');</script>"
+                        "<!doctype html><title>Shortcut probe</title><script>window.focusMarks = []; window.epoch = crypto.randomUUID(); window.report = id => window.__TAURI_INTERNALS__.invoke('browser_url', {id}); window.addEventListener('perch:close-tab', e => report('close:' + e.detail.id + ':' + e.detail.generation)); window.addEventListener('perch:command', e => { window.focusMarks.push(e.detail.focused); const id = window.probeBindings[e.detail.index][0]; report((id === 'tabs.close' ? 'close:' : 'command:' + id + ':') + e.detail.id + ':' + e.detail.generation); }); report('ready');</script>"
                     };
                     let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
                 } else {
@@ -262,7 +302,7 @@ mod probe {
         let mut context = tauri::generate_context!();
         context.config_mut().identifier = "dev.perch.shortcut-probe".into();
         let app = tauri::Builder::default().manage(Reports(tx))
-            .invoke_handler(tauri::generate_handler![browser_url, browser::browser_close_shortcut])
+            .invoke_handler(tauri::generate_handler![browser_url, browser::browser_shortcuts])
             .on_menu_event(browser::on_menu_event)
             .setup(move |app| {
                 app.set_activation_policy(tauri::ActivationPolicy::Prohibited);
@@ -274,7 +314,7 @@ mod probe {
                     let result = run(handle.clone(), rx, format!("{url}child")).await;
                     succeeded.store(result.is_ok(), Ordering::Relaxed);
                     match result {
-                        Ok(()) => println!("PASS: native Close Tab main/page focus, rebinding, disabling, IPC and no duplicate"),
+                        Ok(()) => println!("PASS: universal browser commands, focus-once routing, Close Tab rebinding/disable/reload, IPC and no duplicate"),
                         Err(ref error) => eprintln!("FAIL: {error:#}"),
                     }
                     handle.exit(if result.is_ok() { 0 } else { 1 });

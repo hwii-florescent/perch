@@ -36,7 +36,8 @@ import { useFileTabs } from "./fileTabs";
 import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
-import { closeBrowserById } from "./drawerBrowsers";
+import { browserOwner, closeBrowserById, useDrawerBrowsers } from "./drawerBrowsers";
+import { fileTabKey } from "./fileTabs";
 import { nativeBrowser } from "./browserNative";
 import { tauriInvoke } from "./links";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
@@ -426,6 +427,35 @@ function openWorktreeMenuForActiveProject(create = false): void {
 
 /** Native menu activation, including when the main view (or a blank browser) has focus. */
 export const CLOSE_TAB_EVENT = "perch:close-tab";
+export const NATIVE_COMMAND_EVENT = "perch:command";
+/** Compiled from the same settings-resolved registry, never a native list of default keys. */
+export type NativeBinding = [id: string, code: string, letter: string | null, mods: number];
+export function nativeShortcutBindings(mac = IS_MAC): NativeBinding[] {
+  return SHORTCUTS.flatMap((s) => {
+    if (s.scope === "terminal") return [];
+    const spec = effectiveSpec(s, mac);
+    if (!spec) return [];
+    const c = parseCombo(spec, mac);
+    return [[s.id, c.code, c.letter ?? null, +c.cmd | (+c.ctrl << 1) | (+c.alt << 2) | (+c.shift << 3)]];
+  });
+}
+
+/** Universal app-command entry point for DOM keys, native pages and command/menu callers. */
+export function dispatchShortcut(id: string, handlers: LeaderKeyHandlers, pageId?: string, focusPage = false): boolean {
+  const shortcut = SHORTCUTS.find((s) => s.id === id);
+  if (!shortcut) return false;
+  if (pageId) {
+    const owner = browserOwner(pageId);
+    if (!owner) return false;
+    if (id === "tabs.close") return closeBrowserById(pageId);
+    if (focusPage) {
+      if (owner.kind === "tab") activateTab({ id: fileTabKey(owner.tab), kind: "resource", tab: owner.tab });
+      else useDrawerBrowsers.getState().select(owner.page.workspaceId, owner.page.id);
+    }
+  }
+  shortcut.run(handlers);
+  return true;
+}
 const closeEpoch = nativeBrowser && IS_MAC ? crypto.randomUUID() : "";
 let closeGeneration = 0;
 const closeShortcut = SHORTCUTS.find((s) => s.id === "tabs.close")!;
@@ -528,12 +558,12 @@ const RESIZE_KEYS: Record<string, (c: NonNullable<ReturnType<typeof getDockviewC
 export function useLeaderKey(handlers: LeaderKeyHandlers): void {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
-  usePerchStore((s) => s.settings?.keybindings);
+  const keybindings = usePerchStore((s) => s.settings?.keybindings);
   const spec = effectiveSpec(closeShortcut);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const native = nativeBrowser && IS_MAC;
   const nativeOwnsClose = useRef(false);
-  const nativeBinding = useRef<{ accelerator: string | null; generation: number; epoch: string } | null>(null);
+  const nativeBinding = useRef<{ accelerator: string | null; generation: number; epoch: string; bindings: NativeBinding[] } | null>(null);
   const menuQueue = useRef(Promise.resolve());
 
   useEffect(() => {
@@ -545,15 +575,16 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     let live = true;
     // A menu event bearing this generation is itself proof that Rust installed it, even if
     // the IPC acknowledgement is still in flight. Older generations cannot execute it.
-    nativeBinding.current = { accelerator, generation, epoch: closeEpoch };
+    const bindings = settingsOpen ? [] : nativeShortcutBindings();
+    nativeBinding.current = { accelerator, generation, epoch: closeEpoch, bindings };
     // While configuration is pending, don't run a second DOM close behind the native menu.
     // A rejected configuration restores the original DOM path.
     nativeOwnsClose.current = accelerator !== null;
     menuQueue.current = menuQueue.current
-      .then(async () => { await tauriInvoke!("browser_close_shortcut", { accelerator, generation, epoch: closeEpoch }); })
+      .then(async () => { await tauriInvoke!("browser_shortcuts", { accelerator, generation, epoch: closeEpoch, bindings }); })
       .catch(() => { if (live) { nativeOwnsClose.current = false; nativeBinding.current = null; } });
     return () => { live = false; };
-  }, [native, spec, settingsOpen]);
+  }, [native, spec, settingsOpen, keybindings]);
 
   useEffect(() => {
     let composing = false;
@@ -565,14 +596,26 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       const binding = nativeBinding.current;
       if (!binding?.accelerator || detail.generation !== binding.generation || !("epoch" in detail) || detail.epoch !== binding.epoch ||
           binding.accelerator !== closeAccelerator(effectiveSpec(closeShortcut)) || typeof detail.id !== "string") return;
-      if (detail.id) closeBrowserById(detail.id);
-      else if (!composing && !chordPending) closeCurrent();
+      if (!composing && !chordPending) dispatchShortcut("tabs.close", handlersRef.current, detail.id || undefined);
     };
+    const onCommand = (event: Event) => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (!native || !detail || typeof detail !== "object" || !("epoch" in detail) || !("generation" in detail) || !("index" in detail) || !("id" in detail)) return;
+      const config = nativeBinding.current;
+      if (!config || detail.epoch !== config.epoch || detail.generation !== config.generation || typeof detail.index !== "number" || !Number.isInteger(detail.index) || typeof detail.id !== "string" || !detail.id) return;
+      const binding = config.bindings[detail.index];
+      if (!binding) return;
+      const current = nativeShortcutBindings().find((b) => b[0] === binding[0]);
+      if (!current || current.some((part, i) => part !== binding[i])) return;
+      dispatchShortcut(binding[0], handlersRef.current, detail.id, "focused" in detail && detail.focused === true);
+    };
+    window.addEventListener(NATIVE_COMMAND_EVENT, onCommand);
     window.addEventListener(CLOSE_TAB_EVENT, onClose);
     window.addEventListener("compositionstart", compositionStart, true);
     window.addEventListener("compositionend", compositionEnd, true);
     window.addEventListener("blur", compositionEnd);
     return () => {
+      window.removeEventListener(NATIVE_COMMAND_EVENT, onCommand);
       window.removeEventListener(CLOSE_TAB_EVENT, onClose);
       window.removeEventListener("compositionstart", compositionStart, true);
       window.removeEventListener("compositionend", compositionEnd, true);
@@ -707,7 +750,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
         // menu own it exactly once, without preventing the key from reaching that menu.
         if (direct.id === "tabs.close" && nativeOwnsClose.current) return;
         e.preventDefault();
-        if (!e.repeat) direct.run(handlersRef.current);
+        if (!e.repeat) dispatchShortcut(direct.id, handlersRef.current);
         return;
       }
 
