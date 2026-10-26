@@ -2,7 +2,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePerchStore } from "./store";
 import { useFileTabs } from "./fileTabs";
-import { openTerminalLink, webUrl } from "./links";
+import { browserAddress, openTerminalLink, webUrl } from "./links";
+
+describe("browser addresses", () => {
+  it.each([
+    ["example.com", "https://example.com/"],
+    ["  example.com/path?q=1  ", "https://example.com/path?q=1"],
+    ["example.com:8443/path", "https://example.com:8443/path"],
+    ["https://localhost:3000", "https://localhost:3000/"],
+    ["http://example.com", "http://example.com/"],
+    ["localhost", "http://localhost/"],
+    ["localhost:3000", "http://localhost:3000/"],
+    ["localhost:443", "http://localhost:443/"],
+    ["localhost:3000/path?q=1#x", "http://localhost:3000/path?q=1#x"],
+    ["app.localhost:5173", "http://app.localhost:5173/"],
+    ["server.local", "http://server.local/"],
+    ["127.0.0.1:8080", "http://127.0.0.1:8080/"],
+    ["0.0.0.0:5173", "http://0.0.0.0:5173/"],
+    ["192.168.1.2:3000", "http://192.168.1.2:3000/"],
+    ["[::1]:3000", "http://[::1]:3000/"],
+    ["devbox:3000", "http://devbox:3000/"],
+  ])("resolves %s to %s", (input, expected) => {
+    expect(browserAddress(input)).toBe(expected);
+    expect(webUrl(expected)).toBe(expected);
+  });
+
+  it.each(["hello", "hello world", "what is x?", "C++ & Rust", "你好", "  hello  "])("searches for %s", (input) => {
+    const url = browserAddress(input)!;
+    expect(new URL(url).origin).toBe("https://www.google.com");
+    expect(new URL(url).searchParams.get("q")).toBe(input.trim());
+    expect(webUrl(url)).toBe(url);
+  });
+
+  it.each(["", "  ", "javascript:alert(1)", "file:///etc/passwd", "mailto:x", "about:blank", "https://", "http://[bad"])("does not navigate to %s", (input) => {
+    expect(browserAddress(input)).toBeNull();
+  });
+});
 
 describe("terminal links", () => {
   beforeEach(() => {

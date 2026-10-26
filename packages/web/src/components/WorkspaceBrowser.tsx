@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { browserCall, browserId, nativeBrowser, onPassthrough, passthroughActive } from "../browserNative";
-import { openExternal, parseUrl, webUrl } from "../links";
+import { browserAddress, openExternal, parseUrl } from "../links";
 import { usePerchStore } from "../store";
 import { useZoom } from "../zoom";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -87,7 +87,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   }, [id, started, settingsOpen, zoom]);
 
   const go = () => {
-    const next = webUrl(/^[a-z][a-z\d+.-]*:/i.test(draft) ? draft : `http://${draft}`);
+    const next = browserAddress(draft);
     if (!next) return;
     setUrl(next);
     setDraft(next);
@@ -120,7 +120,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
             className="h-full min-w-0 flex-1 bg-transparent p-0 text-[11px] text-fg [border:0] [font-family:inherit] outline-none placeholder:text-subtext-0"
             aria-label="Address"
             data-testid="browser-address"
-            placeholder="Enter an address"
+            placeholder="Search or enter an address"
             value={draft}
             spellCheck={false}
             autoCapitalize="none"
@@ -128,7 +128,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
             onChange={(e) => setDraft(e.target.value)}
             onFocus={() => { editing.current = true; }}
             onBlur={() => { editing.current = false; }}
-            onKeyDown={(e) => { if (e.key === "Enter") go(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); go(); } }}
           />
         </div>
         <button type="button" className={cn(BTN, "w-auto gap-2 px-1 text-[10px] @min-[461px]:flex")} data-testid="browser-open-external" aria-label="Open externally" disabled={!started} onClick={() => openExternal(url)}>
@@ -138,7 +138,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
       </div>
       <div ref={host} className="host relative min-h-0 flex-1">
         {!started ? (
-          <div className="flex h-full items-center justify-center p-6 text-[12px] text-subtext-0">Enter an address above to browse.</div>
+          <div className="flex h-full items-center justify-center p-6 text-[12px] text-subtext-0">Search or enter an address above to browse.</div>
         ) : nativeBrowser ? null : own ? (
           <div className="p-4 text-[0.85rem] text-subtext-0">perch's own address can't be shown inside perch.</div>
         ) : (
