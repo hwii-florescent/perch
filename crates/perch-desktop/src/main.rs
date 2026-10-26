@@ -57,6 +57,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
                     &P::select_all(app, None)?,
                 ],
             )?,
+            &browser::file_menu(app)?,
             &Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?,
             &Submenu::with_items(
                 app,
@@ -249,6 +250,13 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
+        // File > Close Tab (Cmd+W) while a native browser page has focus.
+        .on_menu_event(|app, event| {
+            #[cfg(target_os = "macos")]
+            browser::on_menu_event(app, event);
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        })
         .invoke_handler(tauri::generate_handler![
             open_external,
             open_in_default_app,

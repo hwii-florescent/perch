@@ -15,6 +15,12 @@ core and shared with connected viewers. Addresses keep their normal resolution:
 HTTPS for bare public domains, HTTP for local development addresses, and an
 explicit HTTP(S) scheme is preserved. Existing settings/older peers use Google.
 
+Cmd+W also closes a browser page while that page has keyboard focus. A native page
+is its own web view, so the desktop app's File > Close Tab menu item (Cmd+W) reports
+which page, if any, holds focus and the UI closes that tab or drawer page. Only the
+default Cmd+W binding is honoured there (a rebound or disabled Close Tab does nothing
+from a page); an unreadable focus closes nothing. Unverified in a real window.
+
 ## 2026-10-25 — Explorer signals and compact status controls
 
 Owner approved the Files/Git visual study, with restrained theme-derived file

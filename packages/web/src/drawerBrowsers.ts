@@ -62,6 +62,21 @@ export const useDrawerBrowsers = create<DrawerBrowsersState>((set, get) => ({
   },
 }));
 
+/** Close the browser page (a top-row tab or a drawer page) whose native webview id is `id`.
+ * False for an id nothing owns, so a stale native event closes nothing else. */
+export function closeBrowserById(id: string): boolean {
+  const files = useFileTabs.getState();
+  const tab = files.tabs.find((t) => t.kind === "browser" && browserId(fileTabKey(t)) === id);
+  if (tab) {
+    files.close(fileTabKey(tab));
+    return true;
+  }
+  const page = useDrawerBrowsers.getState().pages.find((p) => browserId(drawerPageKey(p.id)) === id);
+  if (!page) return false;
+  useDrawerBrowsers.getState().close(page.id);
+  return true;
+}
+
 useDrawerBrowsers.subscribe((state, previous) => {
   if (state.pages === previous.pages) return;
   try { localStorage.setItem(viewerKey(STORAGE_KEY), JSON.stringify(state.pages)); } catch { /* convenience only */ }

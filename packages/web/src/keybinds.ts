@@ -36,6 +36,7 @@ import { useFileTabs } from "./fileTabs";
 import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
+import { closeBrowserById } from "./drawerBrowsers";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
 import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
@@ -118,7 +119,7 @@ shortcut("view.zoomReset", "global", ["cmd+0", "ctrl+0"], "Reset zoom", () => zo
 
 // Tabs (browser style)
 shortcut("tabs.new", "tabs", "mod+t", "New tab (pick a harness) in this nest", () => requestNewTab());
-shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => closeCurrent());
+shortcut("tabs.close", "tabs", "mod+w", "Close the focused pane, file or tab (agents ask first)", () => { lastKeyClose = Date.now(); closeCurrent(); });
 shortcut("tabs.reopen", "tabs", ["cmd+shift+t", "alt+shift+t"], "Reopen the last closed tab or file", () => reopenClosedTab());
 shortcut("tabs.keepOpen", "tabs", ["cmd+alt+enter", "ctrl+alt+enter"], "Keep the preview tab open (make it a regular tab)", () => {
   const { active, pin } = useFileTabs.getState();
@@ -419,6 +420,25 @@ function activeRepoKey(): string | null {
 function openWorktreeMenuForActiveProject(create = false): void {
   const key = activeRepoKey();
   if (key) withSidebar(() => usePerchStore.getState().requestWorktreeMenu(key, undefined, create));
+}
+
+/** Sent by the desktop app's Close Tab menu item (`browser.rs`). A native browser page is its own
+ * web view, so while it has focus this document never sees Cmd+W; the menu does. `detail` is the
+ * focused page's webview id, or "" when the main view had focus. */
+export const CLOSE_TAB_EVENT = "perch:close-tab";
+let lastKeyClose = 0;
+// ponytail: the menu item is fixed to Cmd+W, so a user rebinding of tabs.close only reaches pages
+// through the DOM key; upgrade by syncing the item's accelerator from effectiveSpec.
+if (typeof window !== "undefined") {
+  window.addEventListener(CLOSE_TAB_EVENT, (event) => {
+    const close = SHORTCUTS.find((s) => s.id === "tabs.close");
+    const spec = close && effectiveSpec(close, true);
+    if (!spec || normalizeCombo(spec, true) !== normalizeCombo("cmd+w", true)) return;
+    const id = (event as CustomEvent<unknown>).detail;
+    if (typeof id !== "string") return;
+    if (id) closeBrowserById(id);
+    else if (Date.now() - lastKeyClose > 250) closeCurrent(); // else the DOM key already closed it
+  });
 }
 
 /** Cmd+W: the open file or review, else a split's focused terminal pane,

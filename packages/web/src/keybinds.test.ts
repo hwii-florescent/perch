@@ -6,6 +6,10 @@ import { Terminal } from "@xterm/xterm";
 import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints } from "./keybinds";
 import { IS_MAC, comboMatches, formatCombo, normalizeCombo, parseCombo, recordCombo } from "./keyCombo";
 import { usePerchStore } from "./store";
+import { CLOSE_TAB_EVENT } from "./keybinds";
+import { useDrawerBrowsers, drawerPageKey } from "./drawerBrowsers";
+import { useFileTabs, fileTabKey } from "./fileTabs";
+import { browserId } from "./browserNative";
 
 it("cancels the leader on keyup without swallowing ordinary Space or text input", async () => {
   let navigations = 0;
@@ -238,6 +242,47 @@ describe("direct shortcuts", () => {
     expect(keybindEntries(true).filter((k) => /^Jump to tab \d$/.test(k.description))).toHaveLength(8);
     usePerchStore.setState({ settings: { keybindings: { "tabs.new": "" } } as never });
     expect(keybindEntries(true).some((k) => k.description.startsWith("New tab"))).toBe(false);
+  });
+});
+
+describe("Close Tab from the desktop menu", () => {
+  const send = (detail: unknown) => window.dispatchEvent(new CustomEvent(CLOSE_TAB_EVENT, { detail }));
+  const withSettings = (keybindings: Record<string, string>) => usePerchStore.setState({ settings: { keybindings } as never });
+
+  it("closes only the focused browser page, tab or drawer, and ignores unknown ids", () => {
+    withSettings({});
+    const tab = { workspaceId: "w", path: "https://example.com/", kind: "browser" as const };
+    useFileTabs.setState({ tabs: [tab, { workspaceId: "w", path: "a.ts" }], active: fileTabKey(tab) });
+    useDrawerBrowsers.setState({ pages: [{ id: "p1", workspaceId: "w", url: "" }], active: {} });
+    send("deadbeef"); // stale: nothing else closes
+    expect(useFileTabs.getState().tabs).toHaveLength(2);
+    expect(useDrawerBrowsers.getState().pages).toHaveLength(1);
+    send(browserId(drawerPageKey("p1")));
+    expect(useDrawerBrowsers.getState().pages).toHaveLength(0);
+    expect(useFileTabs.getState().tabs).toHaveLength(2);
+    send(browserId(fileTabKey(tab)));
+    expect(useFileTabs.getState().tabs.map((t) => t.path)).toEqual(["a.ts"]);
+    send(42); // a malformed event is not a close request
+    expect(useFileTabs.getState().tabs).toHaveLength(1);
+  });
+
+  it("does nothing when Close Tab is rebound away from Cmd+W, and from a main view the key already handled", () => {
+    const tab = { workspaceId: "w", path: "blank:1", kind: "browser" as const };
+    useFileTabs.setState({ tabs: [tab], active: fileTabKey(tab) });
+    withSettings({ "tabs.close": "cmd+j" });
+    send(browserId(fileTabKey(tab)));
+    expect(useFileTabs.getState().tabs).toHaveLength(1);
+    withSettings({ "tabs.close": "" });
+    send(browserId(fileTabKey(tab)));
+    expect(useFileTabs.getState().tabs).toHaveLength(1);
+    withSettings({});
+    // The DOM key just closed the active file; the menu's duplicate event ("" = main view) must not close a second one.
+    const other = { workspaceId: "w", path: "b.ts" };
+    useFileTabs.setState({ tabs: [tab, other], active: fileTabKey(other) });
+    SHORTCUTS.find((s) => s.id === "tabs.close")!.run({ openNavigator() {}, openKeybindHelp() {}, toggleDrawer() {} });
+    expect(useFileTabs.getState().tabs).toHaveLength(1);
+    send("");
+    expect(useFileTabs.getState().tabs).toHaveLength(1);
   });
 });
 

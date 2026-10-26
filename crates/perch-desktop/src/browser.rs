@@ -28,6 +28,108 @@ fn web_url(url: &str) -> Result<tauri::Url, String> {
     }
 }
 
+/// Menu id of File > Close Tab.
+#[cfg(target_os = "macos")]
+const CLOSE_TAB_ID: &str = "close-tab";
+
+/// The File menu. A native browser page is its own web view, so while it has focus the main
+/// document never sees Cmd+W. A menu accelerator does reach it first (the app menu has no Close
+/// Window item, see `main.rs::app_menu`); `on_menu_event` forwards it to the UI (`CLOSE_TAB_EVENT`).
+#[cfg(target_os = "macos")]
+pub fn file_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<tauri::Wry>> {
+    use tauri::menu::{MenuItem, Submenu};
+    let close = MenuItem::with_id(app, CLOSE_TAB_ID, "Close Tab", true, Some("CmdOrCtrl+W"))?;
+    Submenu::with_items(app, "File", true, &[&close])
+}
+
+#[cfg(target_os = "macos")]
+pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
+    if event.id().as_ref() == CLOSE_TAB_ID {
+        let app = app.clone();
+        tauri::async_runtime::spawn(close_tab(app));
+    }
+}
+
+/// The UI event for a close request: `id` is the focused browser page's webview id, "" for the
+/// main view. None for an id that is not a plain webview id, so nothing is injected.
+fn close_tab_script(id: &str) -> Option<String> {
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        .then(|| {
+            format!(
+                "window.dispatchEvent(new CustomEvent('perch:close-tab', {{ detail: '{id}' }}))"
+            )
+        })
+}
+
+/// Whether the window's first responder is `view` (a WKWebView) or inside it.
+#[cfg(target_os = "macos")]
+unsafe fn responder_in(view: *mut objc2::runtime::AnyObject) -> bool {
+    use objc2::{
+        class, msg_send,
+        runtime::{AnyObject, Bool},
+    };
+    if view.is_null() {
+        return false;
+    }
+    // SAFETY: `view` is a live NSView and this runs on the main thread; every result is nil-checked.
+    unsafe {
+        let window: *mut AnyObject = msg_send![view, window];
+        if window.is_null() {
+            return false;
+        }
+        let responder: *mut AnyObject = msg_send![window, firstResponder];
+        if responder.is_null() {
+            return false;
+        }
+        let is_view: Bool = msg_send![responder, isKindOfClass: class!(NSView)];
+        is_view.as_bool() && {
+            let inside: Bool = msg_send![responder, isDescendantOf: view];
+            inside.as_bool()
+        }
+    }
+}
+
+/// Close Tab from the menu: tell the main view which browser page has focus (or that none does).
+/// A page whose focus cannot be read leaves the request undone: closing the session tab instead
+/// would be a guess.
+#[cfg(target_os = "macos")]
+async fn close_tab(app: AppHandle) {
+    let mut target = String::new();
+    let mut unknown = false;
+    for (label, view) in app.webviews() {
+        let Some(id) = label.strip_prefix("browser-") else {
+            continue;
+        };
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let asked = view.with_webview(move |platform| {
+            // SAFETY: with_webview runs on the main thread with a live WKWebView.
+            let _ = send.send(unsafe { responder_in(platform.inner().cast()) });
+        });
+        let focused = match asked {
+            Ok(()) => tokio::time::timeout(std::time::Duration::from_millis(300), receive).await,
+            Err(_) => {
+                unknown = true;
+                continue;
+            }
+        };
+        match focused {
+            Ok(Ok(true)) => {
+                target = id.to_string();
+                break;
+            }
+            Ok(Ok(false)) => {}
+            _ => unknown = true,
+        }
+    }
+    if target.is_empty() && unknown {
+        return;
+    }
+    if let (Some(main), Some(script)) = (app.get_webview("main"), close_tab_script(&target)) {
+        let _ = main.eval(script);
+    }
+}
+
 /// Show the tab's page at this rectangle (window-relative CSS px), creating it on first use.
 #[tauri::command]
 pub async fn browser_show(
@@ -172,6 +274,20 @@ pub async fn browser_url(app: AppHandle, id: String) -> Result<Option<String>, S
     view.url()
         .map(|u| Some(u.to_string()))
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod script_tests {
+    #[test]
+    fn close_script_only_carries_plain_webview_ids() {
+        assert!(super::close_tab_script("").unwrap().contains("detail: ''"));
+        assert!(super::close_tab_script("6a-0F")
+            .unwrap()
+            .contains("detail: '6a-0F'"));
+        for bad in ["'", "a'b", "a b", "a);alert(1", "a\n"] {
+            assert!(super::close_tab_script(bad).is_none(), "{bad:?}");
+        }
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]
