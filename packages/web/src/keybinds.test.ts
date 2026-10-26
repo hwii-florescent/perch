@@ -266,7 +266,7 @@ describe("Close Tab from the desktop menu", () => {
     expect(useFileTabs.getState().tabs).toHaveLength(1);
   });
 
-  it("does nothing when Close Tab is rebound away from Cmd+W, and from a main view the key already handled", () => {
+  it("does nothing when Close Tab is rebound away from Cmd+W, or when no page was named", () => {
     const tab = { workspaceId: "w", path: "blank:1", kind: "browser" as const };
     useFileTabs.setState({ tabs: [tab], active: fileTabKey(tab) });
     withSettings({ "tabs.close": "cmd+j" });
@@ -276,7 +276,7 @@ describe("Close Tab from the desktop menu", () => {
     send(browserId(fileTabKey(tab)));
     expect(useFileTabs.getState().tabs).toHaveLength(1);
     withSettings({});
-    // The DOM key just closed the active file; the menu's duplicate event ("" = main view) must not close a second one.
+    // The DOM key closes the active file; an event naming no page (main view) must not close a second one.
     const other = { workspaceId: "w", path: "b.ts" };
     useFileTabs.setState({ tabs: [tab, other], active: fileTabKey(other) });
     SHORTCUTS.find((s) => s.id === "tabs.close")!.run({ openNavigator() {}, openKeybindHelp() {}, toggleDrawer() {} });

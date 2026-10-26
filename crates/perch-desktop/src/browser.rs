@@ -50,8 +50,8 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-/// The UI event for a close request: `id` is the focused browser page's webview id, "" for the
-/// main view. None for an id that is not a plain webview id, so nothing is injected.
+/// The UI event for a close request: `id` is the focused browser page's webview id. None for an
+/// id that is not a plain webview id, so nothing is injected.
 fn close_tab_script(id: &str) -> Option<String> {
     id.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -90,13 +90,11 @@ unsafe fn responder_in(view: *mut objc2::runtime::AnyObject) -> bool {
     }
 }
 
-/// Close Tab from the menu: tell the main view which browser page has focus (or that none does).
-/// A page whose focus cannot be read leaves the request undone: closing the session tab instead
-/// would be a guess.
+/// Close Tab from the menu: tell the main view which browser page has focus. With none focused,
+/// or focus unreadable, nothing is sent: the main view's own key handler owns that case.
 #[cfg(target_os = "macos")]
 async fn close_tab(app: AppHandle) {
     let mut target = String::new();
-    let mut unknown = false;
     for (label, view) in app.webviews() {
         let Some(id) = label.strip_prefix("browser-") else {
             continue;
@@ -108,21 +106,16 @@ async fn close_tab(app: AppHandle) {
         });
         let focused = match asked {
             Ok(()) => tokio::time::timeout(std::time::Duration::from_millis(300), receive).await,
-            Err(_) => {
-                unknown = true;
-                continue;
-            }
+            Err(_) => continue,
         };
-        match focused {
-            Ok(Ok(true)) => {
-                target = id.to_string();
-                break;
-            }
-            Ok(Ok(false)) => {}
-            _ => unknown = true,
+        if matches!(focused, Ok(Ok(true))) {
+            target = id.to_string();
+            break;
         }
     }
-    if target.is_empty() && unknown {
+    // No page has focus: the main view got the key and its own handler owns it. Unreadable
+    // focus is the same: closing something on a guess is worse than doing nothing.
+    if target.is_empty() {
         return;
     }
     if let (Some(main), Some(script)) = (app.get_webview("main"), close_tab_script(&target)) {
@@ -280,7 +273,6 @@ pub async fn browser_url(app: AppHandle, id: String) -> Result<Option<String>, S
 mod script_tests {
     #[test]
     fn close_script_only_carries_plain_webview_ids() {
-        assert!(super::close_tab_script("").unwrap().contains("detail: ''"));
         assert!(super::close_tab_script("6a-0F")
             .unwrap()
             .contains("detail: '6a-0F'"));
