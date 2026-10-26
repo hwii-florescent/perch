@@ -10,7 +10,9 @@ vi.mock("../browserNative", () => ({
   onPassthrough: () => () => {},
   passthroughActive: () => false,
 }));
+vi.mock("../browserHistory", () => ({ searchHistory: vi.fn().mockResolvedValue([]), recordPage: vi.fn(), removePage: vi.fn() }));
 const { browserCall } = await import("../browserNative");
+const { searchHistory, removePage } = await import("../browserHistory");
 const { WorkspaceBrowser } = await import("./WorkspaceBrowser");
 const { usePerchStore } = await import("../store");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -90,4 +92,48 @@ it("does not navigate empty input, non-web schemes, or an IME composition Enter"
   await enter("hello", true);
   expect(browserCall).not.toHaveBeenCalled();
   expect(host.textContent).toContain("Search or enter an address above");
+});
+
+function type(value: string) {
+  const input = host.querySelector("input")!;
+  act(() => {
+    input.dispatchEvent(new FocusEvent("focus"));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  return input;
+}
+const press = (input: HTMLInputElement, key: string) => act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
+
+it("suggests history while typing, picks with the arrows, and Esc closes the list", async () => {
+  vi.mocked(searchHistory).mockResolvedValue([{ url: "https://news.example.org/today", title: "Today's news" }]);
+  await show("");
+  const input = type("news");
+  await act(async () => vi.advanceTimersByTimeAsync(20));
+  const options = [...host.querySelectorAll('[role="option"]')].map((o) => o.textContent);
+  expect(options[0]).toContain("Search for");
+  expect(options[1]).toContain("Today's news");
+  press(input, "Escape");
+  expect(host.querySelector('[role="listbox"]')).toBeNull();
+  type("today");
+  await act(async () => vi.advanceTimersByTimeAsync(20));
+  press(input, "ArrowDown");
+  press(input, "ArrowDown");
+  press(input, "Enter");
+  await act(async () => vi.advanceTimersByTimeAsync(20));
+  expect(input.value).toBe("https://news.example.org/today");
+  expect(browserCall).toHaveBeenCalledWith("show", expect.objectContaining({ url: "https://news.example.org/today" }));
+  expect(host.querySelector('[role="listbox"]')).toBeNull();
+});
+
+it("removes a suggestion from history without navigating", async () => {
+  vi.mocked(searchHistory).mockResolvedValue([{ url: "https://gone.example.org/", title: "Gone page" }]);
+  await show("");
+  type("gone");
+  await act(async () => vi.advanceTimersByTimeAsync(20));
+  const remove = host.querySelector('[aria-label^="Remove Gone page"]')!;
+  act(() => { remove.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); });
+  expect(removePage).toHaveBeenCalledWith("https://gone.example.org/");
+  expect(host.querySelector('[aria-label^="Remove Gone page"]')).toBeNull();
+  expect(browserCall).not.toHaveBeenCalled();
 });

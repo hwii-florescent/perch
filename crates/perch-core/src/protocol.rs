@@ -341,6 +341,13 @@ pub struct SessionSummary {
     pub current_provider_id: Option<String>,
 }
 
+/// One remembered page of the built-in browser (`server/browser_history.rs`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserHistoryEntry {
+    pub url: String,
+    pub title: String,
+}
+
 /// One durable attention event (`server/attention.rs`). `kind`: `question`
 /// (Needs You until answered), `failed` (Needs You until the next turn),
 /// `finished` / `exited` (Recent updates). `certainty`: `verified` (native
@@ -884,6 +891,38 @@ pub enum ClientMessage {
         #[serde(default)]
         dismiss: bool,
     },
+
+    /// Note a page shown in the built-in browser (capability `browser.history.v1`).
+    /// `visit` counts a new visit; otherwise only a non-empty `title` refreshes the entry.
+    /// The core keeps plain http(s) addresses only, without fragments.
+    #[serde(rename = "browser.history.record", rename_all = "camelCase")]
+    BrowserHistoryRecord {
+        url: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        visit: bool,
+    },
+
+    /// Address-bar suggestions: pages matching `query` (every word in the address
+    /// or title), best first; the most recent pages when `query` is empty.
+    /// Answered with `browser.history.result` to this connection only.
+    #[serde(rename = "browser.history.search", rename_all = "camelCase")]
+    BrowserHistorySearch {
+        request_id: String,
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+
+    /// Forget one page.
+    #[serde(rename = "browser.history.remove")]
+    BrowserHistoryRemove { url: String },
+
+    /// Forget every page.
+    #[serde(rename = "browser.history.clear")]
+    BrowserHistoryClear {},
 
     #[serde(rename = "session.subscribe", rename_all = "camelCase")]
     SessionSubscribe { session_id: String },
@@ -1828,6 +1867,13 @@ pub enum ServerMessage {
     /// `attention.list`. Local host only.
     #[serde(rename = "attention.snapshot", rename_all = "camelCase")]
     AttentionSnapshot { events: Vec<AttentionEvent> },
+
+    /// Reply to `browser.history.search`, best match first.
+    #[serde(rename = "browser.history.result", rename_all = "camelCase")]
+    BrowserHistoryResult {
+        request_id: String,
+        entries: Vec<BrowserHistoryEntry>,
+    },
 
     /// Effective session mode after session/workspace/device precedence.
     #[serde(rename = "session.mode", rename_all = "camelCase")]

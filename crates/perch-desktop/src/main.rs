@@ -221,6 +221,7 @@ fn main() {
             browser::browser_go,
             browser::browser_action,
             browser::browser_url,
+            browser::browser_info,
             browser::browser_shortcuts
         ])
         .setup(move |app| {

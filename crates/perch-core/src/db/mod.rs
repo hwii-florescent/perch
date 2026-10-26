@@ -19,6 +19,8 @@ use crate::review::{ReviewComment, ReviewPacket};
 
 mod attention;
 pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
+mod browser_history;
+pub use browser_history::BrowserHistoryRow;
 mod detached;
 pub use detached::DetachedRunRow;
 mod prompts;
@@ -498,6 +500,7 @@ impl HistoryDb {
             conn.execute("ALTER TABLE detached_runs ADD COLUMN operation_id TEXT", [])?;
         }
         Self::migrate_attention(&conn)?;
+        Self::migrate_browser_history(&conn)?;
         // Materialize first-class project/workspace metadata for every old
         // session. This is a metadata-only pass: it never creates a runtime,
         // resumes an agent, or changes an existing archived project flag.

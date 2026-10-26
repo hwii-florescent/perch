@@ -13,6 +13,7 @@ import { ModeSwitch } from "./ModeSwitch";
 import { MacPermissions, macPermissionsAvailable } from "./MacPermissions";
 import { socket } from "../ws";
 import { BROWSER_SEARCH_ENGINES } from "../links";
+import { clearHistory } from "../browserHistory";
 import { AgentCatalog } from "./AgentCatalog";
 import { useAgentChoices } from "./AgentPicker";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
@@ -120,6 +121,9 @@ function BrowserSection() {
         >
           {BROWSER_SEARCH_ENGINES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select>
+      </SettingRow>
+      <SettingRow title="Browsing history" description="Pages suggested in the address bar. Kept on this device only.">
+        <button type="button" className={SELECT} data-testid="settings-browser-clear-history" onClick={clearHistory}>Clear history</button>
       </SettingRow>
     </SettingsGroup>
   );

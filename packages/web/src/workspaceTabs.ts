@@ -4,6 +4,7 @@ import { fileTabKey, isBlankBrowser, useFileTabs, type FileTab } from "./fileTab
 import { applyStoredTabOrder, saveTabOrder, storedTabOrder } from "./tabOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
+import { useBrowserPages } from "./browserPages";
 
 /** One entry of the strip: a session (a terminal or agent) or an open resource.
  * `id` is the session id or `fileTabKey`, so one stored order covers both. */
@@ -67,10 +68,14 @@ export function sessionLabel(session: SessionSummary): string {
   return title.length > MAX_TAB_LABEL ? `${title.slice(0, MAX_TAB_LABEL - 1)}…` : title;
 }
 
-/** A resource tab's name: a file's basename, "Changes", or a page's host. */
+/** A resource tab's name: a file's basename, "Changes", or a page's title (else its host). */
 export function tabName(tab: FileTab): string {
   if (tab.kind === "review") return "Changes";
-  if (tab.kind === "browser") return isBlankBrowser(tab) ? "New browser" : parseUrl(tab.path)?.host ?? tab.path;
+  if (tab.kind === "browser") {
+    const page = useBrowserPages.getState().pages[fileTabKey(tab)];
+    const url = page?.url || (isBlankBrowser(tab) ? "" : tab.path);
+    return page?.title.trim() || (url ? parseUrl(url)?.host ?? url : "New browser");
+  }
   return tab.path.split("/").pop() || tab.path;
 }
 

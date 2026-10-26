@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { browserCall, browserId } from "./browserNative";
+import { useBrowserPages } from "./browserPages";
 import { fileTabKey, useFileTabs } from "./fileTabs";
 import { readViewerStored, viewerKey } from "./viewer";
 
@@ -53,6 +54,7 @@ export const useDrawerBrowsers = create<DrawerBrowsersState>((set, get) => ({
     : state),
   close: (id) => {
     void browserCall("close", { id: browserId(drawerPageKey(id)) });
+    useBrowserPages.getState().forget(drawerPageKey(id));
     set((state) => ({ pages: state.pages.filter((page) => page.id !== id) }));
   },
   closeAll: (workspaceId) => {

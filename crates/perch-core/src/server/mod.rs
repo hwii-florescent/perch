@@ -88,6 +88,7 @@ use workspace::effective_focus;
 mod agent_history;
 mod agents;
 mod attention;
+mod browser_history;
 mod context_bridge;
 mod native_ui;
 mod recover;
@@ -2402,6 +2403,7 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.close",
         "surface.v1",
         "attention.v1",
+        "browser.history.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

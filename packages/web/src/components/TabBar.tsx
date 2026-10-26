@@ -5,6 +5,8 @@ import { NewSessionPopover } from "../Sidebar";
 import { useTabOrderVersion } from "../tabOrder";
 import { isBlankBrowser, openBlankBrowser, useFileTabs, type FileTab } from "../fileTabs";
 import { AgentIcon } from "./AgentIcon";
+import { PageIcon } from "./PageIcon";
+import { useBrowserPages } from "../browserPages";
 import { FileEntryMenu } from "./FileEntryMenu";
 import { activateTab, sessionLabel, tabName, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { useSplitSets } from "../splitSets";
@@ -25,6 +27,8 @@ const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[ou
 const TAB = `min-w-0 flex-1 gap-2 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
 // Small gutters inset each tab from its neighbors and the strip edge, like a browser tab bar.
 const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0 items-stretch";
+// A hairline in the gap before a tab, drawn only between two tabs that are both off screen (no fill to tell them apart).
+const SEPARATOR = "pointer-events-none absolute top-1/2 -left-[2px] h-4 w-px -translate-y-1/2 bg-overlay-0";
 // "square" is the shell's soft corner (--radius-pane), not a literal square.
 const TAB_SHAPE = (shape: "square" | "round") => shape === "round" ? "rounded-full" : "rounded-ui";
 const CLOSE = `absolute top-1/2 right-[0.25rem] grid h-[1.25rem] w-[1.25rem] cursor-pointer place-items-center rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg ${FOCUS}`;
@@ -138,7 +142,7 @@ export function TabBar() {
     setPopoverAnchor(e.currentTarget.getBoundingClientRect());
   }
 
-  function sessionTab(entry: Extract<TabEntry, { kind: "session" }>) {
+  function sessionTab(entry: Extract<TabEntry, { kind: "session" }>, separated: boolean) {
     const s = entry.session;
     const state = paneStates.get(s.id) ?? "hidden";
     return (
@@ -159,6 +163,7 @@ export function TabBar() {
         />
       ) : (
         <span key={s.id} className={TAB_SLOT} data-tab-entry={s.id}>
+        {separated && <span className={SEPARATOR} aria-hidden="true" data-testid="tab-separator" />}
         <button
           type="button"
           className={cn(
@@ -207,11 +212,14 @@ export function TabBar() {
   }
 
   return (
-    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto px-2 py-[6px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
-      {entries.map((entry) => entry.kind === "resource" ? (
-        <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} state={paneStates.get(entry.id) ?? "hidden"} tabShape={tabShape}
-          dragging={entry.id === draggingId} />
-      ) : sessionTab(entry))}
+    <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-[3px] self-stretch overflow-x-auto px-2 py-[6px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
+      {entries.map((entry, i) => {
+        const separated = i > 0 && (paneStates.get(entry.id) ?? "hidden") === "hidden" && (paneStates.get(entries[i - 1]!.id) ?? "hidden") === "hidden";
+        return entry.kind === "resource" ? (
+          <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} state={paneStates.get(entry.id) ?? "hidden"} tabShape={tabShape}
+            dragging={entry.id === draggingId} separated={separated} />
+        ) : sessionTab(entry, separated);
+      })}
 
       <button
         type="button"
@@ -264,12 +272,13 @@ const ReviewIcon = () => <svg {...ICON}><circle cx="4" cy="3" r="1.5" /><circle 
 const CloseIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m2 2 6 6m0-6-6 6" /></svg>;
 
 /** A file's or review's tab: its name, a ● while a file has unsaved changes, and ×. */
-function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
+function ResourceTabButton({ tab, id, state, tabShape, dragging, separated }: {
   tab: FileTab;
   id: string;
   state: TabPaneState;
   tabShape: "square" | "round";
   dragging: boolean;
+  separated: boolean;
 }) {
   const close = useFileTabs((s) => s.close);
   const pin = useFileTabs((s) => s.pin);
@@ -279,10 +288,13 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
     return !review && document != null && document.content !== document.savedContent;
   });
   const browser = tab.kind === "browser";
+  // Subscribing re-renders the tab when its page's title or icon changes (tabName reads the same store).
+  const page = useBrowserPages((s) => (browser ? s.pages[id] : undefined));
   const name = tabName(tab);
   const testId = review ? `review-tab-${tab.workspaceId}` : browser ? "browser-tab" : `file-tab-${tab.path}`;
   return (
     <span className={TAB_SLOT} data-tab-entry={id}>
+      {separated && <span className={SEPARATOR} aria-hidden="true" data-testid="tab-separator" />}
       <button
         type="button"
         className={cn(
@@ -296,7 +308,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
         )}
         data-pane-state={state}
         data-testid={testId}
-        title={review ? "Changes" : isBlankBrowser(tab) ? "New browser" : tab.path}
+        title={review ? "Changes" : browser ? page?.url || (isBlankBrowser(tab) ? "New browser" : tab.path) : tab.path}
         onPointerDown={(e) => beginTabDrag(e, id, name)}
         onClick={() => activateTab({ id, kind: "resource", tab })}
         onDoubleClick={() => pin(id)}
@@ -305,7 +317,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging }: {
           useSplitSets.getState().openMenu(id, e.clientX, e.clientY);
         }}
       >
-        <span className="shrink-0 opacity-80" aria-hidden="true">{browser ? <BrowserIcon /> : review ? <ReviewIcon /> : <FileIcon />}</span>
+        <span className="shrink-0 opacity-80" aria-hidden="true">{browser ? <PageIcon icon={page?.icon} fallback={<BrowserIcon />} /> : review ? <ReviewIcon /> : <FileIcon />}</span>
         <span className={cn("block truncate", tab.preview && "italic")}>{name}</span>
         {dirty && <span className="text-subtext-0" aria-label="unsaved changes"> ●</span>}
       </button>

@@ -182,6 +182,20 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session::handle_session_subscribe(state, raw_text, session_id)
         }
         ClientMessage::SessionList {} => session::handle_session_list(state),
+        ClientMessage::BrowserHistoryRecord {
+            ref url,
+            ref title,
+            visit,
+        } => super::browser_history::handle_record(state, url, title, visit),
+        ClientMessage::BrowserHistorySearch {
+            request_id,
+            ref query,
+            limit,
+        } => super::browser_history::handle_search(state, request_id, query, limit),
+        ClientMessage::BrowserHistoryRemove { ref url } => {
+            super::browser_history::handle_remove(state, url)
+        }
+        ClientMessage::BrowserHistoryClear {} => super::browser_history::handle_clear(state),
         ClientMessage::AttentionList {} => super::attention::handle_list(state),
         ClientMessage::AttentionUpdate { ref ids, dismiss } => {
             super::attention::handle_update(state, ids, dismiss)

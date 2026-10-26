@@ -1,5 +1,6 @@
 import { fileTabKey, useFileTabs } from "./fileTabs";
 import { tauriInvoke } from "./links";
+import { useBrowserPages } from "./browserPages";
 
 /** True in the desktop app, where a browser tab is a native child webview (`browser.rs`). */
 export const nativeBrowser = tauriInvoke !== undefined;
@@ -46,12 +47,14 @@ export function acquirePassthrough(): () => void {
   };
 }
 
-// A closed tab destroys its page. Switching tabs only hides it, so a page keeps its state.
+// A closed tab destroys its page and forgets its saved address. Switching tabs only hides it, so a page keeps its state.
 useFileTabs.subscribe((state, previous) => {
-  if (!nativeBrowser || state.tabs === previous.tabs) return;
+  if (state.tabs === previous.tabs) return;
   const open = new Set(state.tabs.map(fileTabKey));
   for (const tab of previous.tabs) {
     const key = fileTabKey(tab);
-    if (tab.kind === "browser" && !open.has(key)) void browserCall("close", { id: browserId(key) });
+    if (tab.kind !== "browser" || open.has(key)) continue;
+    useBrowserPages.getState().forget(key);
+    if (nativeBrowser) void browserCall("close", { id: browserId(key) });
   }
 });

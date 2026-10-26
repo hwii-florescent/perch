@@ -358,6 +358,27 @@ pub async fn browser_action(app: AppHandle, id: String, action: String) -> Resul
     .map_err(|e| e.to_string())
 }
 
+/// Copy an NSString's bytes; None for nil. Callers keep the autoreleased object alive.
+#[cfg(target_os = "macos")]
+unsafe fn nsstring_lossy(text: *mut objc2::runtime::AnyObject) -> Option<String> {
+    use objc2::msg_send;
+    if text.is_null() {
+        return None;
+    }
+    // SAFETY: the caller supplies a live NSString on its owning thread.
+    unsafe {
+        let bytes: *const std::ffi::c_char = msg_send![text, UTF8String];
+        if bytes.is_null() {
+            return None;
+        }
+        Some(
+            std::ffi::CStr::from_ptr(bytes)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
+
 /// WKWebView.URL is nil until a navigation commits (and can stay nil after a failed first
 /// load). Wry 0.55's url() unwraps it, aborting the app instead of returning an error.
 #[cfg(target_os = "macos")]
@@ -370,18 +391,7 @@ unsafe fn nsurl_string(url: *mut objc2::runtime::AnyObject) -> Option<String> {
     // bytes before the autoreleased objects can be released, checking every nullable result.
     unsafe {
         let text: *mut AnyObject = msg_send![url, absoluteString];
-        if text.is_null() {
-            return None;
-        }
-        let bytes: *const std::ffi::c_char = msg_send![text, UTF8String];
-        if bytes.is_null() {
-            return None;
-        }
-        Some(
-            std::ffi::CStr::from_ptr(bytes)
-                .to_string_lossy()
-                .into_owned(),
-        )
+        nsstring_lossy(text)
     }
 }
 
@@ -415,6 +425,56 @@ pub async fn browser_url(app: AppHandle, id: String) -> Result<Option<String>, S
     view.url()
         .map(|u| Some(u.to_string()))
         .map_err(|e| e.to_string())
+}
+
+/// The page's declared icon, else the site's /favicon.ico. The UI loads it itself, so no third
+/// party is asked about the user's sites. "" for a page with no origin (about:blank).
+#[cfg(target_os = "macos")]
+const ICON_SCRIPT: &std::ffi::CStr = c"(() => { if (!location.origin.startsWith('http')) return ''; const link = document.querySelector('link[rel~=\"icon\"]') || document.querySelector('link[rel=\"apple-touch-icon\"]'); return link && link.href ? link.href : location.origin + '/favicon.ico'; })()";
+
+/// The page's `[title, favicon address]`, for the tab strip; None before the page exists.
+#[tauri::command]
+pub async fn browser_info(app: AppHandle, id: String) -> Result<Option<(String, String)>, String> {
+    let Some(view) = app.get_webview(&label(&id)?) else {
+        return Ok(None);
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        view.with_webview(move |platform| {
+            use objc2::{class, msg_send, runtime::AnyObject};
+            // SAFETY: with_webview runs on the main thread with a live WKWebView. WebKit copies
+            // the completion block and runs it once on the main thread; it retains the script.
+            unsafe {
+                let view = platform.inner().cast::<AnyObject>();
+                let title: *mut AnyObject = msg_send![view, title];
+                let title = nsstring_lossy(title).unwrap_or_default();
+                let send = std::sync::Mutex::new(Some(send));
+                let block =
+                    block2::RcBlock::new(move |result: *mut AnyObject, _error: *mut AnyObject| {
+                        let icon = nsstring_lossy(result).unwrap_or_default();
+                        if let Some(send) = send.lock().unwrap().take() {
+                            let _ = send.send((title.clone(), icon));
+                        }
+                    });
+                let script: *mut AnyObject =
+                    msg_send![class!(NSString), stringWithUTF8String: ICON_SCRIPT.as_ptr()];
+                let _: () = msg_send![view, evaluateJavaScript: script, completionHandler: &*block];
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        // A page that never answers (closing, crashed content process) must not stall the queue.
+        tokio::time::timeout(std::time::Duration::from_secs(5), receive)
+            .await
+            .map_err(|e| e.to_string())?
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = view;
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

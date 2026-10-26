@@ -7,6 +7,36 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-27 — Browser continuity, tab identity and address suggestions (proposed, awaiting approval)
+
+A browser tab or drawer page remembers the address it last showed, so a restart
+reopens that page (fresh load: back/forward history, scroll and form state are
+not kept). Its tab shows the page's own title and favicon (globe until known or
+when the icon fails to load); the tab strip, not the webview, owns that text.
+The favicon address is read from the page (`<link rel=icon>`, else
+`/favicon.ico`) and loaded by the UI directly, so no third party sees the sites.
+
+The address bar behaves like other browsers: focus selects the address; typing
+or ↓ opens a list: the typed action first (go / search, exactly what Enter
+did before) then history matches by prefix, frequency and recency (empty bar: recent pages); ↑/↓ choose,
+Enter opens, Esc closes the list then restores the address; × removes an entry;
+Settings → General → Browser clears history.
+
+History is owned by the core (`browser_history` in its SQLite database, capability
+`browser.history.v1`), like other browsers keep theirs: shared by every window and
+phone of this core, kept across webview-storage resets, capped at 5000 pages. The
+core validates and ranks it; the UI only asks. Only plain http(s) addresses are
+stored, never fragments (they can carry tokens) or perch's own addresses (pairing
+links). Query strings are kept, as other browsers do, so a token passed in one is
+remembered too; every paired phone of this core can read the history. It stays on the local core: it is the user's, not a remote workspace's.
+Without the capability (an older core) the bar simply has no suggestions. The
+per-tab last address/title/icon stays in per-window storage, like open file tabs.
+
+Search-engine query suggestions are not sent anywhere: they would leak keystrokes
+and need an explicit opt-in first. The dropdown hides the native page while open,
+like menus and dialogs. Title/favicon reading is verified by the native probe
+(`close_shortcut_probe`); the dropdown's look is unverified in a real window.
+
 ## 2026-10-26 — Browser search preferences
 
 Settings → General → Browser chooses Google (default), DuckDuckGo, Bing or Brave

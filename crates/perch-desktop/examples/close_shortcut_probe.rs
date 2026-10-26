@@ -165,6 +165,26 @@ mod probe {
             tauri::LogicalSize::new(400., 300.),
         )?;
         crate::shortcuts::tag_browser(&app.get_webview("browser-probe").unwrap(), "probe")?;
+        // The tab strip's title and favicon come from the real page once it has loaded.
+        let icon = child_url
+            .parse::<tauri::Url>()?
+            .join("/icon.png")?
+            .to_string();
+        let mut info = None;
+        for _ in 0..30 {
+            info = browser::browser_info(app.clone(), "probe".into())
+                .await
+                .ok()
+                .flatten();
+            if info.as_ref().is_some_and(|(title, _)| !title.is_empty()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        anyhow::ensure!(
+            info == Some(("Probe page".into(), icon)),
+            "browser_info returned {info:?}"
+        );
         anyhow::ensure!(
             !press(&app, "browser-probe", c"g", 0).await?,
             "unprefixed leader letter stole page typing"
@@ -303,7 +323,7 @@ mod probe {
                     let count = stream.read(&mut bytes).unwrap_or(0);
                     let child = String::from_utf8_lossy(&bytes[..count]).contains("/child");
                     let body = if child {
-                        "<!doctype html><title>Probe page</title><p>page</p>"
+                        "<!doctype html><title>Probe page</title><link rel=\"icon\" href=\"/icon.png\"><p>page</p>"
                     } else {
                         "<!doctype html><title>Shortcut probe</title><script>window.focusMarks = []; window.epoch = crypto.randomUUID(); window.report = id => window.__TAURI_INTERNALS__.invoke('browser_url', {id}); window.addEventListener('perch:close-tab', e => report('close:' + e.detail.id + ':' + e.detail.generation)); window.addEventListener('perch:command', e => { window.focusMarks.push(e.detail.focused); const id = window.probeBindings[e.detail.index][0]; report((id === 'tabs.close' ? 'close:' : 'command:' + id + ':') + e.detail.id + ':' + e.detail.generation); }); report('ready');</script>"
                     };

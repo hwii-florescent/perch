@@ -1101,6 +1101,36 @@ export interface AttentionUpdateMessage {
   dismiss?: boolean;
 }
 
+/** Note a page shown in the built-in browser (capability `browser.history.v1`). `visit`
+ * counts a new visit; otherwise only a non-empty `title` refreshes the entry. The core keeps
+ * plain http(s) addresses only, without fragments. */
+export interface BrowserHistoryRecordMessage {
+  type: "browser.history.record";
+  url: string;
+  title?: string;
+  visit?: boolean;
+}
+
+/** Address-bar suggestions: pages matching `query` (every word in the address or title), best
+ * first; the most recent pages when `query` is empty. Answered with `browser.history.result`. */
+export interface BrowserHistorySearchMessage {
+  type: "browser.history.search";
+  requestId: string;
+  query?: string;
+  limit?: number;
+}
+
+/** Forget one page. */
+export interface BrowserHistoryRemoveMessage {
+  type: "browser.history.remove";
+  url: string;
+}
+
+/** Forget every page. */
+export interface BrowserHistoryClearMessage {
+  type: "browser.history.clear";
+}
+
 // Stage D — settings & hosts client messages
 
 /**
@@ -1742,6 +1772,10 @@ export type ClientMessage =
   | SessionModeSetMessage
   | SessionListMessage
   | AttentionListMessage
+  | BrowserHistoryRecordMessage
+  | BrowserHistorySearchMessage
+  | BrowserHistoryRemoveMessage
+  | BrowserHistoryClearMessage
   | AttentionUpdateMessage
   | ChatSendMessage
   | ChatCancelMessage
@@ -2044,6 +2078,19 @@ export interface AttentionEvent {
   /** Files the agent's last recorded turn changed (finished events only). */
   changedPathCount?: number;
   changedPaths?: string[];
+}
+
+/** One remembered page of the built-in browser. */
+export interface BrowserHistoryEntry {
+  url: string;
+  title: string;
+}
+
+/** Reply to `browser.history.search`, best match first. */
+export interface BrowserHistoryResultMessage {
+  type: "browser.history.result";
+  requestId: string;
+  entries: BrowserHistoryEntry[];
 }
 
 /** Every unresolved, undismissed attention event of the last week, newest
@@ -2542,6 +2589,7 @@ export type ServerMessage =
   | SessionListResponseMessage
   | SessionUpdatedMessage
   | AttentionSnapshotMessage
+  | BrowserHistoryResultMessage
   | SessionModeMessage
   | SessionDeletedMessage
   | ServerInfoMessage

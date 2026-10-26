@@ -1,19 +1,22 @@
 import { cn } from "../lib/cn";
 import { drawerPageKey, useDrawerBrowsers } from "../drawerBrowsers";
 import { useFileTabs } from "../fileTabs";
+import { useBrowserPages } from "../browserPages";
+import { PageIcon } from "./PageIcon";
 import { parseUrl } from "../links";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import { GHOST_BUTTON } from "./ui/icon-button";
 
 const BTN = cn(GHOST_BUTTON, "px-2 py-1 text-[0.75rem]");
 
-const pageLabel = (url: string) => (url ? parseUrl(url)?.host ?? url : "New page");
+const pageLabel = (url: string, title = "") => title.trim() || (url ? parseUrl(url)?.host ?? url : "New page");
 
 /** The drawer's Browser section: the workspace's pages as a strip (open, switch, close,
  * close all) over the shown one. Only the shown page is on screen, but every open page
  * keeps its webview, so closing is how its memory comes back. */
 export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
   const allPages = useDrawerBrowsers((s) => s.pages);
+  const meta = useBrowserPages((s) => s.pages);
   const activeId = useDrawerBrowsers((s) => s.active[workspaceId]);
   const { open, select, setUrl, close, closeAll } = useDrawerBrowsers.getState();
   const tabCount = useFileTabs((s) => s.tabs.filter((tab) => tab.workspaceId === workspaceId && tab.kind === "browser").length);
@@ -33,9 +36,12 @@ export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
               title={page.url || "New page"}
               onClick={() => select(workspaceId, page.id)}
             >
-              {pageLabel(page.url)}
+              <span className="flex items-center gap-1.5">
+                {meta[drawerPageKey(page.id)]?.icon && <PageIcon icon={meta[drawerPageKey(page.id)]?.icon} fallback={null} />}
+                <span className="truncate">{pageLabel(page.url, meta[drawerPageKey(page.id)]?.title)}</span>
+              </span>
             </button>
-            <button type="button" className={cn(GHOST_BUTTON, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url)}`} onClick={() => close(page.id)}>×</button>
+            <button type="button" className={cn(GHOST_BUTTON, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url, meta[drawerPageKey(page.id)]?.title)}`} onClick={() => close(page.id)}>×</button>
           </span>
         ))}
         <button type="button" className={BTN} data-testid="drawer-browser-new" title="New browser page" aria-label="New browser page" onClick={() => open(workspaceId)}>+</button>
