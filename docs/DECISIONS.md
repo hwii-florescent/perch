@@ -7,6 +7,36 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-25 — Explorer signals and compact status controls
+
+Owner approved the Files/Git visual study, with restrained theme-derived file
+icons and separate Git markers. This refines the right-hand explorer and Git
+file rows; the left Birdhouse/Nest/session hierarchy and Git actions stay.
+
+- File/folder icons recognize filename/extension conventions (including package
+  manifests, libraries and config files); they do not analyze dependencies or
+  infer package ownership. Search results and Git rows reuse the same icons.
+  Desktop explorer text matches the organizer's 12px scale with compact rows;
+  narrow/phone tree targets remain at least 44px. Birdhouse hover/selection
+  uses the same neutral `surface-1` fill as session rows.
+- Git markers use the existing core snapshot: M modified, U untracked, A added,
+  D deleted, R renamed, C copied, T type changed, ! merge conflict, ? unknown.
+  A mixed marker such as M/M distinguishes index and working-tree changes;
+  accessible descriptions spell out both states. Folders summarize descendant
+  changes with a quiet dot. Deleted files remain in Git, not phantom tree rows.
+- Badges are snapshots, not live diagnostics: refresh on opening/reconnecting,
+  file-tree refresh and existing Git actions. A loading label identifies refresh;
+  unavailable Git hides badges without claiming a clean tree. No ignored status
+  is guessed from a folder name.
+- Warning/error diagnostics in the study were illustrative. A real compiler or
+  linter source, counts and editor squiggles are not part of this implementation.
+- Needs You is a compact bell with its actionable count or unread dot, no visible
+  text label. Accessible name/title, keyboard shortcut, upward panel, Welcome
+  Back and attention semantics remain. It has no distinct resting fill or
+  attention-colored text; hover uses the normal neutral button fill. Bell/count
+  and usage share the vertical center of the compact bar. Phone targets remain
+  at least 44px.
+
 ## 2026-10-25 — Glass shell, system UI font, Birdhouse/Nest/Scratchpad
 
 Owner-approved follow-up to the soft separation below, from the v3–v5 visual

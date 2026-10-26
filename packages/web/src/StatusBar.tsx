@@ -73,7 +73,7 @@ export function UsageSummary({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="usage-details-popover"
-        className={cn(GHOST_BUTTON, "flex min-w-0 items-center gap-3 p-0 text-[9px] focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+        className={cn(GHOST_BUTTON, "flex h-5 min-w-0 items-center gap-3 px-1.5 py-0 text-[9px] leading-none focus-visible:[outline:1px_solid_var(--overlay-1)]")}
         title="Open plan usage details"
         onClick={() => {
           if (open) {
@@ -211,7 +211,7 @@ export function StatusBar() {
   return (
     // v4 mock: host, path and branch left; optional session details in the middle;
     // Needs You, usage and the connection check right. Identity stays in tabs/sidebar.
-    <footer className="status-bar box-border flex h-[26px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
+    <footer className="status-bar box-border flex h-[26px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] leading-none whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
       <div className="status-bar__location flex min-w-0 flex-1 items-center gap-[13px] overflow-hidden">
         <span className={cn("size-1 shrink-0 rounded-full", online ? "bg-green" : "bg-yellow")} title={connectionLabel} />
         <span className="max-w-24 shrink-0 truncate" title={`${host?.name ?? hostId} · ${connectionLabel}`} data-testid="status-host">{hostId === "local" ? "Local" : host?.name ?? hostId}</span>
@@ -230,8 +230,8 @@ export function StatusBar() {
         {status?.contextTokens !== undefined && <span className="shrink-0">ctx {formatTokens(status.contextTokens)}</span>}
         {status?.costUsd !== undefined && <span className="shrink-0">${status.costUsd.toFixed(3)}</span>}
       </div>
-      <NeedsYouButton variant="status" className="inline-flex h-6 w-[7.75rem] shrink-0 cursor-pointer items-center justify-center gap-[7px] rounded-ui bg-surface-0 px-2 text-[11px] text-fg [border:0] [font-family:inherit] hover:bg-surface-1 aria-expanded:bg-surface-1" />
-      <div className="status-bar__usage min-w-0 max-w-[38%] shrink overflow-hidden">
+      <NeedsYouButton variant="status" className={cn(GHOST_BUTTON, "inline-flex h-5 shrink-0 items-center justify-center gap-1 px-1.5 py-0 text-[11px] leading-none aria-expanded:bg-surface-1 aria-expanded:text-fg")} />
+      <div className="status-bar__usage -ml-2 flex h-5 min-w-0 max-w-[38%] shrink items-center overflow-hidden">
         <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
       </div>
       <span className="shrink-0" role="img" aria-label={connectionLabel} title={`${hostId === "local" ? "Local core" : host?.name ?? hostId}: ${connectionLabel}`} data-testid="status-connection">

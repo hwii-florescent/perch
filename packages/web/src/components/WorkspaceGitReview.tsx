@@ -6,7 +6,6 @@ import type {
   GitDiffSnapshot,
   GitDiffTarget,
   GitPreviewReceipt,
-  GitStatusEntry,
   GitStatusSnapshot,
   ReviewBatchDelivery,
   ReviewBatchPreview,
@@ -18,6 +17,7 @@ import type {
 import type { ContextSource } from "@perch/shared";
 import { newId } from "../ids";
 import { cn } from "../lib/cn";
+import { FileIcon, GitMarker } from "./fileDecorations";
 
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] border px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
@@ -37,7 +37,6 @@ const BRANCH_DETAIL = "block overflow-hidden text-[0.7rem] text-ellipsis whitesp
 const PATH_BUTTON = "workspace-git__path-button flex min-w-0 flex-1 items-center justify-between gap-[0.4rem] rounded-ui border px-3 py-[3px] text-left text-fg [background:none] hover:bg-surface-1";
 const PATH_BUTTON_IDLE = "border-transparent";
 const PATH_BUTTON_ACTIVE = "border-[color:color-mix(in_srgb,var(--accent)_65%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
-const FILE_STATE_TONE: Record<string, string> = { staged: "text-green", changed: "text-yellow", untracked: "text-yellow", conflict: "text-red" };
 const TB_FIELD = "flex min-w-0 max-w-full flex-col items-start gap-[0.35rem] text-[0.68rem] text-subtext-0";
 const TB_INPUT = "min-w-0 max-w-full rounded-ui border border-[color:var(--git-border)] bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
 const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
@@ -130,30 +129,6 @@ function shortHash(value: string | undefined): string {
   return value ? value.slice(0, 8) : "—";
 }
 
-function stateLabel(state: GitStatusEntry["index"]): string {
-  switch (state) {
-    case "untracked": return "untracked";
-    case "modified": return "modified";
-    case "added": return "added";
-    case "deleted": return "deleted";
-    case "renamed": return "renamed";
-    case "copied": return "copied";
-    case "typeChanged": return "type changed";
-    case "ignored": return "ignored";
-    case "conflicted": return "conflicted";
-    case "unmodified": return "clean";
-    default: return "changed";
-  }
-}
-
-function entryState(entry: GitStatusEntry): string {
-  if (entry.index === "conflicted" || entry.worktree === "conflicted") return "conflicted";
-  if (entry.index === "untracked" && entry.worktree === "untracked") return "untracked";
-  if (entry.staged && entry.unstaged) return "staged + modified";
-  if (entry.staged) return "staged";
-  return stateLabel(entry.worktree === "unmodified" ? entry.index : entry.worktree);
-}
-
 function lineNumber(line: GitDiffLine, side: ReviewSide): number | undefined {
   if (side === "old") return line.oldLine;
   if (side === "new") return line.newLine;
@@ -169,13 +144,6 @@ function statusSymbol(line: GitDiffLine["kind"]): string {
   if (line === "addition") return "+";
   if (line === "deletion") return "−";
   return " ";
-}
-
-function statusTone(entry: GitStatusEntry): string {
-  if (entry.index === "conflicted" || entry.worktree === "conflicted") return "conflict";
-  if (entry.index === "untracked" && entry.worktree === "untracked") return "untracked";
-  if (entry.staged) return "staged";
-  return "changed";
 }
 
 function newOperationId(): string {
@@ -723,8 +691,9 @@ export function WorkspaceGitReview({
                   onClick={() => { setActiveFile(entry.path); setSelection(null); }}
                   title={entry.originalPath ? `${entry.originalPath} → ${entry.path}` : entry.path}
                 >
+                  <FileIcon name={entry.path.split("/").at(-1) ?? entry.path} />
                   <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{entry.path}</span>
-                  <span className={`shrink-0 text-[0.64rem] ${FILE_STATE_TONE[statusTone(entry)] ?? "text-subtext-0"}`} title={entryState(entry)}>{entryState(entry)}</span>
+                  <GitMarker decoration={{ entry }} />
                 </button>
               </div>
             ))}
@@ -817,7 +786,7 @@ export function WorkspaceGitReview({
               <div className="flex items-center justify-between gap-[0.6rem] pt-1 pr-[0.3rem] pb-[0.4rem] pl-[0.3rem]"><span className={EYEBROW}>Diff files</span><strong>{diffFiles.length}</strong></div>
               {diffFiles.map((file) => {
                 const path = filePath(file);
-                return <button type="button" className={`${DIFF_FILE} ${activeFile === path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span className="text-[0.64rem] text-accent capitalize">{file.status}</span><strong className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{path}</strong><small className="text-[0.64rem] text-subtext-0">{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
+                return <button type="button" className={`${DIFF_FILE} ${activeFile === path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`} data-testid="git-diff-file" key={path} onClick={() => { setActiveFile(path); setSelection(null); }}><span className="flex items-center gap-1.5 text-[0.64rem] text-subtext-0 capitalize"><FileIcon name={path.split("/").at(-1) ?? path} />{file.status}</span><strong className="w-full overflow-hidden text-ellipsis whitespace-nowrap">{path}</strong><small className="text-[0.64rem] text-subtext-0">{file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}</small></button>;
               })}
               {diffState !== "loading" && diffFiles.length === 0 && <div className={STATUS_NOTE}>No files in this diff.</div>}
             </nav>

@@ -223,7 +223,9 @@ test.describe("Workspace Git/review UI", () => {
       const diff = page.getByTestId("git-diff");
 
       await expect(status).toContainText("1 changed path", { timeout: 15000 });
-      await expect(status).toContainText("staged + modified");
+      const mixedState = status.getByTestId("file-git-marker");
+      await expect(mixedState).toHaveText("M/M");
+      await expect(mixedState).toHaveAccessibleName("Git · Index: modified; working tree: modified");
       await expect(diff).toContainText(WORKTREE_TEXT, { timeout: 15000 });
       await expect(diff).toContainText(INDEX_TEXT);
       await expectDiffSurfaceUsable(page, WORKTREE_TEXT);
@@ -374,7 +376,9 @@ test.describe("Workspace Git/review UI", () => {
 
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByTestId("mobile-switch").click();
-      await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
+      await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
+      await page.getByRole("navigation", { name: "Mobile panes" }).getByRole("button", { name: "Git", exact: true }).click();
+      await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible();
       await selector.selectOption("workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
       await expect(diff).toContainText(WORKTREE_TEXT);
@@ -401,8 +405,9 @@ test.describe("Workspace Git/review UI", () => {
       const switcher = page.getByTestId("mobile-switcher");
       const project = switcher.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
       await expect(project).toBeVisible({ timeout: 10000 });
-      await project.getByTestId(`workspace-git-${workspaceId}`).click();
+      await project.locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
       await expect(switcher).not.toBeVisible({ timeout: 5000 });
+      await page.getByRole("navigation", { name: "Mobile panes" }).getByRole("button", { name: "Git", exact: true }).click();
       await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible({ timeout: 10000 });
       await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(1);
       await expect(page.locator(".dockview-theme-perch")).toHaveCount(0);

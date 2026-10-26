@@ -199,7 +199,7 @@ function Panel({ anchor, onClose, above }: { anchor: HTMLElement | null; onClose
 
 /** A count only when something needs you, a quiet dot for unread updates, nothing at
  * all when the host lacks `attention.v1`. `variant="status"` is the desktop status-bar slot:
- * bell, the "Needs You" label and the count or dot, with the panel opening upward. */
+ * bell and the count or unread dot, with the panel opening upward. Its name stays accessible. */
 export function NeedsYouButton({ className, variant = "icon" }: { className?: string; variant?: "icon" | "status" }) {
   const supported = useAttention((s) => s.supported);
   const events = useAttention((s) => s.events);
@@ -216,7 +216,7 @@ export function NeedsYouButton({ className, variant = "icon" }: { className?: st
       <button
         ref={button}
         type="button"
-        className={cn(className, "relative", !status && "gap-1", count > 0 && "text-yellow")}
+        className={cn(className, "relative", !status && "gap-1")}
         title={label}
         aria-label={label}
         aria-expanded={open}
@@ -229,9 +229,8 @@ export function NeedsYouButton({ className, variant = "icon" }: { className?: st
             <path d="M6.5 13a1.6 1.6 0 0 0 3 0" />
           </>}
         </svg>
-        {status && <span className="min-w-0 truncate">Needs You</span>}
-        {count > 0 && <span className={cn("text-[0.75rem] font-semibold", status && "grid h-4 min-w-4 place-items-center rounded-[5px] bg-surface-1 px-1 text-[10px] font-normal tabular-nums")} data-testid="needs-you-count">{count}</span>}
-        {!count && unread && <span className={cn("size-1.5 rounded-full bg-teal", !status && "absolute top-[0.2rem] right-[0.3rem]")} aria-hidden="true" data-testid="needs-you-unread" />}
+        {count > 0 && <span className={cn("text-[0.75rem] font-semibold", status && "text-[10px] tabular-nums")} data-testid="needs-you-count">{count}</span>}
+        {!count && unread && <span className="absolute top-[0.2rem] right-[0.3rem] size-1.5 rounded-full bg-teal" aria-hidden="true" data-testid="needs-you-unread" />}
       </button>
       {open && <Panel anchor={button.current} onClose={() => setOpen(false)} above={status} />}
     </>

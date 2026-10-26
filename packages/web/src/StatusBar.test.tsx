@@ -88,7 +88,7 @@ const question = (id: string): AttentionEvent => ({
 });
 const finishedUnread: AttentionEvent = { ...question("done"), kind: "finished", requiresAction: false };
 
-it("keeps Needs You in a fixed, non-shrinking slot just left of the usage summary, with its count", () => {
+it("keeps an accessible icon-only Needs You control just left of vertically centered usage, with its count", () => {
   useAttention.setState({ supported: true, events: [question("a"), question("b")] });
   render(<StatusBar />);
   const toggle = get("needs-you-toggle");
@@ -99,8 +99,17 @@ it("keeps Needs You in a fixed, non-shrinking slot just left of the usage summar
   expect(footer.lastElementChild).toBe(get("status-connection"));
   expect(footer.className).toContain("h-[26px]");
   expect(toggle.className).toContain("shrink-0");
-  expect(toggle.className).toContain("w-[7.75rem]");
-  expect(toggle.textContent).toContain("Needs You");
+  // Same box as usage (h-5, px-1.5) centred in the bar, no resting fill: only hover changes it, like the other buttons.
+  expect(toggle.className).toContain("h-5");
+  expect(toggle.className).toContain("px-1.5");
+  expect(toggle.className).not.toMatch(/(^| )bg-surface-0( |$)/);
+  expect(toggle.className).not.toContain("text-yellow");
+  expect(get("usage-summary").className).toContain("px-1.5");
+  expect(toggle.textContent).not.toContain("Needs You");
+  expect(toggle.querySelector("svg")).not.toBeNull();
+  expect(get("usage-summary").className).toContain("h-5");
+  expect(get("usage-summary").className).toContain("leading-none");
+  expect(get("usage-summary").parentElement!.className).toContain("flex h-5");
   expect(get("needs-you-count").textContent).toBe("2");
   expect(toggle.getAttribute("aria-label")).toBe("Needs You: 2");
   // The fields before the slot truncate rather than push it.

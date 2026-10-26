@@ -530,6 +530,8 @@ impl GitService {
             OsString::from("--no-ext-diff"),
             OsString::from("--no-textconv"),
             OsString::from("--no-color"),
+            OsString::from("--src-prefix=a/"),
+            OsString::from("--dst-prefix=b/"),
             OsString::from("--find-renames"),
             OsString::from(format!("--unified={}", options.context_lines.min(1000))),
         ];
@@ -1820,18 +1822,33 @@ fn parse_status_porcelain_z(raw: &[u8]) -> Result<Vec<StatusEntry>, GitError> {
         }
         let x = record[0] as char;
         let y = record[1] as char;
-        let mut path = String::from_utf8_lossy(&record[3..]).into_owned();
-        let mut original_path = None;
-        if matches!(x, 'R' | 'C') && index + 1 < records.len() {
-            let next = records[index + 1];
-            if next.len() < 3 || next[2] != b' ' {
-                original_path = Some(path);
-                path = String::from_utf8_lossy(next).into_owned();
-                index += 1;
-            }
-        }
-        let index_state = file_state(x, true);
-        let worktree_state = file_state(y, false);
+        let path = String::from_utf8_lossy(&record[3..]).into_owned();
+        let original_path = if matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C') {
+            // Porcelain v1 -z emits destination NUL source, even when the source
+            // itself looks like an XY status record (for example, "M old.txt").
+            index += 1;
+            let source = records.get(index).ok_or_else(|| {
+                GitError::Parse("missing porcelain rename/copy source".to_string())
+            })?;
+            Some(String::from_utf8_lossy(source).into_owned())
+        } else {
+            None
+        };
+        let unmerged = matches!(
+            (x, y),
+            ('D', 'D')
+                | ('A', 'U')
+                | ('U', 'D')
+                | ('U', 'A')
+                | ('D', 'U')
+                | ('A', 'A')
+                | ('U', 'U')
+        );
+        let (index_state, worktree_state) = if unmerged {
+            (FileState::Conflicted, FileState::Conflicted)
+        } else {
+            (file_state(x, true), file_state(y, false))
+        };
         entries.push(StatusEntry {
             path,
             original_path,
@@ -1920,9 +1937,27 @@ pub fn parse_unified_diff(raw: &[u8]) -> Result<Vec<DiffFile>, GitError> {
             }
             continue;
         }
-        if line.starts_with("copy from") || line.starts_with("copy to") {
+        if let Some(path) = line
+            .strip_prefix("rename from ")
+            .or_else(|| line.strip_prefix("copy from "))
+        {
             if let Some(file) = current.as_mut() {
-                file.status = DiffFileStatus::Copied;
+                file.old_path = Some(unquote_git_path(path));
+                if line.starts_with("copy ") {
+                    file.status = DiffFileStatus::Copied;
+                }
+            }
+            continue;
+        }
+        if let Some(path) = line
+            .strip_prefix("rename to ")
+            .or_else(|| line.strip_prefix("copy to "))
+        {
+            if let Some(file) = current.as_mut() {
+                file.new_path = Some(unquote_git_path(path));
+                if line.starts_with("copy ") {
+                    file.status = DiffFileStatus::Copied;
+                }
             }
             continue;
         }
@@ -2016,13 +2051,39 @@ pub fn parse_unified_diff(raw: &[u8]) -> Result<Vec<DiffFile>, GitError> {
 
 fn parse_diff_git_header(line: &str) -> Result<(Option<String>, Option<String>), GitError> {
     let rest = line.strip_prefix("diff --git ").unwrap_or_default();
-    let mut fields = rest.split_whitespace();
-    let old = fields
-        .next()
-        .ok_or_else(|| GitError::Parse("diff header has no old path".to_string()))?;
-    let new = fields
-        .next()
-        .ok_or_else(|| GitError::Parse("diff header has no new path".to_string()))?;
+    // Git leaves spaces unquoted. Non-renames have identical paths on both
+    // sides; rename/copy metadata below the header provides their exact paths.
+    let split = if rest.starts_with('"') {
+        let mut escaped = false;
+        rest.char_indices().skip(1).find_map(|(index, ch)| {
+            if escaped {
+                escaped = false;
+                None
+            } else if ch == '\\' {
+                escaped = true;
+                None
+            } else if ch == '"' {
+                Some(index + 1)
+            } else {
+                None
+            }
+        })
+    } else {
+        rest.match_indices(" b/")
+            .find_map(|(index, _)| (rest.get(2..index) == rest.get(index + 3..)).then_some(index))
+    };
+    let (old, new) = if let Some(index) = split {
+        (&rest[..index], rest[index..].trim_start())
+    } else {
+        let mut fields = rest.split_whitespace();
+        let old = fields
+            .next()
+            .ok_or_else(|| GitError::Parse("diff header has no old path".to_string()))?;
+        let new = fields
+            .next()
+            .ok_or_else(|| GitError::Parse("diff header has no new path".to_string()))?;
+        (old, new)
+    };
     Ok((
         parse_file_header_path(old, "a/"),
         parse_file_header_path(new, "b/"),
@@ -2030,7 +2091,7 @@ fn parse_diff_git_header(line: &str) -> Result<(Option<String>, Option<String>),
 }
 
 fn parse_file_header_path(raw: &str, prefix: &str) -> Option<String> {
-    let path = unquote_git_path(raw.trim());
+    let path = unquote_git_path(raw.strip_suffix('\t').unwrap_or(raw));
     if path == "/dev/null" {
         None
     } else {
@@ -2336,17 +2397,16 @@ fn validate_commit_message(message: &str) -> Result<(), GitError> {
 }
 
 fn unquote_git_path(path: &str) -> String {
-    let path = path.trim();
     if !(path.starts_with('"') && path.ends_with('"') && path.len() >= 2) {
         return path.to_string();
     }
     let inner = &path[1..path.len() - 1];
-    let mut output = String::new();
+    let mut output = Vec::new();
     let bytes = inner.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] != b'\\' {
-            output.push(bytes[index] as char);
+            output.push(bytes[index]);
             index += 1;
             continue;
         }
@@ -2355,11 +2415,15 @@ fn unquote_git_path(path: &str) -> String {
             break;
         }
         match bytes[index] {
-            b'n' => output.push('\n'),
-            b't' => output.push('\t'),
-            b'r' => output.push('\r'),
-            b'\\' => output.push('\\'),
-            b'"' => output.push('"'),
+            b'n' => output.push(b'\n'),
+            b't' => output.push(b'\t'),
+            b'r' => output.push(b'\r'),
+            b'a' => output.push(7),
+            b'b' => output.push(8),
+            b'v' => output.push(11),
+            b'f' => output.push(12),
+            b'\\' => output.push(b'\\'),
+            b'"' => output.push(b'"'),
             digit @ b'0'..=b'7' => {
                 let mut value = digit - b'0';
                 let mut count = 1;
@@ -2371,13 +2435,13 @@ fn unquote_git_path(path: &str) -> String {
                     value = value.saturating_mul(8).saturating_add(bytes[index] - b'0');
                     count += 1;
                 }
-                output.push(value as char);
+                output.push(value);
             }
-            other => output.push(other as char),
+            other => output.push(other),
         }
         index += 1;
     }
-    output
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 fn bounded_utf8(bytes: &[u8]) -> Result<String, GitError> {
@@ -2456,7 +2520,7 @@ mod tests {
 
     #[test]
     fn porcelain_parser_preserves_staged_unstaged_rename_conflict_and_untracked() {
-        let raw = b"M  staged.txt\0 M work.txt\0R  old.txt\0new.txt\0UU conflict.txt\0?? new.txt\0";
+        let raw = b"M  staged.txt\0 M work.txt\0R  new.txt\0old.txt\0UU conflict.txt\0?? new.txt\0";
         let entries = parse_status_porcelain_z(raw).expect("status parse");
         assert_eq!(entries.len(), 5);
         let staged = entries
@@ -2469,8 +2533,107 @@ mod tests {
             .find(|entry| entry.path == "new.txt" && entry.original_path.is_some())
             .unwrap();
         assert!(renamed.is_renamed());
+        assert_eq!(renamed.original_path.as_deref(), Some("old.txt"));
         assert!(entries.iter().any(StatusEntry::is_conflicted));
         assert!(entries.iter().any(StatusEntry::is_untracked));
+    }
+
+    #[test]
+    fn porcelain_rename_and_copy_sources_are_always_the_second_nul_record() {
+        let entries = parse_status_porcelain_z(
+            b"RM new -> name.txt\0M old.txt\0 C copy.txt\0A source.txt\0AA both-added\0DD both-deleted\0",
+        )
+        .unwrap();
+        let renamed = entries
+            .iter()
+            .find(|entry| entry.path == "new -> name.txt")
+            .unwrap();
+        assert_eq!(renamed.original_path.as_deref(), Some("M old.txt"));
+        assert!(renamed.staged && renamed.unstaged);
+        let copied = entries
+            .iter()
+            .find(|entry| entry.path == "copy.txt")
+            .unwrap();
+        assert_eq!(copied.original_path.as_deref(), Some("A source.txt"));
+        assert!(entries
+            .iter()
+            .filter(|entry| entry.path.starts_with("both-"))
+            .all(StatusEntry::is_conflicted));
+        assert!(matches!(
+            parse_status_porcelain_z(b"R  missing.txt\0"),
+            Err(GitError::Parse(_))
+        ));
+        assert!(matches!(
+            parse_status_porcelain_z(b" C missing.txt\0"),
+            Err(GitError::Parse(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn status_reports_real_git_rename_destination_and_source() {
+        let root = temp_repo("status-rename");
+        git(&root, &["config", "status.renames", "true"]);
+        fs::write(root.join("M old.txt"), "before\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-qm", "base"]);
+        git(&root, &["mv", "M old.txt", "new -> name.txt"]);
+        fs::write(root.join("new -> name.txt"), "before\nafter\n").unwrap();
+        let service = GitService::default();
+        let target = target(&root);
+        let status = service
+            .status(&target, StatusOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(status.entries.len(), 1);
+        let renamed = &status.entries[0];
+        assert_eq!(renamed.path, "new -> name.txt");
+        assert_eq!(renamed.original_path.as_deref(), Some("M old.txt"));
+        assert!(renamed.is_renamed() && renamed.staged && renamed.unstaged);
+        for scope in [DiffTarget::WorkingTree, DiffTarget::Staged] {
+            let diff = service
+                .diff(
+                    &target,
+                    DiffOptions {
+                        target: scope,
+                        ..DiffOptions::default()
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(diff.files.len(), 1);
+            assert_eq!(diff.files[0].new_path.as_deref(), Some("new -> name.txt"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unified_parser_preserves_no_hunk_paths_spaces_and_quoted_utf8() {
+        for metadata in [
+            "old mode 100644\nnew mode 100755\n",
+            "Binary files a/space name and b/space name differ\n",
+            "new file mode 100644\n",
+            "deleted file mode 100644\n",
+        ] {
+            let patch = format!("diff --git a/space name b/space name\n{metadata}");
+            let files = parse_unified_diff(patch.as_bytes()).unwrap();
+            assert_eq!(files[0].new_path.as_deref(), Some("space name"));
+        }
+        let rename = parse_unified_diff(b"diff --git a/old name b/new name\nsimilarity index 100%\nrename from old name\nrename to new name\n").unwrap();
+        assert_eq!(rename[0].old_path.as_deref(), Some("old name"));
+        assert_eq!(rename[0].new_path.as_deref(), Some("new name"));
+        let copied = parse_unified_diff(b"diff --git a/old name b/new name\nsimilarity index 100%\ncopy from old name\ncopy to new name\n").unwrap();
+        assert_eq!(copied[0].new_path.as_deref(), Some("new name"));
+        assert_eq!(copied[0].status, DiffFileStatus::Copied);
+        let quoted = parse_unified_diff(b"diff --git \"a/\\303\\251 name\" \"b/\\303\\251 name\"\nold mode 100644\nnew mode 100755\n").unwrap();
+        assert_eq!(quoted[0].new_path.as_deref(), Some("é name"));
+        assert_eq!(
+            unquote_git_path(r#""tab\tline\nquote\"slash\\\303\251""#),
+            "tab\tline\nquote\"slash\\é"
+        );
+        assert_eq!(
+            parse_file_header_path("b/ leading and trailing \t", "b/"),
+            Some(" leading and trailing ".to_string())
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { DirectoryEntry, FileMetadata } from "@perch/shared";
 import { usePerchStore } from "../store";
 import {
@@ -20,6 +20,8 @@ import { explorerKey, flattenTree } from "../explorerNav";
 import { IS_MAC } from "../keyCombo";
 import { useZoom } from "../zoom";
 import type { CodeEditorHandle } from "./CodeEditor";
+import { EMPTY_GIT_REVIEW_STATE, gitCapabilityForWorkspace, useWorkspaceGitReviewStore } from "../gitReviewStore";
+import { FileIcon, GitMarker, indexGitDecorations, type GitDecoration } from "./fileDecorations";
 
 // CodeMirror is its own chunk: it loads when the first file opens, not with the app.
 const CodeEditor = lazy(() => import("./CodeEditor").then((module) => ({ default: module.CodeEditor })));
@@ -46,9 +48,10 @@ const CODE = "text-overlay-1 [font:inherit]";
 const PRE = "m-0 overflow-auto border border-overlay-0 bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
 const BANNER = "shrink-0 border-b border-b-[color:color-mix(in_srgb,var(--yellow)_35%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
 
-// VS Code's explorer: 13px text in 22px rows (workbench `font-size`, `explorerviewlet.css`), times the zoom.
-const ROW_FONT = "text-[length:calc(13px*var(--zoom,1))]";
-const ROW_MIN_H = "min-h-[calc(22px*var(--zoom,1))]";
+// VS Code's explorer metrics (explorerviewlet.css, tree.css), tighter: 18px rows (VS Code: 22), an 8px indent per level, a 16px twistie cell
+// holding a 10px chevron. Text stays 12px like the project organizer (VS Code uses 13px); the narrow/phone tree keeps 44px touch targets.
+const ROW_FONT = "text-[length:calc(12px*var(--zoom,1))]";
+const ROW_MIN_H = "min-h-[calc(18px*var(--zoom,1))]";
 const HEADER_ICON = cn(GHOST_BUTTON, "grid size-6 place-items-center p-0");
 
 function HeaderIcon({ label, onClick, active, children }: { label: string; onClick: () => void; active?: boolean; children: React.ReactNode }) {
@@ -88,6 +91,7 @@ interface FileTreeProps {
   selectedPath: string | null;
   cursor: string | null;
   trees: Record<string, WorkspaceTreeState>;
+  decorations: Map<string, GitDecoration>;
   onToggle: (entry: DirectoryEntry) => void;
   onOpenFile: (entry: DirectoryEntry, pinned?: boolean) => void;
   onMenu: (entry: DirectoryEntry, x: number, y: number) => void;
@@ -101,6 +105,7 @@ function FileTree({
   selectedPath,
   cursor,
   trees,
+  decorations,
   onToggle,
   onOpenFile,
   onMenu,
@@ -120,7 +125,7 @@ function FileTree({
             <button
               type="button"
               className={cn(
-                cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-[0.15rem] pr-3 text-left [border:0] [font:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-[2.35rem]",
+                cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-1 rounded-ui pr-3 text-left [border:0] [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-11",
                 selected || cursor === entry.path ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
                 cursor === entry.path && CURSOR_RING,
               )}
@@ -138,13 +143,15 @@ function FileTree({
               onAuxClick={(event) => { if (event.button === 1 && !isDirectory) { event.preventDefault(); onOpenFile(entry, true); } }}
               onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }}
             >
-              <Chevron open={isOpen} size={Math.round(16 * zoom)} className={cn("shrink-0 text-overlay-1", !isDirectory && "invisible")} />
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
-              {entry.kind === "symlink" && <span className="shrink-0 text-overlay-1" role="img" aria-label="symlink">↗</span>}
-              {entry.readonly && <span className="ml-auto pr-[0.35rem] text-[0.54rem] text-yellow">RO</span>}
+              <Chevron open={isOpen} size={Math.round(10 * zoom)} className={cn("mx-[3px] shrink-0 text-overlay-1", !isDirectory && "invisible")} />
+              <FileIcon name={entry.name} directory={isDirectory} open={isOpen} />
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
+              {entry.kind === "symlink" && <svg className="size-3 shrink-0 text-subtext-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" role="img" aria-label="symlink"><path d="M6 10 10 6M6 5l2-2a3 3 0 0 1 4 4l-2 2M10 11l-2 2a3 3 0 0 1-4-4l2-2" /></svg>}
+              {entry.readonly && <span className="shrink-0 text-[0.54rem] text-yellow">RO</span>}
+              <GitMarker decoration={decorations.get(entry.path)} directory={isDirectory} />
             </button>
             {isDirectory && isOpen && childTree && (
-              <div className="ml-[0.75rem] border-l border-l-overlay-0">
+              <div className="ml-2">
                 {childTree.state === "loading" && <div className={TREE_STATE}>Loading…</div>}
                 {childTree.state === "error" && (
                   <div className={cn(TREE_STATE, "text-red")}>
@@ -161,6 +168,7 @@ function FileTree({
                     selectedPath={selectedPath}
                     cursor={cursor}
                     trees={trees}
+                    decorations={decorations}
                     onToggle={onToggle}
                     onOpenFile={onOpenFile}
                     onMenu={onMenu}
@@ -247,11 +255,12 @@ function ConflictPanel({
   );
 }
 
-function SearchResults({ result, query, selectedPath, cursor, onOpenFile, onMenu, onRetry }: {
+function SearchResults({ result, query, selectedPath, cursor, decorations, onOpenFile, onMenu, onRetry }: {
   result?: WorkspaceSearchState;
   query: string;
   selectedPath: string | null;
   cursor: string | null;
+  decorations: Map<string, GitDecoration>;
   onOpenFile: (entry: DirectoryEntry) => void;
   onMenu: (entry: DirectoryEntry, x: number, y: number) => void;
   onRetry: () => void;
@@ -272,7 +281,7 @@ function SearchResults({ result, query, selectedPath, cursor, onOpenFile, onMenu
     <>
       <div className={TREE_STATE}>{count ? `${count} file${count === 1 ? "" : "s"}` : "No matching files"}</div>
       {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left", ROW_FONT, (selectedPath === entry.path || cursor === entry.path) && "bg-surface-1 text-fg", cursor === entry.path && CURSOR_RING)} role="treeitem" aria-selected={selectedPath === entry.path} tabIndex={-1} data-path={entry.path} title={entry.path} onClick={() => onOpenFile(entry)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }} data-testid={`workspace-file-entry-${entry.path}`}>
-        <span className="w-full truncate text-fg">{entry.name}</span>
+        <span className="flex w-full min-w-0 items-center gap-1.5 text-fg"><FileIcon name={entry.name} /><span className="min-w-0 flex-1 truncate">{entry.name}</span><GitMarker decoration={decorations.get(entry.path)} /></span>
         <span className="w-full truncate text-[0.7rem] text-subtext-0">{entry.path}</span>
       </button>)}
       {result.truncated && <div className={TREE_STATE}>Search limited for this workspace. Narrow the filename or path to see more.</div>}
@@ -357,6 +366,18 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
   }, [connected, layout, query, searchFiles, workspaceId]);
 
   const rootTree = trees[""];
+  const project = usePerchStore((state) => state.workspaceProjects.find((candidate) => candidate.id === workspace?.projectId));
+  const isGit = Boolean(workspace?.branch || project?.repoPath);
+  const gitReady = usePerchStore((state) => gitCapabilityForWorkspace(workspaceId, state));
+  const git = useWorkspaceGitReviewStore((state) => layout === "explorer" ? state.workspaces[workspaceId] ?? EMPTY_GIT_REVIEW_STATE : EMPTY_GIT_REVIEW_STATE);
+  const decorations = useMemo(() => indexGitDecorations(gitReady && isGit && git.statusState !== "error" ? git.status?.entries ?? [] : []), [git, gitReady, isGit]);
+  useEffect(() => {
+    if (layout !== "explorer" || !isGit || !gitReady || rootTree?.state !== "ready") return;
+    // ponytail: snapshots refresh on mount/reconnect/tree refresh and Git actions, not a new polling service.
+    // If live badges are needed, invalidate the shared store from a core-owned Git watcher.
+    const store = useWorkspaceGitReviewStore.getState();
+    if (store.workspaces[workspaceId]?.statusState !== "loading") store.refreshStatus(workspaceId);
+  }, [gitReady, isGit, layout, rootTree, workspaceId]);
   const document = selectedPath ? documents[selectedPath] : undefined;
   const preview = selectedPath ? previews[selectedPath] : undefined;
   const dirty = document != null && document.content !== document.savedContent;
@@ -507,8 +528,9 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
           </div>
           <div className="flex shrink-0 items-center justify-between py-[3px] pr-3 pl-3 text-[length:calc(11px*var(--zoom,1))] font-semibold tracking-[0.06em] text-subtext-0 uppercase">
             <span>Explorer</span>
-            <div className="[@container(max-width:460px)]:flex [@container(max-width:460px)]:items-center [@container(max-width:460px)]:gap-1">
-              <button type="button" className={cn(BTN, BTN_HOVER, "min-h-[1.45rem] border-transparent px-[0.32rem] py-[0.15rem] text-[0.85rem]")} onClick={refreshTree} aria-label="Refresh file tree" title="Refresh file tree">↻</button>
+            <div className="flex items-center gap-2">
+              {isGit && <span className="text-[10px] font-normal tracking-normal normal-case" data-testid="explorer-git-state" title={git.statusError} role="status">{!gitReady || git.statusState === "error" ? "Git unavailable" : git.statusState === "ready" ? "Git snapshot" : "Updating Git…"}</span>}
+              <HeaderIcon label="Refresh file tree" onClick={refreshTree}><path d="M13 5a5.5 5.5 0 1 0 0 6M13 2v3H10" /></HeaderIcon>
             </div>
           </div>
           <div
@@ -517,7 +539,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
             tabIndex={0}
             aria-label="Files"
             data-explorer-keynav="false"
-            className="group/tree min-h-0 flex-1 overflow-y-auto outline-none"
+            className="group/tree min-h-0 flex-1 overflow-y-auto px-1 outline-none"
             data-testid="workspace-file-tree-scroll"
             onKeyDown={handleTreeKey}
             onMouseDown={(event) => {
@@ -528,7 +550,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
             onContextMenu={(event) => { event.preventDefault(); if (!query) setMenu({ entry: null, x: event.clientX, y: event.clientY }); }}
           >
           {query ? <div aria-live="polite">
-            <SearchResults result={searchResult} query={query} selectedPath={selectedPath} cursor={cursor} onOpenFile={handleOpenFile} onMenu={(entry, x, y) => setMenu({ entry, x, y })} onRetry={() => searchFiles(workspaceId, query)} />
+            <SearchResults result={searchResult} query={query} selectedPath={selectedPath} cursor={cursor} decorations={decorations} onOpenFile={handleOpenFile} onMenu={(entry, x, y) => setMenu({ entry, x, y })} onRetry={() => searchFiles(workspaceId, query)} />
           </div> : <>
           {rootTree?.state === "loading" && <div className={TREE_STATE} role="status">Loading tree…</div>}
           {rootTree?.state === "error" && (
@@ -546,6 +568,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
               selectedPath={selectedPath}
               cursor={cursor}
               trees={trees}
+              decorations={decorations}
               onToggle={handleToggle}
               onOpenFile={handleOpenFile}
               onMenu={(entry, x, y) => setMenu({ entry, x, y })}
