@@ -135,6 +135,34 @@ it("rebinds folder confirmation in its owner, frees modified Enter, and preserve
   await act(async () => { press("Enter", "Enter", {}, input); });
   expect(browse).toHaveBeenLastCalledWith("local", "/project/child");
 });
+it("refuses macOS menu keys for recording and hand-edited overrides but keeps every default usable", async () => {
+  const { reservedCombo, recordCombo } = await import("./keyCombo");
+  const { SHORTCUTS, effectiveSpec } = await import("./keybinds");
+  for (const spec of ["cmd+q", "cmd+h", "cmd+alt+h", "cmd+m", "cmd+ctrl+f", "cmd+z", "cmd+shift+z", "cmd+x", "cmd+c", "cmd+v", "cmd+a"]) expect(reservedCombo(spec, true), spec).toBe(true);
+  expect(reservedCombo("cmd+a", false)).toBe(false);
+  expect(reservedCombo("cmd+shift+a", true)).toBe(false);
+  expect(recordCombo(new KeyboardEvent("keydown", { key: "q", code: "KeyQ", metaKey: true })) !== null).toBe(true);
+  await rebind({ "global.sidebar": "cmd+q" });
+  expect(effectiveSpec(SHORTCUTS.find((s) => s.id === "global.sidebar")!, true)).toBeNull();
+  await rebind({});
+  for (const mac of [true, false]) for (const s of SHORTCUTS) { const spec = effectiveSpec(s, mac); if (spec) expect(reservedCombo(spec, mac), s.id).toBe(false); }
+});
+it("compiles native leader/resize metadata from the effective registry, not from a Rust key map", async () => {
+  const { nativeShortcutBindings, nativeShortcutModes, LEADER_TIMEOUT_MS } = await import("./keybinds");
+  const fixture = (await import("./nativeShortcutBindings.fixture.json")).default;
+  for (const key of fixture.modeKeys) expect(nativeShortcutBindings(true)).toContainEqual(key);
+  for (const mode of fixture.modes) expect(nativeShortcutModes(true)).toContainEqual(mode);
+  expect(LEADER_TIMEOUT_MS).toBe(fixture.chordTimeoutMs);
+  await rebind({ "leader.arm": "ctrl+alt+space", "leader.navigator": "y", "resize.left": "" });
+  expect(nativeShortcutBindings(true)).toContainEqual(["leader.arm", "Space", null, 6]);
+  expect(nativeShortcutBindings(true)).toContainEqual(["leader.navigator", "KeyY", "y", 0]);
+  expect(nativeShortcutBindings(true).some(([id]) => id === "resize.left")).toBe(false);
+  expect(nativeShortcutModes(true).some(([id]) => id === "resize.left")).toBe(false);
+  await rebind({ "leader.arm": "" });
+  // No prefix: follow-up keys are never native bindings that could steal page typing.
+  expect(nativeShortcutBindings(true).some(([id]) => id.startsWith("leader.") || id.startsWith("resize."))).toBe(true);
+  expect(nativeShortcutModes(true).find(([id]) => id === "leader.navigator")).toEqual(["leader.navigator", "leader", null, true]);
+});
 it("cancels modes on blur or settings changes and lets unmatched ordinary keys reach the terminal", async () => {
   await render();
   press(" ", "Space", { ctrlKey: true }); act(() => window.dispatchEvent(new Event("blur")));

@@ -11,6 +11,7 @@
 
 /// Main-document compiled command id, physical code, layout letter, modifier bits.
 pub type NativeBinding = (String, String, Option<String>, u8);
+pub type NativeMode = (String, Option<String>, Option<String>, bool);
 
 use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
@@ -101,11 +102,16 @@ pub fn browser_shortcuts(
     generation: u64,
     epoch: String,
     bindings: Option<Vec<NativeBinding>>,
+    modes: Option<Vec<NativeMode>>,
+    chord_timeout_ms: Option<u64>,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let bindings = bindings.unwrap_or_default();
         crate::shortcuts::validate(&bindings)?;
+        let modes = modes.unwrap_or_default();
+        let timeout_ms = chord_timeout_ms.unwrap_or(0);
+        crate::shortcuts::validate_modes(&bindings, &modes, timeout_ms)?;
         let _main =
             objc2::MainThreadMarker::new().ok_or("Close Tab config must run on the main thread")?;
         let menu = app.try_state::<CloseTabMenu>().ok_or("no Close Tab menu")?;
@@ -117,6 +123,7 @@ pub fn browser_shortcuts(
             spec.parse::<muda::accelerator::Accelerator>()
                 .map_err(|e| e.to_string())?;
         }
+        crate::shortcuts::watch_window(&app)?;
         // Muda 0.19.3's set_key_accelerator(None) leaves the native key equivalent
         // installed, even on disabled items. Replace it until upstream clears it.
         let item = tauri::menu::MenuItem::with_id(
@@ -145,13 +152,21 @@ pub fn browser_shortcuts(
                 .map_err(|e| format!("{error}; restoring Close Tab: {e}"))?;
             return Err(error.to_string());
         }
-        crate::shortcuts::configure(&app, &epoch, generation, bindings);
+        crate::shortcuts::configure(&app, &epoch, generation, bindings, modes, timeout_ms);
         *binding = (epoch, generation, accelerator.is_some());
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, accelerator, generation, epoch, bindings);
+        let _ = (
+            app,
+            accelerator,
+            generation,
+            epoch,
+            bindings,
+            modes,
+            chord_timeout_ms,
+        );
         Ok(())
     }
 }

@@ -77,6 +77,11 @@ suite's `keybinds.close.test.tsx` covers the mounted listener, every registered
 global command, effective native wire fixtures, tab cycling, all existing close
 targets/guards, Settings recording and native/DOM ownership.
 
+Native leader/resize modes are resolved and expire entirely in Rust from
+the Settings-derived table (JS only receives resolved actions), so there is no
+native active-mode hint. macOS menu keys (Quit, Hide, Minimize, Fullscreen,
+standard editing) cannot be claimed and are refused by the recorder.
+
 The native probe invokes the installed event-monitor handler and AppKit menu
 matching with native events, not hardware keystrokes. It does not certify global
 OS dispatch, monitor delivery by the OS event pump or non-US keyboard layouts.

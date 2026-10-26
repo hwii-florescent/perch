@@ -10,5 +10,18 @@
     "Super+KeyJ": ["tabs.close", "KeyJ", "j", 1],
     "Control+KeyW": ["tabs.close", "KeyW", "w", 2],
     "Control+KeyJ": ["tabs.close", "KeyJ", "j", 2]
-  }
+  },
+  "modeKeys": [
+    ["leader.arm", "Space", null, 2],
+    ["leader.navigator", "KeyG", "g", 0],
+    ["leader.resize", "KeyR", "r", 0],
+    ["resize.left", "KeyH", "h", 0]
+  ],
+  "modes": [
+    ["leader.arm", null, "leader", false],
+    ["leader.navigator", "leader", null, true],
+    ["leader.resize", "leader", "resize", false],
+    ["resize.left", "resize", "resize", true]
+  ],
+  "chordTimeoutMs": 1500
 }

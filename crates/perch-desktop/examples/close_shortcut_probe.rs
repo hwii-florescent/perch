@@ -62,7 +62,7 @@ mod probe {
         // Shared golden wire fixture is checked against nativeShortcutBindings() by Vitest.
         let fixture = include_str!("../../../packages/web/src/nativeShortcutBindings.fixture.json");
         app.get_webview("main").unwrap().eval(format!(
-            "window.probeFixture = {fixture}; window.probeBindings = [...window.probeFixture.global, ...(window.probeFixture.close[{accelerator}] ? [window.probeFixture.close[{accelerator}]] : [])]; window.__TAURI_INTERNALS__.invoke('browser_shortcuts', {{accelerator: {accelerator}, generation: {generation}, epoch: window.epoch, bindings: window.probeBindings}}).then(() => report('configured:{generation}')).catch(e => report('ERROR:' + e))"
+            "window.probeFixture = {fixture}; window.probeBindings = [...window.probeFixture.global, ...window.probeFixture.modeKeys, ...(window.probeFixture.close[{accelerator}] ? [window.probeFixture.close[{accelerator}]] : [])]; window.__TAURI_INTERNALS__.invoke('browser_shortcuts', {{accelerator: {accelerator}, generation: {generation}, epoch: window.epoch, bindings: window.probeBindings, modes: window.probeFixture.modes, chordTimeoutMs: window.probeFixture.chordTimeoutMs}}).then(() => report('configured:{generation}')).catch(e => report('ERROR:' + e))"
         ))?;
         report(rx, &format!("configured:{generation}")).await?;
         let file = file_menu(app);
@@ -118,7 +118,7 @@ mod probe {
                 if !focused.as_bool() { let _ = tx.send(false); return; }
                 let chars: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: key.as_ptr()];
                 let number: isize = msg_send![window, windowNumber];
-                let hardware: u16 = match key.to_bytes() { b"w" => 13, b"j" => 38, b"1" | b"!" => 18, b"p" => 35, _ => 0 };
+                let hardware: u16 = match key.to_bytes() { b"w" => 13, b"j" => 38, b"1" | b"!" => 18, b"p" => 35, b" " => 49, b"g" => 5, b"r" => 15, b"h" => 4, _ => 0 };
                 let event: *mut AnyObject = msg_send![class!(NSEvent), keyEventWithType: 10usize, location: Point { x: 0., y: 0. }, modifierFlags: modifiers, timestamp: 0f64, windowNumber: number, context: std::ptr::null_mut::<AnyObject>(), characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: hardware];
                 if crate::shortcuts::handle_key(app_handle, event) { let _ = tx.send(true); return; }
                 let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
@@ -165,6 +165,23 @@ mod probe {
             tauri::LogicalSize::new(400., 300.),
         )?;
         crate::shortcuts::tag_browser(&app.get_webview("browser-probe").unwrap(), "probe")?;
+        anyhow::ensure!(
+            !press(&app, "browser-probe", c"g", 0).await?,
+            "unprefixed leader letter stole page typing"
+        );
+        anyhow::ensure!(
+            press(&app, "browser-probe", c" ", CTRL).await?,
+            "native prefix not consumed"
+        );
+        anyhow::ensure!(
+            press(&app, "browser-probe", c"g", 0).await?,
+            "native follow-up missed"
+        );
+        report(&mut rx, "command:leader.navigator:probe:1").await?;
+        anyhow::ensure!(
+            !press(&app, "browser-probe", c"g", 0).await?,
+            "leader did not disarm"
+        );
         for (key, modifiers, command) in [
             (c"1", CMD, "tabs.jump1"),
             (c"!", CTRL | SHIFT, "nests.jump1"),
@@ -189,7 +206,7 @@ mod probe {
         app.get_webview("main")
             .unwrap()
             .eval("report('focus:' + window.focusMarks.join(','))")?;
-        report(&mut rx, "focus:true,false,false,true").await?;
+        report(&mut rx, "focus:true,false,false,false,true").await?;
         anyhow::ensure!(
             !press(&app, "browser-probe", c"a", CTRL).await?,
             "unbound PTY/page key consumed"

@@ -24,7 +24,7 @@ import { nativeBrowser } from "./browserNative";
 import { tauriInvoke } from "./links";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
-import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
+import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, reservedCombo, validCombo } from "./keyCombo";
 
 export const LEADER_TIMEOUT_MS = 1500;
 
@@ -208,7 +208,7 @@ function overrides(): Record<string, string> {
 export function effectiveSpec(s: Shortcut, mac = IS_MAC): string | null {
   const own = overrides()[s.id];
   if (own !== undefined) {
-    if (!own || !validCombo(own)) return null;
+    if (!own || !validCombo(own) || reservedCombo(own, mac)) return null;
     const c = parseCombo(own, mac);
     return plainShortcutAllowed(s) || c.cmd || c.ctrl || c.alt || /^F\d+$/.test(c.code) ? own : null;
   }
@@ -456,11 +456,23 @@ function openWorktreeMenuForActiveProject(create = false): void {
 /** Native menu activation, including when the main view (or a blank browser) has focus. */
 export const CLOSE_TAB_EVENT = "perch:close-tab";
 export const NATIVE_COMMAND_EVENT = "perch:command";
+export const NATIVE_FOCUS_EVENT = "perch:browser-focus";
+/** [id, mode scope, next mode, whether the command also reaches JS]. Derived from the registry. */
+export type NativeMode = [id: string, scope: "leader" | "resize" | null, next: "leader" | "resize" | null, invoke: boolean];
+export function nativeShortcutModes(mac = IS_MAC): NativeMode[] {
+  const bound = new Set(nativeShortcutBindings(mac).map((b) => b[0]));
+  return SHORTCUTS.filter((s) => bound.has(s.id) && (s.scope === "leader" || s.scope === "resize" || s.nextMode)).map((s) => [
+    s.id,
+    s.scope === "leader" || s.scope === "resize" ? s.scope : null,
+    s.nextMode ?? null,
+    !(s.nextMode && s.scope !== "resize"),
+  ]);
+}
 /** Compiled from the same settings-resolved registry, never a native list of default keys. */
 export type NativeBinding = [id: string, code: string, letter: string | null, mods: number];
 export function nativeShortcutBindings(mac = IS_MAC): NativeBinding[] {
   return SHORTCUTS.flatMap((s) => {
-    if (s.scope && s.scope !== "outsideTerminal") return [];
+    if (s.scope && !["outsideTerminal", "pane", "leader", "resize"].includes(s.scope)) return [];
     const spec = effectiveSpec(s, mac);
     if (!spec) return [];
     const c = parseCombo(spec, mac);
@@ -524,7 +536,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const native = nativeBrowser && IS_MAC;
   const nativeOwnsClose = useRef(false);
-  const nativeBinding = useRef<{ accelerator: string | null; generation: number; epoch: string; bindings: NativeBinding[] } | null>(null);
+  const nativeBinding = useRef<{ accelerator: string | null; generation: number; epoch: string; bindings: NativeBinding[]; modes: NativeMode[] } | null>(null);
   const menuQueue = useRef(Promise.resolve());
 
   useEffect(() => {
@@ -537,12 +549,13 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     // A menu event bearing this generation is itself proof that Rust installed it, even if
     // the IPC acknowledgement is still in flight. Older generations cannot execute it.
     const bindings = settingsOpen ? [] : nativeShortcutBindings();
-    nativeBinding.current = { accelerator, generation, epoch: closeEpoch, bindings };
+    const modes = settingsOpen ? [] : nativeShortcutModes();
+    nativeBinding.current = { accelerator, generation, epoch: closeEpoch, bindings, modes };
     // While configuration is pending, don't run a second DOM close behind the native menu.
     // A rejected configuration restores the original DOM path.
     nativeOwnsClose.current = accelerator !== null;
     menuQueue.current = menuQueue.current
-      .then(async () => { await tauriInvoke!("browser_shortcuts", { accelerator, generation, epoch: closeEpoch, bindings }); })
+      .then(async () => { await tauriInvoke!("browser_shortcuts", { accelerator, generation, epoch: closeEpoch, bindings, modes, chordTimeoutMs: LEADER_TIMEOUT_MS }); })
       .catch(() => { if (live) { nativeOwnsClose.current = false; nativeBinding.current = null; } });
     return () => { live = false; };
   }, [native, spec, settingsOpen, keybindings]);
@@ -568,14 +581,25 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       if (!binding) return;
       const current = nativeShortcutBindings().find((b) => b[0] === binding[0]);
       if (!current || current.some((part, i) => part !== binding[i])) return;
-      modeRef.current?.run(binding[0], detail.id, "focused" in detail && detail.focused === true);
+      // Native already resolved any prefix/resize mode and owns its deadline; JS only runs the
+      // resolved action against the captured page and never arms a DOM chord from it.
+      dispatchShortcut(binding[0], handlersRef.current, detail.id, "focused" in detail && detail.focused === true);
     };
+    // Focus moved to a native page: a pending DOM chord belonged to the previous owner.
+    const onFocus = (event: Event) => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      const config = nativeBinding.current;
+      if (native && config && detail && typeof detail === "object" && "epoch" in detail && "generation" in detail &&
+          detail.epoch === config.epoch && detail.generation === config.generation) modeRef.current?.reset();
+    };
+    window.addEventListener(NATIVE_FOCUS_EVENT, onFocus);
     window.addEventListener(NATIVE_COMMAND_EVENT, onCommand);
     window.addEventListener(CLOSE_TAB_EVENT, onClose);
     window.addEventListener("compositionstart", compositionStart, true);
     window.addEventListener("compositionend", compositionEnd, true);
     window.addEventListener("blur", compositionEnd);
     return () => {
+      window.removeEventListener(NATIVE_FOCUS_EVENT, onFocus);
       window.removeEventListener(NATIVE_COMMAND_EVENT, onCommand);
       window.removeEventListener(CLOSE_TAB_EVENT, onClose);
       window.removeEventListener("compositionstart", compositionStart, true);

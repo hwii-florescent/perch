@@ -71,6 +71,17 @@ export function comboMatches(e: KeyboardEvent, c: Combo): boolean {
   return e.code === c.code || (!e.code && c.code === "Space" && e.key === " ") || (c.letter !== undefined && !e.altKey && e.key.toLowerCase() === c.letter);
 }
 
+/** macOS menu keys (Quit, Hide, Minimize, Fullscreen, standard editing) are handled by AppKit before any
+ * web or native-page listener, so no app command can claim them. The same list backs recording and
+ * hand-edited overrides, and menu.rs's predefined items are the only source of these keys. */
+const MAC_RESERVED = new Set(["cmd+q", "cmd+h", "cmd+alt+h", "cmd+m", "cmd+ctrl+f", "cmd+z", "cmd+shift+z", "cmd+x", "cmd+c", "cmd+v", "cmd+a"].map((s) => {
+  const c = parseCombo(s, true);
+  return [c.cmd && "cmd", c.ctrl && "ctrl", c.alt && "alt", c.shift && "shift", c.code].filter(Boolean).join("+");
+}));
+export function reservedCombo(spec: string, mac = IS_MAC): boolean {
+  return mac && MAC_RESERVED.has(normalizeCombo(spec, true));
+}
+
 /** Same keys, whichever way the spec was written ("mod+t" = "cmd+t" on a Mac). */
 export function normalizeCombo(spec: string, mac = IS_MAC): string {
   const c = parseCombo(spec, mac);
@@ -104,5 +115,6 @@ export function recordCombo(e: KeyboardEvent, allowPlain = false): Recorded {
   const key = tokenOf(e.code);
   if (!key) return { error: "That key can't be used." };
   if (!allowPlain && !e.metaKey && !e.ctrlKey && !e.altKey && !/^f\d+$/.test(key)) return { error: IS_MAC ? "Include ⌘, ⌃ or ⌥." : "Include Ctrl or Alt." };
-  return { spec: [e.metaKey && "cmd", e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", key].filter(Boolean).join("+") };
+  const spec = [e.metaKey && "cmd", e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", key].filter(Boolean).join("+");
+  return reservedCombo(spec) ? { error: "macOS reserves that key for its menu." } : { spec };
 }
