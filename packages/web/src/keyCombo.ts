@@ -68,7 +68,7 @@ export function validCombo(spec: string): boolean {
 
 export function comboMatches(e: KeyboardEvent, c: Combo): boolean {
   if (e.metaKey !== c.cmd || e.ctrlKey !== c.ctrl || e.shiftKey !== c.shift || e.altKey !== c.alt) return false;
-  return e.code === c.code || (c.letter !== undefined && !e.altKey && e.key.toLowerCase() === c.letter);
+  return e.code === c.code || (!e.code && c.code === "Space" && e.key === " ") || (c.letter !== undefined && !e.altKey && e.key.toLowerCase() === c.letter);
 }
 
 /** Same keys, whichever way the spec was written ("mod+t" = "cmd+t" on a Mac). */
@@ -99,10 +99,10 @@ export type Recorded = { spec: string } | { error: string } | null;
  * waiting). A plain key with no Cmd/Ctrl/Alt would swallow ordinary typing, so
  * only the function keys may stand alone.
  */
-export function recordCombo(e: KeyboardEvent): Recorded {
+export function recordCombo(e: KeyboardEvent, allowPlain = false): Recorded {
   if (["Meta", "Control", "Shift", "Alt"].includes(e.key)) return null;
   const key = tokenOf(e.code);
   if (!key) return { error: "That key can't be used." };
-  if (!e.metaKey && !e.ctrlKey && !e.altKey && !/^f\d+$/.test(key)) return { error: IS_MAC ? "Include ⌘, ⌃ or ⌥." : "Include Ctrl or Alt." };
+  if (!allowPlain && !e.metaKey && !e.ctrlKey && !e.altKey && !/^f\d+$/.test(key)) return { error: IS_MAC ? "Include ⌘, ⌃ or ⌥." : "Include Ctrl or Alt." };
   return { spec: [e.metaKey && "cmd", e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", key].filter(Boolean).join("+") };
 }

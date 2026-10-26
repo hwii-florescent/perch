@@ -16,6 +16,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
+import { shortcutLabel } from "../keybinds";
 
 const KBD =
   "rounded-ui border border-overlay-0 bg-surface-1 px-[0.4rem] py-[0.05rem] text-[0.78rem] text-accent [font-family:ui-monospace,SFMono-Regular,Menlo,monospace]";
@@ -26,6 +27,7 @@ export interface OnboardingProps {
 
 export function Onboarding({ onDismiss }: OnboardingProps) {
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
+  usePerchStore((s) => s.settings?.keybindings);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -60,18 +62,18 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
             or a terminal in it.
           </li>
           <li>
-            Use <kbd className={KBD}>Cmd+T</kbd> for a new tab,{" "}
-            <kbd className={KBD}>Cmd+D</kbd> to split, <kbd className={KBD}>Cmd+1</kbd>…
-            to jump tabs, <kbd className={KBD}>Cmd+Shift+T</kbd> to reopen a closed one.
+            New tab: <kbd className={KBD}>{shortcutLabel("tabs.new") ?? "Not set"}</kbd>;{" "}
+            split: <kbd className={KBD}>{shortcutLabel("panes.splitRight") ?? "Not set"}</kbd>;{" "}
+            first tab: <kbd className={KBD}>{shortcutLabel("tabs.jump1") ?? "Not set"}</kbd>;{" "}
+            reopen a closed tab: <kbd className={KBD}>{shortcutLabel("tabs.reopen") ?? "Not set"}</kbd>.
           </li>
           <li>
-            Press <kbd className={KBD}>Cmd+/</kbd> or <kbd className={KBD}>?</kbd> any time to see the full
-            list of keybindings.
+            Keybind help: <kbd className={KBD}>{shortcutLabel("global.help") ?? "Not set"}</kbd>.{" "}
+            Change any application shortcut in Settings → Keyboard.
           </li>
           <li>
-            Press <kbd className={KBD}>Cmd+P</kbd> (or{" "}
-            <kbd className={KBD}>Ctrl+K</kbd> outside a terminal) to
-            open the Navigator and jump to any session or project.
+            Navigator: <kbd className={KBD}>{shortcutLabel("global.navigator") ?? "Not set"}</kbd>.{" "}
+            Jump to any session or project.
           </li>
           <li>
             <button

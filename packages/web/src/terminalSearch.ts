@@ -54,6 +54,7 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
   useEffect(() => {
     if (!term) return;
     term.attachCustomKeyEventHandler((e) => {
+      if (e.isComposing || e.keyCode === 229) return true;
       const direct = e.type === "keydown" ? shortcutFor(e, true) : undefined;
       if (direct?.scope === "terminal") {
         e.preventDefault();

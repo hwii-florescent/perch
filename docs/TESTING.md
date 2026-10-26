@@ -81,6 +81,14 @@ The native probe invokes the installed event-monitor handler and AppKit menu
 matching with native events, not hardware keystrokes. It does not certify global
 OS dispatch, monitor delivery by the OS event pump or non-US keyboard layouts.
 
+## Settings-resolved command regression
+
+`npm run test -w @perch/web -- src/keybinds.scopes.test.tsx src/keybinds.test.ts src/editorKeymap.test.ts src/keybinds.close.test.tsx`
+checks the effective registry on both platforms, recording/conflict scopes,
+leader/resize overrides and cancellation, mounted CodeMirror save/find and global
+key ownership, Navigator, folder confirmation and dynamic hints. Ordinary editing,
+typing, Enter/Tab/arrows, Escape and terminal input remain native interactions.
+
 ## Isolated manual probes
 
 Point **all four** at scratch paths: `PERCH_DB`, `PERCH_HOSTS`,

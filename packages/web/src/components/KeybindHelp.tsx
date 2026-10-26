@@ -23,10 +23,14 @@ const GROUP_LABELS: Record<KeybindGroup, string> = {
   nests: "Nests and birdhouses",
   panes: "Splits and panes",
   terminal: "Terminal",
-  leader: "Leader (Ctrl+Space, then a key)",
+  leader: "Leader and follow-up keys",
+  resize: "Resize mode",
+  editor: "File editor",
+  navigator: "Navigator",
+  directory: "Folder picker",
 };
 
-const GROUP_ORDER: KeybindGroup[] = ["global", "tabs", "nests", "panes", "terminal", "leader"];
+const GROUP_ORDER: KeybindGroup[] = ["global", "tabs", "nests", "panes", "terminal", "editor", "navigator", "directory", "leader", "resize"];
 
 export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
   const [query, setQuery] = useState("");

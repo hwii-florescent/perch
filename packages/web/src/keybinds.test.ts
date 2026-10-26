@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
-import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints } from "./keybinds";
+import { SHORTCUTS, effectiveSpec, keybindEntries, shortcutsBoundTo, shortcutFor, terminalKeyHandler, useLeaderKey, nestShortcutHints, useNestShortcutHints, shortcutAppliesTo } from "./keybinds";
 import { IS_MAC, comboMatches, formatCombo, normalizeCombo, parseCombo, recordCombo } from "./keyCombo";
 import { usePerchStore } from "./store";
 
@@ -178,14 +178,14 @@ describe("direct shortcuts", () => {
   it("resolves every default to its original action in each platform and terminal context", () => {
     usePerchStore.setState({ settings: { keybindings: {} } as never });
     for (const mac of [true, false]) {
-      for (const inTerm of [true, false]) {
+      for (const context of ["global", "terminal", "editor", "navigator", "directory", "leader", "resize"] as const) {
         for (const shortcut of SHORTCUTS) {
-          if (shortcut.scope === (inTerm ? "outsideTerminal" : "terminal")) continue;
+          if (!shortcutAppliesTo(shortcut, context)) continue;
           const spec = effectiveSpec(shortcut, mac);
           if (!spec) continue;
           const combo = parseCombo(spec, mac);
           const event = press({ code: combo.code, key: combo.letter ?? "", metaKey: combo.cmd, ctrlKey: combo.ctrl, altKey: combo.alt, shiftKey: combo.shift });
-          expect(shortcutFor(event, inTerm, mac)?.id, `${spec} mac=${mac} terminal=${inTerm}`).toBe(shortcut.id);
+          expect(shortcutFor(event, context, mac)?.id, `${spec} mac=${mac} context=${context}`).toBe(shortcut.id);
         }
       }
     }
@@ -201,9 +201,9 @@ describe("direct shortcuts", () => {
   it("never binds one key twice on a platform, and every default parses", () => {
     expect(new Set(SHORTCUTS.map((s) => s.id)).size).toBe(SHORTCUTS.length);
     for (const mac of [true, false]) {
-      for (const inTerm of [false, true]) { // Cmd+K is the Navigator outside a terminal and "clear" inside one
+      for (const context of ["global", "terminal", "editor", "navigator", "directory", "leader", "resize"] as const) {
         const seen = new Map<string, string>();
-        for (const s of SHORTCUTS.filter((x) => (inTerm ? x.scope !== "outsideTerminal" : x.scope !== "terminal"))) {
+        for (const s of SHORTCUTS.filter((x) => shortcutAppliesTo(x, context))) {
           const spec = s.keys[mac ? 0 : 1];
           if (spec === null) continue;
           const c = normalizeCombo(spec, mac);
@@ -247,11 +247,11 @@ describe("direct shortcuts", () => {
   it("lists shortcuts in the help and collapses an untouched range", () => {
     usePerchStore.setState({ settings: { keybindings: {} } as never });
     const entries = keybindEntries(true);
-    expect(entries.filter((k) => k.description.startsWith("Jump to tab")).map((k) => k.keys)).toEqual(["⌘1…8"]);
+    expect(entries.filter((k) => k.group === "tabs" && k.description.startsWith("Jump to tab")).map((k) => k.keys)).toEqual(["⌘1…8"]);
     expect(entries.some((k) => k.description === "New nest (worktree)")).toBe(true);
     expect(entries.some((k) => k.group === "leader")).toBe(true);
     usePerchStore.setState({ settings: { keybindings: { "tabs.jump2": "cmd+alt+2" } } as never });
-    expect(keybindEntries(true).filter((k) => /^Jump to tab \d$/.test(k.description))).toHaveLength(8);
+    expect(keybindEntries(true).filter((k) => k.group === "tabs" && /^Jump to tab \d$/.test(k.description))).toHaveLength(8);
     usePerchStore.setState({ settings: { keybindings: { "tabs.new": "" } } as never });
     expect(keybindEntries(true).some((k) => k.description.startsWith("New tab"))).toBe(false);
   });

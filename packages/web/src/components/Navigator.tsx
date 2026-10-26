@@ -24,6 +24,7 @@ import { StatusDot } from "./StatusDot";
 import { sessionDotState, type AgentDotState } from "../statusDot";
 import type { SessionSummary } from "@perch/shared";
 import { splitActiveTab } from "../tiledPanes";
+import { shortcutFor } from "../keybinds";
 
 const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_none_solid] border-current border-l-2 border-l-transparent";
 const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1 border-l-accent" : "[background:none]");
@@ -119,17 +120,17 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
         return;
       }
-      // Plain arrows always work; fzf-style Ctrl+j/Ctrl+n (down) and
-      // Ctrl+k/Ctrl+p (up) as an alternative that doesn't require leaving
-      // home row — deviates from the plan's literal "j/k" wording because
-      // bare j/k must remain typeable in the always-focused search input.
-      const down = e.key === "ArrowDown" || (e.ctrlKey && (e.key === "j" || e.key === "n"));
-      const up = e.key === "ArrowUp" || (e.ctrlKey && (e.key === "k" || e.key === "p"));
+      // Arrows are native interaction. Optional home-row commands resolve Settings;
+      // bare letters remain typeable in the always-focused search input.
+      const commandShortcut = shortcutFor(e, "navigator");
+      const down = e.key === "ArrowDown" || commandShortcut?.id === "navigator.next" || commandShortcut?.id === "navigator.nextAlt";
+      const up = e.key === "ArrowUp" || commandShortcut?.id === "navigator.previous" || commandShortcut?.id === "navigator.previousAlt";
       if (down) {
         e.preventDefault();
         setSelected((prev) => (rows.length + commands.length === 0 ? 0 : (prev + 1) % (rows.length + commands.length)));

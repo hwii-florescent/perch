@@ -1,18 +1,18 @@
 /**
- * KeybindingsSection.tsx — Settings > Keyboard: every direct shortcut of
+ * KeybindingsSection.tsx — Settings > Keyboard: every application shortcut of
  * `keybinds.ts`, as a row with its key. Click the key to record a new one,
  * × for no shortcut, ↺ for the built-in default. Overrides live in the
  * server's `settings.keybindings` (action id → combo, "" = none).
  */
 import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
-import { SHORTCUTS, effectiveSpec, shortcutsBoundTo, type KeybindGroup } from "../keybinds";
+import { SHORTCUTS, effectiveSpec, plainShortcutAllowed, shortcutsBoundTo, type KeybindGroup } from "../keybinds";
 import { IS_MAC, formatCombo, normalizeCombo, recordCombo } from "../keyCombo";
 import { SettingRow, SettingsGroup } from "./ui/setting-row";
 import { cn } from "../lib/cn";
 
 const GROUPS: [KeybindGroup, string][] = [
-  ["global", "Global"], ["tabs", "Tabs"], ["nests", "Nests and birdhouses"], ["panes", "Splits and panes"], ["terminal", "Terminal"],
+  ["global", "Global"], ["tabs", "Tabs"], ["nests", "Nests and birdhouses"], ["panes", "Splits and panes"], ["terminal", "Terminal"], ["editor", "File editor"], ["navigator", "Navigator"], ["directory", "Folder picker"], ["leader", "Leader and follow-up keys"], ["resize", "Resize mode"],
 ];
 
 const CHIP = "min-w-24 cursor-pointer rounded-ui border bg-surface-1 px-2 py-[0.2rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.75rem] hover:border-accent focus-visible:border-accent";
@@ -53,7 +53,7 @@ export function KeybindingsSection() {
         setNote(null);
         return;
       }
-      const recorded = recordCombo(e);
+      const recorded = recordCombo(e, plainShortcutAllowed(SHORTCUTS.find((s) => s.id === id)!));
       if (!recorded) return;
       if ("error" in recorded) setNote({ id, text: recorded.error });
       else commit(id, recorded.spec);
@@ -65,7 +65,7 @@ export function KeybindingsSection() {
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-4 text-[0.78rem] text-subtext-0">
-        <span>Click a key to record a new one, × for no shortcut, ↺ for the default. The Ctrl+Space leader chords, ? and Esc are fixed.</span>
+        <span>Click a key to record a new one, × for no shortcut, ↺ for the default. Leader and resize rows configure follow-up keys. Global Ctrl/Alt overrides also take precedence in terminals. Ordinary editing, arrows, Enter, Tab and Escape stay native.</span>
         <button type="button" className={cn(ICON, "shrink-0 text-[0.78rem]")} data-testid="keybindings-reset-all" disabled={Object.keys(custom).length === 0} onClick={() => save({})}>
           Reset all
         </button>

@@ -138,14 +138,14 @@ describe("native capture preserves the existing close contract", () => {
 });
 
 describe("native pages share every global command", () => {
-  it.each(SHORTCUTS.filter((s) => s.scope !== "terminal" && s.id !== "tabs.close").map((s) => [s.id]))("dispatches %s through the same registry action", async (id) => {
+  it.each(SHORTCUTS.filter((s) => (!s.scope || s.scope === "outsideTerminal") && s.id !== "tabs.close").map((s) => [s.id]))("dispatches %s through the same registry action", async (id) => {
     const tab = file("browser", "https://example.com/");
     await mount();
     const shortcut = SHORTCUTS.find((s) => s.id === id)!;
     const run = vi.spyOn(shortcut, "run").mockImplementation(() => {});
     try {
       nativeCommand(id!, browserId(fileTabKey(tab)));
-      expect(run).toHaveBeenCalledExactlyOnceWith(handlers);
+      expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(handlers));
     } finally { run.mockRestore(); }
   });
 
@@ -275,6 +275,24 @@ describe("configured shortcut ownership", () => {
     expect(useFileTabs.getState().tabs).toHaveLength(2); // native owns this key
     menu();
     expect(useFileTabs.getState().tabs).toHaveLength(1);
+  });
+
+  it("keeps CodeMirror from consuming a native-owned Close Tab rebound to a standard editor key", async () => {
+    // jsdom has no layout; this probe checks actual CM selection/key ownership, not geometry.
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+    const { CodeEditor } = await import("./components/CodeEditor");
+    const { EditorView } = await import("@codemirror/view");
+    file();
+    await rebind({ "tabs.close": "ctrl+a" });
+    await act(async () => root.render(<><Keys /><CodeEditor value="one two" path="a.txt" docKey="native-close" readOnly={false} wrap={false} label="File" onChange={() => {}} onSave={() => {}} onCaret={() => {}} /></>));
+    const content = host.querySelector<HTMLElement>(".cm-content")!;
+    act(() => content.focus());
+    const event = key("a", { metaKey: false, ctrlKey: true });
+    expect(event.defaultPrevented).toBe(false); // The native menu, not the DOM, owns the key.
+    expect(EditorView.findFromDOM(content)!.state.selection.main.empty).toBe(true);
+    menu();
+    expect(useFileTabs.getState().tabs.map((t) => t.path)).toEqual(["keep.ts"]);
   });
 
   it("respects main-view composition and an armed leader instead of closing underneath them", async () => {

@@ -1,32 +1,14 @@
 /**
- * keybinds.ts — the web keymap.
+ * Settings-resolved application command registry. Global commands, local editor/
+ * terminal/Navigator/folder commands, leader follow-ups and resize mode all use
+ * effectiveSpec(). Defaults are declarations here, never independent dispatch maps.
  *
- * Two layers, one table each:
- *
- * 1. **Direct shortcuts** (`SHORTCUTS`): browser-tab, Vivaldi-workspace and
- *    iTerm2/Ghostty style keys. On macOS the app owns every Cmd combination
- *    (they never reach the PTY; see `terminalKeyHandler`), so `mod` is Cmd
- *    there. Elsewhere Ctrl alone belongs to the shell, so `mod` is Ctrl+Shift,
- *    as in Ghostty/GNOME Terminal. Each entry gives the macOS and the other
- *    platforms' spec; `null` means "no direct key there" (the leader still
- *    reaches it). The help modal is generated from this table.
- * 2. **The leader** (`Ctrl+Space`, then a letter; `CHORD_ACTIONS`): the
- *    namespace for rarer actions that deserve no direct key (swap panes,
- *    resize mode, next project, the worktree menu). Pressing it arms a ~1.5s
- *    window; missing it silently disarms.
- *
- * perch is a desktop app (a phone app is coming), never a web page, so no
- * browser reserves a key from it.
- *
- * Cmd+K / Ctrl+K open the Navigator outside terminals; in a terminal Cmd+K
- * clears it (terminalSearch.ts) and Ctrl+K stays the PTY's. Plain `?` opens
- * the help outside editable elements.
- *
- * Focus guard: leader chords and `?` are suppressed while focus is in a
- * `textarea`/`input`/`[contenteditable]`; a focused terminal or the file
- * editor is the exception, as panes hold focus when their tab is selected.
- * Direct shortcuts work from anywhere, even inside inputs, like a browser's.
- * `terminalKeyHandler` keeps xterm from also sending any of them to the PTY.
+ * The capture listener resolves the full focus context and claims only global
+ * winners, before CodeMirror or xterm can also act. Local winners pass to their
+ * owner. Text editing, arrows, Enter/Tab and Escape remain native interactions.
+ * Explicit global Ctrl/Alt overrides can claim terminal keys; unclaimed input
+ * stays with xterm and the PTY. Leader/resize modes cancel on unmatched input:
+ * unclaimed text passes through; another app command cannot run behind a cancel.
  */
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./store";
@@ -44,13 +26,14 @@ import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
 import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
 
-const LEADER_TIMEOUT_MS = 1500;
+export const LEADER_TIMEOUT_MS = 1500;
 
 // ---------------------------------------------------------------------------
 // Shortcut table (also consumed by KeybindHelp.tsx and Settings > Keyboard)
 // ---------------------------------------------------------------------------
 
-export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader";
+export type KeybindGroup = "global" | "tabs" | "nests" | "panes" | "terminal" | "leader" | "resize" | "editor" | "navigator" | "directory";
+export type ShortcutScope = "terminal" | "outsideTerminal" | "pane" | "outsideEditable" | "leader" | "resize" | "editor" | "navigator" | "directory";
 
 export interface KeybindEntry {
   keys: string;
@@ -62,6 +45,8 @@ export interface LeaderKeyHandlers {
   openNavigator: () => void;
   openKeybindHelp: () => void;
   toggleDrawer: () => void;
+  armLeader?: () => void;
+  armResize?: () => void;
 }
 
 interface ShortcutRange {
@@ -83,7 +68,10 @@ export interface Shortcut {
    * global listener skips it). `outsideTerminal`: in a terminal the key
    * belongs to the PTY, so it is neither run nor swallowed there.
    */
-  scope?: "terminal" | "outsideTerminal";
+  scope?: ShortcutScope;
+  /** An alias invokes the same command, including explicit native page targeting. */
+  command?: string;
+  nextMode?: "leader" | "resize";
   /** The help lists a range (jump to tab 1…8) as one row while none of its members is customised. */
   range?: ShortcutRange;
 }
@@ -96,7 +84,7 @@ function shortcut(
   keys: string | [string, string | null],
   description: string,
   run: Shortcut["run"],
-  extra: Pick<Shortcut, "scope" | "range"> = {},
+  extra: Pick<Shortcut, "scope" | "range" | "command" | "nextMode"> = {},
 ): void {
   SHORTCUTS.push({ id, group, keys: typeof keys === "string" ? [keys, keys] : keys, description, run, ...extra });
 }
@@ -164,6 +152,53 @@ shortcut("terminal.clear", "terminal", "mod+k", "Clear the terminal (screen and 
 shortcut("terminal.scrollTop", "terminal", "mod+up", "Scroll to the top", noop, { scope: "terminal" });
 shortcut("terminal.scrollBottom", "terminal", "mod+down", "Scroll to the bottom", noop, { scope: "terminal" });
 
+// Scoped commands are executed by their owner, not by the global listener.
+for (const [id, keys, description] of [
+  ["editor.save", ["cmd+s", "ctrl+s"], "Save file"],
+  ["editor.find", ["cmd+f", "ctrl+f"], "Find in file"],
+  ["editor.replace", ["cmd+alt+f", "ctrl+h"], "Replace in file"],
+  ["editor.replaceAlt", ["cmd+shift+f", null], "Replace in file (alternate)"],
+  ["editor.findNext", "f3", "Next file match (while Find is open)"],
+  ["editor.findPrevious", "shift+f3", "Previous file match (while Find is open)"],
+  ["editor.findNextAlt", ["cmd+g", null], "Next file match (alternate)"],
+  ["editor.findPreviousAlt", ["cmd+shift+g", null], "Previous file match (alternate)"],
+  ["editor.gotoLine", "ctrl+g", "Go to line"],
+] as const) shortcut(id, "editor", typeof keys === "string" ? keys : [...keys], description, noop, { scope: "editor" });
+for (const [id, key, description] of [
+  ["navigator.next", "ctrl+j", "Next Navigator result"],
+  ["navigator.nextAlt", "ctrl+n", "Next Navigator result (alternate)"],
+  ["navigator.previous", "ctrl+k", "Previous Navigator result"],
+  ["navigator.previousAlt", "ctrl+p", "Previous Navigator result (alternate)"],
+  ["directory.use", "cmd+enter", "Use this folder"],
+  ["directory.useAlt", "ctrl+enter", "Use this folder (alternate)"],
+] as const) shortcut(id, id.startsWith("navigator.") ? "navigator" : "directory", key, description, noop, { scope: id.startsWith("navigator.") ? "navigator" : "directory" });
+shortcut("global.helpPlain", "global", "shift+/", "Open keybind help (outside inputs)", (h) => h.openKeybindHelp(), { scope: "outsideEditable" });
+
+shortcut("leader.arm", "leader", "ctrl+space", "Leader prefix (then a follow-up key)", (h) => h.armLeader?.(), { scope: "pane", nextMode: "leader" });
+for (const [id, key, command] of [
+  ["navigator", "g", "global.navigator"], ["help", "shift+/", "global.help"],
+  ["sidebar", "b", "global.sidebar"], ["settings", "s", "global.settings"],
+  ["nextTab", "n", "tabs.next"], ["previousTab", "p", "tabs.prev"], ["close", "x", "tabs.close"],
+  ["splitRight", "v", "panes.splitRight"], ["splitDown", "shift+-", "panes.splitDown"],
+  ["zoom", "z", "panes.zoom"], ["nextPane", "o", "panes.next"],
+  ...(["left", "down", "up", "right"] as const).map((dir, i) => [`focus.${dir}`, ["h", "j", "k", "l"][i]!, `panes.focus.${dir}`] as const),
+] as const) {
+  const action = SHORTCUTS.find((s) => s.id === command)!;
+  shortcut(`leader.${id}`, "leader", key, action.description, action.run, { scope: "leader", command });
+}
+for (let i = 1; i <= 9; i++) shortcut(`leader.jump${i}`, "leader", String(i), `Jump to tab ${i}`, () => jumpToNthWorkspaceTab(i), { scope: "leader", range: { id: "leader.jump", noun: "tab", label: "1…9" } });
+shortcut("leader.nextProject", "leader", "w", "Next project's most recent session", jumpToNextProject, { scope: "leader" });
+shortcut("leader.worktree", "leader", "shift+w", "Open this project's worktree menu", () => openWorktreeMenuForActiveProject(), { scope: "leader" });
+shortcut("leader.newSession", "leader", "c", "New session in this project", newSessionInCurrentProject, { scope: "leader" });
+shortcut("leader.swapNext", "leader", "shift+]", "Swap with the next pane", () => controller()?.swapActivePaneWithNext(), { scope: "leader" });
+shortcut("leader.grow", "leader", "shift+=", "Grow the focused pane", () => controller()?.growActivePane(), { scope: "leader" });
+shortcut("leader.shrink", "leader", "-", "Shrink the focused pane", () => controller()?.shrinkActivePane(), { scope: "leader" });
+for (const [i, dir] of (["left", "down", "up", "right"] as const).entries()) {
+  shortcut(`leader.swap.${dir}`, "leader", `shift+${["h", "j", "k", "l"][i]}`, `Swap pane ${dir}`, () => controller()?.swapPaneDirection(dir), { scope: "leader" });
+  shortcut(`resize.${dir}`, "resize", ["h", "j", "k", "l"][i]!, `Resize pane ${dir} (${i < 2 ? "shrink" : "grow"})`, () => i < 2 ? controller()?.shrinkActivePane() : controller()?.growActivePane(), { scope: "resize", nextMode: "resize" });
+}
+shortcut("leader.resize", "leader", "r", "Enter resize mode (Escape or timeout exits)", (h) => h.armResize?.(), { scope: "leader", nextMode: "resize" });
+
 /** The user's overrides (action id → combo, "" = none) from Settings > Keyboard. */
 function overrides(): Record<string, string> {
   return usePerchStore.getState().settings?.keybindings ?? {};
@@ -172,16 +207,43 @@ function overrides(): Record<string, string> {
 /** The combo `s` is bound to on this platform: the user's choice, else the default; `null` = none. */
 export function effectiveSpec(s: Shortcut, mac = IS_MAC): string | null {
   const own = overrides()[s.id];
-  if (own !== undefined) return own !== "" && validCombo(own) ? own : null;
-  return s.keys[mac ? 0 : 1];
+  if (own !== undefined) {
+    if (!own || !validCombo(own)) return null;
+    const c = parseCombo(own, mac);
+    return plainShortcutAllowed(s) || c.cmd || c.ctrl || c.alt || /^F\d+$/.test(c.code) ? own : null;
+  }
+  return s.keys[mac ? 0 : 1] || null;
 }
 
 /** The shortcut `e` triggers on this platform, if any. `inTerm`: the key went to a focused terminal, where
  * `terminal` shortcuts apply and `outsideTerminal` ones do not (the PTY keeps their key). */
-export function shortcutFor(e: KeyboardEvent, inTerm = false, mac = IS_MAC): Shortcut | undefined {
-  return SHORTCUTS.find((s) => {
-    const wrongContext = inTerm ? "outsideTerminal" : "terminal";
-    if (s.scope === wrongContext) return false;
+export type ShortcutContext = Exclude<ShortcutScope, "outsideTerminal" | "pane" | "outsideEditable"> | "global";
+export function shortcutContext(target: EventTarget | null): ShortcutContext {
+  if (typeof Element === "undefined" || !(target instanceof Element)) return "global";
+  if (target.closest('[data-testid="navigator"]')) return "navigator";
+  if (target.closest('[data-testid="dir-browser"]')) return "directory";
+  if (target.closest(".cm-editor")) return "editor";
+  return target.closest(".xterm") ? "terminal" : "global";
+}
+export const isGlobalShortcut = (s: Shortcut) => !s.scope || s.scope === "pane" || s.scope === "outsideTerminal" || s.scope === "outsideEditable";
+export const plainShortcutAllowed = (s: Shortcut) => s.scope === "leader" || s.scope === "resize" || s.scope === "outsideEditable";
+const contexts = ["global", "terminal", "editor", "navigator", "directory", "leader", "resize"] as const;
+export function shortcutAppliesTo(s: Shortcut, context: typeof contexts[number]): boolean {
+  if (context === "leader" || context === "resize") return s.scope === context;
+  if (!s.scope || s.scope === "pane") return true;
+  if (s.scope === "outsideTerminal") return context !== "terminal" && context !== "navigator";
+  if (s.scope === "outsideEditable") return context === "global";
+  return s.scope === context;
+}
+export function shortcutFor(e: KeyboardEvent, context: boolean | ShortcutContext = shortcutContext(e.target), mac = IS_MAC): Shortcut | undefined {
+  if (e.isComposing || e.keyCode === 229) return undefined;
+  const ctx = typeof context === "boolean" ? context ? "terminal" : "global" : context;
+  const candidates = SHORTCUTS.filter((s) => shortcutAppliesTo(s, ctx) &&
+    !(s.scope === "pane" && isEditableTarget(e.target, true)) &&
+    !(s.scope === "outsideEditable" && isEditableTarget(e.target)));
+  // Capture and local handlers use the same winner. A modal/editor binding cannot be
+  // swallowed by the capture listener on its way to the owning component.
+  return [ ...candidates.filter((s) => s.scope === ctx), ...candidates.filter((s) => s.scope !== ctx) ].find((s) => {
     const spec = effectiveSpec(s, mac);
     return spec !== null && comboMatches(e, parseCombo(spec, mac));
   });
@@ -227,7 +289,7 @@ export function useNestShortcutHints(): (string | null)[] {
 }
 
 /** Two shortcuts can fire on the same keystroke unless one is terminal-only and the other terminal-free. */
-const overlaps = (a: Shortcut, b: Shortcut) => !(a.scope && b.scope && a.scope !== b.scope);
+const overlaps = (a: Shortcut, b: Shortcut) => contexts.some((ctx) => shortcutAppliesTo(a, ctx) && shortcutAppliesTo(b, ctx));
 
 /** The other shortcuts already on `spec` that would fire together with `id` (for the recorder to move). */
 export function shortcutsBoundTo(spec: string, id: string, mac = IS_MAC): Shortcut[] {
@@ -240,59 +302,29 @@ export function shortcutsBoundTo(spec: string, id: string, mac = IS_MAC): Shortc
   });
 }
 
-/** The help and Settings' view of the keymap: static keys plus the current shortcuts. */
+/** The current binding, including the effective prefix for modal follow-up keys. */
+export function shortcutLabel(id: string, mac = IS_MAC): string | null {
+  const s = SHORTCUTS.find((s) => s.id === id);
+  const spec = s && effectiveSpec(s, mac);
+  if (!s || !spec) return null;
+  const prefix = s.scope === "leader" ? shortcutLabel("leader.arm", mac) : s.scope === "resize" ? shortcutLabel("leader.resize", mac) : null;
+  if ((s.scope === "leader" || s.scope === "resize") && !prefix) return null;
+  return [prefix, formatCombo(spec, mac)].filter(Boolean).join(", ");
+}
 export function keybindEntries(mac = IS_MAC): KeybindEntry[] {
-  const custom = overrides();
-  const rangeEdited = (id: string) => SHORTCUTS.some((s) => s.range?.id === id && custom[s.id] !== undefined);
-  const seenRanges = new Set<string>();
-  const direct = SHORTCUTS.flatMap((s): KeybindEntry[] => {
-    const spec = effectiveSpec(s, mac);
-    if (spec === null) return [];
-    if (s.range && !rangeEdited(s.range.id)) {
-      if (seenRanges.has(s.range.id)) return [];
-      seenRanges.add(s.range.id);
-      const keys = formatCombo(spec, mac);
-      const { noun, label } = s.range;
-      return [{ keys: keys.slice(0, -keyLabel(spec).length) + label, description: `Jump to ${noun} ${label}`, group: s.group }];
+  const custom = overrides(), seen = new Set<string>();
+  return [...SHORTCUTS.flatMap((s): KeybindEntry[] => {
+    const spec = effectiveSpec(s, mac), label = shortcutLabel(s.id, mac);
+    if (!spec || !label) return [];
+    if (s.range && !SHORTCUTS.some((other) => other.range?.id === s.range!.id && custom[other.id] !== undefined)) {
+      if (seen.has(s.range.id)) return [];
+      seen.add(s.range.id);
+      return [{ keys: label.slice(0, -keyLabel(spec).length) + s.range.label, description: `Jump to ${s.range.noun} ${s.range.label}`, group: s.group }];
     }
-    return [{ keys: formatCombo(spec, mac), description: s.description, group: s.group }];
-  });
-  return [
-    ...direct,
-    { keys: "?", description: "Open this keybind help (outside inputs)", group: "global" },
-    { keys: "Esc", description: "Close any open overlay", group: "global" },
-    { keys: "↑ / ↓ (Ctrl+j / Ctrl+k)", description: "Move selection in Navigator", group: "global" },
-    { keys: mac ? "⌘C / ⌘V" : "Ctrl+Shift+C / V", description: "Copy / paste", group: "terminal" },
-  { keys: "Ctrl+Space, g", description: "Open Navigator", group: "leader" },
-  { keys: "Ctrl+Space, ?", description: "Open this keybind help", group: "leader" },
-  { keys: "Ctrl+Space, b", description: "Toggle sidebar collapse", group: "leader" },
-  { keys: "Ctrl+Space, s", description: "Open Settings", group: "leader" },
-  { keys: "Ctrl+Space, w", description: "Jump to the next project's most recent session", group: "leader" },
-  { keys: "Ctrl+Space, W", description: "Open the worktree menu for the current project", group: "leader" },
-  { keys: "Ctrl+Space, c", description: "New session in the current project", group: "leader" },
-  { keys: "Ctrl+Space, n", description: "Next session in the current workspace", group: "leader" },
-  { keys: "Ctrl+Space, p", description: "Previous session in the current workspace", group: "leader" },
-  { keys: "Ctrl+Space, 1-9", description: "Jump to the Nth session in the current workspace", group: "leader" },
-  { keys: "Ctrl+Space, x", description: "Close the focused pane, file or tab (agents ask first)", group: "leader" },
-  { keys: "Ctrl+Space, v", description: "Split pane vertically (new terminal to the right)", group: "leader" },
-  { keys: "Ctrl+Space, _", description: "Split pane horizontally (new terminal below)", group: "leader" },
-  { keys: "Ctrl+Space, z", description: "Maximize / restore the focused pane", group: "leader" },
-  { keys: "Ctrl+Space, h/j/k/l", description: "Focus the pane to the left/below/above/right", group: "leader" },
-  { keys: "Ctrl+Space, o", description: "Cycle focus to the next pane", group: "leader" },
-  { keys: "Ctrl+Space, }", description: "Swap the focused pane with the next one", group: "leader" },
-  {
-    keys: "Ctrl+Space, H/J/K/L",
-    description: "Swap the focused pane with its neighbour left/below/above/right",
-    group: "leader",
-  },
-  { keys: "Ctrl+Space, +", description: "Grow the focused pane", group: "leader" },
-  { keys: "Ctrl+Space, -", description: "Shrink the focused pane", group: "leader" },
-  {
-    keys: "Ctrl+Space, r, then h/j/k/l…",
-    description: "Resize mode: repeated h/j/k/l resizes the focused pane (Esc or timeout exits)",
-    group: "leader",
-  },
-  ];
+    return [{ keys: label, description: s.description, group: s.group }];
+  }), { keys: "Esc", description: "Close any open overlay or keyboard mode", group: "global" },
+    { keys: "↑ / ↓", description: "Move selection in Navigator", group: "navigator" },
+    { keys: mac ? "⌘C / ⌘V" : "Ctrl+Shift+C / V", description: "Copy / paste", group: "terminal" }];
 }
 
 // ---------------------------------------------------------------------------
@@ -303,10 +335,6 @@ function isEditableTarget(target: EventTarget | null, exceptPanes = false): bool
   if (!(target instanceof Element)) return false;
   if (exceptPanes && target.closest('.xterm, [data-testid="workspace-file-editor"]')) return false;
   return target.closest('input, textarea, [contenteditable=""], [contenteditable="true"], .xterm') != null;
-}
-
-function inTerminal(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(".xterm") != null;
 }
 
 /** True while the leader or resize mode waits for its next key. */
@@ -321,14 +349,14 @@ let chordPending = false;
  * keyboard protocol (xtermSetup.ts) lets CLIs tell those apart as they do in
  * Ghostty. */
 export function terminalKeyHandler(e: KeyboardEvent): boolean {
+  if (e.isComposing || e.keyCode === 229) return true;
   if (e.metaKey) return false;
   if (e.type !== "keydown") return true;
   // macOS turns Ctrl+Enter in a text control into the OS context menu unless the keydown is
   // cancelled; xterm only cancels keys it encodes itself, so kitty-mode Ctrl+Enter leaked it.
   if (e.ctrlKey && e.key === "Enter") e.preventDefault();
   if (chordPending) return false;
-  if (shortcutFor(e, true)) return false;
-  return !(e.ctrlKey && !e.altKey && (e.code === "Space" || e.key === " "));
+  return !shortcutFor(e, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +460,7 @@ export const NATIVE_COMMAND_EVENT = "perch:command";
 export type NativeBinding = [id: string, code: string, letter: string | null, mods: number];
 export function nativeShortcutBindings(mac = IS_MAC): NativeBinding[] {
   return SHORTCUTS.flatMap((s) => {
-    if (s.scope === "terminal") return [];
+    if (s.scope && s.scope !== "outsideTerminal") return [];
     const spec = effectiveSpec(s, mac);
     if (!spec) return [];
     const c = parseCombo(spec, mac);
@@ -447,7 +475,7 @@ export function dispatchShortcut(id: string, handlers: LeaderKeyHandlers, pageId
   if (pageId) {
     const owner = browserOwner(pageId);
     if (!owner) return false;
-    if (id === "tabs.close") return closeBrowserById(pageId);
+    if ((shortcut.command ?? id) === "tabs.close") return closeBrowserById(pageId);
     if (focusPage) {
       if (owner.kind === "tab") activateTab({ id: fileTabKey(owner.tab), kind: "resource", tab: owner.tab });
       else useDrawerBrowsers.getState().select(owner.page.workspaceId, owner.page.id);
@@ -480,74 +508,6 @@ function closeCurrent(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Chord action table — the letter pressed after the Ctrl+Space leader
-// ---------------------------------------------------------------------------
-
-const CHORD_ACTIONS: Record<string, (handlers: LeaderKeyHandlers) => void> = {
-  g: (h) => h.openNavigator(),
-  c: () => newSessionInCurrentProject(),
-  n: () => switchTabRelative(1),
-  p: () => switchTabRelative(-1),
-  x: () => closeCurrent(),
-  v: () => splitActiveTab("right"),
-  // Wave 2 item 8: split-horizontal moved from leader,- to leader,_ (shift+-)
-  // to free up leader,-/leader,+ for the new grow/shrink resize chords below
-  // — a plain minus/equals pair mirrors how resize is usually spoken about
-  // ("shrink"/"grow"), and `s` was already taken by Settings so `_`/`-`/`+`
-  // (all reachable off the same physical key) was the cleanest free slot.
-  "_": () => splitActiveTab("below"),
-  z: () => getDockviewController()?.toggleMaximizeActive(),
-  b: () => usePerchStore.getState().toggleSidebar(),
-  s: () => usePerchStore.getState().setSettingsOpen(true),
-  "?": (h) => h.openKeybindHelp(),
-  w: () => jumpToNextProject(),
-  // Capital W (shift+w) — deliberately a *separate* binding from lowercase w,
-  // resolved by the exact-key lookup in `handleKeyDown` below.
-  W: () => openWorktreeMenuForActiveProject(),
-  // Directional pane focus (Wave 2 item 8) — mirrors vim/tmux h/j/k/l.
-  h: () => getDockviewController()?.focusPaneDirection("left"),
-  j: () => getDockviewController()?.focusPaneDirection("down"),
-  k: () => getDockviewController()?.focusPaneDirection("up"),
-  l: () => getDockviewController()?.focusPaneDirection("right"),
-  o: () => getDockviewController()?.cycleToNextPane(),
-  "}": () => getDockviewController()?.swapActivePaneWithNext(),
-  "+": () => getDockviewController()?.growActivePane(),
-  "-": () => getDockviewController()?.shrinkActivePane(),
-  // Directional pane SWAP (capital H/J/K/L, i.e. shift+h/j/k/l) — deliberately
-  // separate bindings from lowercase h/j/k/l's directional FOCUS above,
-  // resolved by the same exact-key-first lookup in `handleKeyDown` that
-  // already keeps leader,W distinct from leader,w. No collision: object keys
-  // are case-sensitive, and `e.key` for Shift+H is "H", not "h".
-  H: () => getDockviewController()?.swapPaneDirection("left"),
-  J: () => getDockviewController()?.swapPaneDirection("down"),
-  K: () => getDockviewController()?.swapPaneDirection("up"),
-  L: () => getDockviewController()?.swapPaneDirection("right"),
-};
-for (let i = 1; i <= 9; i++) {
-  CHORD_ACTIONS[String(i)] = () => jumpToNthWorkspaceTab(i);
-}
-
-// ---------------------------------------------------------------------------
-// Resize mode (leader,r) — herdr lets repeated h/j/k/l resize the focused
-// pane without re-pressing the leader for each press. `r` is deliberately
-// NOT a CHORD_ACTIONS entry: entering resize mode has to arm a *second*,
-// independent timer alongside the leader's own (see `useLeaderKey` below),
-// which the flat CHORD_ACTIONS table (single no-args-beyond-handlers call)
-// has no way to express, so it's special-cased in `handleKeyDown` instead.
-// h/j/k/l while armed call the same grow/shrink helpers leader,+/- already
-// use (not a new directional-resize primitive) — direction is just a mnemonic
-// (left/up shrink, right/down grow), since a single split only ever has one
-// resizable axis at a time regardless of which of the four keys is pressed.
-// ---------------------------------------------------------------------------
-
-const RESIZE_KEYS: Record<string, (c: NonNullable<ReturnType<typeof getDockviewController>>) => void> = {
-  h: (c) => c.shrinkActivePane(),
-  j: (c) => c.shrinkActivePane(),
-  k: (c) => c.growActivePane(),
-  l: (c) => c.growActivePane(),
-};
-
-// ---------------------------------------------------------------------------
 // useLeaderKey — the single global keydown listener
 // ---------------------------------------------------------------------------
 
@@ -556,8 +516,9 @@ const RESIZE_KEYS: Record<string, (c: NonNullable<ReturnType<typeof getDockviewC
  * in `App.tsx` (mirroring how it already owns the dockview `apiRef`) — this
  * hook just calls back into it via `handlers`. */
 export function useLeaderKey(handlers: LeaderKeyHandlers): void {
+  const modeRef = useRef<{ arm: () => void; resize: () => void; reset: () => void; run: (id: string, pageId?: string, focusPage?: boolean) => void } | null>(null);
   const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
+  handlersRef.current = { ...handlers, armLeader: () => modeRef.current?.arm(), armResize: () => modeRef.current?.resize() };
   const keybindings = usePerchStore((s) => s.settings?.keybindings);
   const spec = effectiveSpec(closeShortcut);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
@@ -607,7 +568,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       if (!binding) return;
       const current = nativeShortcutBindings().find((b) => b[0] === binding[0]);
       if (!current || current.some((part, i) => part !== binding[i])) return;
-      dispatchShortcut(binding[0], handlersRef.current, detail.id, "focused" in detail && detail.focused === true);
+      modeRef.current?.run(binding[0], detail.id, "focused" in detail && detail.focused === true);
     };
     window.addEventListener(NATIVE_COMMAND_EVENT, onCommand);
     window.addEventListener(CLOSE_TAB_EVENT, onClose);
@@ -686,106 +647,57 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       resizeTimer = setTimeout(disarmResize, LEADER_TIMEOUT_MS);
     }
 
-    function handleKeyDown(e: KeyboardEvent) {
-      // Resize mode: while armed, h/j/k/l resize (and re-arm the timeout so
-      // a steady stream of presses keeps working); Escape or any other
-      // non-modifier key exits; typing into an editable element always
-      // exits without touching the keystroke (same invariant as the leader
-      // chord — never intercept real typing).
-      if (resizeArmedRef.current) {
-        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
-        if (isEditableTarget(e.target, true)) {
-          disarmResize();
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          disarmResize();
-          return;
-        }
-        const controller = getDockviewController();
-        const action = RESIZE_KEYS[e.key.toLowerCase()];
-        if (action && controller) {
-          e.preventDefault();
-          action(controller);
-          armResize();
-        } else {
-          disarmResize();
-        }
-        return;
-      }
-
-      // A chord is in progress — the next non-modifier keydown resolves it
-      // (or is silently dropped if it doesn't match any bound letter).
-      if (armedRef.current) {
-        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
-        disarm();
-        // leader,r enters resize mode instead of going through the generic
-        // CHORD_ACTIONS dispatch below (see the "Resize mode" comment above
-        // CHORD_ACTIONS for why it can't just be a table entry).
-        if (e.key === "r") {
-          e.preventDefault();
-          armResize();
-          return;
-        }
-        // Exact-key lookup first so shifted bindings (leader,W → worktree
-        // menu, leader,H/J/K/L → directional swap) stay distinct from their
-        // lowercase counterparts (leader,w → next project, leader,h/j/k/l →
-        // directional focus); everything else still resolves
-        // case-insensitively.
-        const action = CHORD_ACTIONS[e.key] ?? CHORD_ACTIONS[e.key.toLowerCase()];
-        if (action) {
-          e.preventDefault();
-          action(handlersRef.current);
-        }
-        return;
-      }
-
-      // Direct shortcuts work from anywhere, inputs included, like a browser's.
-      // `terminal` ones belong to the focused xterm (terminalSearch.ts); an
-      // `outsideTerminal` one (Ctrl+K) is the PTY's inside a terminal.
-      const direct = e.isComposing ? undefined : shortcutFor(e, inTerminal(e.target));
-      if (direct && direct.scope !== "terminal") {
-        // macOS can route this key through both WKWebView and the menu. Let the configured
-        // menu own it exactly once, without preventing the key from reaching that menu.
-        if (direct.id === "tabs.close" && nativeOwnsClose.current) return;
-        e.preventDefault();
-        if (!e.repeat) dispatchShortcut(direct.id, handlersRef.current);
-        return;
-      }
-
-      const editable = isEditableTarget(e.target);
-
-      // Ctrl+Space -> arm the leader. Forms keep it; terminal/file panes don't.
-      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ")) {
-        if (isEditableTarget(e.target, true)) return;
-        e.preventDefault();
-        arm();
-        return;
-      }
-
-      // Plain '?' (no modifiers) -> keybind help, outside inputs only.
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === "?") {
-        if (editable) return;
-        e.preventDefault();
-        handlersRef.current.openKeybindHelp();
-      }
-    }
-
-    // Space activates a focused button on keyup too. The leader must not
-    // re-click the tab left focused after a keyboard-only tab switch.
-    function handleKeyUp(e: KeyboardEvent) {
-      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === " ") &&
-          !isEditableTarget(e.target, true)) e.preventDefault();
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("keyup", handleKeyUp);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("keyup", handleKeyUp);
+    function reset() { disarm(); disarmResize(); }
+    function run(id: string, pageId?: string, focusPage = false) {
+      const resize = SHORTCUTS.find((s) => s.id === id)?.scope === "resize";
       disarm();
-      disarmResize();
+      if (!resize) disarmResize();
+      dispatchShortcut(id, handlersRef.current, pageId, focusPage);
+      if (resize) armResize();
+    }
+    modeRef.current = { arm, resize: armResize, reset, run };
+    const claim = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); };
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || ["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+      if (armedRef.current || resizeArmedRef.current) {
+        if (isEditableTarget(e.target, true)) { reset(); return; }
+        if (e.key === "Escape") { reset(); claim(e); return; }
+        const selected = shortcutFor(e, resizeArmedRef.current ? "resize" : "leader");
+        if (selected) {
+          claim(e);
+          if (!e.repeat || selected.scope === "resize") run(selected.id);
+        } else {
+          // An unmatched key cancels. Ordinary text/editing still reaches its owner, but
+          // another app command cannot run behind the cancelled chord (including menus).
+          const other = shortcutFor(e);
+          if (e.repeat && other?.id === "leader.arm") { claim(e); return; }
+          reset();
+          if (other) claim(e);
+        }
+        return;
+      }
+      const direct = shortcutFor(e);
+      if (!direct || !isGlobalShortcut(direct)) return; // Let the resolved local owner receive it.
+      if (direct.id === "tabs.close" && nativeOwnsClose.current) { e.stopPropagation(); return; }
+      claim(e);
+      if (!e.repeat) run(direct.id);
+    }
+    function handleKeyUp(e: KeyboardEvent) {
+      if (shortcutFor(e)?.id === "leader.arm") e.preventDefault();
+    }
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("keyup", handleKeyUp, true);
+    window.addEventListener("blur", reset);
+    document.addEventListener("pointerdown", reset, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("keyup", handleKeyUp, true);
+      window.removeEventListener("blur", reset);
+      document.removeEventListener("pointerdown", reset, true);
+      reset();
+      modeRef.current = null;
     };
   }, []);
+  useEffect(() => { modeRef.current?.reset(); }, [keybindings]);
 }

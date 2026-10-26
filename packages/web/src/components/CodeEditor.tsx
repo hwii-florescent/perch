@@ -144,8 +144,7 @@ export function CodeEditor({ value, onChange, onSave, onCaret, readOnly, wrap, l
     const { value: doc, readOnly: ro, wrap: wrapped, label: name, docKey: key } = initial.current;
     const config = {
         extensions: [
-          Prec.high(keymap.of([{ key: "Mod-s", run: () => { callbacks.current.onSave(); return true; }, preventDefault: true }])),
-          keymap.of(editorKeymap),
+          Prec.high(keymap.of(editorKeymap(() => callbacks.current.onSave()))),
           lineNumbers(),
           highlightActiveLine(),
           highlightActiveLineGutter(),

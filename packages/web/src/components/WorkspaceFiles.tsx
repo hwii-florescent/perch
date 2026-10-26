@@ -17,7 +17,7 @@ import { FileEntryMenu } from "./FileEntryMenu";
 import { WorkspaceFileAsset } from "./WorkspaceFileAsset";
 import { assetKind } from "./workspaceFileKind";
 import { explorerKey, flattenTree } from "../explorerNav";
-import { IS_MAC } from "../keyCombo";
+import { shortcutLabel } from "../keybinds";
 import { useZoom } from "../zoom";
 import type { CodeEditorHandle } from "./CodeEditor";
 import { EMPTY_GIT_REVIEW_STATE, gitCapabilityForWorkspace, useWorkspaceGitReviewStore } from "../gitReviewStore";
@@ -310,6 +310,7 @@ export interface WorkspaceFilesViewProps {
 let wrapPreference = false;
 
 export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, layout, onOpenFile }: WorkspaceFilesViewProps) {
+  usePerchStore((state) => state.settings?.keybindings);
   const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
   const documents = useWorkspaceFilesStore((state) => state.documents[workspaceId] ?? EMPTY_DOCUMENTS);
@@ -601,7 +602,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap((value) => !value)} title="Toggle word wrap">Wrap</button>
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
-                  <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(workspaceId, selectedPath)} disabled={!canSave} title={`Save (${IS_MAC ? "⌘S" : "Ctrl+S"})`}>
+                  <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(workspaceId, selectedPath)} disabled={!canSave} title={shortcutLabel("editor.save") ? `Save (${shortcutLabel("editor.save")})` : "Save"}>
                     {document.state === "saving" ? "Saving…" : "Save"}
                   </button>
                 </div>
@@ -651,7 +652,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   {document.error && document.state !== "conflict" && <span className="overflow-hidden text-ellipsis text-red" role="alert">{document.error}</span>}
                   {document.metadata?.readonly && <span>Read-only</span>}
                 </span>
-                <button type="button" className={cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]")} onClick={() => editorRef.current?.openGoto()} title="Go to line (Ctrl+G)">Ln {caret.line}, Col {caret.col}</button>
+                <button type="button" className={cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]")} onClick={() => editorRef.current?.openGoto()} title={shortcutLabel("editor.gotoLine") ? `Go to line (${shortcutLabel("editor.gotoLine")})` : "Go to line"}>Ln {caret.line}, Col {caret.col}</button>
               </div>
             </>
           )}

@@ -21,6 +21,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
+import { shortcutFor, shortcutLabel } from "../keybinds";
 import type { FsEntry } from "@perch/shared";
 
 function lastPathKey(hostId: string): string {
@@ -55,6 +56,8 @@ export interface DirectoryBrowserProps {
 
 export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps) {
   const browseDirectory = usePerchStore((s) => s.browseDirectory);
+  usePerchStore((s) => s.settings?.keybindings);
+  const folderKeys = [shortcutLabel("directory.use"), shortcutLabel("directory.useAlt")].filter(Boolean).join(" / ");
   const [mode, setMode] = useState<"browse" | "type">("browse");
   const [typedPath, setTypedPath] = useState("");
   const [currentPath, setCurrentPath] = useState<string | null>(null);
@@ -110,12 +113,8 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
   }
 
   function handleFilterKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if ((e.key === "Enter" && (e.metaKey || e.ctrlKey)) ) {
-      e.preventDefault();
-      confirmCurrent();
-      return;
-    }
-    if (e.key === "Enter") {
+    if (e.isDefaultPrevented() || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       const first = filteredEntries[0];
       if (first) descend(first);
@@ -132,7 +131,14 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
   const isAbsolute = (currentPath ?? "").startsWith("/");
 
   return (
-    <div className="flex min-h-[13rem] w-full flex-1 flex-col" data-testid="dir-browser">
+    <div className="flex min-h-[13rem] w-full flex-1 flex-col" data-testid="dir-browser" onKeyDown={(e) => {
+      const command = shortcutFor(e.nativeEvent, "directory");
+      if (command?.scope !== "directory") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (mode === "type") { if (typedPath.trim()) onUseFolder(typedPath.trim()); }
+      else confirmCurrent();
+    }}>
       <div className="flex shrink-0 justify-end px-2 py-[0.2rem]">
         <button
           type="button"
@@ -223,7 +229,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
               data-testid="dir-browser-use"
               disabled={!currentPath}
               onClick={confirmCurrent}
-              title="Use this folder (Cmd/Ctrl+Enter)"
+              title={folderKeys ? `Use this folder (${folderKeys})` : "Use this folder"}
             >
               Use this folder
             </button>
@@ -239,7 +245,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
             value={typedPath}
             onChange={(e) => setTypedPath(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && typedPath.trim()) onUseFolder(typedPath.trim());
+              if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.nativeEvent.isComposing && typedPath.trim()) onUseFolder(typedPath.trim());
             }}
           />
           <button
