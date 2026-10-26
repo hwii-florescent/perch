@@ -93,6 +93,10 @@ pub struct Settings {
     /// Default address-bar search engine. Older settings keep Google.
     #[serde(default = "default_browser_search_engine")]
     pub browser_search_engine: String,
+    /// Ask the search engine for suggestions as the user types in the address bar. Off by
+    /// default: what is typed leaves the machine (Vivaldi and Brave also default off).
+    #[serde(default)]
+    pub browser_search_suggestions: bool,
 }
 
 impl Default for Settings {
@@ -114,6 +118,7 @@ impl Default for Settings {
             phone_access: false,
             permissions_setup_dismissed: false,
             browser_search_engine: default_browser_search_engine(),
+            browser_search_suggestions: false,
         }
     }
 }
@@ -185,6 +190,7 @@ pub struct SettingsPatch {
     pub phone_access: Option<bool>,
     pub permissions_setup_dismissed: Option<bool>,
     pub browser_search_engine: Option<String>,
+    pub browser_search_suggestions: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -315,6 +321,9 @@ impl SettingsStore {
         if let Some(engine) = patch.browser_search_engine {
             guard.browser_search_engine = engine;
         }
+        if let Some(suggestions) = patch.browser_search_suggestions {
+            guard.browser_search_suggestions = suggestions;
+        }
         let snapshot = guard.clone();
         drop(guard);
         self.write_to_disk(&snapshot)?;
@@ -392,6 +401,22 @@ mod keybinding_tests {
         let loaded = SettingsStore::load(&path).get();
         assert_eq!(loaded.browser_search_engine, "google");
         assert_eq!(loaded.theme, "light");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_suggestions_are_off_until_the_user_turns_them_on() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-suggest-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert!(!store.get().browser_search_suggestions);
+        let on: SettingsPatch =
+            serde_json::from_value(serde_json::json!({"browserSearchSuggestions": true})).unwrap();
+        store.update(on).unwrap();
+        assert!(SettingsStore::load(&path).get().browser_search_suggestions);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -10,9 +10,9 @@ vi.mock("../browserNative", () => ({
   onPassthrough: () => () => {},
   passthroughActive: () => false,
 }));
-vi.mock("../browserHistory", () => ({ searchHistory: vi.fn().mockResolvedValue([]), recordPage: vi.fn(), removePage: vi.fn() }));
+vi.mock("../browserHistory", () => ({ searchHistory: vi.fn().mockResolvedValue([]), searchSuggestions: vi.fn().mockResolvedValue([]), recordPage: vi.fn(), removePage: vi.fn() }));
 const { browserCall } = await import("../browserNative");
-const { searchHistory, removePage } = await import("../browserHistory");
+const { searchHistory, searchSuggestions, removePage } = await import("../browserHistory");
 const { WorkspaceBrowser } = await import("./WorkspaceBrowser");
 const { usePerchStore } = await import("../store");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -124,6 +124,26 @@ it("suggests history while typing, picks with the arrows, and Esc closes the lis
   expect(input.value).toBe("https://news.example.org/today");
   expect(browserCall).toHaveBeenCalledWith("show", expect.objectContaining({ url: "https://news.example.org/today" }));
   expect(host.querySelector('[role="listbox"]')).toBeNull();
+});
+
+it("asks the engine for suggestions only when the setting is on, after a pause, and opens one as a search", async () => {
+  vi.mocked(searchSuggestions).mockResolvedValue(["perch fish"]);
+  await show("");
+  const input = type("perch");
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  expect(searchSuggestions).not.toHaveBeenCalled();
+  act(() => usePerchStore.setState({ settings: { browserSearchSuggestions: true } as never }));
+  type("perc");
+  type("perch");
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  // The burst of keys sent one request, for the final text.
+  expect(searchSuggestions).toHaveBeenCalledTimes(1);
+  expect(searchSuggestions).toHaveBeenCalledWith("perch");
+  press(input, "ArrowDown");
+  press(input, "ArrowDown");
+  press(input, "Enter");
+  await act(async () => vi.advanceTimersByTimeAsync(20));
+  expect(input.value).toBe("https://www.google.com/search?q=perch+fish");
 });
 
 it("removes a suggestion from history without navigating", async () => {

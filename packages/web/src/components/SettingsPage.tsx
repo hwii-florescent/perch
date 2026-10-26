@@ -122,6 +122,9 @@ function BrowserSection() {
           {BROWSER_SEARCH_ENGINES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select>
       </SettingRow>
+      <SettingRow title="Search suggestions" description="Ask the search engine to complete what you type in the address bar. Off by default: everything you type, even if you never search, is sent to the engine. Addresses are never sent.">
+        <Switch label="Search suggestions" testId="settings-browser-search-suggestions" checked={settings?.browserSearchSuggestions === true} onChange={(on) => updateSettings({ browserSearchSuggestions: on })} />
+      </SettingRow>
       <SettingRow title="Browsing history" description="Pages suggested in the address bar. Kept on this device only.">
         <button type="button" className={SELECT} data-testid="settings-browser-clear-history" onClick={clearHistory}>Clear history</button>
       </SettingRow>

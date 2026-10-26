@@ -102,6 +102,9 @@ pub struct SettingsData {
     /// Address-bar search engine. Missing on older peers means Google.
     #[serde(default = "crate::settings::default_browser_search_engine")]
     pub browser_search_engine: String,
+    /// Address-bar search suggestions from the search engine. Missing means off.
+    #[serde(default)]
+    pub browser_search_suggestions: bool,
 }
 
 fn default_theme() -> String {
@@ -172,6 +175,8 @@ pub struct SettingsPatch {
     pub permissions_setup_dismissed: Option<bool>,
     #[serde(default)]
     pub browser_search_engine: Option<String>,
+    #[serde(default)]
+    pub browser_search_suggestions: Option<bool>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -915,6 +920,12 @@ pub enum ClientMessage {
         #[serde(default)]
         limit: Option<u32>,
     },
+
+    /// Address-bar search suggestions from the user's search engine, fetched by the core
+    /// (capability `browser.suggest.v1`). Answered with `browser.suggest.result`, empty
+    /// unless the `browserSearchSuggestions` setting is on and `query` is not an address.
+    #[serde(rename = "browser.suggest", rename_all = "camelCase")]
+    BrowserSuggest { request_id: String, query: String },
 
     /// Forget one page.
     #[serde(rename = "browser.history.remove")]
@@ -1867,6 +1878,13 @@ pub enum ServerMessage {
     /// `attention.list`. Local host only.
     #[serde(rename = "attention.snapshot", rename_all = "camelCase")]
     AttentionSnapshot { events: Vec<AttentionEvent> },
+
+    /// Reply to `browser.suggest`: the engine's completions, best first.
+    #[serde(rename = "browser.suggest.result", rename_all = "camelCase")]
+    BrowserSuggestResult {
+        request_id: String,
+        suggestions: Vec<String>,
+    },
 
     /// Reply to `browser.history.search`, best match first.
     #[serde(rename = "browser.history.result", rename_all = "camelCase")]

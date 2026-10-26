@@ -89,6 +89,7 @@ mod agent_history;
 mod agents;
 mod attention;
 mod browser_history;
+mod browser_suggest;
 mod context_bridge;
 mod native_ui;
 mod recover;
@@ -2404,6 +2405,7 @@ fn foundation_capabilities() -> Vec<String> {
         "surface.v1",
         "attention.v1",
         "browser.history.v1",
+        "browser.suggest.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

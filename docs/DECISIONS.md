@@ -32,8 +32,17 @@ remembered too; every paired phone of this core can read the history. It stays o
 Without the capability (an older core) the bar simply has no suggestions. The
 per-tab last address/title/icon stays in per-window storage, like open file tabs.
 
-Search-engine query suggestions are not sent anywhere: they would leak keystrokes
-and need an explicit opt-in first. The dropdown hides the native page while open,
+Search suggestions follow Firefox's composition and Vivaldi's consent. The list is
+the typed action first (Firefox's "heuristic" row), up to 4 engine suggestions, then
+3 history rows (all the room for history when suggestions are off or empty). Like
+Vivaldi (and Brave) they are **off by default**, because everything typed, even if
+it never becomes a search, is sent to the engine; Settings \u2192 Browser \u2192 Search
+suggestions turns them on. The core asks the selected engine's OpenSearch suggestion
+endpoint (capability `browser.suggest.v1`, via `curl` like `usage.rs`): no cookies,
+referrer or account, 3 s, size-bounded, at most 4 lookups in flight, after a 150 ms
+typing pause. Address-shaped input (a scheme, or one dotted word) is never sent.
+Not done: Firefox's "previous searches" (clock) rows, tail suggestions and
+per-engine suggest-URL editing. The dropdown hides the native page while open,
 like menus and dialogs. Title/favicon reading is verified by the native probe
 (`close_shortcut_probe`); the dropdown's look is unverified in a real window.
 

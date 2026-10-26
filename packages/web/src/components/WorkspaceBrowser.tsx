@@ -3,7 +3,7 @@ import { cn } from "../lib/cn";
 import { browserCall, browserId, nativeBrowser, onPassthrough, passthroughActive } from "../browserNative";
 import { browserAddress, openExternal, parseUrl, webUrl } from "../links";
 import { useBrowserPages, safeIcon } from "../browserPages";
-import { recordPage, removePage, searchHistory, type HistoryEntry } from "../browserHistory";
+import { recordPage, removePage, searchHistory, searchSuggestions, type HistoryEntry } from "../browserHistory";
 import { addressRows, type AddressRow } from "../addressSuggestions";
 import { usePerchStore } from "../store";
 import { useZoom } from "../zoom";
@@ -37,6 +37,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState(-1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [suggested, setSuggested] = useState<string[]>([]);
   const editing = useRef(false);
   const justFocused = useRef(false);
   const lastVisit = useRef("");
@@ -45,6 +46,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const icon = useBrowserPages((s) => s.pages[tabId]?.icon);
   const searchEngine = usePerchStore((s) => s.settings?.browserSearchEngine);
+  const wantSuggestions = usePerchStore((s) => s.settings?.browserSearchSuggestions === true);
   const zoom = useZoom();
   const started = url !== "";
   const latest = useRef(url);
@@ -60,7 +62,15 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     void searchHistory(typed).then((found) => { if (live) setHistory(found); });
     return () => { live = false; };
   }, [open, typed]);
-  const rows = open ? addressRows(typed, history, searchEngine) : [];
+  // Engine suggestions (opt-in; the core also refuses addresses) are asked for after a short pause
+  // so a burst of typing sends one request, not one per key.
+  useEffect(() => {
+    if (!open || !wantSuggestions || !typed.trim()) { setSuggested([]); return; }
+    let live = true;
+    const timer = setTimeout(() => { void searchSuggestions(typed).then((found) => { if (live) setSuggested(found); }); }, 150);
+    return () => { live = false; clearTimeout(timer); };
+  }, [open, wantSuggestions, typed]);
+  const rows = open ? addressRows(typed, history, wantSuggestions ? suggested : [], searchEngine) : [];
 
   // A page this view opened before it was unmounted (switching drawer tabs) is still there.
   useEffect(() => {
@@ -207,7 +217,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
                   // mousedown, not click: the input must not blur (closing the list) before the choice lands.
                   onMouseDown={(e) => { e.preventDefault(); choose(row); }}
                 >
-                  <span className="min-w-0 flex-1 truncate">{row.kind === "search" ? `Search for “${row.title}”` : row.kind === "go" ? `Go to ${row.title}` : row.title}</span>
+                  <span className="min-w-0 flex-1 truncate">{row.kind === "search" ? `Search for “${row.title}”` : row.kind === "suggest" ? row.title : row.kind === "go" ? `Go to ${row.title}` : row.title}</span>
                   {row.kind === "page" && <span className="min-w-0 max-w-[55%] shrink truncate text-subtext-0">{row.url.replace(/^https?:\/\/(www\.)?/, "")}</span>}
                   {row.kind === "page" && (
                     <span

@@ -192,6 +192,9 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             ref query,
             limit,
         } => super::browser_history::handle_search(state, request_id, query, limit),
+        ClientMessage::BrowserSuggest { request_id, query } => {
+            super::browser_suggest::handle_suggest(state, request_id, query)
+        }
         ClientMessage::BrowserHistoryRemove { ref url } => {
             super::browser_history::handle_remove(state, url)
         }

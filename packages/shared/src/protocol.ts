@@ -209,6 +209,8 @@ export interface SettingsData {
   permissionsSetupDismissed?: boolean;
   /** Address-bar search engine. Absent on older peers means Google. */
   browserSearchEngine?: BrowserSearchEngine;
+  /** Address-bar suggestions from the search engine (what is typed is sent to it). Absent = off. */
+  browserSearchSuggestions?: boolean;
 }
 
 /**
@@ -238,6 +240,7 @@ export interface SettingsPatch {
   phoneAccess?: boolean;
   permissionsSetupDismissed?: boolean;
   browserSearchEngine?: BrowserSearchEngine;
+  browserSearchSuggestions?: boolean;
 }
 
 export type HostMode = "perch" | "direct";
@@ -1120,6 +1123,15 @@ export interface BrowserHistorySearchMessage {
   limit?: number;
 }
 
+/** Address-bar search suggestions from the user's search engine, fetched by the core
+ * (capability `browser.suggest.v1`). Answered with `browser.suggest.result`, empty unless the
+ * `browserSearchSuggestions` setting is on and `query` is not an address. */
+export interface BrowserSuggestMessage {
+  type: "browser.suggest";
+  requestId: string;
+  query: string;
+}
+
 /** Forget one page. */
 export interface BrowserHistoryRemoveMessage {
   type: "browser.history.remove";
@@ -1774,6 +1786,7 @@ export type ClientMessage =
   | AttentionListMessage
   | BrowserHistoryRecordMessage
   | BrowserHistorySearchMessage
+  | BrowserSuggestMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
@@ -2084,6 +2097,13 @@ export interface AttentionEvent {
 export interface BrowserHistoryEntry {
   url: string;
   title: string;
+}
+
+/** Reply to `browser.suggest`: the engine's completions, best first. */
+export interface BrowserSuggestResultMessage {
+  type: "browser.suggest.result";
+  requestId: string;
+  suggestions: string[];
 }
 
 /** Reply to `browser.history.search`, best match first. */
@@ -2590,6 +2610,7 @@ export type ServerMessage =
   | SessionUpdatedMessage
   | AttentionSnapshotMessage
   | BrowserHistoryResultMessage
+  | BrowserSuggestResultMessage
   | SessionModeMessage
   | SessionDeletedMessage
   | ServerInfoMessage
