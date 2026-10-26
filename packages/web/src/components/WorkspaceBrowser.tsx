@@ -30,6 +30,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const editing = useRef(false);
   const host = useRef<HTMLDivElement>(null);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const searchEngine = usePerchStore((s) => s.settings?.browserSearchEngine);
   const zoom = useZoom();
   const started = url !== "";
   const latest = useRef(url);
@@ -87,7 +88,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   }, [id, started, settingsOpen, zoom]);
 
   const go = () => {
-    const next = browserAddress(draft);
+    const next = browserAddress(draft, searchEngine);
     if (!next) return;
     setUrl(next);
     setDraft(next);

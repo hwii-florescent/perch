@@ -156,6 +156,8 @@ export interface CustomModelsData {
   codex: ModelEntry[];
 }
 
+export type BrowserSearchEngine = "google" | "duckduckgo" | "bing" | "brave";
+
 export interface SettingsData {
   customModels: CustomModelsData;
   /** `null` means no default set (use process cwd). */
@@ -205,6 +207,8 @@ export interface SettingsData {
   phoneAccess?: boolean;
   /** Setup completed or skipped, not an OS grant. Absent = false. */
   permissionsSetupDismissed?: boolean;
+  /** Address-bar search engine. Absent on older peers means Google. */
+  browserSearchEngine?: BrowserSearchEngine;
 }
 
 /**
@@ -233,6 +237,7 @@ export interface SettingsPatch {
   tabShape?: "square" | "round";
   phoneAccess?: boolean;
   permissionsSetupDismissed?: boolean;
+  browserSearchEngine?: BrowserSearchEngine;
 }
 
 export type HostMode = "perch" | "direct";

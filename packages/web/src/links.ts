@@ -1,6 +1,13 @@
 import { effectiveWorkspace, usePerchStore } from "./store";
 import { useFileTabs } from "./fileTabs";
 
+export const BROWSER_SEARCH_ENGINES = [
+  { id: "google", label: "Google", url: "https://www.google.com/search" },
+  { id: "duckduckgo", label: "DuckDuckGo", url: "https://duckduckgo.com/" },
+  { id: "bing", label: "Bing", url: "https://www.bing.com/search" },
+  { id: "brave", label: "Brave", url: "https://search.brave.com/search" },
+] as const;
+
 /** `uri` as a URL, or null when it isn't one (stored tab URLs and terminal text are untrusted). */
 export function parseUrl(uri: string): URL | null {
   try {
@@ -17,7 +24,7 @@ export function webUrl(uri: string): string | null {
 }
 
 /** Address-bar input, not terminal output: infer a web address or search for words. */
-export function browserAddress(input: string): string | null {
+export function browserAddress(input: string, searchEngine = "google"): string | null {
   const value = input.trim();
   if (!value) return null;
   if (/^https?:/i.test(value)) return webUrl(value);
@@ -31,7 +38,8 @@ export function browserAddress(input: string): string | null {
     if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || !host.includes(".") || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return webUrl(`http://${value}`);
     return url.href;
   }
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+  const engine = BROWSER_SEARCH_ENGINES.find(({ id }) => id === searchEngine) ?? BROWSER_SEARCH_ENGINES[0];
+  return `${engine.url}?${new URLSearchParams({ q: value })}`;
 }
 
 /** The desktop app's IPC, absent in a plain browser (the headless web server). */

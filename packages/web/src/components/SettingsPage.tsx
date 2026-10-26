@@ -6,12 +6,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
-import type { SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
+import type { BrowserSearchEngine, SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
 import { MacPermissions, macPermissionsAvailable } from "./MacPermissions";
 import { socket } from "../ws";
+import { BROWSER_SEARCH_ENGINES } from "../links";
 import { AgentCatalog } from "./AgentCatalog";
 import { useAgentChoices } from "./AgentPicker";
 // Imported rather than re-declared so the bounds the UI enforces and the ones
@@ -97,6 +98,27 @@ function TabShapeSection() {
         >
           <option value="square">Square</option>
           <option value="round">Rounded</option>
+        </select>
+      </SettingRow>
+    </SettingsGroup>
+  );
+}
+
+function BrowserSection() {
+  const settings = usePerchStore((s) => s.settings);
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+  return (
+    <SettingsGroup title="Browser">
+      <SettingRow title="Default search engine" description="Used for searches from the address bar in browser tabs and the drawer.">
+        <select
+          className={SELECT}
+          data-testid="settings-browser-search-engine"
+          aria-label="Default search engine"
+          disabled={!settings}
+          value={settings?.browserSearchEngine ?? "google"}
+          onChange={(e) => updateSettings({ browserSearchEngine: e.target.value as BrowserSearchEngine })}
+        >
+          {BROWSER_SEARCH_ENGINES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select>
       </SettingRow>
     </SettingsGroup>
@@ -764,7 +786,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
 
 function TabContent({ tab }: { tab: SettingsTab }) {
   switch (tab) {
-    case "general": return <><ChatModeSection /><InterfaceSection /><DefaultCwdSection /></>;
+    case "general": return <><ChatModeSection /><InterfaceSection /><BrowserSection /><DefaultCwdSection /></>;
     case "appearance": return <><ThemeSection /><TabShapeSection /></>;
     case "agents": return <><AgentCatalog /><CustomModelsSection /></>;
     case "keyboard": return <KeybindingsSection />;

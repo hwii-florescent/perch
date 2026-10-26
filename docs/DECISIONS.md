@@ -7,6 +7,14 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-26 — Browser search preferences
+
+Settings → General → Browser chooses Google (default), DuckDuckGo, Bing or Brave
+for address-bar searches in tabs and the drawer. The choice is persisted by the
+core and shared with connected viewers. Addresses keep their normal resolution:
+HTTPS for bare public domains, HTTP for local development addresses, and an
+explicit HTTP(S) scheme is preserved. Existing settings/older peers use Google.
+
 ## 2026-10-25 — Explorer signals and compact status controls
 
 Owner approved the Files/Git visual study, with restrained theme-derived file

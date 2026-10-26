@@ -99,6 +99,9 @@ pub struct SettingsData {
     /// Setup completed or skipped, not an OS permission grant.
     #[serde(default)]
     pub permissions_setup_dismissed: bool,
+    /// Address-bar search engine. Missing on older peers means Google.
+    #[serde(default = "crate::settings::default_browser_search_engine")]
+    pub browser_search_engine: String,
 }
 
 fn default_theme() -> String {
@@ -167,6 +170,8 @@ pub struct SettingsPatch {
     pub phone_access: Option<bool>,
     #[serde(default)]
     pub permissions_setup_dismissed: Option<bool>,
+    #[serde(default)]
+    pub browser_search_engine: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

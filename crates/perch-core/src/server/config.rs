@@ -46,6 +46,7 @@ pub(super) fn handle_settings_update(
         tab_shape: patch.tab_shape,
         phone_access: patch.phone_access,
         permissions_setup_dismissed: patch.permissions_setup_dismissed,
+        browser_search_engine: patch.browser_search_engine,
     };
     let phone_access = patch.phone_access;
     match state.app.settings.update(store_patch) {
@@ -187,6 +188,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         tab_shape: s.tab_shape.clone(),
         phone_access: s.phone_access,
         permissions_setup_dismissed: s.permissions_setup_dismissed,
+        browser_search_engine: s.browser_search_engine.clone(),
     }
 }
 

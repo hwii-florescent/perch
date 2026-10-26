@@ -90,6 +90,9 @@ pub struct Settings {
     /// The user completed or skipped macOS permission setup; never a grant.
     #[serde(default)]
     pub permissions_setup_dismissed: bool,
+    /// Default address-bar search engine. Older settings keep Google.
+    #[serde(default = "default_browser_search_engine")]
+    pub browser_search_engine: String,
 }
 
 impl Default for Settings {
@@ -110,8 +113,13 @@ impl Default for Settings {
             tab_shape: default_tab_shape(),
             phone_access: false,
             permissions_setup_dismissed: false,
+            browser_search_engine: default_browser_search_engine(),
         }
     }
+}
+
+pub(crate) fn default_browser_search_engine() -> String {
+    "google".to_string()
 }
 
 fn default_true() -> bool {
@@ -176,6 +184,7 @@ pub struct SettingsPatch {
     pub tab_shape: Option<String>,
     pub phone_access: Option<bool>,
     pub permissions_setup_dismissed: Option<bool>,
+    pub browser_search_engine: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -229,7 +238,12 @@ impl SettingsStore {
     fn read_from_disk(path: &Path) -> Option<Settings> {
         let text = std::fs::read_to_string(path).ok()?;
         match serde_json::from_str::<Settings>(&text) {
-            Ok(s) => Some(s),
+            Ok(mut s) => {
+                if !valid_browser_search_engine(&s.browser_search_engine) {
+                    s.browser_search_engine = default_browser_search_engine();
+                }
+                Some(s)
+            }
             Err(e) => {
                 tracing::warn!("~/.perch/settings.json parse error (using defaults): {e}");
                 None
@@ -244,6 +258,12 @@ impl SettingsStore {
 
     /// Apply `patch` to the in-memory settings and persist atomically.
     pub fn update(&self, patch: SettingsPatch) -> anyhow::Result<Settings> {
+        if let Some(engine) = &patch.browser_search_engine {
+            anyhow::ensure!(
+                valid_browser_search_engine(engine),
+                "unknown browser search engine"
+            );
+        }
         let mut guard = self.inner.lock().unwrap();
         if let Some(cm) = patch.custom_models {
             guard.custom_models = cm;
@@ -292,6 +312,9 @@ impl SettingsStore {
         if let Some(dismissed) = patch.permissions_setup_dismissed {
             guard.permissions_setup_dismissed = dismissed;
         }
+        if let Some(engine) = patch.browser_search_engine {
+            guard.browser_search_engine = engine;
+        }
         let snapshot = guard.clone();
         drop(guard);
         self.write_to_disk(&snapshot)?;
@@ -316,6 +339,10 @@ impl SettingsStore {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn valid_browser_search_engine(engine: &str) -> bool {
+    matches!(engine, "google" | "duckduckgo" | "bing" | "brave")
+}
+
 /// Resolve `~/.perch/settings.json` without pulling in the `dirs` crate.
 pub fn default_settings_path() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
@@ -325,6 +352,48 @@ pub fn default_settings_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod keybinding_tests {
     use super::*;
+
+    #[test]
+    fn browser_search_engine_defaults_round_trips_and_rejects_invalid_patches() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-search-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert_eq!(store.get().browser_search_engine, "google");
+        for engine in ["google", "duckduckgo", "bing", "brave"] {
+            let patch: SettingsPatch =
+                serde_json::from_value(serde_json::json!({"browserSearchEngine": engine})).unwrap();
+            store.update(patch).unwrap();
+            assert_eq!(
+                SettingsStore::load(&path).get().browser_search_engine,
+                engine
+            );
+        }
+        let patch: SettingsPatch = serde_json::from_value(
+            serde_json::json!({"browserSearchEngine": "unknown", "theme": "perch"}),
+        )
+        .unwrap();
+        assert!(store.update(patch).is_err());
+        assert_eq!(store.get().browser_search_engine, "brave");
+        assert_eq!(store.get().theme, "light");
+        assert_eq!(
+            SettingsStore::load(&path).get().browser_search_engine,
+            "brave"
+        );
+
+        // A future/hand-edited value must not discard the rest of the settings file.
+        std::fs::write(
+            &path,
+            r#"{"browserSearchEngine":"unknown","theme":"light"}"#,
+        )
+        .unwrap();
+        let loaded = SettingsStore::load(&path).get();
+        assert_eq!(loaded.browser_search_engine, "google");
+        assert_eq!(loaded.theme, "light");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn keybindings_and_close_warning_round_trip_and_default() {

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePerchStore } from "./store";
 import { useFileTabs } from "./fileTabs";
-import { browserAddress, openTerminalLink, webUrl } from "./links";
+import { BROWSER_SEARCH_ENGINES, browserAddress, openTerminalLink, webUrl } from "./links";
 
 describe("browser addresses", () => {
   it.each([
@@ -32,6 +32,19 @@ describe("browser addresses", () => {
     expect(new URL(url).origin).toBe("https://www.google.com");
     expect(new URL(url).searchParams.get("q")).toBe(input.trim());
     expect(webUrl(url)).toBe(url);
+  });
+
+  it.each(BROWSER_SEARCH_ENGINES)("uses $label and encodes the query without changing addresses", ({ id, url }) => {
+    const result = new URL(browserAddress("C++ & 你好", id)!);
+    expect(result.origin + result.pathname).toBe(url);
+    expect(result.searchParams.get("q")).toBe("C++ & 你好");
+    expect(browserAddress("localhost:3000", id)).toBe("http://localhost:3000/");
+    expect(browserAddress("example.com", id)).toBe("https://example.com/");
+  });
+
+  it("falls back safely for an unknown engine and malformed Unicode", () => {
+    expect(browserAddress("hello", "unknown")).toBe("https://www.google.com/search?q=hello");
+    expect(() => browserAddress("\ud800")).not.toThrow();
   });
 
   it.each(["", "  ", "javascript:alert(1)", "file:///etc/passwd", "mailto:x", "about:blank", "https://", "http://[bad"])("does not navigate to %s", (input) => {
