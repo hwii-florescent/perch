@@ -37,6 +37,8 @@ import { jumpToNest, newScratchpad, reopenClosedTab, stepNest } from "./workspac
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
 import { closeBrowserById } from "./drawerBrowsers";
+import { nativeBrowser } from "./browserNative";
+import { tauriInvoke } from "./links";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
 import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, validCombo } from "./keyCombo";
@@ -422,26 +424,24 @@ function openWorktreeMenuForActiveProject(create = false): void {
   if (key) withSidebar(() => usePerchStore.getState().requestWorktreeMenu(key, undefined, create));
 }
 
-/** Sent by the desktop app's Close Tab menu item (`browser.rs`). A native browser page is its own
- * web view, so while it has focus this document never sees Cmd+W; the menu does. `detail` is the
- * focused page's webview id. Nothing is sent when the main view has focus: its own key handler owns that. */
+/** Native menu activation, including when the main view (or a blank browser) has focus. */
 export const CLOSE_TAB_EVENT = "perch:close-tab";
-// ponytail: the menu item is fixed to Cmd+W, so a user rebinding of tabs.close only reaches pages
-// through the DOM key; upgrade by syncing the item's accelerator from effectiveSpec.
-if (typeof window !== "undefined") {
-  window.addEventListener(CLOSE_TAB_EVENT, (event) => {
-    const close = SHORTCUTS.find((s) => s.id === "tabs.close");
-    const spec = close && effectiveSpec(close, true);
-    if (!spec || normalizeCombo(spec, true) !== normalizeCombo("cmd+w", true)) return;
-    const id = (event as CustomEvent<unknown>).detail;
-    if (typeof id !== "string") return;
-    if (id) closeBrowserById(id);
-  });
+const closeEpoch = nativeBrowser && IS_MAC ? crypto.randomUUID() : "";
+let closeGeneration = 0;
+const closeShortcut = SHORTCUTS.find((s) => s.id === "tabs.close")!;
+
+/** Use the same parsed key as the DOM keymap; no second default in Rust. */
+function closeAccelerator(spec: string | null): string | null {
+  if (!spec) return null;
+  const c = parseCombo(spec, true);
+  return [c.cmd && "Super", c.ctrl && "Control", c.alt && "Alt", c.shift && "Shift", c.code].filter(Boolean).join("+");
 }
 
 /** Cmd+W: the open file or review, else a split's focused terminal pane,
  * else the session's tab (the same end as its ×). */
 function closeCurrent(): void {
+  const browser = document.activeElement?.closest<HTMLElement>("[data-browser-id]")?.dataset.browserId;
+  if (browser) { closeBrowserById(browser); return; }
   const files = useFileTabs.getState();
   if (files.active) return files.close(files.active);
   if (controller()?.closeActiveTerminalPanel()) return;
@@ -528,6 +528,57 @@ const RESIZE_KEYS: Record<string, (c: NonNullable<ReturnType<typeof getDockviewC
 export function useLeaderKey(handlers: LeaderKeyHandlers): void {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
+  usePerchStore((s) => s.settings?.keybindings);
+  const spec = effectiveSpec(closeShortcut);
+  const settingsOpen = usePerchStore((s) => s.settingsOpen);
+  const native = nativeBrowser && IS_MAC;
+  const nativeOwnsClose = useRef(false);
+  const nativeBinding = useRef<{ accelerator: string | null; generation: number; epoch: string } | null>(null);
+  const menuQueue = useRef(Promise.resolve());
+
+  useEffect(() => {
+    if (!native) return;
+    // Settings records keys in a capturing DOM listener. Do not let a native equivalent
+    // consume them before that recorder (or the existing DOM guards) can see them.
+    const accelerator = settingsOpen ? null : closeAccelerator(spec);
+    const generation = ++closeGeneration;
+    let live = true;
+    // A menu event bearing this generation is itself proof that Rust installed it, even if
+    // the IPC acknowledgement is still in flight. Older generations cannot execute it.
+    nativeBinding.current = { accelerator, generation, epoch: closeEpoch };
+    // While configuration is pending, don't run a second DOM close behind the native menu.
+    // A rejected configuration restores the original DOM path.
+    nativeOwnsClose.current = accelerator !== null;
+    menuQueue.current = menuQueue.current
+      .then(async () => { await tauriInvoke!("browser_close_shortcut", { accelerator, generation, epoch: closeEpoch }); })
+      .catch(() => { if (live) { nativeOwnsClose.current = false; nativeBinding.current = null; } });
+    return () => { live = false; };
+  }, [native, spec, settingsOpen]);
+
+  useEffect(() => {
+    let composing = false;
+    const compositionStart = () => { composing = true; };
+    const compositionEnd = () => { composing = false; };
+    const onClose = (event: Event) => {
+      const detail: unknown = (event as CustomEvent<unknown>).detail;
+      if (!native || !detail || typeof detail !== "object" || !("id" in detail) || !("generation" in detail)) return;
+      const binding = nativeBinding.current;
+      if (!binding?.accelerator || detail.generation !== binding.generation || !("epoch" in detail) || detail.epoch !== binding.epoch ||
+          binding.accelerator !== closeAccelerator(effectiveSpec(closeShortcut)) || typeof detail.id !== "string") return;
+      if (detail.id) closeBrowserById(detail.id);
+      else if (!composing && !chordPending) closeCurrent();
+    };
+    window.addEventListener(CLOSE_TAB_EVENT, onClose);
+    window.addEventListener("compositionstart", compositionStart, true);
+    window.addEventListener("compositionend", compositionEnd, true);
+    window.addEventListener("blur", compositionEnd);
+    return () => {
+      window.removeEventListener(CLOSE_TAB_EVENT, onClose);
+      window.removeEventListener("compositionstart", compositionStart, true);
+      window.removeEventListener("compositionend", compositionEnd, true);
+      window.removeEventListener("blur", compositionEnd);
+    };
+  }, [native]);
 
   useEffect(() => {
     const armedRef = { current: false };
@@ -652,6 +703,9 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       // `outsideTerminal` one (Ctrl+K) is the PTY's inside a terminal.
       const direct = e.isComposing ? undefined : shortcutFor(e, inTerminal(e.target));
       if (direct && direct.scope !== "terminal") {
+        // macOS can route this key through both WKWebView and the menu. Let the configured
+        // menu own it exactly once, without preventing the key from reaching that menu.
+        if (direct.id === "tabs.close" && nativeOwnsClose.current) return;
         e.preventDefault();
         if (!e.repeat) direct.run(handlersRef.current);
         return;

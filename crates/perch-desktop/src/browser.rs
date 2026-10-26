@@ -32,32 +32,155 @@ fn web_url(url: &str) -> Result<tauri::Url, String> {
 #[cfg(target_os = "macos")]
 const CLOSE_TAB_ID: &str = "close-tab";
 
-/// The File menu. A native browser page is its own web view, so while it has focus the main
-/// document never sees Cmd+W. A menu accelerator does reach it first (the app menu has no Close
-/// Window item, see `main.rs::app_menu`); `on_menu_event` forwards it to the UI (`CLOSE_TAB_EVENT`).
+#[cfg(target_os = "macos")]
+struct CloseTabMenu {
+    file: tauri::menu::Submenu<tauri::Wry>,
+    binding: std::sync::Mutex<(String, u64, bool)>,
+}
+
+/// One native owner for Close Tab, including main-view and blank-browser focus. The UI installs
+/// the effective Settings > Keyboard binding; until then no accelerator steals keys from the DOM.
 #[cfg(target_os = "macos")]
 pub fn file_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<tauri::Wry>> {
     use tauri::menu::{MenuItem, Submenu};
-    let close = MenuItem::with_id(app, CLOSE_TAB_ID, "Close Tab", true, Some("CmdOrCtrl+W"))?;
-    Submenu::with_items(app, "File", true, &[&close])
+    let close = MenuItem::with_id(app, CLOSE_TAB_ID, "Close Tab", false, None::<&str>)?;
+    let file = Submenu::with_items(app, "File", true, &[&close])?;
+    app.manage(CloseTabMenu {
+        file: file.clone(),
+        binding: std::sync::Mutex::new((String::new(), 0, false)),
+    });
+    Ok(file)
 }
 
 #[cfg(target_os = "macos")]
 pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     if event.id().as_ref() == CLOSE_TAB_ID {
+        // Match the DOM shortcut's !e.repeat guard: holding the key must not close many tabs.
+        // SAFETY: menu callbacks run on the main thread; currentEvent is nil-checked.
+        unsafe {
+            use objc2::{
+                class, msg_send,
+                runtime::{AnyObject, Bool},
+            };
+            let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let event: *mut AnyObject = msg_send![application, currentEvent];
+            if !event.is_null() {
+                let kind: usize = msg_send![event, type];
+                if kind == 10 {
+                    let repeated: Bool = msg_send![event, isARepeat];
+                    if repeated.as_bool() {
+                        return;
+                    }
+                }
+            }
+        }
+        let Some(menu) = app.try_state::<CloseTabMenu>() else {
+            return;
+        };
+        let binding = menu.binding.lock().unwrap();
+        if !binding.2 {
+            return;
+        }
+        let epoch = binding.0.clone();
+        let generation = binding.1;
         let app = app.clone();
-        tauri::async_runtime::spawn(close_tab(app));
+        tauri::async_runtime::spawn(close_tab(app, epoch, generation));
     }
 }
 
-/// The UI event for a close request: `id` is the focused browser page's webview id. None for an
-/// id that is not a plain webview id, so nothing is injected.
-fn close_tab_script(id: &str) -> Option<String> {
+/// Apply synchronously in the native IPC callback: no old-document Tokio task can apply a
+/// binding after a reload. The per-document epoch lets the UI restart its counter safely.
+/// This command remains main-view-only; browser pages gain no IPC.
+#[tauri::command]
+pub fn browser_close_shortcut(
+    app: AppHandle,
+    accelerator: Option<String>,
+    generation: u64,
+    epoch: String,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _main =
+            objc2::MainThreadMarker::new().ok_or("Close Tab config must run on the main thread")?;
+        let menu = app.try_state::<CloseTabMenu>().ok_or("no Close Tab menu")?;
+        let mut binding = menu.binding.lock().unwrap();
+        if !accepts_close_binding(&binding.0, binding.1, &epoch, generation) {
+            return Err("invalid or stale Close Tab binding".into());
+        }
+        if let Some(spec) = &accelerator {
+            spec.parse::<muda::accelerator::Accelerator>()
+                .map_err(|e| e.to_string())?;
+        }
+        // Muda 0.19.3's set_key_accelerator(None) leaves the native key equivalent
+        // installed, even on disabled items. Replace it until upstream clears it.
+        let item = tauri::menu::MenuItem::with_id(
+            &app,
+            CLOSE_TAB_ID,
+            "Close Tab",
+            accelerator.is_some(),
+            accelerator.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        let index = menu
+            .file
+            .items()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .position(|item| item.id().as_ref() == CLOSE_TAB_ID)
+            .ok_or("missing Close Tab item")?;
+        let old = menu
+            .file
+            .remove_at(index)
+            .map_err(|e| e.to_string())?
+            .ok_or("missing Close Tab item")?;
+        if let Err(error) = menu.file.insert(&item, index) {
+            menu.file
+                .insert(&old, index)
+                .map_err(|e| format!("{error}; restoring Close Tab: {e}"))?;
+            return Err(error.to_string());
+        }
+        *binding = (epoch, generation, accelerator.is_some());
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, accelerator, generation, epoch);
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn valid_close_epoch(epoch: &str) -> bool {
+    epoch.len() == 36 && epoch.bytes().all(|c| c.is_ascii_hexdigit() || c == b'-')
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn accepts_close_binding(current_epoch: &str, current: u64, epoch: &str, next: u64) -> bool {
+    valid_close_epoch(epoch) && next > 0 && (epoch != current_epoch || next > current)
+}
+
+/// Main maps to the normal close path; only a known native browser label maps to a page.
+#[cfg(any(target_os = "macos", test))]
+fn close_target(name: &str) -> Option<&str> {
+    if name == "main" {
+        return Some("");
+    }
+    let id = name.strip_prefix("browser-")?;
+    label(id).ok()?;
+    Some(id)
+}
+
+/// Only checked identifiers and a numeric counter may be carried into the main DOM.
+#[cfg(any(target_os = "macos", test))]
+fn close_tab_script(id: &str, epoch: &str, generation: u64) -> Option<String> {
+    if !valid_close_epoch(epoch) {
+        return None;
+    }
     id.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-')
         .then(|| {
             format!(
-                "window.dispatchEvent(new CustomEvent('perch:close-tab', {{ detail: '{id}' }}))"
+                "window.dispatchEvent(new CustomEvent('perch:close-tab', {{ detail: {{ id: '{id}', generation: {generation}, epoch: '{epoch}' }} }}))"
             )
         })
 }
@@ -90,13 +213,12 @@ unsafe fn responder_in(view: *mut objc2::runtime::AnyObject) -> bool {
     }
 }
 
-/// Close Tab from the menu: tell the main view which browser page has focus. With none focused,
-/// or focus unreadable, nothing is sent: the main view's own key handler owns that case.
+/// Resolve actual focus, including the main view. Unknown focus never guesses at a session.
 #[cfg(target_os = "macos")]
-async fn close_tab(app: AppHandle) {
-    let mut target = String::new();
-    for (label, view) in app.webviews() {
-        let Some(id) = label.strip_prefix("browser-") else {
+async fn close_tab(app: AppHandle, epoch: String, generation: u64) {
+    let mut target = None;
+    for (name, view) in app.webviews() {
+        let Some(id) = close_target(&name) else {
             continue;
         };
         let (send, receive) = tokio::sync::oneshot::channel();
@@ -109,16 +231,17 @@ async fn close_tab(app: AppHandle) {
             Err(_) => continue,
         };
         if matches!(focused, Ok(Ok(true))) {
-            target = id.to_string();
+            target = Some(id.to_string());
             break;
         }
     }
-    // No page has focus: the main view got the key and its own handler owns it. Unreadable
-    // focus is the same: closing something on a guess is worse than doing nothing.
-    if target.is_empty() {
+    let Some(target) = target else {
         return;
-    }
-    if let (Some(main), Some(script)) = (app.get_webview("main"), close_tab_script(&target)) {
+    };
+    if let (Some(main), Some(script)) = (
+        app.get_webview("main"),
+        close_tab_script(&target, &epoch, generation),
+    ) {
         let _ = main.eval(script);
     }
 }
@@ -271,13 +394,40 @@ pub async fn browser_url(app: AppHandle, id: String) -> Result<Option<String>, S
 
 #[cfg(test)]
 mod script_tests {
+    const EPOCH: &str = "00000000-0000-4000-8000-000000000000";
+    #[test]
+    fn close_binding_counter_is_document_scoped_and_identifiers_are_checked() {
+        let next_epoch = "00000000-0000-4000-8000-000000000001";
+        assert!(super::accepts_close_binding(EPOCH, 50, next_epoch, 1));
+        assert!(super::accepts_close_binding(EPOCH, 50, EPOCH, 51));
+        for counter in [0, 1, 49, 50] {
+            assert!(!super::accepts_close_binding(EPOCH, 50, EPOCH, counter));
+        }
+        for epoch in [
+            "",
+            "bad",
+            "00000000-0000-4000-8000-00000000000'",
+            "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+        ] {
+            assert!(!super::accepts_close_binding(EPOCH, 50, epoch, 51));
+            assert!(super::close_tab_script("", epoch, 51).is_none());
+        }
+    }
     #[test]
     fn close_script_only_carries_plain_webview_ids() {
-        assert!(super::close_tab_script("6a-0F")
+        assert_eq!(super::close_target("main"), Some(""));
+        assert_eq!(super::close_target("browser-6a-0F"), Some("6a-0F"));
+        for name in ["other", "browser-", "browser-a'b"] {
+            assert_eq!(super::close_target(name), None);
+        }
+        assert!(super::close_tab_script("", EPOCH, 9)
             .unwrap()
-            .contains("detail: '6a-0F'"));
+            .contains("id: '', generation: 9"));
+        assert!(super::close_tab_script("6a-0F", EPOCH, 7)
+            .unwrap()
+            .contains("id: '6a-0F', generation: 7"));
         for bad in ["'", "a'b", "a b", "a);alert(1", "a\n"] {
-            assert!(super::close_tab_script(bad).is_none(), "{bad:?}");
+            assert!(super::close_tab_script(bad, EPOCH, 7).is_none(), "{bad:?}");
         }
     }
 }

@@ -104,7 +104,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const own = !nativeBrowser && parseUrl(url)?.origin === window.location.origin;
 
   return (
-    <div className="@container flex min-w-0 flex-1 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-browser">
+    <div className="@container flex min-w-0 flex-1 flex-col [--radius:var(--radius-pane)]" data-testid="workspace-browser" data-browser-id={id}>
       <div className="browser-toolbar flex h-[43px] shrink-0 items-center gap-1 bg-surface-0 px-[10px] text-subtext-0 max-[700px]:h-12" data-testid="browser-toolbar">
         <button type="button" className={BTN} title={nativeBrowser ? "Back" : "Back is available in the desktop app"} aria-label="Back" disabled={!nativeBrowser || !started} onClick={() => act("back")}>
           <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg>

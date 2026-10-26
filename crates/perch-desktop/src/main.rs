@@ -8,6 +8,8 @@
 mod browser;
 #[cfg(target_os = "macos")]
 mod glass;
+#[cfg(target_os = "macos")]
+mod menu;
 mod permissions;
 
 use perch_core::boot::{
@@ -15,59 +17,6 @@ use perch_core::boot::{
     scrub_nested_agent_env,
 };
 use perch_core::server::CliArgs;
-
-/// The app menu. Tauri's default one binds Cmd+W to "Close Window", which macOS
-/// handles before the web view sees the key; perch uses Cmd+W to close a tab
-/// (`keybinds.ts`), so this is the default minus that item. The window still
-/// closes with its red button and Cmd+Q quits.
-#[cfg(target_os = "macos")]
-fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, PredefinedMenuItem as P, Submenu};
-    let sep = || P::separator(app);
-    Menu::with_items(
-        app,
-        &[
-            &Submenu::with_items(
-                app,
-                "perch",
-                true,
-                &[
-                    &P::about(app, None, None)?,
-                    &sep()?,
-                    &P::services(app, None)?,
-                    &sep()?,
-                    &P::hide(app, None)?,
-                    &P::hide_others(app, None)?,
-                    &P::show_all(app, None)?,
-                    &sep()?,
-                    &P::quit(app, None)?,
-                ],
-            )?,
-            &Submenu::with_items(
-                app,
-                "Edit",
-                true,
-                &[
-                    &P::undo(app, None)?,
-                    &P::redo(app, None)?,
-                    &sep()?,
-                    &P::cut(app, None)?,
-                    &P::copy(app, None)?,
-                    &P::paste(app, None)?,
-                    &P::select_all(app, None)?,
-                ],
-            )?,
-            &browser::file_menu(app)?,
-            &Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?,
-            &Submenu::with_items(
-                app,
-                "Window",
-                true,
-                &[&P::minimize(app, None)?, &P::maximize(app, None)?],
-            )?,
-        ],
-    )
-}
 
 /// Opens a terminal link in the OS default browser. The UI passes whatever the terminal
 /// printed, so only http(s) goes through (and `open` never sees a leading `-`).
@@ -250,7 +199,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
-        // File > Close Tab (Cmd+W) while a native browser page has focus.
+        // Close Tab uses the effective Settings > Keyboard binding in every webview.
         .on_menu_event(|app, event| {
             #[cfg(target_os = "macos")]
             browser::on_menu_event(app, event);
@@ -269,11 +218,12 @@ fn main() {
             browser::browser_close,
             browser::browser_go,
             browser::browser_action,
-            browser::browser_url
+            browser::browser_url,
+            browser::browser_close_shortcut
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
-            app.set_menu(app_menu(app.handle())?)?;
+            app.set_menu(menu::app_menu(app.handle())?)?;
 
             let mut builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("perch")

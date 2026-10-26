@@ -63,6 +63,20 @@ Useful existing coverage (not a claim of a fresh passing run):
   [real Linux resource probe](evidence/remote-workspace-2026-10-23.md) is
   additional evidence, not runtime/D3 certification.
 
+## Native Close Tab regression (macOS)
+
+`cargo run -p perch-desktop --example close_shortcut_probe` uses the production
+app menu, real hidden main/child WKWebViews and main-only IPC permissions. It
+checks focus routing, rebinding, disabling, reloads, invalid/stale updates and duplicate
+menu entries/events, including whether an old key is still consumed. It starts
+only a temporary loopback HTML server on a free port: no core, daemon, shells,
+installed app state or external sites. Its windows cannot activate. The web
+suite's `keybinds.close.test.tsx` covers the mounted listener, all existing close
+targets/guards, Settings recording and native/DOM ownership.
+
+The native probe injects AppKit menu events, not hardware keystrokes. It does
+not certify global OS dispatch or non-US keyboard layouts.
+
 ## Isolated manual probes
 
 Point **all four** at scratch paths: `PERCH_DB`, `PERCH_HOSTS`,
