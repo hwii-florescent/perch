@@ -129,6 +129,86 @@ describe("createPerchTerminal", () => {
     recover.mockRestore();
   });
 
+  it.each(["text", "bytes", "stream"])("does not replay parsed %s when a resize interrupts a write batch", async (kind) => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal } = await import("./xtermSetup");
+    const { term, dispose } = createPerchTerminal(document.createElement("div"), () => {});
+    const parsed = vi.fn();
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    let completed = () => {};
+    const marker = term.parser.registerCsiHandler({ final: "z" }, () => { completed(); return true; });
+    try {
+      const frame = "transcript\r\nprompt\r\nfooter🙂";
+      const encoded = new TextEncoder().encode(frame);
+      await new Promise<void>((resolve) => {
+        // Split the UTF-8 emoji too: retiring a byte chunk must not reset the decoder.
+        completed = () => {
+          parsed();
+          now = 20; // Exceed xterm's 12ms parser budget after the first chunk.
+          resolve();
+        };
+        // Streaming PTY writes have no client callback; the marker gives this
+        // test the same deterministic parser barrier without adding one.
+        if (kind === "stream") term.write(frame + "\x1b[0z");
+        else term.write(kind === "bytes" ? encoded.slice(0, -1) : frame, completed);
+        term.write(kind === "bytes" ? new Uint8Array([...encoded.slice(-1), ...new TextEncoder().encode("\r\nnext frame")]) : "\r\nnext frame");
+      });
+      clock.mockRestore();
+      // Tab reattachment fits the terminal while another parser slice is pending.
+      term.resize(100, 30);
+      const lines = Array.from({ length: 4 }, (_, i) => term.buffer.active.getLine(i)?.translateToString(true));
+      expect(lines).toEqual(["transcript", "prompt", "footer🙂", "next frame"]);
+      expect(parsed).toHaveBeenCalledTimes(1);
+      // Subsequent cursor-relative updates must still target the original rows.
+      await new Promise<void>((resolve) => term.write("\x1b[2A\rPROMPT\x1b[K", resolve));
+      expect(term.buffer.active.getLine(1)?.translateToString(true)).toBe("PROMPT");
+      expect(term.buffer.active.getLine(2)?.translateToString(true)).toBe("footer🙂");
+      expect(parsed).toHaveBeenCalledTimes(1);
+    } finally { clock.mockRestore(); marker.dispose(); dispose(); }
+  });
+
+  it("defers and coalesces fits requested inside a write callback without losing later output", async () => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal } = await import("./xtermSetup");
+    const host = document.createElement("div");
+    let width = 800;
+    Object.defineProperties(host, {
+      offsetWidth: { get: () => width }, clientWidth: { get: () => width },
+      offsetHeight: { value: 480 }, clientHeight: { value: 480 },
+    });
+    host.getBoundingClientRect = () => new DOMRect(0, 0, width, 480);
+    document.body.append(host);
+    const resized = vi.fn();
+    const created = createPerchTerminal(host, resized);
+    const dimensions = vi.spyOn(created.term, "dimensions", "get").mockReturnValue({ css: { cell: { width: 8, height: 16 } } } as never);
+    try {
+      created.fit();
+      resized.mockClear();
+      await new Promise<void>((resolve) => {
+        created.term.write("frame", () => {
+          created.term.write(" before");
+          width = 640;
+          expect(created.fit()).toBeNull();
+          expect(created.fit()).toBeNull();
+          created.term.write(" after", resolve);
+        });
+      });
+      expect(created.term.cols).toBe(80);
+      expect(resized.mock.calls).toEqual([[80, 30]]);
+      expect(created.term.buffer.active.getLine(0)?.translateToString(true)).toBe("frame before after");
+      // A queued fit must also be safe if the callback disposes its terminal.
+      await new Promise<void>((resolve) => created.term.write("", () => { created.fit(); created.dispose(); resolve(); }));
+      await Promise.resolve();
+    } finally { dimensions.mockRestore(); created.dispose(); host.remove(); }
+  });
+
   it("classifies real xterm user input separately from replies without inspecting or rewriting bytes", async () => {
     HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
     window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;

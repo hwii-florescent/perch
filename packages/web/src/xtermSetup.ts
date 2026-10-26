@@ -248,6 +248,21 @@ export function createPerchTerminal(
   // empty Uint8Array is truthy and parses to nothing, keeping write order.
   // Drop this once xterm's flushSync checks `!== undefined`.
   const write = term.write.bind(term);
+  // ponytail: pinned xterm's flushSync also replays the consumed prefix when
+  // its async parser yields. Retire parsed slots before client callbacks (a
+  // replay callback can itself request a fit). Remove when upstream's flush
+  // starts at _bufferOffset instead of replaying the whole queue.
+  // SAFETY: these queue fields belong to the exact pinned xterm 6.1 build;
+  // callback identity guards access and the interrupted-write regression
+  // detects an incompatible layout on upgrades.
+  const writeBuffer = (term as unknown as {
+    _core?: { _writeBuffer?: {
+      _bufferOffset: number;
+      _writeBuffer: (string | Uint8Array)[];
+      _callbacks: ((() => void) | undefined)[];
+    } };
+  })._core?._writeBuffer;
+  let writeCallbacks = 0;
   let pendingBytes = 0;
   let overloaded = false;
   term.write = (data, callback) => {
@@ -261,10 +276,20 @@ export function createPerchTerminal(
       return;
     }
     pendingBytes += bytes;
-    write(data.length ? data : new Uint8Array(0), () => {
+    const parsed = () => {
+      // Async parsing leaves the current entry in the arrays; flushSync has
+      // already shifted it out. Identity distinguishes the two without moving
+      // indices underneath the parser. Empty bytes are truthy, unlike "".
+      if (Array.isArray(writeBuffer?._writeBuffer) && writeBuffer?._callbacks?.[writeBuffer._bufferOffset] === parsed) {
+        writeBuffer._writeBuffer[writeBuffer._bufferOffset] = new Uint8Array(0);
+        writeBuffer._callbacks[writeBuffer._bufferOffset] = undefined;
+      }
       pendingBytes -= bytes;
-      callback?.();
-    });
+      writeCallbacks++;
+      try { callback?.(); }
+      finally { writeCallbacks--; }
+    };
+    write(data.length ? data : new Uint8Array(0), parsed);
   };
 
   // Re-apply on OS appearance change so an already-open terminal picks up
@@ -421,7 +446,8 @@ export function createPerchTerminal(
         // the terminal is next shown.
         const now = Date.now();
         losses = [...losses.filter((at) => now - at < 60_000), now];
-        if (losses.length <= 3) requestAnimationFrame(attachWebgl);
+        if (losses.length <= 3) requestAnimationFrame(() => { attachWebgl(); fit(); });
+        else fit();
       });
       term.loadAddon(addon);
       webgl = addon;
@@ -450,11 +476,16 @@ export function createPerchTerminal(
     if (!onScreen) return dropWebgl();
     losses = [];
     attachWebgl();
+    // Restore the renderer before measuring: DOM and WebGL round cell widths
+    // differently. Fitting the temporary DOM renderer on a tab switch sends
+    // a narrow grid to the PTY, then a wider one when WebGL comes back.
+    fit();
   });
   visibility.observe(container);
 
   let lastCols = 0;
   let lastRows = 0;
+  let fitPending = false;
 
   /** Advance width of one cell at `baseFontSize`, measured off-terminal.
    *
@@ -530,7 +561,18 @@ export function createPerchTerminal(
     // degenerate grid, and pushing it to the PTY makes the CLI reflow its
     // whole UI to ~1 column — damage that is done server-side and survives
     // the pane becoming visible again. Skip instead.
-    if (disposed || !shouldFit() || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
+    if (disposed || !onScreen || !shouldFit() || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
+    // xterm advances its async queue only after a write callback returns.
+    // Resizing inside it flushes that queue reentrantly and can drop output
+    // appended after the flush. Keep the replay barrier synchronous; defer
+    // only its fit until the parser has finished that bookkeeping.
+    if (writeCallbacks) {
+      if (!fitPending) {
+        fitPending = true;
+        queueMicrotask(() => { fitPending = false; fit(); });
+      }
+      return null;
+    }
     try {
       fitWithScaling();
     } catch {
@@ -544,6 +586,12 @@ export function createPerchTerminal(
     return { cols, rows };
   };
 
+  // Pick the visible renderer before the first fit too: a new PTY must start
+  // at the same grid it will have after IntersectionObserver's first callback.
+  const rect = container.getBoundingClientRect();
+  onScreen = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
+    && rect.top < window.innerHeight && rect.left < window.innerWidth;
+  if (onScreen) attachWebgl();
   // Fit now, and again once webfonts settle: xterm derives its cell size by
   // measuring the font, so a measurement taken before the profile's font
   // loads is based on the fallback's metrics and leaves the grid slightly off.
