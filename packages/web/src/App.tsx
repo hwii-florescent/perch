@@ -237,7 +237,7 @@ export default function App() {
         <div className={cn("box-border flex h-11 shrink-0 items-center", SOFT)} data-tauri-drag-region>
           <div
             className={cn(
-              "box-border flex shrink-0 items-center self-stretch pr-2",
+              "box-border flex shrink-0 items-center justify-end self-stretch pr-2",
               MAC_DESKTOP ? "pl-[78px]" : "pl-3",
               !sidebarCollapsed && "w-[var(--sidebar-width,240px)]",
             )}
@@ -280,8 +280,9 @@ export default function App() {
           />
         )}
         {/* The canvas floats in the shell: 8px gutters at its sides (the resize handles, or a
-            margin where a column is closed) and 6px below, so its rounded panes have room. */}
-        <main className={cn("dock-area relative flex min-h-0 min-w-0 flex-1", !isMobile && "mb-[6px]", !isMobile && !showSidebar && "ml-2", !isMobile && !tools && "mr-2")}>
+            margin where a column is closed). It sits flush on the status bar, whose own height
+            is the space below it, so the bar's text is centred between the canvas and the window edge. */}
+        <main className={cn("dock-area relative flex min-h-0 min-w-0 flex-1", !isMobile && !showSidebar && "ml-2", !isMobile && !tools && "mr-2")}>
           {isMobile ? (
             <MobilePaneShell
               activePane={mobilePane}

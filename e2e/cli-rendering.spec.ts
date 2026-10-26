@@ -28,6 +28,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
+import { startFromPanel } from "./projects";
 
 const SHOTS = path.join(__dirname, "screenshots-cli-rendering");
 const fixtureTerminals = new WeakMap<Page, { created: Set<string>; exited: Set<string> }>();
@@ -119,7 +120,7 @@ async function openCliSession(page: Page): Promise<void> {
 
   // CLI is the suite default (isolated settings file).
   await expect(page.locator('[data-testid="cli-start-panel"]')).toBeVisible({ timeout: 15000 });
-  await page.locator('[data-testid="cli-start-chats"]').click();
+  await startFromPanel(page);
 
   const surface = page.locator(".terminal__surface");
   await expect(surface).toBeVisible({ timeout: 25000 });

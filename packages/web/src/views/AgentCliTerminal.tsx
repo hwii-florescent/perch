@@ -10,6 +10,7 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
+import { button } from "../components/ui/button";
 
 function LegacyAgentCliTerminal({
   sessionId,
@@ -189,7 +190,7 @@ function LegacyAgentCliTerminal({
           <span className="terminal__exited-actions">
             <button
               type="button"
-              className="terminal__exited-btn terminal__exited-btn--primary"
+              className={button({ variant: "primary", size: "md", className: "[.app--mobile_&]:min-h-11" })}
               data-testid="cli-restart"
               onClick={restartCli}
             >
@@ -198,7 +199,7 @@ function LegacyAgentCliTerminal({
             {onClose && (
               <button
                 type="button"
-                className="terminal__exited-btn"
+                className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })}
                 data-testid="cli-close-session"
                 onClick={onClose}
               >

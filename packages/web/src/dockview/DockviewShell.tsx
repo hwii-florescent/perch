@@ -31,6 +31,7 @@ import { SessionSplitPopover } from "./SessionSplitPopover";
 import { isSessionDrag, readSessionDragId } from "./sessionDrag";
 import { usePaneLabelsEnabled } from "../paneLabels";
 import { WorkspaceFilesView } from "../components/WorkspaceFiles";
+import { EllipsisIcon, PlusIcon } from "../components/ui/icons";
 import { WorkspaceGitReviewPane } from "../components/WorkspaceGitReviewPane";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
@@ -235,7 +236,7 @@ function PaneGroupHeaderActions({ panels, activePanel }: IDockviewHeaderActionsP
           aria-label="Add terminal"
           onClick={() => getDockviewController()?.addTerminalTabInGroup(terminalPanel.id)}
         >
-          +
+          <PlusIcon />
         </button>
       )}
       {activePanel && (
@@ -265,7 +266,7 @@ function PaneGroupHeaderActions({ panels, activePanel }: IDockviewHeaderActionsP
             openPaneContextMenu?.(activePanel.id, activePanel.title ?? "", rect.right, rect.bottom);
           }}
         >
-          ⋯
+          <EllipsisIcon />
         </button>
       )}
     </>

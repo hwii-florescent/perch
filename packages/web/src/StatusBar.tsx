@@ -211,7 +211,7 @@ export function StatusBar() {
   return (
     // v4 mock: host, path and branch left; optional session details in the middle;
     // Needs You, usage and the connection check right. Identity stays in tabs/sidebar.
-    <footer className="status-bar box-border flex h-[26px] shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] leading-none whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
+    <footer className="status-bar box-border flex h-6 shrink-0 items-center gap-3 overflow-hidden px-3 text-[10px] leading-none whitespace-nowrap text-subtext-0 [--radius:var(--radius-pane)]">
       <div className="status-bar__location flex min-w-0 flex-1 items-center gap-[13px] overflow-hidden">
         <span className={cn("size-1 shrink-0 rounded-full", online ? "bg-green" : "bg-yellow")} title={connectionLabel} />
         <span className="max-w-24 shrink-0 truncate" title={`${host?.name ?? hostId} · ${connectionLabel}`} data-testid="status-host">{hostId === "local" ? "Local" : host?.name ?? hostId}</span>

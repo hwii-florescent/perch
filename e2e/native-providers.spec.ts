@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
+import { startFromPanel } from "./projects";
 
 test("installed OMP and Pi run in separate persistent panes", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -61,7 +62,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   async function prepare(current: Page) {
     await current.goto(url, { waitUntil: "networkidle" });
     for (const provider of ["claude", "codex", "omp", "pi"]) {
-      await expect(current.getByTestId("cli-start-agent").locator(`option[value="${provider}"]`)).toHaveCount(1);
+      await expect(current.getByTestId(`cli-start-agent-${provider}`)).toHaveCount(1);
     }
   }
   try {
@@ -84,14 +85,13 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await prepare(page);
     await prepare(second);
     for (const [current, provider] of [[page, "omp"], [second, "pi"]] as const) {
-      await expect(current.getByTestId("cli-start-agent").locator(`option[value="${provider}"]`)).toHaveCount(1);
+      await expect(current.getByTestId(`cli-start-agent-${provider}`)).toHaveCount(1);
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
         await current.getByTestId("new-session-popover-agent").selectOption("pi");
         await current.getByTestId("project-option-none").click();
       } else {
-        await current.getByTestId("cli-start-agent").selectOption(`${provider}`);
-        await current.getByTestId("cli-start-chats").click();
+        await startFromPanel(current, { agent: provider });
       }
       const terminal = current.getByTestId("persistent-agent-terminal");
       await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });

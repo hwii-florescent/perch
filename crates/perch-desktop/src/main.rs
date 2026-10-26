@@ -239,15 +239,15 @@ fn main() {
 
             // Orca-style: no separate title bar. The web view's top row (tabs
             // + ›_) runs under the traffic lights; it pads 78px for them and
-            // is a drag region. The lights centre in a container `14 + y` tall,
-            // so y = 30 centres them on that 44px row (`App.tsx`).
+            // is a drag region. Tao's `traffic_light_position` did not hold here (the lights
+            // stayed ~6pt above the row's centre once vibrancy replaced the content view), so
+            // `glass::position_traffic_lights` centres them on that 44px row (`App.tsx`) itself.
             // The window is transparent with vibrancy behind a translucent page (glass.rs).
             #[cfg(target_os = "macos")]
             {
                 builder = builder
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
                     .hidden_title(true)
-                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 30.0))
                     .transparent(true)
                     .initialization_script(glass::INIT_SCRIPT);
             }
@@ -258,7 +258,21 @@ fn main() {
 
             let _window = builder.build()?;
             #[cfg(target_os = "macos")]
-            glass::apply(&_window);
+            {
+                glass::apply(&_window);
+                glass::position_traffic_lights(&_window);
+                // macOS re-lays the title bar on resize, focus and theme changes.
+                let relayout = _window.clone();
+                _window.on_window_event(move |event| {
+                    use tauri::WindowEvent::{Focused, Resized, ScaleFactorChanged, ThemeChanged};
+                    if matches!(
+                        event,
+                        Resized(_) | Focused(_) | ScaleFactorChanged { .. } | ThemeChanged(_)
+                    ) {
+                        glass::position_traffic_lights(&relayout);
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

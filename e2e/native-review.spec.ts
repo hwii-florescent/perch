@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
+import { startFromPanel } from "./projects";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   test.setTimeout(180_000);
@@ -61,8 +62,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const project = page.locator(".workspace-project").filter({ hasText: token });
     await expect(project).toBeVisible();
     const workspaceId = await firstWorkspaceId(project);
-    await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
-    await page.locator('[data-testid^="cli-start-project-"]').filter({ hasText: path.basename(fixture) }).click();
+    await startFromPanel(page, { agent: `${provider}`, where: path.basename(fixture) });
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-controlling", "true");
     if (provider === "codex") {

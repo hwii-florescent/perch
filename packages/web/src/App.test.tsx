@@ -67,10 +67,11 @@ it("has no rules: no border on the top row, sidebar column, drawer column or sta
   }
 });
 
-it("floats the canvas between 8px gutters and 6px above the status bar, with the handles as the gutters", () => {
+it("floats the canvas between 8px gutters and flush on the status bar, with the handles as the gutters", () => {
   act(() => root.render(<App />));
   const main = host.querySelector("main")!;
-  expect(main.className).toContain("mb-[6px]");
+  // No gap below: the status bar's own height is the space under the canvas, so its text is centred in it.
+  expect(main.className).not.toMatch(/(^|\s)mb-/);
   // Both columns open: the resize handles are the 8px gutters, so main needs no side margin.
   expect(get("resize-sidebar").className).toContain("flex-[0_0_8px]");
   expect(get("resize-tools").className).toContain("flex-[0_0_8px]");

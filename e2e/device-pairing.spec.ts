@@ -22,7 +22,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { addProject } from "./projects";
+import { addProject, startFromPanel } from "./projects";
 import { holdRow } from "./workspaceTools";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 
@@ -212,8 +212,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await page.keyboard.press("Escape");
 
     // 4. The phone drives a real agent: start it, prompt it, read the reply.
-    await phone.getByTestId("cli-start-agent").selectOption("phonebot");
-    await phone.locator('[data-testid^="cli-start-project-"]').filter({ hasText: "repo" }).click();
+    await startFromPanel(phone, { agent: "phonebot", where: "repo" });
     const terminal = phone.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot ready", { timeout: 30_000 });

@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { startChat } from "./projects";
+import { startChat, startFromPanel } from "./projects";
 
 async function drop(target: Locator, names: string[], type = "drop") {
   return target.evaluate((element, { names, type }) => {
@@ -75,8 +75,7 @@ test("external files reach only agent prompts through native paste, without subm
       try { return (await fetch(url)).ok; } catch { return false; }
     }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByTestId("cli-start-agent").selectOption("drop-fixture");
-    await page.getByTestId("cli-start-chats").click();
+    await startFromPanel(page, { agent: "drop-fixture" });
     const terminal = page.getByTestId("persistent-agent-terminal");
     await expect(terminal).toHaveAttribute("data-writable", "true");
     await expect(terminal.locator(".xterm-rows")).toContainText("DROP_READY");

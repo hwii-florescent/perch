@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
 import { shortcutFor, shortcutLabel } from "../keybinds";
 import type { FsEntry } from "@perch/shared";
+import { button } from "./ui/button";
 
 function lastPathKey(hostId: string): string {
   return `perch.dirBrowser.lastPath.${hostId}`;
@@ -45,7 +46,7 @@ function setLastPath(hostId: string, path: string): void {
 }
 
 const EMPTY = "px-3 py-[0.4rem] text-[0.76rem] text-subtext-0";
-const USE_BUTTON = "cursor-pointer rounded-ui bg-accent px-[0.65rem] py-[0.32rem] text-[0.78rem] font-semibold text-panel-bg [font-family:inherit] [border:none] disabled:cursor-not-allowed disabled:opacity-40";
+const USE_BUTTON = button({ variant: "primary", size: "sm", className: "px-[0.65rem] py-[0.32rem] text-[0.78rem]" });
 
 export interface DirectoryBrowserProps {
   hostId: string;
@@ -142,7 +143,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
       <div className="flex shrink-0 justify-end px-2 py-[0.2rem]">
         <button
           type="button"
-          className="cursor-pointer bg-transparent px-[0.3rem] py-[0.1rem] text-[0.7rem] text-accent underline [font-family:inherit] [border:none]"
+          className={button({ size: "sm" })}
           data-testid="dir-browser-mode-toggle"
           onClick={() => setMode(mode === "browse" ? "type" : "browse")}
         >
@@ -155,7 +156,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
           <div className="flex shrink-0 items-center gap-[0.3rem] overflow-hidden px-2 py-[0.15rem]" title={currentPath ?? ""}>
             <button
               type="button"
-              className="shrink-0 cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.35rem] py-[0.15rem] text-[0.72rem] leading-none text-fg [&:hover:not(:disabled)]:border-accent disabled:cursor-not-allowed disabled:opacity-[0.35]"
+              className={button({ size: "sm", className: "leading-none text-fg" })}
               data-testid="dir-browser-up"
               disabled={!parent}
               onClick={goUp}

@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { startFromPanel } from "./projects";
 
 function manifest(id: string, name: string, executable = "/bin/sh") {
   return {
@@ -79,7 +80,7 @@ test("configured providers retain identity and isolation across desktop and mobi
     const shots = path.join(root, ".impeccable/review");
     fs.mkdirSync(shots, { recursive: true });
     for (const current of [page, phone]) {
-      await expect(current.getByTestId("cli-start-agent").locator(`option[value="fixture-missing"]`)).toHaveCount(0);
+      await expect(current.getByTestId("cli-start-agent-fixture-missing")).toHaveCount(0);
       await current.getByTestId("cli-manage-agents").click();
       await expect(current.locator(".agent-catalog__row")).toHaveCount(40);
       await expect(current.getByRole("region", { name: "Available to install", exact: true }).getByTestId("agent-catalog-fixture-missing")).toBeVisible();
@@ -90,11 +91,12 @@ test("configured providers retain identity and isolation across desktop and mobi
     await desktopBeta.getByRole("button", { name: "Disabled", exact: true }).click();
     await expect(phoneBeta.getByRole("button", { name: "Disabled", exact: true })).toHaveAttribute("aria-pressed", "true");
     await phone.getByRole("button", { name: "Close settings", exact: true }).click();
-    await expect(phone.getByTestId("cli-start-agent").locator(`option[value="fixture-beta"]`)).toHaveCount(0);
+    await expect(phone.getByTestId("cli-start-agent-fixture-beta")).toHaveCount(0);
     await desktopBeta.getByRole("button", { name: "Enabled", exact: true }).click();
     await desktopBeta.getByRole("button", { name: "Set default", exact: true }).click();
     await expect(desktopBeta.getByText("Default", { exact: true })).toBeVisible();
-    await expect(phone.getByTestId("cli-start-agent")).toHaveValue("fixture-beta");
+    // The host's default agent is the first button.
+    await expect(phone.locator('[data-testid^="cli-start-agent-"]').first()).toHaveAttribute("data-testid", "cli-start-agent-fixture-beta");
     await page.getByRole("searchbox", { name: "Search agents" }).fill("claude");
     await expect(page.locator(".agent-catalog__row")).toHaveCount(3);
     await page.getByRole("searchbox", { name: "Search agents" }).fill("");
@@ -106,18 +108,14 @@ test("configured providers retain identity and isolation across desktop and mobi
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     for (const current of [page, phone]) await current.getByRole("button", { name: "Close settings", exact: true }).click();
     await page.reload({ waitUntil: "networkidle" });
-    await expect(page.getByTestId("cli-start-agent")).toHaveValue("fixture-beta");
-    await phone.getByTestId("cli-start-agent").selectOption("fixture-beta");
-    await expect(phone.getByRole("heading", { name: /Start a Beta CLI/ })).toBeVisible();
+    await expect(page.locator('[data-testid^="cli-start-agent-"]').first()).toHaveAttribute("data-testid", "cli-start-agent-fixture-beta");
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const button of await phone.locator("[data-testid=cli-start-agent]").all()) {
+    for (const button of await phone.locator('[data-testid^="cli-start-agent-"]').all()) {
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
     await phone.screenshot({ path: path.join(shots, `provider-picker-mobile-${testInfo.project.name}.png`) });
-    await page.getByTestId("cli-start-agent").selectOption("fixture-alpha");
-    for (const current of [page, phone]) {
-      await current.getByTestId("cli-start-chats").click();
-    }
+    await startFromPanel(page, { agent: "fixture-alpha" });
+    await startFromPanel(phone, { agent: "fixture-beta" });
     const desktopTerminal = page.getByTestId("persistent-agent-terminal");
     const mobileTerminal = phone.getByTestId("persistent-agent-terminal");
     await expect(desktopTerminal.locator(".xterm-rows")).toContainText(/ready_fixture-alpha_pid_\d+_home_unset/);

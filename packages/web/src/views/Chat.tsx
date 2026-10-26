@@ -907,7 +907,7 @@ export function ChatView({ sessionId: sessionIdProp }: { sessionId?: string } = 
           onClose={() => deleteSession(sessionId)}
         />
       ) : mode === "cli" ? (
-        <CliStartPanel agent={cliAgent} />
+        <CliStartPanel />
       ) : cliReady && nativeUiAvailable ? (
         <NativeCliChat key={`${sessionId}-${cliAgent}`} sessionId={sessionId} providerId={cliAgent} />
       ) : !sessionExists ? (

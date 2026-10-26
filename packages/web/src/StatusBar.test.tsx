@@ -97,7 +97,7 @@ it("keeps an accessible icon-only Needs You control just left of vertically cent
   // Needs You, then usage at the right end.
   expect(toggle.nextElementSibling).toBe(get("usage-summary").parentElement);
   expect(footer.lastElementChild).toBe(get("status-connection"));
-  expect(footer.className).toContain("h-[26px]");
+  expect(footer.className).toContain("h-6");
   expect(toggle.className).toContain("shrink-0");
   // Same box as usage (h-5, px-1.5) centred in the bar, no resting fill: only hover changes it, like the other buttons.
   expect(toggle.className).toContain("h-5");

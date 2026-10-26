@@ -40,14 +40,14 @@ import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker, useAgentChoices } from "./components/AgentPicker";
 import { AgentIcon } from "./components/AgentIcon";
-import { menuDivider, menuItem } from "./components/ui/menu";
-import { CATALOG_ACTION } from "./components/ui/settings";
+import { menuDivider, menuItem, menuPanel } from "./components/ui/menu";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
 import { formatCombo } from "./keyCombo";
 import { ICON_BUTTON } from "./components/ui/icon-button";
 import { segment } from "./components/ui/segment";
+import { PlusIcon } from "./components/ui/icons";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
@@ -158,8 +158,8 @@ interface HostChoice {
   direct?: boolean;
 }
 
-const POPOVER_PICK = "flex w-full cursor-pointer flex-col bg-transparent px-3 pt-[0.45rem] pb-[0.35rem] text-left text-[0.82rem] font-semibold text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-1";
-const POPOVER_PICK_CWD = "mt-[0.1rem] overflow-hidden text-[0.7rem] font-normal text-ellipsis whitespace-nowrap text-subtext-0";
+const POPOVER_PICK = "flex w-full cursor-pointer flex-col bg-transparent px-[0.9rem] py-[0.4rem] text-left text-[12.5px] font-medium text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-0";
+const POPOVER_PICK_CWD = "mt-[0.1rem] overflow-hidden text-[11px] font-normal text-ellipsis whitespace-nowrap text-subtext-0";
 const POPOVER_ITEM = "flex min-h-0 max-[700px]:min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-[0.45rem] bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.8rem] text-fg [font-family:inherit] [border:none] hover:bg-surface-1";
 
 /** Where the host switcher can go (this machine, then each configured SSH host) and the active host's state. */
@@ -313,7 +313,7 @@ export function HostSwitcherPopover({
       <div className="h-px bg-overlay-0" />
       <button
         type="button"
-        className="cursor-pointer bg-transparent px-[0.6rem] py-[0.45rem] text-left text-[0.75rem] text-accent [font-family:inherit] [border:none] hover:bg-surface-1"
+        className={menuItem()}
         data-testid="host-switcher-manage"
         onClick={() => {
           onManage();
@@ -659,7 +659,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
   }, [onClose]);
 
   return createPortal(
-    <div className="new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col overflow-hidden rounded-ui bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" ref={popoverRef} style={style}>
+    <div className={cn(menuPanel, "new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col py-1")} ref={popoverRef} style={style}>
       {fixedCwd !== undefined ? (
         <div className="min-h-0 overflow-y-auto py-1">
           {choices.map((choice) => (
@@ -686,7 +686,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
           {discovery && catalog?.state === "loading" && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Checking agents…</p>}
           {discovery && catalog?.state === "error" && <p className="mx-3 text-[0.75rem] text-red" role="alert">{catalog.error}</p>}
           {discovery && catalog?.state === "ready" && !choices.length && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Enable or install an agent in Manage agents.</p>}
-          {discovery && <button type="button" className={cn(CATALOG_ACTION, "mx-3")} onClick={() => { onClose(); manage(); }}>Manage agents</button>}
+          {discovery && <button type="button" className={cn(menuItem(), "text-subtext-0")} onClick={() => { onClose(); manage(); }}>Manage agents…</button>}
         </div>
       ) : <>
       <AgentPicker
@@ -698,7 +698,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
           if (a === "claude" || a === "codex") setLastAgentChoice(a);
         }}
         testIdPrefix="new-session-popover-agent"
-        className="m-2 mb-1 w-[calc(100%_-_1rem)]"
+        className="m-2 mb-1 w-[calc(100%_-_1rem)] [--picker-bg:var(--surface-0)]"
         wrapClassName="max-h-[35vh] shrink-0 overflow-y-auto"
       />
       {projectCwds.length > 0 && (
@@ -843,15 +843,16 @@ export function Sidebar() {
           <span className="shrink-0 pt-[0.6rem] pr-2 text-[0.7rem] text-subtext-0" aria-hidden="true">▾</span>
         </button>}
 
-        <div className="flex shrink-0 flex-col items-stretch px-2">
+        <div className="flex shrink-0 flex-col items-stretch px-[3px]">
           <button
             type="button"
-            className={cn(segment(), "w-full shrink-0 gap-2 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg min-[701px]:px-3 min-[701px]:font-medium")}
+            className={cn(segment(), "w-full shrink-0 gap-2 rounded-ui px-[0.9rem] py-[0.55rem] text-left text-[0.82rem] font-semibold text-fg min-[701px]:px-3 min-[701px]:text-[12.5px] min-[701px]:font-medium")}
             data-testid={`new-session-${activeHostId}`}
             disabled={!canCreate}
             onClick={(e) => setNewAnchor(e.currentTarget.getBoundingClientRect())}
           >
-            + New session
+            <PlusIcon className="shrink-0 text-subtext-0" />
+            New session
             <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("mod+t")}</span>
           </button>
         </div>

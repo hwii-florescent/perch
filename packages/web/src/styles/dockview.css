@@ -78,8 +78,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.9rem;
-  height: 100%;
+  /* A compact hover box around the icon, centred in the header, not a full-height column. */
+  width: 1.5rem;
+  height: 1.5rem;
+  align-self: center;
+  margin: 0 0.15rem;
+  border-radius: var(--radius);
   background: none;
   border: none;
   color: var(--subtext-0);

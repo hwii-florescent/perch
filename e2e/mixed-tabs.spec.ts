@@ -142,7 +142,7 @@ test("browser chrome matches the study and keeps its address field distinct insi
     await expect(toolbar).toHaveCSS("border-bottom-width", "0px");
     await expect(address.locator("..")).toHaveCSS("height", "28px");
     await expect(address.locator("..")).toHaveCSS("border-radius", "8px");
-    await expect(page.locator("footer.status-bar")).toHaveCSS("height", "26px");
+    await expect(page.locator("footer.status-bar")).toHaveCSS("height", "24px");
     await expect(page.getByTestId("browser-open-external")).toBeDisabled();
     for (const theme of ["perch", "catppuccin-latte"]) {
       await page.evaluate((theme) => window.usePerchStore.getState().updateSettings({ theme }), theme);

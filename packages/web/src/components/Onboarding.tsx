@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { usePerchStore } from "../store";
 import { shortcutLabel } from "../keybinds";
+import { button } from "./ui/button";
 
 const KBD =
   "rounded-ui border border-overlay-0 bg-surface-1 px-[0.4rem] py-[0.05rem] text-[0.78rem] text-accent [font-family:ui-monospace,SFMono-Regular,Menlo,monospace]";
@@ -91,7 +92,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
         </ul>
         <button
           type="button"
-          className="cursor-pointer rounded-ui bg-accent px-4 py-[0.45rem] text-[0.85rem] font-semibold text-panel-bg [border:none] [transition:opacity_0.12s_ease] hover:opacity-85"
+          className={button({ variant: "primary", size: "lg" })}
           data-testid="onboarding-dismiss"
           onClick={onDismiss}
         >

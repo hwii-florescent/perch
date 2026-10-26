@@ -11,6 +11,7 @@ import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
 import { MobileKeyBar } from "../components/MobileKeyBar";
 import { useIsMobileWidth } from "../responsive";
+import { button } from "../components/ui/button";
 
 /** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
 const SIZE_MARKER = /\x1b\[8;(\d+);(\d+)t/g;
@@ -231,8 +232,8 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     {(exitCode !== null || sleeping) && <div className="terminal__exited terminal__exited--cli" data-testid={sleeping ? "cli-sleeping" : "cli-exited"}>
       <span className="terminal__exited-text">{sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${exitCode})`}</span>
       <span className="terminal__exited-actions">
-        <button type="button" className="terminal__exited-btn terminal__exited-btn--primary" data-testid={sleeping ? "cli-resume" : "cli-restart"} onClick={startOver}>{sleeping ? "Resume agent" : "Restart CLI"}</button>
-        {onClose && <button type="button" className="terminal__exited-btn" data-testid="cli-close-session" onClick={onClose}>Close session</button>}
+        <button type="button" className={button({ variant: "primary", size: "md", className: "[.app--mobile_&]:min-h-11" })} data-testid={sleeping ? "cli-resume" : "cli-restart"} onClick={startOver}>{sleeping ? "Resume agent" : "Restart CLI"}</button>
+        {onClose && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} data-testid="cli-close-session" onClick={onClose}>Close session</button>}
       </span>
     </div>}
   </div>;

@@ -32,6 +32,7 @@ import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_pro
 import { restoreChatMode, setChatMode } from "./chatMode";
 import { cheapModelEnv } from "./cheapModel";
 import { holdRow } from "./workspaceTools";
+import { startFromPanel } from "./projects";
 
 const RUN_ID = Math.random().toString(36).slice(2, 8);
 const WORKTREE_TEXT = `PHONE_REVIEWS_THIS_${RUN_ID}`;
@@ -207,8 +208,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await page.keyboard.press("Escape");
 
     // 2. The phone starts a real Claude CLI in the repository.
-    await phone.getByTestId("cli-start-agent").selectOption("claude");
-    await phone.locator('[data-testid^="cli-start-project-"]').filter({ hasText: repoName }).click();
+    await startFromPanel(phone, { agent: "claude", where: repoName });
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 40_000 });
     const terminalId = await cli.getAttribute("data-terminal-id");
     await expect(cli.locator(".xterm-rows")).toContainText("Claude Code", { timeout: 40_000 });

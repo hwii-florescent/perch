@@ -17,17 +17,13 @@ import { usePerchStore, effectiveActiveProject } from "../store";
 import { NewSessionPopover } from "../Sidebar";
 import { useAgentChoices } from "./AgentPicker";
 import { cn } from "../lib/cn";
+import { START_ACTION as ACTION, START_HINT as HINT, START_NAME as NAME, START_PANEL as PANEL, StartCard } from "./StartCard";
 import { requestAddProject } from "../appEvents";
 import perchLogo from "../assets/perch-logo-texture-medium.webp";
 
-// Both screens share the cli-start card layout; `home` centres it.
-const PANEL = "flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto bg-panel-bg px-4 py-8";
+// The start card itself is shared with the CLI start panel (`StartCard.tsx`).
 const FONT = "[font-family:inherit] [font-weight:inherit] [line-height:inherit]";
-const NAME = "m-0 text-[2.4rem] font-bold tracking-[-0.02em] text-fg";
-const HINT = "m-0 text-center text-[0.85rem] text-subtext-0";
 const KBD = `min-w-6 rounded-ui border border-overlay-0 bg-surface-0 px-[0.35rem] py-[0.1rem] text-center text-[0.75rem] text-fg ${FONT}`;
-const ACTION = `cursor-pointer rounded-ui border border-overlay-0 bg-surface-0 px-[0.9rem] py-2 text-[0.85rem] text-fg ${FONT} hover:border-overlay-1 hover:bg-surface-1 focus-visible:border-overlay-1 focus-visible:bg-surface-1`;
-
 
 const SHORTCUTS: [string, string[]][] = [
   ["New session", ["Ctrl", "Space", "C"]],
@@ -115,31 +111,15 @@ function basename(path: string): string {
 /** The focused workspace's start picker: what to open in it. */
 function WorkspaceStart({ hostId, name, path }: { hostId: string; name: string; path: string }) {
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
-  const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const { choices } = useAgentChoices(hostId);
   return (
-    <div className={cn(PANEL, "items-center")} data-testid="no-session-panel">
-      <div className="flex w-full max-w-[24rem] flex-col items-center gap-4">
-        <h1 className={cn(NAME, "max-w-full overflow-hidden text-[1.6rem] text-ellipsis whitespace-nowrap")}>{name}</h1>
-        <p className={HINT} title={path}>{path}</p>
-        <p className={HINT}>What do you want to open?</p>
-        <div className="flex flex-wrap justify-center gap-[0.6rem]">
-          {choices.map((choice) => (
-            <button
-              key={choice.id}
-              type="button"
-              className={ACTION}
-              data-testid={`workspace-start-${choice.id}`}
-              onClick={() => createSessionOnHost(hostId, path, choice.id)}
-            >
-              {choice.label}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="cursor-pointer bg-transparent p-0 text-[0.75rem] text-subtext-0 [border:0] [font-family:inherit] [font-weight:inherit] [line-height:inherit] hover:text-fg hover:underline focus-visible:text-fg focus-visible:underline" onClick={() => setSettingsOpen(true)}>
-          Open one automatically: Settings → Empty workspace opens
-        </button>
-      </div>
-    </div>
+    <StartCard
+      name={name}
+      path={path}
+      choices={choices}
+      idPrefix="workspace-start"
+      testId="no-session-panel"
+      onPick={(agent) => createSessionOnHost(hostId, path, agent)}
+    />
   );
 }

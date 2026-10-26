@@ -1,6 +1,7 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import * as fs from "node:fs";
 import { setChatMode } from "./chatMode";
+import { startFromPanel } from "./projects";
 import * as path from "node:path";
 
 test("agent runtime survives view changes and control transfers between desktop and phone", async ({ page, context, browser }, testInfo) => {
@@ -11,7 +12,7 @@ test("agent runtime survives view changes and control transfers between desktop 
   let phone: Page | undefined;
   let phoneContext: BrowserContext | undefined;
   try {
-    await page.getByTestId("cli-start-chats").click();
+    await startFromPanel(page);
     const desktop = page.getByTestId("persistent-agent-terminal");
     await expect(desktop).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(desktop).toHaveAttribute("data-controlling", "true");

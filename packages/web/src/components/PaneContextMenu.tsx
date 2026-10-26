@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import type { DockviewController } from "../dockview/dockviewController";
 import { canStopAgent, stopAgent } from "../agentTerminals";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
+import { button } from "./ui/button";
 import { useSplitSets } from "../splitSets";
 import { splitActiveTab } from "../tiledPanes";
 
@@ -97,7 +98,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
           />
           <button
             type="button"
-            className="shrink-0 cursor-pointer rounded-ui bg-accent px-[0.55rem] py-[0.3rem] text-[0.78rem] font-semibold text-panel-bg [border:none] [font-family:inherit]"
+            className={button({ variant: "primary", size: "sm" })}
             data-testid="pane-menu-rename-confirm"
             onClick={commitRename}
           >

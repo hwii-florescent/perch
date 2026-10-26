@@ -40,6 +40,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
 import { ICON_BUTTON } from "./ui/icon-button";
+import { button } from "./ui/button";
+import { menuItem } from "./ui/menu";
+import { PlusIcon } from "./ui/icons";
 import { usePerchStore } from "../store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AGENT_PICKER, useAgentChoices } from "./AgentPicker";
@@ -48,7 +51,7 @@ import type { WorktreeEntry, WorktreePreservedBranch } from "@perch/shared";
 
 const INPUT = "rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:border-accent focus:[outline:none]";
 const BADGE = "shrink-0 rounded-ui border border-accent px-[0.28rem] py-0 text-[0.6rem] font-medium text-accent";
-const ACTION = "cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.4rem] py-[0.15rem] text-[0.7rem] text-fg [font-family:inherit] [transition:border-color_0.1s_ease,color_0.1s_ease] hover:border-accent hover:text-accent";
+const ACTION = button({ size: "sm", className: "text-fg" });
 /** Mirror of `branch_to_path_slug` in `crates/perch-core/src/worktree.rs`
  * (kept in sync by hand — it exists here only to *preview* the default
  * checkout path in the create form; the server always recomputes the real
@@ -356,7 +359,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
   const popover = open
     ? createPortal(
         <div
-          className="w-[min(420px,calc(100vw_-_16px))] overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          className="w-[min(420px,calc(100vw_-_16px))] overflow-hidden rounded-ui bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
           role="dialog"
           aria-label="Git worktrees"
           data-testid={`worktree-popover-${hostId}-${cwd}`}
@@ -422,7 +425,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                     {!entry.isPrimary && (
                       <button
                         type="button"
-                        className={cn(ACTION, "hover:border-red hover:text-red")}
+                        className={cn(ACTION, "hover:text-red")}
                         data-testid={`worktree-remove-${entry.path}`}
                         onClick={() => setPendingRemove({ path: entry.path, branch: entry.branch, force: false })}
                         title={deleteSupported ? "Delete this worktree and its branch" : "Remove this worktree"}
@@ -561,7 +564,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                 </button>
                 <button
                   type="button"
-                  className="cursor-pointer rounded-ui bg-accent px-[0.6rem] py-1 text-[0.75rem] font-semibold text-panel-bg [font-family:inherit] [border:none] disabled:cursor-not-allowed disabled:opacity-40"
+                  className={button({ variant: "primary", size: "sm" })}
                   data-testid="worktree-create-submit"
                   disabled={!canCreate || creating}
                   onClick={() => void submitCreate()}
@@ -573,7 +576,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
           ) : (
             <button
               type="button"
-              className="block w-full cursor-pointer bg-transparent px-[0.65rem] py-[0.45rem] text-left text-[0.78rem] text-fg [font-family:inherit] [border:none] [transition:background_0.1s_ease] hover:bg-surface-1"
+              className={menuItem()}
               data-testid="worktree-new"
               onClick={() => {
                 setShowCreateForm(true);
@@ -600,7 +603,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
         aria-label="New workspace"
         aria-expanded={open}
       >
-        +
+        <PlusIcon />
       </button>
       {popover}
       {pendingRemove && (

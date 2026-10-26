@@ -5,7 +5,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { restoreChatMode, setChatMode } from "./chatMode";
-import { addProject } from "./projects";
+import { addProject, startFromPanel } from "./projects";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
@@ -69,9 +69,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   try {
     await start();
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByTestId("cli-start-agent").selectOption(`${provider}`);
     await addProject(page, fixture);
-    await page.locator('[data-testid^="cli-start-project-"]').filter({ hasText: path.basename(fixture) }).click();
+    await startFromPanel(page, { agent: `${provider}`, where: path.basename(fixture) });
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
     await expect(cli).toHaveAttribute("data-controlling", "true");
     await expect(cli.locator(".xterm-rows")).toContainText(provider === "opencode" ? /OpenCode|opencode|Ask anything/i : provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });

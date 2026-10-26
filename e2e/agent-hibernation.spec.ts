@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { startFromPanel } from "./projects";
 
 interface AgentStatusFrame {
   state: string;
@@ -92,8 +93,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
 
     // 1. Start a real CLI agent and complete a conversation turn.
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByTestId("cli-start-agent").selectOption("claude");
-    await page.getByTestId("cli-start-chats").click();
+    await startFromPanel(page, { agent: "claude" });
     const cli = page.getByTestId("persistent-agent-terminal");
     await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 60_000 });
     await expect(cli.locator(".xterm-rows")).toContainText(/Claude Code/, { timeout: 60_000 });

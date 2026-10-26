@@ -17,6 +17,7 @@ import { tauriInvoke } from "../links";
 import { usePerchStore } from "../store";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { Dialog } from "./ui/dialog";
+import { button } from "./ui/button";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface FileEntryMenuProps {
@@ -154,7 +155,7 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
       <Dialog title="That did not work" onClose={onClose} testId="file-error-dialog">
         <p role="alert" className="m-0 text-[0.82rem] text-red">{error}</p>
         <div className="flex justify-end">
-          <button type="button" className="cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.85rem] py-[0.35rem] text-[0.82rem] text-fg [font-family:inherit] hover:border-accent" onClick={onClose}>OK</button>
+          <button type="button" className={button({ variant: "primary" })} onClick={onClose}>OK</button>
         </div>
       </Dialog>
     );
@@ -249,8 +250,8 @@ function NameDialog({ title, initial, confirmLabel, busy, error, onCancel, onSub
       {trimmed && /[\\/]/.test(trimmed) && <p className="m-0 text-[0.75rem] text-red">A name cannot contain / or \.</p>}
       {error && <p role="alert" className="m-0 text-[0.78rem] text-red">{error}</p>}
       <div className="flex justify-end gap-2">
-        <button type="button" className="cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.85rem] py-[0.35rem] text-[0.82rem] text-fg [font-family:inherit] hover:border-accent" onClick={onCancel}>Cancel</button>
-        <button type="button" className="cursor-pointer rounded-ui border border-accent bg-accent px-[0.85rem] py-[0.35rem] text-[0.82rem] text-panel-bg [font-family:inherit] disabled:cursor-not-allowed disabled:opacity-40" disabled={invalid || busy} data-testid="file-name-confirm" onClick={submit}>{confirmLabel}</button>
+        <button type="button" className={button()} onClick={onCancel}>Cancel</button>
+        <button type="button" className={button({ variant: "primary" })} disabled={invalid || busy} data-testid="file-name-confirm" onClick={submit}>{confirmLabel}</button>
       </div>
     </Dialog>
   );

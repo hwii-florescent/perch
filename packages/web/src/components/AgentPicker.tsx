@@ -2,11 +2,11 @@ import { useEffect, useRef } from "react";
 import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
-import { CATALOG_ACTION } from "./ui/settings";
+import { menuItem } from "./ui/menu";
 
 /** The native select, with a drawn chevron (WebKit ignores min-height on a native select).
  * Phones lift the min-height to a 44px touch target. */
-export const AGENT_PICKER = "min-h-[32px] [.app--mobile_&]:min-h-[44px] w-full appearance-none rounded-ui border border-overlay-0 py-[0.3rem] pr-[1.6rem] pl-[0.45rem] text-fg [background:linear-gradient(45deg,transparent_50%,var(--subtext-0)_50%)_right_0.85rem_center/5px_5px_no-repeat,linear-gradient(135deg,var(--subtext-0)_50%,transparent_50%)_right_0.55rem_center/5px_5px_no-repeat,var(--panel-bg)] [font:inherit] focus-visible:border-accent focus-visible:[outline:none]";
+export const AGENT_PICKER = "min-h-[32px] [.app--mobile_&]:min-h-[44px] w-full appearance-none rounded-ui border border-overlay-0 py-[0.3rem] pr-[1.6rem] pl-[0.45rem] text-[0.8rem] text-fg [background:linear-gradient(45deg,transparent_50%,var(--subtext-0)_50%)_right_0.85rem_center/5px_5px_no-repeat,linear-gradient(135deg,var(--subtext-0)_50%,transparent_50%)_right_0.55rem_center/5px_5px_no-repeat,var(--picker-bg,var(--panel-bg))] [font-family:inherit] focus-visible:border-overlay-1 focus-visible:[outline:none]";
 
 /** The CLI agents `hostId` can start in a pane (its enabled, installed
  * manifests), fetched on demand. Shared by every "start a session" surface. */
@@ -54,7 +54,7 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
       onChange={(event) => onChange(event.target.value)}>
       {choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
     </select>
-    {discovery && <button type="button" className={CATALOG_ACTION} onClick={() => { onManage?.(); manage(); }}>Manage agents</button>}
+    {discovery && <button type="button" className={cn(menuItem(), "text-subtext-0")} onClick={() => { onManage?.(); manage(); }}>Manage agents…</button>}
     {discovery && catalog?.state === "error" && <p role="alert">{catalog.error}</p>}
     {discovery && catalog?.state === "ready" && !choices.length && <p role="status">Enable or install an agent in Manage agents.</p>}
   </div>;

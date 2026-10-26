@@ -1,6 +1,21 @@
 import { expect, type Page } from "@playwright/test";
 import { realpathSync } from "node:fs";
 
+/** Start a CLI session from the start panel: pick where (a project whose name contains `where`, else the
+ * Scratchpad), then the agent (default: the first button, which is the host's default agent). */
+export async function startFromPanel(page: Page, opts: { agent?: string; where?: string } = {}): Promise<void> {
+  const target = page.getByTestId("cli-start-target");
+  if (await target.count()) {
+    const value = await target.locator("option").evaluateAll(
+      (options, where) => (options as HTMLOptionElement[]).find((option) => (where ? option.textContent!.includes(where) : option.value === "~"))?.value,
+      opts.where,
+    );
+    if (value === undefined) throw new Error(`no start target matching ${opts.where ?? "Scratchpad"}`);
+    await target.selectOption(value);
+  }
+  await (opts.agent ? page.getByTestId(`cli-start-agent-${opts.agent}`) : page.locator('[data-testid^="cli-start-agent-"]').first()).click();
+}
+
 /** Sessions start only in a project listed in perch, or in Chats. Register
  * `dir` the way "+ Add project" does; resolves once the server replies. */
 export async function addProject(page: Page, dir: string): Promise<void> {
