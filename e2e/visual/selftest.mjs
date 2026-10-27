@@ -17,6 +17,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const visual = path.join(here, "visual.mjs");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "perch-vis-selftest-"));
 const run = (...args) => spawnSync("node", [visual, ...args], { encoding: "utf8" });
+// This is a self-check: malformed harness output must terminate with a nonzero exit.
+// pi-lens-ignore: unchecked-throwing-call-js
 const states = JSON.parse(run("states").stdout);
 
 // --- fixtures -------------------------------------------------------------

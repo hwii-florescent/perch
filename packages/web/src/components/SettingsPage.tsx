@@ -4,9 +4,9 @@
  * server. Sections are grouped into the left-hand tabs; each is a card of rows.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
-import type { BrowserSearchEngine, SshHostEntry, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
+import type { BrowserSearchEngine, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";
@@ -30,7 +30,7 @@ import { GHOST_BUTTON } from "./ui/icon-button";
 import { Chevron } from "./ui/chevron";
 import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
 import {
-  ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, CHECKBOX_ROW, EMPTY, FIELD_ROW, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
+  ADD_ROW, ADDR, BTN_DANGER, BTN_PRIMARY, EMPTY, HOST_ROW, INPUT, INPUT_PORT, INPUT_WIDE,
   LIST, MODEL_ROW, MUTED, NAME, SELECT, SELECT_HOST,
 } from "./ui/settings";
 

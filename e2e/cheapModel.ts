@@ -74,6 +74,8 @@ export function cheapModelEnv(provider: string, fixture: string, userHome = os.h
     // Runtime override merged by the CLI; user config and plugins stay intact.
     // https://opencode.ai/docs/config/#inline-config
     return { OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      // Invalid config must abort setup before a paid turn, never inherit an expensive default.
+      // pi-lens-ignore: unchecked-throwing-call
       ...JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}"),
       model: `anthropic/${CHEAP_CLAUDE_MODEL}`,
       small_model: `anthropic/${CHEAP_CLAUDE_MODEL}`,
@@ -81,6 +83,8 @@ export function cheapModelEnv(provider: string, fixture: string, userHome = os.h
   }
   if (provider === "pi") {
     const home = overlayHome(fixture, "pi-agent", path.join(userHome, ".pi", "agent"), "settings.json", (config) =>
+      // Like the inline config above, a malformed file deliberately aborts fixture setup.
+      // pi-lens-ignore: unchecked-throwing-call
       JSON.stringify({ ...JSON.parse(config), defaultProvider: "openai-codex", defaultModel: CHEAP_CODEX_MODEL, defaultThinkingLevel: "low" }),
     );
     return { PI_CODING_AGENT_DIR: home };

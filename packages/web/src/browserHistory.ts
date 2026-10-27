@@ -28,7 +28,7 @@ socket.onMessage((message) => {
 });
 // A dropped connection never answers: let waiting requests finish empty.
 socket.onConnectionChange((connected) => {
-  if (!connected) for (const id of [...pending.keys()]) settle(id, []);
+  if (!connected) for (const id of pending.keys()) settle(id, []); // deleting the visited key from a Map is safe
 });
 
 const ready = (capability: string) => capabilities.includes(capability) && socket.connected;

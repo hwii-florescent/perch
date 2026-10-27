@@ -1246,7 +1246,9 @@ extern "C" {
 
 #[cfg(unix)]
 unsafe fn raw_kill(pid: i32, sig: i32) {
-    kill(pid, sig);
+    // SAFETY: kill takes integers, not pointers; callers supply the spawned child's PID
+    // and SIGTERM. The C declaration above matches the Unix kill ABI.
+    unsafe { kill(pid, sig) };
 }
 
 #[cfg(test)]

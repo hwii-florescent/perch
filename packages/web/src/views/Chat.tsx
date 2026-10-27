@@ -526,6 +526,8 @@ const MessageBubble = memo(function MessageBubble({
         <div
           ref={markdownRef}
           className={cn("message__markdown", MESSAGE_MARKDOWN)}
+          // renderedMarkdown is DOMPurify-sanitized in markdown.ts (renderMarkdown).
+          // pi-lens-ignore: dangerously-set-inner-html
           dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
         />
       ) : message.text ? (
