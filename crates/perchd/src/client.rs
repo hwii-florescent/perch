@@ -262,13 +262,21 @@ impl Client {
         cols: u16,
         rows: u16,
     ) -> Result<Created, Error> {
+        let cleanup_owner = env
+            .iter()
+            .find(|(name, _)| name == CLEANUP_OWNER_ENV)
+            .map(|(_, value)| value.clone());
         self.call_as(Request::Create {
             id: id.into(),
             argv,
             cwd,
-            env,
+            env: env
+                .into_iter()
+                .filter(|(name, _)| name != CLEANUP_OWNER_ENV)
+                .collect(),
             cols,
             rows,
+            cleanup_owner,
         })
     }
 
@@ -401,6 +409,44 @@ impl Client {
 
     pub fn session(&self, id: &str) -> Result<Option<SessionInfo>, Error> {
         Ok(self.list()?.into_iter().find(|s| s.id == id))
+    }
+
+    fn require_cleanup(&self) -> Result<(), Error> {
+        if !self
+            .health()?
+            .capabilities
+            .iter()
+            .any(|cap| cap == RELEASED_CLEANUP_CAPABILITY)
+        {
+            return Err(Error::Server(
+                "daemon does not support released-only cleanup; no processes were stopped".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Explicit owner release. Disconnecting a client must never call this.
+    pub fn release(&self, session: &SessionInfo, owner: &str, reason: &str) -> Result<(), Error> {
+        self.require_cleanup()?;
+        self.call(Request::Release {
+            id: session.id.clone(),
+            incarnation: session.cleanup.incarnation.clone(),
+            revision: session.cleanup.revision,
+            owner: owner.into(),
+            reason: reason.into(),
+        })
+        .map(|_| ())
+    }
+
+    /// The daemon rechecks this exact preview before signalling anything.
+    pub fn cleanup(&self, session: &SessionInfo) -> Result<(), Error> {
+        self.require_cleanup()?;
+        self.call(Request::Cleanup {
+            id: session.id.clone(),
+            incarnation: session.cleanup.incarnation.clone(),
+            revision: session.cleanup.revision,
+        })
+        .map(|_| ())
     }
 
     pub fn snapshot(&self, id: &str) -> Result<Snapshot, Error> {

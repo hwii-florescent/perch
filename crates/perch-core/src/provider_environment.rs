@@ -97,6 +97,8 @@ fn prepare_with_parent(
         .entry("LANG".into())
         .or_insert_with(|| "en_US.UTF-8".into());
     environment.extend(policy.set.clone());
+    // This is a core lifecycle scope, never an environment hint for nested tools.
+    environment.remove(perchd::proto::CLEANUP_OWNER_ENV);
     for name in &policy.unset {
         environment.remove(name);
     }
@@ -233,6 +235,10 @@ mod tests {
             ),
             // bash exports functions under a name no shell can `export`.
             ("BASH_FUNC_helper%%".to_string(), "() { :; }".to_string()),
+            (
+                perchd::proto::CLEANUP_OWNER_ENV.into(),
+                "must-not-propagate".into(),
+            ),
         ]
         .into_iter()
         .collect();
@@ -247,6 +253,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(prepared.argv[0], "/bin/sh", "must not clear the child env");
+        assert!(!fs::read_to_string(&prepared.bootstrap.as_ref().unwrap().0)
+            .unwrap()
+            .contains(perchd::proto::CLEANUP_OWNER_ENV));
         let result = Command::new(&prepared.argv[0])
             .args(&prepared.argv[1..])
             .env("TMUX", "/tmp/tmux-501/default,123,4")

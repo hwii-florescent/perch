@@ -1,5 +1,6 @@
 //! perchd — the perch terminal daemon. See `docs/ARCHITECTURE.md` §3.
 
+mod cleanup_cli;
 pub mod client;
 pub mod permissions;
 pub mod proto;
@@ -36,6 +37,18 @@ pub fn raise_fd_limit() {
 /// "__perchd"]`), used when `connect` has to start a daemon.
 pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
     raise_fd_limit();
+    if matches!(
+        args.first().map(String::as_str),
+        Some("ps" | "list" | "cleanup" | "release")
+    ) {
+        return match cleanup_cli::run(&args[0], &args[1..]) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("perch: {error}");
+                1
+            }
+        };
+    }
     let mut dir = server::default_dir();
     let mut idle = Some(std::time::Duration::from_secs(60));
     let mut rest = args.iter();
@@ -85,7 +98,7 @@ pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
         }
         _ => {
             eprintln!(
-                "usage: perchd serve|connect|version [--dir DIR] [--idle-exit SECS|--no-idle-exit]"
+                "usage: perchd serve|connect|version [--dir DIR] [--idle-exit SECS|--no-idle-exit]\n       perch ps [--dir DIR] [--json]\n       perch cleanup [--dir DIR] [--dry-run|--yes] [--json]"
             );
             2
         }
@@ -98,6 +111,11 @@ pub fn spawn_command(exe_prefix: &[String], dir: &Path) -> Command {
         .arg("serve")
         .arg("--dir")
         .arg(dir);
+    if let Ok(seconds) = std::env::var("PERCHD_IDLE_EXIT_SECS") {
+        if let Ok(seconds) = seconds.parse::<u64>() {
+            cmd.arg("--idle-exit").arg(seconds.to_string());
+        }
+    }
     cmd
 }
 

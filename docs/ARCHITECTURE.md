@@ -49,6 +49,15 @@ days. History is bounded (8 MiB, compacted to its newest half), not an unlimited
 transcript or an fsync-per-write guarantee. Replay includes retained output and
 a screen/mode repaint; gaps and storage failures are disclosed.
 
+Released-only cleanup is daemon-authoritative (`released-cleanup.v1`). New
+runtimes are retained; legacy/restored ownership is unknown. Only an explicit
+owner lifecycle release makes a live runtime eligible. Focus, visibility, age,
+resource use, disconnect and core death never release it. Attach/input/resize
+reclaims a released runtime and invalidates old previews. Cleanup rechecks its
+incarnation/revision and reserves that session before signalling its pinned
+process group; it preserves history. Known escaped groups require manual review.
+This is not a general orphan PID sweep or a production session-close migration.
+
 Output budgets exist across daemon subscribers, client attachments, core WS
 outbox and xterm parser writes. A stalled viewer disconnects and replays rather
 than growing memory indefinitely. Exact budgets live in those modules; candidate

@@ -116,6 +116,9 @@ pub enum Request {
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
+        /// Explicit lifecycle scope, not a process-discovery heuristic.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cleanup_owner: Option<String>,
     },
     /// Subscribe to `id`'s output. The reply is followed by replay frames
     /// from `since` (default: the last [`DEFAULT_REPLAY`] bytes), then live
@@ -142,6 +145,19 @@ pub enum Request {
         id: String,
     },
     List,
+    /// Owner release and cleanup are gated by RELEASED_CLEANUP_CAPABILITY.
+    Release {
+        id: String,
+        incarnation: String,
+        revision: u64,
+        owner: String,
+        reason: String,
+    },
+    Cleanup {
+        id: String,
+        incarnation: String,
+        revision: u64,
+    },
     Snapshot {
         id: String,
     },
@@ -200,6 +216,33 @@ pub struct Attached {
     pub gap: bool,
 }
 
+pub const RELEASED_CLEANUP_CAPABILITY: &str = "released-cleanup.v1";
+pub const CLEANUP_OWNER_ENV: &str = "PERCH_CLEANUP_OWNER";
+
+/// Absence in legacy metadata is uncertainty, never permission to stop.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Retention {
+    #[default]
+    Unknown,
+    Retained,
+    Released,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CleanupState {
+    pub incarnation: String,
+    pub revision: u64,
+    pub retention: Retention,
+    pub owner: Option<String>,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub stopping: bool,
+    /// Confirmed empty original process group; not a claim about escaped tools.
+    #[serde(default)]
+    pub group_stopped: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub id: String,
@@ -214,6 +257,17 @@ pub struct SessionInfo {
     pub created_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_error: Option<String>,
+    #[serde(default)]
+    pub cleanup: CleanupState,
+}
+
+impl SessionInfo {
+    pub fn cleanup_candidate(&self) -> bool {
+        self.alive
+            && self.pid.is_some()
+            && !self.cleanup.stopping
+            && self.cleanup.retention == Retention::Released
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -231,6 +285,8 @@ pub struct Health {
     pub pid: u32,
     pub sessions: usize,
     pub alive: usize,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<crate::permissions::PermissionSnapshot>,
 }

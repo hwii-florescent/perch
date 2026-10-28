@@ -7,15 +7,19 @@
 
 use perchd::client::Client;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 static CLIENT: Mutex<Option<Client>> = Mutex::new(None);
+// Capture before boot/provider environment changes. This is lifecycle metadata,
+// not a provider-controlled environment setting; perchd strips it from children.
+static CLEANUP_OWNER: OnceLock<Option<String>> = OnceLock::new();
 
 /// If this process was started as the daemon (`<exe> __perchd serve …`, see
 /// [`connect`]), run it and exit. Call first thing in `main`, before any async
 /// runtime or window exists.
 pub fn run_if_requested() {
+    CLEANUP_OWNER.get_or_init(|| std::env::var(perchd::proto::CLEANUP_OWNER_ENV).ok());
     perchd::raise_fd_limit(); // for the core and the daemon alike
     let mut args = std::env::args();
     let _exe = args.next();
@@ -266,7 +270,12 @@ pub fn discard(key: &str) {
 /// up by `boot.rs`) plus the terminal overrides. Sent in full with every
 /// create, so a daemon started by an older runtime can't hand out stale env.
 pub fn terminal_env() -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(name, _)| name != perchd::proto::CLEANUP_OWNER_ENV)
+        .collect();
+    if let Some(Some(owner)) = CLEANUP_OWNER.get() {
+        env.push((perchd::proto::CLEANUP_OWNER_ENV.into(), owner.clone()));
+    }
     env.extend(crate::terminal::terminal_env_overrides());
     env
 }

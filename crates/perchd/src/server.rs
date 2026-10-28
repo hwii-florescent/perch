@@ -100,12 +100,15 @@ pub fn run(cfg: Config) -> io::Result<()> {
         let sock = sock.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_millis(500));
-            let alive = state
-                .sessions
-                .lock()
-                .unwrap()
-                .values()
-                .any(|s| s.inner.lock().unwrap().alive);
+            // Keep the map locked through exit: a create must never slip
+            // between the idle check and daemon shutdown, abandoning a PTY.
+            let sessions = state.sessions.lock().unwrap();
+            let alive = sessions.values().any(|s| {
+                let session = info(s);
+                session.alive
+                    || session.cleanup.stopping
+                    || (session.pid.is_some() && !session.cleanup.group_stopped)
+            });
             if !alive
                 && state.conns.load(Ordering::SeqCst) == 0
                 && state.last_activity.lock().unwrap().elapsed() >= idle
@@ -165,6 +168,8 @@ struct Session {
     cwd: Option<String>,
     created_ms: u64,
     pid: Option<u32>,
+    /// Cleanup pins the unreaped leader so its pid/pgid cannot be reused.
+    reap: Mutex<()>,
     inner: Mutex<Inner>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
@@ -182,6 +187,7 @@ struct Inner {
     rows: u16,
     alive: bool,
     exit_code: Option<i32>,
+    cleanup: CleanupState,
     subscribers: HashMap<u64, Outbox>,
 }
 
@@ -199,6 +205,8 @@ struct Meta {
     history_error: Option<String>,
     #[serde(default)]
     seq: Option<u64>,
+    #[serde(default)]
+    cleanup: CleanupState,
 }
 
 /// A connection's outbound queue. `queued` counts payload bytes not yet
@@ -268,6 +276,10 @@ fn meta_path(dir: &Path, id: &str) -> PathBuf {
 }
 
 fn write_meta(dir: &Path, s: &Session, inner: &Inner) {
+    let _ = save_meta(dir, s, inner);
+}
+
+fn save_meta(dir: &Path, s: &Session, inner: &Inner) -> io::Result<()> {
     let meta = Meta {
         id: s.id.clone(),
         argv: s.argv.clone(),
@@ -279,12 +291,12 @@ fn write_meta(dir: &Path, s: &Session, inner: &Inner) {
         exit_code: inner.exit_code,
         history_error: inner.history_error.clone(),
         seq: Some(inner.seq),
+        cleanup: inner.cleanup.clone(),
     };
     let path = meta_path(dir, &s.id);
     let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, serde_json::to_vec(&meta).unwrap()).is_ok() {
-        let _ = fs::rename(tmp, path);
-    }
+    fs::write(&tmp, serde_json::to_vec(&meta)?)?;
+    fs::rename(tmp, path)
 }
 
 /// Reload sessions a previous daemon left behind. Their processes died with
@@ -331,6 +343,7 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
             cwd: meta.cwd,
             created_ms: meta.created_ms,
             pid: None,
+            reap: Mutex::new(()),
             inner: Mutex::new(Inner {
                 seq: meta.seq.unwrap_or(0).max(meta.log_start + len),
                 log_start: meta.log_start,
@@ -342,6 +355,12 @@ fn load_sessions(dir: &Path) -> HashMap<String, Arc<Session>> {
                 alive: false,
                 // No recorded code means the process was lost with its daemon.
                 exit_code: Some(meta.exit_code.unwrap_or(-1)),
+                // A restarted daemon cannot prove ownership of surviving descendants.
+                cleanup: CleanupState {
+                    retention: Retention::Unknown,
+                    stopping: false,
+                    ..meta.cleanup
+                },
                 subscribers: HashMap::new(),
             }),
             writer: Mutex::new(None),
@@ -385,8 +404,12 @@ fn serve_conn(state: Arc<State>, stream: UnixStream) {
         match frame {
             Frame::Data { id, bytes, .. } => {
                 if let Some(s) = state.get(&id) {
-                    if let Some(w) = s.writer.lock().unwrap().as_mut() {
-                        let _ = w.write_all(&bytes).and_then(|_| w.flush());
+                    let mut inner = s.inner.lock().unwrap();
+                    if !inner.cleanup.stopping {
+                        retain(&state.dir, &s, &mut inner);
+                        if let Some(w) = s.writer.lock().unwrap().as_mut() {
+                            let _ = w.write_all(&bytes).and_then(|_| w.flush());
+                        }
                     }
                 }
             }
@@ -436,6 +459,7 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
                 pid: std::process::id(),
                 sessions: count,
                 alive,
+                capabilities: vec![RELEASED_CLEANUP_CAPABILITY.into()],
                 permissions: permissions.then(crate::permissions::snapshot),
             })
             .unwrap()))
@@ -452,7 +476,27 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
             env,
             cols,
             rows,
-        } => reply(create(state, id, argv, cwd, env, cols, rows)),
+            cleanup_owner,
+        } => reply(create(state, id, argv, cwd, env, cols, rows, cleanup_owner)),
+        Request::Release {
+            id,
+            incarnation,
+            revision,
+            owner,
+            reason,
+        } => {
+            reply(
+                release(state, &id, &incarnation, revision, &owner, &reason)
+                    .map(|_| serde_json::Value::Null),
+            );
+        }
+        Request::Cleanup {
+            id,
+            incarnation,
+            revision,
+        } => {
+            reply(cleanup(state, &id, &incarnation, revision).map(|_| serde_json::Value::Null));
+        }
         Request::Attach { id, since } => match state.get(&id) {
             // `attach` writes its own reply so replay frames can follow it
             // under the session lock.
@@ -467,6 +511,12 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
         }
         Request::Resize { id, cols, rows } => match state.get(&id) {
             Some(s) => {
+                let mut inner = s.inner.lock().unwrap();
+                if inner.cleanup.stopping {
+                    reply(Err("cleanup in progress".into()));
+                    return;
+                }
+                retain(&state.dir, &s, &mut inner);
                 let size = PtySize {
                     rows,
                     cols,
@@ -476,7 +526,6 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
                 if let Some(m) = s.master.lock().unwrap().as_ref() {
                     let _ = m.resize(size);
                 }
-                let mut inner = s.inner.lock().unwrap();
                 inner.cols = cols;
                 inner.rows = rows;
                 inner.screen.set_size(cols, rows);
@@ -486,22 +535,36 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
         },
         Request::Kill { id, signal } => match state.get(&id) {
             Some(s) => {
-                if s.inner.lock().unwrap().alive {
-                    if let Some(pid) = s.pid {
-                        // The PTY child is a session leader, so its pid is its
-                        // process group: signal the whole group.
-                        // SAFETY: plain syscall; a stale pgid only yields ESRCH.
-                        unsafe { libc::kill(-(pid as i32), signal) };
-                    }
+                let _reap = s.reap.lock().unwrap();
+                let inner = s.inner.lock().unwrap();
+                if inner.cleanup.stopping {
+                    reply(Err("cleanup in progress".into()));
+                } else if inner.alive {
+                    reply(
+                        s.pid
+                            .ok_or_else(|| "unknown process identity".into())
+                            .and_then(|pid| signal_group(pid, signal))
+                            .map(|_| serde_json::Value::Null),
+                    );
+                } else {
+                    reply(Ok(serde_json::Value::Null));
                 }
-                reply(Ok(serde_json::Value::Null))
             }
             None => reply(not_found()),
         },
         Request::Remove { id } => {
             let mut sessions = state.sessions.lock().unwrap();
             match sessions.get(&id) {
-                Some(s) if s.inner.lock().unwrap().alive => reply(Err("alive".into())),
+                Some(s)
+                    if {
+                        let session = info(s);
+                        session.alive
+                            || session.cleanup.stopping
+                            || (session.pid.is_some() && !session.cleanup.group_stopped)
+                    } =>
+                {
+                    reply(Err("alive, stopping or process group unconfirmed".into()))
+                }
                 Some(_) => {
                     sessions.remove(&id);
                     let _ = fs::remove_file(log_path(&state.dir, &id));
@@ -531,7 +594,12 @@ fn handle(state: &Arc<State>, conn: u64, out: &Outbox, msg: ClientMsg) {
 }
 
 fn info(s: &Session) -> SessionInfo {
-    let inner = s.inner.lock().unwrap();
+    let mut inner = s.inner.lock().unwrap();
+    if !inner.alive && !inner.cleanup.group_stopped && s.pid.is_some_and(group_absent) {
+        // A surviving child may have exited since the leader was reaped.
+        // Absence is safe to observe; this never permits signalling a stale pid.
+        inner.cleanup.group_stopped = true;
+    }
     SessionInfo {
         id: s.id.clone(),
         pid: s.pid,
@@ -544,7 +612,190 @@ fn info(s: &Session) -> SessionInfo {
         seq: inner.seq,
         created_ms: s.created_ms,
         history_error: inner.history_error.clone(),
+        cleanup: inner.cleanup.clone(),
     }
+}
+
+/// Visibility, silence, client disconnect and a dead owner never release a runtime.
+fn retain(dir: &Path, s: &Session, inner: &mut Inner) {
+    if inner.cleanup.retention == Retention::Released {
+        inner.cleanup.retention = Retention::Retained;
+        inner.cleanup.reason = None;
+        inner.cleanup.revision += 1;
+        write_meta(dir, s, inner);
+    }
+}
+
+fn release(
+    state: &State,
+    id: &str,
+    incarnation: &str,
+    revision: u64,
+    owner: &str,
+    reason: &str,
+) -> Result<(), String> {
+    if reason.is_empty() || reason.len() > 512 {
+        return Err("invalid release reason".into());
+    }
+    let s = state.get(id).ok_or(ERR_NOT_FOUND)?;
+    let mut inner = s.inner.lock().unwrap();
+    if inner.cleanup.incarnation != incarnation
+        || inner.cleanup.revision != revision
+        || inner.cleanup.owner.as_deref() != Some(owner)
+        || inner.cleanup.retention != Retention::Retained
+        || inner.cleanup.stopping
+        || !inner.alive
+        || !inner.subscribers.is_empty()
+    {
+        return Err(
+            "runtime is changed, observed, unknown or not owned by this release scope".into(),
+        );
+    }
+    let previous = inner.cleanup.clone();
+    inner.cleanup.retention = Retention::Released;
+    inner.cleanup.reason = Some(reason.into());
+    inner.cleanup.revision += 1;
+    if let Err(error) = save_meta(&state.dir, &s, &inner) {
+        inner.cleanup = previous;
+        return Err(format!("release was not saved: {error}"));
+    }
+    Ok(())
+}
+
+fn signal_group(pid: u32, signal: i32) -> Result<(), String> {
+    if pid <= 1 || pid > i32::MAX as u32 {
+        return Err("invalid process group".into());
+    }
+    // SAFETY: the caller pins the daemon's unreaped child, reserving its pgid.
+    if unsafe { libc::kill(-(pid as i32), signal) } == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(format!("group signal unconfirmed: {error}"))
+    }
+}
+
+fn group_absent(pid: u32) -> bool {
+    // This is only an absence probe, never permission to signal a reaped pid.
+    // A zombie or EPERM remains unconfirmed; only ESRCH confirms an empty group.
+    (unsafe { libc::kill(-(pid as i32), 0) }) != 0
+        && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+/// Only inspect identities/state, never command arguments or directory resemblance.
+fn group_live(pid: u32, check_descendants: bool) -> Result<bool, String> {
+    // ponytail: explicit cleanup scans the local process table (O(processes));
+    // replace ps with platform process APIs if cleanup becomes frequent.
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,pgid=,stat="])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("cannot verify process group state".into());
+    }
+    let text = std::str::from_utf8(&output.stdout).map_err(|e| e.to_string())?;
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let columns: Vec<_> = line.split_whitespace().collect();
+        if columns.len() != 4 {
+            return Err("unknown process table format".into());
+        }
+        let number = |i: usize| columns[i].parse::<u32>().map_err(|e| e.to_string());
+        rows.push((
+            number(0)?,
+            number(1)?,
+            number(2)?,
+            columns[3].starts_with('Z'),
+        ));
+    }
+    if check_descendants {
+        let mut descendants = std::collections::HashSet::from([pid]);
+        loop {
+            let before = descendants.len();
+            for (child, parent, _, _) in &rows {
+                if descendants.contains(parent) {
+                    descendants.insert(*child);
+                }
+            }
+            if descendants.len() == before {
+                break;
+            }
+        }
+        if rows.iter().any(|(child, _, group, zombie)| {
+            descendants.contains(child) && *group != pid && !zombie
+        }) {
+            return Err(
+                "owned runtime has a detached process group; manual review required".into(),
+            );
+        }
+    }
+    // The pinned zombie leader keeps the numeric group identity reserved but
+    // consumes no executing resources. Reaping it is confirmed separately.
+    Ok(rows
+        .iter()
+        .any(|(_, _, group, zombie)| *group == pid && !zombie))
+}
+
+fn cleanup(state: &State, id: &str, incarnation: &str, revision: u64) -> Result<(), String> {
+    let s = state.get(id).ok_or(ERR_NOT_FOUND)?;
+    let reap = s.reap.lock().unwrap();
+    let pid = s.pid.ok_or("unknown process identity")?;
+    {
+        let mut inner = s.inner.lock().unwrap();
+        if !inner.alive
+            || inner.cleanup.incarnation != incarnation
+            || inner.cleanup.revision != revision
+            || inner.cleanup.retention != Retention::Released
+            || inner.cleanup.stopping
+            || !inner.subscribers.is_empty()
+        {
+            return Err("cleanup preview is stale or runtime is protected".into());
+        }
+        group_live(pid, true)?;
+        // This per-session reservation excludes attach/input/recreate, without
+        // blocking health, output or operations on unrelated sessions.
+        inner.cleanup.stopping = true;
+        inner.cleanup.revision += 1;
+    }
+    let result = (|| {
+        for signal in [libc::SIGHUP, libc::SIGKILL] {
+            signal_group(pid, signal)?;
+            let deadline = Instant::now() + Duration::from_millis(1500);
+            while Instant::now() < deadline {
+                if !group_live(pid, false)? {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
+        Err("process group shutdown unconfirmed".to_string())
+    })();
+    drop(reap); // allow the waiter to reap the exact leader
+    let result = result.and_then(|()| {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let inner = s.inner.lock().unwrap();
+            if !inner.alive && group_absent(pid) {
+                return Ok(());
+            }
+            drop(inner);
+            if Instant::now() >= deadline {
+                return Err("leader/process group exit unconfirmed".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    let mut inner = s.inner.lock().unwrap();
+    inner.cleanup.stopping = false;
+    inner.cleanup.group_stopped = result.is_ok();
+    if result.is_err() {
+        inner.cleanup.retention = Retention::Unknown;
+    }
+    write_meta(&state.dir, &s, &inner);
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -556,7 +807,19 @@ fn create(
     env: Vec<(String, String)>,
     cols: u16,
     rows: u16,
+    cleanup_owner: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    if cleanup_owner
+        .as_ref()
+        .is_some_and(|owner| owner.is_empty() || owner.len() > 256)
+    {
+        return Err("invalid cleanup owner".into());
+    }
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut random))
+        .map_err(|error| format!("runtime identity: {error}"))?;
+    let incarnation = random.iter().map(|byte| format!("{byte:02x}")).collect();
     if id.is_empty() || id.len() > 256 {
         return Err("invalid id".into());
     }
@@ -565,7 +828,11 @@ fn create(
     // cannot both spawn.
     let mut sessions = state.sessions.lock().unwrap();
     if let Some(existing) = sessions.get(&id) {
-        if existing.inner.lock().unwrap().alive {
+        let session = info(existing);
+        if session.alive
+            || session.cleanup.stopping
+            || (session.pid.is_some() && !session.cleanup.group_stopped)
+        {
             return Err(ERR_EXISTS.into());
         }
     }
@@ -586,6 +853,8 @@ fn create(
     for (k, v) in &env {
         cmd.env(k, v);
     }
+    // A nested core/tool must not inherit its parent's cleanup scope.
+    cmd.env_remove(CLEANUP_OWNER_ENV);
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     // Acquire storage and PTY handles before any child can be launched. An
@@ -608,6 +877,7 @@ fn create(
         cwd,
         created_ms: now_ms(),
         pid: child.process_id(),
+        reap: Mutex::new(()),
         inner: Mutex::new(Inner {
             seq: 0,
             log_start: 0,
@@ -618,6 +888,15 @@ fn create(
             rows,
             alive: true,
             exit_code: None,
+            cleanup: CleanupState {
+                incarnation,
+                revision: 1,
+                retention: Retention::Retained,
+                owner: cleanup_owner,
+                reason: None,
+                stopping: false,
+                group_stopped: false,
+            },
             subscribers: HashMap::new(),
         }),
         writer: Mutex::new(Some(writer)),
@@ -641,7 +920,30 @@ fn create(
         let session = session.clone();
         let state = state.clone();
         std::thread::spawn(move || {
+            // Observe exit without reaping first. Cleanup can pin this exact
+            // leader while signalling its group, even if it exits before a child.
+            if let Some(pid) = session.pid {
+                loop {
+                    let mut status = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+                    // SAFETY: valid child id and writable siginfo; WNOWAIT retains its pid.
+                    let result = unsafe {
+                        libc::waitid(
+                            libc::P_PID,
+                            pid as libc::id_t,
+                            status.as_mut_ptr(),
+                            libc::WEXITED | libc::WNOWAIT,
+                        )
+                    };
+                    if result == 0
+                        || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted
+                    {
+                        break;
+                    }
+                }
+            }
+            let _reap = session.reap.lock().unwrap();
             let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
+            let group_stopped = session.pid.is_some_and(group_absent);
             // Let the reader drain what the process wrote before it exited, so
             // Exit reaches subscribers after the last output byte. A grandchild
             // holding the PTY open must not keep the session alive, hence the
@@ -650,6 +952,7 @@ fn create(
             let mut inner = session.inner.lock().unwrap();
             inner.alive = false;
             inner.exit_code = Some(code);
+            inner.cleanup.group_stopped = group_stopped;
             if let Some(log) = inner.log.as_mut() {
                 let _ = log.flush();
             }
@@ -798,6 +1101,15 @@ fn read_range(path: &Path, log_start: u64, from: u64, to: u64) -> Vec<u8> {
 
 fn attach(state: &State, s: &Session, conn: u64, out: &Outbox, rid: u64, since: Option<u64>) {
     let mut inner = s.inner.lock().unwrap();
+    if inner.cleanup.stopping {
+        out.msg(&ServerMsg::Reply {
+            rid,
+            error: Some("cleanup in progress".into()),
+            data: serde_json::Value::Null,
+        });
+        return;
+    }
+    retain(&state.dir, s, &mut inner);
     if let Some(log) = inner.log.as_mut() {
         let _ = log.flush();
     }
@@ -901,6 +1213,7 @@ mod tests {
             vec![],
             80,
             24,
+            None,
         );
         assert!(result.unwrap_err().contains("no process started"));
         assert!(state.sessions.lock().unwrap().is_empty());
@@ -919,6 +1232,7 @@ mod tests {
             cwd: None,
             pid: None,
             created_ms: now_ms(),
+            reap: Mutex::new(()),
             writer: Mutex::new(None),
             master: Mutex::new(None),
             inner: Mutex::new(Inner {
@@ -932,6 +1246,7 @@ mod tests {
                 rows: 24,
                 alive: true,
                 exit_code: None,
+                cleanup: CleanupState::default(),
                 subscribers: HashMap::new(),
             }),
         };
