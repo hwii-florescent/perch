@@ -158,6 +158,40 @@ test("browser chrome matches the study and keeps its address field distinct insi
   }
 });
 
+test("keyboard-only tab switches retain address drafts and never activate terminal warning links", async ({ page }) => {
+  const root = prepareFixture();
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await startChat(page, "terminal", root);
+    const terminal = page.getByTestId("persistent-agent-terminal");
+    const input = terminal.locator(".xterm-helper-textarea");
+    await expect(input).toBeFocused();
+    const url = "https://rollupjs.org/configuration-options/#output-manualchunks";
+    await page.keyboard.type(`printf '\\nBuild warning link: ${url}\\n'\n`);
+    const row = terminal.locator(".xterm-rows > div").filter({ hasText: "rollupjs.org" }).last();
+    await expect(row).toBeVisible();
+    const box = (await row.boundingBox())!;
+    await page.getByTestId("tab-new").click();
+    await page.getByText("New browser", { exact: true }).click();
+    const address = page.getByTestId("browser-address");
+    await expect(address).toBeFocused();
+    await address.fill("https://example.org/unfinished");
+    await address.evaluate((el: HTMLInputElement) => el.setSelectionRange(8, 14, "backward"));
+    // Leave the pointer where the terminal URL will reappear. No click/refocus is allowed.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    for (const delay of [0, 20, 80, 0]) {
+      await page.keyboard.press("Meta+1");
+      await expect(input).toBeFocused();
+      if (delay) await page.waitForTimeout(delay);
+      await page.keyboard.press("Meta+2");
+      await expect(address).toBeFocused();
+      await expect(address).toHaveValue("https://example.org/unfinished");
+      expect(await address.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd, el.selectionDirection])).toEqual([8, 14, "backward"]);
+      await expect(page.locator('[data-testid="tab-bar"] .tab-bar__tab')).toHaveCount(2);
+    }
+  } finally { cleanup(); }
+});
+
 test("a terminal, a file and the review share one ordered strip", async ({ page }) => {
   const root = prepareFixture();
   try {
@@ -330,7 +364,8 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
     await expect(page.getByTestId("split-divider-0")).toHaveCount(0);
     await page.keyboard.press("Meta+Shift+Enter");
     await expect(page.getByTestId("split-divider-0")).toBeVisible();
-    await chord(page, "+");
+    // Playwright "+" omits Shift; send the actual Settings binding (Shift+Equal).
+    await chord(page, "Shift+Equal");
     await expect.poll(async () => (await box(page, "split-pane-session")).width).toBeGreaterThan(pane.width / 2 + 30);
     await chord(page, "h");
     await expect.poll(() => activeTab(page)).toBe(`tab-${first}`);

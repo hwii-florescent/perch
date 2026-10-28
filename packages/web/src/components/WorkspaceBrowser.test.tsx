@@ -5,13 +5,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("../browserNative", () => ({
   nativeBrowser: true,
+  browserAddressDrafts: new Map(),
+  BROWSER_COVERS: '[role="dialog"], [role="menu"], [role="listbox"]',
+  browserHasFocus: vi.fn().mockReturnValue(false),
+  noteBrowserFocus: vi.fn(),
   browserId: (key: string) => key,
   browserCall: vi.fn().mockResolvedValue(null),
   onPassthrough: () => () => {},
   passthroughActive: () => false,
 }));
 vi.mock("../browserHistory", () => ({ searchHistory: vi.fn().mockResolvedValue([]), searchSuggestions: vi.fn().mockResolvedValue([]), recordPage: vi.fn(), removePage: vi.fn() }));
-const { browserCall } = await import("../browserNative");
+const { browserCall, browserAddressDrafts, browserHasFocus, BROWSER_COVERS } = await import("../browserNative");
 const { searchHistory, searchSuggestions, removePage } = await import("../browserHistory");
 const { WorkspaceBrowser } = await import("./WorkspaceBrowser");
 const { usePerchStore } = await import("../store");
@@ -22,7 +26,10 @@ let host: HTMLDivElement;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  usePerchStore.setState({ settings: null });
+  browserAddressDrafts.clear();
+  vi.mocked(browserHasFocus).mockReturnValue(false);
+  vi.mocked(browserCall).mockImplementation(async (_command, _args, current) => { current?.(); return null; });
+  usePerchStore.setState({ settings: null, settingsOpen: false });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 800, 600));
   host = document.createElement("div");
@@ -38,7 +45,7 @@ afterEach(() => {
 });
 
 async function show(initialUrl: string) {
-  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl={initialUrl} />));
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl={initialUrl} active />));
   await act(async () => vi.advanceTimersByTimeAsync(20));
   vi.mocked(browserCall).mockClear();
 }
@@ -156,4 +163,110 @@ it("removes a suggestion from history without navigating", async () => {
   expect(removePage).toHaveBeenCalledWith("https://gone.example.org/");
   expect(host.querySelector('[aria-label^="Remove Gone page"]')).toBeNull();
   expect(browserCall).not.toHaveBeenCalled();
+});
+
+const focusCalls = () => vi.mocked(browserCall).mock.calls.filter(([command]) => command === "focus");
+const frame = () => act(async () => { await vi.advanceTimersByTimeAsync(25); });
+
+it("focuses only an activated pane, not a visible sibling or a restored background drawer", async () => {
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active={false} />));
+  await frame();
+  expect(focusCalls()).toHaveLength(0);
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active />));
+  await frame();
+  expect(focusCalls()).toHaveLength(1);
+  // Geometry changes do not refocus the page.
+  window.dispatchEvent(new Event("resize"));
+  await frame();
+  expect(focusCalls()).toHaveLength(1);
+  await act(async () => root.render(<WorkspaceBrowser key="drawer" tabId="drawer" initialUrl="https://example.net/" />));
+  await frame();
+  expect(focusCalls()).toHaveLength(1);
+});
+
+it("rejects a queued focus after deselection or unmount", async () => {
+  await show("https://example.org/");
+  // Capture rather than execute the next request's execution-time guard.
+  vi.mocked(browserCall).mockResolvedValue(null);
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active={false} />));
+  await frame();
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active />));
+  await frame();
+  const current = focusCalls().at(-1)![2]!;
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active={false} />));
+  expect(current()).toBe(false);
+  await act(async () => root.render(null));
+  expect(current()).toBe(false);
+});
+
+it("rejects a queued focus if Settings opens or the host becomes hidden", async () => {
+  await show("https://example.org/");
+  vi.mocked(browserCall).mockResolvedValue(null);
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active={false} />));
+  await frame();
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active />));
+  await frame();
+  const current = focusCalls().at(-1)![2]!;
+  act(() => usePerchStore.setState({ settingsOpen: true }));
+  expect(current()).toBe(false);
+  act(() => usePerchStore.setState({ settingsOpen: false }));
+  vi.mocked(Element.prototype.getBoundingClientRect).mockReturnValue(new DOMRect(0, 0, 0, 0));
+  expect(current()).toBe(false);
+});
+
+it("hides for a dialog and restores only the page that owned native focus", async () => {
+  await show("https://example.org/");
+  vi.mocked(browserHasFocus).mockReturnValue(true);
+  const dialog = document.createElement("div");
+  dialog.role = "dialog";
+  document.body.append(dialog);
+  await frame();
+  expect(browserCall).toHaveBeenCalledWith("hide", { id: "test" });
+  dialog.remove();
+  await frame();
+  expect(focusCalls()).toHaveLength(1);
+
+  vi.mocked(browserCall).mockClear();
+  vi.mocked(browserHasFocus).mockReturnValue(false);
+  document.body.append(dialog);
+  await frame();
+  dialog.remove();
+  await frame();
+  expect(focusCalls()).toHaveLength(0);
+});
+
+it("returns from Settings without tearing down and refocusing on every geometry update", async () => {
+  await show("https://example.org/");
+  vi.mocked(browserHasFocus).mockReturnValue(true);
+  act(() => usePerchStore.setState({ settingsOpen: true }));
+  await frame();
+  expect(browserCall).toHaveBeenCalledWith("hide", { id: "test" });
+  act(() => usePerchStore.setState({ settingsOpen: false }));
+  await frame();
+  expect(focusCalls()).toHaveLength(1);
+  expect(BROWSER_COVERS).toContain('[role="dialog"]');
+});
+
+it("keeps the address draft and exact selection across a tab unmount/remount", async () => {
+  await show("https://example.org/");
+  const input = type("unfinished address");
+  act(() => { input.focus(); input.setSelectionRange(3, 8, "backward"); });
+  await act(async () => root.render(null));
+  expect(browserAddressDrafts.get("test")).toMatchObject({ value: "unfinished address", start: 3, end: 8, direction: "backward" });
+  await act(async () => root.render(<WorkspaceBrowser tabId="test" initialUrl="https://example.org/" active />));
+  await frame();
+  const restored = host.querySelector("input")!;
+  expect(document.activeElement).toBe(restored);
+  expect(restored.value).toBe("unfinished address");
+  expect([restored.selectionStart, restored.selectionEnd, restored.selectionDirection]).toEqual([3, 8, "backward"]);
+});
+
+it("submitting an address hands focus to the page, not the address bar", async () => {
+  await show("https://example.org/");
+  const input = type("example.net");
+  act(() => input.focus());
+  press(input, "Enter");
+  await frame();
+  expect(document.activeElement).not.toBe(input);
+  expect(focusCalls()).toHaveLength(1);
 });

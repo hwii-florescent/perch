@@ -26,5 +26,9 @@ block2 = "0.6"
 # Use Tauri's already-transitive parser: its menu constructors silently ignore invalid keys.
 muda = { version = "0.19", default-features = false }
 
+[dev-dependencies]
+# Already used by core/Tauri; decode the complete Settings-derived native probe fixture.
+serde_json = "1"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

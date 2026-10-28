@@ -33,6 +33,7 @@ import { usePaneLabelsEnabled } from "../paneLabels";
 import { WorkspaceFilesView } from "../components/WorkspaceFiles";
 import { EllipsisIcon, PlusIcon } from "../components/ui/icons";
 import { WorkspaceGitReviewPane } from "../components/WorkspaceGitReviewPane";
+import { focusMainResponder } from "../browserNative";
 
 /** Info needed to render `<PaneContextMenu>` for a right-clicked tab. Module
  * state (not React state) because `PaneTab` is a stable module-level
@@ -536,6 +537,7 @@ export function DockviewShell({ primaryHidden = false }: { primaryHidden?: boole
           const input = element.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea, textarea");
           if (!input || !input.isConnected) return;
           input.focus({ preventScroll: true });
+          focusMainResponder(input);
           observer?.disconnect();
         });
       };

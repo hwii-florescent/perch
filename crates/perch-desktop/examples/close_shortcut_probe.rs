@@ -104,6 +104,73 @@ mod probe {
         key: &'static std::ffi::CStr,
         modifiers: usize,
     ) -> anyhow::Result<bool> {
+        send_key(app, view, key, modifiers, true).await
+    }
+
+    // Continuity tests must not repair the responder before sending the next key.
+    async fn send_key(
+        app: &AppHandle,
+        view: &str,
+        key: &'static std::ffi::CStr,
+        modifiers: usize,
+        refocus: bool,
+    ) -> anyhow::Result<bool> {
+        let hardware = match key.to_bytes() {
+            b"w" => 13,
+            b"j" => 38,
+            b"1" | b"!" => 18,
+            b"p" => 35,
+            b" " => 49,
+            b"g" => 5,
+            b"r" => 15,
+            b"h" => 4,
+            _ => 0,
+        };
+        send_event(
+            app,
+            view,
+            key.to_string_lossy().into_owned(),
+            hardware,
+            modifiers,
+            refocus,
+        )
+        .await
+    }
+
+    async fn send_binding(
+        app: &AppHandle,
+        binding: &browser::NativeBinding,
+    ) -> anyhow::Result<bool> {
+        let hardware = (0..128)
+            .find(|code| crate::shortcuts::physical_code(*code) == binding.1)
+            .ok_or_else(|| anyhow::anyhow!("no hardware code for {}", binding.1))?;
+        let bits = [20, 18, 19, 17];
+        let modifiers = bits.iter().enumerate().fold(0, |flags, (i, bit)| {
+            flags | (usize::from(binding.3 & (1 << i) != 0) << bit)
+        });
+        send_event(
+            app,
+            "main",
+            binding
+                .2
+                .clone()
+                .unwrap_or_else(|| binding.1.strip_prefix("Digit").unwrap_or(&binding.1).into()),
+            hardware,
+            modifiers,
+            false,
+        )
+        .await
+    }
+
+    async fn send_event(
+        app: &AppHandle,
+        view: &str,
+        text: String,
+        hardware: u16,
+        modifiers: usize,
+        refocus: bool,
+    ) -> anyhow::Result<bool> {
+        let key = std::ffi::CString::new(text)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let app_handle = app.clone();
         app.get_webview(view).unwrap().with_webview(move |platform| {
@@ -114,21 +181,62 @@ mod probe {
             let handled = unsafe {
                 let view = platform.inner().cast::<AnyObject>();
                 let window: *mut AnyObject = msg_send![view, window];
-                let focused: Bool = msg_send![window, makeFirstResponder: view];
-                if !focused.as_bool() { let _ = tx.send(false); return; }
+                if refocus {
+                    let focused: Bool = msg_send![window, makeFirstResponder: view];
+                    if !focused.as_bool() { let _ = tx.send(false); return; }
+                }
                 let chars: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: key.as_ptr()];
                 let number: isize = msg_send![window, windowNumber];
-                let hardware: u16 = match key.to_bytes() { b"w" => 13, b"j" => 38, b"1" | b"!" => 18, b"p" => 35, b" " => 49, b"g" => 5, b"r" => 15, b"h" => 4, _ => 0 };
                 let event: *mut AnyObject = msg_send![class!(NSEvent), keyEventWithType: 10usize, location: Point { x: 0., y: 0. }, modifierFlags: modifiers, timestamp: 0f64, windowNumber: number, context: std::ptr::null_mut::<AnyObject>(), characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: hardware];
                 if crate::shortcuts::handle_key(app_handle, event) { let _ = tx.send(true); return; }
                 let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
                 let menu: *mut AnyObject = msg_send![application, mainMenu];
                 let result: Bool = msg_send![menu, performKeyEquivalent: event];
+                if !result.as_bool() {
+                    let responder: *mut AnyObject = msg_send![window, firstResponder];
+                    if !responder.is_null() { let _: () = msg_send![responder, keyDown: event]; }
+                }
                 result.as_bool()
             };
             let _ = tx.send(handled);
         })?;
         Ok(tokio::time::timeout(Duration::from_secs(3), rx).await??)
+    }
+
+    async fn page_check(
+        app: &AppHandle,
+        id: &str,
+        script: &str,
+        expected: &str,
+    ) -> anyhow::Result<()> {
+        let mut last = None;
+        for _ in 0..40 {
+            app.get_webview(&format!("browser-{id}"))
+                .unwrap()
+                .eval(format!(
+                    "document.title = JSON.stringify((() => {{ {script} }})())"
+                ))?;
+            let info = browser::browser_info(app.clone(), id.into())
+                .await
+                .map_err(anyhow::Error::msg)?;
+            if info.as_ref().is_some_and(|(title, _)| title == expected) {
+                return Ok(());
+            }
+            last = info;
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        anyhow::bail!("page {id} did not report {expected}; got {last:?}; script: {script}");
+    }
+
+    async fn has_responder(app: &AppHandle, label: &str) -> anyhow::Result<bool> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.get_webview(label)
+            .unwrap()
+            .with_webview(move |platform| {
+                // SAFETY: live WKWebView on the main thread.
+                let _ = tx.send(unsafe { browser::responder_in(platform.inner().cast()) });
+            })?;
+        Ok(rx.await?)
     }
 
     async fn run(
@@ -176,7 +284,10 @@ mod probe {
                 .await
                 .ok()
                 .flatten();
-            if info.as_ref().is_some_and(|(title, _)| !title.is_empty()) {
+            if info
+                .as_ref()
+                .is_some_and(|(title, _)| title == "Probe page")
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -185,6 +296,24 @@ mod probe {
             info == Some(("Probe page".into(), icon)),
             "browser_info returned {info:?}"
         );
+        anyhow::ensure!(!press(&app, "browser-probe", c"g", 0).await?);
+        browser::browser_hide(app.clone(), "probe".into())
+            .await
+            .map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(send_key(&app, "main", c"w", CMD, false).await?);
+        report(&mut rx, "close::1").await?;
+        browser::browser_show(
+            app.clone(),
+            "probe".into(),
+            child_url.clone(),
+            0.,
+            0.,
+            400.,
+            300.,
+            None,
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         anyhow::ensure!(
             !press(&app, "browser-probe", c"g", 0).await?,
             "unprefixed leader letter stole page typing"
@@ -306,6 +435,192 @@ mod probe {
                 .is_err(),
             "duplicate/unexpected close event"
         );
+        // The complete Settings-derived keymap, not a handpicked shortcut subset.
+        configure(&app, &mut rx, Some("Super+KeyW"), 3).await?;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/web/src/nativeShortcutBindings.fixture.json"
+        ))?;
+        let keys: Vec<browser::NativeBinding> = serde_json::from_value(fixture["global"].clone())?;
+        let mode_keys: Vec<browser::NativeBinding> =
+            serde_json::from_value(fixture["modeKeys"].clone())?;
+        let modes: Vec<browser::NativeMode> = serde_json::from_value(fixture["modes"].clone())?;
+        browser::browser_focus(app.clone(), Some("probe".into()), None)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        for key in &keys {
+            anyhow::ensure!(send_binding(&app, key).await?, "native missed {}", key.0);
+            report(&mut rx, &format!("command:{}:probe:3", key.0)).await?;
+            browser::browser_hide(app.clone(), "probe".into())
+                .await
+                .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                send_key(&app, "main", c"w", CMD, false).await?,
+                "follow-up after {} lost focus",
+                key.0
+            );
+            report(&mut rx, "close::3").await?;
+            browser::browser_show(
+                app.clone(),
+                "probe".into(),
+                child_url.clone(),
+                0.,
+                0.,
+                400.,
+                300.,
+                None,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+            browser::browser_focus(app.clone(), Some("probe".into()), None)
+                .await
+                .map_err(anyhow::Error::msg)?;
+        }
+        for (id, scope, _, invoke) in &modes {
+            if !invoke {
+                continue;
+            }
+            let key = mode_keys.iter().find(|b| &b.0 == id).unwrap();
+            anyhow::ensure!(
+                send_binding(
+                    &app,
+                    mode_keys.iter().find(|b| b.0 == "leader.arm").unwrap()
+                )
+                .await?
+            );
+            if scope.as_deref() == Some("resize") {
+                anyhow::ensure!(
+                    send_binding(
+                        &app,
+                        mode_keys.iter().find(|b| b.0 == "leader.resize").unwrap()
+                    )
+                    .await?
+                );
+            }
+            anyhow::ensure!(send_binding(&app, key).await?, "native missed modal {id}");
+            report(&mut rx, &format!("command:{id}:probe:3")).await?;
+            // Cancel a continuing resize mode without a click or changing focus.
+            let _ = send_event(&app, "main", "\u{1b}".into(), 53, 0, false).await?;
+        }
+        // No doubled dispatch, accidental page open, or leaked mode-only event.
+        anyhow::ensure!(tokio::time::timeout(Duration::from_millis(150), rx.recv())
+            .await
+            .is_err());
+        // Actual focus round trips: only initial activation focuses a view. Neither send_key
+        // nor the assertions repair focus between actions; hidden windows never activate.
+        browser::browser_show(
+            app.clone(),
+            "second".into(),
+            child_url.clone(),
+            0.,
+            0.,
+            400.,
+            300.,
+            None,
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
+        for (element, hide) in ["field", "multiline", "editable", "nested"]
+            .into_iter()
+            .flat_map(|element| [(element, true), (element, false)])
+        {
+            app.get_webview("browser-probe")
+                .unwrap()
+                .eval("window.keys = window.inputs = 0;")?;
+            browser::browser_focus(app.clone(), Some("probe".into()), None)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            page_check(&app, "probe", &format!(
+                "const e = document.getElementById('{element}'); const t = e.tagName === 'IFRAME' ? e.contentDocument.querySelector('input') : e; t.value !== undefined ? t.value = 'abcdef' : t.textContent = 'abcdef'; t.focus(); if (t.setSelectionRange) t.setSelectionRange(2, 4); else {{ const r = document.createRange(); r.setStart(t.firstChild, 2); r.setEnd(t.firstChild, 4); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }} return 'ready';"
+            ), "\"ready\"").await?;
+            if element == "editable" {
+                page_check(
+                    &app,
+                    "probe",
+                    "return ['before-hide', document.activeElement.id, getSelection().toString()];",
+                    "[\"before-hide\",\"editable\",\"cd\"]",
+                )
+                .await?;
+            }
+            // Page -> main, including a split where the page stays visible. The main DOM
+            // textarea remains focused across native focus loss, so no focusin is required.
+            if hide {
+                browser::browser_hide(app.clone(), "probe".into()).await
+            } else {
+                browser::browser_focus(app.clone(), None, Some("probe".into())).await
+            }
+            .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                has_responder(&app, "main").await?,
+                "main handoff left browser responder behind (hide={hide})"
+            );
+            app.get_webview("main").unwrap().eval("(() => { const t = document.getElementById('terminal'); t.value = ''; t.focus(); report('typing-ready'); })()")?;
+            report(&mut rx, "typing-ready").await?;
+            anyhow::ensure!(!send_key(&app, "main", c"g", 0, false).await?);
+            report(&mut rx, "typed:g").await?;
+            page_check(
+                &app,
+                "probe",
+                "return window.keys === 0 && window.inputs === 0;",
+                "true",
+            )
+            .await?;
+            browser::browser_show(
+                app.clone(),
+                "probe".into(),
+                child_url.clone(),
+                0.,
+                0.,
+                400.,
+                300.,
+                None,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                has_responder(&app, "main").await?,
+                "geometry/show stole input"
+            );
+            browser::browser_focus(app.clone(), Some("probe".into()), None)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                has_responder(&app, "browser-probe").await?,
+                "activation did not focus page"
+            );
+            page_check(&app, "probe", &format!(
+                "const e = document.getElementById('{element}'); const d = e.tagName === 'IFRAME' ? e.contentDocument : document; const t = d.activeElement; return [t.id || t.tagName, t.selectionStart ?? getSelection().toString(), t.selectionEnd ?? null];"
+            ), if element == "editable" { "[\"editable\",\"cd\",null]" } else if element == "nested" { "[\"INPUT\",2,4]" } else if element == "field" { "[\"field\",2,4]" } else { "[\"multiline\",2,4]" }).await?;
+            anyhow::ensure!(!send_key(&app, "main", c"g", 0, false).await?);
+            page_check(&app, "probe", &format!(
+                "const e = document.getElementById('{element}'); const d = e.tagName === 'IFRAME' ? e.contentDocument : document; const t = d.activeElement; return t.value ?? t.textContent;"
+            ), "\"abgef\"").await?;
+            // Browser -> browser -> main -> original browser, without per-key refocus.
+            browser::browser_focus(app.clone(), Some("second".into()), Some("probe".into()))
+                .await
+                .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(has_responder(&app, "browser-second").await?);
+            browser::browser_focus(app.clone(), Some("probe".into()), Some("second".into()))
+                .await
+                .map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(has_responder(&app, "browser-probe").await?);
+        }
+        browser::browser_focus(app.clone(), Some("second".into()), Some("probe".into()))
+            .await
+            .map_err(anyhow::Error::msg)?;
+        browser::browser_close(app.clone(), "probe".into())
+            .await
+            .map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(
+            has_responder(&app, "browser-second").await?,
+            "closing background page stole input"
+        );
+        browser::browser_close(app.clone(), "second".into())
+            .await
+            .map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(
+            has_responder(&app, "main").await?,
+            "closing focused page lost main focus"
+        );
         Ok(())
     }
 
@@ -320,14 +635,33 @@ mod probe {
                 if let Ok((mut stream, _)) = listener.accept() {
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                     let mut bytes = [0; 2048];
-                    let count = stream.read(&mut bytes).unwrap_or(0);
-                    let child = String::from_utf8_lossy(&bytes[..count]).contains("/child");
+                    let mut count = 0;
+                    while count < bytes.len()
+                        && !bytes[..count].windows(4).any(|w| w == b"\r\n\r\n")
+                    {
+                        match stream.read(&mut bytes[count..]) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => count += n,
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&bytes[..count]);
+                    // Only the request target selects the fixture, never a Referer header.
+                    let child = request
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        == Some("/child");
                     let body = if child {
-                        "<!doctype html><title>Probe page</title><link rel=\"icon\" href=\"/icon.png\"><p>page</p>"
+                        "<!doctype html><title>Probe page</title><link rel=\"icon\" href=\"/icon.png\"><script>window.keys = window.inputs = 0; document.addEventListener('keydown', () => window.keys++); document.addEventListener('input', () => window.inputs++);</script><input id=\"field\" value=\"abcdef\"><textarea id=\"multiline\">abcdef</textarea><div id=\"editable\" contenteditable>abcdef</div><iframe id=\"nested\" srcdoc=\"&lt;input value=abcdef&gt;\"></iframe>"
                     } else {
-                        "<!doctype html><title>Shortcut probe</title><script>window.focusMarks = []; window.epoch = crypto.randomUUID(); window.report = id => window.__TAURI_INTERNALS__.invoke('browser_url', {id}); window.addEventListener('perch:close-tab', e => report('close:' + e.detail.id + ':' + e.detail.generation)); window.addEventListener('perch:command', e => { window.focusMarks.push(e.detail.focused); const id = window.probeBindings[e.detail.index][0]; report((id === 'tabs.close' ? 'close:' : 'command:' + id + ':') + e.detail.id + ':' + e.detail.generation); }); report('ready');</script>"
+                        "<!doctype html><title>Shortcut probe</title><textarea id=\"terminal\"></textarea><script>document.getElementById('terminal').addEventListener('input', e => report('typed:' + e.target.value)); window.focusMarks = []; window.epoch = crypto.randomUUID(); window.report = id => window.__TAURI_INTERNALS__.invoke('browser_url', {id}); window.addEventListener('perch:close-tab', e => report('close:' + e.detail.id + ':' + e.detail.generation)); window.addEventListener('perch:command', e => { window.focusMarks.push(e.detail.focused); const id = window.probeBindings[e.detail.index][0]; report((id === 'tabs.close' ? 'close:' : 'command:' + id + ':') + e.detail.id + ':' + e.detail.generation); }); report('ready');</script>"
                     };
-                    let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
                 } else {
                     std::thread::sleep(Duration::from_millis(5));
                 }
@@ -339,7 +673,7 @@ mod probe {
         let mut context = tauri::generate_context!();
         context.config_mut().identifier = "dev.perch.shortcut-probe".into();
         let app = tauri::Builder::default().manage(Reports(tx))
-            .invoke_handler(tauri::generate_handler![browser_url, browser::browser_shortcuts])
+            .invoke_handler(tauri::generate_handler![browser_url, browser::browser_shortcuts, browser::browser_focus])
             .on_menu_event(browser::on_menu_event)
             .setup(move |app| {
                 app.set_activation_policy(tauri::ActivationPolicy::Prohibited);

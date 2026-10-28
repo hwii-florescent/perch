@@ -217,6 +217,7 @@ fn main() {
             permissions::permissions_verify,
             browser::browser_show,
             browser::browser_hide,
+            browser::browser_focus,
             browser::browser_close,
             browser::browser_go,
             browser::browser_action,

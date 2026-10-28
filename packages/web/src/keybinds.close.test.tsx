@@ -13,7 +13,7 @@ vi.mock("./tiledPanes", () => ({ getPaneController: () => ({ closeActiveTerminal
 vi.mock("./agentTerminals", () => ({ isWatchingAgent: mocks.watching }));
 vi.mock("./terminalKeeper", () => ({ forgetSessionTerminals: mocks.forget }));
 
-const { CLOSE_TAB_EVENT, NATIVE_COMMAND_EVENT, SHORTCUTS, nativeShortcutBindings, useLeaderKey } = await import("./keybinds");
+const { CLOSE_TAB_EVENT, NATIVE_COMMAND_EVENT, SHORTCUTS, nativeShortcutBindings, nativeShortcutModes, useLeaderKey } = await import("./keybinds");
 const { usePerchStore } = await import("./store");
 const { useCloseGuard } = await import("./closeGuard");
 const { useFileTabs, fileTabKey } = await import("./fileTabs");
@@ -138,7 +138,7 @@ describe("native capture preserves the existing close contract", () => {
 });
 
 describe("native pages share every global command", () => {
-  it.each(SHORTCUTS.filter((s) => (!s.scope || s.scope === "outsideTerminal") && s.id !== "tabs.close").map((s) => [s.id]))("dispatches %s through the same registry action", async (id) => {
+  it.each(SHORTCUTS.filter((s) => nativeShortcutBindings(true).some((b) => b[0] === s.id) && !s.nextMode && (s.command ?? s.id) !== "tabs.close").map((s) => [s.id]))("dispatches %s through the same registry action", async (id) => {
     const tab = file("browser", "https://example.com/");
     await mount();
     const shortcut = SHORTCUTS.find((s) => s.id === id)!;
@@ -149,18 +149,22 @@ describe("native pages share every global command", () => {
     } finally { run.mockRestore(); }
   });
 
-  it("the universal browser bridge closes its exact owner through the existing close guard", async () => {
+  it.each(["tabs.close", "leader.close"])("%s closes its exact browser owner through the existing close guard", async (command) => {
     const tab = file("browser", "https://example.com/");
     useFileTabs.setState({ active: fileTabKey({ workspaceId: "w", path: "keep.ts" }) });
     await mount();
-    nativeCommand("tabs.close", browserId(fileTabKey(tab)));
+    nativeCommand(command, browserId(fileTabKey(tab)));
     expect(useFileTabs.getState().tabs.map((t) => t.path)).toEqual(["keep.ts"]);
     expect(usePerchStore.getState().deleteSession).not.toHaveBeenCalled();
   });
 
   it("the native probe fixture is produced by the effective Settings keymap", async () => {
     await mount();
-    for (const binding of nativeFixture.global) expect(nativeShortcutBindings(true)).toContainEqual(binding);
+    const modes = nativeShortcutModes(true);
+    const modal = new Set(modes.map((m) => m[0]));
+    expect(nativeFixture.global).toEqual(nativeShortcutBindings(true).filter((b) => b[0] !== "tabs.close" && !modal.has(b[0])));
+    expect(nativeFixture.modeKeys).toEqual(nativeShortcutBindings(true).filter((b) => modal.has(b[0])));
+    expect(nativeFixture.modes).toEqual(modes);
     for (const [accelerator, binding] of Object.entries(nativeFixture.close)) {
       const spec = accelerator.toLowerCase().replace("super", "cmd").replace("control", "ctrl").replace("key", "");
       await rebind({ "tabs.close": spec });

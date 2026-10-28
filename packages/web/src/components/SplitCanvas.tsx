@@ -5,7 +5,7 @@ import { ChatView } from "../views/Chat";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
-import { acquirePassthrough } from "../browserNative";
+import { acquirePassthrough, focusMainResponder } from "../browserNative";
 import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -93,6 +93,7 @@ export function SplitCanvas() {
         const editor = pane?.querySelector<HTMLElement>('[data-testid="workspace-file-editor"]');
         if (!editor) return;
         editor.focus({ preventScroll: true });
+        focusMainResponder(editor);
         observer.disconnect();
       });
     };
@@ -205,7 +206,7 @@ export function SplitCanvas() {
       frame = requestAnimationFrame(() => {
         const pane = [...host.querySelectorAll<HTMLElement>("[data-pane-id]")].find((el) => el.dataset.paneId === activeId);
         const input = pane?.querySelector<HTMLElement>(".xterm-helper-textarea, textarea");
-        if (input) { input.focus({ preventScroll: true }); observer.disconnect(); }
+        if (input) { input.focus({ preventScroll: true }); focusMainResponder(input); observer.disconnect(); }
       });
     };
     const observer = new MutationObserver(focus);
@@ -271,7 +272,7 @@ export function SplitCanvas() {
           {tab.kind === "review" ? (
             <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
           ) : tab.kind === "browser" ? (
-            <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} />
+            <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} active={id === activeId} />
           ) : (
             <WorkspaceFilesView layout="editor" workspaceId={tab.workspaceId} initialPath={tab.path} />
           )}

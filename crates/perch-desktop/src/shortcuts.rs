@@ -254,7 +254,7 @@ fn matches(binding: &Binding, code: &str, key: &str, mods: u8) -> bool {
 
 /// Apple's virtual key codes -> KeyboardEvent.code. These are hardware identities, NOT
 /// shortcut defaults. Layout letters use the same fallback as keyCombo.ts::comboMatches.
-fn physical_code(key: u16) -> &'static str {
+pub(crate) fn physical_code(key: u16) -> &'static str {
     match key {
         0 => "KeyA",
         1 => "KeyS",
@@ -441,14 +441,24 @@ pub unsafe fn handle_key(app: &AppHandle, event: *mut objc2::runtime::AnyObject)
         }
         let hidden: Bool = msg_send![ancestor, isHiddenOrHasHiddenAncestor];
         if hidden.as_bool() {
-            return false;
+            // Recovery only, never dispatch against the stale page or deliver invisible input.
+            // Normal hide/close hands focus back before hiding; AppKit may restore an old
+            // responder when a window re-keys. Do not replay this key and risk a double action.
+            app.state::<Bindings>().0.lock().unwrap().reset();
+            if let Some(main) = app.get_webview("main") {
+                let _ = main.set_focus();
+            }
+            return true;
         }
         let state = app.state::<Bindings>();
         let notice = {
             let mut c = state.0.lock().unwrap();
             if c.observed.as_deref() != Some(&browser) {
                 c.observed = Some(browser.clone());
-                Some(format!("window.dispatchEvent(new CustomEvent('perch:browser-focus', {{detail: {{id: '{browser}', epoch: '{}', generation: {} }} }}))", c.epoch, c.generation))
+                Some(format!(
+                    "window.dispatchEvent(new CustomEvent('perch:browser-focus', {{detail: {{id: '{browser}', epoch: '{}', generation: {} }} }}))",
+                    c.epoch, c.generation
+                ))
             } else {
                 None
             }
@@ -488,7 +498,10 @@ pub unsafe fn handle_key(app: &AppHandle, event: *mut objc2::runtime::AnyObject)
             c.page = Some(browser.clone());
             // Mode-only keys stay native. Only resolved actions cross the bridge, so a late
             // delivery never arms a JS mode or rechecks a different clock.
-            format!("window.dispatchEvent(new CustomEvent('perch:command', {{ detail: {{ index: {index}, command: '{}', id: '{browser}', epoch: '{}', generation: {}, focused: {focused} }} }}))", c.keys[index].0, c.epoch, c.generation)
+            format!(
+                "window.dispatchEvent(new CustomEvent('perch:command', {{ detail: {{ index: {index}, command: '{}', id: '{browser}', epoch: '{}', generation: {}, focused: {focused} }} }}))",
+                c.keys[index].0, c.epoch, c.generation
+            )
         };
         app.get_webview("main")
             .is_some_and(|main| main.eval(script).is_ok())

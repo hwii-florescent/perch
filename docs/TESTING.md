@@ -67,10 +67,17 @@ Useful existing coverage (not a claim of a fresh passing run):
 
 `cargo run -p perch-desktop --example close_shortcut_probe` uses the production
 app menu, real hidden main/child WKWebViews and main-only IPC permissions. It
-checks the browser command bridge (Cmd+1, Ctrl+Shift+1 and Navigator), focus-once
-routing for queued tab cycles, unknown-key pass-through, Close Tab rebinding,
+checks every Settings-derived native binding (including leader/resize follow-ups),
+focus-once routing for queued tab cycles, unknown-key pass-through, Close Tab rebinding,
 disabling, reloads, invalid/stale updates and duplicate menu entries/events,
-including whether an old key is still consumed. It starts
+including whether an old key is still consumed. Uninterrupted sequences use the
+production hide/show/focus/close paths without repairing focus before the next
+key, including return to a main DOM input that was already focused while the
+browser remains visible in a split. Input, textarea, contenteditable and
+same-origin nested-frame selections survive native focus round trips; typing
+then reaches the original caret, while
+main-view typing never reaches hidden pages. Showing/resizing a page and closing
+a background page must not steal focus. It starts
 only a temporary loopback HTML server on a free port: no core, daemon, shells,
 installed app state or external sites. Its windows cannot activate. The web
 suite's `keybinds.close.test.tsx` covers the mounted listener, every registered

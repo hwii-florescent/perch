@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cn } from "../lib/cn";
 import { drawerPageKey, useDrawerBrowsers } from "../drawerBrowsers";
 import { useFileTabs } from "../fileTabs";
@@ -23,6 +24,12 @@ export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
   const pages = allPages.filter((page) => page.workspaceId === workspaceId);
   const shown = pages.find((page) => page.id === activeId) ?? pages.at(-1);
   const total = pages.length + tabCount;
+  // Opening/restoring a workspace must not let a background drawer take canvas focus.
+  const [focusPage, setFocusPage] = useState<string | null>(null);
+  const newPage = () => {
+    open(workspaceId);
+    setFocusPage(useDrawerBrowsers.getState().active[workspaceId] ?? null);
+  };
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="drawer-browser">
@@ -34,17 +41,17 @@ export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
               className={cn(GHOST_BUTTON, "max-w-[10rem] truncate px-2 py-1 text-[0.75rem]", page === shown && "text-fg")}
               data-testid="drawer-browser-page"
               title={page.url || "New page"}
-              onClick={() => select(workspaceId, page.id)}
+              onClick={() => { select(workspaceId, page.id); setFocusPage(page.id); }}
             >
               <span className="flex items-center gap-1.5">
                 {meta[drawerPageKey(page.id)]?.icon && <PageIcon icon={meta[drawerPageKey(page.id)]?.icon} fallback={null} />}
                 <span className="truncate">{pageLabel(page.url, meta[drawerPageKey(page.id)]?.title)}</span>
               </span>
             </button>
-            <button type="button" className={cn(GHOST_BUTTON, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url, meta[drawerPageKey(page.id)]?.title)}`} onClick={() => close(page.id)}>×</button>
+            <button type="button" className={cn(GHOST_BUTTON, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url, meta[drawerPageKey(page.id)]?.title)}`} onClick={() => { close(page.id); setFocusPage(useDrawerBrowsers.getState().pages.filter((p) => p.workspaceId === workspaceId).at(-1)?.id ?? null); }}>×</button>
           </span>
         ))}
-        <button type="button" className={BTN} data-testid="drawer-browser-new" title="New browser page" aria-label="New browser page" onClick={() => open(workspaceId)}>+</button>
+        <button type="button" className={BTN} data-testid="drawer-browser-new" title="New browser page" aria-label="New browser page" onClick={newPage}>+</button>
         {total > 0 && (
           <button
             type="button"
@@ -58,10 +65,10 @@ export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
         )}
       </div>
       {shown ? (
-        <WorkspaceBrowser key={shown.id} tabId={drawerPageKey(shown.id)} initialUrl={shown.url} onUrl={(url) => setUrl(shown.id, url)} />
+        <WorkspaceBrowser key={shown.id} tabId={drawerPageKey(shown.id)} initialUrl={shown.url} active={focusPage === shown.id ? true : undefined} onUrl={(url) => setUrl(shown.id, url)} />
       ) : (
         <div className="flex flex-1 items-start p-4">
-          <button type="button" className={cn(BTN, "bg-surface-0")} data-testid="drawer-browser-open" onClick={() => open(workspaceId)}>New browser page</button>
+          <button type="button" className={cn(BTN, "bg-surface-0")} data-testid="drawer-browser-open" onClick={newPage}>New browser page</button>
         </div>
       )}
     </div>

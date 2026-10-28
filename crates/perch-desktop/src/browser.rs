@@ -209,7 +209,7 @@ fn close_tab_script(id: &str, epoch: &str, generation: u64) -> Option<String> {
 
 /// Whether the window's first responder is `view` (a WKWebView) or inside it.
 #[cfg(target_os = "macos")]
-unsafe fn responder_in(view: *mut objc2::runtime::AnyObject) -> bool {
+pub(crate) unsafe fn responder_in(view: *mut objc2::runtime::AnyObject) -> bool {
     use objc2::{
         class, msg_send,
         runtime::{AnyObject, Bool},
@@ -316,11 +316,130 @@ pub async fn browser_show(
     Ok(())
 }
 
+// Only live DOM references stay in the page, never text or app authority. WebKit retains
+// input/textarea carets itself, but collapses contenteditable ranges on native focus loss.
+#[cfg(target_os = "macos")]
+const SAVE_SELECTION: &str = r#"(() => {
+    let d = document;
+    try { while (d.activeElement?.contentDocument) d = d.activeElement.contentDocument; } catch {}
+    const e = d.activeElement, s = d.getSelection();
+    if (e?.isContentEditable && s?.rangeCount)
+        window[Symbol.for('perch.liveSelection')] = { e, r: s.getRangeAt(0).cloneRange() };
+})()"#;
+#[cfg(target_os = "macos")]
+const RESTORE_SELECTION: &str = r#"(() => {
+    const k = Symbol.for('perch.liveSelection'), saved = window[k];
+    delete window[k];
+    if (!saved) return;
+    const { e, r } = saved, d = e.ownerDocument;
+    if (e.isConnected && e === d.activeElement && r.startContainer.isConnected && r.endContainer.isConnected) {
+        const s = d.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+})()"#;
+
+/// Release a child responder before hiding/destroying it. DOM focus alone does not switch
+/// AppKit's responder between WKWebViews; leaving it behind loses the next app shortcut.
+#[cfg(target_os = "macos")]
+async fn release_focus(app: &AppHandle, view: &tauri::Webview) -> Result<(), String> {
+    let main = app.get_webview("main").ok_or("no main webview")?;
+    let (send, receive) = tokio::sync::oneshot::channel();
+    view.with_webview(move |platform| {
+        // SAFETY: main-thread live WKWebView.
+        let _ = send.send(unsafe { responder_in(platform.inner().cast()) });
+    })
+    .map_err(|e| e.to_string())?;
+    if !receive.await.map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    let (send, mut receive) = tokio::sync::mpsc::unbounded_channel();
+    if view
+        .eval_with_callback(SAVE_SELECTION, move |_| {
+            let _ = send.send(());
+        })
+        .is_ok()
+    {
+        // ponytail: cap tab-switch capture at 300ms, then hand off even if the page stays busy.
+        // A late snapshot may miss selection; guaranteed busy-page retention would need a
+        // page-side selection observer. Failed/crashed pages must not block native focus.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), receive.recv()).await;
+    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    view.with_webview(move |platform| {
+        // SAFETY: with_webview runs on the main thread with a live child.
+        // Recheck after JS: input may have moved to another view while the page replied.
+        let result = if unsafe { responder_in(platform.inner().cast()) } {
+            main.set_focus()
+        } else {
+            Ok(())
+        };
+        let _ = send.send(result.map_err(|e| e.to_string()));
+    })
+    .map_err(|e| e.to_string())?;
+    receive.await.map_err(|e| e.to_string())?
+}
+
+/// Intent-driven focus, separate from geometry/show so a resize cannot steal input.
+/// Only the main document has IPC. The source is revalidated against the actual responder.
+#[tauri::command]
+pub async fn browser_focus(
+    app: AppHandle,
+    id: Option<String>,
+    from: Option<String>,
+) -> Result<(), String> {
+    let target = id
+        .as_deref()
+        .map(label)
+        .transpose()?
+        .unwrap_or_else(|| "main".into());
+    if from != id {
+        if let Some(from) = from {
+            if let Some(view) = app.get_webview(&label(&from)?) {
+                #[cfg(target_os = "macos")]
+                release_focus(&app, &view).await?;
+                #[cfg(not(target_os = "macos"))]
+                let _ = view;
+            }
+        }
+    }
+    let Some(view) = app.get_webview(&target) else {
+        return Ok(());
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let restore = view.clone();
+        view.with_webview(move |platform| unsafe {
+            use objc2::{
+                msg_send,
+                runtime::{AnyObject, Bool},
+            };
+            let view = platform.inner().cast::<AnyObject>();
+            if responder_in(view) {
+                return;
+            }
+            let hidden: Bool = msg_send![view, isHiddenOrHasHiddenAncestor];
+            let window: *mut AnyObject = msg_send![view, window];
+            if !hidden.as_bool() && !window.is_null() {
+                let focused: Bool = msg_send![window, makeFirstResponder: view];
+                if focused.as_bool() {
+                    let _ = restore.eval(RESTORE_SELECTION);
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    view.set_focus().map_err(|e| e.to_string())
+}
+
 /// Hide the page (its tab is not on screen, or something is drawn over it); it keeps its state.
 #[tauri::command]
 pub async fn browser_hide(app: AppHandle, id: String) -> Result<(), String> {
     match app.get_webview(&label(&id)?) {
-        Some(view) => view.hide().map_err(|e| e.to_string()),
+        Some(view) => {
+            #[cfg(target_os = "macos")]
+            release_focus(&app, &view).await?;
+            view.hide().map_err(|e| e.to_string())
+        }
         None => Ok(()),
     }
 }
@@ -329,7 +448,11 @@ pub async fn browser_hide(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn browser_close(app: AppHandle, id: String) -> Result<(), String> {
     match app.get_webview(&label(&id)?) {
-        Some(view) => view.close().map_err(|e| e.to_string()),
+        Some(view) => {
+            #[cfg(target_os = "macos")]
+            release_focus(&app, &view).await?;
+            view.close().map_err(|e| e.to_string())
+        }
         None => Ok(()),
     }
 }

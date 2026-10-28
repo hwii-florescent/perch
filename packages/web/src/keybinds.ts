@@ -20,7 +20,7 @@ import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewTab, withSidebar } from "./appEvents";
 import { browserOwner, closeBrowserById, useDrawerBrowsers } from "./drawerBrowsers";
 import { fileTabKey } from "./fileTabs";
-import { nativeBrowser } from "./browserNative";
+import { focusMainResponder, nativeBrowser, noteBrowserFocus } from "./browserNative";
 import { tauriInvoke } from "./links";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
@@ -590,8 +590,14 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
       const detail: unknown = (event as CustomEvent<unknown>).detail;
       const config = nativeBinding.current;
       if (native && config && detail && typeof detail === "object" && "epoch" in detail && "generation" in detail &&
-          detail.epoch === config.epoch && detail.generation === config.generation) modeRef.current?.reset();
+          detail.epoch === config.epoch && detail.generation === config.generation && "id" in detail &&
+          typeof detail.id === "string" && browserOwner(detail.id)) {
+        noteBrowserFocus(detail.id);
+        modeRef.current?.reset();
+      }
     };
+    const onMainFocus = (event: FocusEvent) => focusMainResponder(event.target);
+    document.addEventListener("focusin", onMainFocus);
     window.addEventListener(NATIVE_FOCUS_EVENT, onFocus);
     window.addEventListener(NATIVE_COMMAND_EVENT, onCommand);
     window.addEventListener(CLOSE_TAB_EVENT, onClose);
@@ -599,6 +605,7 @@ export function useLeaderKey(handlers: LeaderKeyHandlers): void {
     window.addEventListener("compositionend", compositionEnd, true);
     window.addEventListener("blur", compositionEnd);
     return () => {
+      document.removeEventListener("focusin", onMainFocus);
       window.removeEventListener(NATIVE_FOCUS_EVENT, onFocus);
       window.removeEventListener(NATIVE_COMMAND_EVENT, onCommand);
       window.removeEventListener(CLOSE_TAB_EVENT, onClose);

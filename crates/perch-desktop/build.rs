@@ -12,6 +12,7 @@ fn main() {
             "permissions_verify",
             "browser_show",
             "browser_hide",
+            "browser_focus",
             "browser_close",
             "browser_go",
             "browser_action",

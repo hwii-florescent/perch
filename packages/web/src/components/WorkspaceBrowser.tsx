@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
-import { browserCall, browserId, nativeBrowser, onPassthrough, passthroughActive } from "../browserNative";
+import { BROWSER_COVERS, browserAddressDrafts, browserCall, browserHasFocus, browserId, nativeBrowser, noteBrowserFocus, onPassthrough, passthroughActive } from "../browserNative";
 import { browserAddress, openExternal, parseUrl, webUrl } from "../links";
 import { useBrowserPages, safeIcon } from "../browserPages";
 import { recordPage, removePage, searchHistory, searchSuggestions, type HistoryEntry } from "../browserHistory";
@@ -12,26 +12,24 @@ import { PageIcon } from "./PageIcon";
 
 const BTN = cn(GHOST_BUTTON, "grid h-7 w-7 shrink-0 place-items-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-fg max-[700px]:size-11");
 
-/** What draws over the page in the main web view. A native webview sits above all HTML,
- * so the page is hidden while one of these is up (dialogs, context menus). */
-const COVERS = '[role="dialog"], [role="menu"], [role="listbox"], .pane-context-menu__item';
-
 /** perch's lightweight browser. In the desktop app the page is a native child webview laid
  * over `.host` (`browser.rs`): a real browser, so GitHub and every other site works. Without
  * Tauri (the headless web server) it is a sandboxed iframe, which sites that forbid framing
  * show blank; Open externally is always one click away. */
-export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
+export function WorkspaceBrowser({ tabId, initialUrl, onUrl, active }: {
   tabId: string;
   /** "" shows an empty address bar (the drawer's browser) and no page until one is entered. */
   initialUrl: string;
   /** Told each address the page reaches, so its owner can keep it. */
   onUrl?: (url: string) => void;
+  /** Visible split siblings must not steal focus from the selected pane. */
+  active?: boolean;
 }) {
   const id = browserId(tabId);
   // After a restart the page it last showed (not the address the tab was opened with) comes back.
   const [start] = useState(() => webUrl(useBrowserPages.getState().pages[tabId]?.url ?? "") ?? initialUrl);
   const [url, setUrl] = useState(start);
-  const [draft, setDraft] = useState(start);
+  const [draft, setDraft] = useState(() => browserAddressDrafts.get(id)?.value ?? start);
   const [reloads, setReloads] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [open, setOpen] = useState(false);
@@ -43,11 +41,23 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
   const lastVisit = useRef("");
   const lastSent = useRef("");
   const host = useRef<HTMLDivElement>(null);
+  const address = useRef<HTMLInputElement>(null);
+  const selected = useRef(active);
+  selected.current = active;
+  const focusPending = useRef(active === true);
+  const schedulePage = useRef<() => void>(() => {});
+  useEffect(() => {
+    focusPending.current = active === true;
+    schedulePage.current();
+  }, [active]);
   const settingsOpen = usePerchStore((s) => s.settingsOpen);
   const icon = useBrowserPages((s) => s.pages[tabId]?.icon);
   const searchEngine = usePerchStore((s) => s.settings?.browserSearchEngine);
   const wantSuggestions = usePerchStore((s) => s.settings?.browserSearchSuggestions === true);
   const zoom = useZoom();
+  const presentation = useRef({ settingsOpen, zoom });
+  presentation.current = { settingsOpen, zoom };
+  useEffect(() => { schedulePage.current(); }, [settingsOpen, zoom]);
   const started = url !== "";
   const latest = useRef(url);
   latest.current = url;
@@ -74,7 +84,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
 
   // A page this view opened before it was unmounted (switching drawer tabs) is still there.
   useEffect(() => {
-    if (nativeBrowser) void browserCall<string>("url", { id }).then((current) => { if (current) { setUrl(current); setDraft(current); } });
+    if (nativeBrowser) void browserCall<string>("url", { id }).then((current) => { if (current) { setUrl(current); if (!editing.current) setDraft(current); } });
   }, [id]);
 
   // Native: keep the webview on `host`'s rectangle, hidden while covered or unmounted.
@@ -87,16 +97,29 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     const sync = () => {
       frame = 0;
       const r = el.getBoundingClientRect();
-      const hidden = settingsOpen || r.width < 2 || r.height < 2 || document.querySelector(COVERS) !== null || passthroughActive();
-      const next = hidden ? "hidden" : `${r.x},${r.y},${r.width},${r.height}`;
-      // zoom is in the effect's deps, so a zoom change re-runs it and `last` starts empty: show re-sends it.
-      if (next === last) return;
-      last = next;
-      void (hidden
-        ? browserCall("hide", { id })
-        : browserCall("show", { id, url: latest.current, x: r.x, y: r.y, width: r.width, height: r.height, zoom }));
+      const { settingsOpen, zoom } = presentation.current;
+      const hidden = settingsOpen || r.width < 2 || r.height < 2 || document.querySelector(BROWSER_COVERS) !== null || passthroughActive();
+      const next = hidden ? "hidden" : `${r.x},${r.y},${r.width},${r.height},${zoom}`;
+      const returning = last === "hidden" && browserHasFocus(id);
+      if (next !== last) {
+        last = next;
+        void (hidden
+          ? browserCall("hide", { id })
+          : browserCall("show", { id, url: latest.current, x: r.x, y: r.y, width: r.width, height: r.height, zoom }));
+      }
+      if (!hidden && selected.current !== false && !editing.current && (focusPending.current || returning)) {
+        void browserCall("focus", { id }, () => {
+          if (!live || selected.current === false || editing.current || presentation.current.settingsOpen || document.querySelector(BROWSER_COVERS) || passthroughActive()) return false;
+          const bounds = el.getBoundingClientRect();
+          if (bounds.width < 2 || bounds.height < 2) return false;
+          focusPending.current = false;
+          noteBrowserFocus(id);
+          return true;
+        });
+      }
     };
     const schedule = () => { frame ||= requestAnimationFrame(sync); };
+    schedulePage.current = schedule;
     const resize = new ResizeObserver(schedule);
     resize.observe(el);
     const mutations = new MutationObserver(schedule);
@@ -123,6 +146,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     }, 1000);
     return () => {
       live = false;
+      schedulePage.current = () => {};
       if (frame) cancelAnimationFrame(frame);
       clearInterval(poll);
       resize.disconnect();
@@ -131,7 +155,26 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
       window.removeEventListener("resize", schedule);
       void browserCall("hide", { id });
     };
-  }, [id, started, settingsOpen, zoom]);
+  }, [id, started]);
+
+  useLayoutEffect(() => () => {
+    const input = address.current;
+    if (input && document.activeElement === input && !browserHasFocus(id)) {
+      browserAddressDrafts.set(id, { value: input.value, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection });
+    }
+  }, [id, active]);
+
+  useEffect(() => {
+    const input = address.current;
+    if (!active || settingsOpen || !input) return;
+    const saved = browserAddressDrafts.get(id);
+    if (!started || saved) {
+      input.focus();
+      if (saved) input.setSelectionRange(saved.start, saved.end, saved.direction ?? undefined);
+      focusPending.current = false;
+      browserAddressDrafts.delete(id);
+    }
+  }, [id, active, started, settingsOpen]);
 
   const go = (target?: string) => {
     const next = target ?? browserAddress(draft, searchEngine);
@@ -143,6 +186,9 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
     setDraft(next);
     // Before the first address there is no page yet; becoming `started` shows it at `next`.
     if (nativeBrowser && started) void browserCall("go", { id, url: next });
+    focusPending.current = true;
+    address.current?.blur();
+    schedulePage.current();
   };
   const act = (action: "back" | "forward" | "reload") => {
     if (nativeBrowser) void browserCall("action", { id, action });
@@ -168,6 +214,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl }: {
         <div className="relative mx-[11px] flex h-7 min-w-0 flex-1 items-center gap-[7px] rounded-ui bg-[var(--bg)] px-[10px] focus-within:outline focus-within:outline-1 focus-within:outline-fg @max-[460px]:mx-1 max-[700px]:h-9">
           <PageIcon icon={icon} fallback={<svg width="12" height="12" className="shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="10" cy="10" r="7" /><ellipse cx="10" cy="10" rx="3" ry="7" /><path d="M3 10h14" /></svg>} />
           <input
+            ref={address}
             role="combobox"
             aria-expanded={rows.length > 0}
             aria-controls="browser-suggestions"

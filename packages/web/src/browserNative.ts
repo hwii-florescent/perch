@@ -13,10 +13,49 @@ export const browserId = (key: string) => [...new TextEncoder().encode(key)].map
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Run a `browser_*` command. A failed call (page gone, bad URL) resolves to null. */
-export function browserCall<T = null>(command: string, args: Record<string, unknown>): Promise<T | null> {
-  const run = queue.then(() => tauriInvoke?.(`browser_${command}`, args) as Promise<T>).catch(() => null);
+export function browserCall<T = null>(command: string, args: Record<string, unknown>, current: () => boolean = () => true): Promise<T | null> {
+  const run = queue.then(() => {
+    if (command === "close" && typeof args.id === "string") {
+      browserAddressDrafts.delete(args.id);
+      if (focusedBrowser === args.id) focusedBrowser = null;
+    }
+    const from = focusedBrowser;
+    if (!current()) return null;
+    const payload = command === "focus" ? { from, ...args } : args;
+    return tauriInvoke?.(`browser_${command}`, payload) as Promise<T>;
+  }).catch(() => null);
   queue = run;
   return run;
+}
+
+/** Native focus notices are validated by keybinds.ts before reaching this module. */
+let focusedBrowser: string | null = null;
+let focusRevision = 0;
+export const browserHasFocus = (id: string) => focusedBrowser === id;
+export function noteBrowserFocus(id: string): void {
+  focusRevision++;
+  focusedBrowser = id;
+  browserAddressDrafts.delete(id);
+}
+
+/** An address draft/selection lives only as long as its tab, never in persisted page history. */
+export const browserAddressDrafts = new Map<string, {
+  value: string; start: number | null; end: number | null; direction: "forward" | "backward" | "none" | null;
+}>();
+
+export const BROWSER_COVERS = '[role="dialog"], [role="menu"], [role="listbox"], .pane-context-menu__item, [data-testid="settings-modal"]';
+
+// Main-document inputs (including dialogs/address bars) must own the native responder too.
+// Keep the page's return target while a temporary cover owns input. Explicit activation
+// also calls this: focusing an already-active DOM input does not emit another focusin.
+export function focusMainResponder(target: EventTarget | null): void {
+  if (!nativeBrowser || !focusedBrowser || !(target instanceof HTMLElement) || !target.isConnected || document.activeElement !== target) return;
+  const from = focusedBrowser, revision = focusRevision;
+  void browserCall("focus", { id: null, from }, () => {
+    if (revision !== focusRevision || focusedBrowser !== from || !target.isConnected || document.activeElement !== target) return false;
+    if (!target.closest(BROWSER_COVERS)) focusedBrowser = null;
+    return true;
+  });
 }
 
 /**
@@ -55,6 +94,6 @@ useFileTabs.subscribe((state, previous) => {
     const key = fileTabKey(tab);
     if (tab.kind !== "browser" || open.has(key)) continue;
     useBrowserPages.getState().forget(key);
-    if (nativeBrowser) void browserCall("close", { id: browserId(key) });
+    void browserCall("close", { id: browserId(key) });
   }
 });
