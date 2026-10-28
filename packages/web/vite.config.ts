@@ -13,6 +13,8 @@ export default defineConfig({
   base: "./",
   build: {
     outDir: "dist",
+    // The desktop serves local assets; suppress only the advisory large-chunk warning.
+    chunkSizeWarningLimit: Infinity,
     // Vite's default target (es2020 + firefox78) makes esbuild lower `||=`,
     // and that lowering miscompiles xterm 6.1's DECRQM handler into a
     // ReferenceError that wedges the parser. Every perch client (WKWebView,
