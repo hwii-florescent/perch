@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { startFromPanel } from "./projects";
@@ -103,7 +104,7 @@ async function startCore(options: { port: number; home: string; repo: string; lo
   const core = spawn(
     path.join(root, "target/debug/perch-core"),
     ["--port", String(options.port), "--db-path", path.join(options.home, "history.sqlite"), "--hosts-path", path.join(options.home, "hosts.json"), "--providers-path", path.join(options.home, "providers.json"), "--cwd", options.repo],
-    { cwd: root, env: { ...process.env, ANTHROPIC_MODEL: "claude-haiku-4-5", PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info" }, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(options.home), ANTHROPIC_MODEL: "claude-haiku-4-5", PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info" }, stdio: ["ignore", "pipe", "pipe"] },
   );
   core.stdout?.on("data", (chunk) => options.log.push(String(chunk)));
   core.stderr?.on("data", (chunk) => options.log.push(String(chunk)));
@@ -114,17 +115,15 @@ async function startCore(options: { port: number; home: string; repo: string; lo
   return core;
 }
 
-/** Stop a fixture core and every tmux session its own log says it started. */
-async function stopCore(core: ChildProcess | null, log: string): Promise<void> {
-  if (core && core.exitCode === null) {
+/** Stop the core, then explicitly release and verify its private runtimes. */
+async function stopCore(core: ChildProcess | null, home: string): Promise<void> {
+  if (core && core.exitCode === null && core.signalCode === null) {
     await new Promise<void>((resolve) => {
       core.once("exit", () => resolve());
       core.kill("SIGKILL");
     });
   }
-  for (const name of new Set([...log.matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]))) {
-    try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already stopped */ }
-  }
+  await cleanupFixtureRuntime(path.resolve(__dirname, ".."), home);
 }
 
 for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agent turn becomes a reviewable diff base`, async ({ page, context }, testInfo) => {
@@ -349,11 +348,11 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
 
     expect(errors).toEqual([]);
   } finally {
+    await stopCore(core, home);
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
     fs.writeFileSync(testInfo.outputPath("terminal.txt"), terminalOutput);
     fs.writeFileSync(testInfo.outputPath("input.json"), JSON.stringify(sentInputs));
     fs.writeFileSync(testInfo.outputPath("lifecycle.json"), JSON.stringify(lifecycle, null, 2));
-    await stopCore(core, coreLog.join(""));
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -538,8 +537,8 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
 
     expect(errors).toEqual([]);
   } finally {
+    await stopCore(core, home);
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
-    await stopCore(core, coreLog.join(""));
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }

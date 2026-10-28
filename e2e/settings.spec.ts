@@ -29,7 +29,7 @@ import * as path from "path";
 
 const BASE_URL = "http://127.0.0.1:7799";
 // The e2e core's own hosts file (playwright.config.ts), never the user's ~/.perch/hosts.json.
-const HOSTS_FILE = "/tmp/perch-e2e-hub-hosts.json";
+const HOSTS_FILE = process.env.PERCH_HOSTS ?? "/tmp/perch-e2e-hub-hosts.json";
 const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
 // ---------------------------------------------------------------------------

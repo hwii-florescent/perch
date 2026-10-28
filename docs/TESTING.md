@@ -118,6 +118,55 @@ Claude normally bypasses permissions here: use `AskUserQuestion` to exercise
 Needs You. Bracketed paste wraps the prompt in `<pasted_content …>`; hook
 assertions match with `contains`, not equality.
 
+## Released-only cleanup and fixture teardown
+
+Build the developer CLI (not an installed app update):
+
+```sh
+cargo build -p perchd --bin perch
+target/debug/perch ps
+target/debug/perch cleanup --dry-run
+target/debug/perch cleanup                  # confirms the exact preview
+# Noninteractive execution requires explicit --yes.
+```
+
+These commands connect only; they never start a missing daemon. Older daemons
+can be listed, but cleanup refuses without `released-cleanup.v1`. Do not restart
+the installed daemon to enable it: upgrade during a planned session shutdown.
+Retained and unknown sessions are protected, including unfocused agents and
+their subprocesses. This does not discover arbitrary old leftovers by age,
+visibility, cwd, process names or memory usage. Production sessions currently
+stay retained; explicit release is wired to private test-owner teardown only.
+Cleanup preserves history and provider transcripts. Detached/escaped processes
+are not swept; original-group confirmation is not whole-tree attribution.
+
+Standalone fixture cores use `fixtureRuntimeEnv()` for private state and owner
+metadata captured at core startup (never forwarded into PTY/provider children).
+Only after the core exits does `cleanupFixtureRuntime()` explicitly release its
+owned sessions, perform verified group cleanup and wait for the private daemon
+idle exit (`PERCHD_IDLE_EXIT_SECS=1`). It refuses legacy, differently owned or
+unconfirmed runtime state and preserves scratch evidence on failure. Never kill
+the daemon first: its PTYs intentionally survive it. Intermediate core restarts
+must not release sessions. Main Playwright web servers use the same final
+teardown wrapper and fresh hub/remote state, with no existing-server reuse.
+Focused configs must likewise isolate all four state paths; a killed test
+runner/host cannot guarantee finalizers ran and is never itself a release.
+
+No paid provider turns are needed for the lifecycle regression:
+
+```sh
+cargo build -p perch-core
+node --experimental-strip-types e2e/fixtureRuntime.check.mjs
+node --experimental-strip-types e2e/fixtureRuntime.check.mjs --crash-core
+cargo test -p perchd
+```
+
+The Node check uses a real core, persistent shell and private daemon; it checks
+watcher-disconnect protection, owner capture, refused unknown metadata and
+final cleanup, both normally and after forcibly killing its exact private core. Rust regressions cover stale previews/reclaims, sibling scopes,
+HUP-resistant children (including leader-first exit), escaped-group refusal,
+process-group confirmation, history preservation and connect-only behavior.
+
 ## Rendering, performance and packaging
 
 - `node e2e/memory/memory.mjs` after a web build checks footprint and WebGL
@@ -138,6 +187,21 @@ assertions match with `contains`, not equality.
   notarized. Do not publish/tag/push without instruction.
 
 ## Known limitations to recheck
+
+- Legacy core `daemon::terminate()` still confirms leader exit, not complete
+  group exit. Released-only cleanup does not use that confirmation. Follow-up:
+  capability-gated owned Stop reusing the verified group-stop engine; do not
+  treat old-daemon leader exit as group-confirmed destructive cleanup.
+- Escaped/daemonized descendants cannot be universally attributed. Known
+  separate groups are refused; already escaped unknown processes need manual
+  review. These checks are macOS evidence, not fresh Linux certification.
+
+Cleanup validation (2026-10-27): the shared-server Chromium settings smoke
+passed. The standalone `provider-config` browser spec still timed out at browser
+context teardown after the reorder; no core/daemon from that rerun survived.
+It is not a passing provider UI acceptance check. The 300 ms synthetic usage
+probe failed once under concurrent browser/build load, then passed alone and
+in a fresh full core run; do not hide this timing sensitivity.
 
 Recorded 2026-10-02, not blanket exemptions for new failures:
 - OpenCode is deliberately absent on this dev Mac; do not install it for tests.

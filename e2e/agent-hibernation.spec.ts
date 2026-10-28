@@ -18,10 +18,11 @@
  */
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
-import { restoreChatMode, setChatMode } from "./chatMode";
+import { setChatMode } from "./chatMode";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { spawn, type ChildProcess } from "node:child_process";
 import { startFromPanel } from "./projects";
 
@@ -80,7 +81,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
       ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json"), "--cwd", fixture],
       {
         cwd: root,
-        env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", ANTHROPIC_MODEL: "claude-haiku-4-5", PERCH_HIBERNATE_AFTER_SECS: "2" },
+        env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1", ANTHROPIC_MODEL: "claude-haiku-4-5", PERCH_HIBERNATE_AFTER_SECS: "2" },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -177,15 +178,15 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
 
     expect(errors).toEqual([]);
   } finally {
-    fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
-    if (core && core.exitCode === null) {
+    if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => {
         child.once("exit", () => resolve());
         child.kill("SIGKILL");
       });
     }
-    restoreChatMode(); // the fixture core shares the suite's settings file; the test ends in UI mode
+    await cleanupFixtureRuntime(root, fixture);
+    fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

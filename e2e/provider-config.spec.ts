@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { startFromPanel } from "./projects";
 
 function manifest(id: string, name: string, executable = "/bin/sh") {
@@ -65,7 +66,7 @@ test("configured providers retain identity and isolation across desktop and mobi
   await phoneContext.addInitScript(seed, fixture);
   try {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--providers-path", providers], {
-      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", log, log],
+      cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {
       if (core?.exitCode !== null) throw new Error(`Fixture core exited: ${fs.readFileSync(coreLog, "utf8")}`);
@@ -150,11 +151,12 @@ test("configured providers retain identity and isolation across desktop and mobi
     await phone.screenshot({ path: path.join(shots, `provider-terminal-mobile-${testInfo.project.name}.png`) });
     await page.screenshot({ path: path.join(shots, `provider-terminal-desktop-${testInfo.project.name}.png`) });
   } finally {
-    await phoneContext.close();
     if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
     }
+    await cleanupFixtureRuntime(root, fixture);
+    await phoneContext.close();
     fs.closeSync(log);
     await testInfo.attach("fixture-core.log", { body: fs.readFileSync(coreLog), contentType: "text/plain" });
     fs.rmSync(fixture, { recursive: true, force: true });

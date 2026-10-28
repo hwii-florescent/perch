@@ -28,8 +28,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
-import { restoreChatMode, setChatMode } from "./chatMode";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { setChatMode } from "./chatMode";
 import { cheapModelEnv } from "./cheapModel";
 import { holdRow } from "./workspaceTools";
 import { startFromPanel } from "./projects";
@@ -124,7 +125,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json"), "--devices-path", devicesPath, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info", ...cheapModelEnv("claude", fixture) }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: process.env.RUST_LOG ?? "info", ...cheapModelEnv("claude", fixture) }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -134,7 +135,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     }, { timeout: 20_000 }).toBe(true);
   }
   async function stop(): Promise<void> {
-    if (!core || core.exitCode !== null) return;
+    if (!core || core.exitCode !== null || core.signalCode !== null) return;
     const child = core;
     await new Promise<void>((resolve) => {
       child.once("exit", () => resolve());
@@ -303,16 +304,12 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
     expect(phoneErrors).toEqual([]);
   } finally {
+    await stop();
+    await cleanupFixtureRuntime(root, fixture);
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
     fs.writeFileSync(testInfo.outputPath("wire.json"), JSON.stringify(wire, null, 2));
     await phone.screenshot({ path: testInfo.outputPath("phone-final.png"), fullPage: true }).catch(() => {});
     await phoneContext.close();
-    await stop();
-    restoreChatMode(); // the test ends in UI mode; the settings file is shared
-    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
-    for (const name of ownedTmux) {
-      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* already exited */ }
-    }
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

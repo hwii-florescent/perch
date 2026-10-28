@@ -2,8 +2,8 @@
  * federation.spec.ts — Stage F3 e2e tests for hub federation.
  *
  * Two perch instances run in parallel:
- *   A (hub)    — :7799   /tmp/perch-e2e-hub.sqlite + /tmp/perch-e2e-hub-hosts.json
- *   B (remote) — :7800   /tmp/perch-e2e-remote.sqlite + /tmp/perch-e2e-remote-hosts.json
+ *   A (hub)    — :7799   fresh private hub state from playwright.config.ts
+ *   B (remote) — :7800   independent private remote state
  *
  * Raw WebSocket control uses the Node 22 built-in `WebSocket` global —
  * no external `ws` package needed.

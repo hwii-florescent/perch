@@ -2,14 +2,16 @@ import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
 import * as os from "os";
 import { CHEAP_CLAUDE_MODEL } from "./cheapModel";
+import * as fs from "node:fs";
+import { fixtureRuntimeEnv } from "./fixtureRuntime";
 
-// Every core the suite starts (the webServers and the specs' own spawns,
-// which pass process.env through) gets a test PTY daemon. The default
-// ~/.perch/daemon is the installed app's, and test sessions left in it run it
-// out of fds.
-process.env.PERCHD_DIR ??= "/tmp/perch-e2e-perchd";
-// Likewise settings: never read or write the user's ~/.perch/settings.json.
-process.env.PERCH_SETTINGS ??= "/tmp/perch-e2e-settings.json";
+// One fresh scope per run, inherited by workers. Never delete another run's
+// database or kill its daemon to obtain clean state.
+const state = process.env.PERCH_E2E_STATE ??= fs.mkdtempSync(path.join(os.tmpdir(), "perch-suite-"));
+const hub = path.join(state, "hub"), remote = path.join(state, "remote");
+fs.mkdirSync(hub, { recursive: true });
+fs.mkdirSync(remote, { recursive: true });
+Object.assign(process.env, fixtureRuntimeEnv(hub));
 // Every core this config starts (including spec-owned spawns) inherits Haiku.
 process.env.ANTHROPIC_MODEL = CHEAP_CLAUDE_MODEL;
 
@@ -61,42 +63,35 @@ export default defineConfig({
   workers: 1,
   webServer: [
     {
-      // Instance A — the hub (UI runs against this one). Isolated /tmp
-      // db+hosts (same pattern as instance B below) so e2e runs never touch
-      // the developer's real ~/.perch/history.sqlite or hosts.json — a
-      // previous version of this config pointed at the real paths and a
-      // flaky run left ~165 junk sessions in the real DB.
-      //
-      // Each run starts clean: the db and the test daemon (whose PTYs outlive
-      // the core by design) are dropped first, or every run inherits the
-      // sessions and live shells of all earlier ones until the daemon runs out
-      // of fds. Runs only when Playwright boots the server itself.
-      command: "rm -f /tmp/perch-e2e-hub.sqlite*; pkill -f '__perchd serve --dir /tmp/perch-e2e-perchd$'; cargo run -p perch-core -- --port 7799 --db-path /tmp/perch-e2e-hub.sqlite --hosts-path /tmp/perch-e2e-hub-hosts.json",
+      // Instance A — private hub. The wrapper cleans PTYs after core exit.
+      command: "cargo build -p perch-core && exec node --experimental-strip-types e2e/fixtureServer.ts --port 7799",
       cwd: path.resolve(__dirname, ".."),
       url: "http://127.0.0.1:7799/",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 120_000 },
       timeout: 60000,
       env: {
-        // Point at real HOME so the claude CLI can find its credentials.
-        // Sessions are created fresh by each test run against the isolated
-        // db above — no more "pre-existing sessions are background noise".
+        ...fixtureRuntimeEnv(hub),
+        PERCH_NO_LOGIN_PATH: "1",
+        // Keep credentials available, but never share Perch state.
         HOME: os.homedir(),
         // Include ~/.cargo/bin so cargo/rustc are on PATH for the webServer command.
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
       },
     },
     {
-      // Instance B — the federated remote (isolated db + hosts so it never
-      // accidentally loops back into A or shares ~/.perch state).
-      command: "rm -f /tmp/perch-e2e-remote.sqlite*; pkill -f '__perchd serve --dir /tmp/perch-e2e-perchd-remote$'; cargo run -p perch-core -- --port 7800 --db-path /tmp/perch-e2e-remote.sqlite --hosts-path /tmp/perch-e2e-remote-hosts.json",
+      // Instance B — independent owner, settings, database and daemon.
+      command: "cargo build -p perch-core && exec node --experimental-strip-types e2e/fixtureServer.ts --port 7800",
       cwd: path.resolve(__dirname, ".."),
       url: "http://127.0.0.1:7800/",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 120_000 },
       timeout: 60000,
       env: {
+        ...fixtureRuntimeEnv(remote),
+        PERCH_NO_LOGIN_PATH: "1",
         HOME: os.homedir(),
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
-        PERCHD_DIR: "/tmp/perch-e2e-perchd-remote",
       },
     },
   ],

@@ -22,9 +22,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { addProject, startFromPanel } from "./projects";
 import { holdRow } from "./workspaceTools";
-import { execFileSync, execSync, spawn, type ChildProcess } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 
 const AGENT_SCRIPT = [
   "printf 'phonebot ready\\n'",
@@ -112,7 +113,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json"), "--devices-path", devicesPath, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", PERCHD_DIR: path.join(fixture, "d"), PERCH_SETTINGS: path.join(fixture, "settings.json") }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -122,7 +123,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     }, { timeout: 20_000 }).toBe(true);
   }
   async function stop(): Promise<void> {
-    if (!core || core.exitCode !== null) return;
+    if (!core || core.exitCode !== null || core.signalCode !== null) return;
     const child = core;
     await new Promise<void>((resolve) => {
       child.once("exit", () => resolve());
@@ -319,14 +320,10 @@ test("a phone pairs over the network, drives the session, and loses access when 
 
     expect(phoneErrors).toEqual([]);
   } finally {
+    await stop();
+    await cleanupFixtureRuntime(root, fixture);
     fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
     // Release fixture processes before potentially slow WebKit teardown.
-    await stop();
-    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
-    for (const name of ownedTmux) {
-      try { execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" }); } catch { /* already exited */ }
-    }
-    try { execFileSync("pkill", ["-f", `__perchd serve --dir ${path.join(fixture, "d")}`]); } catch { /* already exited */ }
     fs.rmSync(fixture, { recursive: true, force: true });
     await phoneContext.close();
   }

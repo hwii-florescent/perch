@@ -4,7 +4,8 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { restoreChatMode, setChatMode } from "./chatMode";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { startFromPanel } from "./projects";
@@ -26,7 +27,6 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
   const url = `http://127.0.0.1:${port}`;
   const token = `review_${provider}_${Date.now()}`;
   const log = fs.openSync(path.join(scratch, "core.log"), "a");
-  const ownedTmux = () => new Set([...fs.readFileSync(path.join(scratch, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
   const shots = path.join(root, ".impeccable/review"); fs.mkdirSync(shots, { recursive: true });
   let core: ChildProcess | undefined;
   let phoneContext: BrowserContext | undefined;
@@ -51,7 +51,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(current.locator(".workspace-git__comment").filter({ hasText: body })).toBeVisible();
   }
   try {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv(provider, scratch) }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(scratch), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv(provider, scratch) }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByTestId("workspace-add-project").click();
@@ -151,6 +151,8 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     expect(unexpectedErrors()).toEqual([]);
     completed = true;
   } finally {
+    if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
+    await cleanupFixtureRuntime(root, scratch);
     if (!completed) {
       await page.screenshot({ path: path.join(shots, `native-review-${provider}-failure-${testInfo.project.name}.png`) }).catch(() => {});
       await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
@@ -161,11 +163,6 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       }
     }
     await phoneContext?.close().catch(() => {});
-    if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
-    restoreChatMode(); // the test ends in UI mode; the settings file is shared
-    for (const name of ownedTmux()) {
-      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
-    }
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(scratch, "core.log")), contentType: "text/plain" });
     fs.rmSync(scratch, { recursive: true, force: true });

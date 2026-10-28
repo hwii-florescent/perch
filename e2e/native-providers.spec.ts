@@ -4,7 +4,8 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { restoreChatMode, setChatMode } from "./chatMode";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 import { startFromPanel } from "./projects";
 
@@ -76,7 +77,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     const quote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
     fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piEnv.PI_CODING_AGENT_DIR!)}\nexec ${quote(realPi)} "$@"\n`, { mode: 0o700 });
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--providers-path", providers], {
-      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv("omp", fixture), PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", log, log],
+      cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", ...cheapModelEnv("omp", fixture), PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {
       if (core?.exitCode !== null) throw new Error("Fixture core exited before readiness");
@@ -174,22 +175,15 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });
   } finally {
-    if (testInfo.status !== testInfo.expectedStatus) {
-      await page.screenshot({ path: path.join(shots, `native-provider-failure-${testInfo.project.name}.png`) }).catch(() => {});
-    }
-    await secondContext.close();
     if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
     }
-    restoreChatMode(); // a failed run may leave the shared settings file in UI mode
-    const ownedTmux = new Set([...fs.readFileSync(path.join(fixture, "core.log"), "utf8").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
-    for (const name of ownedTmux) {
-      try { execFileSync("tmux", ["kill-session", "-t", `=${name}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
+    await cleanupFixtureRuntime(root, fixture);
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await page.screenshot({ path: path.join(shots, `native-provider-failure-${testInfo.project.name}.png`) }).catch(() => {});
     }
-    for (const id of shellIds) {
-      try { execFileSync("tmux", ["kill-session", "-t", `perch-cli-shell-${id}`], { stdio: "ignore" }); } catch { /* Already stopped. */ }
-    }
+    await secondContext.close();
     fs.copyFileSync(path.join(fixture, "core.log"), testInfo.outputPath("core.log"));
     fs.closeSync(log);
     await testInfo.attach("fixture-core.log", { body: fs.readFileSync(path.join(fixture, "core.log")), contentType: "text/plain" });

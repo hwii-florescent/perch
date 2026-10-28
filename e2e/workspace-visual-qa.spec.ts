@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { firstWorkspaceId, holdRow, openWorkspaceTool } from "./workspaceTools";
 
@@ -180,7 +181,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", path.join(home, "history.sqlite"), "--hosts-path", hosts, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(home), PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -344,14 +345,15 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
 
     expect(errors).toEqual([]);
   } finally {
-    fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
-    if (core && core.exitCode === null) {
+    if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => {
         child.once("exit", () => resolve());
         child.kill("SIGKILL");
       });
     }
+    await cleanupFixtureRuntime(root, home);
+    fs.writeFileSync(testInfo.outputPath("core.log"), coreLog.join(""));
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }

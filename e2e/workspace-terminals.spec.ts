@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import * as os from "node:os";
 import * as net from "node:net";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
@@ -116,7 +117,7 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
   const errors: string[] = [];
   async function boot() {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", hosts, "--cwd", fixture], {
-      cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", PERCHD_DIR: path.join(fixture, "perchd"), PERCH_SETTINGS: path.join(fixture, "settings.json") }, stdio: "ignore",
+      cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1" }, stdio: "ignore",
     });
     await expect.poll(async () => {
       if (core?.exitCode !== null) throw new Error("Fixture core exited before readiness");
@@ -159,7 +160,9 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
     const db = path.join(fixture, "history.sqlite");
     await expect.poll(() => execFileSync("sqlite3", [db, "SELECT state FROM agent_lifecycle WHERE session_id = '" + sessionId + "'"], { encoding: "utf8" }).trim()).toBe("idle");
     await stop();
-    execFileSync("pkill", ["-KILL", "-f", `__perchd serve --dir ${path.join(fixture, "perchd")}$`]);
+    // Deliberately lose the private daemon/runtime, without abandoning its PTY.
+    // The lifecycle DB still says idle because the core is already stopped.
+    await cleanupFixtureRuntime(root, fixture);
     await boot();
     await expect(shell.locator('[role="alert"]')).toContainText(/no replacement|existing|fresh session/i, { timeout: 30_000 });
     expect(await shell.getAttribute("data-terminal-id")).toBeNull();
@@ -171,7 +174,7 @@ test("perchd shell recovers its process and state after a core crash", async ({ 
     expect((await shell.locator(".xterm-rows").innerText()).match(/NEW_SHELL_PID_(\d+)_END/)![1]).not.toBe(pid);
   } finally {
     await stop();
-    try { execFileSync("pkill", ["-KILL", "-f", `__perchd serve --dir ${path.join(fixture, "perchd")}$`]); } catch { /* already gone */ }
+    await cleanupFixtureRuntime(root, fixture);
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

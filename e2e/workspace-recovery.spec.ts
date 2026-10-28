@@ -2,7 +2,7 @@
  * V-09 mixed workspace and agent recovery.
  *
  * The already-recorded V-09 evidence covers each surface on its own: file
- * draft/path recovery, a real tmux shell across a core crash, and native
+ * draft/path recovery, a real daemon shell across a core crash, and native
  * Claude/Pi/OMP/OpenCode same-PID recovery. What was never exercised is the
  * *mixed* case the gate actually names — sessions, terminals, comments, file
  * conflict state and project/worktree identity all surviving one restart
@@ -22,7 +22,8 @@ import { expectDoc } from "./editor";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
-import { execSync, execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
 const RELATIVE_FILE = "src/main.txt";
@@ -74,7 +75,6 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
   const dbPath = path.join(home, "history.sqlite");
   let core: ChildProcess | null = null;
   let restarting = false;
-  let terminalId: string | null = null;
   const errors: string[] = [];
   const coreLog: string[] = [];
   let shellPid = "";
@@ -92,7 +92,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     core = spawn(
       path.join(root, "target/debug/perch-core"),
       ["--port", String(port), "--db-path", dbPath, "--hosts-path", hosts, "--cwd", repo],
-      { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(home), PERCH_NO_LOGIN_PATH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
     );
     core.stdout?.on("data", (chunk) => coreLog.push(String(chunk)));
     core.stderr?.on("data", (chunk) => coreLog.push(String(chunk)));
@@ -130,12 +130,6 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     if (restarting && message.text().includes("ERR_CONNECTION_REFUSED")) return;
     if (message.type() === "error") errors.push("console: " + message.text().slice(0, 2000));
   });
-  page.on("websocket", (socket) =>
-    socket.on("framereceived", ({ payload }) => {
-      const message = JSON.parse(String(payload));
-      if (message.type === "terminal.opened") terminalId = message.terminal.id;
-    }),
-  );
 
   try {
     await boot();
@@ -285,17 +279,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     throw error;
   } finally {
     await stop();
-    // A worktree launcher also starts its configured CLI. Reap every tmux
-    // process this isolated core actually launched, not only the plain shell.
-    const ownedTmux = new Set([...coreLog.join("").matchAll(/tmux_session=(perch-cli-\S+)/g)].map((match) => match[1]));
-    if (terminalId) ownedTmux.add(`perch-cli-shell-${terminalId}`);
-    for (const name of ownedTmux) {
-      try {
-        execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" });
-      } catch {
-        /* already gone */
-      }
-    }
+    await cleanupFixtureRuntime(root, home);
     try {
       git("worktree prune", repo);
     } catch {

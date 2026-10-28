@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { addProject } from "./projects";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { MOD, expectDoc } from "./editor";
@@ -64,7 +65,7 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
   const dialog = page.getByTestId("context-bridge");
   const prepared = dialog.getByLabel("Prepared context", { exact: true });
   try {
-    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", PERCH_DB: path.join(scratch, "history.sqlite"), PERCH_HOSTS: path.join(scratch, "hosts.json"), PERCHD_DIR: path.join(scratch, "daemon"), PERCH_SETTINGS: path.join(scratch, "settings.json"), ANTHROPIC_MODEL: CHEAP_CLAUDE_MODEL, RUST_LOG: "info" }, stdio: ["ignore", log, log] });
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(scratch, "history.sqlite"), "--hosts-path", path.join(scratch, "hosts.json"), "--providers-path", path.join(scratch, "providers.json")], { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(scratch), PERCH_NO_LOGIN_PATH: "1", ANTHROPIC_MODEL: CHEAP_CLAUDE_MODEL, RUST_LOG: "info" }, stdio: ["ignore", log, log] });
     await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
     await page.goto(url, { waitUntil: "networkidle" });
     await addProject(page, fixture);
@@ -228,10 +229,10 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     expect(fs.readFileSync(path.join(fixture, "notes.txt"), "utf8")).toBe("changed on disk\n");
     expect(errors).toEqual([]);
   } finally {
+    if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
+    await cleanupFixtureRuntime(root, scratch);
     await page.screenshot({ path: testInfo.outputPath("final-state.png") }).catch(() => {});
     await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
-    if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
-    try { execFileSync("pkill", ["-TERM", "-f", `__perchd serve --dir ${scratch}/daemon`], { stdio: "ignore" }); } catch { /* no surviving probe daemon */ }
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(scratch, "core.log")), contentType: "text/plain" });
     fs.rmSync(scratch, { recursive: true, force: true });

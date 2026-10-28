@@ -1,9 +1,10 @@
 import { test, expect, type Locator } from "@playwright/test";
-import { spawn, execFileSync, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { startChat, startFromPanel } from "./projects";
 
 async function drop(target: Locator, names: string[], type = "drop") {
@@ -27,7 +28,6 @@ async function drop(target: Locator, names: string[], type = "drop") {
 test("external files reach only agent prompts through native paste, without submitting", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-drop-"));
-  const daemon = path.join(fixture, "daemon");
   const port = await new Promise<number>((resolve) => {
     const server = net.createServer();
     server.listen(0, "127.0.0.1", () => {
@@ -67,7 +67,7 @@ test("external files reach only agent prompts through native paste, without subm
       cwd: root, env: {
         ...process.env, HOME: fixture, PERCH_NO_LOGIN_PATH: "1",
         PERCH_DB: path.join(fixture, "history.sqlite"), PERCH_HOSTS: path.join(fixture, "hosts.json"),
-        PERCHD_DIR: daemon, PERCH_SETTINGS: path.join(fixture, "settings.json"),
+        ...fixtureRuntimeEnv(fixture),
       }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {
@@ -133,17 +133,13 @@ test("external files reach only agent prompts through native paste, without subm
     expect(uploads).toBe(uploadsBeforeShellDrop);
     expect(errors).toEqual([]);
   } finally {
-    await phoneContext.close();
-    await context.close();
     if (core && core.exitCode === null && core.signalCode === null) {
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGTERM"); });
     }
-    // This daemon and its PTYs are private to this fixture, never the installed app.
-    const daemonPattern = `__perchd serve --dir ${daemon}$`;
-    try { execFileSync("pkill", ["-f", daemonPattern]); }
-    catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
-    await expect.poll(() => spawnSync("pgrep", ["-f", daemonPattern]).status, { timeout: 5000 }).toBe(1);
+    await cleanupFixtureRuntime(root, fixture);
+    await phoneContext.close();
+    await context.close();
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(logPath), contentType: "text/plain" });
     fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
