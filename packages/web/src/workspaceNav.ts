@@ -113,5 +113,12 @@ export function reopenClosedTab(): void {
   if (!tab) return;
   if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
   if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : tab.browser ? "browser" : undefined);
-  else state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
+  else {
+    // Scratchpad executes in HOME, but new sessions are requested by its
+    // listed workspace path, not by the execution directory.
+    const workspace = state.workspaces.find((workspace) => workspace.id === tab.workspaceId);
+    const project = state.workspaceProjects.find((project) => project.id === workspace?.projectId);
+    const cwd = workspace && project && isChatsProject(project) ? workspace.path : tab.cwd;
+    state.createSessionOnHost(tab.hostId, cwd, tab.providerId);
+  }
 }

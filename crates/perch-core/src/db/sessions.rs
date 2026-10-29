@@ -165,6 +165,29 @@ impl HistoryDb {
         self.create_session_on_host(id, cwd, "local")
     }
 
+    /// Create a session whose execution directory can differ from its workspace
+    /// (Scratchpad runs in HOME but keeps its own navigation/file scope).
+    pub fn create_session_in_workspace(
+        &self,
+        id: &str,
+        workspace: &WorkspaceRow,
+        cwd: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO sessions (id, cwd, created_at, host_id, project_id, workspace_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                cwd,
+                now_millis(),
+                workspace.host_id,
+                workspace.project_id,
+                workspace.id
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Local sessions to delete: those of `project_id`, or with `None`, those
     /// left archived (or in an archived project) from when perch archived.
     pub fn local_session_ids(&self, project_id: Option<&str>) -> anyhow::Result<Vec<String>> {
@@ -191,6 +214,19 @@ impl HistoryDb {
         let host_id = normalized_host_id(host_id);
         conn.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
+            // Existing sessions keep their identity even when their execution
+            // cwd differs from the workspace root. Do not register that cwd.
+            let complete: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1
+                 AND NULLIF(host_id, '') IS NOT NULL
+                 AND NULLIF(project_id, '') IS NOT NULL
+                 AND NULLIF(workspace_id, '') IS NOT NULL)",
+                params![id],
+                |row| row.get(0),
+            )?;
+            if complete {
+                return Ok(());
+            }
             let (project_id, workspace_id) =
                 ensure_project_workspace_locked(&conn, host_id, cwd, None, false, None)?;
             conn.execute(

@@ -169,8 +169,8 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(shell.getByText("Shell running", { exact: true })).toBeVisible();
     await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
     await shell.locator(".xterm-helper-textarea").press("Enter");
-    // Both sessions started with no project, so in Chats.
-    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${path.join(os.homedir(), ".perch/scratch")}`);
+    // Scratchpad shells start in HOME, not its hidden bookkeeping folder.
+    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${os.homedir()}`);
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });

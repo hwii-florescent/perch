@@ -5,6 +5,7 @@ import { forgetClosedTabs, recordClosedTab, takeClosedTab } from "./closedTabs";
 import { isAgentSession, requestCloseSession, useCloseGuard } from "./closeGuard";
 import { usePerchStore } from "./store";
 import * as agentTerminals from "./agentTerminals";
+import { reopenClosedTab } from "./workspaceNav";
 
 const session = (init: Partial<SessionSummary>): SessionSummary => ({
   id: "s", title: "t", cwd: "/p", createdAt: 0, status: "idle", cliProviderId: "claude", ...init,
@@ -44,6 +45,28 @@ describe("closed tabs (Cmd+Shift+T)", () => {
     recordClosedTab(session({ cwd: "/gone", projectId: "b" }));
     forgetClosedTabs("b");
     expect(takeClosedTab((tab) => tab.cwd === "/keep")?.projectId).toBe("a");
+  });
+});
+
+describe("Scratchpad reopen", () => {
+  it.each([true, false])("uses the listed path only for Scratchpad (%s)", (scratchpad) => {
+    const createSessionOnHost = vi.fn();
+    const projectPath = scratchpad ? "/home/test/.perch/scratch" : "/project";
+    const cwd = scratchpad ? "/home/test" : "/project/subdir";
+    const previous = usePerchStore.getState();
+    usePerchStore.setState({
+      activeWorkspaceId: "w",
+      workspaceProjects: [{ id: "p", path: projectPath, hostId: "local" } as never],
+      workspaces: [{ id: "w", projectId: "p", path: projectPath, hostId: "local", state: "active" } as never],
+      createSessionOnHost,
+    });
+    try {
+      recordClosedTab(session({ cwd, workspaceId: "w", projectId: "p" }));
+      reopenClosedTab();
+      expect(createSessionOnHost).toHaveBeenCalledWith("local", scratchpad ? projectPath : cwd, "claude");
+    } finally {
+      usePerchStore.setState(previous);
+    }
   });
 });
 

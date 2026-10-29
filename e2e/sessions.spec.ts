@@ -48,6 +48,27 @@ test.describe("Session lifecycle", () => {
     await expect(chats.getByTestId(`workspace-session-${id}`)).toBeVisible();
     await expect(page.getByTestId("project-list")).not.toContainText("scratch");
     await expect(chats).not.toContainText("scratch");
+    const terminal = page.getByTestId("persistent-agent-terminal");
+    const originalTerminalId = await terminal.getAttribute("data-terminal-id");
+    const checkCwd = async () => {
+      const marker = `scratchpad_cwd_${crypto.randomUUID()}:`;
+      await terminal.locator(".xterm-helper-textarea").pressSequentially(`printf '${marker}%s\\n' "$PWD"\n`);
+      // The fixture core explicitly uses this process's home (playwright.config.ts).
+      await expect(terminal.locator(".xterm-rows")).toContainText(`${marker}${os.homedir()}`);
+    };
+    await checkCwd();
+
+    // Reopen requests the Scratchpad workspace, not an unlisted HOME project.
+    await page.getByTestId(`workspace-session-close-${id}`).click();
+    await expect(chats.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+t" : "Control+Shift+t");
+    await expect(terminal).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+    await expect(terminal).not.toHaveAttribute("data-terminal-id", originalTerminalId!);
+    await checkCwd();
+    const reopened = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
+    expect(reopened).not.toBe(id);
+    await expect(chats.getByTestId(`workspace-session-${reopened}`)).toBeVisible();
+    await expect(page.getByTestId("project-list").getByTitle(os.homedir(), { exact: true })).toHaveCount(0);
   });
 
   test("S4. × and exiting the terminal delete the session", async ({ page }) => {

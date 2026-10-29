@@ -524,7 +524,9 @@ impl HistoryDb {
             let mut stmt = conn.prepare(
                 "SELECT id, cwd, COALESCE(NULLIF(host_id, ''), 'local'), archived,
                         project_id, workspace_id
-                 FROM sessions ORDER BY created_at ASC, id ASC",
+                 FROM sessions
+                 WHERE NULLIF(project_id, '') IS NULL OR NULLIF(workspace_id, '') IS NULL
+                 ORDER BY created_at ASC, id ASC",
             )?;
             let rows = stmt
                 .query_map([], |row| {

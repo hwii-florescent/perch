@@ -836,8 +836,9 @@ pub(super) fn status_message(status: crate::status::StatusInfo) -> ServerMessage
 }
 
 /// "No project" sessions (cwd `~` or none, including the blank one minted on
-/// connect) run in one scratch folder listed as "Chats", so perch never turns
-/// $HOME into a project. Callers hold `foundation_lock`.
+/// connect) belong to one scratch workspace listed as "Chats", so perch never
+/// turns $HOME into a project. New sessions execute in HOME instead of that
+/// bookkeeping folder. Callers hold `foundation_lock`.
 pub(super) fn chats_pair(
     app: &AppState,
 ) -> anyhow::Result<(crate::db::ProjectRow, crate::db::WorkspaceRow)> {
@@ -846,6 +847,24 @@ pub(super) fn chats_pair(
     std::fs::create_dir_all(&scratch)?;
     app.db
         .create_project("local", &scratch.display().to_string(), Some("Chats"), None)
+}
+
+fn create_workspace_session(
+    db: &crate::db::HistoryDb,
+    session_id: &str,
+    workspace: &crate::db::WorkspaceRow,
+) -> anyhow::Result<String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
+    let cwd = if workspace.host_id == "local"
+        && workspace.path == crate::db::canonical_path_for_host("local", &scratch.to_string_lossy())
+    {
+        home
+    } else {
+        workspace.path.clone()
+    };
+    db.create_session_in_workspace(session_id, workspace, &cwd)?;
+    Ok(cwd)
 }
 
 pub(super) fn handle_session_create(
@@ -880,10 +899,9 @@ pub(super) fn handle_session_create(
     // or in Chats, never in a folder perch hasn't been given ("+ Add" is how
     // a folder becomes a project). Once started, the session stays in that
     // project whatever the terminal later cd's into.
-    let requested = cwd.filter(|cwd| cwd != "~");
-    if let Some(cwd) = &requested {
-        let listed = state.app.db.listed_workspace_at("local", cwd);
-        if !matches!(listed, Ok(Some(_))) || !std::path::Path::new(cwd).is_dir() {
+    let requested = if let Some(cwd) = cwd.filter(|cwd| cwd != "~") {
+        let listed = state.app.db.listed_workspace_at("local", &cwd);
+        if !matches!(listed, Ok(Some(_))) || !std::path::Path::new(&cwd).is_dir() {
             let _ = state.out_tx.send(ServerMessage::Error {
                 message: format!("{cwd} is not a project in perch; add it first or start in Chats"),
                 request_id: None,
@@ -892,17 +910,19 @@ pub(super) fn handle_session_create(
             });
             return;
         }
-    }
+        listed.unwrap()
+    } else {
+        None
+    };
     let state = state.clone();
     tokio::spawn(async move {
         let session_id = Uuid::new_v4().to_string();
         let persisted = match requested {
-            Some(cwd) => state.app.db.create_session(&session_id, &cwd).map(|()| cwd),
+            Some(workspace) => create_workspace_session(&state.app.db, &session_id, &workspace),
             None => {
                 let _foundation_guard = state.app.foundation_lock.lock().unwrap();
                 chats_pair(&state.app).and_then(|(project, workspace)| {
-                    let cwd = workspace.path.clone();
-                    state.app.db.create_session(&session_id, &cwd)?;
+                    let cwd = create_workspace_session(&state.app.db, &session_id, &workspace)?;
                     // Push the pair so Chats shows in the sidebar right away.
                     super::workspace::publish_project_pair(&state.app, project, workspace);
                     Ok(cwd)
@@ -1844,6 +1864,73 @@ pub(super) fn handle_session_rename(
                 retryable: false,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod scratchpad_tests {
+    use super::*;
+
+    #[test]
+    fn scratchpad_starts_in_home_without_moving_existing_sessions_or_registering_home() {
+        let path = std::env::temp_dir().join(format!("perch-scratchpad-{}.sqlite", Uuid::new_v4()));
+        let db = crate::db::HistoryDb::open(&path).unwrap();
+        let home = std::env::var("HOME").unwrap();
+        let scratch = std::path::Path::new(&home).join(".perch/scratch");
+        let scratch = scratch.to_string_lossy();
+        let (project, workspace) = db
+            .create_project("local", &scratch, Some("Chats"), None)
+            .unwrap();
+        db.create_session("old", &scratch).unwrap();
+        db.set_claude_session_id("old", "existing-conversation")
+            .unwrap();
+
+        assert_eq!(
+            create_workspace_session(&db, "new", &workspace).unwrap(),
+            home
+        );
+        let row = db.get_session("new").unwrap().unwrap();
+        assert_eq!(row.cwd, home);
+        assert_eq!(row.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(row.workspace_id.as_deref(), Some(workspace.id.as_str()));
+        // Lazy persistence from terminal/chat/layout paths must not mint a HOME project.
+        db.create_session("new", &home).unwrap();
+        // Nor may a repeated create move an old conversation to HOME.
+        db.create_session_in_workspace("old", &workspace, &home)
+            .unwrap_err();
+        drop(db);
+
+        // Startup's legacy import must preserve explicit associations without
+        // creating a project from the execution cwd.
+        let db = crate::db::HistoryDb::open(&path).unwrap();
+        let row = db.get_session("new").unwrap().unwrap();
+        assert_eq!(row.cwd, home);
+        assert_eq!(row.workspace_id.as_deref(), Some(workspace.id.as_str()));
+        assert_eq!(db.list_projects("local", true).unwrap().len(), 1);
+        assert!(db.listed_workspace_at("local", &home).unwrap().is_none());
+        let old = db.get_session("old").unwrap().unwrap();
+        assert_eq!(old.cwd, scratch);
+        assert_eq!(
+            old.claude_session_id.as_deref(),
+            Some("existing-conversation")
+        );
+        let ids = db.local_session_ids(Some(&project.id)).unwrap();
+        assert!(ids.contains(&"new".to_string()) && ids.contains(&"old".to_string()));
+
+        let (_, ordinary) = db
+            .create_project("local", "/tmp/perch-ordinary", None, None)
+            .unwrap();
+        assert_eq!(
+            create_workspace_session(&db, "ordinary", &ordinary).unwrap(),
+            ordinary.path
+        );
+        let (_, remote) = db.create_project("remote", &scratch, None, None).unwrap();
+        assert_eq!(
+            create_workspace_session(&db, "remote", &remote).unwrap(),
+            remote.path
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 }
 
