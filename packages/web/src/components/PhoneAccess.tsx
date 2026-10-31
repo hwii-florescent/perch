@@ -79,7 +79,7 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
             <span className={MUTED}>No network address found. Connect this computer to Wi-Fi or Tailscale.</span>
           )}
           {!hasTailscale && address && (
-            <span className={MUTED}>Tailscale isn’t running here, so the phone must be on this Wi-Fi.</span>
+            <span className={MUTED}>Tailscale isn’t running on this computer. Turn it on here and on the phone (same account) to reach this computer from anywhere. Until then the phone must be on this Wi-Fi, which many campus, office and apartment networks block.</span>
           )}
         </div>
       )}
