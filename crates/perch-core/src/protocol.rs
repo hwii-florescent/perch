@@ -2234,6 +2234,10 @@ pub enum ServerMessage {
         enabled: bool,
         always_on: bool,
         addresses: Vec<PhoneAddress>,
+        /// This machine's Tailscale: `missing`, `needsLogin`, `stopped` or
+        /// `running`. Absent while access is off (and from older cores).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tailscale: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

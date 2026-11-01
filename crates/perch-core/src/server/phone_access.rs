@@ -165,16 +165,21 @@ impl PhoneAccess {
     }
 
     /// The URLs a phone can try, best first (Tailscale works from anywhere,
-    /// the LAN address only on the same Wi-Fi). Empty while access is off.
-    pub async fn addresses(&self) -> Vec<PhoneAddress> {
+    /// the LAN address only on the same Wi-Fi), and Tailscale's state so the
+    /// user can be told what to fix. Empty/`None` while access is off.
+    pub async fn addresses(&self) -> (Vec<PhoneAddress>, Option<Tailscale>) {
         let port = match (self.always_on, self.running.lock().unwrap().as_ref()) {
             (Some(port), _) => port,
             (None, Some(running)) => running.port,
-            (None, None) => return Vec::new(),
+            (None, None) => return (Vec::new(), None),
         };
         let url = |ip: IpAddr| format!("http://{ip}:{port}{}", self.base_path);
         let mut found = Vec::new();
-        let tailnet = tailscale_ip().await;
+        let tailscale = tailscale().await;
+        let tailnet = match tailscale {
+            Tailscale::Running(ip) => Some(ip),
+            _ => None,
+        };
         if let Some(ip) = tailnet {
             found.push(PhoneAddress {
                 kind: "tailscale".into(),
@@ -188,7 +193,31 @@ impl PhoneAccess {
                 url: url(ip),
             });
         }
-        found
+        (found, Some(tailscale))
+    }
+}
+
+/// What a phone needs from this machine's Tailscale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tailscale {
+    /// No CLI on the PATH and no app bundle.
+    Missing,
+    /// Installed, but not signed in (or the machine awaits admin approval).
+    NeedsLogin,
+    /// Installed but off, starting, or not answering.
+    Stopped,
+    /// Connected, with this tailnet IPv4 address.
+    Running(IpAddr),
+}
+
+impl Tailscale {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::NeedsLogin => "needsLogin",
+            Self::Stopped => "stopped",
+            Self::Running(_) => "running",
+        }
     }
 }
 
@@ -203,34 +232,63 @@ fn lan_ip() -> Option<IpAddr> {
     (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
 }
 
-/// This machine's tailnet address, if the Tailscale CLI is installed and the
-/// daemon is up. The app bundle's binary is tried too because a GUI-only
-/// install doesn't put `tailscale` on the PATH.
-async fn tailscale_ip() -> Option<IpAddr> {
+/// This machine's Tailscale state, from `tailscale status --json`. The app
+/// bundle's binary is tried too because a GUI-only install doesn't put
+/// `tailscale` on the PATH (and its CLI only answers while the app runs).
+async fn tailscale() -> Tailscale {
+    const APP: &str = "/Applications/Tailscale.app";
+    let mut found = if std::path::Path::new(APP).exists() {
+        Tailscale::Stopped
+    } else {
+        Tailscale::Missing
+    };
     for program in [
         "tailscale",
         "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
     ] {
         let run = tokio::process::Command::new(program)
-            .args(["ip", "-4"])
+            .args(["status", "--json"])
             .kill_on_drop(true)
             .output();
-        let Ok(Ok(output)) = tokio::time::timeout(Duration::from_secs(2), run).await else {
-            continue;
+        let output = match tokio::time::timeout(Duration::from_secs(2), run).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            // Present but hung or unrunnable: installed, not usable.
+            _ => {
+                if found == Tailscale::Missing {
+                    found = Tailscale::Stopped;
+                }
+                continue;
+            }
         };
-        if !output.status.success() {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        if let Some(ip) = text
-            .lines()
-            .next()
-            .and_then(|line| line.trim().parse::<IpAddr>().ok())
-        {
-            return Some(ip);
+        // Not the exit status: a stopped daemon still reports its state.
+        match parse_status(&output.stdout) {
+            running @ Tailscale::Running(_) => return running,
+            Tailscale::NeedsLogin => found = Tailscale::NeedsLogin,
+            _ if found == Tailscale::Missing => found = Tailscale::Stopped,
+            _ => {}
         }
     }
-    None
+    found
+}
+
+/// The state in one `tailscale status --json` answer. Anything unreadable is
+/// an installed CLI that couldn't answer, i.e. stopped.
+fn parse_status(json: &[u8]) -> Tailscale {
+    let Ok(status) = serde_json::from_slice::<serde_json::Value>(json) else {
+        return Tailscale::Stopped;
+    };
+    match status["BackendState"].as_str() {
+        Some("Running") => status["Self"]["TailscaleIPs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|ip| ip.as_str()?.parse::<IpAddr>().ok())
+            .find(IpAddr::is_ipv4)
+            .map_or(Tailscale::Stopped, Tailscale::Running),
+        Some("NeedsLogin" | "NeedsMachineAuth") => Tailscale::NeedsLogin,
+        _ => Tailscale::Stopped,
+    }
 }
 
 #[cfg(test)]
@@ -258,7 +316,7 @@ mod tests {
 
         // Off at start: nothing listens, no addresses, tokens refused.
         assert!(!access.enabled());
-        assert!(access.addresses().await.is_empty());
+        assert!(access.addresses().await.0.is_empty());
         let code = devices.start_pairing(std::time::Instant::now());
         let paired = devices
             .claim(&code, "p", std::time::Instant::now(), 1)
@@ -289,6 +347,32 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(get(port).await.is_err(), "the port must be closed");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn reads_tailscale_state_from_status_json() {
+        let running = br#"{"BackendState":"Running","Self":{"TailscaleIPs":["fd7a:115c::1","100.101.102.103"]}}"#;
+        assert_eq!(
+            parse_status(running),
+            Tailscale::Running("100.101.102.103".parse().unwrap())
+        );
+        assert_eq!(
+            parse_status(br#"{"BackendState":"NeedsLogin","Self":{}}"#),
+            Tailscale::NeedsLogin
+        );
+        assert_eq!(
+            parse_status(br#"{"BackendState":"Stopped"}"#),
+            Tailscale::Stopped
+        );
+        // Running without an IPv4 address yet, or a CLI that printed an error.
+        assert_eq!(
+            parse_status(br#"{"BackendState":"Running","Self":{"TailscaleIPs":[]}}"#),
+            Tailscale::Stopped
+        );
+        assert_eq!(
+            parse_status(b"The Tailscale GUI failed to start"),
+            Tailscale::Stopped
+        );
     }
 }
 

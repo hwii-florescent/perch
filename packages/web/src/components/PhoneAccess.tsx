@@ -17,6 +17,8 @@ import { Switch } from "./ui/switch";
 import { SettingRow } from "./ui/setting-row";
 import { cn } from "../lib/cn";
 import { ADDR, MUTED } from "./ui/settings";
+import { button } from "./ui/button";
+import { openExternal } from "../links";
 
 export type PhoneStatus = Omit<PhoneAccessStatusMessage, "type" | "requestId">;
 
@@ -30,8 +32,21 @@ export function usePhoneAccess(): PhoneStatus | null {
     socket.send({ type: "phone.access.get", requestId: newId() });
     return off;
   }, []);
+  // While Tailscale is being set up, look again so its address appears on its own.
+  const waiting = !!status?.enabled && !!status.tailscale && status.tailscale !== "running";
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => socket.send({ type: "phone.access.get", requestId: newId() }), 5000);
+    return () => clearInterval(timer);
+  }, [waiting]);
   return status;
 }
+
+const TAILSCALE_HINT: Record<string, string> = {
+  missing: "Install Tailscale on this computer and on the phone, signed in to the same account, to reach this computer from anywhere.",
+  needsLogin: "Tailscale is installed but not signed in. Open it and sign in, then sign in on the phone with the same account.",
+  stopped: "Tailscale is installed but not connected. Open it and turn it on, here and on the phone.",
+};
 
 /** The address a phone should use: Tailscale reaches it from anywhere, the LAN
  * address only on the same Wi-Fi. */
@@ -78,8 +93,18 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
           ) : (
             <span className={MUTED}>No network address found. Connect this computer to Wi-Fi or Tailscale.</span>
           )}
-          {!hasTailscale && address && (
-            <span className={MUTED}>Tailscale isn’t running on this computer. Turn it on here and on the phone (same account) to reach this computer from anywhere. Until then the phone must be on this Wi-Fi, which many campus, office and apartment networks block.</span>
+          {!hasTailscale && (
+            <div className="flex flex-col items-start gap-[0.4rem]" data-testid="phone-tailscale-hint">
+              <span className={MUTED}>
+                {TAILSCALE_HINT[status!.tailscale ?? ""] ?? "Tailscale isn’t running on this computer. Turn it on here and on the phone (same account) to reach this computer from anywhere."}
+                {" "}Until then the phone must be on this Wi-Fi, which many campus, office and apartment networks block. This updates by itself.
+              </span>
+              {status!.tailscale === "missing" && (
+                <button type="button" className={button({ variant: "soft", size: "sm" })} data-testid="phone-get-tailscale" onClick={() => openExternal("https://tailscale.com/download")}>
+                  Get Tailscale
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

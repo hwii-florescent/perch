@@ -100,11 +100,13 @@ pub(super) async fn phone_access_status(
     request_id: String,
     error: Option<String>,
 ) -> ServerMessage {
+    let (addresses, tailscale) = app.phone.addresses().await;
     ServerMessage::PhoneAccessStatus {
         request_id,
         enabled: app.phone.enabled(),
         always_on: app.phone.always_on(),
-        addresses: app.phone.addresses().await,
+        addresses,
+        tailscale: tailscale.map(|t| t.wire().to_string()),
         error,
     }
 }

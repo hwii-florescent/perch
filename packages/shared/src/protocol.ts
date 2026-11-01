@@ -1189,6 +1189,8 @@ export interface PhoneAccessStatusMessage {
   enabled: boolean;
   alwaysOn: boolean;
   addresses: PhoneAddress[];
+  /** This machine's Tailscale; absent while access is off (and from older cores). */
+  tailscale?: "missing" | "needsLogin" | "stopped" | "running";
   error?: string;
 }
 /** Revoke one paired device; its token stops working immediately. */
