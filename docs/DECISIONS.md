@@ -7,6 +7,72 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-10-28 — Perch Relay: reach a phone without Tailscale (proposed, awaiting approval)
+
+**Problem.** A paired phone reaches the desktop directly: the same Wi-Fi or
+Tailscale (`server/phone_access.rs`). Many campus, office and apartment networks
+keep Wi-Fi clients apart, and Tailscale needs an install and sign-in on both
+devices. T3 Code (T3 Connect) and Orca (Orca Relay) solve this with a hosted
+service both sides dial out to, plus accounts and native apps.
+
+**Proposal.** An optional relay, off by default, that only carries ciphertext.
+
+- **Pairing.** Settings → Devices → "Reach from anywhere". The QR carries the
+  relay URL, a random 128-bit rendezvous id, the desktop's X25519 public key and
+  the existing one-time pairing code. Nothing about the pairing reaches the
+  relay except the rendezvous id.
+- **Transport.** Desktop and phone each open an outbound WSS to the relay; it
+  joins the two sockets by rendezvous id and splices frames. Neither side
+  accepts inbound connections, so client isolation and NAT stop mattering.
+- **End-to-end encryption.** Noise `XX` (X25519, ChaCha20-Poly1305) inside the
+  WSS. The phone pins the desktop key from the QR; the desktop records the
+  phone's key with its device entry. The relay sees IPs, timing and sizes, never
+  terminal bytes, files or tokens. Revoking a device (existing `device.revoke`)
+  also forgets its key and drops its relay session.
+- **No accounts in v1.** The desktop proves it owns a rendezvous id with a
+  signature from its key; the relay stores only ids, public keys and limits.
+- **Same semantics as a direct connection.** A relay drop is a disconnect:
+  unknown runtime state, never exit; no queued keystrokes, no blind retries.
+  Direct LAN/Tailscale is preferred whenever it answers.
+
+**Where the phone's code comes from (the hard part).** A web page served by
+the relay could be replaced with one that reads everything, which defeats the
+encryption. That is why Orca and T3 ship native apps. Proposed instead: a tiny,
+auditable bootstrap page on a static origin separate from the relay (a pinned
+release on the project's site). Its service worker does the Noise handshake and
+fetches the real UI bundle *from the desktop* through the tunnel, so the UI is
+always the paired desktop's own version. The trusted surface is the bootstrap
+(a few hundred lines), not the relay or the whole app. `ws.ts` gets a transport
+shim, because a service worker cannot proxy WebSockets. A native app stays a
+later option, not a prerequisite.
+
+**Running it.**
+
+- One open-source Rust binary, `perch-relay` (axum, in-memory state), that
+  anyone can self-host; the desktop takes a relay URL setting.
+- A project-run default instance (Cloudflare Workers + Durable Objects or one
+  small VM). Limits: frame size, per-rendezvous bandwidth, idle timeout,
+  connection rate per IP. Needs a privacy note (what metadata exists, retention:
+  none beyond live sessions) and an owner for cost and abuse.
+
+**Phases.** (1) `perch-relay` + Noise tunnel, tested with a self-hosted relay and
+a phone that first loaded the UI over LAN/Tailscale; (2) bootstrap origin, so a
+first pairing needs no direct path; (3) project-hosted default instance;
+(4) Web Push for Needs You (iOS 16.4+ home-screen PWAs), if wanted.
+
+**Alternatives considered.** Embedding Tailscale: `tailscale-rs` is official
+Rust but an experimental preview with auth-key-only sign-in and no
+Serve/Funnel/HTTPS; `libtailscale` (Go tsnet) adds a Go runtime to every build;
+either way the phone still needs the Tailscale app. Tailscale Funnel / Cloudflare
+Quick Tunnels: TLS ends at the provider and Perch's shells sit on a public URL
+behind pairing alone. Native mobile app: largest scope, second codebase, store
+review. Accounts (T3/Orca style): unnecessary when the QR already exchanges keys.
+
+**Open questions.** Who runs and pays for the default instance; whether a relay
+is compatible with "Hosted is frozen" (it is transport, not hosted chat);
+whether phones on both direct and relay paths should switch automatically
+(proposed: prefer direct, fall back to relay, show which in the header).
+
 ## 2026-10-27 — Browser continuity, tab identity and address suggestions (proposed, awaiting approval)
 
 A browser tab or drawer page remembers the address it last showed, so a restart
