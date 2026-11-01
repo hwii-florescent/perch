@@ -76,9 +76,13 @@ Start: `crates/perch-core/src/hub.rs`, `ssh.rs`,
 
 ### 2. Workspace Quick Open and coherent actions
 
-- Fast bounded/cancellable file finder scoped to the selected nest, with explicit
-  ignore/generated-file policy.
-- Reuse Navigator's shell, but go beyond its current session/agent-launch list.
+First slice implemented: typing in Navigator (Cmd-P) searches filenames in the
+selected nest through `fs.search` (debounced, superseded searches cancel, skips
+VCS/dependency/build folders, does not read .gitignore, 200-hit/20k-entry/2s
+bounds, local and relayed remote cores). Remaining:
+
+- Ranking/fuzzy matching, recent files, and an ignore policy that honours
+  .gitignore (today a bounded breadth-first walk, not an index).
 - Share targets/guards across menu, shortcut and palette entry points. Freeze
   the target while a menu is open; domain validation stays server-side.
 - Finish session-free connect/browsing. Canonical files need no session parent,
@@ -95,6 +99,26 @@ Give execution a visible terminal owner. Cancel creates nothing. Do not paste
 into a busy agent/shell, auto-run repository configuration or infer arbitrary
 commands from filenames. Saved project commands can follow; a scheduler is not
 needed for alpha.
+
+First slice implemented, **local only**: `> command` in Navigator confirms host,
+folder and command, then `workspace.run.v1` starts a NEW owned terminal (the
+command is one positional argument of a wrapper shell, never PTY input). The
+request id is a durable one-shot admission (`workspace_runs`), so a lost reply,
+core crash or deleted tab never re-runs it; an unknown outcome is reported, not
+retried. Remote hosts are refused until owned remote runtimes exist (item 1).
+Remaining: saved project commands, remote Run, a visible running/exited state in
+Navigator.
+
+### Also landed: place history and command marks
+
+- Back/Forward (`navHistory.ts`): per-window, in-memory history of sessions,
+  files, changes and pages. Ctrl-- / Ctrl-Shift-- on a Mac, Alt-Shift-Left/Right
+  elsewhere, and mouse buttons 4/5. Closed places are skipped; it never starts or
+  relaunches anything. Not persisted across reloads.
+- OSC 133 command marks (`commandMarks.ts`): jump to the previous/next command
+  and a scrollbar tick per failed one. Observe-only. Perch does **not** inject
+  shell integration, so marks appear only for shells that already emit OSC 133
+  and for a confirmed Run; opt-in zsh/bash/fish integration is the open follow-up.
 
 ### 4. Finish resource actions, not a full editor
 
