@@ -24,6 +24,7 @@ import { focusMainResponder, nativeBrowser, noteBrowserFocus } from "./browserNa
 import { tauriInvoke } from "./links";
 import { zoomIn, zoomOut, zoomReset } from "./zoom";
 import { openNextAttention } from "./attention";
+import { navBack, navForward } from "./navHistory";
 import { IS_MAC, comboMatches, formatCombo, keyLabel, normalizeCombo, parseCombo, reservedCombo, validCombo } from "./keyCombo";
 
 export const LEADER_TIMEOUT_MS = 1500;
@@ -123,6 +124,10 @@ for (let i = 1; i <= 8; i++) {
 shortcut("tabs.last", "tabs", ["cmd+9", "alt+9"], "Jump to the last tab", () => jumpToNthWorkspaceTab(Infinity));
 shortcut("tabs.next", "tabs", ["cmd+shift+]", "ctrl+pagedown"], "Next tab", () => switchTabRelative(1));
 shortcut("tabs.prev", "tabs", ["cmd+shift+[", "ctrl+pageup"], "Previous tab", () => switchTabRelative(-1));
+// History, not position: where you were before / after (VS Code's Ctrl+- on a Mac). It claims Ctrl+- in a
+// terminal too (readline's undo is also on Ctrl+X Ctrl+U); rebind in Settings to give it back.
+shortcut("nav.back", "tabs", ["ctrl+-", "alt+shift+left"], "Back to where you were", () => navBack());
+shortcut("nav.forward", "tabs", ["ctrl+shift+-", "alt+shift+right"], "Forward", () => navForward());
 
 // Nests and birdhouses (workspaces and projects)
 shortcut("nests.prev", "nests", ["ctrl+shift+up", "alt+shift+up"], "Previous nest", () => stepNest(-1));

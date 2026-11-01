@@ -25,6 +25,8 @@
     ["tabs.last","Digit9",null,1],
     ["tabs.next","BracketRight",null,9],
     ["tabs.prev","BracketLeft",null,9],
+    ["nav.back","Minus",null,2],
+    ["nav.forward","Minus",null,10],
     ["nests.prev","ArrowUp",null,10],
     ["nests.next","ArrowDown",null,10],
     ["nests.jump1","Digit1",null,10],
