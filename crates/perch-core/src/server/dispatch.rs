@@ -309,6 +309,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             files,
             session_order,
         ),
+        ClientMessage::WorkspaceRun {
+            request_id,
+            workspace_id,
+            command,
+        } => terminal::handle_workspace_run(state, request_id, workspace_id, command),
         ClientMessage::AgentTerminalOpen {
             request_id,
             session_id,

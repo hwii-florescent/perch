@@ -18,13 +18,17 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePerchStore } from "../store";
+import { effectiveWorkspace, usePerchStore } from "../store";
+import { useWorkspaceFilesStore } from "../filesystemStore";
+import { useFileTabs } from "../fileTabs";
 import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { sessionDotState, type AgentDotState } from "../statusDot";
 import type { SessionSummary } from "@perch/shared";
 import { splitActiveTab } from "../tiledPanes";
 import { shortcutFor } from "../keybinds";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { runInWorkspace } from "../runs";
 
 const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_none_solid] border-current border-l-2 border-l-transparent";
 const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1 border-l-accent" : "[background:none]");
@@ -62,17 +66,45 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   const createSession = usePerchStore((s) => s.createSessionOnHost);
   const manageAgents = usePerchStore((s) => s.openAgentCatalog);
   const connected = usePerchStore((s) => s.connected);
+  const workspace = usePerchStore(effectiveWorkspace);
+  const supportsSearch = usePerchStore((s) => (workspace?.hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[workspace?.hostId ?? ""])?.includes("fs.search") === true);
+  const searchResult = useWorkspaceFilesStore((s) => workspace ? s.searches[workspace.id] : undefined);
+  const supportsRun = usePerchStore((s) => workspace?.hostId === "local" && s.serverInfo?.capabilities?.includes("workspace.run.v1") === true);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterChip>("all");
   const [selected, setSelected] = useState(0);
+  const [runTarget, setRunTarget] = useState<{ workspaceId: string; cwd: string; command: string } | null>(null);
+  const [running, setRunning] = useState(false);
+  const runPending = useRef(false);
+  const [runError, setRunError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (open && connected) fetchAgents(hostId); }, [open, connected, fetchAgents, hostId]);
   const current = sessions.find((session) => session.id === sessionId);
   const cwd = current?.cwd ?? activeProject?.cwd;
+  const runMode = query.trimStart().startsWith(">");
+  const fileQuery = runMode ? "" : query.trim();
+  const searchActive = open && connected && supportsSearch && !!workspace && filter === "all" && !!fileQuery;
+  useEffect(() => {
+    if (!searchActive || !workspace) return;
+    const timer = setTimeout(() => useWorkspaceFilesStore.getState().searchFiles(workspace.id, fileQuery), 180);
+    return () => clearTimeout(timer);
+  }, [searchActive, workspace?.id, fileQuery]);
+  const matchingSearch = searchActive && searchResult?.query === fileQuery ? searchResult : undefined;
   const commands = useMemo(() => {
+    if (runMode) {
+      const command = query.trimStart().slice(1).trim();
+      return command && connected && supportsRun && workspace ? [{
+        id: "run", label: `Run ${command}`, detail: workspace.path,
+        run: () => { setRunError(null); setRunTarget({ workspaceId: workspace.id, cwd: workspace.path, command }); },
+      }] : [];
+    }
     if (filter !== "all") return [];
+    const files = matchingSearch?.state === "ready" && workspace ? matchingSearch.entries.slice(0, 50).map((file) => ({
+      id: `file:${file.path}`, label: file.name, detail: file.path,
+      run: () => useFileTabs.getState().open(workspace.id, file.path),
+    })) : [];
     const choices = [
       ...(connected && sessionId && current?.cwd ? [{ id: "terminal", label: "New Terminal", detail: current.cwd, run: () => splitActiveTab("right") }] : []),
       ...(connected && cwd ? (catalog?.manifests ?? [])
@@ -81,8 +113,8 @@ export function Navigator({ open, onClose }: NavigatorProps) {
       { id: "agents", label: "Manage agents", detail: "Installed and available to install", run: manageAgents },
     ];
     const search = query.trim().toLowerCase();
-    return choices.filter((choice) => !search || choice.label.toLowerCase().includes(search));
-  }, [catalog, connected, createSession, current?.cwd, cwd, filter, hostId, manageAgents, query, sessionId]);
+    return [...files, ...choices.filter((choice) => !search || choice.label.toLowerCase().includes(search))];
+  }, [catalog, connected, createSession, current?.cwd, cwd, filter, hostId, manageAgents, query, sessionId, matchingSearch, workspace, runMode, supportsRun]);
 
   // Reset transient state every time the Navigator opens.
   useEffect(() => {
@@ -90,6 +122,8 @@ export function Navigator({ open, onClose }: NavigatorProps) {
     setQuery("");
     setFilter("all");
     setSelected(0);
+    setRunError(null);
+    setRunTarget(null);
     // Focus the search input once it's mounted.
     const id = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(id);
@@ -97,11 +131,12 @@ export function Navigator({ open, onClose }: NavigatorProps) {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (runMode) return [];
     return sessions
       .filter((s) => filter === "all" || sessionDotState(s) === filter)
       .filter((s) => !q || s.title.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [sessions, filter, query]);
+  }, [sessions, filter, query, runMode]);
 
   // Clamp selection whenever the filtered row set shrinks/grows.
   useEffect(() => {
@@ -118,7 +153,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   }, [selected]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || runTarget) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       if (e.key === "Escape") {
@@ -144,7 +179,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
       if (e.key === "Enter") {
         e.preventDefault();
         const command = commands[selected];
-        if (command) { onClose(); command.run(); return; }
+        if (command) { if (command.id !== "run") onClose(); command.run(); return; }
         const target = rows[selected - commands.length];
         if (target) {
           switchSession(target.id);
@@ -154,9 +189,25 @@ export function Navigator({ open, onClose }: NavigatorProps) {
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, rows, commands, selected, switchSession, onClose]);
+  }, [open, rows, commands, selected, switchSession, onClose, runTarget]);
 
   if (!open) return null;
+  if (runTarget) return <ConfirmDialog
+    message={`Run in a new terminal?\n\nHost: This computer\nFolder: ${runTarget.cwd}\n\n${runTarget.command}`}
+    confirmLabel="Run" busy={running}
+    onCancel={() => { setRunTarget(null); requestAnimationFrame(() => inputRef.current?.focus()); }}
+    onConfirm={() => {
+      if (runPending.current) return;
+      runPending.current = true; setRunning(true);
+      void runInWorkspace(runTarget.workspaceId, runTarget.command).then((id) => {
+        usePerchStore.getState().startCli(id, "terminal");
+        useFileTabs.getState().showSession();
+        switchSession(id); onClose();
+      }, (error: unknown) => { setRunError(error instanceof Error ? error.message : String(error)); }).finally(() => {
+        runPending.current = false; setRunning(false); setRunTarget(null);
+      });
+    }}
+  />;
 
   const modal = (
     <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-[rgba(0,0,0,0.55)] pt-[12vh]" onClick={onClose}>
@@ -173,7 +224,8 @@ export function Navigator({ open, onClose }: NavigatorProps) {
           type="text"
           className="shrink-0 bg-surface-1 px-4 py-3 [font-family:inherit] text-[0.95rem] text-fg [border-style:none_none_solid] border-current border-b border-b-overlay-0 [outline:none]"
           data-testid="navigator-input"
-          placeholder="Search sessions, agents, commands…"
+          aria-label="Search files, sessions and commands"
+          placeholder="Search files, sessions, agents… or > command"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -196,13 +248,17 @@ export function Navigator({ open, onClose }: NavigatorProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto py-[0.3rem]" ref={listRef}>
+          {runError && <p className="m-0 px-4 py-2 text-[0.78rem] text-red" role="alert">{runError}</p>}
+          {runMode && <p className="m-0 px-4 py-2 text-[0.78rem] text-subtext-0" role="status">{!connected ? "Reconnect to run commands." : !workspace ? "Select a nest first." : !supportsRun ? "Run needs an updated local core. Remote owned runs are not supported yet." : "Enter a shell command after >. You’ll confirm the host, folder and command before it starts in a new terminal."}</p>}
           {commands.map((command, index) => <button key={command.id} type="button"
             className={row(index === selected)}
             data-testid={`navigator-command-${command.id}`} data-selected={index === selected}
-            onMouseEnter={() => setSelected(index)} onClick={() => { onClose(); command.run(); }}>
+            onMouseEnter={() => setSelected(index)} onClick={() => { if (command.id !== "run") onClose(); command.run(); }}>
             <span className={ROW_TITLE}>{command.label}</span><span className={ROW_CWD}>{command.detail}</span>
           </button>)}
-          {rows.length + commands.length === 0 && <div className="p-4 text-center text-[0.82rem] text-subtext-0">No matches</div>}
+          {searchActive && (!matchingSearch || matchingSearch.state === "loading") && <p className="m-0 px-4 py-2 text-[0.78rem] text-subtext-0" role="status">Searching files…</p>}
+          {matchingSearch?.state === "error" && <p className="m-0 px-4 py-2 text-[0.78rem] text-red" role="alert">{matchingSearch.error}</p>}
+          {rows.length + commands.length === 0 && (!searchActive || matchingSearch?.state === "ready") && <div className="p-4 text-center text-[0.82rem] text-subtext-0">No matches</div>}
           {rows.map((s, i) => (
             <button
               key={s.id}
@@ -222,6 +278,10 @@ export function Navigator({ open, onClose }: NavigatorProps) {
             </button>
           ))}
         </div>
+        {searchActive && <p className="m-0 shrink-0 border-t border-overlay-0 px-4 py-2 text-[0.72rem] [overflow-wrap:anywhere] text-subtext-0" role="status">
+          Files in {workspace?.path}. Skips VCS, dependency and build folders; not .gitignore.
+          {(matchingSearch?.truncated || (matchingSearch?.entries.length ?? 0) > 50) && " Results limited; narrow your search."}
+        </p>}
       </div>
     </div>
   );

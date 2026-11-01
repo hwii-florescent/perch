@@ -1102,6 +1102,15 @@ pub enum ClientMessage {
         session_order: Vec<String>,
     },
 
+    /// Explicit confirmed command in a NEW local owned terminal (`workspace.run.v1`).
+    /// A UUID request id is a durable one-shot launch admission, never a retry.
+    #[serde(rename = "workspace.run", rename_all = "camelCase")]
+    WorkspaceRun {
+        request_id: String,
+        workspace_id: String,
+        command: String,
+    },
+
     /// Observe the host-owned provider process. A view release never stops it.
     #[serde(rename = "agent.terminal.open", rename_all = "camelCase")]
     AgentTerminalOpen {
@@ -2222,6 +2231,12 @@ pub enum ServerMessage {
         request_id: String,
         code: String,
         expires_in_ms: i64,
+    },
+
+    #[serde(rename = "workspace.run.started", rename_all = "camelCase")]
+    WorkspaceRunStarted {
+        request_id: String,
+        session_id: String,
     },
 
     /// Whether phones can reach this host and where. `always_on` = the main

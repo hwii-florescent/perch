@@ -976,6 +976,20 @@ export interface ViewerPresentationMessage {
   presentation: ViewerPresentation;
 }
 
+/** Explicit confirmed launch, never PTY input. Local-only; `workspace.run.v1`. */
+export interface WorkspaceRunMessage {
+  type: "workspace.run";
+  /** UUID; the core durably refuses to execute the same request twice. */
+  requestId: string;
+  workspaceId: string;
+  command: string;
+}
+export interface WorkspaceRunStartedMessage {
+  type: "workspace.run.started";
+  requestId: string;
+  sessionId: string;
+}
+
 export interface AgentTerminalOpenMessage {
   type: "agent.terminal.open";
   requestId: string;
@@ -1836,6 +1850,7 @@ export type ClientMessage =
   | FsBrowseMessage
   | UsageGetMessage
   | FsTreeMessage
+  | WorkspaceRunMessage
   | FsSearchMessage
   | FsExtractMessage
   | FsMutateMessage
@@ -2606,6 +2621,7 @@ export interface WorkspaceFocusResponseMessage {
 
 export type ServerMessage =
   | ContextPreviewResultMessage
+  | WorkspaceRunStartedMessage
   | SessionCreatedMessage
   | SessionHistoryMessage
   | SessionListResponseMessage

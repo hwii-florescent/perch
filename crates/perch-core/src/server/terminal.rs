@@ -17,6 +17,7 @@ use agents::lifecycle_control_key;
 /// Resolve the durable session and provider identity before touching a PTY.
 /// Serialize first allocation across connections; a live process always keeps
 /// its existing continuation identity, even if another view has stale state.
+#[allow(clippy::too_many_arguments)]
 fn open_agent_terminal(
     state: &Arc<ConnState>,
     request_id: &str,
@@ -25,6 +26,7 @@ fn open_agent_terminal(
     view_id: &str,
     cols: u16,
     rows: u16,
+    run_command: Option<&str>,
 ) -> anyhow::Result<()> {
     let _operation = state.app.agent_operation_lock.lock().unwrap();
     anyhow::ensure!(
@@ -91,6 +93,13 @@ fn open_agent_terminal(
             );
         }
         let mut extra = Vec::new();
+        if let Some(command) = run_command {
+            anyhow::ensure!(
+                provider_id == crate::agent_fleet::TERMINAL_PROVIDER && live.is_none(),
+                "Run requires a new terminal"
+            );
+            extra.push(command.to_owned());
+        }
         let mut resume = true;
         let mut provider_session_id = live
             .as_ref()
@@ -199,8 +208,15 @@ fn open_agent_terminal(
         }
         state.app.db.set_cli_provider(session_id, provider_id)?;
         // A terminal tab is named "Terminal", not after its first command.
-        if provider_id == crate::agent_fleet::TERMINAL_PROVIDER {
-            state.app.db.set_cli_title(session_id, "Terminal")?;
+        if provider_id == crate::agent_fleet::TERMINAL_PROVIDER
+            && (run_command.is_some() || row.cli_provider_id.as_deref() != Some(provider_id))
+        {
+            let title = run_command
+                .map(|command| format!("Run: {}", command.chars().take(60).collect::<String>()));
+            state
+                .app
+                .db
+                .set_cli_title(session_id, title.as_deref().unwrap_or("Terminal"))?;
         }
         persist_agent_runtime(&state.app, &key)?;
         (registration, row.cwd, extra, resume)
@@ -634,6 +650,97 @@ pub(super) fn handle_terminal_close(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Confirmed Run has its own correlated, durably one-shot admission. It does
+/// not use the uncorrelated session.create UI path or write to an existing PTY.
+pub(super) fn handle_workspace_run(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    command: String,
+) {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = (|| -> anyhow::Result<()> {
+            anyhow::ensure!(
+                Uuid::parse_str(&request_id).is_ok(),
+                "Run requires a UUID request id"
+            );
+            anyhow::ensure!(
+                !command.trim().is_empty()
+                    && command.len() <= 4096
+                    && !command.chars().any(char::is_control),
+                "Use a command of 1–4096 bytes without control characters"
+            );
+            let session_id = format!("run-{request_id}");
+            let cwd = {
+                let _foundation = state.app.foundation_lock.lock().unwrap();
+                let workspace = state.app.db.resolve_workspace(&workspace_id)?;
+                anyhow::ensure!(
+                    workspace.host_id == "local" && !workspace_id.starts_with("remote:"),
+                    "Run in an owned terminal is not supported on remote hosts yet"
+                );
+                anyhow::ensure!(
+                    Path::new(&workspace.path).is_dir(),
+                    "The workspace folder is unavailable"
+                );
+                anyhow::ensure!(state.app.db.claim_workspace_run(&request_id)?, "This Run request was already admitted. Check its terminal; it will not be run again.");
+                session::create_workspace_session(&state.app.db, &session_id, &workspace)?
+            };
+            // Even if opening fails, keep the session discoverable; never delete
+            // bookkeeping or silently retry after an uncertain start.
+            state
+                .app
+                .db
+                .set_cli_provider(&session_id, crate::agent_fleet::TERMINAL_PROVIDER)?;
+            state.app.db.mark_cli_activity(&session_id)?;
+            state.app.registry.create(&session_id, &cwd);
+            session::insert_runtime(&state, &session_id, &cwd, None, None, None);
+            notify_session_updated(&state.app, &session_id);
+            let opened = open_agent_terminal(
+                &state,
+                &request_id,
+                &session_id,
+                crate::agent_fleet::TERMINAL_PROVIDER,
+                &request_id,
+                80,
+                24,
+                Some(&command),
+            );
+            // Creation is not a permanent viewer. The new tab attaches through
+            // the normal provider view API; release only detaches, never stops.
+            release_agent_terminal(
+                &state,
+                &session_id,
+                crate::agent_fleet::TERMINAL_PROVIDER,
+                &request_id,
+            );
+            opened?;
+            if let Some(session) = session::local_sessions_snapshot(&state.app)
+                .into_iter()
+                .find(|row| row.id == session_id)
+            {
+                let _ = state.out_tx.send(ServerMessage::SessionUpdated { session });
+            }
+            let _ = state.out_tx.send(ServerMessage::WorkspaceRunStarted {
+                request_id: request_id.clone(),
+                session_id,
+            });
+            Ok(())
+        })();
+        if let Err(error) = result {
+            fail(
+                &state.out_tx,
+                request_id,
+                "workspace_run_failed",
+                format!(
+                    "{error}. No automatic retry; check the nest's terminals before running again."
+                ),
+                false,
+            );
+        }
+    });
+}
+
 pub(super) fn handle_agent_terminal_open(
     state: &Arc<ConnState>,
     request_id: String,
@@ -653,6 +760,7 @@ pub(super) fn handle_agent_terminal_open(
             &view_id,
             cols,
             rows,
+            None,
         ) {
             fail(
                 &state.out_tx,

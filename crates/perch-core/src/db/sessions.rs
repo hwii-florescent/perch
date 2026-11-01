@@ -161,6 +161,15 @@ fn session_list_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionLis
 }
 
 impl HistoryDb {
+    /// Reserve BEFORE starting any process. Kept even if a launch fails or its
+    /// tab is deleted: uncertainty must never authorize running a command twice.
+    pub fn claim_workspace_run(&self, request_id: &str) -> anyhow::Result<bool> {
+        Ok(self.conn.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO workspace_runs (request_id, created_at) VALUES (?1, ?2)",
+            params![request_id, now_millis()],
+        )? == 1)
+    }
+
     pub fn create_session(&self, id: &str, cwd: &str) -> anyhow::Result<()> {
         self.create_session_on_host(id, cwd, "local")
     }
@@ -545,5 +554,28 @@ impl HistoryDb {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    #[test]
+    fn run_admission_survives_session_deletion_and_database_reopen() {
+        let dir = std::env::temp_dir().join(format!("perch-run-admission-{}", Uuid::new_v4()));
+        let path = dir.join("history.sqlite");
+        let db = HistoryDb::open(&path).unwrap();
+        assert!(db.claim_workspace_run("request").unwrap());
+        db.create_session("run-request", &dir.to_string_lossy())
+            .unwrap();
+        db.delete_session("run-request").unwrap();
+        assert!(!db.claim_workspace_run("request").unwrap());
+        drop(db);
+        let db = HistoryDb::open(&path).unwrap();
+        assert!(!db.claim_workspace_run("request").unwrap());
+        assert!(db.claim_workspace_run("new-confirmation").unwrap());
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -442,8 +442,20 @@ impl FileService {
         })
     }
 
-    /// Search filenames/relative paths, not file contents. Never follow links.
+    /// Search filenames/relative paths, not contents. Never follow links.
+    /// Skip VCS/dependency/build directories; include dotfiles. This bounded
+    /// walk does not interpret .gitignore (the explorer can open omitted files).
     pub fn search(&self, query: &str) -> Result<DirectoryListing, FsError> {
+        self.search_while(query, || true)
+    }
+
+    /// Superseded searches stop between directories/entries, including queued
+    /// work that has not started yet. Cancellation returns incomplete results.
+    pub fn search_while(
+        &self,
+        query: &str,
+        current: impl Fn() -> bool,
+    ) -> Result<DirectoryListing, FsError> {
         let query = query.trim().to_lowercase();
         if query.is_empty() || query.len() > 256 {
             return Err(FsError::InvalidPath {
@@ -459,6 +471,10 @@ impl FileService {
         // ponytail: bounded traversal (20k entries / 2s / 200 hits), not an
         // index. Add an incremental index if large workspaces need full search.
         while let Some(path) = queue.pop_front() {
+            if !current() {
+                truncated = true;
+                break;
+            }
             let listing = match self.list_dir(&path) {
                 Ok(listing) => listing,
                 Err(error) if path.is_empty() => return Err(error),
@@ -470,14 +486,32 @@ impl FileService {
             truncated |= listing.truncated;
             for entry in listing.entries {
                 examined += 1;
-                if entry.kind == EntryKind::Directory && entry.name != ".git" {
+                if entry.kind == EntryKind::Directory
+                    && !matches!(
+                        entry.name.as_str(),
+                        ".git"
+                            | ".hg"
+                            | ".svn"
+                            | "node_modules"
+                            | "target"
+                            | "dist"
+                            | "build"
+                            | ".next"
+                            | ".venv"
+                            | "__pycache__"
+                    )
+                {
                     queue.push_back(entry.path.clone());
                 } else if entry.kind == EntryKind::File
                     && entry.path.to_lowercase().contains(&query)
                 {
                     entries.push(entry);
                 }
-                if examined >= 20_000 || entries.len() >= 200 || started.elapsed().as_secs() >= 2 {
+                if !current()
+                    || examined >= 20_000
+                    || entries.len() >= 200
+                    || started.elapsed().as_secs() >= 2
+                {
                     return Ok(DirectoryListing {
                         path: String::new(),
                         entries,
@@ -1990,6 +2024,12 @@ mod tests {
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join("src/nested/Example.txt"), b"hello").unwrap();
         fs::write(root.join(".git/Example.txt"), b"hidden").unwrap();
+        for dir in ["node_modules", "target", "dist", ".venv"] {
+            fs::create_dir(root.join(dir)).unwrap();
+            fs::write(root.join(dir).join("Example.txt"), b"generated").unwrap();
+        }
+        let cancelled = service.search_while("Example", || false).unwrap();
+        assert!(cancelled.truncated && cancelled.entries.is_empty());
         fs::write(root.join("video.mp4"), [0, 1, 2, 3]).unwrap();
         let hits = service.search("EXAMPLE").unwrap();
         assert_eq!(hits.entries.len(), 1);

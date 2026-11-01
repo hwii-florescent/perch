@@ -1899,6 +1899,8 @@ struct ConnState {
     /// connection's active selection.
     active_project_id: Mutex<Option<String>>,
     active_workspace_id: Mutex<Option<String>>,
+    /// Latest filename search on this connection; typing supersedes old work.
+    file_search_generation: Arc<std::sync::atomic::AtomicU64>,
     /// Maps CLI-attached terminal ids to the session they're attached to, so
     /// `TerminalInput` can clear that session's blocked state on user input,
     /// and the `on_data`/`on_exit` closures (created before this struct
@@ -2084,6 +2086,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         active_session_id: Mutex::new(None),
         active_project_id: Mutex::new(initial_project_id),
         active_workspace_id: Mutex::new(initial_workspace_id),
+        file_search_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         terminal_agent_sessions,
         agent_on_data,
         agent_on_exit,
@@ -2397,6 +2400,7 @@ fn foundation_capabilities() -> Vec<String> {
         "agent.control.acquire",
         "agent.control.release",
         "terminal.open",
+        "workspace.run.v1",
         "terminal.sharedInput",
         "context.bridge.v1",
         "terminal.list",

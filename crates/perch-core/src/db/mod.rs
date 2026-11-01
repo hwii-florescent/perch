@@ -98,6 +98,12 @@ impl HistoryDb {
                 opencode_session_id TEXT,
                 created_at INTEGER NOT NULL
             );
+            -- Run admissions are tombstones, deliberately not FK-cascaded with
+            -- sessions: even a deleted tab must not let an old request re-run.
+            CREATE TABLE IF NOT EXISTS workspace_runs (
+                request_id TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS provider_preferences (
                 provider_id TEXT PRIMARY KEY,
                 enabled INTEGER NOT NULL DEFAULT 1,

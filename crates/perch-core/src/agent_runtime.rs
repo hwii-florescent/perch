@@ -508,6 +508,21 @@ impl AgentRuntimeAdapter {
                 )));
             }
         }
+        if provider_id == crate::agent_fleet::TERMINAL_PROVIDER && !extra_args.is_empty() {
+            if extra_args.len() != 1 {
+                return Err(RuntimeAdapterError::Launch(LaunchError::InvalidInput(
+                    "Run needs exactly one command".into(),
+                )));
+            }
+            // A confirmed command is shell SOURCE by design, passed as one
+            // positional argument, never interpolated into this wrapper and
+            // never typed/pasted into an agent or an already-running shell.
+            return Ok(vec![
+                "/bin/sh".into(), "-c".into(),
+                "trap : INT; printf '\\033]133;C\\007'; \"${SHELL:-/bin/sh}\" -c \"$1\"; s=$?; printf '\\033]133;D;%s\\007\\n[exit %s]\\n' \"$s\" \"$s\"; exec \"${SHELL:-/bin/sh}\" -l".into(),
+                "perch-run".into(), extra_args[0].clone(),
+            ]);
+        }
         command.extend(extra_args.iter().cloned());
         Ok(command)
     }

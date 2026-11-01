@@ -369,13 +369,19 @@ pub(super) fn spawn_fs_search(
     query: String,
 ) {
     let search_query = query.clone();
+    let generation = state.file_search_generation.clone();
+    let ticket = generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let out = state.out_tx.clone();
     spawn_fs_task(
         state,
         request_id,
         workspace_id,
         move |app, workspace_id| {
             workspace_file_service(app, workspace_id)?
-                .search(&search_query)
+                .search_while(&search_query, || {
+                    !out.is_closed()
+                        && generation.load(std::sync::atomic::Ordering::Relaxed) == ticket
+                })
                 .map_err(FsAdapterFailure::Filesystem)
         },
         |request_id, workspace_id, listing| ServerMessage::FsSearchResult {

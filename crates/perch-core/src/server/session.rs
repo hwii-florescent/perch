@@ -237,7 +237,7 @@ fn set_active_session(state: &Arc<ConnState>, session_id: &str) {
 /// server restart — without this, claude would fall back to the dated snapshot
 /// id in its transcript (e.g. `claude-haiku-4-5-20251001`), which the GenAI
 /// proxy rejects.
-fn insert_runtime(
+pub(super) fn insert_runtime(
     state: &Arc<ConnState>,
     session_id: &str,
     cwd: &str,
@@ -849,7 +849,7 @@ pub(super) fn chats_pair(
         .create_project("local", &scratch.display().to_string(), Some("Chats"), None)
 }
 
-fn create_workspace_session(
+pub(super) fn create_workspace_session(
     db: &crate::db::HistoryDb,
     session_id: &str,
     workspace: &crate::db::WorkspaceRow,

@@ -1622,6 +1622,7 @@ impl HubManager {
             // store.
             // Background worktree jobs are local-host only (`worktree_jobs.rs`).
             ServerMessage::ContextPreviewResult { .. }
+            | ServerMessage::WorkspaceRunStarted { .. }
             | ServerMessage::WorktreeJobStarted { .. }
             | ServerMessage::WorktreeJobs { .. }
             | ServerMessage::DevicePairCode { .. }

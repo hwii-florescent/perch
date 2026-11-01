@@ -21,6 +21,8 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
   /** Extra content under the message (an option to tick). */
   children?: ReactNode;
+  /** A confirmed operation is in flight; cancel can no longer undo it. */
+  busy?: boolean;
 }
 
 export function ConfirmDialog({
@@ -30,12 +32,14 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   children,
+  busy = false,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     confirmRef.current?.focus();
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.isComposing || e.repeat || busy) return;
       if (e.key === "Enter") {
         e.preventDefault();
         onConfirm();
@@ -46,10 +50,10 @@ export function ConfirmDialog({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onConfirm, onCancel]);
+  }, [onConfirm, onCancel, busy]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={onCancel}>
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={() => { if (!busy) onCancel(); }}>
       <div
         className="w-[min(360px,calc(100vw_-_2rem))] rounded-ui bg-panel-bg p-4 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         role="dialog"
@@ -58,13 +62,14 @@ export function ConfirmDialog({
         data-testid="confirm-dialog"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="confirm-dialog__message mx-0 mt-0 mb-4 text-[0.88rem] leading-[1.4] whitespace-pre-wrap text-fg">{message}</p>
+        <p className="confirm-dialog__message mx-0 mt-0 mb-4 text-[0.88rem] leading-[1.4] whitespace-pre-wrap [overflow-wrap:anywhere] text-fg">{message}</p>
         {children}
         <div className="flex justify-end gap-2">
           <button
             type="button"
             className={button()}
             data-testid="confirm-cancel"
+            disabled={busy}
             onClick={onCancel}
           >
             {cancelLabel}
@@ -73,10 +78,11 @@ export function ConfirmDialog({
             type="button"
             className={button({ variant: "primary" })}
             data-testid="confirm-accept"
+            disabled={busy}
             ref={confirmRef}
             onClick={onConfirm}
           >
-            {confirmLabel}
+            {busy ? "Starting…" : confirmLabel}
           </button>
         </div>
       </div>
