@@ -156,6 +156,9 @@ shortcut("terminal.find", "terminal", "mod+f", "Find in the terminal", noop, { s
 shortcut("terminal.clear", "terminal", "mod+k", "Clear the terminal (screen and scrollback)", noop, { scope: "terminal" });
 shortcut("terminal.scrollTop", "terminal", "mod+up", "Scroll to the top", noop, { scope: "terminal" });
 shortcut("terminal.scrollBottom", "terminal", "mod+down", "Scroll to the bottom", noop, { scope: "terminal" });
+// Needs a shell that marks its commands (OSC 133: Ghostty/iTerm2/VS Code integration) or a confirmed Run.
+shortcut("terminal.prevCommand", "terminal", ["cmd+shift+up", "ctrl+shift+pageup"], "Jump to the previous command", noop, { scope: "terminal" });
+shortcut("terminal.nextCommand", "terminal", ["cmd+shift+down", "ctrl+shift+pagedown"], "Jump to the next command", noop, { scope: "terminal" });
 
 // Scoped commands are executed by their owner, not by the global listener.
 for (const [id, keys, description] of [

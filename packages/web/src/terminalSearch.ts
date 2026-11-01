@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { SearchAddon } from "@xterm/addon-search";
 import { shortcutFor, terminalKeyHandler } from "./keybinds";
+import { jumpToCommand } from "./commandMarks";
 
 export interface TerminalSearchController {
   open: boolean;
@@ -62,6 +63,8 @@ export function useTerminalSearch(term: Terminal | null): TerminalSearchControll
         else if (direct.id === "terminal.clear") term.clear();
         else if (direct.id === "terminal.scrollTop") term.scrollToTop();
         else if (direct.id === "terminal.scrollBottom") term.scrollToBottom();
+        else if (direct.id === "terminal.prevCommand") jumpToCommand(term, -1);
+        else if (direct.id === "terminal.nextCommand") jumpToCommand(term, 1);
         return false;
       }
       if (e.type === "keydown" && e.key === "Escape" && openRef.current) {

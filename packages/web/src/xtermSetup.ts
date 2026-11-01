@@ -62,6 +62,7 @@ import { onZoom, zoomFactor } from "./zoom";
 import { attachTerminalTuiWheel } from "./terminalTuiWheel";
 import { socket } from "./ws";
 import { attachTerminalContext } from "./contextBridge";
+import { attachCommandMarks } from "./commandMarks";
 
 /**
  * Classify input without guessing from bytes (a paste can contain any escape
@@ -620,6 +621,8 @@ export function createPerchTerminal(
   });
 
   const stopContext = attachTerminalContext(container, term, contextSessionId);
+  // Observes OSC 133 output marks only (jump between commands, failed-command ticks); no input is touched.
+  const commandMarks = attachCommandMarks(term);
   return {
     term,
     fit,
@@ -640,6 +643,7 @@ export function createPerchTerminal(
       mql?.removeEventListener("change", handleSchemeChange);
       stopTuiWheel();
       stopContext();
+      commandMarks.dispose();
       keySurface?.removeEventListener("keydown", trackMenuKey, true);
       document.removeEventListener("contextmenu", trackMenu, true);
       keySurface?.removeEventListener("keyup", recoverMenuKey, true);
