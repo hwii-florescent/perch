@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ activate: vi.fn(), focus: vi.fn() }));
 vi.mock("./workspaceTabs", () => ({ activateTab: mocks.activate }));
+// The store connects a real socket on import; its failure lands mid-test, under load, and resets state.
+vi.mock("./ws", () => ({ socket: { connect: () => {}, send: () => {}, onMessage: () => () => {}, onConnectionChange: () => () => {}, isOpen: () => false } }));
 const nav = await import("./navHistory");
 const { NavHistory, navBack, navForward, resetNavHistory, settleNavHistory } = nav;
 const { usePerchStore } = await import("./store");
