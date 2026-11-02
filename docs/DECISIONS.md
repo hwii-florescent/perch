@@ -7,7 +7,52 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
-## 2026-10-28 — Perch Relay: reach a phone without Tailscale (proposed, awaiting approval)
+## 2026-11-02 — Three ways to reach a phone; the relay is one you deploy (approved)
+
+**Decision.** Settings → Devices offers, side by side: the same Wi-Fi, Tailscale
+(with setup guidance when it is missing), and a **relay** you run yourself.
+Nothing is on by default and any can be used without the others. This replaces
+the proposal below: no Perch-hosted service, no Noise handshake, no native app.
+
+- **Relay.** `relay/` is a small Cloudflare Worker (free plan, one Durable
+  Object per room, WebSocket Hibernation) that routes opaque frames and serves
+  the web app as static assets. The user deploys it and pastes its address.
+  The core dials out to it (`crates/perch-core/src/relay/`), so client
+  isolation and NAT stop mattering and the phone needs only a browser.
+- **Keys.** The core makes a 32-byte key and a host secret once (`relay.json`,
+  mode 0600). The room id is the SHA-256 of the host secret, so the relay stores
+  nothing and a phone that knows only the room id cannot become the host. The
+  key travels in the link's `#fragment`, which a browser never sends.
+- **Sealing.** AES-256-GCM per frame; a hello exchange adds fresh nonces from
+  both sides, and every frame's AAD binds both nonces, the direction and a
+  per-direction counter. A relay can drop a session but not read, forge, replay,
+  reorder or reflect a frame. Rust and browser seal the same bytes
+  (`wire.fixture.json`).
+- **Authority is unchanged.** Tunnelled requests are marked `x-perch-relay` so
+  `local_request` treats them as remote: the paired-device token is checked on
+  every request and `/pair` is still how a phone gets one. Only the five data
+  routes are reachable; the app itself comes from the relay's assets.
+- **Phone side.** `packages/web/src/relay/` replaces `fetch` of those routes
+  and the `/ws` socket only when the page was opened from a relay link. Media,
+  PDFs and downloads are fetched through the tunnel into object URLs.
+
+**Known limits, stated plainly.**
+
+- The relay also serves the page that holds the key, so whoever controls the
+  relay's deployment can ship code that leaks it. That is why the relay is one
+  you deploy, not one shared with strangers. A pinned or signed bootstrap is
+  future work.
+- The link has no reset button yet; deleting `relay.json` rotates the key and
+  invalidates every relay link (pairing tokens stay valid on the LAN).
+- No flow control beyond bounded queues: large files cross the relay slowly and
+  whole in memory.
+- Turning Wi-Fi access off while the relay is on leaves already-open Wi-Fi
+  sockets until they reconnect.
+- Verified: Rust unit and in-process tests, a real `wrangler dev` Worker with a
+  real core and a real browser (`e2e/relay.check.mjs`). Not verified: a deployed
+  Worker, iOS Safari, Cloudflare's free-plan limits under real use.
+
+## 2026-10-28 — Perch Relay: reach a phone without Tailscale (superseded 2026-11-02)
 
 **Problem.** A paired phone reaches the desktop directly: the same Wi-Fi or
 Tailscale (`server/phone_access.rs`). Many campus, office and apartment networks

@@ -120,6 +120,15 @@ Navigator.
   shell integration, so marks appear only for shells that already emit OSC 133
   and for a confirmed Run; opt-in zsh/bash/fish integration is the open follow-up.
 
+### Also landed: three ways to reach a phone
+
+Settings → Devices: same Wi-Fi, Tailscale (guided setup), and a relay you deploy
+(`relay/`, free Cloudflare Worker; end-to-end sealed, phone needs only a browser
+— [decision](DECISIONS.md)). Not yet verified: a deployed Worker, iOS Safari and
+the PWA/home-screen path, real Cloudflare free-plan limits. Open: a key-reset
+button, flow control for big files, a pinned bootstrap so the relay operator
+cannot swap the page, relay-aware push notifications.
+
 ### 4. Finish resource actions, not a full editor
 
 - Safe rendered Markdown with source access and no implicit remote fetches.

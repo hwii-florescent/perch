@@ -166,6 +166,16 @@ A proxy rewriting Host to loopback with no identifying headers is
 indistinguishable from local: set `PERCH_REQUIRE_PAIRING=1` behind one.
 Real Tailscale Serve has not been verified. See `server/phone_access.rs`.
 
+The relay (`relay/`, `crates/perch-core/src/relay/`, `packages/web/src/relay/`)
+is a third way in. The core dials out to a user-deployed Worker and serves each
+phone as an end-to-end sealed session (key in the link fragment, AES-256-GCM,
+nonces and counters bound into every frame). Tunnelled requests reach the same
+router and `/ws` marked `x-perch-relay`, so they are remote and need a paired
+token; only `pair`, `ws`, `workspace-file`, `clipboard-image` and `upload`
+are carried. The relay's address is the `relayUrl` setting, changed only from
+the computer itself. `relay.json` beside `devices.json` holds its identity.
+`wire.rs` and `wire.ts` must change together (`wire.fixture.json`).
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

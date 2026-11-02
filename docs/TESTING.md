@@ -203,6 +203,18 @@ It is not a passing provider UI acceptance check. The 300 ms synthetic usage
 probe failed once under concurrent browser/build load, then passed alone and
 in a fresh full core run; do not hide this timing sensitivity.
 
+Relay (`relay/`, `perch-core/src/relay/`, `web/src/relay/`): `cargo test -p perch-core --lib relay`
+(in-process relay stand-in, tamper and stranger cases) and `npx vitest run
+src/relay` (shares `wire.fixture.json` with Rust). `node
+--experimental-strip-types e2e/relay.check.mjs` runs a real `wrangler dev`
+Worker, a core and a browser, all private under the temp dir; needs `npm install`
+in `relay/` and a built web app and `perch-core`. Never run it against a
+deployed Worker with your real `~/.perch`.
+
+2026-11-02: `device-pairing` timed out at its post-reload typing step (the
+reply to `after-phone-reload` never arrived), with and without the relay
+installed; not caused by it, not diagnosed.
+
 Recorded 2026-10-02, not blanket exemptions for new failures:
 - OpenCode is deliberately absent on this dev Mac; do not install it for tests.
 - `paired-phone-flows` intermittently reports unconfirmed review delivery.
