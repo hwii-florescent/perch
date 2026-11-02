@@ -125,7 +125,9 @@ Navigator.
 Settings → Devices: same Wi-Fi, Tailscale (guided setup), and a relay you deploy
 (`relay/`, free Cloudflare Worker; end-to-end sealed, phone needs only a browser
 — [decision](DECISIONS.md)). Not yet verified: a deployed Worker, iOS Safari and
-the PWA/home-screen path, real Cloudflare free-plan limits. Open: a key-reset
+the PWA/home-screen path, real Cloudflare free-plan limits. A build can name a relay
+(`PERCH_DEFAULT_RELAY`) to offer it as one "Remote access" switch; no hosted
+relay is deployed yet. Open: a key-reset
 button, flow control for big files, a pinned bootstrap so the relay operator
 cannot swap the page, relay-aware push notifications.
 

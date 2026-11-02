@@ -68,21 +68,25 @@ function shownAddress(address: PhoneAddress): string {
   return address.kind === "relay" ? address.url.split("#")[0] ?? address.url : address.url;
 }
 
-/** Turn the relay on by giving it an address, off by clearing it. */
-function RelayRow({ status }: { status: PhoneStatus | null }) {
+function RelayState({ relay }: { relay: PhoneStatus["relay"] }) {
+  const text = relay?.state === "online" ? "Connected" : relay?.state === "connecting" ? "Connecting…" : relay?.state === "error" ? relay.message : null;
+  if (!text) return null;
+  return <span className={cn("mt-1 block", relay?.state === "error" ? "text-red" : "")} role="status" data-testid="relay-status">{text}</span>;
+}
+
+/** The relay at an address you choose (your own deployment of `relay/`). */
+function OwnRelayRow({ status, title }: { status: PhoneStatus | null; title: string }) {
   const saved = usePerchStore((s) => s.settings?.relayUrl ?? "");
   const updateSettings = usePerchStore((s) => s.updateSettings);
   const [url, setUrl] = useState(saved);
   useEffect(() => setUrl(saved), [saved]);
-  const relay = status?.relay;
-  const state = relay?.state === "online" ? "Connected" : relay?.state === "connecting" ? "Connecting…" : relay?.state === "error" ? relay.message : null;
   return (
     <SettingRow
-      title="Relay"
+      title={title}
       description={
         <>
           Reach this computer from any network with only a browser on the phone. You run the relay yourself (a free Cloudflare Worker, see <code>relay/README.md</code>); it forwards data it cannot read. Pairing is still required.
-          {state && <span className={cn("mt-1 block", relay?.state === "error" ? "text-red" : "")} role="status" data-testid="relay-status">{state}</span>}
+          <RelayState relay={status?.relay} />
         </>
       }
     >
@@ -100,6 +104,40 @@ function RelayRow({ status }: { status: PhoneStatus | null }) {
         {url.trim() === "" ? "Turn off" : "Save"}
       </button>
     </SettingRow>
+  );
+}
+
+/** Remote access: one switch when this build offers a relay, always the option of your own. */
+function RelayRow({ status }: { status: PhoneStatus | null }) {
+  const saved = usePerchStore((s) => s.settings?.relayUrl ?? "");
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+  const [showOwn, setShowOwn] = useState(false);
+  const hosted = status?.defaultRelay;
+  if (!hosted) return <OwnRelayRow status={status} title="Relay" />;
+  const own = saved !== "" && saved !== hosted;
+  return (
+    <>
+      <SettingRow
+        title="Remote access"
+        description={
+          <>
+            Reach this computer from any network with only a browser on the phone. Everything is encrypted end to end; the relay passes it along and cannot read it. Pairing is still required.
+            {!own && <RelayState relay={status?.relay} />}
+          </>
+        }
+      >
+        <Switch label="Remote access" testId="remote-access-switch" checked={saved === hosted} onChange={(on) => updateSettings({ relayUrl: on ? hosted : "" })} />
+      </SettingRow>
+      {own || showOwn ? (
+        <OwnRelayRow status={status} title="Your own relay" />
+      ) : (
+        <div className="py-2">
+          <button type="button" className={button({ variant: "ghost", size: "sm" })} data-testid="relay-own" onClick={() => setShowOwn(true)}>
+            Use your own relay instead
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

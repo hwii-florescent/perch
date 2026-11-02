@@ -51,7 +51,7 @@ let socket, browser;
 try {
   start("relay", "npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(relayPort), "--persist-to", path.join(dir, "wrangler")], { cwd: path.join(root, "relay"), stdio: ["ignore", "pipe", "pipe"] });
   start("core", process.execPath, ["--experimental-strip-types", path.join(root, "e2e/fixtureServer.ts"), "--port", String(corePort)], {
-    env: { ...process.env, ...fixtureRuntimeEnv(dir), PERCH_DEVICES: path.join(dir, "devices.json"), PERCH_NO_LOGIN_PATH: "1" },
+    env: { ...process.env, ...fixtureRuntimeEnv(dir), PERCH_DEVICES: path.join(dir, "devices.json"), PERCH_DEFAULT_RELAY: relayOrigin, PERCH_NO_LOGIN_PATH: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await until(up(`http://127.0.0.1:${corePort}`), "the core");
@@ -151,6 +151,18 @@ try {
   // Turning the relay off drops the phone's way in.
   send({ type: "settings.update", patch: { relayUrl: "" } });
   await wait((m) => m.type === "phone.access.status" && !m.relay && !m.addresses.some((a) => a.kind === "relay"), "the relay to switch off");
+  // A build that names a relay offers it behind one switch: on connects, off disconnects.
+  const again = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await again.goto(`http://127.0.0.1:${corePort}`);
+  await again.getByTestId("onboarding-dismiss").click({ timeout: 20_000 }).catch(() => {});
+  await again.waitForFunction(() => window.usePerchStore !== undefined);
+  await again.evaluate(() => window.usePerchStore.getState().setSettingsOpen(true));
+  await again.getByTestId("settings-nav-devices").click();
+  await again.getByTestId("remote-access-switch").click();
+  await again.locator('[data-testid="relay-status"]:has-text("Connected")').waitFor({ timeout: 15_000 });
+  await again.screenshot({ path: "/tmp/perch-remote-switch.png" });
+  await again.getByTestId("remote-access-switch").click();
+  await again.locator('[data-testid="relay-status"]').waitFor({ state: "detached", timeout: 15_000 });
   console.log("Relay check passed: sealed pairing and reload through a real Worker, host impersonation refused, relay off removes the address.");
 } finally {
   await browser?.close();

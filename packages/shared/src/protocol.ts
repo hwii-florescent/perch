@@ -1217,6 +1217,8 @@ export interface PhoneAccessStatusMessage {
   tailscale?: "missing" | "needsLogin" | "stopped" | "running";
   /** The relay, when an address is set; its link is also in `addresses`. Absent from older cores. */
   relay?: RelayInfo;
+  /** The relay this build offers behind one switch; absent when it has none. */
+  defaultRelay?: string;
   error?: string;
 }
 /** Revoke one paired device; its token stops working immediately. */

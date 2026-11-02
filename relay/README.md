@@ -34,6 +34,15 @@ Phones still have to pair, as on Wi-Fi.
 Redeploy after updating Perch (`npm run build` first) so the phone's page
 matches your computer's version. To turn it off, clear the address.
 
+## Running one for other people
+
+A release can offer this relay behind a single "Remote access" switch:
+build with `PERCH_DEFAULT_RELAY=https://your-relay.example` (or set it in the
+environment of a running core). Users then turn it on with no deployment. You
+become the operator users trust with the phone's page, so use the paid Workers
+plan (the free plan's limits are per account, not per user), a custom domain
+you control, and watch usage.
+
 ## What to know
 
 - **Trust.** The relay also serves the page that holds the key. Whoever deploys

@@ -36,6 +36,15 @@ the proposal below: no Perch-hosted service, no Noise handshake, no native app.
   and the `/ws` socket only when the page was opened from a relay link. Media,
   PDFs and downloads are fetched through the tunnel into object URLs.
 
+**One switch for users who do not want to deploy.** A build can name a relay
+(`PERCH_DEFAULT_RELAY`, build time or environment; never committed). When it
+does, Settings → Devices shows **Remote access** as one switch that points the
+relay setting at it; "Use your own relay instead" stays. The maintainers who
+name it run it and are trusted with the page the phone loads, as with other
+tools' hosted relays. A shared relay needs Cloudflare's paid Workers plan
+(the free plan's request limits are per account), and per-room abuse limits
+beyond the current 16 phones per room and 1 MiB per frame.
+
 **Known limits, stated plainly.**
 
 - The relay also serves the page that holds the key, so whoever controls the

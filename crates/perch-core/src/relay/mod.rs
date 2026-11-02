@@ -150,6 +150,18 @@ pub fn parse_target(input: &str) -> Result<Target, String> {
     })
 }
 
+/// The relay Perch offers behind one switch, for users who would rather not
+/// deploy their own. Not in the source: whoever builds a release names it
+/// (`PERCH_DEFAULT_RELAY=https://… cargo build`), or a running core is told with
+/// the same variable. Without one the setting is just "your own relay".
+pub fn default_relay() -> Option<String> {
+    std::env::var("PERCH_DEFAULT_RELAY")
+        .ok()
+        .or_else(|| option_env!("PERCH_DEFAULT_RELAY").map(str::to_string))
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty() && parse_target(url).is_ok())
+}
+
 pub fn default_path() -> PathBuf {
     std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".perch/relay.json"))

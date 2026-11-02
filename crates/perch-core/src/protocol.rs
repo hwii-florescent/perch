@@ -2272,6 +2272,9 @@ pub enum ServerMessage {
         /// (kind `relay`) so it is picked and paired like any other.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         relay: Option<RelayInfo>,
+        /// The relay this build offers behind one switch, when it has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_relay: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

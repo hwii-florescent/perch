@@ -159,6 +159,7 @@ pub(super) async fn phone_access_status(
         addresses,
         tailscale: tailscale.map(|t| t.wire().to_string()),
         relay,
+        default_relay: crate::relay::default_relay(),
         error,
     }
 }
