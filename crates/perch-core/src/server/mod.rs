@@ -327,6 +327,8 @@ struct AppState {
     devices: Arc<crate::devices::DeviceStore>,
     /// The LAN listener phones connect through (desktop app); see `phone_access.rs`.
     phone: Arc<phone_access::PhoneAccess>,
+    /// The relay phones reach this host through from any network (`relay/`).
+    relay: Arc<crate::relay::RelayAccess>,
     workspace_terminals: Arc<crate::workspace_terminals::WorkspaceTerminals>,
     /// Process-wide provider/lifecycle bridge used by local CLI attaches.
     /// Keeping this beside the shared terminal registry prevents a second WS
@@ -623,6 +625,13 @@ pub async fn run(
         db.clone(),
     )?);
     crate::surfaces::ensure_schema(&db)?;
+    let relay = Arc::new(crate::relay::RelayAccess::new(
+        options
+            .devices_path
+            .as_deref()
+            .map(|path| path.with_file_name("relay.json"))
+            .unwrap_or_else(crate::relay::default_path),
+    ));
     let devices = Arc::new(match options.devices_path {
         Some(path) => crate::devices::DeviceStore::load(path),
         None => crate::devices::DeviceStore::load_default(),
@@ -662,6 +671,7 @@ pub async fn run(
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         devices,
         phone: phone.clone(),
+        relay: relay.clone(),
         agent_terminals,
         workspace_terminals,
         agent_runtime,
@@ -794,6 +804,18 @@ pub async fn run(
     spawn_filesystem_watch_task(state.clone());
 
     let phone_saved = options.phone_access_port.is_some() || state.settings.get().phone_access;
+    {
+        // Every client hears the relay come up, drop and come back.
+        let (app, mut changes) = (state.clone(), relay.subscribe());
+        tokio::spawn(async move {
+            while changes.changed().await.is_ok() {
+                let status = config::phone_access_status(&app, String::new(), None).await;
+                let _ = app.hub.hub_events_tx.send(Arc::new(status));
+            }
+        });
+    }
+    let relay_saved = state.settings.get().relay_url;
+    let state_for_relay = state.clone();
     let pair_path = format!("{base_path}pair");
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
@@ -822,6 +844,15 @@ pub async fn run(
     }
 
     phone.set_router(router.clone());
+    relay.set_local(crate::relay::Local {
+        router: router.clone(),
+        port: bound_addr.port(),
+        base_path: base_path.clone(),
+    });
+    if !relay_saved.is_empty() {
+        phone.set_relay_on(true);
+        config::apply_relay(state_for_relay);
+    }
     if phone_saved {
         if let Err(error) = phone.apply(|| true).await {
             tracing::warn!("phone access could not start: {error}");
@@ -1580,6 +1611,8 @@ fn proxied(headers: &HeaderMap) -> bool {
             || name.starts_with("x-forwarded-")
             || name.starts_with("tailscale-")
             || name.starts_with("cf-")
+            // Our own relay tunnel (`relay/host.rs`): a phone, never this machine.
+            || name == "x-perch-relay"
     })
 }
 

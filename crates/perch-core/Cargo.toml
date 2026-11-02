@@ -38,7 +38,12 @@ tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
-tokio-tungstenite = "0.24"
+# TLS is for the relay (`relay/`): wss:// to a user-chosen host. perchd and SSH hosts stay on plain ws://127.0.0.1.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# The relay seals every frame before it leaves this machine (`relay/wire.rs`).
+aes-gcm = "0.10"
+base64 = "0.22"
+tower = { version = "0.5", features = ["util"] }
 # Used only for CLI-attached terminal blocked-state (approval-prompt)
 # detection in server.rs — see `blocked_patterns`/`strip_ansi`.
 regex = "1"

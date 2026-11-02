@@ -67,6 +67,11 @@ pub struct PhoneAccess {
     devices: Arc<DeviceStore>,
     router: OnceLock<Router>,
     running: Mutex<Option<Running>>,
+    /// The relay (`relay/`) is on: paired devices must work even with the LAN
+    /// listener off. ponytail: turning the LAN off while the relay is on leaves
+    /// already-open LAN sockets until they reconnect; a per-connection origin
+    /// on the device gate would close them.
+    relay_on: AtomicBool,
     /// Port tried first when starting (`0` = any free one).
     preferred_port: u16,
     /// Serializes start/stop so quick on-off-on toggles can't interleave.
@@ -90,6 +95,7 @@ impl PhoneAccess {
             devices,
             router: OnceLock::new(),
             running: Mutex::new(None),
+            relay_on: AtomicBool::new(false),
             preferred_port,
             op: tokio::sync::Mutex::new(()),
         }
@@ -146,8 +152,8 @@ impl PhoneAccess {
             )
             .await;
         });
-        self.devices.set_remote_enabled(true);
         *self.running.lock().unwrap() = Some(Running { port, task, live });
+        self.sync_remote();
         tracing::info!("[perch] phone access on, port {port}");
         Ok(())
     }
@@ -161,7 +167,18 @@ impl PhoneAccess {
             running.task.abort();
             tracing::info!("[perch] phone access off");
         }
-        self.devices.set_remote_enabled(false);
+        self.sync_remote();
+    }
+
+    /// Paired devices work while any way in (LAN listener or relay) is on.
+    fn sync_remote(&self) {
+        self.devices
+            .set_remote_enabled(self.enabled() || self.relay_on.load(Ordering::SeqCst));
+    }
+
+    pub fn set_relay_on(&self, on: bool) {
+        self.relay_on.store(on, Ordering::SeqCst);
+        self.sync_remote();
     }
 
     /// The URLs a phone can try, best first (Tailscale works from anywhere,

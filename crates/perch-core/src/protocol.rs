@@ -96,6 +96,9 @@ pub struct SettingsData {
     /// Also listen on the LAN for paired phones (desktop app; see `phone_access.rs`).
     #[serde(default)]
     pub phone_access: bool,
+    /// Relay address for phones on any network; empty = off (`relay/`).
+    #[serde(default)]
+    pub relay_url: String,
     /// Setup completed or skipped, not an OS permission grant.
     #[serde(default)]
     pub permissions_setup_dismissed: bool,
@@ -171,6 +174,8 @@ pub struct SettingsPatch {
     pub tab_shape: Option<String>,
     #[serde(default)]
     pub phone_access: Option<bool>,
+    #[serde(default)]
+    pub relay_url: Option<String>,
     #[serde(default)]
     pub permissions_setup_dismissed: Option<bool>,
     #[serde(default)]
@@ -589,6 +594,16 @@ pub struct DeviceSummary {
 pub struct PhoneAddress {
     pub kind: String,
     pub url: String,
+}
+
+/// The relay connection: `connecting`, `online` or `error` (with `message`).
+/// Absent from the status while no relay address is set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayInfo {
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// How much of a recorded turn is actually reviewable. A turn's boundary is
@@ -2253,6 +2268,10 @@ pub enum ServerMessage {
         /// `running`. Absent while access is off (and from older cores).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tailscale: Option<String>,
+        /// The relay, when an address is set. Its link is also in `addresses`
+        /// (kind `relay`) so it is picked and paired like any other.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relay: Option<RelayInfo>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

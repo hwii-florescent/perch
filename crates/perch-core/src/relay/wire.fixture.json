@@ -1,0 +1,7 @@
+{
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "guestNonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+  "hostNonce": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+  "iv": "c0c1c2c3c4c5c6c7c8c9cacb",
+  "sealed": "c0c1c2c3c4c5c6c7c8c9cacb014827677003b433fdad95cd568ed2740b36b71d4114987d4c48a3d9370a01a0e8caf27be5"
+}

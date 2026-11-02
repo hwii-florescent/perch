@@ -87,6 +87,9 @@ pub struct Settings {
     /// until the user turns it on.
     #[serde(default)]
     pub phone_access: bool,
+    /// Address of the relay phones can use from any network (`relay/`); empty = off.
+    #[serde(default)]
+    pub relay_url: String,
     /// The user completed or skipped macOS permission setup; never a grant.
     #[serde(default)]
     pub permissions_setup_dismissed: bool,
@@ -116,6 +119,7 @@ impl Default for Settings {
             preview_tabs: true,
             tab_shape: default_tab_shape(),
             phone_access: false,
+            relay_url: String::new(),
             permissions_setup_dismissed: false,
             browser_search_engine: default_browser_search_engine(),
             browser_search_suggestions: false,
@@ -188,6 +192,7 @@ pub struct SettingsPatch {
     pub preview_tabs: Option<bool>,
     pub tab_shape: Option<String>,
     pub phone_access: Option<bool>,
+    pub relay_url: Option<String>,
     pub permissions_setup_dismissed: Option<bool>,
     pub browser_search_engine: Option<String>,
     pub browser_search_suggestions: Option<bool>,
@@ -314,6 +319,9 @@ impl SettingsStore {
         }
         if let Some(phone_access) = patch.phone_access {
             guard.phone_access = phone_access;
+        }
+        if let Some(relay_url) = patch.relay_url {
+            guard.relay_url = relay_url.trim().to_string();
         }
         if let Some(dismissed) = patch.permissions_setup_dismissed {
             guard.permissions_setup_dismissed = dismissed;
