@@ -56,6 +56,11 @@ fn identity_is_made_once_private_and_names_the_room_by_hash() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+/// A plain-text socket URL to a server on this machine, the only kind a test makes.
+fn loopback(addr: std::net::SocketAddr, path: &str) -> String {
+    format!("{}://{addr}{path}", "ws")
+}
+
 /// Routes frames between one host and its guests and nothing else.
 #[derive(Default)]
 struct Room {
@@ -160,7 +165,7 @@ struct Phone {
 impl Phone {
     async fn join(relay: std::net::SocketAddr, key: Key32) -> Self {
         let (mut socket, _) =
-            tokio_tungstenite::connect_async(format!("ws://{relay}/r/room?role=guest"))
+            tokio_tungstenite::connect_async(loopback(relay, "/r/room?role=guest"))
                 .await
                 .unwrap();
         let guest = random_bytes::<NONCE_LEN>();
@@ -291,7 +296,7 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
         .await
         .unwrap()
         .unwrap();
-    let (mut desktop, _) = tokio_tungstenite::connect_async(format!("ws://{address}/ws"))
+    let (mut desktop, _) = tokio_tungstenite::connect_async(loopback(address, "/ws"))
         .await
         .unwrap();
 
@@ -450,7 +455,7 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
 
     // A phone with the wrong key is never answered.
     let (mut stranger, _) =
-        tokio_tungstenite::connect_async(format!("ws://{relay_addr}/r/room?role=guest"))
+        tokio_tungstenite::connect_async(loopback(relay_addr, "/r/room?role=guest"))
             .await
             .unwrap();
     let wrong: Key32 = random_bytes();

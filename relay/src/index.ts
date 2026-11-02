@@ -77,8 +77,8 @@ export class Room extends DurableObject {
     const role = url.searchParams.get("role");
     const { 0: client, 1: server } = new WebSocketPair();
     if (role === "host") {
-      const room = url.pathname.split("/").pop()!;
-      if (!(await ownsRoom(room, url.searchParams.get("auth")))) return new Response("not this room's host", { status: 403 });
+      const room = /^\/r\/([^/]+)$/.exec(url.pathname)?.[1];
+      if (!room || !(await ownsRoom(room, url.searchParams.get("auth")))) return new Response("not this room's host", { status: 403 });
       // One host per room: a restarted computer replaces its stale socket.
       for (const old of this.ctx.getWebSockets("host")) old.close(4001, "replaced by a newer host");
       this.ctx.acceptWebSocket(server, ["host"]);

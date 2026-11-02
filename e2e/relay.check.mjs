@@ -144,7 +144,7 @@ try {
   });
   await desktop.getByTestId("pair-start").click();
   await desktop.getByTestId("pair-qr").waitFor();
-  assert(!(await desktop.locator("body").innerText()).includes("#r="), "the key must not be shown on screen");
+  assert(!((await desktop.locator("body").textContent()) ?? "").includes("#r="), "the key must not be shown on screen");
   await desktop.screenshot({ path: "/tmp/perch-relay-settings.png" });
   await desktop.close();
 
@@ -163,7 +163,7 @@ try {
   await again.screenshot({ path: "/tmp/perch-remote-switch.png" });
   await again.getByTestId("remote-access-switch").click();
   await again.locator('[data-testid="relay-status"]').waitFor({ state: "detached", timeout: 15_000 });
-  console.log("Relay check passed: sealed pairing and reload through a real Worker, host impersonation refused, relay off removes the address.");
+  process.stdout.write("Relay check passed: sealed pairing and reload through a real Worker, host impersonation refused, relay off removes the address.\n");
 } finally {
   await browser?.close();
   socket?.close();

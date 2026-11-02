@@ -91,7 +91,7 @@ export class Tunnel {
       const plain = await W.open(this.key, W.helloAad(true, this.guest), sealed);
       const hello = plain && W.parseFrame(plain);
       if (!hello || hello.kind !== W.HELLO_HOST || hello.payload.length !== W.NONCE_LEN) return this.fail("the computer's answer was not valid");
-      this.host = hello.payload.slice();
+      this.host = new Uint8Array(hello.payload);
       this.onReady();
       return;
     }
@@ -116,7 +116,7 @@ export class Tunnel {
         }
         break;
       case W.RES_BODY:
-        request?.chunks.push(payload.slice());
+        request?.chunks.push(new Uint8Array(payload));
         break;
       case W.RES_END:
         if (request && request.head) request.resolve({ head: request.head, body: W.concat(...request.chunks) });
