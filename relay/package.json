@@ -1,0 +1,16 @@
+{
+  "name": "perch-relay",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Blind WebSocket relay for Perch phones (Cloudflare Worker).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "typescript": "^5.6.3",
+    "wrangler": "^4.0.0"
+  }
+}

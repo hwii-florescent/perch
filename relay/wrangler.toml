@@ -1,0 +1,21 @@
+# Deploy: npm run build (repo root), then in this directory: npx wrangler deploy
+# The free plan is enough. See README.md.
+name = "perch-relay"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# The web app phones open. Only /r/* reaches the Worker; the rest is static.
+[assets]
+directory = "../packages/web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/r/*"]
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# SQLite-backed classes are the ones the free plan allows.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
