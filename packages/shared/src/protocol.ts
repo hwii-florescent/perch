@@ -205,6 +205,8 @@ export interface SettingsData {
   tabShape?: "square" | "round";
   /** The desktop app also listens on the LAN for paired phones. Absent = off. */
   phoneAccess?: boolean;
+  /** Relay address for phones on any network; empty or absent = off. */
+  relayUrl?: string;
   /** Setup completed or skipped, not an OS grant. Absent = false. */
   permissionsSetupDismissed?: boolean;
   /** Address-bar search engine. Absent on older peers means Google. */
@@ -238,6 +240,7 @@ export interface SettingsPatch {
   previewTabs?: boolean;
   tabShape?: "square" | "round";
   phoneAccess?: boolean;
+  relayUrl?: string;
   permissionsSetupDismissed?: boolean;
   browserSearchEngine?: BrowserSearchEngine;
   browserSearchSuggestions?: boolean;
@@ -1188,10 +1191,17 @@ export interface PhoneAccessGetMessage {
   type: "phone.access.get";
   requestId: string;
 }
-/** One URL a phone can open to reach this host: the same Wi-Fi (`lan`) or the tailnet. */
+/** One URL a phone can open to reach this host: the same Wi-Fi (`lan`), the
+ * tailnet, or the relay (`relay`: carries a #fragment key, so a pairing code is
+ * appended with `&pair=`, not `#pair=`). */
 export interface PhoneAddress {
-  kind: "lan" | "tailscale";
+  kind: "lan" | "tailscale" | "relay";
   url: string;
+}
+/** The relay connection; absent while no relay address is set. */
+export interface RelayInfo {
+  state: "connecting" | "online" | "error";
+  message?: string;
 }
 /** Whether phones can reach this host and where. `alwaysOn`: the main
  * listener already serves the LAN (headless), so there is no switch.
@@ -1205,6 +1215,8 @@ export interface PhoneAccessStatusMessage {
   addresses: PhoneAddress[];
   /** This machine's Tailscale; absent while access is off (and from older cores). */
   tailscale?: "missing" | "needsLogin" | "stopped" | "running";
+  /** The relay, when an address is set; its link is also in `addresses`. Absent from older cores. */
+  relay?: RelayInfo;
   error?: string;
 }
 /** Revoke one paired device; its token stops working immediately. */

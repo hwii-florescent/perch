@@ -2,6 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { claimViewer } from "./viewer";
+import { installRelayTransport } from "./relay/transport";
+
+// Opened from a relay link: send the app's data routes through the sealed tunnel.
+// Before anything can make a request; a no-op on the LAN and the desktop app.
+installRelayTransport();
 
 // PWA service worker. Registering through virtual:pwa-register (rather than
 // the plugin's plain injected register call) matters: in autoUpdate mode this

@@ -5,7 +5,8 @@
  *
  * The QR carries a link, `<address>#pair=<code>`; opening it on the phone
  * lands on the connect screen, which claims the code (`pairing.ts`). The code
- * rides in the #hash so it never reaches a server log.
+ * rides in the #hash so it never reaches a server log. The relay's link already
+ * has a #fragment (its key), so the code joins it with `&` (`pairLink`).
  */
 import { useEffect, useMemo, useState } from "react";
 import qrcode from "qrcode-generator";
@@ -16,7 +17,7 @@ import { usePerchStore } from "../store";
 import { Switch } from "./ui/switch";
 import { SettingRow } from "./ui/setting-row";
 import { cn } from "../lib/cn";
-import { ADDR, MUTED } from "./ui/settings";
+import { ADDR, INPUT, MUTED } from "./ui/settings";
 import { button } from "./ui/button";
 import { openExternal } from "../links";
 
@@ -54,7 +55,53 @@ export function pickAddress(status: PhoneStatus | null, kind: string | null): Ph
   return status?.addresses.find((a) => a.kind === kind) ?? status?.addresses[0];
 }
 
-const KIND_LABEL: Record<string, string> = { tailscale: "Tailscale", lan: "Same Wi-Fi" };
+const KIND_LABEL: Record<string, string> = { tailscale: "Tailscale", lan: "Same Wi-Fi", relay: "Relay" };
+
+/** What the QR encodes: the address plus the pairing code, in the #hash. */
+export function pairLink(address: string, code: string): string {
+  return `${address}${address.includes("#") ? "&" : "#"}pair=${code}`;
+}
+
+/** The address as shown: the relay's link carries the end-to-end key after the
+ * `#`, which doesn't belong on a screen others can see. */
+function shownAddress(address: PhoneAddress): string {
+  return address.kind === "relay" ? address.url.split("#")[0] ?? address.url : address.url;
+}
+
+/** Turn the relay on by giving it an address, off by clearing it. */
+function RelayRow({ status }: { status: PhoneStatus | null }) {
+  const saved = usePerchStore((s) => s.settings?.relayUrl ?? "");
+  const updateSettings = usePerchStore((s) => s.updateSettings);
+  const [url, setUrl] = useState(saved);
+  useEffect(() => setUrl(saved), [saved]);
+  const relay = status?.relay;
+  const state = relay?.state === "online" ? "Connected" : relay?.state === "connecting" ? "Connecting…" : relay?.state === "error" ? relay.message : null;
+  return (
+    <SettingRow
+      title="Relay"
+      description={
+        <>
+          Reach this computer from any network with only a browser on the phone. You run the relay yourself (a free Cloudflare Worker, see <code>relay/README.md</code>); it forwards data it cannot read. Pairing is still required.
+          {state && <span className={cn("mt-1 block", relay?.state === "error" ? "text-red" : "")} role="status" data-testid="relay-status">{state}</span>}
+        </>
+      }
+    >
+      <input
+        type="text"
+        className={cn(INPUT, "w-[16rem] flex-none")}
+        placeholder="perch-relay.you.workers.dev"
+        aria-label="Relay address"
+        data-testid="relay-url"
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        onKeyDown={(event) => event.key === "Enter" && updateSettings({ relayUrl: url.trim() })}
+      />
+      <button type="button" className={button({ variant: "soft", size: "sm" })} data-testid="relay-save" disabled={url.trim() === saved} onClick={() => updateSettings({ relayUrl: url.trim() })}>
+        {url.trim() === "" ? "Turn off" : "Save"}
+      </button>
+    </SettingRow>
+  );
+}
 
 export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus | null; kind: string | null; onKind: (kind: string) => void }) {
   const updateSettings = usePerchStore((s) => s.updateSettings);
@@ -62,15 +109,18 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
   const address = pickAddress(status, kind);
   const hasTailscale = status?.addresses.some((a) => a.kind === "tailscale") ?? false;
 
-  // Headless `perch-core` already listens on the network; there is no switch.
-  if (status?.alwaysOn) return null;
+  // Headless `perch-core` already listens on the network, so it has no Wi-Fi switch. The relay
+  // works either way, and its address shows beside the others whenever there is one.
+  const alwaysOn = status?.alwaysOn ?? false;
   return (
     <>
-      <SettingRow title="Phone access" description="Let a paired phone reach this computer on your Wi-Fi or over Tailscale. Off, only this app can. Pairing is still required.">
-        <Switch label="Phone access" testId="phone-access-switch" checked={enabled} onChange={(on) => updateSettings({ phoneAccess: on })} />
-      </SettingRow>
+      {!alwaysOn && (
+        <SettingRow title="Phone access" description="Let a paired phone reach this computer on your Wi-Fi or over Tailscale. Off, only this app can. Pairing is still required.">
+          <Switch label="Phone access" testId="phone-access-switch" checked={enabled} onChange={(on) => updateSettings({ phoneAccess: on })} />
+        </SettingRow>
+      )}
       {status?.error && <p className="m-0 py-1 text-[0.78rem] text-red" role="alert" data-testid="phone-access-error">{status.error}</p>}
-      {enabled && (
+      {(enabled || (status?.addresses.length ?? 0) > 0) && (
         <div className="flex flex-col gap-[0.4rem] py-2" data-testid="phone-access-addresses">
           {status!.addresses.length > 1 && (
             <div className="flex gap-1" role="group" aria-label="Address for the phone">
@@ -89,11 +139,11 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
             </div>
           )}
           {address ? (
-            <span className={ADDR} data-testid="phone-address-url">{address.url}</span>
+            <span className={ADDR} data-testid="phone-address-url">{shownAddress(address)}</span>
           ) : (
             <span className={MUTED}>No network address found. Connect this computer to Wi-Fi or Tailscale.</span>
           )}
-          {!hasTailscale && (
+          {enabled && !hasTailscale && (
             <div className="flex flex-col items-start gap-[0.4rem]" data-testid="phone-tailscale-hint">
               <span className={MUTED}>
                 {TAILSCALE_HINT[status!.tailscale ?? ""] ?? "Tailscale isn’t running on this computer. Turn it on here and on the phone (same account) to reach this computer from anywhere."}
@@ -108,6 +158,7 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
           )}
         </div>
       )}
+      <RelayRow status={status} />
     </>
   );
 }

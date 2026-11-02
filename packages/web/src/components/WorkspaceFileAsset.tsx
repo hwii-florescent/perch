@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { FileMetadata } from "@perch/shared";
 import { getWorkspaceFileUrl } from "../base";
+import { isRelayMode, relayDownload, useRelayUrl } from "../relay/transport";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
@@ -14,7 +15,9 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   const [failed, setFailed] = useState(false);
   const extraction = useWorkspaceFilesStore((state) => state.extractions[workspaceId]?.[metadata.path]);
   const extract = useWorkspaceFilesStore((state) => state.extractArchive);
-  const url = getWorkspaceFileUrl(workspaceId, metadata.path);
+  const fileUrl = getWorkspaceFileUrl(workspaceId, metadata.path);
+  // On the LAN the URL itself; through the relay, the file fetched into an object URL.
+  const url = useRelayUrl(fileUrl, useCallback(() => setFailed(true), []));
   const kind = assetKind(metadata.mediaType);
   const remote = usePerchStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId !== "local");
   const archive = kind === "archive";
@@ -33,7 +36,11 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
         {archive && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={extraction?.state === "loading"} onClick={() => extract(workspaceId, metadata.path)}>
           {extraction?.state === "loading" ? "Extracting…" : "Extract"}
         </button>}
-        {!remote && <a className={cn(GHOST_BUTTON, "inline-flex min-h-8 items-center px-2")} href={getWorkspaceFileUrl(workspaceId, metadata.path, true)} download={metadata.name}>Download</a>}
+        {!remote && <a className={cn(GHOST_BUTTON, "inline-flex min-h-8 items-center px-2")} href={getWorkspaceFileUrl(workspaceId, metadata.path, true)} download={metadata.name} onClick={(event) => {
+          if (!isRelayMode()) return;
+          event.preventDefault();
+          void relayDownload(getWorkspaceFileUrl(workspaceId, metadata.path, true), metadata.name);
+        }}>Download</a>}
       </header>
       {extraction?.state === "ready" && <p role="status" className="m-0 px-3 py-2 text-[0.75rem] text-subtext-0">Extracted to {extraction.destination}. Find it in the file tree.</p>}
       {extraction?.state === "error" && <p role="alert" className="m-0 px-3 py-2 text-[0.75rem] text-red">{extraction.error}</p>}
@@ -44,10 +51,11 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
         </div>
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-3">
-          {kind === "image" && <img className="max-h-full max-w-full object-contain" src={url} alt={metadata.name} onError={() => setFailed(true)} data-testid="workspace-file-image" />}
-          {kind === "video" && <video className="max-h-full max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} data-testid="workspace-file-video" />}
-          {kind === "audio" && <audio className="max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} />}
-          {kind === "pdf" && <WorkspacePdf url={url} />}
+          {url === null && <span className="text-[0.8rem] text-subtext-0" role="status">Loading…</span>}
+          {url !== null && kind === "image" && <img className="max-h-full max-w-full object-contain" src={url} alt={metadata.name} onError={() => setFailed(true)} data-testid="workspace-file-image" />}
+          {url !== null && kind === "video" && <video className="max-h-full max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} data-testid="workspace-file-video" />}
+          {url !== null && kind === "audio" && <audio className="max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} />}
+          {url !== null && kind === "pdf" && <WorkspacePdf url={url} />}
         </div>
       )}
     </section>

@@ -25,7 +25,7 @@ import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { KeybindingsSection } from "./KeybindingsSection";
-import { PhoneAccessRows, QrCode, pickAddress, usePhoneAccess } from "./PhoneAccess";
+import { PhoneAccessRows, QrCode, pairLink, pickAddress, usePhoneAccess } from "./PhoneAccess";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { Chevron } from "./ui/chevron";
 import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
@@ -709,7 +709,7 @@ function DevicesSection() {
 
   return (
     <>
-    {!phone?.alwaysOn && !isMobile && (
+    {!isMobile && (
       <SettingsGroup title="Phone access" testId="settings-phone-access">
         <PhoneAccessRows status={phone} kind={addressKind} onKind={setAddressKind} />
       </SettingsGroup>
@@ -721,11 +721,11 @@ function DevicesSection() {
       </p>
       {code ? (
         <div className="my-2 flex flex-wrap items-center gap-[0.8rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
-          {address && <QrCode text={`${address.url}#pair=${code}`} />}
+          {address && <QrCode text={pairLink(address.url, code)} />}
           <div className="flex min-w-0 flex-1 basis-[14rem] flex-col gap-[0.4rem]">
           <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono)]">{code}</strong>
           <span className={MUTED}>
-            {address ? "Scan the QR with the phone, or open the address above and enter the code." : "Enter it on the other device."} Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
+            {address ? (address.kind === "relay" ? "Scan the QR with the phone." : "Scan the QR with the phone, or open the address above and enter the code.") : "Enter it on the other device."} Expires in {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.
           </span>
           </div>
           <button
@@ -739,8 +739,8 @@ function DevicesSection() {
             Cancel
           </button>
         </div>
-      ) : phone?.enabled === false ? (
-        <p className={MUTED} data-testid="pair-needs-access">Turn on Phone access to pair a phone.</p>
+      ) : phone?.enabled === false && !phone.relay ? (
+        <p className={MUTED} data-testid="pair-needs-access">Turn on Phone access or set a relay to pair a phone.</p>
       ) : (
         <button
           type="button"
