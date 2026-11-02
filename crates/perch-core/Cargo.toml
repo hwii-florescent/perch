@@ -40,6 +40,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 # TLS is for the relay (`relay/`): wss:// to a user-chosen host. perchd and SSH hosts stay on plain ws://127.0.0.1.
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# wss:// needs exactly one crypto provider selected; without this the TLS handshake
+# panics at runtime ("could not determine the process-level CryptoProvider").
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # The relay seals every frame before it leaves this machine (`relay/wire.rs`).
 aes-gcm = "0.10"
 base64 = "0.22"

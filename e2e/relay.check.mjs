@@ -28,7 +28,10 @@ const freePort = async () => {
   return port;
 };
 const [corePort, relayPort] = [await freePort(), await freePort()];
-const relayOrigin = `http://127.0.0.1:${relayPort}`;
+// PERCH_RELAY_CHECK_URL=https://… tests an already deployed relay instead of a local one.
+const deployed = process.env.PERCH_RELAY_CHECK_URL?.replace(/\/$/, "");
+const relayOrigin = deployed ?? `http://127.0.0.1:${relayPort}`;
+const relayWs = relayOrigin.replace(/^http/, "ws");
 const logs = { core: "", relay: "" };
 const children = [];
 const start = (name, command, args, options) => {
@@ -49,7 +52,7 @@ const up = (url) => async () => { try { return (await fetch(url, { signal: Abort
 
 let socket, browser;
 try {
-  start("relay", "npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(relayPort), "--persist-to", path.join(dir, "wrangler")], { cwd: path.join(root, "relay"), stdio: ["ignore", "pipe", "pipe"] });
+  if (!deployed) start("relay", "npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(relayPort), "--persist-to", path.join(dir, "wrangler")], { cwd: path.join(root, "relay"), stdio: ["ignore", "pipe", "pipe"] });
   start("core", process.execPath, ["--experimental-strip-types", path.join(root, "e2e/fixtureServer.ts"), "--port", String(corePort)], {
     env: { ...process.env, ...fixtureRuntimeEnv(dir), PERCH_DEVICES: path.join(dir, "devices.json"), PERCH_DEFAULT_RELAY: relayOrigin, PERCH_NO_LOGIN_PATH: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -62,7 +65,8 @@ try {
   socket.addEventListener("message", (event) => messages.push(JSON.parse(String(event.data))));
   await once(socket, "open", { signal: AbortSignal.timeout(5000) });
   const send = (message) => socket.send(JSON.stringify(message));
-  const wait = (match, what) => until(() => messages.some(match), what);
+  const lastStatus = () => JSON.stringify(messages.findLast((m) => m.type === "phone.access.status"));
+  const wait = (match, what) => until(() => messages.some(match), `${what} (last relay status: ${lastStatus()})`);
 
   send({ type: "settings.update", patch: { relayUrl: relayOrigin } });
   await wait((m) => m.type === "phone.access.status" && m.relay?.state === "online", "the core to reach the relay");
@@ -73,7 +77,7 @@ try {
 
   // Someone who knows only the room id cannot take the host's place.
   const room = /#r=([^.]+)\./.exec(link)[1];
-  const impostor = new WebSocket(`ws://127.0.0.1:${relayPort}/r/${room}?role=host&auth=${"A".repeat(43)}`);
+  const impostor = new WebSocket(`${relayWs}/r/${room}?role=host&auth=${"A".repeat(43)}`);
   const refused = await new Promise((resolve) => { impostor.onerror = () => resolve(true); impostor.onopen = () => resolve(false); });
   assert(refused, "the relay accepted a host without the secret");
 
@@ -110,11 +114,27 @@ try {
   send({ type: "project.create", requestId: "project", path: project });
   await wait((m) => m.type === "workspace.snapshot" && m.requestId === "project", "the project");
   const workspace = messages.findLast((m) => m.type === "workspace.snapshot" && m.requestId === "project").workspaces.find((w) => w.path === fs.realpathSync(project));
-  const got = await phone.evaluate(async (id) => {
+  // A freshly installed service worker may reload the page once (autoUpdate); try again after it.
+  const inPage = async (fn, arg) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // The app sets this after main.tsx ran, i.e. after the transport was installed.
+        await phone.waitForFunction(() => window.usePerchStore !== undefined);
+        return await phone.evaluate(fn, arg);
+      } catch (error) {
+        if (attempt >= 3 || !/context was destroyed|navigation/.test(String(error))) throw error;
+        await phone.waitForLoadState("load");
+        await inApp();
+      }
+    }
+  };
+  const got = await inPage(async (id) => {
     const response = await fetch(`/workspace-file?workspaceId=${encodeURIComponent(id)}&path=big.bin`);
-    return { status: response.status, sum: [...new Uint8Array(await crypto.subtle.digest("SHA-256", await response.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("") };
+    const body = await response.clone().arrayBuffer();
+    return { status: response.status, length: body.byteLength, head: [...new Uint8Array(body).slice(0, 8)], sum: [...new Uint8Array(await crypto.subtle.digest("SHA-256", await response.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("") };
   }, workspace.id);
   assert.equal(got.status, 200);
+  assert.equal(got.length, big.length, `length ${got.length}, starts ${got.head}`);
   assert.equal(got.sum, createHash("sha256").update(big).digest("hex"));
   // Its data routes went through the sealed tunnel, not the relay's HTTP.
   const direct = seen.filter((url) => /\/(pair|ws|workspace-file|upload|clipboard-image)(\?|$)/.test(new URL(url).pathname));
@@ -136,8 +156,8 @@ try {
   await desktop.waitForFunction(() => window.usePerchStore !== undefined);
   await desktop.evaluate(() => window.usePerchStore.getState().setSettingsOpen(true));
   await desktop.getByTestId("settings-nav-devices").click();
-  await desktop.getByTestId("relay-url").waitFor();
-  assert.equal(await desktop.getByTestId("relay-url").inputValue(), relayOrigin);
+  // The build names this relay, so it is the "Remote access" switch, already on.
+  await desktop.getByTestId("remote-access-switch").waitFor();
   await desktop.locator('[data-testid="relay-status"]:has-text("Connected")').waitFor({ timeout: 10_000 }).catch(async (error) => {
     await desktop.screenshot({ path: "/tmp/perch-relay-settings-failed.png" });
     throw error;

@@ -16,6 +16,13 @@ use tokio_tungstenite::tungstenite::Message;
 use super::wire::*;
 use super::*;
 
+/// `wss://` to a real relay panics at the first handshake if rustls has no single
+/// provider selected; local `ws://` tests never reach it, so check it directly.
+#[test]
+fn tls_has_exactly_one_crypto_provider() {
+    let _ = rustls::ClientConfig::builder();
+}
+
 #[test]
 fn relay_addresses_are_checked_before_they_are_trusted() {
     let ok = parse_target("relay.example.workers.dev/").unwrap();

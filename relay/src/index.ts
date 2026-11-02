@@ -32,9 +32,19 @@ const MAX_FRAME = 1 << 20;
 const DATA = 0;
 const LEFT = 2;
 
+function parse(request: Request): URL | null {
+  try {
+    return new URL(request.url);
+  } catch {
+    return null;
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const match = /^\/r\/([^/]+)$/.exec(new URL(request.url).pathname);
+    const url = parse(request);
+    if (!url) return new Response("bad request", { status: 400 });
+    const match = /^\/r\/([^/]+)$/.exec(url.pathname);
     if (!match) return env.ASSETS.fetch(request);
     if (!ROOM_ID.test(match[1])) return new Response("bad room", { status: 400 });
     if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
@@ -73,7 +83,8 @@ function envelope(kind: number, gid: number, payload?: Uint8Array): Uint8Array {
 
 export class Room extends DurableObject {
   async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+    const url = parse(request);
+    if (!url) return new Response("bad request", { status: 400 });
     const role = url.searchParams.get("role");
     const { 0: client, 1: server } = new WebSocketPair();
     if (role === "host") {
