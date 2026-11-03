@@ -99,6 +99,7 @@ fn capability(kind: &str) -> Option<&str> {
         | "fs.mutate"
         | "fs.extract" => Some(kind),
         "worktree.create" => Some("worktree.startFrom"),
+        "workspace.order.set" => Some("workspace.order.v1"),
         "surface.open"
         | "surface.list"
         | "surface.close"
@@ -154,6 +155,19 @@ fn target(request: &Value) -> Result<Option<(String, Value)>, &'static str> {
         }
     }
     forwarded.as_object_mut().unwrap().remove("hostId");
+    // Order lists carry the browser's qualified project ids. Hand the owner
+    // only its own, unqualified; ids from any other host are dropped.
+    if request["type"] == "workspace.order.set" {
+        if let Some(ids) = forwarded["projects"].as_array_mut() {
+            ids.retain_mut(|id| match id.as_str().map(split) {
+                Some(Ok(Some((owner, local)))) if owner == host => {
+                    *id = json!(local);
+                    true
+                }
+                _ => false,
+            });
+        }
+    }
     Ok(Some((host, forwarded)))
 }
 
@@ -175,6 +189,17 @@ fn row(value: &mut Value, host: &str, workspace: bool) {
 /// Explicit payload locations only. In particular, never walk settings,
 /// locators, file contents or presentation.layout looking for ID-like strings.
 fn tag(reply: &mut Value, host: &str) {
+    if reply["type"] == "workspace.order" {
+        // `projects` is a list of bare ids here, not rows; session ids are
+        // already unambiguous across hosts and stay as they are.
+        reply["hostId"] = json!(host);
+        if let Some(ids) = reply["projects"].as_array_mut() {
+            for id in ids {
+                *id = json!(qualify(host, id.as_str().unwrap_or_default()));
+            }
+        }
+        return;
+    }
     id_field(reply, "workspaceId", host);
     id_field(reply, "projectId", host);
     id_field(reply, "activeProjectId", host);
@@ -237,6 +262,7 @@ fn is_event(kind: &str) -> bool {
         "project.updated"
             | "project.deleted"
             | "workspace.updated"
+            | "workspace.order"
             | "fs.changed"
             | "review.batch.delivery"
     )
@@ -268,6 +294,7 @@ impl HubManager {
                 | C::WorkspacePin { .. }
                 | C::WorkspaceVisibility { .. }
                 | C::WorkspaceNest { .. }
+                | C::WorkspaceOrderSet { .. }
                 | C::FsTree { .. }
                 | C::FsSearch { .. }
                 | C::FsRead { .. }
@@ -414,6 +441,18 @@ impl HubManager {
         true
     }
 
+    /// Broadcast a tagged remote metadata event; a remote's `workspace.order`
+    /// is also kept for browsers that connect later.
+    fn publish_event(&self, host: &str, message: ServerMessage) {
+        if matches!(message, ServerMessage::WorkspaceOrder { .. }) {
+            self.remote_orders
+                .lock()
+                .unwrap()
+                .insert(host.to_string(), message.clone());
+        }
+        let _ = self.hub_events_tx.send(Arc::new(message));
+    }
+
     pub(super) fn fail_workspace_requests(&self, host: &str) {
         self.workspace_relay.pending.lock().unwrap().retain(|_, pending| {
             if pending.host != host { return true; }
@@ -437,6 +476,10 @@ impl HubManager {
         }
         let mut reply = serde_json::to_value(message).expect("server message serializes");
         let kind = reply["type"].as_str().unwrap_or_default().to_string();
+        // Only a remote's own order is its order: its relayed hosts' is not.
+        if kind == "workspace.order" && reply["hostId"] != "local" {
+            return true;
+        }
         let event = is_event(&kind);
         let mut requests = self.workspace_relay.pending.lock().unwrap();
         let key = reply["requestId"].as_str().unwrap_or_default().to_string();
@@ -457,7 +500,7 @@ impl HubManager {
             if event {
                 reply.as_object_mut().unwrap().remove("requestId");
                 if let Ok(message) = serde_json::from_value(reply) {
-                    let _ = self.hub_events_tx.send(Arc::new(message));
+                    self.publish_event(host, message);
                 }
             }
             return true;
@@ -467,7 +510,7 @@ impl HubManager {
             tag(&mut reply, host);
             reply.as_object_mut().unwrap().remove("requestId");
             if let Ok(message) = serde_json::from_value(reply) {
-                let _ = self.hub_events_tx.send(Arc::new(message));
+                self.publish_event(host, message);
             }
             return true;
         }
@@ -608,6 +651,62 @@ mod tests {
             serde_json::from_str::<Value>(&rx.recv().await.unwrap().0).unwrap()["hostId"],
             "a"
         );
+    }
+
+    #[tokio::test]
+    async fn remote_order_routes_to_its_owner_and_comes_back_qualified() {
+        let (hub, mut remote) = connected();
+        if let Some(HostState::Connected(info)) = hub.host_states.lock().unwrap().get_mut("a") {
+            info.capabilities.push("workspace.order.v1".into());
+        }
+        let (tx, mut rx) = crate::ws_outbox::channel();
+        let mut events = hub.subscribe_events();
+        route(
+            &hub,
+            "one",
+            &tx,
+            json!({"type":"workspace.order.set", "requestId":"order", "hostId":"a",
+                   "projects":[qualify("a", "p2"), qualify("b", "other"), "local-id", qualify("a", "p1")],
+                   "sessions":["s2", "s1"]}),
+        );
+        let forwarded: Value = serde_json::from_str(&remote.recv().await.unwrap()).unwrap();
+        assert_eq!(forwarded["projects"], json!(["p2", "p1"]));
+        assert_eq!(forwarded["sessions"], json!(["s2", "s1"]));
+        assert!(forwarded.get("hostId").is_none());
+        let id = forwarded["requestId"].as_str().unwrap();
+        let reply: ServerMessage = serde_json::from_value(json!({"type":"workspace.order", "requestId":id, "hostId":"local", "projects":["p1","p2"], "sessions":["s1"]})).unwrap();
+        assert!(hub.relay_workspace_message("a", &reply));
+        let answered: Value = serde_json::from_str(&rx.recv().await.unwrap().0).unwrap();
+        assert_eq!(answered["requestId"], "order");
+        assert_eq!(answered["hostId"], "a");
+        assert_eq!(
+            answered["projects"],
+            json!([qualify("a", "p1"), qualify("a", "p2")])
+        );
+        assert_eq!(answered["sessions"], json!(["s1"]));
+        let event = serde_json::to_value(&*events.recv().await.unwrap()).unwrap();
+        assert!(event.get("requestId").is_none());
+        // New browsers get the last order; a remote's own remote is ignored.
+        assert_eq!(hub.snapshot_remote_orders().len(), 1);
+        let nested: ServerMessage = serde_json::from_value(
+            json!({"type":"workspace.order", "hostId":"c", "projects":["x"], "sessions":[]}),
+        )
+        .unwrap();
+        assert!(hub.relay_workspace_message("a", &nested));
+        assert!(events.try_recv().is_err());
+        // Without the capability the request is refused, never run locally.
+        if let Some(HostState::Connected(info)) = hub.host_states.lock().unwrap().get_mut("a") {
+            info.capabilities.retain(|cap| cap != "workspace.order.v1");
+        }
+        route(
+            &hub,
+            "one",
+            &tx,
+            json!({"type":"workspace.order.set", "requestId":"again", "hostId":"a", "sessions":["s"]}),
+        );
+        let refused: Value = serde_json::from_str(&rx.recv().await.unwrap().0).unwrap();
+        assert_eq!(refused["code"], "remote_unavailable");
+        assert!(remote.try_recv().is_err());
     }
 
     #[test]

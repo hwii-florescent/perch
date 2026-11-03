@@ -1866,6 +1866,20 @@ pub enum ClientMessage {
         parent_workspace_id: Option<String>,
     },
 
+    /// Replace the core's sidebar order (capability `workspace.order.v1`).
+    /// Each list that is present replaces the stored one (last write wins);
+    /// absent lists are untouched. Answered by a `workspace.order` broadcast.
+    #[serde(rename = "workspace.order.set", rename_all = "camelCase")]
+    WorkspaceOrderSet {
+        request_id: String,
+        #[serde(default)]
+        host_id: Option<String>,
+        #[serde(default)]
+        projects: Option<Vec<String>>,
+        #[serde(default)]
+        sessions: Option<Vec<String>>,
+    },
+
     /// Restore a sleeping workspace's metadata state. This first slice does
     /// not advertise sleep itself and never starts an agent as a side effect.
     #[serde(rename = "workspace.restore", rename_all = "camelCase")]
@@ -2636,6 +2650,20 @@ pub enum ServerMessage {
     /// every change; the list replaces the previous one.
     #[serde(rename = "worktree.jobs", rename_all = "camelCase")]
     WorktreeJobs { jobs: Vec<WorktreeJob> },
+
+    /// The core's sidebar order: project ids and session ids, first to last.
+    /// Sent on connect and broadcast to every viewer after each change (the
+    /// requester's copy echoes `requestId`). Ids may be stale or unknown.
+    /// Through a hub, `hostId` names the owning remote and project ids are
+    /// host-qualified.
+    #[serde(rename = "workspace.order", rename_all = "camelCase")]
+    WorkspaceOrder {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        host_id: String,
+        projects: Vec<String>,
+        sessions: Vec<String>,
+    },
 
     #[serde(rename = "project.list", rename_all = "camelCase")]
     ProjectList {

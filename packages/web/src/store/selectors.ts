@@ -28,6 +28,8 @@ export type ProjectNavState = Pick<
   /** Optional so project-only callers keep working; the full store state has both. */
   activeWorkspaceId?: string | null;
   workspaces?: WorkspaceRecord[];
+  /** The cores' chat order (`workspace.order`); absent = each strip keeps its own order. */
+  workspaceOrderByHost?: PerchState["workspaceOrderByHost"];
 };
 
 /** Projects belonging to `hostId`, newest-first. */

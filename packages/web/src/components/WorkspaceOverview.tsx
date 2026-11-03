@@ -2,7 +2,8 @@ import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { ADD_PROJECT_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
-import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
+import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
+import { moveInOrder, orderBy, orderProjects, stepTarget } from "../sidebarOrder";
 import { StatusDot } from "./StatusDot";
 import { sessionDotState } from "../statusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
@@ -46,6 +47,9 @@ const RESTORE = button({ size: "xs", tone: "warn", className: "mt-0 mr-[0.3rem] 
 const PROJECT_ICON = rowAction({ reveal: "project" });
 const SESSION_CLOSE = rowAction({ reveal: "session" });
 const HEADER_PLUS = PROJECT_ICON;
+// Reorder drag: its own payload (not the session-to-dockview one) and a line where it will land.
+const ORDER_DRAG_MIME = "application/x-perch-order";
+const DROP_LINE = "data-[drop=before]:[box-shadow:inset_0_2px_0_0_var(--accent)] data-[drop=after]:[box-shadow:inset_0_-2px_0_0_var(--accent)]";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -323,6 +327,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const setActiveHost = usePerchStore((state) => state.setActiveHost);
   const sshHosts = usePerchStore((state) => state.hosts);
   const hostStates = usePerchStore((state) => state.hostStates);
+  // The core's project and chat order; no drag or Move without the capability (no local-only order).
+  const order = usePerchStore((state) => state.workspaceOrderByHost[state.activeHostId]);
+  const reorderable = usePerchStore((state) => canReorderHost(state, state.activeHostId));
+  const setWorkspaceOrder = usePerchStore((state) => state.setWorkspaceOrder);
   // Which host the Add project dialog registers on; starts as the active one.
   const [addHostId, setAddHostId] = useState(activeHostId);
   const focusWorkspace = usePerchStore((state) => state.focusWorkspace);
@@ -357,11 +365,85 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     });
   }
 
+  // Reorder: one operation, move X before/after Y within a group (a project's chats, the
+  // favourites). Native HTML5 drag with the mouse; Move up/down in the row menus serves the
+  // keyboard and the phone. The core keeps the order, so every viewer shows it.
+  const dragging = useRef<{ kind: "project" | "session"; id: string; group: string } | null>(null);
+  const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
+  function moveRow(kind: "project" | "session", id: string, target: string, after: boolean) {
+    if (kind === "project") setWorkspaceOrder(activeHostId, { projects: moveInOrder(hostProjects.map((project) => project.id), order?.projects, id, target, after) });
+    else setWorkspaceOrder(activeHostId, { sessions: moveInOrder(allSessions.map((session) => session.id), order?.sessions, id, target, after) });
+  }
+  function dnd(kind: "project" | "session", id: string, group: string) {
+    if (!reorderable || compact) return { handle: {}, zone: {} };
+    const clear = () => { dragging.current = null; setDrop(null); };
+    const hover = () => (dragging.current?.kind === kind && dragging.current.group === group && dragging.current.id !== id ? dragging.current : null);
+    const after = (event: React.DragEvent) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      return event.clientY > rect.top + rect.height / 2;
+    };
+    return {
+      handle: {
+        draggable: true,
+        onDragStart: (event: React.DragEvent) => {
+          event.stopPropagation();
+          dragging.current = { kind, id, group };
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(ORDER_DRAG_MIME, id);
+        },
+        onDragEnd: clear,
+      },
+      zone: {
+        "data-drop": drop?.id === id ? (drop.after ? "after" : "before") : undefined,
+        onDragOver: (event: React.DragEvent) => {
+          if (!hover()) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          const side = after(event);
+          setDrop((current) => (current?.id === id && current.after === side ? current : { id, after: side }));
+        },
+        onDragLeave: (event: React.DragEvent) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrop((current) => (current?.id === id ? null : current));
+        },
+        onDrop: (event: React.DragEvent) => {
+          const source = hover();
+          if (!source) return;
+          event.preventDefault();
+          event.stopPropagation();
+          moveRow(kind, source.id, id, after(event));
+          clear();
+        },
+      },
+    };
+  }
+  function moveItems(kind: "project" | "session", id: string, siblings: string[]): MenuItem[] {
+    if (!reorderable) return [];
+    return ([["up", "Move up", -1], ["down", "Move down", 1]] as const).flatMap(([key, label, step]) => {
+      const to = stepTarget(siblings, id, step);
+      return to ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, to.target, to.after) }] : [];
+    });
+  }
+  /** A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down. */
+  function sessionRowProps(session: SessionSummary, siblings: SessionSummary[], group: string) {
+    const { handle, zone } = dnd("session", session.id, group);
+    return {
+      ...handle,
+      ...zone,
+      ...longPress((x, y) => sessionMenu(session, x, y, siblings)),
+      onContextMenu: (event: React.MouseEvent) => {
+        event.preventDefault();
+        sessionMenu(session, event.clientX, event.clientY, siblings);
+      },
+    };
+  }
+
   function projectMenu(project: WorkspaceProject): MenuItem[] {
     const projectSessions = sessionsForProject(project.id);
     return [
       { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
       { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
+      ...moveItems("project", project.id, visibleProjects.filter((other) => other.favorite === project.favorite).map((other) => other.id)),
       ...(projectSessions.length > 0
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
         : []),
@@ -422,11 +504,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     ];
   }
 
-  function sessionRows(list: SessionSummary[]): ReactElement {
+  function sessionRows(list: SessionSummary[], group: string): ReactElement {
     return (
       <div className="workspace-entry__sessions flex flex-col gap-[2px] pt-[2px]">
         {list.map((session) => (
-          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui", session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, "pl-[1.9rem]", session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -462,8 +544,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     setSessionView(next);
     try { localStorage.setItem(SESSION_VIEW_KEY, next); } catch { /* per-viewer convenience */ }
   }
-  function sessionMenu(session: SessionSummary, x: number, y: number) {
+  function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[]) {
     setMenu({ x, y, label: "Session actions", items: [
+      ...moveItems("session", session.id, siblings.map((other) => other.id)),
       { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => requestCloseSession(session.id) },
     ] });
   }
@@ -504,13 +587,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }, [clearCreateRequest, createRequest?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hostProjects = useMemo(
-    () => projects
+    () => orderProjects(projects
       .filter((project) => project.hostId === activeHostId)
       .sort((a, b) => {
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
         return b.updatedAt - a.updatedAt;
-      }),
-    [activeHostId, projects],
+      }), order?.projects),
+    [activeHostId, projects, order?.projects],
   );
   const chatsProject = hostProjects.find(isChatsProject);
   const visibleProjects = hostProjects.filter((project) => !isChatsProject(project));
@@ -522,9 +605,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   function sessionsForProject(projectId: string): SessionSummary[] {
     const projectWorkspaces = workspacesForProject(workspaces, projectId);
-    return projectWorkspaces
+    return orderBy(projectWorkspaces
       .flatMap((workspace) => sessionsForWorkspace(sessions, workspace))
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => b.createdAt - a.createdAt), order?.sessions, (session) => session.id);
   }
 
   function navigateToWorkspace(workspaceId: string) {
@@ -534,8 +617,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
 
   // "In one list": every session on this host, projects and Chats alike, newest first.
   const allSessions = useMemo(
-    () => sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt),
-    [sessions, activeHostId],
+    () => orderBy(sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt), order?.sessions, (session) => session.id),
+    [sessions, activeHostId, order?.sessions],
   );
   const listView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-session-list">
@@ -543,7 +626,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
-          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui", session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div {...sessionRowProps(session, allSessions, "list")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -629,7 +712,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             {!chatsCollapsed && chats.length > 0 && (
               <div className="flex flex-col gap-[2px] pt-[2px] pr-[0.3rem] pl-[0.4rem]">
                 {chats.map((session) => (
-                  <div className={cn("group/row flex min-w-0 items-stretch rounded-ui", session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+                  <div {...sessionRowProps(session, chats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
                     <button
                       type="button"
                       className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -800,13 +883,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const collapsible = single ? sessionView === "list" && projectSessions.length > 0 : true;
             const showHeaderDots = projectSessions.length > 0 && (projectCollapsed || (single && sessionView === "compact"));
             const onHeaderClick = () => (collapsible || !single ? toggleCollapsed(project.id) : navigateToWorkspace(single.id));
+            // Reorder inside the favourites or the rest; the whole project is the drop target.
+            const projectDnd = dnd("project", project.id, project.favorite ? "favorites" : "projects");
             return (
               <div
-                className="workspace-project flex flex-col gap-[2px]"
+                {...projectDnd.zone}
+                className={cn("workspace-project flex flex-col gap-[2px]", DROP_LINE)}
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
+                  {...(renamingProjectId === project.id ? {} : projectDnd.handle)}
                   {...longPress((x, y) => setMenu({ x, y, label: "Project actions", items: projectMenu(project) }))}
                   className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", HOLDABLE, single && "workspace-entry", single && single.id === activeWorkspaceId && (sessionView === "compact" || projectCollapsed || projectSessions.length === 0) && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
@@ -866,7 +953,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 </button>
                 )}
                 {showHeaderDots && (
-                  <SessionDots sessions={allWorkspaces.flatMap(tabOrderedSessions)} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
+                  <SessionDots sessions={allWorkspaces.flatMap(tabOrderedSessions)} activeId={sessionId} onPick={pickSession} onMenu={(session, x, y) => sessionMenu(session, x, y, allWorkspaces.flatMap(tabOrderedSessions))} />
                 )}
                 <button
                   type="button"
@@ -996,7 +1083,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                             )}
                           </button>
                           {sessionView === "compact" && workspaceSessions.length > 0 && (
-                            <SessionDots sessions={tabOrderedSessions(workspace)} activeId={sessionId} onPick={pickSession} onMenu={sessionMenu} />
+                            <SessionDots sessions={tabOrderedSessions(workspace)} activeId={sessionId} onPick={pickSession} onMenu={(session, x, y) => sessionMenu(session, x, y, tabOrderedSessions(workspace))} />
                           )}
                           </div>
                           )}
@@ -1009,7 +1096,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                               Restore
                             </button>
                           )}
-                          {sessionView === "list" && workspaceSessions.length > 0 && (workspaceActive || compact) && sessionRows(tabOrderedSessions(workspace))}
+                          {sessionView === "list" && workspaceSessions.length > 0 && (workspaceActive || compact) && sessionRows(tabOrderedSessions(workspace), workspace.id)}
                         </div>
                         {nested.length > 0 && depth < 8 && (
                           <div className={`${WORKSPACE_TREE} ml-[0.9rem]`} data-testid={`workspace-children-${workspace.id}`}>
@@ -1031,7 +1118,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                                 Restore
                               </button>
                             )}
-                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(tabOrderedSessions(single))}
+                            {sessionView === "list" && !projectCollapsed && sessionsForWorkspace(sessions, single).length > 0 && sessionRows(tabOrderedSessions(single), single.id)}
                           </>
                         );
                       }

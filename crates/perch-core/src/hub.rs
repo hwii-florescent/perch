@@ -92,6 +92,7 @@ const RELAYED_CAPABILITIES: &[&str] = &[
     "workspace.pin",
     "workspace.nest",
     "workspace.visibility",
+    "workspace.order.v1",
     "fs.tree",
     "fs.search",
     "fs.read",
@@ -224,6 +225,9 @@ pub struct HubManager {
     /// each new browser connection like the local cache: a remote only sends
     /// it when it changes.
     remote_git: Mutex<HashMap<(String, String), ServerMessage>>,
+    /// Latest `workspace.order` per remote, replayed to new connections (a
+    /// remote sends it on its own connect and on change only).
+    remote_orders: Mutex<HashMap<String, ServerMessage>>,
     /// Shutdown-flag channels per host (watch<bool> where `true` = shut down).
     shutdown_flags: Mutex<HashMap<String, watch::Sender<bool>>>,
     /// The `SshHost` config each currently-running connection task was last
@@ -252,6 +256,7 @@ impl HubManager {
             host_states: Mutex::new(HashMap::new()),
             host_names: Mutex::new(HashMap::new()),
             remote_git: Mutex::new(HashMap::new()),
+            remote_orders: Mutex::new(HashMap::new()),
             shutdown_flags: Mutex::new(HashMap::new()),
             running_hosts: Mutex::new(HashMap::new()),
             own_port,
@@ -279,6 +284,16 @@ impl HubManager {
     /// The last `workspace.git` of every remote cwd, for a new connection.
     pub fn snapshot_remote_git(&self) -> Vec<ServerMessage> {
         self.remote_git.lock().unwrap().values().cloned().collect()
+    }
+
+    /// The last `workspace.order` of every remote, for a new connection.
+    pub fn snapshot_remote_orders(&self) -> Vec<ServerMessage> {
+        self.remote_orders
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Called when `hosts.upsert` / `hosts.delete` is received. Diffs the new
@@ -1636,6 +1651,7 @@ impl HubManager {
             | ServerMessage::ProjectUpdated { .. }
             | ServerMessage::ProjectDeleted { .. }
             | ServerMessage::WorkspaceSnapshot { .. }
+            | ServerMessage::WorkspaceOrder { .. }
             | ServerMessage::WorkspaceUpdated { .. }
             | ServerMessage::WorkspaceFocus { .. }
             | ServerMessage::FsTreeResult { .. }

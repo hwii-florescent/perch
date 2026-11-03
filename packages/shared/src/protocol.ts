@@ -1798,6 +1798,17 @@ export interface WorkspaceNestMessage {
   parentWorkspaceId?: string;
 }
 
+/** Replace the core's sidebar order (capability `workspace.order.v1`). Each
+ * list that is present replaces the stored one (last write wins); absent
+ * lists are untouched. Answered by a `workspace.order` broadcast. */
+export interface WorkspaceOrderSetMessage {
+  type: "workspace.order.set";
+  requestId: string;
+  hostId?: string;
+  projects?: string[];
+  sessions?: string[];
+}
+
 export interface WorkspaceRestoreMessage {
   type: "workspace.restore";
   requestId: string;
@@ -1899,6 +1910,7 @@ export type ClientMessage =
   | WorkspacePinMessage
   | WorkspaceVisibilityMessage
   | WorkspaceNestMessage
+  | WorkspaceOrderSetMessage
   | WorktreeJobCancelMessage
   | WorktreeJobRetryMessage
   | WorktreeJobDismissMessage
@@ -2577,6 +2589,18 @@ export interface WorktreeJobsMessage {
   jobs: WorktreeJob[];
 }
 
+/** The core's sidebar order: project ids and session ids, first to last.
+ * Sent on connect and broadcast to every viewer after each change (the
+ * requester's copy echoes `requestId`). Ids may be stale or unknown. Through
+ * a hub, `hostId` names the owning remote and project ids are host-qualified. */
+export interface WorkspaceOrderMessage {
+  type: "workspace.order";
+  requestId?: string;
+  hostId: string;
+  projects: string[];
+  sessions: string[];
+}
+
 export interface ProjectListResponseMessage {
   type: "project.list";
   requestId: string;
@@ -2712,6 +2736,7 @@ export type ServerMessage =
   | WorktreeErrorMessage
   | WorktreeJobStartedMessage
   | WorktreeJobsMessage
+  | WorkspaceOrderMessage
   | ProjectListResponseMessage
   | ProjectUpdatedMessage
   | ProjectDeletedMessage

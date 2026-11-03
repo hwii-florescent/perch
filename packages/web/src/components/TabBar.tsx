@@ -70,6 +70,7 @@ export function TabBar() {
   const activeProject = usePerchStore((s) => s.activeProject);
   const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
   const workspaces = usePerchStore((s) => s.workspaces);
+  const workspaceOrderByHost = usePerchStore((s) => s.workspaceOrderByHost);
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const renameSession = usePerchStore((s) => s.renameSession);
   const fileTabs = useFileTabs((s) => s.tabs);
@@ -88,7 +89,7 @@ export function TabBar() {
   // The order is read from storage on every render: a saved drag order must re-render the strip.
   useTabOrderVersion();
 
-  const navState = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces };
+  const navState = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces, workspaceOrderByHost };
   const ws = effectiveWorkspace(navState);
   const project = effectiveActiveProject(navState);
   const hostId = ws?.hostId ?? project?.hostId ?? activeHostId;

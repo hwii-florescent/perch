@@ -1,9 +1,8 @@
 /** Pane actions for the layout actually on screen. A split (drag, shortcut or menu) tiles
  * top-row tabs; Dockview only keeps the session's own panels. Both use the same keymap. */
 import { getDockviewController, type PaneDirection } from "./dockview/dockviewController";
-import { activateTab, currentTabs, tabOrderKey } from "./workspaceTabs";
+import { activateTab, currentTabs, saveTabStrip, tabOrderKey } from "./workspaceTabs";
 import { layout, MAX_SPLIT, MIN_PANE_PX, useSplitSets, visibleSplit, type SplitNode } from "./splitSets";
-import { saveTabOrder } from "./tabOrder";
 import { dropTab } from "./tabDrag";
 import { usePerchStore, effectiveWorkspace } from "./store";
 import { useFileTabs } from "./fileTabs";
@@ -80,7 +79,7 @@ function swap(other: string | null) {
   const a = ids.indexOf(split.activeId), b = ids.indexOf(other);
   if (a < 0 || b < 0) return;
   [ids[a], ids[b]] = [ids[b]!, ids[a]!];
-  saveTabOrder(key, ids);
+  saveTabStrip(key, ids);
 }
 
 function resize(delta: number) {

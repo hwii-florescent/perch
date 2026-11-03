@@ -863,6 +863,63 @@ pub(super) fn handle_workspace_mutation(
     }
 }
 
+/// The stored sidebar order as a wire message (on connect, and after a set).
+pub(super) fn order_message(app: &AppState, request_id: Option<String>) -> ServerMessage {
+    ServerMessage::WorkspaceOrder {
+        request_id,
+        host_id: "local".to_string(),
+        projects: app.db.workspace_order(crate::db::ORDER_PROJECTS),
+        sessions: app.db.workspace_order(crate::db::ORDER_SESSIONS),
+    }
+}
+
+/// `workspace.order.set`: replace the present lists, then broadcast the
+/// result to every viewer (the broadcast also answers the request). The
+/// foundation lock keeps concurrent writes and their broadcasts in one order.
+pub(super) fn handle_workspace_order_set(
+    state: &Arc<ConnState>,
+    request_id: String,
+    host_id: Option<String>,
+    projects: Option<Vec<String>>,
+    sessions: Option<Vec<String>>,
+) {
+    if let Some(message) = reject_non_local_foundation_host(host_id.as_deref(), &request_id) {
+        let _ = state.out_tx.send(message);
+        return;
+    }
+    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+    for (kind, ids) in [
+        (crate::db::ORDER_PROJECTS, projects),
+        (crate::db::ORDER_SESSIONS, sessions),
+    ] {
+        let Some(ids) = ids else { continue };
+        match state.app.db.set_workspace_order(kind, ids) {
+            Ok(true) => {}
+            Ok(false) => {
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "order_invalid",
+                    "order list is too long",
+                    false,
+                );
+                return;
+            }
+            Err(err) => {
+                fail(
+                    &state.out_tx,
+                    request_id,
+                    "order_failed",
+                    err.to_string(),
+                    true,
+                );
+                return;
+            }
+        }
+    }
+    broadcast_foundation(&state.app, order_message(&state.app, Some(request_id)));
+}
+
 pub(super) fn handle_project_list(
     state: &Arc<ConnState>,
     request_id: String,

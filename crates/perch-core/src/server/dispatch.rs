@@ -922,6 +922,12 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             "workspace_pin_failed",
             |db, id| db.set_workspace_pinned(id, pinned),
         ),
+        ClientMessage::WorkspaceOrderSet {
+            request_id,
+            host_id,
+            projects,
+            sessions,
+        } => workspace::handle_workspace_order_set(state, request_id, host_id, projects, sessions),
         ClientMessage::WorkspaceVisibility {
             request_id,
             workspace_id,

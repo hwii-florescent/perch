@@ -2,6 +2,7 @@ import type { SessionSummary } from "@perch/shared";
 import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, usePerchStore, type ProjectNavState } from "./store";
 import { fileTabKey, isBlankBrowser, useFileTabs, type FileTab } from "./fileTabs";
 import { applyStoredTabOrder, saveTabOrder, storedTabOrder } from "./tabOrder";
+import { applySessionOrder, orderBy, refillSlots } from "./sidebarOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
 import { useBrowserPages } from "./browserPages";
@@ -31,7 +32,28 @@ export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEn
       .map((tab): TabEntry => ({ id: fileTabKey(tab), kind: "resource", tab })),
   ];
   const key = tabOrderKey(nav);
-  return key ? applyStoredTabOrder(key, entries) : entries;
+  const stored = key ? applyStoredTabOrder(key, entries) : entries;
+  // Chats follow the core's order, so the strip, the sidebar and the phone agree.
+  // File tabs keep this viewer's slots.
+  const hostId = ws?.hostId ?? nav.activeHostId;
+  return applySessionOrder(stored, (entry) => entry.kind === "session", nav.workspaceOrderByHost?.[hostId]?.sessions);
+}
+
+/** Save the strip's new order. When it changes the chats' relative order that
+ * is the core's chat order too, so every viewer follows. */
+export function saveTabStrip(key: string, ids: string[]): void {
+  const state = usePerchStore.getState();
+  const files = useFileTabs.getState();
+  const sessionIds = new Set(state.sessions.map((session) => session.id));
+  const before = workspaceTabs(state, files.tabs).filter((tab) => tab.kind === "session").map((tab) => tab.id);
+  saveTabOrder(key, ids);
+  const after = ids.filter((id) => sessionIds.has(id));
+  if (before.join() === after.join()) return;
+  const hostId = effectiveWorkspace(state)?.hostId ?? state.activeHostId;
+  const mine = state.sessions.filter((session) => (session.hostId ?? "local") === hostId).sort((a, b) => b.createdAt - a.createdAt);
+  const shown = orderBy(mine, state.workspaceOrderByHost[hostId]?.sessions, (session) => session.id).map((session) => session.id);
+  const moved = new Set(after);
+  state.setWorkspaceOrder(hostId, { sessions: refillSlots(shown, (id) => moved.has(id), after.filter((id) => shown.includes(id))) });
 }
 
 /** A single click on a file in the explorer: show it in the workspace's preview tab, replacing

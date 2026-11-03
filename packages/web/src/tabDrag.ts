@@ -1,9 +1,9 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { create } from "zustand";
 import { usePerchStore } from "./store";
-import { moveBeside, moveTab, saveTabOrder } from "./tabOrder";
+import { moveBeside, moveTab } from "./tabOrder";
 import { planDrop, useSplitSets, type DropZone } from "./splitSets";
-import { activateTab, currentTabs, tabOrderKey } from "./workspaceTabs";
+import { activateTab, currentTabs, saveTabStrip, tabOrderKey } from "./workspaceTabs";
 import { acquirePassthrough } from "./browserNative";
 
 /**
@@ -102,7 +102,7 @@ function commit(drag: TabDragState): void {
   // The tab (or the target pane's) may have closed during the drag.
   if (!ids.includes(drag.id)) return;
   if (drag.insert && key) {
-    saveTabOrder(key, moveTab(ids, drag.id, drag.insert.index));
+    saveTabStrip(key, moveTab(ids, drag.id, drag.insert.index));
     return;
   }
   const { drop } = drag;
@@ -116,7 +116,7 @@ export function dropTab(dragged: string, target: string, zone: DropZone): void {
   if (!key || !ids.includes(dragged) || !ids.includes(target)) return;
   useSplitSets.getState().drop(dragged, target, zone);
   // Left/up puts the tab before the pane's in the strip, right/down after: the strip order is the pane order.
-  saveTabOrder(key, moveBeside(ids, dragged, target, zone === "right" || zone === "down"));
+  saveTabStrip(key, moveBeside(ids, dragged, target, zone === "right" || zone === "down"));
   const entry = currentTabs().tabs.find((tab) => tab.id === dragged);
   if (entry) activateTab(entry);
 }

@@ -760,6 +760,45 @@ describe("deleteSession (tab close)", () => {
     }
   });
 
+  it("keeps each core's sidebar order and sends moves only to a reachable core that has the capability", () => {
+    const base = usePerchStore.getState();
+    try {
+      handleServerMessage({ type: "workspace.order", hostId: "local", projects: ["p2", "p1"], sessions: ["s1"] });
+      handleServerMessage({ type: "workspace.order", hostId: "box", projects: ["remote:p"], sessions: [] });
+      expect(usePerchStore.getState().workspaceOrderByHost).toEqual({
+        local: { projects: ["p2", "p1"], sessions: ["s1"] },
+        box: { projects: ["remote:p"], sessions: [] },
+      });
+
+      // Local core without the capability (older peer): nothing sent, nothing changed.
+      usePerchStore.setState({ connected: true, serverInfo: { type: "server.info", hostname: "h", isSsh: false, platform: "linux", claudeModels: [], codexModels: [], protocolVersion: 1, capabilities: [] } as never });
+      FakeWebSocket.sent = [];
+      usePerchStore.getState().setWorkspaceOrder("local", { sessions: ["s2", "s1"] });
+      expect(FakeWebSocket.sent).toEqual([]);
+      expect(usePerchStore.getState().workspaceOrderByHost.local!.sessions).toEqual(["s1"]);
+
+      // With it: applied at once, and only the lists given are sent.
+      usePerchStore.setState({ serverInfo: { ...usePerchStore.getState().serverInfo!, capabilities: ["workspace.order.v1"] } });
+      usePerchStore.getState().setWorkspaceOrder("local", { sessions: ["s2", "s1"] });
+      expect(usePerchStore.getState().workspaceOrderByHost.local).toEqual({ projects: ["p2", "p1"], sessions: ["s2", "s1"] });
+      expect(JSON.parse(FakeWebSocket.sent.at(-1)!)).toMatchObject({ type: "workspace.order.set", sessions: ["s2", "s1"] });
+      expect(JSON.parse(FakeWebSocket.sent.at(-1)!)).not.toHaveProperty("projects");
+
+      // A remote host needs its own capability and a live connection: no local fallback.
+      FakeWebSocket.sent = [];
+      usePerchStore.getState().setWorkspaceOrder("box", { projects: [] });
+      expect(FakeWebSocket.sent).toEqual([]);
+      usePerchStore.setState({
+        hostStates: { box: { type: "host.info", hostId: "box", name: "box", state: "connected" } as never },
+        workspaceCapabilitiesByHost: { box: ["workspace.order.v1"] },
+      });
+      usePerchStore.getState().setWorkspaceOrder("box", { projects: ["remote:q"] });
+      expect(JSON.parse(FakeWebSocket.sent.at(-1)!)).toMatchObject({ type: "workspace.order.set", hostId: "box", projects: ["remote:q"] });
+    } finally {
+      usePerchStore.setState({ workspaceOrderByHost: {}, serverInfo: base.serverInfo, hostStates: base.hostStates, workspaceCapabilitiesByHost: base.workspaceCapabilitiesByHost, connected: base.connected });
+    }
+  });
+
   it("closing the active tab lands on a sibling in the same project, not the newest session elsewhere", () => {
     usePerchStore.setState({
       sessionId: "A",

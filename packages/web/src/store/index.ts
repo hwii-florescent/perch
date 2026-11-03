@@ -40,6 +40,7 @@ export {
 } from "./selectors";
 export type { ProjectGroup, ProjectNavState } from "./selectors";
 import { newId } from "../ids";
+import type { WorkspaceOrder } from "../sidebarOrder";
 import { writeSessionId } from "../viewer";
 
 export interface ToolCallEntry {
@@ -354,6 +355,12 @@ export interface PerchState {
   workspaceSnapshotByHost: Record<string, WorkspaceSnapshotStatus>;
   workspaceCapabilities: string[];
   workspaceCapabilitiesByHost: Record<string, string[]>;
+  /** Each core's sidebar order (`workspace.order`), by host. Absent until the
+   * core sends it; an older core never does and keeps today's sort. */
+  workspaceOrderByHost: Record<string, WorkspaceOrder>;
+  /** Replace the lists given on `hostId`'s core (last write wins). Applies at
+   * once and is then confirmed by the core's broadcast; a no-op without the capability. */
+  setWorkspaceOrder: (hostId: string, order: Partial<WorkspaceOrder>) => void;
   workspaceProjectCreate: WorkspaceProjectCreateState | null;
   activeProjectId: string | null;
   activeWorkspaceId: string | null;
@@ -847,6 +854,7 @@ const WORKSPACE_CAPABILITIES = {
   workspacePin: "workspace.pin",
   workspaceNest: "workspace.nest",
   workspaceVisibility: "workspace.visibility",
+  workspaceOrder: "workspace.order.v1",
 } as const;
 
 const AGENT_RUNTIME_CAPABILITIES = {
@@ -868,6 +876,17 @@ function hasWorkspaceCapability(
     : state.workspaceCapabilitiesByHost[hostId];
   return (hostId === "local" ? state.serverInfo?.protocolVersion : capabilities != null) != null &&
     capabilities?.includes(capability) === true;
+}
+
+/** Whether the sidebar can reorder `hostId`'s projects and chats: its core has
+ * `workspace.order.v1` and is reachable. There is no local-only fallback; a
+ * host without it keeps its default sort and no drag. */
+export function canReorderHost(
+  state: Pick<PerchState, "connected" | "serverInfo" | "workspaceCapabilitiesByHost" | "hostStates">,
+  hostId: string,
+): boolean {
+  const reachable = hostId === "local" ? state.connected : state.hostStates[hostId]?.state === "connected";
+  return reachable && hasWorkspaceCapability(state, hostId, WORKSPACE_CAPABILITIES.workspaceOrder);
 }
 
 function hasAgentRuntimeCapability(
@@ -1029,6 +1048,18 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   workspaceSnapshotByHost: {},
   workspaceCapabilities: [],
   workspaceCapabilitiesByHost: {},
+  workspaceOrderByHost: {},
+  setWorkspaceOrder: (hostId, order) => {
+    const state = get();
+    if (!canReorderHost(state, hostId)) return;
+    const next = { projects: [], sessions: [], ...state.workspaceOrderByHost[hostId], ...order };
+    set({ workspaceOrderByHost: { ...state.workspaceOrderByHost, [hostId]: next } });
+    sendWorkspaceMessage(
+      { type: "workspace.order.set", requestId: newId(), ...(hostId === "local" ? {} : { hostId }), ...order },
+      hostId,
+      WORKSPACE_CAPABILITIES.workspaceOrder,
+    );
+  },
   workspaceProjectCreate: null,
   activeProjectId: readStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY),
   activeWorkspaceId: readStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY),
@@ -3243,6 +3274,13 @@ export function handleServerMessage(msg: ServerMessage): void {
     }
     case "worktree.jobs": {
       usePerchStore.setState({ worktreeJobs: msg.jobs });
+      break;
+    }
+    case "workspace.order": {
+      if (msg.requestId) pendingWorkspaceRequests.delete(msg.requestId);
+      usePerchStore.setState((state) => ({
+        workspaceOrderByHost: { ...state.workspaceOrderByHost, [msg.hostId]: { projects: msg.projects, sessions: msg.sessions } },
+      }));
       break;
     }
   }

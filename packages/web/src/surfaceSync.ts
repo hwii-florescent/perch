@@ -325,6 +325,8 @@ function syncShown(state = usePerchStore.getState()): void {
 usePerchStore.subscribe((state, previous) => {
   noteNavigation(state, previous);
   if (state.sessions !== previous.sessions || state.sessionId !== previous.sessionId) trackSession(state);
+  // The core's chat order shapes the strip this window mirrors.
+  if (state.workspaceOrderByHost !== previous.workspaceOrderByHost) scheduleMirror();
   if (state.activeWorkspaceId === previous.activeWorkspaceId && state.sessionId === previous.sessionId
     && state.serverInfo === previous.serverInfo && state.workspaces === previous.workspaces) return;
   syncShown(state);

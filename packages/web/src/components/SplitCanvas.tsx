@@ -50,6 +50,7 @@ export function SplitCanvas() {
   const activeProject = usePerchStore((s) => s.activeProject);
   const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
   const workspaces = usePerchStore((s) => s.workspaces);
+  const workspaceOrderByHost = usePerchStore((s) => s.workspaceOrderByHost);
   const fileTabs = useFileTabs((s) => s.tabs);
   const activeKey = useFileTabs((s) => s.active);
   const sets = useSplitSets((s) => s.sets);
@@ -73,7 +74,7 @@ export function SplitCanvas() {
     return () => observer.disconnect();
   }, []);
 
-  const entries = workspaceTabs({ sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces }, fileTabs);
+  const entries = workspaceTabs({ sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces, workspaceOrderByHost }, fileTabs);
   const resources = new Map(entries.flatMap((entry) => entry.kind === "resource" ? [[entry.id, entry.tab] as const] : []));
   const fileShown = activeKey !== null && resources.has(activeKey);
   const activeId = fileShown ? activeKey : sessionId;

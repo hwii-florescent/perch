@@ -2150,6 +2150,12 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             .load(std::sync::atomic::Ordering::SeqCst),
     });
     let _ = state.out_tx.send(worktree_jobs::jobs_message(&state.app));
+    let _ = state
+        .out_tx
+        .send(workspace::order_message(&state.app, None));
+    for msg in state.app.hub.snapshot_remote_orders() {
+        let _ = state.out_tx.send(msg);
+    }
 
     // Send the current hosts list so the sidebar can render remote sections
     // without waiting for the Settings modal to call fetchHosts().
@@ -2418,6 +2424,7 @@ fn foundation_capabilities() -> Vec<String> {
         "worktree.startFrom",
         "worktree.delete",
         "workspace.pin",
+        "workspace.order.v1",
         "workspace.nest",
         "workspace.visibility",
         "session.mode.get",
