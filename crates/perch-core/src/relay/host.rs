@@ -55,6 +55,19 @@ const CHUNK: usize = 48 * 1024;
 
 type Out = mpsc::Sender<Message>;
 
+/// A text message as frames of at most `CHUNK` bytes: the relay drops any frame
+/// over 1 MiB, and a terminal replay is several MiB. The pieces are bytes, so
+/// one may end inside a UTF-8 character; the phone joins them before decoding.
+pub(super) fn text_frames(text: &str) -> Vec<(u8, &[u8])> {
+    let bytes = text.as_bytes();
+    let mut pieces: Vec<_> = bytes.chunks(CHUNK).map(|piece| (WS_TEXT_PART, piece)).collect();
+    match pieces.last_mut() {
+        Some(last) => last.0 = WS_TEXT,
+        None => pieces.push((WS_TEXT, bytes)),
+    }
+    pieces
+}
+
 /// Connect, serve, and reconnect with backoff until aborted.
 pub(super) async fn run(
     url: String,
@@ -444,7 +457,13 @@ async fn socket(
             }
             outgoing = stream.next() => {
                 let sent = match outgoing {
-                    Some(Ok(Message::Text(text))) => session.send(WS_TEXT, id, text.as_bytes()).await,
+                    Some(Ok(Message::Text(text))) => {
+                        let mut sent = true;
+                        for (kind, piece) in text_frames(&text) {
+                            sent &= session.send(kind, id, piece).await;
+                        }
+                        sent
+                    }
                     Some(Ok(Message::Binary(bytes))) => session.send(WS_BIN, id, &bytes).await,
                     Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => true,
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,

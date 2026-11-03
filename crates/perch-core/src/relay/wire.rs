@@ -35,6 +35,9 @@ pub const WS_OPENED: u8 = 8;
 pub const WS_TEXT: u8 = 9;
 pub const WS_BIN: u8 = 10;
 pub const WS_CLOSE: u8 = 11;
+/// Not the last piece of a text message too big for one frame; the final
+/// piece is a plain `WS_TEXT`. A peer that does not know this kind ignores it.
+pub const WS_TEXT_PART: u8 = 12;
 
 /// Relay → host: a frame from guest `gid` follows / guest `gid` left.
 pub const ENV_DATA: u8 = 0;

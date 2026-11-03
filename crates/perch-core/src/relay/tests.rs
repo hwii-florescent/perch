@@ -44,6 +44,22 @@ fn relay_addresses_are_checked_before_they_are_trusted() {
 }
 
 #[test]
+fn long_text_is_split_into_frames_the_relay_accepts_and_joins_back_exactly() {
+    // Multi-byte characters so a piece boundary can fall inside one.
+    let text = "café ✓ ".repeat(40_000);
+    let frames = host::text_frames(&text);
+    assert!(frames.len() > 1 && frames.iter().all(|(_, piece)| piece.len() <= 48 * 1024));
+    let (last, rest) = frames.split_last().unwrap();
+    assert_eq!(last.0, WS_TEXT);
+    assert!(rest.iter().all(|(kind, _)| *kind == WS_TEXT_PART));
+    let joined: Vec<u8> = frames.iter().flat_map(|(_, piece)| piece.iter().copied()).collect();
+    assert_eq!(String::from_utf8(joined).unwrap(), text);
+    // Short and empty messages stay a single plain frame.
+    assert_eq!(host::text_frames("{}"), vec![(WS_TEXT, &b"{}"[..])]);
+    assert_eq!(host::text_frames(""), vec![(WS_TEXT, &b""[..])]);
+}
+
+#[test]
 fn identity_is_made_once_private_and_names_the_room_by_hash() {
     let dir = std::env::temp_dir().join(format!("perch-relay-id-{}", uuid::Uuid::new_v4()));
     let path = dir.join("relay.json");

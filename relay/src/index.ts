@@ -117,6 +117,15 @@ export class Room extends DurableObject {
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (typeof message !== "string" && message.byteLength > MAX_FRAME && this.ctx.getTags(ws).includes("host")) {
+      // An oversized frame costs that phone its session (counters now disagree);
+      // it must not take the computer's link, and every other phone, down with it.
+      if (message.byteLength >= 5) {
+        const guest = this.ctx.getWebSockets(String(new DataView(message).getUint32(1)))[0];
+        if (guest?.readyState === WebSocket.OPEN) guest.close(1009, "frame too large");
+      }
+      return;
+    }
     if (typeof message === "string" || message.byteLength > MAX_FRAME) return ws.close(1009, "binary frames only, 1 MiB at most");
     const bytes = new Uint8Array(message);
     if (this.ctx.getTags(ws).includes("host")) {

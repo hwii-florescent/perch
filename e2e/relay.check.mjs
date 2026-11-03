@@ -114,6 +114,9 @@ try {
   const big = Buffer.alloc(300_000);
   for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 8)) & 0xff;
   fs.writeFileSync(path.join(project, "big.bin"), big);
+  // One WebSocket message larger than the Worker's 1 MiB frame limit (a terminal replay is the real case).
+  const hugeText = "perch relay frame limit\n".repeat(90_000);
+  fs.writeFileSync(path.join(project, "huge.txt"), hugeText);
   send({ type: "project.create", requestId: "project", path: project });
   await wait((m) => m.type === "workspace.snapshot" && m.requestId === "project", "the project");
   const workspace = messages.findLast((m) => m.type === "workspace.snapshot" && m.requestId === "project").workspaces.find((w) => w.path === fs.realpathSync(project));
@@ -139,6 +142,25 @@ try {
   assert.equal(got.status, 200);
   assert.equal(got.length, big.length, `length ${got.length}, starts ${got.head}`);
   assert.equal(got.sum, createHash("sha256").update(big).digest("hex"));
+  // A single WebSocket message over 1 MiB must arrive whole and must not drop the computer's relay link.
+  const huge = await inPage(async (id) => {
+    const ws = new WebSocket(`${location.origin}${location.pathname.replace(/[^/]*$/, "")}ws`);
+    await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onclose = () => reject(new Error("data socket closed")); setTimeout(() => reject(new Error("data socket did not open")), 15_000); });
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("fs.read result never arrived")), 30_000);
+      ws.onclose = () => { clearTimeout(timer); reject(new Error("data socket closed before the large message")); };
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type !== "fs.read.result" || message.requestId !== "huge") return;
+        clearTimeout(timer); ws.onclose = null; ws.close();
+        resolve({ frameBytes: event.data.length, contentBytes: message.content.length });
+      };
+      ws.send(JSON.stringify({ type: "fs.read", requestId: "huge", workspaceId: id, path: "huge.txt" }));
+    });
+  }, workspace.id);
+  assert.equal(huge.contentBytes, hugeText.length);
+  assert(huge.frameBytes > 1 << 20, `fixture must exceed the relay frame limit, got ${huge.frameBytes}`);
+  assert.equal(await inPage(() => window.usePerchStore.getState().connected), true, "a large message dropped the phone's main session");
   // Its data routes went through the sealed tunnel, not the relay's HTTP.
   const direct = seen.filter((url) => /\/(pair|ws|workspace-file|upload|clipboard-image)(\?|$)/.test(new URL(url).pathname));
   assert.deepEqual(direct, [], "data routes must not be fetched from the relay directly");

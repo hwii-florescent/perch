@@ -21,6 +21,8 @@ export const WS_OPENED = 8;
 export const WS_TEXT = 9;
 export const WS_BIN = 10;
 export const WS_CLOSE = 11;
+/** Non-final piece of a text message too big for one frame (see wire.rs). */
+export const WS_TEXT_PART = 12;
 
 const text = new TextEncoder();
 

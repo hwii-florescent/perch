@@ -49,6 +49,21 @@ it("reports relay, encrypted hello and tunnel-ready as separate stages", async (
   expect(updates.at(-1)?.stage).toBe("tunnel-ready");
 });
 
+it("joins a text message split across frames, even inside a character", async () => {
+  const socket = await start(); socket.onopen?.();
+  const { frame, HELLO_HOST, WS_TEXT, WS_TEXT_PART } = await import("./wire");
+  const open = (plain: Uint8Array) => { wire.open.mockResolvedValueOnce(plain); socket.onmessage?.({ data: new ArrayBuffer(32) }); };
+  open(frame(HELLO_HOST, 0, new Uint8Array(16)));
+  await tunnel!.ready;
+  const text = vi.fn();
+  tunnel!.openSocket("ws", null, { opened: () => undefined, text, closed: () => undefined });
+  const bytes = new TextEncoder().encode("café ✓");
+  // 'caf' plus the first byte of 'é', then its second byte, then the rest.
+  for (const [kind, piece] of [[WS_TEXT_PART, bytes.slice(0, 4)], [WS_TEXT_PART, bytes.slice(4, 5)], [WS_TEXT, bytes.slice(5)]] as const) open(frame(kind, 1, piece));
+  await vi.waitFor(() => expect(text).toHaveBeenCalledTimes(1));
+  expect(text).toHaveBeenCalledWith("café ✓");
+});
+
 it("retains the hello timeout when closing the failed socket", async () => {
   const socket = await start(); socket.onopen?.();
   await vi.advanceTimersByTimeAsync(15_000);
