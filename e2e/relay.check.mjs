@@ -152,6 +152,22 @@ try {
   send({ type: "device.list", requestId: "list2" });
   await wait((m) => m.requestId === "list2" && m.devices.length === 1, "no second device after reload");
 
+  const soakMs = Number(process.env.PERCH_RELAY_CHECK_SOAK_MS ?? 0);
+  assert(Number.isSafeInteger(soakMs) && soakMs >= 0 && soakMs <= 600_000, "soak duration must be 0–600000 ms");
+  if (soakMs) {
+    const drops = await inPage(async (ms) => {
+      const store = window.usePerchStore;
+      let drops = 0;
+      const off = store.subscribe((state, previous) => { if (previous.connected && !state.connected) drops++; });
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      off();
+      return drops;
+    }, soakMs);
+    assert.equal(drops, 0, "relay disconnected during the idle soak");
+    const paired = await inPage(async () => { const response = await fetch("/pair"); return (await response.json()).paired; });
+    assert.equal(paired, true, "the sealed session stopped answering after the idle soak");
+  }
+
   // A replaced host loses its sealed sessions. Guests must reconnect too,
   // rather than keep an apparently open socket to a session that no longer exists.
   const { hostSecret } = JSON.parse(fs.readFileSync(path.join(dir, "relay.json"), "utf8"));
@@ -195,6 +211,7 @@ try {
   assert.equal(report.mode, "relay");
   assert.equal(report.perchConnected, false);
   assert.equal(report.linkPresent, true);
+  assert.equal(report.roomFingerprint, createHash("sha256").update(room).digest("hex").slice(0, 12));
   assert.equal(report.closeCode, 4004);
   for (const secret of [room, link.split(".").at(-1), code, hostSecret]) assert(!reportText.includes(secret), "diagnostic report leaked a secret");
   assert(!((await lostPhone.locator("body").textContent()) ?? "").includes("this phone is on the same Wi-Fi"), "relay failures must not require Wi-Fi or Tailscale");

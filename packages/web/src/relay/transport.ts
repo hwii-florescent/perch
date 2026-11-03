@@ -220,6 +220,12 @@ export function installRelayTransport(): boolean {
     reportConnection({ stage: "failed", error: "browser encryption is unavailable; a secure HTTPS page is required" });
     return false;
   }
+  // A short one-way fingerprint lets support compare phone/host identities
+  // without collecting either the room id or its encryption key.
+  void crypto.subtle.digest("SHA-256", new TextEncoder().encode(link.room)).then((hash) => {
+    const roomFingerprint = Array.from(new Uint8Array(hash).slice(0, 6), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    reportConnection({ roomFingerprint });
+  }).catch(() => undefined);
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const route = typeof input === "string" || input instanceof URL ? routeOf(new URL(input, window.location.href)) : null;

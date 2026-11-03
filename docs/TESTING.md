@@ -203,7 +203,10 @@ It is not a passing provider UI acceptance check. The 300 ms synthetic usage
 probe failed once under concurrent browser/build load, then passed alone and
 in a fresh full core run; do not hide this timing sensitivity.
 
-Relay (`relay/`, `perch-core/src/relay/`, `web/src/relay/`): `cargo test -p perch-core --lib relay`
+Relay (`relay/`, `perch-core/src/relay/`, `web/src/relay/`):
+`node --experimental-strip-types relay/check.mjs` checks host replacement,
+close handshakes and closing-socket routing without network or account access.
+`cargo test -p perch-core --lib relay`
 (in-process relay stand-in, tamper and stranger cases) and `npx vitest run
 src/relay` (shares `wire.fixture.json` with Rust). `node
 --experimental-strip-types e2e/relay.check.mjs` runs a real `wrangler dev`
@@ -214,13 +217,18 @@ socket to connect, survive reload and recover after host replacement and a
 relay off/on cycle; rendering the phone shell alone is not a pass. Set
 `PERCH_RELAY_CHECK_URL` to an explicitly authorized deployed relay to exercise
 that deployment with a fresh, private room. Never use your real `~/.perch`
-for this check.
+for this check. Set `PERCH_RELAY_CHECK_SOAK_MS=100000` to check that the
+sealed session stays usable across idle/heartbeat periods before replacing the
+host; valid values are 0–600000 ms. Host replacement must close the old guest
+sessions so they perform a new encrypted hello, not retain a stale open socket.
 
 Disconnected browser/phone and pairing screens expose **Connection details →
 Copy diagnostic report**. The report distinguishes a missing relay link, browser
 storage/encryption availability, the relay WebSocket, encrypted hello and Perch
 data socket; it preserves the last failure during retries. It contains no URL,
-room id, encryption key, pairing code, device token or workspace payload. The
+room id, encryption key, pairing code, device token or workspace payload. A
+12-hex-character `roomFingerprint` (truncated SHA-256 of the public room id) lets
+support compare phone and host identities without sharing the QR link. The
 relay check verifies the offline-host close code and report redaction, and saves
 phone/desktop diagnostic screenshots under `/tmp/perch-connection-*.png`.
 Focused checks: `npm run test -w @perch/web -- src/relay

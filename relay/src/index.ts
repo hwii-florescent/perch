@@ -82,6 +82,10 @@ function envelope(kind: number, gid: number, payload?: Uint8Array): Uint8Array {
 }
 
 export class Room extends DurableObject {
+  private host(): WebSocket | undefined {
+    return this.ctx.getWebSockets("host").find((ws) => ws.readyState === WebSocket.OPEN);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = parse(request);
     if (!url) return new Response("bad request", { status: 400 });
@@ -90,8 +94,11 @@ export class Room extends DurableObject {
     if (role === "host") {
       const room = /^\/r\/([^/]+)$/.exec(url.pathname)?.[1];
       if (!room || !(await ownsRoom(room, url.searchParams.get("auth")))) return new Response("not this room's host", { status: 403 });
+      // Sealed sessions belong to the old host connection, not just its key.
+      // Close guests now so they send a fresh hello to the replacement host.
+      for (const guest of this.ctx.getWebSockets("guest")) if (guest.readyState === WebSocket.OPEN) guest.close(4004, "host changed; reconnect");
       // One host per room: a restarted computer replaces its stale socket.
-      for (const old of this.ctx.getWebSockets("host")) old.close(4001, "replaced by a newer host");
+      for (const old of this.ctx.getWebSockets("host")) if (old.readyState === WebSocket.OPEN) old.close(4001, "replaced by a newer host");
       this.ctx.acceptWebSocket(server, ["host"]);
     } else if (role === "guest") {
       const guests = this.ctx.getWebSockets("guest");
@@ -101,7 +108,7 @@ export class Room extends DurableObject {
       do gid = crypto.getRandomValues(new Uint32Array(1))[0]; while (taken.has(gid) || gid === 0);
       server.serializeAttachment({ gid });
       this.ctx.acceptWebSocket(server, ["guest", String(gid)]);
-      if (this.ctx.getWebSockets("host").length === 0) server.close(4004, "host offline");
+      if (!this.host()) server.close(4004, "host offline");
     } else {
       return new Response("role must be host or guest", { status: 400 });
     }
@@ -109,27 +116,34 @@ export class Room extends DurableObject {
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
     if (typeof message === "string" || message.byteLength > MAX_FRAME) return ws.close(1009, "binary frames only, 1 MiB at most");
     const bytes = new Uint8Array(message);
     if (this.ctx.getTags(ws).includes("host")) {
-      if (bytes.length < 5) return;
+      if (ws !== this.host() || bytes.length < 5) return;
       const gid = new DataView(message).getUint32(1);
       const guest = this.ctx.getWebSockets(String(gid))[0];
-      if (bytes[0] === DATA) guest?.send(bytes.subarray(5));
-      else if (bytes[0] === LEFT) guest?.close(4005, "closed by host");
+      if (!guest || guest.readyState !== WebSocket.OPEN) return;
+      if (bytes[0] === DATA) guest.send(bytes.subarray(5));
+      else if (bytes[0] === LEFT) guest.close(4005, "closed by host");
       return;
     }
-    const host = this.ctx.getWebSockets("host")[0];
+    const host = this.host();
     if (!host) return ws.close(4004, "host offline");
     const { gid } = ws.deserializeAttachment() as { gid: number };
     host.send(envelope(DATA, gid, bytes));
   }
 
   webSocketClose(ws: WebSocket, code: number): void {
-    if (!this.ctx.getTags(ws).includes("guest")) return;
-    const { gid } = ws.deserializeAttachment() as { gid: number };
-    this.ctx.getWebSockets("host")[0]?.send(envelope(LEFT, gid));
-    // Echo the close so the socket finishes; 1005/1006 are not sendable codes.
+    if (this.ctx.getTags(ws).includes("guest")) {
+      const { gid } = ws.deserializeAttachment() as { gid: number };
+      this.host()?.send(envelope(LEFT, gid));
+    } else if (!this.host()) {
+      // A stale host's close must not tear down the replacement's guests.
+      for (const guest of this.ctx.getWebSockets("guest")) if (guest.readyState === WebSocket.OPEN) guest.close(4004, "host offline");
+    }
+    // Echo host closes too: the configured compatibility date predates auto-close.
+    // 1005/1006 are not sendable codes.
     // A socket that is already closed throws, and then there is nothing to do.
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code);

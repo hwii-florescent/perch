@@ -13,7 +13,7 @@ const secretPair = "PRIVATEPAIR";
 
 beforeEach(() => {
   vi.resetModules();
-  vi.stubGlobal("crypto", { subtle: {} });
+  vi.stubGlobal("crypto", { subtle: { digest: vi.fn().mockResolvedValue(new Uint8Array(32).buffer) } });
   vi.stubGlobal("fetch", vi.fn());
   vi.stubGlobal("WebSocket", window.WebSocket);
   const storage = new Map<string, string>();
@@ -40,7 +40,7 @@ it("copies only safe connection evidence, not the relay link or stored secrets",
   await act(async () => root.render(<ConnectionDetails />));
   await act(async () => host.querySelector("button")!.click());
   const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0]![0];
-  expect(JSON.parse(copied)).toMatchObject({ mode: "relay", stage: "link-ready", linkPresent: true, tokenPresent: true, storageAvailable: true });
+  expect(JSON.parse(copied)).toMatchObject({ mode: "relay", stage: "link-ready", linkPresent: true, roomFingerprint: "000000000000", tokenPresent: true, storageAvailable: true });
   for (const secret of [room, key, secretToken, secretPair, "#r=", "perch.relay.token"]) expect(copied).not.toContain(secret);
   expect(host.textContent).toContain("Diagnostic report copied.");
 });

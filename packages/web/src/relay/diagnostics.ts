@@ -8,6 +8,8 @@ export interface RelayDiagnostics {
   stage: ConnectionStage;
   attempts: number;
   linkPresent: boolean;
+  /** Truncated SHA-256 of the public room id, never the room id or key itself. */
+  roomFingerprint: string | null;
   tokenPresent: boolean;
   storageAvailable: boolean | null;
   secureContext: boolean;
@@ -18,7 +20,7 @@ export interface RelayDiagnostics {
 }
 
 let snapshot: RelayDiagnostics = {
-  mode: "direct", stage: "direct", attempts: 0, linkPresent: false, tokenPresent: false,
+  mode: "direct", stage: "direct", attempts: 0, linkPresent: false, roomFingerprint: null, tokenPresent: false,
   storageAvailable: null, secureContext: false, webCrypto: false,
   error: null, closeCode: null, failureStage: null,
 };
