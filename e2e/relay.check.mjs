@@ -85,8 +85,8 @@ try {
   await wait((m) => m.type === "device.pair.code", "a pairing code");
   const code = messages.find((m) => m.type === "device.pair.code").code;
 
-  const { chromium } = await import("@playwright/test");
-  browser = await chromium.launch({ headless: true });
+  const { chromium, webkit } = await import("@playwright/test");
+  browser = await (process.env.PERCH_E2E_WEBKIT === "1" ? webkit : chromium).launch({ headless: true });
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const seen = [];
   phone.on("request", (request) => seen.push(request.url()));
@@ -94,8 +94,11 @@ try {
   await phone.goto(`${link}&pair=${code}`);
   const dismiss = phone.getByTestId("onboarding-dismiss");
   await dismiss.click({ timeout: 20_000 }).catch(() => {});
-  // The phone shell's bottom bar: only drawn once connected and paired.
-  const inApp = () => phone.getByText("Files", { exact: true }).first().waitFor({ timeout: 30_000 });
+  // The shell can render while disconnected: require the actual data socket too.
+  const inApp = async () => {
+    await phone.waitForFunction(() => window.usePerchStore?.getState().connected === true, undefined, { timeout: 30_000 });
+    await phone.getByText("Files", { exact: true }).first().waitFor({ timeout: 30_000 });
+  };
   await inApp().catch(async (error) => {
     await phone.screenshot({ path: "/tmp/perch-relay-failed.png" });
     throw new Error(`the phone never reached the app (/tmp/perch-relay-failed.png): ${error.message}\n${logs.core}\n${logs.relay}`);
@@ -149,6 +152,15 @@ try {
   send({ type: "device.list", requestId: "list2" });
   await wait((m) => m.requestId === "list2" && m.devices.length === 1, "no second device after reload");
 
+  // A replaced host loses its sealed sessions. Guests must reconnect too,
+  // rather than keep an apparently open socket to a session that no longer exists.
+  const { hostSecret } = JSON.parse(fs.readFileSync(path.join(dir, "relay.json"), "utf8"));
+  const replacement = new WebSocket(`${relayWs}/r/${room}?role=host&auth=${hostSecret}`);
+  await once(replacement, "open", { signal: AbortSignal.timeout(5000) });
+  replacement.close();
+  await phone.waitForFunction(() => window.usePerchStore?.getState().connected === false, undefined, { timeout: 10_000 });
+  await inApp();
+
   // The desktop's Settings → Devices shows the relay, its state, and a pairing QR.
   const desktop = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await desktop.goto(`http://127.0.0.1:${corePort}`);
@@ -171,6 +183,7 @@ try {
   // Turning the relay off drops the phone's way in.
   send({ type: "settings.update", patch: { relayUrl: "" } });
   await wait((m) => m.type === "phone.access.status" && !m.relay && !m.addresses.some((a) => a.kind === "relay"), "the relay to switch off");
+  await phone.waitForFunction(() => window.usePerchStore?.getState().connected === false, undefined, { timeout: 10_000 });
   // A build that names a relay offers it behind one switch: on connects, off disconnects.
   const again = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await again.goto(`http://127.0.0.1:${corePort}`);
@@ -180,6 +193,7 @@ try {
   await again.getByTestId("settings-nav-devices").click();
   await again.getByTestId("remote-access-switch").click();
   await again.locator('[data-testid="relay-status"]:has-text("Connected")').waitFor({ timeout: 15_000 });
+  await inApp(); // The existing phone must establish a fresh sealed session without reloading.
   await again.screenshot({ path: "/tmp/perch-remote-switch.png" });
   await again.getByTestId("remote-access-switch").click();
   await again.locator('[data-testid="relay-status"]').waitFor({ state: "detached", timeout: 15_000 });

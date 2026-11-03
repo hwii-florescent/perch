@@ -208,8 +208,13 @@ Relay (`relay/`, `perch-core/src/relay/`, `web/src/relay/`): `cargo test -p perc
 src/relay` (shares `wire.fixture.json` with Rust). `node
 --experimental-strip-types e2e/relay.check.mjs` runs a real `wrangler dev`
 Worker, a core and a browser, all private under the temp dir; needs `npm install`
-in `relay/` and a built web app and `perch-core`. Never run it against a
-deployed Worker with your real `~/.perch`.
+in `relay/` and a built web app and `perch-core`. Set `PERCH_E2E_WEBKIT=1` to
+exercise WebKit instead of Chromium. The check requires the actual phone data
+socket to connect, survive reload and recover after host replacement and a
+relay off/on cycle; rendering the phone shell alone is not a pass. Set
+`PERCH_RELAY_CHECK_URL` to an explicitly authorized deployed relay to exercise
+that deployment with a fresh, private room. Never use your real `~/.perch`
+for this check.
 
 2026-11-02: `device-pairing` timed out at its post-reload typing step (the
 reply to `after-phone-reload` never arrived), with and without the relay
