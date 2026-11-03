@@ -6,7 +6,6 @@ import { cn } from "./lib/cn";
 import { computeAnchoredPopoverStyle, useDismissOnOutsideClick } from "./components/popoverPosition";
 import { GHOST_BUTTON } from "./components/ui/icon-button";
 import { menuPanel } from "./components/ui/menu";
-import { NeedsYouButton } from "./components/NeedsYou";
 import { useZoom, zoomReset } from "./zoom";
 import { IS_MAC, formatCombo } from "./keyCombo";
 import type { AccountUsage, UsageWindow } from "@perch/shared";
@@ -230,7 +229,6 @@ export function StatusBar() {
         {status?.contextTokens !== undefined && <span className="shrink-0">ctx {formatTokens(status.contextTokens)}</span>}
         {status?.costUsd !== undefined && <span className="shrink-0">${status.costUsd.toFixed(3)}</span>}
       </div>
-      <NeedsYouButton variant="status" className={cn(GHOST_BUTTON, "inline-flex h-5 shrink-0 items-center justify-center gap-1 px-1.5 py-0 text-[11px] leading-none aria-expanded:bg-surface-1 aria-expanded:text-fg")} />
       <div className="status-bar__usage -ml-2 flex h-5 min-w-0 max-w-[38%] shrink items-center overflow-hidden">
         <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
       </div>

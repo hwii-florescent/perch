@@ -24,7 +24,7 @@ import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { cn } from "./lib/cn";
-import "./attention";
+import { useNeedsYouCount } from "./attention";
 import "./surfaceSync";
 import "./workspaceCleanup";
 
@@ -88,6 +88,8 @@ export default function App() {
   });
   const sidebarCollapsed = usePerchStore((state) => state.sidebarCollapsed);
   const toggleSidebar = usePerchStore((state) => state.toggleSidebar);
+  // With the sidebar out of sight, chats that need you show as a count on the control that opens it.
+  const needsYou = useNeedsYouCount();
   const [sidebarWidthRaw, setSidebarWidth] = useState(() => readWidth(SIDEBAR_KEY) ?? SIDEBAR_DEFAULT);
   const [toolsWidthRaw, setToolsWidth] = useState(() => readWidth(TOOLS_KEY) ?? toolsDefault());
   useEffect(() => {
@@ -208,9 +210,9 @@ export default function App() {
   const sidebarToggle = (
     <button
       type="button"
-      className={ICON_BUTTON}
+      className={cn(ICON_BUTTON, "relative")}
       title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-      aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label={sidebarCollapsed ? `Expand sidebar${needsYou ? `, ${needsYou} ${needsYou === 1 ? "chat needs" : "chats need"} you` : ""}` : "Collapse sidebar"}
       data-testid="sidebar-collapse-toggle"
       aria-pressed={!sidebarCollapsed}
       onClick={toggleSidebar}
@@ -219,6 +221,9 @@ export default function App() {
         <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
         <path d="M6 2.5v11" />
       </svg>
+      {sidebarCollapsed && needsYou > 0 && (
+        <span className="absolute -top-1 -right-1 grid h-[14px] min-w-[14px] place-items-center rounded-full bg-yellow px-[3px] text-[9px] leading-none font-semibold text-panel-bg tabular-nums" data-testid="needs-you-count" aria-hidden="true">{needsYou}</span>
+      )}
     </button>
   );
 

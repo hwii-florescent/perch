@@ -13,7 +13,7 @@ const treeFocused = (page: Page) =>
   page.evaluate(() => document.activeElement?.getAttribute("data-testid") === "workspace-file-tree-scroll");
 const isPreview = async (page: Page, file: string) => (await tab(page, file).locator("span.italic").count()) === 1;
 
-test("file icons and Git snapshots stay honest across themes, with centered icon-only attention and usage", async ({ page }, testInfo) => {
+test("file icons and Git snapshots stay honest across themes, with centered usage", async ({ page }, testInfo) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-explorer-status-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   let failGit = false;
@@ -61,19 +61,16 @@ test("file icons and Git snapshots stay honest across themes, with centered icon
     await expect(row("node_modules").getByTestId("file-git-marker")).toHaveCount(0);
     await expect(row("package.json").locator('[data-file-icon="package"]')).toBeVisible();
     await expect(row("pnpm-lock.yaml").locator('[data-file-icon="config"]')).toBeVisible();
-    for (const ws of sockets) ws.send(JSON.stringify({ type: "attention.snapshot", events: ["a", "b"].map((id) => ({ id, sessionId: "fixture", agentId: "pi", kind: "question", requiresAction: true, certainty: "verified", summary: "", occurredAt: Date.now(), count: 1, read: false })) }));
     await page.evaluate(() => window.usePerchStore.setState({ usage: [{ provider: "claude", windows: [{ label: "5h", usedPercent: 42, windowMinutes: 300 }, { label: "7d", usedPercent: 19, windowMinutes: 10080 }] }, { provider: "codex", windows: [{ label: "5h", usedPercent: 8, windowMinutes: 300 }] }] }));
-    const attention = page.getByTestId("needs-you-toggle");
-    await expect(attention).toHaveAccessibleName("Needs You: 2");
-    await expect(attention).toHaveText("2");
+    await expect(page.getByTestId("needs-you-toggle")).toHaveCount(0);
     for (const theme of THEME_NAMES) {
       await page.evaluate((theme) => window.usePerchStore.getState().updateSettings({ theme }), theme);
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--panel-bg").trim())).toBe(resolveTheme(theme).panelBg);
       const geometry = await page.evaluate(() => {
         const center = (selector: string) => { const r = document.querySelector(selector)!.getBoundingClientRect(); return r.y + r.height / 2; };
-        return { footer: center("footer.status-bar"), bell: center('[data-testid="needs-you-toggle"] svg'), count: center('[data-testid="needs-you-count"]'), usage: center('[data-testid="usage-summary"]'), text: center('[data-testid="usage-summary"] > span'), overflow: document.documentElement.scrollWidth > innerWidth };
+        return { footer: center("footer.status-bar"), usage: center('[data-testid="usage-summary"]'), text: center('[data-testid="usage-summary"] > span'), overflow: document.documentElement.scrollWidth > innerWidth };
       });
-      for (const center of [geometry.bell, geometry.count, geometry.usage, geometry.text]) expect(Math.abs(center - geometry.footer)).toBeLessThanOrEqual(0.5);
+      for (const center of [geometry.usage, geometry.text]) expect(Math.abs(center - geometry.footer)).toBeLessThanOrEqual(0.5);
       expect(geometry.overflow).toBe(false);
       const birdhouse = page.getByTestId(`workspace-entry-${workspaceId}`);
       const surface = await birdhouse.evaluate((element) => {
@@ -88,18 +85,11 @@ test("file icons and Git snapshots stay honest across themes, with centered icon
       await birdhouse.hover();
       await expect(birdhouse).toHaveCSS("background-color", surface);
       await page.mouse.move(0, 0);
-      await expect(attention).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-      await attention.hover();
-      await expect(attention).toHaveCSS("background-color", surface);
-      await page.mouse.move(0, 0);
-      await expect(attention).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       expect(await row("src/App.tsx").evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBe(12);
       expect((await row("src/App.tsx").boundingBox())!.height).toBeLessThanOrEqual(22);
       await expect(row("src/dual.ts").getByTestId("file-git-marker")).toHaveText("M/M");
       if (["perch", "catppuccin", "catppuccin-latte"].includes(theme)) await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`explorer-${theme}.png`) });
     }
-    await attention.click(); await expect(page.getByTestId("needs-you-panel")).toBeVisible(); await page.keyboard.press("Escape");
-    await expect(attention).toBeFocused();
     await page.getByTestId("workspace-tools-gitReview").click();
     const changed = page.getByTestId("git-status").getByRole("listitem");
     await expect(changed.filter({ hasText: "src/dual.ts" }).getByTestId("file-git-marker")).toHaveText("M/M");
@@ -111,7 +101,7 @@ test("file icons and Git snapshots stay honest across themes, with centered icon
     await page.setViewportSize({ width: 390, height: 844 }); await page.getByTestId("mobile-pane-files").click();
     await row("src").click();
     expect((await row("src/App.tsx").boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    expect((await page.getByTestId("needs-you-toggle").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await page.getByTestId("mobile-switch").boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await page.screenshot({ animations: "disabled", path: testInfo.outputPath("explorer-phone.png") });
     failGit = true;
     await page.getByRole("button", { name: "Refresh file tree", exact: true }).click();

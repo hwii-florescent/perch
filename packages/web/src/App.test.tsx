@@ -40,7 +40,8 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   usePerchStore.setState({ connected: true, sidebarCollapsed: false });
-  useAttention.setState({ supported: true, events: [], open: false, welcome: null });
+  useAttention.setState({ supported: true, events: [] });
+  usePerchStore.setState({ sessions: [], hostStates: {} });
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -49,19 +50,32 @@ afterEach(() => {
 });
 const get = (testId: string) => { const element = host.querySelector(`[data-testid="${testId}"]`); expect(element).not.toBeNull(); return element as HTMLElement; };
 
-it("puts Needs You in the status bar, not the top row, and drops the wordmark", () => {
+it("has no Needs You button or panel in the top row or status bar, and drops the wordmark", () => {
   act(() => root.render(<App />));
   const topRow = get("tab-bar").parentElement!;
-  expect(topRow.querySelector('[data-testid="needs-you-toggle"]')).toBeNull();
+  expect(host.querySelector('[data-testid="needs-you-toggle"]')).toBeNull();
   expect(topRow.textContent).not.toContain("perch");
   expect(topRow.querySelector('[data-testid="sidebar-collapse-toggle"]')).not.toBeNull();
-  expect(get("needs-you-toggle").closest("footer")?.className).toContain("status-bar");
+  expect(get("status-connection").closest("footer")?.className).toContain("status-bar");
+});
+
+it("keeps the alert when the sidebar is collapsed: a count on the control that opens it", () => {
+  usePerchStore.setState({ sessions: [{ id: "q", title: "t", cwd: "/p", createdAt: 1, status: "running", blocked: true } as never] });
+  act(() => root.render(<App />));
+  // Open sidebar: By status lists it, so no badge on the toggle.
+  expect(host.querySelector('[data-testid="needs-you-count"]')).toBeNull();
+  act(() => usePerchStore.setState({ sidebarCollapsed: true }));
+  expect(get("needs-you-count").textContent).toBe("1");
+  expect(get("sidebar-collapse-toggle").getAttribute("aria-label")).toBe("Expand sidebar, 1 chat needs you");
+  act(() => usePerchStore.setState({ sessions: [] }));
+  expect(host.querySelector('[data-testid="needs-you-count"]')).toBeNull();
+  expect(get("sidebar-collapse-toggle").getAttribute("aria-label")).toBe("Expand sidebar");
 });
 
 it("has no rules: no border on the top row, sidebar column, drawer column or status bar", () => {
   act(() => root.render(<App />));
   const topRow = get("tab-bar").parentElement!;
-  const footer = get("needs-you-toggle").closest("footer")!;
+  const footer = get("status-connection").closest("footer")!;
   for (const element of [topRow, topRow.firstElementChild!, get("workspace-tools-header"), footer]) {
     expect(element.className, element.className).not.toMatch(/(^|\s)border(-[lrtb])?(-|\s|$)/);
   }

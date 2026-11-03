@@ -2,13 +2,12 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AccountUsage, AttentionEvent } from "@perch/shared";
+import type { AccountUsage } from "@perch/shared";
 
 vi.mock("./ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 const { socket } = await import("./ws");
 const { usePerchStore } = await import("./store");
 const { StatusBar } = await import("./StatusBar");
-const { useAttention } = await import("./attention");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -32,8 +31,6 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   document.querySelector("[data-testid='usage-details']")?.remove();
-  document.querySelector("[data-testid='needs-you-panel']")?.remove();
-  useAttention.setState({ events: [], supported: false, open: false, welcome: null });
 });
 function render(node: ReactNode) { act(() => root.render(node)); }
 function click(element: Element) { act(() => element.dispatchEvent(new MouseEvent("click", { bubbles: true }))); }
@@ -82,36 +79,18 @@ it("shows a failed Claude account when refreshing could not restore usage", () =
   expect(get("usage-refresh")).not.toBeNull();
 });
 
-const question = (id: string): AttentionEvent => ({
-  id, sessionId: "s", agentId: "claude", kind: "question", requiresAction: true,
-  certainty: "verified", summary: "", occurredAt: 1, count: 1, read: false,
-});
-const finishedUnread: AttentionEvent = { ...question("done"), kind: "finished", requiresAction: false };
 
-it("keeps an accessible icon-only Needs You control just left of vertically centered usage, with its count", () => {
-  useAttention.setState({ supported: true, events: [question("a"), question("b")] });
+it("keeps vertically centered usage at the right end, just before the connection mark", () => {
   render(<StatusBar />);
-  const toggle = get("needs-you-toggle");
-  const footer = toggle.closest("footer")!;
+  const footer = get("usage-summary").closest("footer")!;
   expect(footer.className).toContain("status-bar");
-  // Needs You, then usage at the right end.
-  expect(toggle.nextElementSibling).toBe(get("usage-summary").parentElement);
   expect(footer.lastElementChild).toBe(get("status-connection"));
+  expect(get("usage-summary").parentElement!.nextElementSibling).toBe(get("status-connection"));
   expect(footer.className).toContain("h-6");
-  expect(toggle.className).toContain("shrink-0");
-  // Same box as usage (h-5, px-1.5) centred in the bar, no resting fill: only hover changes it, like the other buttons.
-  expect(toggle.className).toContain("h-5");
-  expect(toggle.className).toContain("px-1.5");
-  expect(toggle.className).not.toMatch(/(^| )bg-surface-0( |$)/);
-  expect(toggle.className).not.toContain("text-yellow");
   expect(get("usage-summary").className).toContain("px-1.5");
-  expect(toggle.textContent).not.toContain("Needs You");
-  expect(toggle.querySelector("svg")).not.toBeNull();
   expect(get("usage-summary").className).toContain("h-5");
   expect(get("usage-summary").className).toContain("leading-none");
   expect(get("usage-summary").parentElement!.className).toContain("flex h-5");
-  expect(get("needs-you-count").textContent).toBe("2");
-  expect(toggle.getAttribute("aria-label")).toBe("Needs You: 2");
   // The fields before the slot truncate rather than push it.
   expect(footer.className).toContain("overflow-hidden");
   expect(get("usage-summary").parentElement!.className).toContain("overflow-hidden");
@@ -151,26 +130,8 @@ it("labels the actual remote host and does not report unknown remote connectivit
   expect(get("status-connection").getAttribute("aria-label")).toBe("Connected");
 });
 
-it("shows the unread dot, not a count, for recent updates, and nothing when the host lacks attention", () => {
-  useAttention.setState({ supported: false });
+it("no longer has a Needs You control: that moved to the sidebar's By status view", () => {
   render(<StatusBar />);
   expect(document.querySelector("[data-testid='needs-you-toggle']")).toBeNull();
-  act(() => useAttention.setState({ supported: true, events: [finishedUnread] }));
-  expect(get("needs-you-toggle").getAttribute("aria-label")).toBe("Needs You: recent updates");
-  expect(document.querySelector("[data-testid='needs-you-count']")).toBeNull();
-  expect(get("needs-you-unread")).not.toBeNull();
-});
-
-it("opens the Needs You panel upward from the bar and closes it with Escape, returning focus", () => {
-  useAttention.setState({ supported: true, events: [question("a")] });
-  render(<StatusBar />);
-  const toggle = get("needs-you-toggle") as HTMLButtonElement;
-  click(toggle);
-  const panel = get("needs-you-panel") as HTMLElement;
-  expect(panel.style.bottom).not.toBe("");
-  expect(panel.style.top).toBe("");
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(document.querySelector("[data-testid='needs-you-panel']")).toBeNull();
-  expect(document.activeElement).toBe(toggle);
 });

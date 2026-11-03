@@ -15,7 +15,7 @@ import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
-import { NeedsYouButton } from "./NeedsYou";
+import { useNeedsYouCount } from "../attention";
 import type { SessionSummary } from "@perch/shared";
 
 function basename(cwd: string): string {
@@ -35,6 +35,7 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
   const status = usePerchStore((s) => s.status);
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const connected = usePerchStore((s) => s.connected);
+  const needsYou = useNeedsYouCount();
 
   const activeSession: SessionSummary | undefined =
     knownSession ??
@@ -53,7 +54,7 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
         type="button"
         className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] min-w-0 flex-1 items-center gap-[0.55rem] px-[0.4rem] text-left")}
         data-testid="mobile-switch"
-        aria-label="Switch session"
+        aria-label={needsYou ? `Switch session, ${needsYou} ${needsYou === 1 ? "needs" : "need"} you` : "Switch session"}
         onClick={onOpenSwitcher}
       >
         {activeSession && <StatusDot session={activeSession} className="mobile-header__dot" />}
@@ -65,9 +66,9 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
               : <>{projectName}{branch ? ` · ${branch}` : ""}</>}
           </span>
         </span>
+        {needsYou > 0 && <span className="grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-[6px] bg-surface-1 px-1 text-[0.68rem] text-fg tabular-nums" data-testid="needs-you-count" aria-hidden="true">{needsYou}</span>}
         <Chevron open />
       </button>
-      <NeedsYouButton className={cn(GHOST_BUTTON, "flex size-11 shrink-0 items-center justify-center p-0")} />
       <button
         type="button"
         className={cn(GHOST_BUTTON, "grid size-11 shrink-0 place-items-center p-0 text-[1.1rem]")}

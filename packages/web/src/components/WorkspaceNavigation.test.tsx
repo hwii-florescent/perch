@@ -31,6 +31,8 @@ const session: SessionSummary = { id: "session", title: "My agent", cwd: worktre
 
 beforeEach(() => {
   localStorage.clear();
+  // These cover the project tree; By status is the default view.
+  localStorage.setItem("perch.sidebar.organize", "project");
   vi.clearAllMocks();
   host = document.createElement("div");
   document.body.append(host);

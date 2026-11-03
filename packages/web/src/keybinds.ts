@@ -101,7 +101,7 @@ shortcut("global.settings", "global", "mod+,", "Open Settings", () => chrome().s
 shortcut("global.help", "global", "mod+/", "Open this keybind help", (h) => h.openKeybindHelp());
 shortcut("global.sidebar", "global", "mod+b", "Toggle sidebar", () => chrome().toggleSidebar());
 shortcut("global.drawer", "global", ["cmd+shift+b", "alt+shift+b"], "Toggle the right drawer (files and Git)", (h) => h.toggleDrawer());
-shortcut("global.needsYou", "global", ["cmd+shift+u", "alt+shift+u"], "Open the next agent that needs you (else the Needs You panel)", () => openNextAttention());
+shortcut("global.needsYou", "global", ["cmd+shift+u", "alt+shift+u"], "Show the sidebar and open the next chat that needs you", () => openNextAttention());
 
 // Zoom the tab area (terminals, files, browser pages): VS Code's keys, ⌘ on a Mac, Ctrl elsewhere
 shortcut("view.zoomIn", "global", ["cmd+=", "ctrl+="], "Zoom in", () => zoomIn());

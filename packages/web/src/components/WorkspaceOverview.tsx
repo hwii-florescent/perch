@@ -4,8 +4,10 @@ import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
 import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
 import { moveInOrder, orderBy, orderProjects, stepTarget } from "../sidebarOrder";
+import { certaintyNote, needsYou, reasonLabel, useAttention } from "../attention";
+import { groupByStatus, holdFinished, STATUS_LABELS, STATUS_SECTIONS } from "../statusView";
 import { StatusDot } from "./StatusDot";
-import { sessionDotState } from "../statusDot";
+import { sessionDotState, type AgentDotState } from "../statusDot";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { button } from "./ui/button";
@@ -192,11 +194,15 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   );
 }
 
-type Organize = "project" | "list";
+type Organize = "status" | "project" | "list";
 const ORGANIZE_KEY = "perch.sidebar.organize";
-const ORGANIZE_LABELS: Record<Organize, string> = { project: "By project", list: "In one list" };
+const ORGANIZE_LABELS: Record<Organize, string> = { status: "By status", project: "By project", list: "In one list" };
+/** By status unless the viewer saved another choice. */
 function readOrganize(): Organize {
-  try { return localStorage.getItem(ORGANIZE_KEY) === "list" ? "list" : "project"; } catch { return "project"; }
+  try {
+    const saved = localStorage.getItem(ORGANIZE_KEY);
+    return saved === "project" || saved === "list" ? saved : "status";
+  } catch { return "status"; }
 }
 
 /** Orca's hidden-worktrees card: worktrees perch discovered but did not
@@ -327,6 +333,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const setActiveHost = usePerchStore((state) => state.setActiveHost);
   const sshHosts = usePerchStore((state) => state.hosts);
   const hostStates = usePerchStore((state) => state.hostStates);
+  const connected = usePerchStore((state) => state.connected);
   // The core's project and chat order; no drag or Move without the capability (no local-only order).
   const order = usePerchStore((state) => state.workspaceOrderByHost[state.activeHostId]);
   const reorderable = usePerchStore((state) => canReorderHost(state, state.activeHostId));
@@ -658,6 +665,76 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     </div>
   );
 
+  // "By status": the same chats in sections by what they need from you. A chat you are
+  // reading stays in Done until you leave it (`holdFinished`), so its row does not jump.
+  const attentionEvents = useAttention((state) => state.events);
+  const hostReachable = activeHostId === "local" ? connected : hostStates[activeHostId]?.state === "connected";
+  const viewedSession = sessions.find((session) => session.id === sessionId);
+  const viewedDot = viewedSession && sessionDotState(viewedSession);
+  const reading = useRef<{ id: string | null; held: string | null; dot?: AgentDotState }>({ id: null, held: null });
+  const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
+  reading.current = { id: sessionId, held, dot: viewedDot };
+  const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
+  const statusGroups = useMemo(() => groupByStatus(allSessions, new Set(needsEvents.keys()), held), [allSessions, needsEvents, held]);
+  const statusSections: { key: string; title: string; note?: string; list: SessionSummary[] }[] = hostReachable
+    ? STATUS_SECTIONS.map((key) => ({ key, title: STATUS_LABELS[key], list: statusGroups[key] })).filter((section) => section.list.length > 0)
+    // Not connected: what these chats were doing is unknown. Show them once, as last known, never as Working/Idle/Done.
+    : allSessions.length ? [{ key: "offline", title: "Offline: last known", note: activeHostId === "local" ? "Reconnecting…" : `${sshHosts.find((host) => host.id === activeHostId)?.name ?? activeHostId}: ${hostStates[activeHostId]?.state ?? "connecting"}`, list: allSessions }] : [];
+  const statusView = (
+    <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-status-view">
+      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}
+      {statusSections.map((section) => (
+        <div className="flex flex-col gap-[2px]" key={section.key} data-testid={`status-section-${section.key}`}>
+          <div className="flex items-baseline gap-[0.4rem] pt-2 pr-3 pb-1 pl-3 text-[14px] font-semibold text-subtext-0 min-[701px]:text-[0.62rem] min-[701px]:tracking-[0.045em] min-[701px]:uppercase" data-testid={`status-section-title-${section.key}`}>
+            <span>{section.title}</span>
+            <span className="tabular-nums" aria-label={`${section.list.length} chats`}>{section.list.length}</span>
+            {section.note && <span className="min-w-0 truncate text-[0.62rem] font-normal tracking-normal normal-case">{section.note}</span>}
+          </div>
+          {section.list.map((session) => {
+            const owner = projects.find((project) => project.id === session.projectId);
+            const need = section.key === "needs" ? needsEvents.get(session.id) : undefined;
+            const reason = section.key !== "needs" ? null : need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you";
+            const detail = [owner && !isChatsProject(owner) ? owner.name || basename(owner.path) : null, reason].filter(Boolean).join(" · ");
+            return (
+              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+                <button
+                  type="button"
+                  className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
+                  aria-current={session.id === sessionId ? "page" : undefined}
+                  data-testid={`workspace-session-${session.id}`}
+                  data-session={session.id}
+                  title={session.cwd}
+                  onClick={() => {
+                    switchSession(session.id);
+                    onNavigate?.();
+                  }}
+                >
+                  {section.key === "offline"
+                    ? <span className="inline-flex h-[18px] w-[18px] shrink-0 rounded-full border-[1.5px] border-overlay-1" aria-hidden="true" />
+                    : <StatusDot session={session} className="h-[18px] w-[18px]" />}
+                  <span className="grid min-w-0 flex-1">
+                    <span className={SESSION_TITLE}>{session.title || "New chat"}</span>
+                    {detail && <span className="min-w-0 truncate text-[0.62rem] text-subtext-0" data-testid="status-row-detail">{detail}</span>}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={SESSION_CLOSE}
+                  data-testid={`workspace-session-close-${session.id}`}
+                  title="Close chat"
+                  aria-label={`Close ${session.title || "chat"}`}
+                  onClick={() => requestCloseSession(session.id)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6" /></svg>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+
   // After the projects, inside their scrolling list (or after the empty state).
   const chatsSection = chatsProject && (() => {
         const chats = sessionsForProject(chatsProject.id);
@@ -758,9 +835,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     >
       <div className="flex shrink-0 items-stretch justify-between gap-[0.45rem] pl-[0.75rem] min-[701px]:pr-[3px] min-[701px]:pl-4">
         <div className="flex min-w-0 items-center gap-[0.45rem] py-[0.55rem]">
-          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase min-[701px]:text-[0.62rem] min-[701px]:font-semibold min-[701px]:tracking-[0.045em] min-[701px]:text-subtext-0">{organize === "list" ? "Sessions" : "Birdhouses"}</span>
+          <span className="text-[0.72rem] font-bold tracking-[0.08em] text-fg uppercase min-[701px]:text-[0.62rem] min-[701px]:font-semibold min-[701px]:tracking-[0.045em] min-[701px]:text-subtext-0">{organize === "project" ? "Birdhouses" : "Sessions"}</span>
           <span className="text-[0.65rem] whitespace-nowrap text-subtext-0 min-[701px]:hidden">
-            {organize === "list"
+            {organize !== "project"
               ? `${allSessions.length} session${allSessions.length === 1 ? "" : "s"}`
               : visibleProjects.length ? `${visibleProjects.length} birdhouse${visibleProjects.length === 1 ? "" : "s"}` : "No birdhouses"}
           </span>
@@ -867,7 +944,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-[3px] py-[3px] [&>*]:shrink-0" data-testid="project-list">
-          {organize === "list" && !showNestHints ? listView : <>
+          {organize !== "project" && !showNestHints ? (organize === "list" ? listView : statusView) : <>
           {visibleProjects.map((project) => {
             const allWorkspaces = workspacesForProject(workspaces, project.id);
             const projectWorkspaces = allWorkspaces.filter((w) => !w.hidden);

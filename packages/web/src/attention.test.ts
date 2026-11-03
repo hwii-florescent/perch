@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent, SessionSummary } from "@perch/shared";
-import { handleAttentionMessage, needsYou, openNextAttention, recentUpdates, useAttention, welcomeLine, welcomeSummary } from "./attention";
+import { certaintyNote, handleAttentionMessage, needsYou, openNextAttention, reasonLabel, useAttention } from "./attention";
 import { usePerchStore } from "./store";
 import { socket } from "./ws";
 
@@ -14,13 +14,7 @@ const session = (init: Partial<SessionSummary>): SessionSummary => ({
 }) as SessionSummary;
 
 beforeEach(() => {
-  const store = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => void store.set(key, value),
-    removeItem: (key: string) => void store.delete(key),
-  });
-  useAttention.setState({ events: [], supported: false, open: false, welcome: null });
+  useAttention.setState({ events: [], supported: false });
   vi.restoreAllMocks();
 });
 
@@ -34,49 +28,57 @@ describe("Needs You", () => {
       event({ id: "exit", kind: "exited", occurredAt: 7 }),
     ];
     expect(needsYou(events).map((e) => e.id)).toEqual(["q1", "q2", "f"]);
-    expect(recentUpdates(events).map((e) => e.id)).toEqual(["done", "exit"]);
   });
 
-  it("summarizes what happened while away without calling silence completion", () => {
-    const events = [
-      event({ id: "a", count: 3, occurredAt: 100 }),
-      event({ id: "old", occurredAt: 10 }),
-      event({ id: "seen", occurredAt: 200, read: true }),
-      event({ id: "x", kind: "exited", occurredAt: 150 }),
-      event({ id: "q", kind: "question", requiresAction: true, occurredAt: 5 }),
-    ];
-    const sessions = [
-      session({ id: "w", status: "running" }),
-      session({ id: "stale", status: "running", stale: true }),
-      session({ id: "blocked", status: "running", blocked: true }),
-    ];
-    const hosts = { box: { type: "host.info", hostId: "box", name: "devbox", state: "error" } } as never;
-    const summary = welcomeSummary(events, sessions, hosts, 50);
-    expect(summary).toEqual({ finished: 3, exited: 1, needsYou: 1, working: 1, unknown: 1, offlineHosts: ["devbox"] });
-    expect(welcomeLine(summary)).toBe("3 turns finished · 1 agent exited · 1 still working · 1 status not confirmed · devbox offline");
-    expect(welcomeLine(welcomeSummary([], [], {}, 0))).toBeNull();
+  it("states the reason and says how sure the core is only when it is not certain", () => {
+    expect(reasonLabel(event({ kind: "question", requiresAction: true }))).toBe("Waiting for you");
+    expect(reasonLabel(event({ kind: "question", requiresAction: true, certainty: "unconfirmed" }))).toBe("Was waiting for you before restart");
+    expect(certaintyNote(event({ certainty: "verified" }))).toBeNull();
+    expect(certaintyNote(event({ certainty: "heuristic" }))).toBe("Guessed from terminal output");
   });
 
-  it("asks for a snapshot only from a capable host and welcomes on the first one", () => {
+  it("asks for a snapshot only from a capable host, and keeps the snapshot's events", () => {
     const send = vi.spyOn(socket, "send").mockImplementation(() => {});
     handleAttentionMessage({ type: "server.info", capabilities: [] } as never);
     expect(send).not.toHaveBeenCalled();
     handleAttentionMessage({ type: "server.info", capabilities: ["attention.v1"] } as never);
     expect(send).toHaveBeenCalledWith({ type: "attention.list" });
-    // This browser last looked at t=100: only what happened after reopens it.
-    localStorage.setItem("perch.attention.seenAt", "100");
-    handleAttentionMessage({ type: "attention.snapshot", events: [event({ kind: "question", requiresAction: true, occurredAt: 150 })] });
-    expect(useAttention.getState()).toMatchObject({ open: true, welcome: { since: 100 } });
+    const events = [event({ kind: "question", requiresAction: true })];
+    handleAttentionMessage({ type: "attention.snapshot", events });
+    expect(useAttention.getState()).toMatchObject({ supported: true, events });
   });
 
-  it("Cmd-Shift-U opens the oldest waiting agent, else the panel", () => {
+  it("Cmd-Shift-U shows the sidebar and opens the oldest waiting chat, then the next; with none it opens nothing", () => {
     const switchSession = vi.fn();
-    usePerchStore.setState({ switchSession } as never);
+    usePerchStore.setState({
+      switchSession, connected: true, sidebarCollapsed: false, sessionId: "x", hostStates: {},
+      sessions: [session({ id: "a" }), session({ id: "b" }), session({ id: "x" })],
+    } as never);
     openNextAttention();
-    expect(useAttention.getState().open).toBe(true);
-    useAttention.setState({ open: false, events: [event({ id: "late", sessionId: "b", kind: "question", requiresAction: true, occurredAt: 9 }), event({ id: "early", sessionId: "a", kind: "question", requiresAction: true, occurredAt: 1 })] });
+    expect(switchSession).not.toHaveBeenCalled();
+
+    useAttention.setState({ events: [event({ id: "late", sessionId: "b", kind: "question", requiresAction: true, occurredAt: 9 }), event({ id: "early", sessionId: "a", kind: "question", requiresAction: true, occurredAt: 1 })] });
     openNextAttention();
-    expect(switchSession).toHaveBeenCalledWith("a");
-    expect(useAttention.getState().open).toBe(false);
+    expect(switchSession).toHaveBeenLastCalledWith("a");
+    usePerchStore.setState({ sessionId: "a" });
+    openNextAttention();
+    expect(switchSession).toHaveBeenLastCalledWith("b");
+  });
+
+  it("Cmd-Shift-U expands a collapsed sidebar and ignores a chat on an offline host", () => {
+    vi.useFakeTimers();
+    try {
+      const switchSession = vi.fn();
+      usePerchStore.setState({
+        switchSession, connected: true, sidebarCollapsed: true, sessionId: null,
+        hostStates: { box: { type: "host.info", hostId: "box", name: "box", state: "error" } },
+        sessions: [session({ id: "r", hostId: "box", status: "running", blocked: true })],
+      } as never);
+      openNextAttention();
+      expect(usePerchStore.getState().sidebarCollapsed).toBe(false);
+      expect(switchSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

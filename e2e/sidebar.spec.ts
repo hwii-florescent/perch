@@ -297,6 +297,59 @@ test.describe("Perch sidebar", () => {
     await expect(page.getByTestId(`workspace-session-${id}`)).toBeVisible();
   });
 
+  test("2e. By status is the default Organize view, grouped by what each chat needs; a saved choice wins", async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } }); // no saved choice (the config pins By project)
+    try {
+      const page = await ctx.newPage();
+      await open(page);
+      const id = await startChat(page);
+      await expect(page.getByTestId("workspace-status-view")).toBeVisible();
+      await expect(page.getByTestId("status-section-idle").getByTestId(`workspace-session-${id}`)).toBeVisible();
+      await expect(page.getByTestId("status-section-title-idle")).toContainText("Idle");
+      await page.getByTestId("workspace-organize").click();
+      await page.getByTestId("workspace-organize-project").click();
+      await expect(page.getByTestId("workspace-status-view")).toHaveCount(0);
+      await expect(page.getByTestId("workspace-chats")).toBeVisible();
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(page.getByTestId("workspace-status-view")).toHaveCount(0);
+      await page.getByTestId("workspace-organize").click();
+      await page.getByTestId("workspace-organize-status").click();
+      await expect(page.getByTestId("workspace-status-view")).toBeVisible();
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  test("2f. Projects reorder by drag and Move down, and the core keeps the order across a reload", async ({ page }) => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-projects-")));
+    const dirs = ["alpha", "beta"].map((name) => path.join(root, name));
+    dirs.forEach((dir) => fs.mkdirSync(dir));
+    try {
+      await open(page);
+      for (const dir of dirs) await addProject(page, dir);
+      const toggle = (dir: string) => page.locator(`[data-testid^="project-toggle-"][title="${dir}"]`);
+      for (const dir of dirs) await expect(toggle(dir)).toBeVisible({ timeout: 10_000 });
+      const shown = () => page.locator("[data-testid='project-list'] > .workspace-project").evaluateAll(
+        (rows, mine) => rows.map((row) => row.querySelector("[data-testid^='project-toggle-']")?.getAttribute("title") ?? "").filter((title) => mine.includes(title)),
+        dirs,
+      );
+      const [alpha, beta] = dirs as [string, string];
+      // Newest first until someone reorders.
+      await expect.poll(shown).toEqual([beta, alpha]);
+      await toggle(alpha).dragTo(toggle(beta), { targetPosition: { x: 40, y: 2 } });
+      await expect.poll(shown).toEqual([alpha, beta]);
+      await page.reload({ waitUntil: "networkidle" });
+      await expect.poll(shown).toEqual([alpha, beta]);
+      // Move down from the row menu (the keyboard and phone path).
+      const id = (await toggle(alpha).getAttribute("data-testid"))!.replace("project-toggle-", "");
+      await page.getByTestId(`workspace-project-menu-${id}`).click();
+      await page.getByTestId(`workspace-project-move-down-${id}`).click();
+      await expect.poll(shown).toEqual([beta, alpha]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("2c. Chats reorder by drag, Move and tab drag; the core keeps one order for every viewer", async ({ browser }) => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-order-")));
     const ctx1 = await browser.newContext();

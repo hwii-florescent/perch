@@ -33,8 +33,8 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 const get = (id: string) => host.querySelector(`[data-testid="${id}"]`)!;
 
-it.each(["project", "list", "scratchpad"])("%s sessions have one full-row selection and sibling close actions", (mode) => {
-  if (mode === "list") storage.set("perch.sidebar.organize", "list");
+it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-row selection and sibling close actions", (mode) => {
+  if (mode !== "status") storage.set("perch.sidebar.organize", mode === "list" ? "list" : "project");
   if (mode === "scratchpad") usePerchStore.setState({ workspaceProjects: [{ ...project, path: "/tmp/.perch/scratch" }] });
   act(() => root.render(<WorkspaceOverview />));
   const selected = get("workspace-session-first");

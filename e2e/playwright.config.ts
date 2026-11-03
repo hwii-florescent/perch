@@ -47,7 +47,9 @@ export default defineConfig({
       origins: [
         {
           origin: "http://127.0.0.1:7799",
-          localStorage: [{ name: "perch.onboarding.seen", value: "1" }],
+          // The sidebar defaults to By status; most specs drive the project tree.
+          // The By status specs (needs-you, sidebar 2e) clear it.
+          localStorage: [{ name: "perch.onboarding.seen", value: "1" }, { name: "perch.sidebar.organize", value: "project" }],
         },
       ],
     },
