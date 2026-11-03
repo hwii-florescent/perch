@@ -3,7 +3,7 @@ import { ADD_PROJECT_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
 import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
-import { moveInOrder, orderBy, orderProjects, stepTarget } from "../sidebarOrder";
+import { orderBy, orderProjects, stepTarget, writeScope } from "../sidebarOrder";
 import { certaintyNote, needsYou, reasonLabel, useAttention } from "../attention";
 import { groupByStatus, holdFinished, STATUS_LABELS, STATUS_SECTIONS } from "../statusView";
 import { StatusDot } from "./StatusDot";
@@ -24,8 +24,8 @@ import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
 import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, orderedNests, sessionsForWorkspace, workspacesForProject } from "../workspaceNav";
-import { workspaceTabs } from "../workspaceTabs";
-import { TAB_ORDER_EVENT } from "../tabOrder";
+import { chatsInStripOrder, moveChat, workspaceTabs } from "../workspaceTabs";
+import { moveBeside, TAB_ORDER_EVENT } from "../tabOrder";
 import { useNestShortcutHints } from "../keybinds";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
@@ -311,7 +311,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     const label = nestHints[numberedNests.findIndex((nest) => nest.id === workspaceId)];
     return label ? <kbd className="pointer-events-none absolute top-[7px] right-3 w-8 text-right text-[11px] leading-[18px] font-semibold text-accent tabular-nums [font-family:inherit]" data-testid={`workspace-shortcut-${workspaceId}`} aria-label={`Jump to workspace: ${label}`}>{label}</kbd> : null;
   }
-  const [, refreshTabOrder] = useState(0);
+  const [tabOrderVersion, refreshTabOrder] = useState(0);
   useEffect(() => {
     const refresh = () => refreshTabOrder((version) => version + 1);
     window.addEventListener(TAB_ORDER_EVENT, refresh);
@@ -377,11 +377,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   // keyboard and the phone. The core keeps the order, so every viewer shows it.
   const dragging = useRef<{ kind: "project" | "session"; id: string; group: string } | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
-  function moveRow(kind: "project" | "session", id: string, target: string, after: boolean) {
-    if (kind === "project") setWorkspaceOrder(activeHostId, { projects: moveInOrder(hostProjects.map((project) => project.id), order?.projects, id, target, after) });
-    else setWorkspaceOrder(activeHostId, { sessions: moveInOrder(allSessions.map((session) => session.id), order?.sessions, id, target, after) });
+  // A move writes only what it touches: the projects as shown (hidden ones keep their place),
+  // or the chats of the moved and target workspaces (`moveChat`). `shown` is the row's siblings.
+  function moveRow(kind: "project" | "session", id: string, target: string, after: boolean, shown: string[]) {
+    if (kind === "project") setWorkspaceOrder(activeHostId, { projects: writeScope(order?.projects, moveBeside(hostProjects.map((project) => project.id), id, target, after)) });
+    else moveChat(id, target, after, shown);
   }
-  function dnd(kind: "project" | "session", id: string, group: string) {
+  function dnd(kind: "project" | "session", id: string, group: string, shown: string[] = []) {
     if (!reorderable || compact) return { handle: {}, zone: {} };
     const clear = () => { dragging.current = null; setDrop(null); };
     const hover = () => (dragging.current?.kind === kind && dragging.current.group === group && dragging.current.id !== id ? dragging.current : null);
@@ -418,7 +420,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           if (!source) return;
           event.preventDefault();
           event.stopPropagation();
-          moveRow(kind, source.id, id, after(event));
+          moveRow(kind, source.id, id, after(event), shown);
           clear();
         },
       },
@@ -428,12 +430,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     if (!reorderable) return [];
     return ([["up", "Move up", -1], ["down", "Move down", 1]] as const).flatMap(([key, label, step]) => {
       const to = stepTarget(siblings, id, step);
-      return to ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, to.target, to.after) }] : [];
+      return to ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, to.target, to.after, siblings) }] : [];
     });
   }
   /** A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down. */
   function sessionRowProps(session: SessionSummary, siblings: SessionSummary[], group: string) {
-    const { handle, zone } = dnd("session", session.id, group);
+    const { handle, zone } = dnd("session", session.id, group, siblings.map((other) => other.id));
     return {
       ...handle,
       ...zone,
@@ -610,11 +612,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     createWorkspaceProject(path, name, addHostId);
   }
 
+  // A project's chats, workspace by workspace in each strip's order (the core's chat order is in it).
   function sessionsForProject(projectId: string): SessionSummary[] {
-    const projectWorkspaces = workspacesForProject(workspaces, projectId);
-    return orderBy(projectWorkspaces
-      .flatMap((workspace) => sessionsForWorkspace(sessions, workspace))
-      .sort((a, b) => b.createdAt - a.createdAt), order?.sessions, (session) => session.id);
+    return workspacesForProject(workspaces, projectId).flatMap(tabOrderedSessions);
   }
 
   function navigateToWorkspace(workspaceId: string) {
@@ -623,9 +623,10 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }
 
   // "In one list": every session on this host, projects and Chats alike, newest first.
+  // Purely chronological (DECISIONS.md): the core's order does not apply, and there is no drag.
   const allSessions = useMemo(
-    () => orderBy(sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt), order?.sessions, (session) => session.id),
-    [sessions, activeHostId, order?.sessions],
+    () => sessions.filter((session) => (session.hostId ?? "local") === activeHostId).sort((a, b) => b.createdAt - a.createdAt),
+    [sessions, activeHostId],
   );
   const listView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-session-list">
@@ -633,7 +634,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
-          <div {...sessionRowProps(session, allSessions, "list")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -675,11 +676,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
   reading.current = { id: sessionId, held, dot: viewedDot };
   const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
-  const statusGroups = useMemo(() => groupByStatus(allSessions, new Set(needsEvents.keys()), held), [allSessions, needsEvents, held]);
+  // Within a section: oldest first, each workspace in its strip's order (so a first move changes
+  // nothing else there), then the core's chat order; chats the core has not listed yet come first.
+  const statusChats = useMemo(
+    () => orderBy(chatsInStripOrder(usePerchStore.getState(), allSessions), order?.sessions, (session) => session.id),
+    [allSessions, order?.sessions, workspaces, tabOrderVersion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const statusGroups = useMemo(() => groupByStatus(statusChats, new Set(needsEvents.keys()), held), [statusChats, needsEvents, held]);
   const statusSections: { key: string; title: string; note?: string; list: SessionSummary[] }[] = hostReachable
     ? STATUS_SECTIONS.map((key) => ({ key, title: STATUS_LABELS[key], list: statusGroups[key] })).filter((section) => section.list.length > 0)
     // Not connected: what these chats were doing is unknown. Show them once, as last known, never as Working/Idle/Done.
-    : allSessions.length ? [{ key: "offline", title: "Offline: last known", note: activeHostId === "local" ? "Reconnecting…" : `${sshHosts.find((host) => host.id === activeHostId)?.name ?? activeHostId}: ${hostStates[activeHostId]?.state ?? "connecting"}`, list: allSessions }] : [];
+    : allSessions.length ? [{ key: "offline", title: "Offline: last known", note: activeHostId === "local" ? "Reconnecting…" : `${sshHosts.find((host) => host.id === activeHostId)?.name ?? activeHostId}: ${hostStates[activeHostId]?.state ?? "connecting"}`, list: statusChats }] : [];
   const statusView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-status-view">
       {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">No chats yet.</div>}

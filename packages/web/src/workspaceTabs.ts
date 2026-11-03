@@ -1,8 +1,8 @@
 import type { SessionSummary } from "@perch/shared";
 import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, usePerchStore, type ProjectNavState } from "./store";
 import { fileTabKey, isBlankBrowser, useFileTabs, type FileTab } from "./fileTabs";
-import { applyStoredTabOrder, saveTabOrder, storedTabOrder } from "./tabOrder";
-import { applySessionOrder, orderBy, refillSlots } from "./sidebarOrder";
+import { applyStoredTabOrder, moveBeside, saveTabOrder, storedTabOrder } from "./tabOrder";
+import { applySessionOrder, refillSlots, writeScope } from "./sidebarOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
 import { useBrowserPages } from "./browserPages";
@@ -39,8 +39,41 @@ export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEn
   return applySessionOrder(stored, (entry) => entry.kind === "session", nav.workspaceOrderByHost?.[hostId]?.sessions);
 }
 
+type NavState = ReturnType<typeof usePerchStore.getState>;
+
+/** The workspace whose strip shows `session`. */
+function workspaceOf(state: NavState, session: SessionSummary) {
+  return state.workspaces?.find((workspace) => (session.workspaceId ? workspace.id === session.workspaceId : (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path));
+}
+
+/** The chat ids of `workspace` in its strip order (this viewer's drag order and the core's order included). */
+function chatStrip(state: NavState, workspace: NonNullable<ReturnType<typeof workspaceOf>>): string[] {
+  return workspaceTabs({ ...state, activeWorkspaceId: workspace.id }, []).flatMap((entry) => (entry.kind === "session" ? [entry.id] : []));
+}
+
+/** `sessions` oldest first, each workspace's chats in the order its strip shows them:
+ * the sidebar's default order, so a first move there changes nothing else in the strips. */
+export function chatsInStripOrder(state: NavState, sessions: SessionSummary[]): SessionSummary[] {
+  let out = [...sessions].sort((a, b) => a.createdAt - b.createdAt);
+  for (const workspace of state.workspaces ?? []) {
+    const mine = out.filter((session) => workspaceOf(state, session)?.id === workspace.id);
+    const shown = new Map(mine.map((session) => [session.id, session]));
+    const strip = chatStrip(state, workspace).flatMap((id) => shown.get(id) ?? []);
+    if (strip.length === mine.length) out = refillSlots(out, (session) => shown.has(session.id), strip);
+  }
+  return out;
+}
+
+/** Write `scope` (chats of the workspaces a move touched, in their new order) into
+ * the core's chat order. Chats of other workspaces keep their place there. */
+function writeChats(state: NavState, hostId: string, scope: string[]): void {
+  const live = new Set(state.sessions.filter((session) => (session.hostId ?? "local") === hostId).map((session) => session.id));
+  state.setWorkspaceOrder(hostId, { sessions: writeScope(state.workspaceOrderByHost[hostId]?.sessions, scope, live) });
+}
+
 /** Save the strip's new order. When it changes the chats' relative order that
- * is the core's chat order too, so every viewer follows. */
+ * is the core's chat order too, so every viewer follows. Only this strip's chats
+ * are written, so other workspaces' strips do not change. */
 export function saveTabStrip(key: string, ids: string[]): void {
   const state = usePerchStore.getState();
   const files = useFileTabs.getState();
@@ -49,11 +82,22 @@ export function saveTabStrip(key: string, ids: string[]): void {
   saveTabOrder(key, ids);
   const after = ids.filter((id) => sessionIds.has(id));
   if (before.join() === after.join()) return;
-  const hostId = effectiveWorkspace(state)?.hostId ?? state.activeHostId;
-  const mine = state.sessions.filter((session) => (session.hostId ?? "local") === hostId).sort((a, b) => b.createdAt - a.createdAt);
-  const shown = orderBy(mine, state.workspaceOrderByHost[hostId]?.sessions, (session) => session.id).map((session) => session.id);
-  const moved = new Set(after);
-  state.setWorkspaceOrder(hostId, { sessions: refillSlots(shown, (id) => moved.has(id), after.filter((id) => shown.includes(id))) });
+  writeChats(state, effectiveWorkspace(state)?.hostId ?? state.activeHostId, after);
+}
+
+/** A sidebar move: put chat `moved` beside `target`, as the sidebar shows them in
+ * `shown`. The base order is each workspace's own strip order (this viewer's drag
+ * order included), so only the moved chat changes place in its strip, and only the
+ * workspaces of `moved` and `target` are written. */
+export function moveChat(moved: string, target: string, after: boolean, shown: string[]): void {
+  const state = usePerchStore.getState();
+  const [from, to] = [moved, target].map((id) => state.sessions.find((session) => session.id === id));
+  if (!from || !to) return;
+  const strips = [...new Set([workspaceOf(state, from), workspaceOf(state, to)])].flatMap((workspace) => (workspace ? [chatStrip(state, workspace)] : []));
+  const scope = new Set([moved, target, ...strips.flat()]);
+  let base = [...shown.filter((id) => scope.has(id)), ...[...scope].filter((id) => !shown.includes(id))];
+  for (const strip of strips) base = refillSlots(base, (id) => strip.includes(id), strip);
+  writeChats(state, from.hostId ?? "local", moveBeside(base, moved, target, after));
 }
 
 /** A single click on a file in the explorer: show it in the workspace's preview tab, replacing

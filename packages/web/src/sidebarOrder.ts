@@ -1,11 +1,10 @@
 /**
  * The core owns the order of projects and chats (`workspace.order`), so every
  * viewer, the phone included, shows the same sidebar. These helpers are the
- * pure client side of it: apply the list, compute a move, and refill the tab
- * strip's session slots. With no list (an older core, or never reordered) every
- * helper returns its input unchanged.
+ * pure client side of it: apply the list, write a scoped move into it, and refill
+ * the tab strip's session slots. With no list (an older core, or never reordered)
+ * every helper returns its input unchanged.
  */
-import { moveBeside } from "./tabOrder";
 
 export interface WorkspaceOrder {
   projects: string[];
@@ -29,11 +28,25 @@ export function orderProjects<T extends { id: string; favorite?: boolean }>(proj
   return [...ordered.filter((project) => project.favorite), ...ordered.filter((project) => !project.favorite)];
 }
 
-/** The full list after moving `moved` right before (or after) `target` in what
- * `ids` currently shows under `order`. Ids not in `ids` are dropped, which is
- * how the core's list loses stale entries. */
-export function moveInOrder(ids: string[], order: readonly string[] | undefined, moved: string, target: string, after: boolean): string[] {
-  return moveBeside(orderBy(ids, order, (id) => id), moved, target, after);
+/** Past this many entries a write also drops ids that are no longer live. Below it
+ * the list is kept whole, so a viewer that sees only part of a host loses nothing. */
+const PRUNE_ABOVE = 256;
+
+/** The core's list after `scope` (the ids a move touched, now in their new order)
+ * is written into `list`. The listed scope ids' slots take the new order, scope
+ * ids that were unlisted follow the last slot, and every other id, listed or not,
+ * keeps its place. With `live` given, a list over `PRUNE_ABOVE` drops dead ids. */
+export function writeScope(list: readonly string[] | undefined, scope: readonly string[], live?: ReadonlySet<string>): string[] {
+  const inScope = new Set(scope);
+  let next = 0;
+  let last = -1;
+  const out = [...new Set(list ?? [])].map((id, at) => {
+    if (!inScope.has(id)) return id;
+    last = at;
+    return scope[next++]!;
+  });
+  out.splice(last < 0 ? out.length : last + 1, 0, ...scope.slice(next));
+  return live && out.length > PRUNE_ABOVE ? out.filter((id) => live.has(id)) : out;
 }
 
 /** One step up (-1) or down (+1) among `siblings` (the ids as shown, in shown

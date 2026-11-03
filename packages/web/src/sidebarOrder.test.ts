@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySessionOrder, moveInOrder, orderBy, orderProjects, refillSlots, stepTarget } from "./sidebarOrder";
+import { applySessionOrder, orderBy, orderProjects, refillSlots, stepTarget, writeScope } from "./sidebarOrder";
 
 const row = (id: string, favorite = false) => ({ id, favorite });
 const ids = (list: { id: string }[]) => list.map((item) => item.id);
@@ -24,15 +24,29 @@ describe("orderProjects", () => {
   });
 });
 
-describe("moveInOrder", () => {
-  it("moves before or after a target across what is shown, from the default order", () => {
-    expect(moveInOrder(["a", "b", "c"], undefined, "c", "a", false)).toEqual(["c", "a", "b"]);
-    expect(moveInOrder(["a", "b", "c"], undefined, "a", "b", true)).toEqual(["b", "a", "c"]);
+describe("writeScope", () => {
+  it("lists a scope that was unlisted at the end, leaving the rest where it is", () => {
+    expect(writeScope(undefined, ["a", "b"])).toEqual(["a", "b"]);
+    expect(writeScope(["x", "y"], ["b", "a"])).toEqual(["x", "y", "b", "a"]);
   });
 
-  it("starts from the displayed order (unknown first) and drops stale ids", () => {
-    // Shown: new, b, a. Moving a before b gives the complete list.
-    expect(moveInOrder(["a", "b", "new"], ["b", "stale", "a"], "a", "b", false)).toEqual(["new", "a", "b"]);
+  it("rewrites the listed scope in its own slots; other listed ids keep their place", () => {
+    expect(writeScope(["a", "x", "b", "y", "c"], ["c", "a", "b"])).toEqual(["c", "x", "a", "y", "b"]);
+  });
+
+  it("puts the scope ids that overflow the old slots right after the last slot, in order", () => {
+    expect(writeScope(["a", "x", "b", "y"], ["a", "new", "b"])).toEqual(["a", "x", "new", "b", "y"]);
+  });
+
+  it("keeps ids it does not know (a partial view) until the list is long, then drops only dead ones", () => {
+    expect(writeScope(["a", "ghost", "b"], ["b", "a"], new Set(["a", "b"]))).toEqual(["b", "ghost", "a"]);
+    const long = Array.from({ length: 300 }, (_, i) => `s${i}`);
+    const live = new Set(["s0", "s1", "s299", "a"]);
+    expect(writeScope(long, ["a"], live)).toEqual(["s0", "s1", "s299", "a"]);
+  });
+
+  it("is the identity for a scope already in place", () => {
+    expect(writeScope(["a", "x", "b"], ["a", "b"])).toEqual(["a", "x", "b"]);
   });
 });
 

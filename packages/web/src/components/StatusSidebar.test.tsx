@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent, SessionSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
@@ -87,6 +87,48 @@ it("respects a saved Organize choice, and By status is one of the choices", () =
   act(() => (document.querySelector('[data-testid="workspace-organize-status"]') as HTMLElement).click());
   expect(get("workspace-status-view")).not.toBeNull();
   expect(storage.get("perch.sidebar.organize")).toBe("status");
+});
+
+describe("reordering", () => {
+  const setOrder = vi.fn();
+  const rowIds = (section: string) => [...get(section)!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-session") ?? el.getAttribute("data-testid")!.replace("workspace-session-", ""));
+  const menuOf = (testId: string) => act(() => get(testId)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+  beforeEach(() => {
+    setOrder.mockClear();
+    usePerchStore.setState({ sessions: [chat("a", { createdAt: 1 }), chat("b", { createdAt: 2 }), chat("c", { createdAt: 3 })], serverInfo: { protocolVersion: 1, capabilities: ["workspace.order.v1"] } as never, setWorkspaceOrder: setOrder });
+    useAttention.setState({ supported: true, events: [] });
+  });
+
+  it("By status lists chats oldest-first like the strip, so a first Move changes only the moved chat", () => {
+    act(() => root.render(<WorkspaceOverview />));
+    expect(rowIds("status-section-idle")).toEqual(["a", "b", "c"]);
+    menuOf("workspace-session-a");
+    act(() => (document.querySelector('[data-testid="workspace-session-move-down-a"]') as HTMLElement).click());
+    expect(setOrder).toHaveBeenCalledWith("local", { sessions: ["b", "a", "c"] });
+  });
+
+  it("In one list is chronological, ignores the core's order, and has no drag or Move", () => {
+    storage.set("perch.sidebar.organize", "list");
+    usePerchStore.setState({ workspaceOrderByHost: { local: { projects: [], sessions: ["a", "b", "c"] } } });
+    act(() => root.render(<WorkspaceOverview />));
+    const ids = [...get("workspace-session-list")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""));
+    expect(ids).toEqual(["c", "b", "a"]);
+    expect(get("workspace-session-list")!.querySelector('[draggable="true"]')).toBeNull();
+    menuOf("workspace-session-b");
+    expect(document.querySelector('[data-testid^="workspace-session-move-"]')).toBeNull();
+  });
+
+  it("a project Move keeps the positions of projects this viewer does not list", () => {
+    storage.set("perch.sidebar.organize", "project");
+    usePerchStore.setState({
+      workspaceProjects: [project, { ...project, id: "q", name: "Other", path: "/tmp/other", updatedAt: 0 }],
+      workspaceOrderByHost: { local: { projects: ["p", "archived", "q"], sessions: [] } },
+    });
+    act(() => root.render(<WorkspaceOverview />));
+    act(() => (get("workspace-project-menu-p") as HTMLElement).click());
+    act(() => (document.querySelector('[data-testid="workspace-project-move-down-p"]') as HTMLElement).click());
+    expect(setOrder).toHaveBeenCalledWith("local", { projects: ["q", "archived", "p"] });
+  });
 });
 
 it("lists chats in the core's order inside a section", () => {
