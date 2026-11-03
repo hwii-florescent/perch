@@ -32,7 +32,7 @@ or editor.** Useful without an agent or Git; optional worktrees, no task ceremon
   search; image/PDF/audio/video viewing, archive extraction and downloads.
 - Local desktop Open in Default App / Reveal in Finder.
 - Git/review/commit/push, anchored feedback packets, worktree lifecycle guards.
-- Local Needs You / Welcome Back and bounded Context Bridge (Claude direct send;
+- Local attention (By status sidebar view) and bounded Context Bridge (Claude direct send;
   other providers Copy).
 - Browser tabs/drawer and desktop native child webviews; phone/PWA pairing and
   shared CLI input; terminal search, kitty keyboard, OSC 52, imported profiles,
@@ -133,8 +133,9 @@ cannot swap the page, relay-aware push notifications.
 
 ### 4. Finish resource actions, not a full editor
 
-- Safe rendered Markdown with source access and no implicit remote fetches.
-- Image zoom/dimensions/decode limits and useful unknown/oversized fallbacks.
+- Markdown preview and image zoom/dimensions/limits landed
+  ([decision](DECISIONS.md)); still owed: real relay viewing and skipping the
+  relay fetch for oversized files. Remaining: useful unknown-file fallbacks.
 - Internal Open With / viewer choice beyond the existing OS-default opener.
 - Explicit remote external-open (download/local copy or a remote-aware editor).
 - Recheck source/draft distinctions, conflicts, trust boundaries and accessibility
@@ -163,7 +164,7 @@ Start: `crates/perch-core/src/server/attention.rs`, `db/attention.rs`,
   not another runtime or orchestration engine.
 - Saved runs; structured JSON/CSV/log viewers where useful; workspace-associated
   port forwarding/remote app preview; phone wide-terminal and delivery polish.
-- Chat sorting/manual order; chrome font trial remains undecided.
+- Sort chats by last updated; chrome font trial remains undecided.
 
 ## Release evidence still owed
 

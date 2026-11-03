@@ -53,7 +53,7 @@ Useful existing coverage (not a claim of a fresh passing run):
   core restart, draft/conflict recovery.
 - `workspace-file-browser.spec.ts`: CodeMirror, media, read-only and extraction.
 - `agent-terminal-ownership.spec.ts`, `terminal-width.spec.ts`: authority/size.
-- `needs-you.spec.ts`: question persistence/resolution and navigation.
+- `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated
   headless metadata/files/drafts/surfaces/reconnect plus `remote-git.spec.ts`

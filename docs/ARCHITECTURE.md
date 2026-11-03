@@ -127,7 +127,7 @@ fallback output heuristics have different confidence. The transition bridge
 `spawn_agent_turn_state_task` projects lifecycle into sidebar running/blocked
 sets; do not add a competing state machine.
 
-Local Needs You / Welcome Back persists `attention_events`. Viewing reads,
+Local attention persists `attention_events` and feeds the sidebar's By status view. Viewing reads,
 never resolves, a question. Silence is not completion; uncertainty stays
 labelled. Failures and finished/exited events are distinct. Remote event relay,
 per-user read state and notification deep links remain deferred.

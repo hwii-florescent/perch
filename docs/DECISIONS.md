@@ -7,6 +7,37 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-03 — By status replaces Needs You; the core owns sidebar order (owner)
+
+- **By status** is the sidebar's default Organize view, shown as Needs you, Done,
+  Working and Idle with counts. A chat being read stays in Done until you leave
+  it. While the active host is disconnected its chats appear under "Offline: last
+  known". By project and In one list remain; a saved choice is respected.
+- **The Needs You button and panel are removed**, on desktop and phone. So are
+  Recent updates, Welcome Back, Dismiss, changed-file chips, Review N files and
+  the unread dot. The core attention service, `attention.v1` and read-on-view
+  stay. Cmd/Alt-Shift-U shows the sidebar and opens the next chat needing you. A
+  count sits on the existing control that opens the sidebar when it is hidden.
+- **The phone reflects the desktop.** Project and chat order live in the owning
+  core (`workspace_order`, capability `workspace.order.v1`), which narrows the
+  per-viewer rule for order only. Focus, file-tab position and split geometry
+  stay per viewer. A host without the capability keeps the default sort, with no
+  drag and no local fallback.
+- **Reordering** uses native drag with a landing line, plus Move up/down in row
+  menus; drag is off in the compact phone layout. Favourites stay first. A chat
+  move writes only the workspaces it touches, so other tab strips do not change.
+  Unlisted chats default to their strip order (oldest first). In one list stays
+  strictly newest first, with no drag. Nest order is not reorderable.
+- **Markdown files** get a Source/Preview toggle that renders the draft. Nothing
+  remote is fetched: images and media become text placeholders. Relative images
+  use the confined local file route, and show placeholders on remote hosts and
+  relay pages. Images get zoom, Fit, 100%, pan, dimensions and a 50 MiB limit.
+
+Verified by unit tests and headless Chromium, including a two-viewer reorder. Not
+verified: live cross-host reorder, WebKit, real relay viewing, phone-width touch
+targets and the desktop app. On a relay, an oversized file is still fetched into
+memory before the viewer shows its fallback.
+
 ## 2026-11-02 — Three ways to reach a phone; the relay is one you deploy (approved)
 
 **Decision.** Settings → Devices offers, side by side: the same Wi-Fi, Tailscale
@@ -331,8 +362,8 @@ Decided with the owner. Spec: [UI-UX-DIRECTION.md Appendix D](UI-UX-DIRECTION.md
   (the project row stands in; Files/Git move to the project menu). The phone
   keeps full rows. Strip states are neutral: hover and active are a rounded
   `surface-1` fill, focus is a 1px neutral ring; no hairlines between rows.
-- **Backlog:** "Sort chats by" (Last updated / Manual order). Needs a
-  last-updated field on `SessionSummary` and drag-and-drop.
+- **Backlog:** "Sort chats by" Last updated. Needs a last-updated field on
+  `SessionSummary`. Manual order shipped 2026-11-03.
 
 ## 2026-10-04 — Shell navigation, vocabulary, close/restore (PER-6)
 

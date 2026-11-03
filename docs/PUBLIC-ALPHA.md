@@ -156,7 +156,7 @@ Do not install missing providers merely to make a support matrix larger. Existin
 
 ### D. Trustworthy attention
 
-- [x] Small Needs You view, not dashboard/kanban. (`components/NeedsYou.tsx`, 2026-10-21)
+- [x] Small attention view, not dashboard/kanban. (By status sidebar view, `statusView.ts`, replaced the Needs You panel 2026-11-03)
 - [ ] Verified question/needs-input signal with exact resource navigation for a tested provider locally and remotely. **Local done** (Claude, `e2e/needs-you.spec.ts`); remote hosts not yet relayed.
 - [x] Viewing and resolving are separate; question remains until evidence resolves it. (`db/attention.rs` tests, needs-you N1)
 - [x] Completion, process exit, successful tests and review readiness are not conflated. (`attention` kinds: question/failed/finished/exited; no test/review admission)
