@@ -216,6 +216,16 @@ relay off/on cycle; rendering the phone shell alone is not a pass. Set
 that deployment with a fresh, private room. Never use your real `~/.perch`
 for this check.
 
+Disconnected browser/phone and pairing screens expose **Connection details →
+Copy diagnostic report**. The report distinguishes a missing relay link, browser
+storage/encryption availability, the relay WebSocket, encrypted hello and Perch
+data socket; it preserves the last failure during retries. It contains no URL,
+room id, encryption key, pairing code, device token or workspace payload. The
+relay check verifies the offline-host close code and report redaction, and saves
+phone/desktop diagnostic screenshots under `/tmp/perch-connection-*.png`.
+Focused checks: `npm run test -w @perch/web -- src/relay
+src/components/ConnectionDetails.test.tsx src/pairing.test.ts`.
+
 2026-11-02: `device-pairing` timed out at its post-reload typing step (the
 reply to `after-phone-reload` never arrived), with and without the relay
 installed; not caused by it, not diagnosed.

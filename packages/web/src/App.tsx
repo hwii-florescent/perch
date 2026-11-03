@@ -19,6 +19,7 @@ import { useLeaderKey } from "./keybinds";
 import { usePerchStore } from "./store";
 import { MobilePaneShell, type MobilePaneKind } from "./components/MobilePaneShell";
 import { LaptopUnreachable, PairingGate } from "./components/PairingGate";
+import { ConnectionDetails } from "./components/ConnectionDetails";
 import { isPaired } from "./pairing";
 import { WorkspaceTools, WorkspaceToolsTabs, type WorkspaceToolsTab } from "./components/WorkspaceTools";
 import { ResizeHandle } from "./components/ResizeHandle";
@@ -264,6 +265,7 @@ export default function App() {
         </div>
       )}
 
+      {!connected && !MAC_DESKTOP && <div className="shrink-0 border-b border-overlay-0 px-4"><ConnectionDetails /></div>}
       <div className="flex min-h-0 flex-1">
         {showSidebar && <Sidebar />}
         {showSidebar && (

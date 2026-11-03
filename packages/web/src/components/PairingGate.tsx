@@ -15,6 +15,8 @@
  */
 import { useEffect, useState } from "react";
 import { claimPairing, takePairingCodeFromUrl } from "../pairing";
+import { useRelayDiagnostics } from "../relay/diagnostics";
+import { ConnectionDetails } from "./ConnectionDetails";
 
 const INPUT = "min-h-11 min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_var(--font-mono)] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
 const SCREEN = "flex min-h-[100dvh] items-center justify-center p-6 text-fg";
@@ -93,12 +95,14 @@ export function PairingGate({ phone = false, onPaired }: { phone?: boolean; onPa
         <button type="submit" className={PRIMARY} data-testid="pairing-submit" disabled={pending || !code.trim()}>
           {pending ? "Pairing…" : phone ? "Connect" : "Pair device"}
         </button>
+        <ConnectionDetails />
       </form>
     </div>
   );
 }
 
 export function LaptopUnreachable() {
+  const relay = useRelayDiagnostics().mode === "relay";
   return (
     <div className={SCREEN} data-testid="laptop-unreachable">
       <div className={CARD} role="status">
@@ -108,9 +112,20 @@ export function LaptopUnreachable() {
           retrying on its own. Check that:
         </p>
         <ul className={`${BODY} m-0 list-disc pl-5`}>
-          <li>the laptop is awake and perch is open, with Phone access on (Settings → Devices)</li>
-          <li>this phone is on the same Wi-Fi, or both are on Tailscale</li>
+          {relay ? (
+            <>
+              <li>the laptop is awake, online, and running perch</li>
+              <li>Settings → Devices → Relay says Connected on the laptop</li>
+            </>
+          ) : (
+            <>
+              <li>the laptop is awake and perch is open, with Phone access on (Settings → Devices)</li>
+              <li>this phone is on the same Wi-Fi, or both are on Tailscale</li>
+            </>
+          )}
         </ul>
+        {relay && <p className={BODY}>Relay access does not require the same Wi-Fi or Tailscale. Connection details below show where this attempt stopped.</p>}
+        <ConnectionDetails />
         <button type="button" className={PRIMARY} data-testid="laptop-retry" onClick={() => window.location.reload()}>
           Try again
         </button>

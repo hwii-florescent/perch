@@ -184,6 +184,25 @@ try {
   send({ type: "settings.update", patch: { relayUrl: "" } });
   await wait((m) => m.type === "phone.access.status" && !m.relay && !m.addresses.some((a) => a.kind === "relay"), "the relay to switch off");
   await phone.waitForFunction(() => window.usePerchStore?.getState().connected === false, undefined, { timeout: 10_000 });
+  // A fresh phone can inspect its failed handshake without developer tools.
+  const lostPhone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await lostPhone.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
+  await lostPhone.goto(link);
+  await lostPhone.getByTestId("laptop-unreachable").waitFor({ timeout: 20_000 });
+  await lostPhone.getByTestId("connection-details").locator("summary").click();
+  const reportText = await lostPhone.getByLabel("Connection diagnostic report").textContent();
+  const report = JSON.parse(reportText);
+  assert.equal(report.mode, "relay");
+  assert.equal(report.perchConnected, false);
+  assert.equal(report.linkPresent, true);
+  assert.equal(report.closeCode, 4004);
+  for (const secret of [room, link.split(".").at(-1), code, hostSecret]) assert(!reportText.includes(secret), "diagnostic report leaked a secret");
+  assert(!((await lostPhone.locator("body").textContent()) ?? "").includes("this phone is on the same Wi-Fi"), "relay failures must not require Wi-Fi or Tailscale");
+  await lostPhone.screenshot({ path: "/tmp/perch-connection-phone.png" });
+  await lostPhone.setViewportSize({ width: 1280, height: 800 });
+  await lostPhone.getByTestId("connection-details").locator("summary").click();
+  await lostPhone.screenshot({ path: "/tmp/perch-connection-desktop.png" });
+  await lostPhone.close();
   // A build that names a relay offers it behind one switch: on connects, off disconnects.
   const again = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await again.goto(`http://127.0.0.1:${corePort}`);

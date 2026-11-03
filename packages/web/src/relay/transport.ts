@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { getBasePath } from "../base";
 import { base64urlDecode, KEY_LEN } from "./wire";
 import { Tunnel } from "./tunnel";
+import { getRelayDiagnostics, reportConnection } from "./diagnostics";
 
 const LINK_KEY = "perch.relay.link";
 const tokenKey = (room: string) => `perch.relay.token.${room}`;
@@ -46,6 +47,7 @@ function readLink(): Link | null {
   const fromUrl = parseLink(fragment.get("r") ?? "");
   if (fromUrl) {
     localStorage.setItem(LINK_KEY, JSON.stringify(fromUrl));
+    reportConnection({ storageAvailable: true });
     fragment.delete("r");
     const rest = fragment.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${rest ? `#${rest}` : ""}`);
@@ -53,8 +55,10 @@ function readLink(): Link | null {
   }
   try {
     const saved = JSON.parse(localStorage.getItem(LINK_KEY) ?? "null") as Link | null;
+    reportConnection({ storageAvailable: true });
     return saved && parseLink(`${saved.room}.${saved.key}`);
   } catch {
+    reportConnection({ storageAvailable: false, error: "the browser could not read the saved relay link" });
     return null;
   }
 }
@@ -63,7 +67,12 @@ function currentTunnel(): Tunnel {
   if (!link) throw new Error("not in relay mode");
   if (!tunnel || tunnel.closed) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    tunnel = new Tunnel(link.key, `${protocol}//${window.location.host}/r/${link.room}?role=guest`);
+    const attempt = getRelayDiagnostics().attempts + 1;
+    reportConnection({ attempts: attempt });
+    tunnel = new Tunnel(link.key, `${protocol}//${window.location.host}/r/${link.room}?role=guest`, (update) => {
+      // An old socket can finish closing after the next attempt has started.
+      if (getRelayDiagnostics().attempts === attempt) reportConnection(update);
+    });
   }
   return tunnel;
 }
@@ -77,7 +86,16 @@ function routeOf(url: URL): string | null {
   return ROUTES.has(name) ? name + url.search : null;
 }
 
-const token = () => (link ? localStorage.getItem(tokenKey(link.room)) : null);
+function token(): string | null {
+  try {
+    const value = link ? localStorage.getItem(tokenKey(link.room)) : null;
+    reportConnection({ tokenPresent: Boolean(value), storageAvailable: true });
+    return value;
+  } catch {
+    reportConnection({ storageAvailable: false, error: "the browser could not read the paired device token" });
+    return null;
+  }
+}
 
 async function tunnelFetch(route: string, init: RequestInit | undefined): Promise<Response> {
   const headers = new Headers(init?.headers);
@@ -89,7 +107,15 @@ async function tunnelFetch(route: string, init: RequestInit | undefined): Promis
     throw new TypeError("Failed to fetch");
   }
   const issued = /perch_device=([A-Za-z0-9]+)/.exec(result.head.setCookie ?? "")?.[1];
-  if (issued && link) localStorage.setItem(tokenKey(link.room), issued);
+  if (issued && link) {
+    try {
+      localStorage.setItem(tokenKey(link.room), issued);
+      reportConnection({ tokenPresent: true, storageAvailable: true });
+    } catch {
+      reportConnection({ storageAvailable: false, error: "the browser could not save the paired device token" });
+      throw new Error("Allow site storage so this browser can remember its pairing.");
+    }
+  }
   const out = new Headers();
   if (result.head.contentType) out.set("content-type", result.head.contentType);
   if (result.head.contentDisposition) out.set("content-disposition", result.head.contentDisposition);
@@ -126,14 +152,19 @@ class RelayWebSocket extends EventTarget {
     t.ready.then(
       () => {
         if (this.readyState !== 0) return;
+        if (t === tunnel) reportConnection({ stage: "opening-perch" });
         this.controller = t.openSocket(route, token(), {
           opened: () => {
             if (this.readyState !== 0) return;
             this.readyState = 1;
+            if (t === tunnel) reportConnection({ stage: "connected" });
             this.emit(new Event("open"));
           },
           text: (data) => this.emit(new MessageEvent("message", { data })),
-          closed: () => this.finish(1006),
+          closed: () => {
+            if (t === tunnel && !t.closed) reportConnection({ stage: "failed", error: "the computer did not keep the Perch data socket open; pairing may be required" });
+            this.finish(1006);
+          },
         });
       },
       () => {
@@ -171,9 +202,24 @@ class RelayWebSocket extends EventTarget {
 /** Take over the app's data routes if this page came from a relay. Call once,
  * before the app makes its first request. */
 export function installRelayTransport(): boolean {
-  if (!window.crypto?.subtle) return false; // not a secure context: no WebCrypto
-  link = readLink();
-  if (!link) return false;
+  const fragmentPresent = new URLSearchParams(window.location.hash.slice(1)).has("r");
+  reportConnection({ secureContext: Boolean(window.isSecureContext), webCrypto: Boolean(window.crypto?.subtle) });
+  try {
+    link = readLink();
+  } catch {
+    reportConnection({ mode: "relay", linkPresent: fragmentPresent, storageAvailable: false, stage: "failed", error: "the browser could not save the relay link" });
+    return false;
+  }
+  reportConnection({ mode: link || fragmentPresent ? "relay" : "direct", linkPresent: Boolean(link), stage: link ? "link-ready" : "direct" });
+  if (!link) {
+    if (fragmentPresent) reportConnection({ stage: "failed", error: "the relay link is incomplete or damaged" });
+    return false;
+  }
+  token();
+  if (!window.crypto?.subtle) {
+    reportConnection({ stage: "failed", error: "browser encryption is unavailable; a secure HTTPS page is required" });
+    return false;
+  }
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const route = typeof input === "string" || input instanceof URL ? routeOf(new URL(input, window.location.href)) : null;

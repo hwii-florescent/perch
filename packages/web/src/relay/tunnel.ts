@@ -7,6 +7,7 @@
  * each frame valid, so a new connection means a new hello and new nonces.
  */
 import * as W from "./wire";
+import type { RelayDiagnostics } from "./diagnostics";
 
 /** The page's own WebSocket, kept before `transport.ts` replaces the global. */
 const NativeWebSocket = globalThis.WebSocket;
@@ -52,7 +53,8 @@ export class Tunnel {
   private readonly requests = new Map<number, Pending>();
   private readonly sockets = new Map<number, SocketHandlers>();
 
-  constructor(keyText: string, wsUrl: string) {
+  constructor(keyText: string, wsUrl: string, private readonly report: (update: Partial<Pick<RelayDiagnostics, "stage" | "error" | "closeCode">>) => void = () => undefined) {
+    this.report({ stage: "preparing-encryption" });
     this.ready = new Promise<void>((resolve, reject) => {
       const giveUp = setTimeout(() => this.fail("the computer did not answer"), HELLO_TIMEOUT_MS);
       this.onReady = () => { clearTimeout(giveUp); resolve(); };
@@ -60,7 +62,7 @@ export class Tunnel {
     });
     // Callers that never await it must not see an unhandled rejection.
     this.ready.catch(() => undefined);
-    void this.start(keyText, wsUrl);
+    void this.start(keyText, wsUrl).catch(() => this.fail("the browser could not start the encrypted relay connection"));
   }
 
   private onReady: () => void = () => undefined;
@@ -70,18 +72,37 @@ export class Tunnel {
     const raw = W.base64urlDecode(keyText);
     if (!raw || raw.length !== W.KEY_LEN) return this.fail("the link's key is damaged");
     this.key = await W.importKey(raw);
+    if (this.closed) return;
+    this.report({ stage: "connecting-relay" });
     const ws = new NativeWebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
-      void W.seal(this.key, W.helloAad(false), W.frame(W.HELLO_GUEST, 0, this.guest)).then((hello) => ws.send(hello));
+      this.report({ stage: "waiting-for-computer" });
+      void W.seal(this.key, W.helloAad(false), W.frame(W.HELLO_GUEST, 0, this.guest))
+        .then((hello) => { if (!this.closed) ws.send(hello); })
+        .catch(() => this.fail("the browser could not send the encrypted hello"));
     };
     ws.onmessage = (event) => {
       if (!(event.data instanceof ArrayBuffer)) return;
       const bytes = new Uint8Array(event.data);
-      this.rx = this.rx.then(() => this.receive(bytes));
+      this.rx = this.rx.then(() => this.receive(bytes)).catch(() => this.fail("the browser could not process an encrypted relay frame"));
     };
-    ws.onclose = () => this.fail("the connection closed");
+    ws.onclose = (event) => {
+      // The peer's reason is untrusted and may contain secrets. Use only its code.
+      const reasons: Record<number, string> = {
+        4004: "the computer is not connected to the relay",
+        4005: "the computer closed the encrypted session",
+        1009: "the relay rejected an oversized frame",
+      };
+      const error = reasons[event.code] ?? "the relay WebSocket closed";
+      if (this.closed) {
+        this.report({ closeCode: event.code });
+        if (reasons[event.code]) this.report({ closeCode: event.code, error });
+      } else {
+        this.fail(error, event.code);
+      }
+    };
     ws.onerror = () => this.fail("the relay cannot be reached");
   }
 
@@ -92,6 +113,7 @@ export class Tunnel {
       const hello = plain && W.parseFrame(plain);
       if (!hello || hello.kind !== W.HELLO_HOST || hello.payload.length !== W.NONCE_LEN) return this.fail("the computer's answer was not valid");
       this.host = new Uint8Array(hello.payload);
+      this.report({ stage: "tunnel-ready" });
       this.onReady();
       return;
     }
@@ -145,13 +167,14 @@ export class Tunnel {
       const sealed = await W.seal(this.key, W.dataAad(this.guest, this.host, false, this.sent), W.frame(kind, id, payload));
       this.sent += 1;
       if (!this.closed) ws.send(sealed);
-    });
+    }).catch(() => this.fail("the browser could not send an encrypted relay frame"));
     return this.tx;
   }
 
-  fail(reason: string): void {
+  fail(reason: string, closeCode: number | null = null): void {
     if (this.closed) return;
     this.closed = true;
+    this.report({ stage: "failed", error: reason, closeCode });
     this.onFail(reason);
     for (const request of this.requests.values()) request.reject(new Error(reason));
     this.requests.clear();
