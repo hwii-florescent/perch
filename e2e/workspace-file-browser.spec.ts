@@ -54,6 +54,8 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
     const workspaceId = await firstWorkspaceId(project);
     await openWorkspaceTool(page, workspaceId, "files");
 
+    // The header's search icon reveals the search box.
+    await page.getByRole("button", { name: "Search files" }).click();
     const search = page.getByRole("searchbox", { name: "Search workspace files" });
     await search.fill("nested/note");
     await page.getByTestId("workspace-file-entry-nested/note.txt").click();
@@ -134,6 +136,59 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
     await expect(page.getByTestId("workspace-file-image")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("file-browser-mobile.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } finally {
+    fs.rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("Markdown Preview shows the unsaved draft safely; images zoom, pan and fall back", async ({ page }) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-markdown-"));
+  try {
+    fs.mkdirSync(path.join(root, "pics"));
+    fs.writeFileSync(path.join(root, "pics/dot.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="#666"/></svg>');
+    fs.writeFileSync(path.join(root, "broken.png"), "not an image");
+    fs.writeFileSync(path.join(root, "README.md"), "# Saved heading\n\n![local](pics/dot.svg)\n\n![remote](https://example.invalid/r.png)\n\n<script>document.title = 'pwned'</script>\n");
+    await page.goto("/");
+    await addProject(page, root);
+    const project = page.locator(".workspace-project").filter({ hasText: path.basename(root) });
+    await openWorkspaceTool(page, await firstWorkspaceId(project), "files");
+    const requests: string[] = [];
+    page.on("request", (request) => requests.push(request.url()));
+    await page.getByTestId("workspace-file-entry-README.md").click();
+    const editor = page.getByTestId("workspace-file-editor");
+    await expect(editor).toBeFocused();
+    await page.keyboard.press(`${MOD}+End`);
+    await page.keyboard.type("\nDRAFT-ONLY text");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const preview = page.getByTestId("workspace-markdown-preview");
+    await expect(preview).toContainText("DRAFT-ONLY text");
+    await expect(preview.getByRole("heading", { name: "Saved heading" })).toBeVisible();
+    await expect.poll(() => preview.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(240);
+    await expect(preview.locator(".md-placeholder")).toHaveText("[image: remote] https://example.invalid/r.png");
+    expect(requests.some((url) => url.includes("example.invalid"))).toBe(false);
+    expect(await page.title()).not.toBe("pwned");
+    expect(fs.readFileSync(path.join(root, "README.md"), "utf8")).not.toContain("DRAFT-ONLY");
+    // Source still holds the unsaved draft; Save is still offered.
+    await page.getByRole("button", { name: "Source", exact: true }).click();
+    await expect(preview).toHaveCount(0);
+    expect(await docOf(editor)).toContain("DRAFT-ONLY text");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+
+    await page.getByTestId("workspace-file-entry-pics").click();
+    await page.getByTestId("workspace-file-entry-pics/dot.svg").click();
+    const info = page.getByTestId("workspace-image-info");
+    await expect(info).toHaveText("240 × 160 · Fit");
+    await page.getByRole("button", { name: "100%", exact: true }).click();
+    await expect(info).toHaveText("240 × 160 · 100%");
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect(info).toHaveText("240 × 160 · 125%");
+    await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await expect(info).toHaveText("240 × 160 · Fit");
+
+    await page.getByTestId("workspace-file-entry-broken.png").click();
+    await expect(page.getByText("Preview unavailable", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download", exact: true })).toBeVisible();
   } finally {
     fs.rmSync(root, { force: true, recursive: true });
   }

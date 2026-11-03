@@ -137,3 +137,34 @@
   border-top: 1px solid var(--overlay-0);
   margin: 0.75em 0;
 }
+
+/* The file viewer's Markdown preview (WorkspaceMarkdownPreview.tsx) reuses the rules above. */
+.file-markdown {
+  overflow-wrap: anywhere;
+}
+
+.file-markdown img {
+  max-width: 100%;
+}
+
+.file-markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+
+.file-markdown th,
+.file-markdown td {
+  border: 1px solid var(--overlay-0);
+  padding: 0.2em 0.5em;
+}
+
+/* A remote image/media/frame that was not loaded: its alt text and URL, as text. */
+.file-markdown .md-placeholder {
+  color: var(--subtext-0);
+  font-size: 0.9em;
+  border: 1px dashed var(--overlay-0);
+  border-radius: 0.25rem;
+  padding: 0.05em 0.35em;
+}

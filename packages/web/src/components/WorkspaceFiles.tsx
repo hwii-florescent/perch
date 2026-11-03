@@ -15,6 +15,7 @@ import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { FileEntryMenu } from "./FileEntryMenu";
 import { WorkspaceFileAsset } from "./WorkspaceFileAsset";
+import { WorkspaceMarkdownPreview } from "./WorkspaceMarkdownPreview";
 import { assetKind } from "./workspaceFileKind";
 import { explorerKey, flattenTree } from "../explorerNav";
 import { shortcutLabel } from "../keybinds";
@@ -329,6 +330,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [markdownPreviewPath, setMarkdownPreviewPath] = useState<string | null>(null);
   const [fileQuery, setFileQuery] = useState("");
   // The header's search icon reveals the search box; closing it clears the query.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -382,6 +384,10 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
   const document = selectedPath ? documents[selectedPath] : undefined;
   const preview = selectedPath ? previews[selectedPath] : undefined;
   const dirty = document != null && document.content !== document.savedContent;
+  // Markdown has a Source/Preview toggle (per file, kept while this view is mounted). The editor
+  // stays mounted behind the rendered view, so a draft, caret and conflict state are never touched.
+  const isMarkdown = selectedPath != null && /\.(?:md|markdown)$/i.test(selectedPath);
+  const markdownPreview = isMarkdown && markdownPreviewPath === selectedPath;
   const canEdit = document != null && !document.metadata?.readonly && document.state !== "loading" && document.state !== "error";
   const canSave = document != null && !document.metadata?.readonly && dirty && document.state !== "saving" && document.state !== "loading" && document.state !== "error";
 
@@ -599,8 +605,16 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                 </div>
                 <div className={cn(ACTIONS, "gap-[0.1rem] [@container(max-width:460px)]:max-w-full [@container(max-width:460px)]:min-w-0 [@container(max-width:460px)]:flex-[1_1_100%] [@container(max-width:460px)]:flex-wrap")}>
                   {contextBridgeAvailable(workspaceId) && <button type="button" className={cn(GHOST_BUTTON, "min-h-7 px-2 max-[700px]:min-h-11")} disabled={document.state !== "ready" && document.state !== "conflict"} onClick={() => editorRef.current?.askAgent()}>Ask agent…</button>}
+                  {isMarkdown && (
+                    <div className="flex items-center" role="group" aria-label="Markdown view">
+                      {(["Source", "Preview"] as const).map((view) => {
+                        const active = (view === "Preview") === markdownPreview;
+                        return <button key={view} type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-11", active && "bg-surface-1 text-fg")} aria-pressed={active} onClick={() => setMarkdownPreviewPath(view === "Preview" ? selectedPath : null)}>{view}</button>;
+                      })}
+                    </div>
+                  )}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", wrap && "text-fg")} onClick={() => setWrap((value) => !value)} title="Toggle word wrap">Wrap</button>
-                  <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>
+                  {!isMarkdown && <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", previewOpen && "text-fg")} onClick={() => { setPreviewOpen((value) => !value); if (!preview || preview.state === "error") requestPreview(workspaceId, selectedPath); }}>Preview</button>}
                   <button type="button" className={cn(GHOST_BUTTON, "px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]")} onClick={handleReload} disabled={document.state === "saving" || document.bufferState === "saving"} title="Reload from disk">Reload</button>
                   <button type="button" className={cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg")} onClick={() => saveFile(workspaceId, selectedPath)} disabled={!canSave} title={shortcutLabel("editor.save") ? `Save (${shortcutLabel("editor.save")})` : "Save"}>
                     {document.state === "saving" ? "Saving…" : "Save"}
@@ -626,7 +640,8 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                   </div>
                 </div>
               )}
-              <div className="relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden">
+              {markdownPreview && <WorkspaceMarkdownPreview workspaceId={workspaceId} path={selectedPath} content={document.content} local={workspace.hostId === "local"} />}
+              <div className={cn("relative flex min-h-[12rem] min-w-0 flex-1 flex-col overflow-hidden", markdownPreview && "hidden")}>
                 <Suspense fallback={<div className={PREVIEW_STATE} role="status">Loading editor…</div>}>
                   <CodeEditor
                     key={`${selectedPath}\0${document.reloadEpoch ?? 0}`}

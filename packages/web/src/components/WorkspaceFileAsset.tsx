@@ -6,6 +6,7 @@ import { useWorkspaceFilesStore } from "../filesystemStore";
 import { usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { MAX_IMAGE_BYTES, WorkspaceImage } from "./WorkspaceImage";
 import { WorkspacePdf } from "./WorkspacePdf";
 import { assetKind } from "./workspaceFileKind";
 
@@ -21,14 +22,21 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   const kind = assetKind(metadata.mediaType);
   const remote = usePerchStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId !== "local");
   const archive = kind === "archive";
-  const hasPreview = kind !== undefined && !archive && !remote;
+  const oversized = kind === "image" && metadata.size > MAX_IMAGE_BYTES;
+  const hasPreview = kind !== undefined && !archive && !remote && !oversized;
   let unavailableDescription = "Download this file to open it in another app. Media support depends on your browser and codecs.";
   if (remote) unavailableDescription = "Use your SSH tools to download this file. Perch will not open a remote path on this machine.";
   else if (archive) unavailableDescription = "Extract into a new folder beside this archive. Existing files are never overwritten.";
   let unavailableTitle = "No preview for this file type";
   if (remote) unavailableTitle = "Remote media is not available yet";
   else if (archive) unavailableTitle = "Compressed archive";
-  else if (failed) unavailableTitle = "Preview unavailable";
+  else if (oversized) {
+    unavailableTitle = "Image too large to preview";
+    unavailableDescription = `This image is ${Math.round(metadata.size / 1048576)} MB. Download it to open it in another app.`;
+  } else if (failed) {
+    unavailableTitle = "Preview unavailable";
+    if (kind === "image") unavailableDescription = "The image may be corrupt or in a format this browser cannot decode. Download it to open it in another app.";
+  }
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`Previewing ${metadata.path}`} data-testid="workspace-file-asset">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-overlay-0 px-3 py-2 text-[0.75rem]">
@@ -49,10 +57,11 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
           <strong className="text-fg">{unavailableTitle}</strong>
           <span>{unavailableDescription}</span>
         </div>
+      ) : kind === "image" && url !== null ? (
+        <WorkspaceImage url={url} name={metadata.name} onFail={() => setFailed(true)} />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-3">
           {url === null && <span className="text-[0.8rem] text-subtext-0" role="status">Loading…</span>}
-          {url !== null && kind === "image" && <img className="max-h-full max-w-full object-contain" src={url} alt={metadata.name} onError={() => setFailed(true)} data-testid="workspace-file-image" />}
           {url !== null && kind === "video" && <video className="max-h-full max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} data-testid="workspace-file-video" />}
           {url !== null && kind === "audio" && <audio className="max-w-full" src={url} controls preload="metadata" onError={() => setFailed(true)} aria-label={metadata.name} />}
           {url !== null && kind === "pdf" && <WorkspacePdf url={url} />}
