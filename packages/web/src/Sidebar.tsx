@@ -40,7 +40,7 @@ import { WorktreeMenu } from "./components/WorktreeMenu";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AgentPicker, useAgentChoices } from "./components/AgentPicker";
 import { AgentIcon } from "./components/AgentIcon";
-import { menuDivider, menuItem, menuPanel } from "./components/ui/menu";
+import { menuItem, menuPanel } from "./components/ui/menu";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { HostStateDot } from "./components/HostStateDot";
 import { cn } from "./lib/cn";
@@ -606,6 +606,8 @@ function ProjectRow({
 // NewSessionPopover — portal popover for the "+" buttons (also used by TabBar)
 // ---------------------------------------------------------------------------
 
+interface LauncherItem { id: string; label: string; icon?: React.ReactNode; testId: string; disabled?: boolean; muted?: boolean; run: () => void }
+
 export interface NewSessionPopoverProps {
   hostId: string;
   /** Known project cwds for this host, derived from existing sessions. */
@@ -627,6 +629,36 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
   const [selectedAgent, setSelectedAgent] = useState<string>(lastAgentChoice);
   const { connected, discovery, catalog, choices } = useAgentChoices(hostId);
   const manage = usePerchStore((s) => s.openAgentCatalog);
+
+  // Keyboard launcher (scoped branch): a filterable list the user drives without the mouse.
+  const [filter, setFilter] = useState("");
+  const [active, setActive] = useState(0);
+  const agentsReady = connected && !(discovery && catalog?.state !== "ready");
+  const items: LauncherItem[] = fixedCwd === undefined ? [] : [
+    ...choices.map((choice) => ({
+      id: choice.id, label: choice.label, icon: <AgentIcon provider={choice.id} />,
+      testId: `new-session-provider-${choice.id}`, disabled: !agentsReady,
+      run: () => {
+        if (!agentsReady) return;
+        if (choice.id === "claude" || choice.id === "codex") setLastAgentChoice(choice.id);
+        onSelect(fixedCwd, choice.id);
+        onClose();
+      },
+    })),
+    ...(extras ?? []).map((extra) => ({
+      id: extra.id, label: extra.label, icon: extra.icon, testId: `new-tab-${extra.id}`,
+      run: () => { onClose(); extra.onSelect(); },
+    })),
+    ...(discovery ? [{ id: "manage", label: "Manage agents…", muted: true, testId: "new-tab-manage", run: () => { onClose(); manage(); } }] : []),
+  ];
+  const needle = filter.trim().toLowerCase();
+  const visible = needle ? items.filter((item) => item.label.toLowerCase().includes(needle)) : items;
+
+  // Dismissing returns focus to where it was (the terminal), not to <body>.
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    return () => { if (!document.activeElement || document.activeElement === document.body) previous?.focus?.(); };
+  }, []);
 
   // Position: open below the anchor button, left-aligned. Clamped to the
   // viewport: the project list grows one row per listed project.
@@ -662,31 +694,51 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
     <div className={cn(menuPanel, "new-session-popover flex max-w-[min(320px,calc(100vw_-_24px))] min-w-[200px] flex-col py-1")} ref={popoverRef} style={style}>
       {fixedCwd !== undefined ? (
         <div className="min-h-0 overflow-y-auto py-1">
-          {choices.map((choice) => (
-            <button type="button" key={choice.id} className={cn(menuItem(), "flex items-center gap-2")}
-              data-testid={`new-session-provider-${choice.id}`}
-              disabled={!connected || (discovery && catalog?.state !== "ready")}
-              onClick={() => {
-                if (choice.id === "claude" || choice.id === "codex") setLastAgentChoice(choice.id);
-                onSelect(fixedCwd, choice.id);
-                onClose();
-              }}>
-              <AgentIcon provider={choice.id} />
-              {choice.label}
-            </button>
-          ))}
-          {extras && extras.length > 0 && <div className={menuDivider} />}
-          {extras?.map((extra) => (
-            <button type="button" key={extra.id} className={cn(menuItem(), "flex items-center gap-2")} data-testid={`new-tab-${extra.id}`}
-              onClick={() => { onClose(); extra.onSelect(); }}>
-              {extra.icon}
-              {extra.label}
-            </button>
-          ))}
+          <input
+            type="text"
+            autoFocus
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="new-tab-launcher-list"
+            aria-activedescendant={visible[active] ? `new-tab-launcher-${visible[active].id}` : undefined}
+            aria-label="Filter new tab options"
+            placeholder="Type to filter, ↑↓ Enter, 1–9"
+            data-testid="new-tab-filter"
+            className="mx-2 mb-1 w-[calc(100%_-_1rem)] rounded-ui border-0 bg-surface-0 px-2 py-1 text-[0.8rem] text-fg [font-family:inherit] [outline:none] placeholder:text-subtext-0"
+            value={filter}
+            onChange={(e) => { setFilter(e.target.value); setActive(0); }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                if (visible.length) setActive((active + (e.key === "ArrowDown" ? 1 : visible.length - 1)) % visible.length);
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                visible[active]?.run();
+              } else if (!filter && /^[1-9]$/.test(e.key) && visible[Number(e.key) - 1]) {
+                e.preventDefault();
+                visible[Number(e.key) - 1]!.run();
+              }
+            }}
+          />
+          <div id="new-tab-launcher-list" role="listbox">
+            {visible.map((item, i) => (
+              <button type="button" role="option" aria-selected={i === active} tabIndex={-1} key={item.id}
+                id={`new-tab-launcher-${item.id}`}
+                className={cn(menuItem(), "flex items-center gap-2", item.muted && "text-subtext-0", i === active && "bg-surface-0")}
+                data-testid={item.testId}
+                disabled={item.disabled}
+                onMouseMove={() => setActive(i)}
+                onClick={item.run}>
+                {item.icon}
+                <span className="flex-1">{item.label}</span>
+                {!filter && i < 9 && <kbd className="text-[0.7rem] text-subtext-0 [font-family:inherit]">{i + 1}</kbd>}
+              </button>
+            ))}
+          </div>
+          {!visible.length && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">No match.</p>}
           {discovery && catalog?.state === "loading" && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Checking agents…</p>}
           {discovery && catalog?.state === "error" && <p className="mx-3 text-[0.75rem] text-red" role="alert">{catalog.error}</p>}
           {discovery && catalog?.state === "ready" && !choices.length && <p className="mx-3 text-[0.75rem] text-subtext-0" role="status">Enable or install an agent in Manage agents.</p>}
-          {discovery && <button type="button" className={cn(menuItem(), "text-subtext-0")} onClick={() => { onClose(); manage(); }}>Manage agents…</button>}
         </div>
       ) : <>
       <AgentPicker

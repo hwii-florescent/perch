@@ -460,7 +460,7 @@ Open URL…                          when supported
 Manage agents…
 ```
 
-Terminal is first. Installed/enabled agents follow; preserve the user's recent choice as a convenience, never auto-execute on opening the launcher. Search filters actions/providers, not a second full file index. Dismissing creates nothing. With no project selected, explicitly offer Open project or Scratchpad.
+Terminal is first. Installed/enabled agents follow; preserve the user's recent choice as a convenience, never auto-execute on opening the launcher. Search filters actions/providers, not a second full file index. The launcher is keyboard-complete: the filter is focused on open, ↑/↓ move the highlight, Enter opens it, 1–9 open the numbered row while the filter is empty, Esc dismisses and returns focus to the terminal. Dismissing creates nothing. With no project selected, explicitly offer Open project or Scratchpad.
 
 ### Order and overflow
 
