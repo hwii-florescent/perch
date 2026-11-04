@@ -139,7 +139,6 @@ body {
  * app is pinned to what the keyboard leaves visible. */
 .app--mobile {
   position: fixed;
-  inset: 0 0 auto 0;
+  inset: var(--visible-top, 0px) 0 auto 0;
   height: var(--visible-height, 100dvh);
-  translate: 0 var(--visible-top, 0px);
 }
