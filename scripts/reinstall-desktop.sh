@@ -1,6 +1,7 @@
 #!/bin/sh
 # Build perch.app from this checkout, quit the running app, install the build
-# to /Applications and open it again. macOS only.
+# to /Applications and open it again, then redeploy the relay (the phone's web
+# app) from the same build. macOS only.
 #
 # Terminals live in perchd (the same binary run as `__perchd serve`), which
 # keeps running across the swap, so agents and shells survive, including the
@@ -63,3 +64,24 @@ ditto "$BUILT" "$APP"
 
 open "$APP"
 echo "Installed and opened $APP"
+
+# Redeploy the relay so the phone's page (the web build above) matches this app. Runs after the
+# install and never fails it: offline or logged out of Cloudflare only skips the relay.
+# PERCH_SKIP_RELAY=1 skips it. A stamp of what was last deployed (web build, Worker source and
+# config) skips the deploy when nothing changed; PERCH_RELAY_FORCE=1 ignores the stamp, e.g. after
+# switching Cloudflare accounts.
+STAMP=relay/.wrangler/deployed.sha
+relay_hash() { find packages/web/dist relay/src relay/wrangler.toml -type f -exec shasum {} + | LC_ALL=C sort | shasum | cut -d' ' -f1; }
+if [ "${PERCH_SKIP_RELAY:-}" = 1 ]; then
+  echo "Skipping relay deploy (PERCH_SKIP_RELAY=1)"
+else
+  want="$(relay_hash)"
+  if [ "${PERCH_RELAY_FORCE:-}" != 1 ] && [ "$(cat "$STAMP" 2>/dev/null || true)" = "$want" ]; then
+    echo "Relay already up to date (PERCH_RELAY_FORCE=1 to redeploy)"
+  else
+    echo "Deploying relay…"
+    (cd relay && { [ -d node_modules ] || npm install; } && npx wrangler deploy) \
+      && { mkdir -p "$(dirname "$STAMP")" && echo "$want" > "$STAMP"; } \
+      || echo "Relay deploy failed; the app is installed. Retry: (cd relay && npx wrangler login && npx wrangler deploy)" >&2
+  fi
+fi

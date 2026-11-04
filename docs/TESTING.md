@@ -180,7 +180,8 @@ process-group confirmation, history preservation and connect-only behavior.
   minute. A core/desktop rebuild is needed for Rust changes.
 - Desktop installers: `npm run build`, then
   `(cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build)`.
-  `scripts/reinstall-desktop.sh` installs/reopens the user's macOS app:
+  `scripts/reinstall-desktop.sh` installs/reopens the user's macOS app and
+  redeploys the user's Cloudflare relay (`PERCH_SKIP_RELAY=1` skips that):
   use only when that is intended, not as a test-isolation shortcut.
 - Release workflow builds draft macOS/Linux packages and Linux daemon binaries.
   Build support is not packaged-install evidence. macOS is ad-hoc signed, not
