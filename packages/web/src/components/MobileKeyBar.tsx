@@ -1,5 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 import { cn } from "../lib/cn";
+import { GHOST_BUTTON } from "./ui/icon-button";
+import { glass } from "./ui/glass";
 
 /**
  * The keys a CLI agent asks for that a phone keyboard has no key for: answer a
@@ -25,13 +27,13 @@ const KEYS: { label: string; aria: string; seq: (appCursor: boolean) => string }
 export function MobileKeyBar({ term, send }: { term: Terminal | null; send: (data: string) => void }) {
   const press = (seq: (appCursor: boolean) => string) => send(seq(term?.modes.applicationCursorKeysMode ?? false));
   return (
-    <div className="flex shrink-0 border-t border-t-overlay-0 bg-surface-0" role="toolbar" aria-label="Terminal keys" data-testid="mobile-key-bar">
+    <div className={cn(glass, "mx-2 mb-1 flex shrink-0 gap-0.5 p-0.5")} role="toolbar" aria-label="Terminal keys" data-testid="mobile-key-bar">
       {KEYS.map(({ label, aria, seq }) => (
         <button
           key={aria}
           type="button"
           aria-label={aria}
-          className={cn("min-h-11 flex-1 cursor-pointer bg-transparent text-[0.85rem] text-subtext-0 [border:0] [font-family:inherit] active:bg-surface-1 active:text-fg", aria === "Control C" && "text-red")}
+          className={cn(GHOST_BUTTON, "min-h-11 flex-1 p-0 text-[0.85rem] active:bg-surface-1 active:text-fg", aria === "Control C" && "text-red hover:text-red")}
           onPointerDown={(event) => { event.preventDefault(); press(seq); }}
           onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); press(seq); } }}
         >

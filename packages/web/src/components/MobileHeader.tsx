@@ -15,6 +15,7 @@ import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { glass } from "./ui/glass";
 import { useNeedsYouCount } from "../attention";
 import type { SessionSummary } from "@perch/shared";
 
@@ -49,7 +50,8 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
   const branch = workspace?.branch ?? (activeHostId === "local" ? status?.branch : undefined);
 
   return (
-    <header className="flex shrink-0 items-center gap-1 border-b border-b-overlay-0 bg-surface-0 pt-[env(safe-area-inset-top)] pr-[max(0.4rem,env(safe-area-inset-right))] pl-[max(0.4rem,env(safe-area-inset-left))]" data-testid="mobile-header">
+    <header className="shrink-0 pt-[max(0.4rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pl-[max(0.5rem,env(safe-area-inset-left))]" data-testid="mobile-header">
+      <div className={cn(glass, "flex items-center gap-1 px-1")}>
       <button
         type="button"
         className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] min-w-0 flex-1 items-center gap-[0.55rem] px-[0.4rem] text-left")}
@@ -79,6 +81,7 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
       >
         ⚙
       </button>
+      </div>
     </header>
   );
 }

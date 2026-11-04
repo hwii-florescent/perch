@@ -194,6 +194,14 @@ try {
   const phoneCols = await phone.evaluate(() => document.querySelector(".xterm-rows").children[0].textContent.length);
   // The desktop surface is ~150 columns wide; a phone left following it would show that many.
   assert(phoneCols <= 100, `the phone terminal did not fit the phone: ${phoneCols} columns`);
+  // The desktop is told a phone holds the size, and can take it back.
+  await desktop.getByTestId("phone-size-notice").waitFor({ timeout: 10_000 });
+  await desktop.screenshot({ path: "/tmp/perch-phone-notice-desktop.png" });
+  await phone.screenshot({ path: "/tmp/perch-phone-terminal.png" });
+  await desktop.getByRole("button", { name: "Take back this tab" }).click();
+  await desktop.getByTestId("phone-size-notice").waitFor({ state: "detached", timeout: 10_000 });
+  // The PTY is the desktop's size again, and the phone follows it.
+  await phone.waitForFunction(() => document.querySelector(".xterm-rows").children[0].textContent.length > 100, undefined, { timeout: 10_000 });
   await desktop.close();
   }
 

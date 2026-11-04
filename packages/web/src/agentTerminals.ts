@@ -22,6 +22,29 @@ const pending = new Map<string, Pending>();
 // Only that plain message: a callback would keep its view's xterm alive.
 const retired = new Map<string, ClientMessage | undefined>();
 const views = new Map<string, View>();
+/** Each open view's way to take the PTY size back, by view id (see `takeBackAllSizes`). */
+const takeBacks = new Map<string, { terminalId: () => string | undefined; take: () => Promise<void> }>();
+
+/** The device id the core gives a connection with no paired device: this computer's own window. */
+export const LOCAL_DEVICE = "local";
+
+/** Another device (a phone) holds this terminal's size. */
+export const sizedByOtherDevice = (status: AgentLifecycleStatus | null | undefined): boolean =>
+  !!status?.resizeOwner && status.resizeOwner.deviceId !== LOCAL_DEVICE;
+
+/** Take the size of every terminal a phone holds, back to the views here. The one that asked fits itself as it is shown. */
+export async function takeBackAllSizes(): Promise<void> {
+  const taken = new Set<string>();
+  const jobs: Promise<void>[] = [];
+  for (const { terminalId, take } of takeBacks.values()) {
+    const id = terminalId();
+    const view = id ? views.get(id) : undefined;
+    if (!id || taken.has(id) || !view || view.leases.resize || !sizedByOtherDevice(view.status)) continue;
+    taken.add(id);
+    jobs.push(take());
+  }
+  await Promise.all(jobs);
+}
 
 function retire(id: string, releaseLate?: ClientMessage) {
   retired.set(id, releaseLate);
@@ -141,6 +164,7 @@ export function openAgentTerminal(
   const releaseRemote = () => socket.send(releaseMessage);
   const release = () => {
     released = true;
+    takeBacks.delete(viewId);
     unsubscribe?.();
     releaseRemote();
     if (terminalId) {
@@ -186,6 +210,7 @@ export function openAgentTerminal(
       resizeAgentTerminal(terminalId, size.cols, size.rows);
     }
   };
+  takeBacks.set(viewId, { terminalId: () => terminalId, take: () => takeResize() });
   return {
     ready, release, takeResize,
     takeControl: async (ifUnowned = false) => { await acquire("input", ifUnowned); await takeResize(ifUnowned); },

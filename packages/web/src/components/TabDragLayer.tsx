@@ -41,15 +41,16 @@ export function TabDragLayer() {
           </div>
         </>
       )}
-      {/* On the strip the tab itself follows the pointer; the ghost is for leaving it. */}
-      {!drag.overStrip && (
+      {/* On the strip the tab itself follows the pointer. Off it (the strip clips it) a copy of
+          the tab's own markup follows, so it looks the same as it does on the strip. */}
+      {!drag.overStrip && drag.look && (
         <div
-          className="pointer-events-none fixed max-w-[16rem] truncate rounded-ui border border-accent bg-surface-1 px-3 py-1 text-[0.8rem] text-fg shadow-[0_6px_18px_rgba(0,0,0,0.45)]"
-          style={{ left: drag.x + 12, top: drag.y + 12 }}
+          className="pointer-events-none fixed flex [filter:drop-shadow(0_6px_10px_rgba(0,0,0,0.45))]"
+          style={{ left: drag.x - drag.look.dx, top: drag.y - drag.look.dy, width: drag.look.width, height: drag.look.height }}
           data-testid="tab-drag-ghost"
-        >
-          {drag.label}
-        </div>
+          aria-label={drag.label}
+          dangerouslySetInnerHTML={{ __html: drag.look.html }}
+        />
       )}
     </div>,
     document.body,

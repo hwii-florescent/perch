@@ -40,7 +40,7 @@ export function slideOffsets(spans: Span[], from: number, to: number, delta: num
   return out;
 }
 
-const STYLED = ["transform", "transition", "zIndex", "boxShadow", "pointerEvents", "position", "backgroundColor", "borderRadius"] as const;
+const STYLED = ["transform", "transition", "zIndex", "filter", "pointerEvents", "position"] as const;
 
 export interface Slide {
   readonly from: number;
@@ -91,9 +91,9 @@ function createSlide(items: HTMLElement[], from: number, axis: Axis, startEvent:
     }
     if (getComputedStyle(el).position === "static") el.style.position = "relative";
     el.style.zIndex = "30";
-    el.style.backgroundColor = "var(--surface-1)";
-    el.style.borderRadius = "var(--radius-ui, 6px)";
-    el.style.boxShadow = "0 6px 18px rgba(0, 0, 0, 0.45)";
+    // The item keeps its own look (shape, colors); the lift follows its painted outline, so a
+    // wide wrapper around a tab or a row with rounded corners does not turn into a square.
+    el.style.filter = "drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45))";
   });
 
   const place = (to: number, delta: number) => {

@@ -33,6 +33,8 @@ export interface TabDragState {
   y: number;
   /** The pointer is on the tab strip: the tabs slide (`slideDrag.ts`) and the dragged one follows it. */
   overStrip: boolean;
+  /** The tab as the strip draws it, for off the strip (the strip clips the real one), and where it was grabbed. */
+  look: { html: string; width: number; height: number; dx: number; dy: number } | null;
   /** A reorder drop: the slot the tab lands in; null where it already is. */
   insert: { index: number } | null;
   /** A split drop on `targetId`'s pane; `zone` is null when that pane cannot take the tab. */
@@ -120,13 +122,26 @@ export function dropTab(dragged: string, target: string, zone: DropZone): void {
 /** Call from a tab's `onPointerDown`; the press turns into a drag after a few pixels. */
 export function beginTabDrag(e: ReactPointerEvent, id: string, label: string): void {
   if (useTabDrag.getState().drag) return;
+  let source: HTMLElement | undefined;
+  let look: TabDragState["look"] = null;
   beginSlideDrag(e, {
     axis: "x",
-    items: () => [...(stripEl()?.querySelectorAll<HTMLElement>("[data-tab-entry]") ?? [])],
+    items: () => {
+      const items = [...(stripEl()?.querySelectorAll<HTMLElement>("[data-tab-entry]") ?? [])];
+      source = items.find((el) => el.dataset.tabEntry === id);
+      return items;
+    },
     from: (items) => items.findIndex((el) => el.dataset.tabEntry === id),
     onStart: acquirePassthrough,
     onMove: (ev, slide) => {
-      const base: TabDragState = { id, label, x: ev.clientX, y: ev.clientY, overStrip: false, insert: null, drop: null };
+      if (!look && source) {
+        const rect = source.getBoundingClientRect();
+        // A copy of the tab's own markup, so off the strip it looks as it does on it. No ids or test ids
+        // (there is one real tab) and no inline style (the drag's own offset and lift are on the original).
+        const html = source.outerHTML.replace(/\s(data-testid|data-tab-entry|id|style)="[^"]*"/g, "");
+        look = { html, width: rect.width, height: rect.height, dx: ev.clientX - rect.left, dy: ev.clientY - rect.top };
+      }
+      const base: TabDragState = { id, label, x: ev.clientX, y: ev.clientY, overStrip: false, look, insert: null, drop: null };
       useTabDrag.setState({ drag: { ...base, ...hit(base, ev, slide) } });
     },
     onEnd: (apply) => {

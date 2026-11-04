@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentLifecycleStatus } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { socket } from "../ws";
-import { openAgentTerminal } from "../agentTerminals";
+import { openAgentTerminal, sizedByOtherDevice, takeBackAllSizes } from "../agentTerminals";
 import { createPerchTerminal, onTerminalInput, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
@@ -12,6 +12,9 @@ import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
 import { MobileKeyBar } from "../components/MobileKeyBar";
 import { useIsMobileWidth } from "../responsive";
 import { button } from "../components/ui/button";
+import { glass } from "../components/ui/glass";
+import { PhoneSizeNotice } from "../components/PhoneSizeNotice";
+import { cn } from "../lib/cn";
 
 /** The PTY's size, in-band in its output (`terminal::pty_size_marker`). */
 const SIZE_MARKER = /\x1b\[8;(\d+);(\d+)t/g;
@@ -20,13 +23,15 @@ interface ViewState {
   terminalId: string | null;
   status: AgentLifecycleStatus | null;
   controlling: boolean;
+  /** This view holds the PTY's size. */
+  resizing: boolean;
   writable: boolean;
   shared: boolean;
   pending: boolean;
   error: string | null;
   exitCode: number | null;
 }
-const OPENING: ViewState = { terminalId: null, status: null, controlling: false, writable: false, shared: false, pending: false, error: null, exitCode: null };
+const OPENING: ViewState = { terminalId: null, status: null, controlling: false, resizing: false, writable: false, shared: false, pending: false, error: null, exitCode: null };
 
 /** One agent terminal and its connection, kept across unmounts
  * (`terminalKeeper.ts`). */
@@ -110,7 +115,7 @@ class AgentView extends KeptTerminal<ViewState> {
         if (this.disposed) return;
         ownsInput = owned;
         ownsResize = resizing;
-        this.set({ status: snapshot, controlling: owned });
+        this.set({ status: snapshot, controlling: owned, resizing });
         updateInput();
         if (ownsResize) created.fit();
         void claimUnownedResize();
@@ -155,6 +160,18 @@ class AgentView extends KeptTerminal<ViewState> {
     finally { this.set({ pending: false }); }
   }
 
+  /** Take the size back from a phone: this terminal, or every one a phone holds. */
+  async takeBack(all: boolean) {
+    if (this.state.pending) return;
+    this.set({ pending: true, error: null });
+    try {
+      if (all) await takeBackAllSizes();
+      else await this.binding.takeResize();
+      this.created.fit();
+    } catch (reason) { this.set({ error: (reason as Error).message }); }
+    finally { this.set({ pending: false }); }
+  }
+
   protected teardown() {
     this.inputId = null;
     this.stop();
@@ -171,7 +188,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   const [view, setView] = useState<AgentView | null>(null);
   const [restart, setRestart] = useState(0);
   const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
-  const { terminalId, status, controlling, writable, shared, pending, error, exitCode } = useSyncExternalStore(
+  const { terminalId, status, controlling, resizing, writable, shared, pending, error, exitCode } = useSyncExternalStore(
     view?.subscribe ?? noSubscription, view?.getState ?? openingState,
   );
   const search = useTerminalSearch(view?.created.term ?? null);
@@ -217,15 +234,18 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   const sleeping = status?.state === "sleeping";
   // Shared typing never needs takeover. The optional Fit here action moves
   // sizing/stop authority, without making the other screens read-only.
-  const label = !connected ? "Reconnecting…" : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? "Shared terminal" : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
+  // A phone holds the size of this computer's terminal: the notice offers it back, in place of "Fit here".
+  const phoneSized = !isMobile && shared && !resizing && !!terminalId && sizedByOtherDevice(status);
+  const label = !connected ? "Reconnecting…" : phoneSized ? null : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? "Shared terminal" : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
-    {label && <div className="terminal__toolbar terminal__toolbar--overlay">
+    {label && <div className={cn(glass, "absolute top-2 right-3 z-[2] flex items-center gap-1 py-0.5 pr-0.5 pl-3 text-[0.8rem] text-subtext-0")}>
       <span role="status">{label}</span>
-      {!terminalId && error && connected && <button type="button" disabled={pending} onClick={startOver}>Retry CLI</button>}
-      {terminalId && status && !controlling && <button type="button" disabled={pending || !connected} onClick={() => void view?.takeControl()}>
+      {!terminalId && error && connected && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending} onClick={startOver}>Retry CLI</button>}
+      {terminalId && status && !controlling && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending || !connected} onClick={() => void view?.takeControl()}>
         {pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control"}
       </button>}
     </div>}
+    {phoneSized && status?.resizeOwner && <PhoneSizeNotice generation={status.resizeOwner.generation} pending={pending} onThisTab={() => void view?.takeBack(false)} onAllTabs={() => void view?.takeBack(true)} />}
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
     {fileDrop && (

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { claimViewer } from "./viewer";
 import { installRelayTransport } from "./relay/transport";
+import { trackVisibleViewport } from "./visibleViewport";
 
 // Opened from a relay link: send the app's data routes through the sealed tunnel.
 // Before anything can make a request; a no-op on the LAN and the desktop app.
@@ -60,6 +61,7 @@ declare global {
 window.usePerchStore = usePerchStore;
 // Glass shell: base.css turns --shell-bg translucent. Web mode and other platforms never set it.
 if (window.__PERCH_GLASS__) document.documentElement.dataset.glass = "1";
+trackVisibleViewport();
 
 createRoot(container).render(
   <StrictMode>

@@ -4,6 +4,8 @@ import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 import { useToolsContext } from "./WorkspaceTools";
 import { useFileTabs } from "../fileTabs";
 import { cn } from "../lib/cn";
+import { GHOST_BUTTON } from "./ui/icon-button";
+import { glass } from "./ui/glass";
 
 // A plain terminal is a session like any agent (the `Terminal` provider), so there is no separate shell pane.
 export type MobilePaneKind = "chat" | "files" | "gitReview";
@@ -68,14 +70,16 @@ export function MobilePaneShell({
           ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} />
           : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Pick a workspace in the switcher.</div>)}
       </div>
-      <nav className="flex shrink-0 border-t border-t-overlay-0 bg-surface-0 pb-[env(safe-area-inset-bottom)]" aria-label="Mobile panes">
+      <nav className="shrink-0 px-2 pt-1 pb-[max(0.4rem,env(safe-area-inset-bottom))]" aria-label="Mobile panes">
+       <div className={cn(glass, "flex gap-0.5 p-0.5")}>
         {panes.map(({ kind, label, testId, icon }) => (
           <button
             key={kind}
             type="button"
             className={cn(
-              "flex min-h-[3.25rem] flex-1 cursor-pointer flex-col items-center justify-center gap-[0.15rem] bg-transparent text-[0.68rem] [border:0] [font-family:inherit] focus-visible:bg-surface-1",
-              shown === kind ? "text-fg" : "text-subtext-0",
+              GHOST_BUTTON,
+              "flex min-h-[3.25rem] flex-1 flex-col items-center justify-center gap-[0.15rem] p-0 text-[0.68rem]",
+              shown === kind && "bg-surface-1 text-fg",
             )}
             data-testid={testId}
             aria-pressed={shown === kind}
@@ -85,6 +89,7 @@ export function MobilePaneShell({
             {label}
           </button>
         ))}
+       </div>
       </nav>
     </section>
   );
