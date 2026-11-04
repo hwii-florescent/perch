@@ -10,7 +10,7 @@ export async function startFromPanel(page: Page, opts: { agent?: string; where?:
       (options, where) => (options as HTMLOptionElement[]).find((option) => (where ? option.textContent!.includes(where) : option.value === "~"))?.value,
       opts.where,
     );
-    if (value === undefined) throw new Error(`no start target matching ${opts.where ?? "Scratchpad"}`);
+    if (value === undefined) throw new Error(`no start target matching ${opts.where ?? "Quickchat"}`);
     await target.selectOption(value);
   }
   await (opts.agent ? page.getByTestId(`cli-start-agent-${opts.agent}`) : page.locator('[data-testid^="cli-start-agent-"]').first()).click();

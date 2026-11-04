@@ -85,7 +85,7 @@ export function CliStartPanel() {
   const targets = [
     ...(current?.cwd ? [{ key: "here", label: `${basename(current.cwd)} (this session)`, name: basename(current.cwd), path: current.cwd }] : []),
     ...projectCwds.map((cwd) => ({ key: cwd, label: basename(cwd), name: basename(cwd), path: cwd })),
-    { key: SCRATCHPAD, label: "No birdhouse (Scratchpad)", name: "Scratchpad", path: "No birdhouse" },
+    { key: SCRATCHPAD, label: "No birdhouse (Quickchat)", name: "Quickchat", path: "~" },
   ];
   const target = targets.find((candidate) => candidate.key === targetKey) ?? targets[0]!;
 

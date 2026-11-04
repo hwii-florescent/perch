@@ -725,7 +725,7 @@ export function NewSessionPopover({ hostId, projectCwds, fixedCwd, anchorRect, o
         onClick={() => { onSelect("~", selectedAgent); onClose(); }}
       >
         No birdhouse
-        <span className={POPOVER_PICK_CWD}>Scratchpad</span>
+        <span className={POPOVER_PICK_CWD}>Quickchat</span>
       </button>
       </>}
     </div>,

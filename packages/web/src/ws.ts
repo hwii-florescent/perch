@@ -38,6 +38,18 @@ class PerchSocket {
     this.started = true;
     this.sessionId = loadStoredSessionId();
     this.open();
+    // A phone suspends a backgrounded tab's socket, and the backoff timer may be
+    // seconds out when it returns: reconnect now rather than show a dead laptop.
+    const wake = () => {
+      if (document.visibilityState === "hidden" || this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.backoffMs = INITIAL_BACKOFF_MS;
+      this.open();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", wake);
   }
 
   private open(): void {

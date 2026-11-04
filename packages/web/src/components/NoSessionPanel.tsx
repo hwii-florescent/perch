@@ -56,7 +56,9 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   if (workspace) {
     // A project's own checkout goes by the project's name ("Chats", not "scratch").
     const projectName = projects.find((p) => p.id === workspace.projectId && p.path === workspace.path)?.name;
-    return <WorkspaceStart hostId={workspace.hostId} name={workspace.name || projectName || basename(workspace.path)} path={workspace.path} />;
+    // Quickchat sessions run in HOME, so show that rather than its bookkeeping folder.
+    const quickchat = workspace.path.endsWith("/.perch/scratch");
+    return <WorkspaceStart hostId={workspace.hostId} name={quickchat ? "Quickchat" : workspace.name || projectName || basename(workspace.path)} path={quickchat ? "~" : workspace.path} startPath={workspace.path} />;
   }
 
   function addProject() {
@@ -109,7 +111,7 @@ function basename(path: string): string {
 }
 
 /** The focused workspace's start picker: what to open in it. */
-function WorkspaceStart({ hostId, name, path }: { hostId: string; name: string; path: string }) {
+function WorkspaceStart({ hostId, name, path, startPath }: { hostId: string; name: string; path: string; startPath: string }) {
   const createSessionOnHost = usePerchStore((s) => s.createSessionOnHost);
   const { choices } = useAgentChoices(hostId);
   return (
@@ -119,7 +121,7 @@ function WorkspaceStart({ hostId, name, path }: { hostId: string; name: string; 
       choices={choices}
       idPrefix="workspace-start"
       testId="no-session-panel"
-      onPick={(agent) => createSessionOnHost(hostId, path, agent)}
+      onPick={(agent) => createSessionOnHost(hostId, startPath, agent)}
     />
   );
 }

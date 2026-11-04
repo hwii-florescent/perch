@@ -138,7 +138,7 @@ for (let i = 1; i <= 9; i++) {
 }
 shortcut("nests.new", "nests", "mod+n", "New nest (worktree)", () => openWorktreeMenuForActiveProject(true));
 shortcut("nests.addBirdhouse", "nests", "mod+o", "Add birdhouse (project)", () => requestAddProject());
-shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New scratchpad chat", () => newScratchpad());
+shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New quickchat", () => newScratchpad());
 
 // Splits and panes (iTerm2/Ghostty)
 shortcut("panes.splitRight", "panes", "mod+d", "Split right", () => splitActiveTab("right"));
