@@ -771,7 +771,13 @@ export function ProjectList() {
 // Sidebar
 // ---------------------------------------------------------------------------
 
-export function Sidebar() {
+/** The sidebar's body — host, New session, projects and sessions — shared with the phone's switcher
+ * (`compact`: no drag, no shortcut hint; `onNavigate` fires once a session or workspace is chosen). */
+export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
+  compact?: boolean;
+  onNavigate?: () => void;
+  onManageHosts?: () => void;
+}) {
   const connected = usePerchStore((s) => s.connected);
   const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const serverInfo = usePerchStore((s) => s.serverInfo);
@@ -803,7 +809,7 @@ export function Sidebar() {
   const canCreate = connected && (activeHostId === "local" || activeHostState === "connected");
 
   return (
-    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden bg-transparent [--radius:var(--radius-pane)] max-[700px]:hidden">
+    <>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* A local-only install has nothing to switch between (UI-UX-DIRECTION.md §11). */}
         {(hosts.length > 0 || activeHostId !== "local") && <button
@@ -853,17 +859,46 @@ export function Sidebar() {
           >
             <PlusIcon className="shrink-0 text-subtext-0" />
             New session
-            <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("mod+t")}</span>
+            {!compact && <span className="ml-auto text-[0.7rem] font-normal text-subtext-0">{formatCombo("mod+t")}</span>}
           </button>
         </div>
 
         {workspaceNavigationEnabled ? (
-          <WorkspaceOverview />
+          <WorkspaceOverview compact={compact} onNavigate={onNavigate} />
         ) : (
           <ProjectList />
         )}
       </div>
 
+      {hostAnchor && (
+        <HostSwitcherPopover
+          choices={choices}
+          activeHostId={activeHostId}
+          anchorRect={hostAnchor}
+          onClose={() => setHostAnchor(null)}
+          onSelect={setActiveHost}
+          onToggleEnabled={(entry) => upsertHost({ ...entry, enabled: !entry.enabled })}
+          onManage={() => { setSettingsOpen(true); onManageHosts?.(); }}
+        />
+      )}
+      {newAnchor && (
+        <NewSessionPopover
+          hostId={activeHostId}
+          projectCwds={projectCwds}
+          anchorRect={newAnchor}
+          onClose={() => setNewAnchor(null)}
+          onSelect={(cwd, agent) => { createSessionOnHost(activeHostId, cwd, agent); onNavigate?.(); }}
+        />
+      )}
+    </>
+  );
+}
+
+export function Sidebar() {
+  const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
+  return (
+    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden bg-transparent [--radius:var(--radius-pane)] max-[700px]:hidden">
+      <SidebarContent />
       <div className="flex shrink-0 items-stretch p-1">
         <button
           type="button"
@@ -876,27 +911,6 @@ export function Sidebar() {
           ⚙
         </button>
       </div>
-
-      {hostAnchor && (
-        <HostSwitcherPopover
-          choices={choices}
-          activeHostId={activeHostId}
-          anchorRect={hostAnchor}
-          onClose={() => setHostAnchor(null)}
-          onSelect={setActiveHost}
-          onToggleEnabled={(entry) => upsertHost({ ...entry, enabled: !entry.enabled })}
-          onManage={() => setSettingsOpen(true)}
-        />
-      )}
-      {newAnchor && (
-        <NewSessionPopover
-          hostId={activeHostId}
-          projectCwds={projectCwds}
-          anchorRect={newAnchor}
-          onClose={() => setNewAnchor(null)}
-          onSelect={(cwd, agent) => createSessionOnHost(activeHostId, cwd, agent)}
-        />
-      )}
     </aside>
   );
 }
