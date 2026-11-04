@@ -201,7 +201,7 @@ try {
   await desktop.getByRole("button", { name: "Take back this tab" }).click();
   await desktop.getByTestId("phone-size-notice").waitFor({ state: "detached", timeout: 10_000 });
   // The PTY is the desktop's size again, and the phone follows it.
-  await phone.waitForFunction(() => document.querySelector(".xterm-rows").children[0].textContent.length > 100, undefined, { timeout: 10_000 });
+  await phone.waitForFunction(() => document.querySelector(".xterm-screen")?.getBoundingClientRect().width > innerWidth, undefined, { timeout: 10_000 });
   await desktop.close();
   }
 
