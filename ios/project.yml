@@ -1,0 +1,79 @@
+---
+# The Perch iPhone app: a native shell around the paired desktop's own
+# web UI (docs/DECISIONS.md, 2026-11-04). Generate the Xcode project with
+# `xcodegen` in this folder; the .xcodeproj is not committed.
+name: Perch
+options:
+  bundleIdPrefix: dev.hwii
+  deploymentTarget:
+    iOS: "17.0"
+configFiles:
+  Debug: Perch/Base.xcconfig
+  Release: Perch/Base.xcconfig
+targets:
+  Perch:
+    type: application
+    platform: iOS
+    sources: [Perch]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERCH_BUNDLE_ID)
+        PRODUCT_NAME: Perch
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: Perch
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: >-
+          UIInterfaceOrientationPortrait
+          UIInterfaceOrientationLandscapeLeft
+          UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
+        INFOPLIST_KEY_NSCameraUsageDescription: >-
+          Perch uses the camera to scan the pairing QR code your computer
+          shows.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: >-
+          Perch connects to your computer on this network.
+    info:
+      path: Perch/Info.plist
+      properties:
+        # The desktop serves its UI over plain http on Wi-Fi and
+        # Tailscale; allow that in the web view only, not for the app's
+        # own requests.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+          NSAllowsLocalNetworking: true
+  PerchTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PerchTests]
+    dependencies:
+      - target: Perch
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERCH_BUNDLE_ID).tests
+  # Opt-in live probe: pairs with a running core (docs/TESTING.md).
+  PerchUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PerchUITests]
+    dependencies:
+      - target: Perch
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: $(PERCH_BUNDLE_ID).uitests
+        TEST_TARGET_NAME: Perch
+schemes:
+  Perch:
+    build:
+      targets:
+        Perch: all
+        PerchTests: [test]
+    test:
+      targets: [PerchTests, PerchUITests]

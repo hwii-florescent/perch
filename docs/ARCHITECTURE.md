@@ -8,7 +8,7 @@ defines acceptance evidence. Source presence is not a release certification.
 
 ```text
 React / Zustand / Dockview / xterm
-  browser, paired phone/PWA, or Tauri webview
+  browser, paired phone/PWA, iPhone app (ios/), or Tauri webview
                       │ HTTP + WebSocket
 perch-core: axum, Rust domain services, SQLite
        │ private socket              │ OpenSSH

@@ -7,6 +7,28 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-04 — A native iPhone app, as a shell around the desktop's UI (owner)
+
+Reverses "no native app" (2026-11-02) for iOS only. `ios/` is a small SwiftUI
+app: a Connect screen (scan the pairing QR, or type the address and code from
+Settings → Devices), then the paired desktop's own web UI in a full-screen
+`WKWebView`. The UI is always served by the desktop (or its relay), so it never
+drifts from the desktop's protocol and the web code stays the one phone UI.
+
+- **Pairing is unchanged.** The app opens `address#pair=CODE` and the web
+  `PairingGate` claims it; the device token stays the core's cookie (through
+  a relay, the page's storage, as in a browser). The app keeps the link
+  (without the code) in the Keychain; a relay link's key is in it. Wi-Fi and
+  Tailscale pair by QR or typed address and code; a relay by QR only, since
+  its key is never shown as text.
+- **Bridge.** `window.webkit.messageHandlers.perchApp` (`web/src/nativeApp.ts`):
+  `paste` returns the clipboard (plain-http pages cannot read it), `disconnect`
+  forgets the computer and its website data. Settings shows **Change computer**
+  only in the app. Other sites open in Safari.
+- **Not included:** App Store/TestFlight, push notifications, background
+  connections, Android, bundling the UI in the app. Dev builds only; free Apple
+  ID signing expires after seven days.
+
 ## 2026-11-04 — One soft, borderless component language (owner)
 
 - Every control follows the main shell: filled surfaces, **no borders or

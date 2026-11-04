@@ -1,0 +1,5 @@
+// Signing is machine-local: put `DEVELOPMENT_TEAM = <your team id>` (and, for a free Apple ID,
+// a bundle id of your own: `PERCH_BUNDLE_ID = com.you.perch`) in Local.xcconfig beside this
+// file. It is git-ignored; never commit account details.
+PERCH_BUNDLE_ID = dev.hwii.perch.mobile
+#include? "Local.xcconfig"

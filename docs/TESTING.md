@@ -183,6 +183,22 @@ process-group confirmation, history preservation and connect-only behavior.
   `scripts/reinstall-desktop.sh` installs/reopens the user's macOS app and
   redeploys the user's Cloudflare relay (`PERCH_SKIP_RELAY=1` skips that):
   use only when that is intended, not as a test-isolation shortcut.
+- iPhone app (`ios/`, needs Xcode and `brew install xcodegen`): `cd ios &&
+  xcodegen`, then `xcodebuild -project Perch.xcodeproj -scheme Perch
+  -destination 'platform=iOS Simulator,name=iPhone 17' test`. Unit tests cover
+  link parsing; `PerchUITests` is a live pairing probe, skipped unless
+  `TEST_RUNNER_PERCH_ADDRESS` and `TEST_RUNNER_PERCH_CODE` are set: a fresh
+  code from `device.pair.start` (keep that socket open meanwhile) and either
+  the core at a non-loopback address (this Mac's LAN IP and port; loopback
+  skips pairing) or a whole relay link (`http://127.0.0.1:<port>/#r=…` from
+  a `wrangler dev` relay set up as in `e2e/relay.check.mjs`). Use isolated
+  state and uninstall the app first. 2026-11-04: passed on Wi-Fi and through
+  a local relay (iOS 27 simulator); Tailscale and the QR camera need a device.
+  For a device, set `DEVELOPMENT_TEAM` (and a bundle id of your own,
+  `PERCH_BUNDLE_ID`) in the git-ignored `ios/Perch/Local.xcconfig`, open the
+  project in Xcode and Run. Editor/pi-lens diagnostics need the iOS SDK:
+  `brew install xcode-build-server`, then in `ios/`, `xcode-build-server
+  config -project Perch.xcodeproj -scheme Perch` and one build.
 - Release workflow builds draft macOS/Linux packages and Linux daemon binaries.
   Build support is not packaged-install evidence. macOS is ad-hoc signed, not
   notarized. Do not publish/tag/push without instruction.
