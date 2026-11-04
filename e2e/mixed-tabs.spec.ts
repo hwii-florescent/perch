@@ -252,13 +252,20 @@ test("a tab dropped past the last one goes last, and one dropped on a pane's sid
     await expect(page.getByTestId("workspace-git-review").last()).toBeVisible({ timeout: 20000 });
     expect(await strip(page)).toEqual([terminalTab, fileTab, reviewTab]);
 
-    // Past the last tab, in the strip's empty space: the bar shows, and the tab goes last.
+    // Past the last tab, in the strip's empty space: the tab follows the pointer, the ones it
+    // passes slide aside, and the tab goes last.
+    const slot = (id: string) => page.getByTestId(id).locator("xpath=..");
     const bar = await box(page, "tab-bar");
     await holdTab(page, terminalTab, { x: bar.x + bar.width - 4, y: bar.y + bar.height / 2 });
-    await expect(page.getByTestId("tab-drop-bar")).toBeVisible();
+    for (const id of [terminalTab, fileTab, reviewTab]) await expect(slot(id)).toHaveCSS("transform", /matrix/);
     await page.mouse.up();
     await expect.poll(() => strip(page)).toEqual([fileTab, reviewTab, terminalTab]);
     await expect(page.getByTestId("tab-drag-layer")).toHaveCount(0);
+    // Nothing is left displaced or lifted once it lands.
+    for (const id of [terminalTab, fileTab, reviewTab]) {
+      await expect(slot(id)).toHaveCSS("transform", "none");
+      await expect(slot(id)).toHaveCSS("z-index", "auto");
+    }
 
     // Over a pane's lower edge the highlight is its lower half; releasing stacks the tab below.
     const pane = await box(page, "split-pane-review");

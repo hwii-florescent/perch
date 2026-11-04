@@ -26,6 +26,7 @@ import type { SessionSummary, WorktreeJob } from "@perch/shared";
 import { isChatsProject, navigateToWorkspace as goToWorkspace, newScratchpad, orderedNests, sessionsForWorkspace, workspacesForProject } from "../workspaceNav";
 import { chatsInStripOrder, moveChat, workspaceTabs } from "../workspaceTabs";
 import { moveBeside, TAB_ORDER_EVENT } from "../tabOrder";
+import { beginSlideDrag } from "../slideDrag";
 import { useNestShortcutHints } from "../keybinds";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
@@ -49,9 +50,6 @@ const RESTORE = button({ size: "xs", tone: "warn", className: "mt-0 mr-[0.3rem] 
 const PROJECT_ICON = rowAction({ reveal: "project" });
 const SESSION_CLOSE = rowAction({ reveal: "session" });
 const HEADER_PLUS = PROJECT_ICON;
-// Reorder drag: its own payload (not the session-to-dockview one) and a line where it will land.
-const ORDER_DRAG_MIME = "application/x-perch-order";
-const DROP_LINE = "data-[drop=before]:[box-shadow:inset_0_2px_0_0_var(--accent)] data-[drop=after]:[box-shadow:inset_0_-2px_0_0_var(--accent)]";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -373,22 +371,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   }
 
   // Reorder: one operation, move X before/after Y within a group (a project's chats, the
-  // favourites). Native HTML5 drag with the mouse; Move up/down in the row menus serves the
+  // favourites). A pointer drag with the mouse (`slideDrag.ts`, the tab strip's too: the row
+  // follows the pointer, the others slide aside); Move up/down in the row menus serves the
   // keyboard and the phone. The core keeps the order, so every viewer shows it.
-  const dragging = useRef<{ kind: "project" | "session"; id: string; group: string } | null>(null);
-  const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
-  // macOS shows the green "+" (copy) over any spot that does not accept the drag: the row being
-  // dragged, the gaps, other groups. While a row drag is live, accept it everywhere as a move
-  // (only the landing rows act on a drop), so the cursor stays a plain move.
-  useEffect(() => {
-    const keepMove = (event: DragEvent) => {
-      if (!dragging.current || !event.dataTransfer) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-    };
-    window.addEventListener("dragover", keepMove);
-    return () => window.removeEventListener("dragover", keepMove);
-  }, []);
   // A move writes only what it touches: the projects as shown (hidden ones keep their place),
   // or the chats of the moved and target workspaces (`moveChat`). `shown` is the row's siblings.
   // `flip`: the group shows its strip order reversed (Quickchat, newest first), so a move is
@@ -397,48 +382,51 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     if (kind === "project") setWorkspaceOrder(activeHostId, { projects: writeScope(order?.projects, moveBeside(hostProjects.map((project) => project.id), id, target, after)) });
     else moveChat(id, target, flip ? !after : after, flip ? [...shown].reverse() : shown);
   }
-  function dnd(kind: "project" | "session", id: string, group: string, shown: string[] = [], flip = false) {
+  const moveRowNow = useRef(moveRow);
+  moveRowNow.current = moveRow;
+  /** `zone` marks the item that moves (a chat row, a project's whole block) and its group;
+   * `handle.onPointerDown` starts the drag from it (a project's header). A drag slides the
+   * group's items (the siblings under one parent) and on release writes the slot it landed in. */
+  function dnd(kind: "project" | "session", id: string, group: string, shown: string[] = [], flip = false): { handle: { onPointerDown?: (event: React.PointerEvent) => void }; zone: Record<string, string> } {
     if (!reorderable || compact) return { handle: {}, zone: {} };
-    const clear = () => { dragging.current = null; setDrop(null); };
-    const hover = () => (dragging.current?.kind === kind && dragging.current.group === group && dragging.current.id !== id ? dragging.current : null);
-    const after = (event: React.DragEvent) => {
-      const rect = event.currentTarget.getBoundingClientRect();
-      return event.clientY > rect.top + rect.height / 2;
-    };
     return {
+      zone: { "data-reorder-group": group, "data-reorder-id": id },
       handle: {
-        draggable: true,
-        onDragStart: (event: React.DragEvent) => {
-          event.stopPropagation();
-          dragging.current = { kind, id, group };
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData(ORDER_DRAG_MIME, id);
-        },
-        onDragEnd: clear,
-      },
-      zone: {
-        "data-drop": drop?.id === id ? (drop.after ? "after" : "before") : undefined,
-        onDragOver: (event: React.DragEvent) => {
-          if (!hover()) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          const side = after(event);
-          setDrop((current) => (current?.id === id && current.after === side ? current : { id, after: side }));
-        },
-        onDragLeave: (event: React.DragEvent) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrop((current) => (current?.id === id ? null : current));
-        },
-        onDrop: (event: React.DragEvent) => {
-          const source = hover();
-          if (!source) return;
-          event.preventDefault();
-          event.stopPropagation();
-          moveRow(kind, source.id, id, after(event), shown, flip);
-          clear();
+        onPointerDown: (event) => {
+          if (event.pointerType === "touch" || (event.target as HTMLElement).closest("input, textarea")) return;
+          const row = (event.currentTarget as HTMLElement).closest<HTMLElement>("[data-reorder-id]");
+          const list = row?.parentElement;
+          if (!row || !list) return;
+          let ids: string[] = [];
+          beginSlideDrag(event, {
+            axis: "y",
+            items: () => {
+              const items = [...list.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.reorderGroup === group);
+              ids = items.map((el) => el.dataset.reorderId!);
+              return items;
+            },
+            from: (items) => items.indexOf(row),
+            onMove: (ev, slide) => {
+              const box = list.getBoundingClientRect();
+              // Off the sidebar sideways, the row goes home and a release changes nothing.
+              if (ev.clientX < box.left - 12 || ev.clientX > box.right + 12) slide.rest();
+              else slide.apply(slide.slot(ev), ev);
+            },
+            onEnd: (apply, slide) => {
+              if (!apply || slide.to === slide.from) return;
+              const others = ids.filter((other) => other !== id);
+              const at = slide.to;
+              const target = others[at] ?? others[others.length - 1];
+              if (target) moveRowNow.current(kind, id, target, at >= others.length, shown, flip);
+            },
+          });
         },
       },
     };
+  }
+  /** The row's own press handlers plus its drag, which both need `onPointerDown`. */
+  function withDrag<T extends { onPointerDown: (event: React.PointerEvent) => void }>(press: T, handle: { onPointerDown?: (event: React.PointerEvent) => void }): T {
+    return { ...press, onPointerDown: (event: React.PointerEvent) => { press.onPointerDown(event); handle.onPointerDown?.(event); } };
   }
   function moveItems(kind: "project" | "session", id: string, siblings: string[], flip = false): MenuItem[] {
     if (!reorderable) return [];
@@ -452,9 +440,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     const flip = group === "chats" || group.startsWith("status:"); // groups shown newest first
     const { handle, zone } = dnd("session", session.id, group, siblings.map((other) => other.id), flip);
     return {
-      ...handle,
       ...zone,
-      ...longPress((x, y) => sessionMenu(session, x, y, siblings, flip)),
+      ...withDrag(longPress((x, y) => sessionMenu(session, x, y, siblings, flip)), handle),
       onContextMenu: (event: React.MouseEvent) => {
         event.preventDefault();
         sessionMenu(session, event.clientX, event.clientY, siblings, flip);
@@ -532,7 +519,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     return (
       <div className="workspace-entry__sessions flex flex-col gap-[2px] pt-[2px]">
         {list.map((session) => (
-          <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, "pl-[1.9rem]", session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -649,7 +636,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
-          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -720,7 +707,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             const reason = section.key !== "needs" ? null : need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you";
             const detail = [owner && !isChatsProject(owner) ? owner.name || basename(owner.path) : null, reason].filter(Boolean).join(" · ");
             return (
-              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
                 <button
                   type="button"
                   className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -815,7 +802,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             {!chatsCollapsed && chats.length > 0 && (
               <div className="flex flex-col gap-[2px] pt-[2px] pr-[0.3rem] pl-[0.4rem]">
                 {shownChats.map((session) => (
-                  <div {...sessionRowProps(session, shownChats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+                  <div {...sessionRowProps(session, shownChats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
                     <button
                       type="button"
                       className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -991,13 +978,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             return (
               <div
                 {...projectDnd.zone}
-                className={cn("workspace-project flex flex-col gap-[2px]", DROP_LINE)}
+                className="workspace-project flex flex-col gap-[2px]"
                 key={project.id}
                 data-testid={`workspace-project-${project.id}`}
               >
                 <div
-                  {...(renamingProjectId === project.id ? {} : projectDnd.handle)}
-                  {...longPress((x, y) => setMenu({ x, y, label: "Project actions", items: projectMenu(project) }))}
+                  {...withDrag(longPress((x, y) => setMenu({ x, y, label: "Project actions", items: projectMenu(project) })), renamingProjectId === project.id ? {} : projectDnd.handle)}
                   className={cn("group/ph relative flex cursor-pointer flex-wrap items-stretch rounded-ui hover:bg-surface-1", HOLDABLE, single && "workspace-entry", single && single.id === activeWorkspaceId && (sessionView === "compact" || projectCollapsed || projectSessions.length === 0) && "bg-surface-1")}
                   data-testid={single ? `workspace-entry-${single.id}` : undefined}
                   onClick={(event) => {

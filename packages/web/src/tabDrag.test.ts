@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { dropSplit, layout, leaveSplit, planDrop, storeSizes, swapPanes, visibleSplit, MAX_SPLIT, type SplitSet } from "./splitSets";
 import { moveBeside, moveTab } from "./tabOrder";
-import { insertIndex, resolveZone, zoneBox } from "./tabDrag";
+import { resolveZone, zoneBox } from "./tabDrag";
+import { slideOffsets, slotIndex } from "./slideDrag";
 
 const box = { left: 100, top: 50, width: 400, height: 200 };
 
@@ -22,10 +23,22 @@ describe("resolveZone", () => {
 });
 
 describe("tab order moves", () => {
-  it("insertIndex counts the tabs left of the pointer, so past the last tab is the end", () => {
-    expect(insertIndex([50, 150, 250], 10)).toBe(0);
-    expect(insertIndex([50, 150, 250], 200)).toBe(2);
-    expect(insertIndex([50, 150, 250], 900)).toBe(3);
+  // Three tabs 100, 60 and 140 wide with a 4 gap: [0,100] [104,164] [168,308].
+  const spans = [{ start: 0, end: 100 }, { start: 104, end: 164 }, { start: 168, end: 308 }];
+
+  it("slotIndex counts the other tabs before the pointer, so past the last tab is the end", () => {
+    expect(slotIndex(spans, 0, 10)).toBe(0);
+    expect(slotIndex(spans, 0, 150)).toBe(1); // past tab 1's center (134), before tab 2's (238)
+    expect(slotIndex(spans, 0, 900)).toBe(2);
+    expect(slotIndex(spans, 2, 20)).toBe(0);
+  });
+
+  it("slideOffsets moves the tabs it passes by its own size plus the gap, toward the slot it left", () => {
+    expect(slideOffsets(spans, 0, 0, 0)).toEqual([0, 0, 0]);
+    expect(slideOffsets(spans, 0, 2, 200)).toEqual([200, -104, -104]);
+    expect(slideOffsets(spans, 2, 0, -150)).toEqual([144, 144, -150]);
+    expect(slideOffsets(spans, 1, 2, 9999)).toEqual([0, 144, -64]); // the dragged tab stays inside the strip
+    expect(slideOffsets(spans, 0, 0, -50)).toEqual([0, 0, 0]);
   });
 
   it("moveTab moves to an index of the others; moveBeside lands next to the target", () => {

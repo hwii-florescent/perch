@@ -374,34 +374,40 @@ test.describe("Perch sidebar", () => {
         (tabs, mine) => tabs.map((tab) => tab.getAttribute("data-testid")!.replace("tab-", "")).filter((id) => mine.includes(id)),
         [a, b, c],
       );
-      // Oldest first, like the tab strip, until someone reorders.
-      await expect.poll(() => shown(page2)).toEqual([a, b, c]);
+      // The strip is oldest first and By status shows it mirrored, newest first, until someone reorders.
+      await expect.poll(() => shown(page2)).toEqual([c, b, a]);
+      await expect.poll(() => strip(page1)).toEqual([a, b, c]);
 
       // Drag a above c: no click fires, so c stays the open chat; the other viewer follows,
       // and only a moved: b and c keep their order in the strip.
       await page1.getByTestId(`workspace-session-${a}`).dragTo(page1.getByTestId(`workspace-session-${c}`), { targetPosition: { x: 40, y: 2 } });
-      await expect.poll(() => shown(page1)).toEqual([b, a, c]);
-      await expect.poll(() => shown(page2)).toEqual([b, a, c]);
-      await expect.poll(() => strip(page1)).toEqual([b, a, c]);
+      await expect.poll(() => shown(page1)).toEqual([a, c, b]);
+      await expect.poll(() => shown(page2)).toEqual([a, c, b]);
+      await expect.poll(() => strip(page1)).toEqual([b, c, a]);
       await expect(page1.getByTestId(`workspace-session-${c}`)).toHaveClass(/workspace-entry__session--active/);
+      // Nothing is left displaced or lifted once it lands.
+      for (const id of [a, b, c]) {
+        const row = page1.getByTestId(`workspace-session-${id}`).locator("xpath=..");
+        await expect(row).toHaveCSS("transform", "none");
+        await expect(row).toHaveCSS("z-index", "auto");
+      }
 
-      // Move down from the other viewer's row menu.
+      // Move down from the other viewer's row menu: a goes below c.
       await page2.getByTestId(`workspace-session-${a}`).click({ button: "right" });
       await page2.getByTestId(`workspace-session-move-down-${a}`).click();
-      await expect.poll(() => shown(page1)).toEqual([b, c, a]);
-      // Reordered chats sort after any the core has not listed yet, so a is the last row.
+      await expect.poll(() => shown(page1)).toEqual([c, a, b]);
       await page2.getByTestId(`workspace-session-${a}`).click({ button: "right" });
       await expect(page2.getByTestId(`workspace-session-move-up-${a}`)).toBeVisible();
-      await expect(page2.getByTestId(`workspace-session-move-down-${a}`)).toHaveCount(0);
+      await expect(page2.getByTestId(`workspace-session-move-down-${a}`)).toBeVisible();
       await page2.keyboard.press("Escape");
 
-      // The tab strip shows the same order, and dragging a tab reorders the core's list too.
-      await expect.poll(() => strip(page1)).toEqual([b, c, a]);
-      await page1.getByTestId(`tab-${a}`).dragTo(page1.getByTestId(`tab-${c}`), { targetPosition: { x: 4, y: 8 } });
-      await expect.poll(() => shown(page2)).toEqual([b, a, c]);
+      // The tab strip shows the mirror of that, and dragging a tab reorders the core's list too.
+      await expect.poll(() => strip(page1)).toEqual([b, a, c]);
+      await page1.getByTestId(`tab-${c}`).dragTo(page1.getByTestId(`tab-${b}`), { targetPosition: { x: 4, y: 8 } });
+      await expect.poll(() => shown(page2)).toEqual([a, b, c]);
 
       await page1.reload({ waitUntil: "networkidle" });
-      await expect.poll(() => shown(page1)).toEqual([b, a, c]);
+      await expect.poll(() => shown(page1)).toEqual([a, b, c]);
     } finally {
       await ctx1.close();
       await ctx2.close();

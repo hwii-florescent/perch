@@ -85,7 +85,8 @@ export function TabBar() {
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
-  const draggingId = useTabDrag((s) => s.drag?.id ?? null);
+  // Dimmed only while the tab is off the strip (its ghost is out); on the strip it is the one moving.
+  const draggingId = useTabDrag((s) => (s.drag && !s.drag.overStrip ? s.drag.id : null));
   // The order is read from storage on every render: a saved drag order must re-render the strip.
   useTabOrderVersion();
 
