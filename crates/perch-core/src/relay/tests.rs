@@ -296,6 +296,12 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
         axum::serve(relay_listener, app).await.unwrap();
     });
 
+    // The desktop below turns the relay on with `settings.update`, which the
+    // server persists to `$PERCH_SETTINGS`, else the real `~/.perch/settings.json`.
+    // Without this, running the tests repoints the user's relay at this throwaway one.
+    // Safety: test-only; set before the server starts and nothing else here reads it.
+    let settings_path = root.join("settings.json");
+    std::env::set_var("PERCH_SETTINGS", &settings_path);
     let db_path = root.join("history.sqlite");
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(crate::server::run(
