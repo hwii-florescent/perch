@@ -377,6 +377,18 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   // keyboard and the phone. The core keeps the order, so every viewer shows it.
   const dragging = useRef<{ kind: "project" | "session"; id: string; group: string } | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
+  // macOS shows the green "+" (copy) over any spot that does not accept the drag: the row being
+  // dragged, the gaps, other groups. While a row drag is live, accept it everywhere as a move
+  // (only the landing rows act on a drop), so the cursor stays a plain move.
+  useEffect(() => {
+    const keepMove = (event: DragEvent) => {
+      if (!dragging.current || !event.dataTransfer) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    };
+    window.addEventListener("dragover", keepMove);
+    return () => window.removeEventListener("dragover", keepMove);
+  }, []);
   // A move writes only what it touches: the projects as shown (hidden ones keep their place),
   // or the chats of the moved and target workspaces (`moveChat`). `shown` is the row's siblings.
   // `flip`: the group shows its strip order reversed (Quickchat, newest first), so a move is
