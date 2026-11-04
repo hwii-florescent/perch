@@ -99,12 +99,18 @@ describe("reordering", () => {
     useAttention.setState({ supported: true, events: [] });
   });
 
-  it("By status lists chats oldest-first like the strip, so a first Move changes only the moved chat", () => {
+  it("By status lists chats newest-first but writes strip order, so a first Move changes only the moved chat", () => {
     act(() => root.render(<WorkspaceOverview />));
-    expect(rowIds("status-section-idle")).toEqual(["a", "b", "c"]);
-    menuOf("workspace-session-a");
-    act(() => (document.querySelector('[data-testid="workspace-session-move-down-a"]') as HTMLElement).click());
-    expect(setOrder).toHaveBeenCalledWith("local", { sessions: ["b", "a", "c"] });
+    expect(rowIds("status-section-idle")).toEqual(["c", "b", "a"]);
+    menuOf("workspace-session-c");
+    act(() => (document.querySelector('[data-testid="workspace-session-move-down-c"]') as HTMLElement).click());
+    expect(setOrder).toHaveBeenCalledWith("local", { sessions: ["a", "c", "b"] });
+  });
+
+  it("By status puts a chat the core has not listed yet on top", () => {
+    usePerchStore.setState({ sessions: [chat("a", { createdAt: 1 }), chat("b", { createdAt: 2 }), chat("d", { createdAt: 4 })], workspaceOrderByHost: { local: { projects: [], sessions: ["a", "b"] } } });
+    act(() => root.render(<WorkspaceOverview />));
+    expect(rowIds("status-section-idle")).toEqual(["d", "b", "a"]);
   });
 
   it("In one list is chronological, ignores the core's order, and has no drag or Move", () => {
@@ -116,6 +122,21 @@ describe("reordering", () => {
     expect(get("workspace-session-list")!.querySelector('[draggable="true"]')).toBeNull();
     menuOf("workspace-session-b");
     expect(document.querySelector('[data-testid^="workspace-session-move-"]')).toBeNull();
+  });
+
+  it("Quickchat shows newest first but writes strip order, so a first Move cannot flip the strips", () => {
+    const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch" };
+    const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
+    const qc = (id: string, createdAt: number) => chat(id, { createdAt, workspaceId: "sw", projectId: "s", cwd: scratch.path });
+    storage.set("perch.sidebar.organize", "project");
+    usePerchStore.setState({ workspaceProjects: [scratch], workspaces: [sw], activeWorkspaceId: "sw", sessions: [qc("a", 1), qc("b", 2), qc("c", 3)] });
+    act(() => root.render(<WorkspaceOverview />));
+    const ids = () => [...get("workspace-chats")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""));
+    expect(ids()).toEqual(["c", "b", "a"]);
+    // Move c down on screen (past b): in strip order b goes before c, a stays first.
+    menuOf("workspace-session-c");
+    act(() => (document.querySelector('[data-testid="workspace-session-move-down-c"]') as HTMLElement).click());
+    expect(setOrder).toHaveBeenCalledWith("local", { sessions: ["a", "c", "b"] });
   });
 
   it("a project Move keeps the positions of projects this viewer does not list", () => {
@@ -135,5 +156,5 @@ it("lists chats in the core's order inside a section", () => {
   usePerchStore.setState({ sessions: [chat("a"), chat("b"), chat("c")], workspaceOrderByHost: { local: { projects: [], sessions: ["c", "a", "b"] } } });
   act(() => root.render(<WorkspaceOverview />));
   const ids = [...get("status-section-idle")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-session"));
-  expect(ids).toEqual(["c", "a", "b"]);
+  expect(ids).toEqual(["b", "a", "c"]); // the core's order, mirrored: newest first on screen
 });

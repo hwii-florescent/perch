@@ -379,11 +379,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   // A move writes only what it touches: the projects as shown (hidden ones keep their place),
   // or the chats of the moved and target workspaces (`moveChat`). `shown` is the row's siblings.
-  function moveRow(kind: "project" | "session", id: string, target: string, after: boolean, shown: string[]) {
+  // `flip`: the group shows its strip order reversed (Quickchat, newest first), so a move is
+  // mirrored back into strip order before it is written and the first drag cannot flip the strips.
+  function moveRow(kind: "project" | "session", id: string, target: string, after: boolean, shown: string[], flip = false) {
     if (kind === "project") setWorkspaceOrder(activeHostId, { projects: writeScope(order?.projects, moveBeside(hostProjects.map((project) => project.id), id, target, after)) });
-    else moveChat(id, target, after, shown);
+    else moveChat(id, target, flip ? !after : after, flip ? [...shown].reverse() : shown);
   }
-  function dnd(kind: "project" | "session", id: string, group: string, shown: string[] = []) {
+  function dnd(kind: "project" | "session", id: string, group: string, shown: string[] = [], flip = false) {
     if (!reorderable || compact) return { handle: {}, zone: {} };
     const clear = () => { dragging.current = null; setDrop(null); };
     const hover = () => (dragging.current?.kind === kind && dragging.current.group === group && dragging.current.id !== id ? dragging.current : null);
@@ -420,29 +422,30 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           if (!source) return;
           event.preventDefault();
           event.stopPropagation();
-          moveRow(kind, source.id, id, after(event), shown);
+          moveRow(kind, source.id, id, after(event), shown, flip);
           clear();
         },
       },
     };
   }
-  function moveItems(kind: "project" | "session", id: string, siblings: string[]): MenuItem[] {
+  function moveItems(kind: "project" | "session", id: string, siblings: string[], flip = false): MenuItem[] {
     if (!reorderable) return [];
     return ([["up", "Move up", -1], ["down", "Move down", 1]] as const).flatMap(([key, label, step]) => {
       const to = stepTarget(siblings, id, step);
-      return to ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, to.target, to.after, siblings) }] : [];
+      return to ? [{ label, testId: `workspace-${kind}-move-${key}-${id}`, onSelect: () => moveRow(kind, id, to.target, to.after, siblings, flip) }] : [];
     });
   }
   /** A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down. */
   function sessionRowProps(session: SessionSummary, siblings: SessionSummary[], group: string) {
-    const { handle, zone } = dnd("session", session.id, group, siblings.map((other) => other.id));
+    const flip = group === "chats" || group.startsWith("status:"); // groups shown newest first
+    const { handle, zone } = dnd("session", session.id, group, siblings.map((other) => other.id), flip);
     return {
       ...handle,
       ...zone,
-      ...longPress((x, y) => sessionMenu(session, x, y, siblings)),
+      ...longPress((x, y) => sessionMenu(session, x, y, siblings, flip)),
       onContextMenu: (event: React.MouseEvent) => {
         event.preventDefault();
-        sessionMenu(session, event.clientX, event.clientY, siblings);
+        sessionMenu(session, event.clientX, event.clientY, siblings, flip);
       },
     };
   }
@@ -553,9 +556,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     setSessionView(next);
     try { localStorage.setItem(SESSION_VIEW_KEY, next); } catch { /* per-viewer convenience */ }
   }
-  function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[]) {
+  function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[], flip = false) {
     setMenu({ x, y, label: "Session actions", items: [
-      ...moveItems("session", session.id, siblings.map((other) => other.id)),
+      ...moveItems("session", session.id, siblings.map((other) => other.id), flip),
       { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => requestCloseSession(session.id) },
     ] });
   }
@@ -630,7 +633,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   );
   const listView = (
     <div className="flex flex-col gap-[2px] py-[0.2rem]" data-testid="workspace-session-list">
-      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">Nothing in the Scratchpad yet.</div>}
+      {allSessions.length === 0 && <div className="px-[0.3rem] py-2 text-[0.7rem] text-subtext-0">Nothing in Quickchat yet.</div>}
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
@@ -676,10 +679,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const held = holdFinished(reading.current.id === sessionId ? reading.current.held : null, sessionId, reading.current.id === sessionId ? reading.current.dot : undefined, viewedDot);
   reading.current = { id: sessionId, held, dot: viewedDot };
   const needsEvents = useMemo(() => new Map(needsYou(attentionEvents).map((event) => [event.sessionId, event])), [attentionEvents]);
-  // Within a section: oldest first, each workspace in its strip's order (so a first move changes
-  // nothing else there), then the core's chat order; chats the core has not listed yet come first.
+  // Within a section: newest first on screen, the mirror of the strips' order (each workspace in its
+  // strip's order, then the core's chat order), so a move is mirrored back before it is written and
+  // a first move changes nothing else. Built from reversed inputs so chats the core has not listed
+  // yet (new ones) sit on top, newest first.
   const statusChats = useMemo(
-    () => orderBy(chatsInStripOrder(usePerchStore.getState(), allSessions), order?.sessions, (session) => session.id),
+    () => orderBy([...chatsInStripOrder(usePerchStore.getState(), allSessions)].reverse(), order?.sessions && [...order.sessions].reverse(), (session) => session.id),
     [allSessions, order?.sessions, workspaces, tabOrderVersion], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const statusGroups = useMemo(() => groupByStatus(statusChats, new Set(needsEvents.keys()), held), [statusChats, needsEvents, held]);
@@ -745,6 +750,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   // After the projects, inside their scrolling list (or after the empty state).
   const chatsSection = chatsProject && (() => {
         const chats = sessionsForProject(chatsProject.id);
+        // Newest first on screen; the strip (oldest first) stays the stored order.
+        const shownChats = [...chats].reverse();
         const chatsCollapsed = collapsed.includes(chatsProject.id);
         return (
           <div className="flex flex-col gap-[2px]" data-testid="workspace-chats">
@@ -756,7 +763,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                 aria-expanded={!chatsCollapsed}
                 onClick={() => toggleCollapsed(chatsProject.id)}
               >
-                Scratchpad
+                Quickchat
                 <Chevron open={!chatsCollapsed} />
               </button>
               {chats.length > 0 && (
@@ -764,12 +771,12 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
                   type="button"
                   className={PROJECT_ICON}
                   data-testid="workspace-chats-menu"
-                  title="Scratchpad actions"
-                  aria-label="Scratchpad actions"
+                  title="Quickchat actions"
+                  aria-label="Quickchat actions"
                   aria-haspopup="menu"
                   onClick={(event) => {
                     const rect = event.currentTarget.getBoundingClientRect();
-                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Scratchpad actions", items: [
+                    setMenu({ x: rect.left, y: rect.bottom + 4, label: "Quickchat actions", items: [
                       { label: "Close all chats", testId: "workspace-chats-close-all", danger: true, onSelect: () => { for (const chat of chats) deleteSession(chat.id); } },
                     ] });
                   }}
@@ -795,8 +802,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             </div>
             {!chatsCollapsed && chats.length > 0 && (
               <div className="flex flex-col gap-[2px] pt-[2px] pr-[0.3rem] pl-[0.4rem]">
-                {chats.map((session) => (
-                  <div {...sessionRowProps(session, chats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+                {shownChats.map((session) => (
+                  <div {...sessionRowProps(session, shownChats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", DROP_LINE, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
                     <button
                       type="button"
                       className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}

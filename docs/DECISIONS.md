@@ -26,8 +26,11 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 - **Reordering** uses native drag with a landing line, plus Move up/down in row
   menus; drag is off in the compact phone layout. Favourites stay first. A chat
   move writes only the workspaces it touches, so other tab strips do not change.
-  Unlisted chats default to their strip order (oldest first). In one list stays
-  strictly newest first, with no drag. Nest order is not reorderable.
+  Unlisted chats default to their strip order (oldest first). Tab strips stay
+  oldest first; Quickchat and By status show that order mirrored, newest first
+  (like Orca's sidebar), and a move is mirrored back into strip order before it
+  is written, so a first drag cannot flip the strips. In one list stays strictly
+  newest first, with no drag. Nest order is not reorderable.
 - **Markdown files** get a Source/Preview toggle that renders the draft. Nothing
   remote is fetched: images and media become text placeholders. Relative images
   use the confined local file route, and show placeholders on remote hosts and
