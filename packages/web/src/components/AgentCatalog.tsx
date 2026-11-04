@@ -24,7 +24,7 @@ export function AgentCatalog() {
 
   function row(entry: AgentManifestSummary) {
     const enabled = entry.enabled !== false;
-    return <div className="agent-catalog__row border-b border-b-surface-1 py-4 last:[border-bottom:0] [@media(min-width:620px)]:grid [@media(min-width:620px)]:grid-cols-[minmax(0,1fr)_auto] [@media(min-width:620px)]:items-center [@media(min-width:620px)]:gap-4" key={entry.id} data-testid={`agent-catalog-${entry.id}`}>
+    return <div className="agent-catalog__row py-4 [@media(min-width:620px)]:grid [@media(min-width:620px)]:grid-cols-[minmax(0,1fr)_auto] [@media(min-width:620px)]:items-center [@media(min-width:620px)]:gap-4" key={entry.id} data-testid={`agent-catalog-${entry.id}`}>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 font-semibold">{entry.displayName}{entry.isDefault && <span className="text-[0.75rem] font-medium text-accent">Default</span>}</div>
         <code className="mt-[0.3rem] block text-[0.8rem] text-subtext-0 [overflow-wrap:anywhere]" title={entry.launchCommand}>{entry.launchCommand ?? entry.executable ?? entry.id}</code>

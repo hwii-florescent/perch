@@ -86,7 +86,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
         <div className="flex items-center gap-[0.35rem] px-2 py-[0.4rem]">
           <input
             type="text"
-            className="min-w-0 flex-1 rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.8rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
+            className="min-w-0 flex-1 rounded-ui bg-surface-1 px-2 py-[0.3rem] text-[0.8rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
             data-testid="pane-menu-rename-input"
             ref={renameInputRef}
             value={renameValue}

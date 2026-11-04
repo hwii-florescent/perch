@@ -18,9 +18,9 @@ import { claimPairing, takePairingCodeFromUrl } from "../pairing";
 import { useRelayDiagnostics } from "../relay/diagnostics";
 import { ConnectionDetails } from "./ConnectionDetails";
 
-const INPUT = "min-h-11 min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_var(--font-mono)] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
+const INPUT = "min-h-11 min-w-0 rounded-ui bg-surface-0 px-[0.65rem] py-2 tracking-[0.08em] text-fg [font:1rem/1.2_var(--font-mono)] focus-visible:[outline-offset:-2px] focus-visible:[outline:2px_solid_var(--accent)]";
 const SCREEN = "flex min-h-[100dvh] items-center justify-center p-6 text-fg";
-const CARD = "flex w-[min(26rem,100%)] flex-col gap-[0.85rem] rounded-[calc(var(--radius)*2)] border border-overlay-0 bg-panel-bg p-6";
+const CARD = "flex w-[min(26rem,100%)] flex-col gap-[0.85rem] rounded-[calc(var(--radius)*2)] bg-panel-bg p-6";
 const BODY = "m-0 text-[0.8rem] leading-[1.45] text-subtext-0";
 const PRIMARY = "min-h-11 cursor-pointer rounded-ui bg-accent text-panel-bg [border:0] disabled:cursor-not-allowed disabled:opacity-[0.55]";
 

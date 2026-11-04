@@ -92,7 +92,7 @@ it("workspace background picks it, while its badge and rename input keep their o
   expect(button.classList.contains("bg-overlay-0")).toBe(false);
   expect(button.classList.contains("h-8")).toBe(true);
   expect(button.querySelector(".agent-status-dot")!.classList.contains("h-[18px]")).toBe(true);
-  expect(get("session-dots").classList.contains("border-overlay-1")).toBe(true);
+  expect(get("session-dots").classList.contains("bg-surface-0")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("rounded-ui")).toBe(true);
   expect(get("workspace-entry-tree").classList.contains("bg-surface-1")).toBe(true);
   const badge = button.querySelector(".agent-status-dot")!;
@@ -140,7 +140,6 @@ it("identifies visible workspaces with checkout icons and nests without connecti
   expect(get("project-folder-icon").getAttribute("fill")).toBe("currentColor");
   expect(entries.map((entry) => entry.querySelectorAll('[data-testid="workspace-checkout-icon"] circle').length)).toEqual([0, 3, 3, 3, 3, 3]);
   expect(get("workspace-children-tree").classList.contains("ml-[0.9rem]")).toBe(true);
-  expect(get("workspace-overview").classList.contains("[--radius:6px]")).toBe(true);
   expect(entries.every((entry) => entry.querySelector("strong")?.classList.contains("font-medium"))).toBe(true);
   expect(entries.every((entry) => !entry.querySelector("strong")?.classList.contains("font-bold"))).toBe(true);
   expect(project.querySelector(".workspace-project__workspaces")?.classList.contains("border-t")).toBe(false);

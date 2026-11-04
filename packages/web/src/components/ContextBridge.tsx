@@ -10,7 +10,7 @@ import { Chevron } from "./ui/chevron";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { menuItem, menuPanel } from "./ui/menu";
 
-const CONTROL = "min-h-11 w-full rounded-ui border border-overlay-0 bg-surface-0 px-2 py-2 text-[0.8rem] text-fg [font-family:inherit] focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg";
+const CONTROL = "min-h-11 w-full rounded-ui bg-surface-0 px-2 py-2 text-[0.8rem] text-fg [font-family:inherit] focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg";
 const BUTTON = `${GHOST_BUTTON} min-h-11 px-3 text-[0.8rem] disabled:cursor-not-allowed disabled:opacity-40`;
 
 export function ContextBridge() {

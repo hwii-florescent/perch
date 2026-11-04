@@ -32,7 +32,7 @@ const TOOLS_STORAGE_KEY = "perch.workspaceTools";
 // The Tauri app on macOS draws its traffic lights over the web view's top row.
 const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.platform);
 // The sidebar and drawer toggles blend into the top row and fill only on hover.
-const ICON_BUTTON = "inline-flex size-7 shrink-0 items-center justify-center rounded-ui border border-transparent bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+const ICON_BUTTON = "inline-flex size-7 shrink-0 items-center justify-center rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
 // Soft corners for the desktop chrome: every `rounded-ui` inside follows --radius-pane (base.css).
 const SOFT = "[--radius:var(--radius-pane)]";
 // The open gutter between a column and the canvas is the column's resize handle (ResizeHandle.tsx).
@@ -270,7 +270,7 @@ export default function App() {
         </div>
       )}
 
-      {!connected && !MAC_DESKTOP && <div className="shrink-0 border-b border-overlay-0 px-4"><ConnectionDetails /></div>}
+      {!connected && !MAC_DESKTOP && <div className="shrink-0 px-4"><ConnectionDetails /></div>}
       <div className="flex min-h-0 flex-1">
         {showSidebar && <Sidebar />}
         {showSidebar && (

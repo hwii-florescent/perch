@@ -23,13 +23,13 @@ export function TabDragLayer() {
       {drop && box && (
         <>
           <div
-            className="pointer-events-none fixed rounded-ui border border-dashed border-overlay-1"
+            className="pointer-events-none fixed rounded-ui bg-surface-1/30"
             style={{ left: drop.pane.left, top: drop.pane.top, width: drop.pane.width, height: drop.pane.height }}
           />
           <div
             className={cn(
-              "pointer-events-none fixed flex items-center justify-center rounded-ui border-2 transition-[left,top,width,height] duration-150 ease-out animate-drop-zone",
-              zone ? "border-accent bg-accent/35 shadow-[inset_0_0_24px_var(--accent)]" : "border-dashed border-overlay-1 bg-surface-1/60",
+              "pointer-events-none fixed flex items-center justify-center rounded-ui transition-[left,top,width,height] duration-150 ease-out animate-drop-zone",
+              zone ? "bg-accent/35 shadow-[inset_0_0_24px_var(--accent)]" : "bg-surface-1/60",
             )}
             style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
             data-testid="tab-drop-zone"

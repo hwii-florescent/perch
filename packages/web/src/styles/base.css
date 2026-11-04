@@ -31,17 +31,10 @@
   --border: var(--overlay-0);
   --muted: var(--subtext-0);
   --danger: var(--red);
-  /* Flat/minimal corner radius for panel-like chrome (sidebar, tabs, status
-   * bar, overlays, popovers, buttons) — herdr's ratatui panes render with
-   * `ratatui::symbols::border::PLAIN` (square corners); a small radius here
-   * is the closest sane web equivalent without looking broken. Chat message
-   * bubbles and inline code/pre blocks intentionally keep their own (larger)
-   * radius since they're chat content, not TUI chrome. */
-  --radius: 3px;
-  /* Soft corners for the desktop shell (tabs, sidebar rows, drawer controls,
-   * canvas panes). Those regions opt in with `[--radius:var(--radius-pane)]`
-   * so every `rounded-ui` inside follows it; panes use `rounded-soft`.
-   * Menus and dialogs outside those regions keep --radius. */
+  /* One soft corner for all chrome (sidebar, tabs, status bar, menus, dialogs,
+   * popovers, fields, buttons, badges): borderless fills, 8px corners. Chat
+   * bubbles and inline code/pre blocks keep their own radius. */
+  --radius: 8px;
   --radius-pane: 8px;
   /* Native checkboxes/radios follow the theme, not the browser's blue. */
   accent-color: var(--accent);
@@ -74,6 +67,9 @@ samp {
 @layer base {
   ::selection { background: var(--accent); color: var(--panel-bg); }
   :where(input, textarea)::placeholder { color: var(--subtext-0); opacity: 1; }
+  /* Controls are filled and borderless (no preflight, so the browser's default
+   * border would show); a utility (`border`) still overrides. */
+  :where(button, input, select, textarea) { border: 0; }
   :where(button, a[href], select, summary, [role="button"], [role="menuitem"]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;

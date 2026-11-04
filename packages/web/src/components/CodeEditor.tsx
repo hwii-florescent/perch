@@ -99,7 +99,7 @@ const theme = EditorView.theme({
   "&.cm-editor .cm-dialog-close": { position: "static", width: "1.75rem", height: "1.75rem", fontSize: "0.82rem", color: "var(--subtext-0)", borderRadius: "var(--radius)", cursor: "pointer" },
   "&.cm-editor .cm-textfield": {
     boxSizing: "border-box", height: "1.75rem", minWidth: "0", backgroundColor: "var(--surface-0)", color: "var(--text)",
-    border: "1px solid var(--overlay-0)", borderRadius: "var(--radius)", fontFamily: "inherit", fontSize: "0.82rem", padding: "0 0.55rem",
+    border: "0", borderRadius: "var(--radius)", fontFamily: "inherit", fontSize: "0.82rem", padding: "0 0.55rem",
   },
   "&.cm-editor .cm-textfield:focus": { outline: "1px solid var(--accent)" },
   "&.cm-editor .cm-button": {

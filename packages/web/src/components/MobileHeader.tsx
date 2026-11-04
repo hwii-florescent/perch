@@ -14,8 +14,9 @@ import { effectiveWorkspace, usePerchStore } from "../store";
 import { cn } from "../lib/cn";
 import { StatusDot } from "./StatusDot";
 import { Chevron } from "./ui/chevron";
+import { GearIcon } from "./ui/icons";
 import { GHOST_BUTTON } from "./ui/icon-button";
-import { glass } from "./ui/glass";
+import { TAP_BUTTON, glass } from "./ui/glass";
 import { useNeedsYouCount } from "../attention";
 import type { SessionSummary } from "@perch/shared";
 
@@ -50,11 +51,11 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
   const branch = workspace?.branch ?? (activeHostId === "local" ? status?.branch : undefined);
 
   return (
-    <header className="shrink-0 pt-[max(0.4rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pl-[max(0.5rem,env(safe-area-inset-left))]" data-testid="mobile-header">
-      <div className={cn(glass, "flex items-center gap-1 px-1")}>
+    <header className="shrink-0 pt-[max(0.5rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pb-2 pl-[max(0.5rem,env(safe-area-inset-left))]" data-testid="mobile-header">
+      <div className={cn(glass, "flex items-center gap-0.5 p-0.5")}>
       <button
         type="button"
-        className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] min-w-0 flex-1 items-center gap-[0.55rem] px-[0.4rem] text-left")}
+        className={cn(GHOST_BUTTON, TAP_BUTTON, "flex min-h-[3.25rem] min-w-0 flex-1 items-center gap-2 px-3 text-left")}
         data-testid="mobile-switch"
         aria-label={needsYou ? `Switch session, ${needsYou} ${needsYou === 1 ? "needs" : "need"} you` : "Switch session"}
         onClick={onOpenSwitcher}
@@ -73,13 +74,13 @@ export function MobileHeader({ onOpenSwitcher }: MobileHeaderProps) {
       </button>
       <button
         type="button"
-        className={cn(GHOST_BUTTON, "grid size-11 shrink-0 place-items-center p-0 text-[1.1rem]")}
+        className={cn(GHOST_BUTTON, TAP_BUTTON, "grid size-[3.25rem] shrink-0 place-items-center p-0")}
         data-testid="settings-gear"
         title="Settings"
         aria-label="Settings"
         onClick={() => setSettingsOpen(true)}
       >
-        ⚙
+        <GearIcon size={20} />
       </button>
       </div>
     </header>

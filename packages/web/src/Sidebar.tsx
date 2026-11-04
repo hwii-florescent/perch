@@ -47,7 +47,7 @@ import { cn } from "./lib/cn";
 import { formatCombo } from "./keyCombo";
 import { ICON_BUTTON } from "./components/ui/icon-button";
 import { segment } from "./components/ui/segment";
-import { PlusIcon } from "./components/ui/icons";
+import { CloseIcon, GearIcon, PlusIcon } from "./components/ui/icons";
 import { sessionDotState, DOT_GLYPH, type AgentDotState } from "./statusDot";
 import type { SessionSummary, SshHostEntry, HostConnectionState } from "@perch/shared";
 
@@ -92,10 +92,10 @@ interface EnvHeaderProps {
   branch: string | undefined;
 }
 
-const ENV_BADGE = "sidebar__env-badge shrink-0 rounded-ui border px-[0.4rem] py-[0.15rem] text-[0.65rem] font-bold tracking-[0.06em] uppercase";
-const ENV_BADGE_LOCAL = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--accent)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] text-accent`;
-const ENV_BADGE_REMOTE = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--yellow)_30%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_15%,transparent)] text-yellow`;
-const ENV_BADGE_SSH = `${ENV_BADGE} border-[color:color-mix(in_srgb,var(--blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--blue)_15%,transparent)] text-blue`;
+const ENV_BADGE = "sidebar__env-badge shrink-0 rounded-ui px-[0.4rem] py-[0.15rem] text-[0.65rem] font-bold tracking-[0.06em] uppercase";
+const ENV_BADGE_LOCAL = `${ENV_BADGE} bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] text-accent`;
+const ENV_BADGE_REMOTE = `${ENV_BADGE} bg-[color-mix(in_srgb,var(--yellow)_15%,transparent)] text-yellow`;
+const ENV_BADGE_SSH = `${ENV_BADGE} bg-[color-mix(in_srgb,var(--blue)_15%,transparent)] text-blue`;
 const ENV_ROW = "flex flex-wrap items-center gap-[0.4rem]";
 const ENV_HOST = "sidebar__env-host min-w-0 overflow-hidden text-[0.75rem] font-medium text-ellipsis whitespace-nowrap text-fg";
 const ENV_PLATFORM = "ml-auto text-[0.7rem] text-subtext-0";
@@ -256,7 +256,7 @@ export function HostSwitcherPopover({
   }, [onClose]);
 
   return createPortal(
-    <div className="flex max-w-[320px] min-w-[200px] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]" data-testid="host-switcher-popover" ref={popoverRef} style={style}>
+    <div className="flex max-w-[320px] min-w-[200px] flex-col overflow-hidden rounded-ui bg-surface-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]" data-testid="host-switcher-popover" ref={popoverRef} style={style}>
       <div className="min-h-0 overflow-y-auto">
         {choices.map((choice) => (
           <div
@@ -344,8 +344,8 @@ function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps
       <button
         type="button"
         className={cn(
-          "flex w-full min-w-0 flex-1 cursor-pointer items-start gap-[0.45rem] border-current px-[0.65rem] py-[0.3rem] text-left text-[0.82rem] text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease] hover:bg-surface-1",
-          isActive ? "session-item--active bg-surface-0 border-l-accent" : "bg-transparent border-l-transparent",
+          "flex w-full min-w-0 flex-1 cursor-pointer items-start gap-[0.45rem] rounded-ui px-[0.65rem] py-[0.3rem] text-left text-[0.82rem] text-fg [font-family:inherit] [transition:background_0.1s_ease] hover:bg-surface-1",
+          isActive ? "session-item--active bg-surface-0" : "bg-transparent",
         )}
         data-session-id={session.id}
         onClick={() => onSwitch(session.id)}
@@ -365,7 +365,7 @@ function SessionItem({ session, isActive, onSwitch, onDelete }: SessionItemProps
        * confirmations, which still route through ConfirmDialog). */}
       <button
         type="button"
-        className="hidden w-[1.6rem] shrink-0 cursor-pointer items-center justify-center border-current bg-transparent p-0 text-[0.85rem] text-subtext-0 [border-style:none_none_none_solid] border-l border-l-transparent [transition:color_0.1s_ease,background_0.1s_ease] group-focus-within:flex group-hover:flex hover:bg-surface-1 hover:text-red"
+        className="hidden w-[1.6rem] shrink-0 cursor-pointer items-center justify-center rounded-ui bg-transparent p-0 text-[0.85rem] text-subtext-0 [transition:color_0.1s_ease,background_0.1s_ease] group-focus-within:flex group-hover:flex hover:bg-surface-1 hover:text-red"
         data-testid={`session-delete-icon-${session.id}`}
         title="Delete session"
         aria-label="Delete session"
@@ -527,9 +527,9 @@ function ProjectRow({
         <button
           type="button"
           className={cn(
-            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui border-current px-3 py-[3px] text-left text-fg [font-family:inherit] [border-style:none_none_none_solid] border-l-2 [transition:background_0.1s_ease,border-color_0.1s_ease]",
+            "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-ui px-3 py-[3px] text-left text-fg [font-family:inherit] [transition:background_0.1s_ease]",
             // The legacy active rule outranked :hover, so an active row keeps its fill under the pointer.
-            isActiveProject ? "bg-surface-0 border-l-accent" : "bg-transparent border-l-transparent hover:bg-surface-1",
+            isActiveProject ? "bg-surface-0" : "bg-transparent hover:bg-surface-1",
           )}
           data-testid="project-row"
           data-project-cwd={group.cwd}
@@ -553,7 +553,7 @@ function ProjectRow({
               <ProjectSubline projectKey={group.key} hostId={hostId} cwd={group.cwd} />
             </span>
           </span>
-          <span className="shrink-0 rounded-ui border border-overlay-0 bg-surface-1 px-[0.35rem] py-[0.05rem] text-[0.68rem] text-subtext-0">{sessionCount}</span>
+          <span className="shrink-0 rounded-ui bg-surface-1 px-[0.35rem] py-[0.05rem] text-[0.68rem] text-subtext-0">{sessionCount}</span>
         </button>
         <ProjectWorktrees projectKey={group.key} hostId={hostId} cwd={group.cwd} />
         <ProjectGitReviewButton hostId={hostId} sessions={group.sessions} />
@@ -568,7 +568,7 @@ function ProjectRow({
             setConfirmingCloseAll(true);
           }}
         >
-          ✕
+          <CloseIcon size={12} />
         </button>
       </div>
       {isActiveProject &&
@@ -866,7 +866,7 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
         {/* A local-only install has nothing to switch between (UI-UX-DIRECTION.md §11). */}
         {(hosts.length > 0 || activeHostId !== "local") && <button
           type="button"
-          className="flex w-full shrink-0 cursor-pointer items-start gap-[0.3rem] border-current bg-transparent text-left text-fg [font-family:inherit] [border-style:none_none_solid] border-b border-b-overlay-0 [transition:background_0.12s_ease] hover:bg-surface-1"
+          className="flex w-full shrink-0 cursor-pointer items-start gap-[0.3rem] bg-transparent text-left text-fg [font-family:inherit] [transition:background_0.12s_ease] hover:bg-surface-1"
           data-testid="host-switcher"
           title="Switch host"
           aria-haspopup="true"
@@ -954,13 +954,13 @@ export function Sidebar() {
       <div className="flex shrink-0 items-stretch p-1">
         <button
           type="button"
-          className={cn(segment(), "w-full justify-end rounded-ui px-[0.9rem] py-[0.4rem] text-[1.1rem] leading-none")}
+          className={cn(segment(), "w-full justify-end rounded-ui px-[0.9rem] py-[0.4rem] leading-none")}
           data-testid="settings-gear"
           title="Settings"
           aria-label="Settings"
           onClick={() => setSettingsOpen(true)}
         >
-          ⚙
+          <GearIcon size={18} />
         </button>
       </div>
     </aside>

@@ -189,7 +189,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
           <input
             type="text"
             ref={filterInputRef}
-            className="mx-2 my-[0.2rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:border-accent focus:[outline:none]"
+            className="mx-2 my-[0.2rem] shrink-0 rounded-ui bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
             data-testid="dir-browser-filter"
             placeholder="Filter…"
             value={filter}
@@ -214,7 +214,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
                 >
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
                   {entry.isGitRepo && (
-                    <span className="ml-[0.4rem] shrink-0 rounded-ui border border-accent px-[0.3rem] py-0 text-[0.62rem] text-accent" title="Git repository">
+                    <span className="ml-[0.4rem] shrink-0 rounded-ui bg-surface-1 px-[0.3rem] py-0 text-[0.62rem] text-accent" title="Git repository">
                       git
                     </span>
                   )}
@@ -223,7 +223,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
             )}
           </div>
 
-          <div className="flex shrink-0 justify-end border-t border-t-overlay-0 px-2 py-[0.4rem]">
+          <div className="flex shrink-0 justify-end px-2 py-[0.4rem]">
             <button
               type="button"
               className={USE_BUTTON}
@@ -240,7 +240,7 @@ export function DirectoryBrowser({ hostId, onUseFolder }: DirectoryBrowserProps)
         <div className="flex shrink-0 items-center gap-[0.35rem] px-2 py-[0.4rem]">
           <input
             type="text"
-            className="min-w-0 flex-1 rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:border-accent focus:[outline:none]"
+            className="min-w-0 flex-1 rounded-ui bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
             data-testid="project-path-input"
             placeholder="/path/to/project"
             value={typedPath}

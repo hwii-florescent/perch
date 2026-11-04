@@ -23,7 +23,7 @@ import perchLogo from "../assets/perch-logo-texture-medium.webp";
 
 // The start card itself is shared with the CLI start panel (`StartCard.tsx`).
 const FONT = "[font-family:inherit] [font-weight:inherit] [line-height:inherit]";
-const KBD = `min-w-6 rounded-ui border border-overlay-0 bg-surface-0 px-[0.35rem] py-[0.1rem] text-center text-[0.75rem] text-fg ${FONT}`;
+const KBD = `min-w-6 rounded-ui bg-surface-0 px-[0.35rem] py-[0.1rem] text-center text-[0.75rem] text-fg ${FONT}`;
 
 const SHORTCUTS: [string, string[]][] = [
   ["New session", ["Ctrl", "Space", "C"]],

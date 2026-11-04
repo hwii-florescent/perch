@@ -11,9 +11,8 @@
 .session-split-popover {
   display: flex;
   flex-direction: column;
-  background: var(--panel-bg);
-  border: 1px solid var(--overlay-0);
-  border-radius: 6px;
+  background: var(--surface-1);
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   padding: 4px;
   font-size: 12.5px;
@@ -117,8 +116,8 @@
 .inactive-session-pane__switch {
   margin-top: 4px;
   padding: 6px 14px;
-  border-radius: 5px;
-  border: 1px solid var(--overlay-0);
+  border-radius: var(--radius);
+  border: 0;
   background: var(--surface-0);
   color: var(--text);
   cursor: pointer;

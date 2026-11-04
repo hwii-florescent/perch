@@ -7,18 +7,18 @@
 import type { TerminalSearchController } from "../terminalSearch";
 
 const BTN =
-  "h-[1.4rem] w-[1.4rem] shrink-0 rounded-ui border border-overlay-0 bg-surface-1 leading-none text-subtext-0 [font-family:inherit] hover:border-accent hover:text-fg";
+  "h-[1.4rem] w-[1.4rem] shrink-0 rounded-ui bg-surface-1 leading-none text-subtext-0 [font-family:inherit] hover:bg-overlay-0 hover:text-fg";
 
 export function TerminalSearchBar({ controller }: { controller: TerminalSearchController }) {
   if (!controller.open) return null;
   return (
     <div
-      className="absolute top-2 right-3 z-20 flex items-center gap-[0.3rem] rounded-ui border border-accent bg-panel-bg px-[0.4rem] py-[0.3rem] shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
+      className="absolute top-2 right-3 z-20 flex items-center gap-[0.3rem] rounded-ui bg-surface-1 px-[0.4rem] py-[0.3rem] shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
       data-testid="term-search">
       <input
         type="text"
         autoFocus
-        className="w-[11rem] rounded-ui border border-overlay-0 bg-surface-0 px-[0.45rem] py-[0.2rem] text-[0.8rem] text-fg [font-family:inherit] [outline:none] focus:border-accent"
+        className="w-[11rem] rounded-ui bg-surface-0 px-[0.45rem] py-[0.2rem] text-[0.8rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
         data-testid="term-search-input"
         placeholder="Find…"
         value={controller.query}

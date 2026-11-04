@@ -81,7 +81,7 @@ export function WorkspacePdf({ url }: { url: string }) {
         <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={!document || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous page</button>
         <span aria-live="polite">Page {pageNumber} of {document?.numPages ?? "…"}</span>
         <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={!document || pageNumber >= document.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next page</button>
-        <select aria-label="PDF zoom" className="min-h-8 rounded-ui border border-overlay-0 bg-panel-bg px-1 text-fg" value={zoom} onChange={(event) => setZoom(event.target.value)}>
+        <select aria-label="PDF zoom" className="min-h-8 rounded-ui bg-panel-bg px-1 text-fg" value={zoom} onChange={(event) => setZoom(event.target.value)}>
           <option value="fit">Fit width</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option>
         </select>
       </nav>

@@ -20,7 +20,7 @@ import { shortcutLabel } from "../keybinds";
 import { button } from "./ui/button";
 
 const KBD =
-  "rounded-ui border border-overlay-0 bg-surface-1 px-[0.4rem] py-[0.05rem] text-[0.78rem] text-accent [font-family:ui-monospace,SFMono-Regular,Menlo,monospace]";
+  "rounded-ui bg-surface-1 px-[0.4rem] py-[0.05rem] text-[0.78rem] text-accent [font-family:ui-monospace,SFMono-Regular,Menlo,monospace]";
 
 export interface OnboardingProps {
   onDismiss: () => void;
@@ -44,7 +44,7 @@ export function Onboarding({ onDismiss }: OnboardingProps) {
   const modal = (
     <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-[rgba(0,0,0,0.55)]">
       <div
-        className="max-h-[calc(100dvh_-_4rem)] w-[min(480px,calc(100vw_-_2rem))] overflow-y-auto rounded-ui border border-accent bg-panel-bg px-[1.4rem] pt-5 pb-[1.4rem] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="max-h-[calc(100dvh_-_4rem)] w-[min(480px,calc(100vw_-_2rem))] overflow-y-auto rounded-ui bg-panel-bg px-[1.4rem] pt-5 pb-[1.4rem] shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         role="dialog"
         aria-modal="true"
         aria-label="Welcome to perch"

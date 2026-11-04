@@ -239,7 +239,7 @@ function NameDialog({ title, initial, confirmLabel, busy, error, onCancel, onSub
     <Dialog title={title} onClose={onCancel} testId="file-name-dialog">
       <input
         ref={inputRef}
-        className="min-h-8 w-full rounded-ui border border-overlay-0 bg-surface-0 px-2 text-[0.85rem] text-fg [font-family:inherit] focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg"
+        className="min-h-8 w-full rounded-ui bg-surface-0 px-2 text-[0.85rem] text-fg [font-family:inherit] focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg"
         aria-label="Name"
         data-testid="file-name-input"
         value={name}

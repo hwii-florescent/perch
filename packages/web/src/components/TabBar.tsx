@@ -153,7 +153,7 @@ export function TabBar() {
           key={s.id}
           ref={renameInputRef}
           type="text"
-          className="w-40 shrink-0 rounded-ui border border-accent bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] [outline:none]"
+          className="w-40 shrink-0 rounded-ui bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
           data-testid="rename-input"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}

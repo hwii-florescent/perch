@@ -36,7 +36,7 @@ const FOCUS = "focus-visible:[outline:1px_solid_var(--overlay-1)] focus-visible:
 const ROW_BTN = "flex w-full min-w-0 items-center text-left [border:0] [font-family:inherit]";
 const SESSION = `${ROW_BTN} min-h-8 flex-1 cursor-pointer gap-2 rounded-ui bg-transparent px-[0.65rem] py-1 text-[13px] min-[701px]:text-[12px] ${FOCUS}`;
 const SESSION_TITLE = "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap";
-const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui border border-accent bg-surface-0 px-[0.3rem] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
+const RENAME = "mx-[0.3rem] my-1 w-[calc(100%_-_0.6rem)] rounded-ui bg-surface-0 px-[0.3rem] focus:[outline:1px_solid_var(--accent)] py-[0.2rem] text-[0.76rem] text-fg [font-family:inherit] [font-weight:inherit] [line-height:inherit]";
 const DOT = "shrink-0 text-[0.58rem] text-subtext-0";
 const ENTRY_BTN = `workspace-entry__button ${ROW_BTN} min-h-8 cursor-pointer gap-[0.45rem] rounded-ui py-[3px] pr-3 pl-3 text-fg ${FOCUS}`;
 const STRONG = "overflow-hidden text-[14px] font-semibold text-ellipsis whitespace-nowrap text-fg min-[701px]:text-[12.5px] min-[701px]:font-medium";
@@ -167,7 +167,7 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
   return (
     <span className={cn("order-last w-full min-w-0 pb-1", inline && "min-[701px]:order-none min-[701px]:ml-auto min-[701px]:w-auto min-[701px]:shrink-0 min-[701px]:self-center min-[701px]:pb-0")}>
     <span
-      className={cn("mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui border border-overlay-1 bg-transparent px-1", inline && "min-[701px]:mx-0 min-[701px]:w-auto min-[701px]:items-center min-[701px]:border-0 min-[701px]:px-0")}
+      className={cn("mx-auto flex w-[85%] min-w-0 cursor-default items-stretch gap-0 overflow-hidden rounded-ui bg-surface-0 px-1", inline && "min-[701px]:mx-0 min-[701px]:w-auto min-[701px]:items-center min-[701px]:bg-transparent min-[701px]:px-0")}
       data-testid="session-dots"
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
@@ -253,7 +253,7 @@ function WorktreeJobRows({ jobs }: { jobs: WorktreeJob[] }) {
         const failed = job.status === "failed";
         return (
           <div
-            className="workspace-entry relative border-l border-l-overlay-0"
+            className="workspace-entry relative"
             key={job.jobId}
             data-testid={`worktree-job-${job.branch}`}
             role="status"
@@ -838,10 +838,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   return (
     <section
       className={cn(
-        // The phone keeps 6px; the desktop sidebar uses the shell's soft corner.
-        "workspace-overview flex flex-col overflow-hidden [--radius:6px] min-[701px]:[--radius:var(--radius-pane)]",
+        "workspace-overview flex flex-col overflow-hidden",
         // compact = the phone switcher, where the panel owns the bottom edge
-        compact ? "min-h-full flex-1" : "min-h-0 flex-1 max-[700px]:border-b max-[700px]:border-b-overlay-0",
+        compact ? "min-h-full flex-1" : "min-h-0 flex-1",
       )}
       data-testid="workspace-overview"
       aria-label="Birdhouses and nests"
@@ -898,7 +897,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
             <span>Name <em className="text-overlay-1 not-italic">optional</em></span>
             <input
-              className="w-full min-w-0 rounded-ui border border-overlay-0 bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:border-overlay-1 focus:outline-none"
+              className="w-full min-w-0 rounded-ui bg-surface-0 px-[0.5rem] py-[0.4rem] text-fg focus:[outline:1px_solid_var(--accent)]"
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Birdhouse name"

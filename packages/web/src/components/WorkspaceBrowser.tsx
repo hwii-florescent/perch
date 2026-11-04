@@ -253,7 +253,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl, active }: {
             }}
           />
           {rows.length > 0 && (
-            <ul id="browser-suggestions" role="listbox" aria-label="Suggestions" data-testid="browser-suggestions" className="absolute top-full right-0 left-0 z-50 mt-1 list-none overflow-hidden rounded-ui border border-overlay-0 bg-surface-0 p-1 text-[11px] text-fg shadow-lg">
+            <ul id="browser-suggestions" role="listbox" aria-label="Suggestions" data-testid="browser-suggestions" className="absolute top-full right-0 left-0 z-50 mt-1 list-none overflow-hidden rounded-ui bg-surface-0 p-1 text-[11px] text-fg shadow-lg">
               {rows.map((row, i) => (
                 <li
                   key={`${row.kind}:${row.url}`}

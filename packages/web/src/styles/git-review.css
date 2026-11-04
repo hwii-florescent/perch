@@ -39,12 +39,7 @@
   outline-offset: 1px;
 }
 
-/* WebKit treats a clicked select as :focus-visible; an outline on top of its
- * border reads as a doubled frame, so selects mark focus with the border. */
-.workspace-git select:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-}
+/* Selects are borderless: the shared 2px outline marks focus. */
 
 .workspace-git__diff {
   container-type: inline-size;

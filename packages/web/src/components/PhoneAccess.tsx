@@ -166,7 +166,7 @@ export function PhoneAccessRows({ status, kind, onKind }: { status: PhoneStatus 
                 <button
                   key={a.kind}
                   type="button"
-                  className={cn("min-h-8 cursor-pointer rounded-ui border bg-transparent px-3 text-[0.78rem] [font-family:inherit] max-[700px]:min-h-11", a.kind === address?.kind ? "border-overlay-1 bg-surface-1 text-fg" : "border-overlay-0 text-subtext-0 hover:text-fg")}
+                  className={cn("min-h-8 cursor-pointer rounded-ui bg-transparent px-3 text-[0.78rem] [font-family:inherit] max-[700px]:min-h-11", a.kind === address?.kind ? "bg-surface-1 text-fg" : "bg-surface-0 text-subtext-0 hover:text-fg")}
                   aria-pressed={a.kind === address?.kind}
                   data-testid={`phone-address-${a.kind}`}
                   onClick={() => onKind(a.kind)}

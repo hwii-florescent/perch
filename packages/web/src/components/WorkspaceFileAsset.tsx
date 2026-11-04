@@ -39,7 +39,7 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   }
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`Previewing ${metadata.path}`} data-testid="workspace-file-asset">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-overlay-0 px-3 py-2 text-[0.75rem]">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-2 text-[0.75rem]">
         <strong className="min-w-0 flex-1 truncate" title={metadata.path}>{metadata.path}</strong>
         {archive && <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={extraction?.state === "loading"} onClick={() => extract(workspaceId, metadata.path)}>
           {extraction?.state === "loading" ? "Extracting…" : "Extract"}

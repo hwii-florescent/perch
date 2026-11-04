@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { keybindEntries, type KeybindGroup } from "../keybinds";
 import { usePerchStore } from "../store";
+import { CloseIcon } from "./ui/icons";
 
 export interface KeybindHelpProps {
   open: boolean;
@@ -68,14 +69,14 @@ export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
   const modal = (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-[rgba(0,0,0,0.55)]" onClick={onClose}>
       <div
-        className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[calc(100dvh_-_4rem)] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[calc(100dvh_-_4rem)] flex-col overflow-hidden rounded-ui bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         role="dialog"
         aria-modal="true"
         aria-label="Keybindings"
         data-testid="keybind-help"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-b-overlay-0 px-4 pt-[0.85rem] pb-3">
+        <div className="flex shrink-0 items-center justify-between px-4 pt-[0.85rem] pb-3">
           <h2 className="m-0 text-[1rem] font-semibold text-fg">Keybindings</h2>
           <button
             type="button"
@@ -83,13 +84,13 @@ export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
             aria-label="Close keybind help"
             onClick={onClose}
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
 
         <input
           type="text"
-          className="shrink-0 bg-surface-1 px-4 py-[0.6rem] [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_solid] border-current border-b border-b-overlay-0 [outline:none]"
+          className="shrink-0 bg-surface-1 px-4 py-[0.6rem] [font-family:inherit] text-[0.85rem] text-fg [outline:none]"
           data-testid="keybind-help-search"
           placeholder="Search keybindings…"
           value={query}
@@ -105,7 +106,7 @@ export function KeybindHelp({ open, onClose }: KeybindHelpProps) {
               <ul className="m-0 list-none p-0">
                 {entries.map((entry) => (
                   <li key={`${group}-${entry.keys}`} className="flex items-center gap-3 py-[0.3rem]">
-                    <kbd className="min-w-36 shrink-0 rounded-ui border border-overlay-0 bg-surface-1 px-[0.45rem] py-[0.1rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.72rem] text-accent">{entry.keys}</kbd>
+                    <kbd className="min-w-36 shrink-0 rounded-ui bg-surface-1 px-[0.45rem] py-[0.1rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.72rem] text-accent">{entry.keys}</kbd>
                     <span className="text-[0.8rem] text-fg">{entry.description}</span>
                   </li>
                 ))}

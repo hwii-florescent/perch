@@ -27,6 +27,8 @@ import { Switch } from "./ui/switch";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { PhoneAccessRows, QrCode, pairLink, pickAddress, usePhoneAccess } from "./PhoneAccess";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { TAP_BUTTON } from "./ui/glass";
+import { disconnectNativeApp, inNativeApp } from "../nativeApp";
 import { Chevron } from "./ui/chevron";
 import { MOBILE_WIDTH_BREAKPOINT, useIsMobileWidth } from "../responsive";
 import {
@@ -62,8 +64,8 @@ function ThemeSection() {
             <button
               type="button"
               className={cn(
-                "flex cursor-pointer items-center gap-[0.4rem] rounded-ui border bg-surface-1 px-[0.65rem] py-[0.3rem] text-[0.8rem] hover:border-overlay-1",
-                name === current ? "settings-modal__theme-option--active border-accent text-accent" : "border-overlay-0 text-fg",
+                "flex cursor-pointer items-center gap-[0.4rem] rounded-ui bg-surface-1 px-[0.65rem] py-[0.3rem] text-[0.8rem] hover:bg-overlay-0",
+                name === current ? "settings-modal__theme-option--active bg-surface-0 text-accent" : "text-fg",
               )}
               data-testid={`theme-option-${name}`}
               onClick={() => handleSelect(name)}
@@ -720,7 +722,7 @@ function DevicesSection() {
         Anything reaching this host from another machine needs a paired device. Local access never does.
       </p>
       {code ? (
-        <div className="my-2 flex flex-wrap items-center gap-[0.8rem] rounded-ui border border-overlay-0 bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
+        <div className="my-2 flex flex-wrap items-center gap-[0.8rem] rounded-ui bg-surface-0 px-3 py-[0.6rem]" data-testid="pair-code">
           {address && <QrCode text={pairLink(address.url, code)} />}
           <div className="flex min-w-0 flex-1 basis-[14rem] flex-col gap-[0.4rem]">
           <strong className="tracking-[0.22em] [font:1.15rem/1_var(--font-mono)]">{code}</strong>
@@ -812,10 +814,10 @@ function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTa
   const current = TABS.find((t) => t.id === tab);
   return (
     <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
-      <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-b-overlay-0 bg-surface-0 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[max(0.25rem,env(safe-area-inset-left))]">
+      <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center pt-[max(0.5rem,env(safe-area-inset-top))] pr-[env(safe-area-inset-right)] pl-[max(0.25rem,env(safe-area-inset-left))]">
         <button
           type="button"
-          className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] items-center gap-1 justify-self-start px-3 text-[0.9rem]")}
+          className={cn(GHOST_BUTTON, TAP_BUTTON, "flex min-h-[3.25rem] items-center gap-1 justify-self-start px-3 text-[0.9rem]")}
           data-testid={current ? "settings-back" : "settings-close"}
           aria-label={current ? "Back to settings" : "Close settings"}
           onClick={() => (current ? onTab(null) : onClose())}
@@ -836,7 +838,7 @@ function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTa
               <button
                 key={id}
                 type="button"
-                className={cn(GHOST_BUTTON, "flex min-h-[3.25rem] w-full items-center justify-between rounded-none border-b border-b-overlay-0 px-4 text-left text-[0.95rem] text-fg last:border-b-0")}
+                className={cn(GHOST_BUTTON, TAP_BUTTON, "flex min-h-[3.25rem] w-full items-center justify-between rounded-none px-4 text-left text-[0.95rem] text-fg hover:text-fg")}
                 data-testid={`settings-nav-${id}`}
                 onClick={() => onTab(id)}
               >
@@ -845,6 +847,16 @@ function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTa
               </button>
             ))}
           </div>
+          {inNativeApp() && (
+            <button
+              type="button"
+              className={cn(GHOST_BUTTON, TAP_BUTTON, "mt-4 flex min-h-[3.25rem] w-full items-center rounded-ui bg-surface-0 px-4 text-left text-[0.95rem] text-red hover:bg-surface-0 hover:text-red")}
+              data-testid="native-change-computer"
+              onClick={disconnectNativeApp}
+            >
+              Change computer
+            </button>
+          )}
         </nav>
       )}
     </div>

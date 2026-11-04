@@ -33,7 +33,7 @@ export function DrawerBrowser({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="drawer-browser">
-      <div className="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-b-overlay-0 px-2">
+      <div className="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto px-2">
         {pages.map((page) => (
           <span key={page.id} className={cn("flex shrink-0 items-center rounded-ui", page === shown && "bg-surface-1")}>
             <button

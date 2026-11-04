@@ -48,13 +48,12 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 1.5rem 0.25rem 0.5rem;
-  border-bottom: 1px solid var(--overlay-0);
   color: var(--subtext-0);
   font-size: 0.8rem;
 }
 .terminal__toolbar button, .terminal__toolbar select {
   min-height: 32px;
-  border: 1px solid var(--overlay-0);
+  border: 0;
   border-radius: var(--radius);
   color: var(--text);
   background: var(--surface-0);
@@ -69,7 +68,6 @@
   right: 0.9rem;
   z-index: 2;
   padding: 0.2rem 0.3rem 0.2rem 0.6rem;
-  border: 1px solid var(--overlay-0);
   border-radius: var(--radius);
   background: var(--surface-1);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
@@ -88,7 +86,6 @@
   left: 50%;
   transform: translateX(-50%);
   background: var(--surface-1);
-  border: 1px solid var(--overlay-0);
   padding: 0.35rem 0.75rem;
   border-radius: var(--radius);
   font-size: 0.85rem;
@@ -123,7 +120,6 @@
   left: 50%;
   transform: translateX(-50%);
   background: color-mix(in srgb, var(--red) 20%, var(--panel-bg));
-  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--panel-bg));
   padding: 0.35rem 0.75rem;
   border-radius: var(--radius);
   font-size: 0.85rem;

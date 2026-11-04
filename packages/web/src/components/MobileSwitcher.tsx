@@ -11,6 +11,7 @@
  */
 import { UsageSummary, useUsage } from "../StatusBar";
 import { SidebarContent } from "../Sidebar";
+import { CloseIcon } from "./ui/icons";
 
 export interface MobileSwitcherProps {
   open: boolean;
@@ -30,28 +31,28 @@ export function MobileSwitcher({ open, onClose, onPicked }: MobileSwitcherProps)
   }
 
   return (
-    <div className="fixed inset-0 z-[3000] flex justify-end bg-[rgba(0,0,0,0.5)]" onClick={onClose}>
+    <div className="fixed inset-0 z-[3000] flex justify-end bg-[rgba(0,0,0,0.5)] pt-[max(0.5rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-2" onClick={onClose}>
       <div
-        className="flex h-full w-[min(360px,92vw)] flex-col overflow-hidden border-l border-l-overlay-0 bg-surface-0 shadow-[-8px_0_32px_rgba(0,0,0,0.5)]"
+        className="flex h-full w-[min(360px,92vw)] flex-col overflow-hidden rounded-soft bg-surface-0 [--radius:var(--radius-pane)] shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
         data-testid="mobile-switcher"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-b-overlay-0 px-[0.9rem] pt-[calc(0.7rem_+_env(safe-area-inset-top))] pb-[0.7rem]">
+        <div className="flex shrink-0 items-center justify-between px-[0.9rem] py-[0.7rem]">
           <span className="text-[0.95rem] font-semibold text-fg">Sessions</span>
           <button
             type="button"
-            className="-my-2 -mr-2 grid size-11 cursor-pointer place-items-center text-[1.3rem] leading-none text-subtext-0 [background:none] [border:none] hover:text-fg"
+            className="-my-2 -mr-2 grid size-11 cursor-pointer place-items-center rounded-ui leading-none text-subtext-0 [background:none] hover:bg-surface-1 hover:text-fg"
             data-testid="mobile-switcher-close"
             aria-label="Close"
             onClick={onClose}
           >
-            ×
+            <CloseIcon size={16} />
           </button>
         </div>
 
         <SidebarContent compact onNavigate={picked} onManageHosts={onClose} />
 
-        <div className="shrink-0 overflow-x-auto border-t border-t-overlay-0 px-[0.9rem] pt-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))] text-[0.78rem] whitespace-nowrap text-subtext-0">
+        <div className="shrink-0 overflow-x-auto px-[0.9rem] py-2 text-[0.78rem] whitespace-nowrap text-subtext-0">
           <UsageSummary usage={usage} updatedAt={usageUpdatedAt} />
         </div>
       </div>

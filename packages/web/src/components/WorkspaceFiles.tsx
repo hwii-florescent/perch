@@ -39,15 +39,15 @@ const SECTION = "workspace-files relative flex h-full min-h-0 w-full min-w-0 fle
 const EMPTY = "grid min-h-full content-center justify-items-start gap-[0.35rem] p-5 text-[0.72rem] text-subtext-0";
 const PREVIEW_STATE = "shrink-0 px-[0.7rem] py-[0.55rem] text-[0.68rem] text-subtext-0";
 const COMPARE_LABEL = "mb-[0.2rem] block text-subtext-0 uppercase";
-const BTN = "min-h-[1.8rem] cursor-pointer rounded-ui border border-overlay-0 bg-transparent px-[0.48rem] py-[0.28rem] text-subtext-0";
-const BTN_HOVER = "hover:border-accent hover:text-fg focus-visible:border-accent focus-visible:text-fg";
-const DANGER = "border-red! text-red!";
+const BTN = "min-h-[1.8rem] cursor-pointer rounded-ui bg-surface-0 px-[0.48rem] py-[0.28rem] text-subtext-0";
+const BTN_HOVER = "hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
+const DANGER = "text-red!";
 const ACTIONS = "flex shrink-0 items-center gap-[0.35rem]";
 const TREE_STATE = "px-[0.65rem] py-[0.45rem] text-[0.68rem] text-subtext-0";
-const TREE_BUTTON = "ml-[0.35rem] cursor-pointer rounded-ui border border-current bg-transparent px-[0.26rem] py-[0.12rem] text-inherit [font:inherit]";
+const TREE_BUTTON = "ml-[0.35rem] cursor-pointer rounded-ui bg-surface-1 px-[0.26rem] py-[0.12rem] text-inherit [font:inherit]";
 const CODE = "text-overlay-1 [font:inherit]";
-const PRE = "m-0 overflow-auto border border-overlay-0 bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
-const BANNER = "shrink-0 border-b border-b-[color:color-mix(in_srgb,var(--yellow)_35%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
+const PRE = "m-0 overflow-auto bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
+const BANNER = "shrink-0 bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
 
 // VS Code's explorer metrics (explorerviewlet.css, tree.css), tighter: 18px rows (VS Code: 22), an 8px indent per level, a 16px twistie cell
 // holding a 10px chevron. Text stays 12px like the project organizer (VS Code uses 13px); the narrow/phone tree keeps 44px touch targets.
@@ -201,7 +201,7 @@ function PreviewPanel({ preview }: { preview: WorkspacePreviewState }) {
   if (preview.state !== "ready") return null;
   if (preview.kind === "html" && preview.content) {
     return (
-      <div className="flex min-h-[8rem] flex-[0_1_40%] flex-col border-t border-t-overlay-0">
+      <div className="flex min-h-[8rem] flex-[0_1_40%] flex-col">
         <div className={cn(PREVIEW_STATE, "py-[0.3rem] text-yellow")}>HTML is isolated in a sandboxed preview.</div>
         <iframe className="min-h-[8rem] w-full flex-1 bg-[#fff] [border:0]" sandbox="" title="Sandboxed file preview" srcDoc={preview.content} />
       </div>
@@ -211,7 +211,7 @@ function PreviewPanel({ preview }: { preview: WorkspacePreviewState }) {
     return <div className={PREVIEW_STATE}>{preview.message || "This file is not rendered in the editor."}</div>;
   }
   return (
-    <pre className={cn(PRE, "max-h-[30%] border-t border-t-overlay-0")} data-testid="workspace-file-preview-content">
+    <pre className={cn(PRE, "max-h-[30%]")} data-testid="workspace-file-preview-content">
       {preview.content || preview.message || "No preview content."}
     </pre>
   );
@@ -233,7 +233,7 @@ function ConflictPanel({
   const [compareOpen, setCompareOpen] = useState(false);
   const conflict = document.conflict;
   return (
-    <div className="grid shrink-0 gap-[0.3rem] border-b border-b-[color:color-mix(in_srgb,var(--red)_35%,transparent)] bg-[color-mix(in_srgb,var(--red)_7%,transparent)] px-[0.65rem] py-[0.55rem] text-[0.68rem] text-subtext-0" role="alert" data-testid="workspace-file-conflict">
+    <div className="grid shrink-0 gap-[0.3rem] bg-[color-mix(in_srgb,var(--red)_7%,transparent)] px-[0.65rem] py-[0.55rem] text-[0.68rem] text-subtext-0" role="alert" data-testid="workspace-file-conflict">
       <strong className="text-red">File changed on disk.</strong>
       <span>Your draft is preserved. Choose how to reconcile it.</span>
       <div className="flex gap-[0.65rem]">
@@ -526,7 +526,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                 <path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1zM8 7v3.5M6.25 8.75h3.5" />
               </HeaderIcon>
             </>}
-            {searchOpen && <input autoFocus type="search" className={cn(ROW_FONT, "min-h-8 min-w-0 flex-1 rounded-ui border border-overlay-0 bg-panel-bg px-2 text-fg placeholder:text-subtext-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg")} aria-label="Search workspace files" placeholder="Search files in workspace…" maxLength={256} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} onKeyDown={(event) => {
+            {searchOpen && <input autoFocus type="search" className={cn(ROW_FONT, "min-h-8 min-w-0 flex-1 rounded-ui bg-panel-bg px-2 text-fg placeholder:text-subtext-0 focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg")} aria-label="Search workspace files" placeholder="Search files in workspace…" maxLength={256} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} onKeyDown={(event) => {
               if (event.key === "Escape") { setFileQuery(""); setSearchOpen(false); }
               // Down from the search box walks its results (or the tree) with the keyboard.
               if (event.key === "ArrowDown" && rows.length > 0) { event.preventDefault(); setCursor(rows[0]!.path); treeRef.current?.focus(); }

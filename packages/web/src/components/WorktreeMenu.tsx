@@ -49,8 +49,8 @@ import { AGENT_PICKER, useAgentChoices } from "./AgentPicker";
 import type { WorktreeEntry, WorktreePreservedBranch } from "@perch/shared";
 
 
-const INPUT = "rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:border-accent focus:[outline:none]";
-const BADGE = "shrink-0 rounded-ui border border-accent px-[0.28rem] py-0 text-[0.6rem] font-medium text-accent";
+const INPUT = "rounded-ui bg-surface-0 px-2 py-[0.3rem] text-[0.78rem] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]";
+const BADGE = "shrink-0 rounded-ui bg-surface-0 px-[0.28rem] py-0 text-[0.6rem] font-medium text-accent";
 const ACTION = button({ size: "sm", className: "text-fg" });
 /** Mirror of `branch_to_path_slug` in `crates/perch-core/src/worktree.rs`
  * (kept in sync by hand — it exists here only to *preview* the default
@@ -359,7 +359,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
   const popover = open
     ? createPortal(
         <div
-          className="w-[min(420px,calc(100vw_-_16px))] overflow-hidden rounded-ui bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          className="w-[min(420px,calc(100vw_-_16px))] overflow-hidden rounded-ui bg-surface-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
           role="dialog"
           aria-label="Git worktrees"
           data-testid={`worktree-popover-${hostId}-${cwd}`}
@@ -368,7 +368,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
           // The form inputs stop key propagation, so Escape is caught here.
           onKeyDownCapture={(e) => { if (e.key === "Escape") setOpen(false); }}
         >
-          <div className="flex items-baseline justify-between gap-2 border-b border-b-overlay-0 px-[0.65rem] pt-[0.4rem] pb-[0.3rem]">
+          <div className="flex items-baseline justify-between gap-2 px-[0.65rem] pt-[0.4rem] pb-[0.3rem]">
             <span className="text-[0.72rem] font-semibold tracking-[0.04em] text-subtext-0 uppercase">{showCreateForm ? "New workspace" : "Worktrees"}</span>
             <span className="overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-accent" title={cwd}>
               {basename(cwd)}
@@ -400,7 +400,7 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                       )}
                       {entry.isDirty && (
                         <span
-                          className={cn(BADGE, "border-yellow text-yellow")}
+                          className={cn(BADGE, "text-yellow")}
                           data-testid={`worktree-dirty-${entry.path}`}
                           title="Uncommitted or untracked changes"
                         >
@@ -440,12 +440,10 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
           </div>
 
           {error && (
-            <div className="border-t border-t-overlay-0 px-[0.65rem] py-[0.35rem] text-[0.72rem] whitespace-pre-wrap text-red" data-testid="worktree-error">
+            <div className="px-[0.65rem] py-[0.35rem] text-[0.72rem] whitespace-pre-wrap text-red" data-testid="worktree-error">
               {error}
             </div>
           )}
-
-          <div className="h-px bg-overlay-0" />
 
           {showCreateForm ? (
             <div className="flex flex-col gap-[0.3rem] px-[0.65rem] py-[0.45rem]">

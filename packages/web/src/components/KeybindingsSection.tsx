@@ -15,7 +15,7 @@ const GROUPS: [KeybindGroup, string][] = [
   ["global", "Global"], ["tabs", "Tabs"], ["nests", "Nests and birdhouses"], ["panes", "Splits and panes"], ["terminal", "Terminal"], ["editor", "File editor"], ["navigator", "Navigator"], ["directory", "Folder picker"], ["leader", "Leader and follow-up keys"], ["resize", "Resize mode"],
 ];
 
-const CHIP = "min-w-24 cursor-pointer rounded-ui border bg-surface-1 px-2 py-[0.2rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.75rem] hover:border-accent focus-visible:border-accent";
+const CHIP = "min-w-24 cursor-pointer rounded-ui bg-surface-1 px-2 py-[0.2rem] text-center [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[0.75rem] hover:bg-overlay-0";
 const ICON = "cursor-pointer rounded-ui bg-transparent px-[0.4rem] py-[0.1rem] text-[0.85rem] leading-none text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
 
 export function KeybindingsSection() {
@@ -80,7 +80,7 @@ export function KeybindingsSection() {
               <SettingRow key={s.id} title={s.description} description={note?.id === s.id ? note.text : undefined}>
                 <button
                   type="button"
-                  className={cn(CHIP, active ? "border-accent text-accent" : "border-overlay-0", !spec && !active && "text-subtext-0")}
+                  className={cn(CHIP, active && "bg-surface-0 text-accent", !spec && !active && "text-subtext-0")}
                   data-testid={`keybinding-${s.id}`}
                   aria-label={`Shortcut for ${s.description}`}
                   onClick={() => { setNote(null); setRecording(active ? null : s.id); }}

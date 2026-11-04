@@ -144,7 +144,7 @@ export function MacPermissionSetup({ enabled }: { enabled: boolean }) {
       {/* Reserve 4rem for Dialog padding/title inside its 85vh ceiling. */}
       <div ref={content} tabIndex={-1} className="flex max-h-[calc(85vh-4rem)] min-h-0 flex-col outline-none">
         <div className="min-h-0 flex-1 overflow-y-auto"><MacPermissions /></div>
-        <div className="shrink-0 border-t border-overlay-0 pt-3">
+        <div className="shrink-0 pt-3">
           <p className={MUTED}>You can revisit these controls in Settings → Permissions.</p>
           <div className="mt-2 flex items-center justify-between gap-2">
             <button type="button" className={CATALOG_TOGGLE} onClick={close}>Not now</button>

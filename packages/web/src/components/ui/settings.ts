@@ -5,7 +5,7 @@ export const CATALOG_ACTION = `flex items-center gap-2 ${CATALOG_TOGGLE}`;
 /** Settings-modal chrome shared by `SettingsModal` and `AgentCatalog`.
  * `settings-modal__*` tokens that e2e selects on (`host-row`, `agent-block`,
  * `model-row`, `body`, `backdrop`) are kept as unstyled hooks at the use site. */
-export const SECTION = "border-b border-b-overlay-0 px-4 py-3 last:[border-bottom:none]";
+export const SECTION = "px-4 py-3";
 export const SECTION_TITLE = "m-0 mb-[0.6rem] text-[0.88rem] font-semibold tracking-[0.04em] text-fg uppercase";
 export const MUTED = "m-0 mt-[0.4rem] text-[0.78rem] text-subtext-0";
 export const EMPTY = "m-0 mb-2 text-[0.82rem] text-subtext-0";
@@ -13,9 +13,9 @@ export const EMPTY = "m-0 mb-2 text-[0.82rem] text-subtext-0";
 export const FIELD_ROW = "settings-modal__field-row [&_.mode-switch]:ml-0 flex items-center gap-[0.6rem] text-[0.82rem]";
 export const CHECKBOX_ROW = "mb-[0.6rem] flex cursor-pointer items-center gap-2 text-[0.82rem] text-fg";
 
-const FIELD = "rounded-ui border border-overlay-0 bg-surface-1 text-fg [font-family:inherit]";
+const FIELD = "rounded-ui bg-surface-1 text-fg [font-family:inherit]";
 // On a phone (<=700px) fields are touch-sized, inputs take a whole line and rows wrap.
-export const SELECT = `${FIELD} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:border-accent focus:[outline:none]`;
+export const SELECT = `${FIELD} px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`;
 export const SELECT_HOST = `${SELECT} min-w-[5.5rem] shrink-0`;
 const INPUT_BASE = `${FIELD} min-w-0 px-[0.55rem] py-[0.35rem] text-[0.82rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)]`;
 export const INPUT = `${INPUT_BASE} flex-1 max-[700px]:flex-[1_1_100%]`;
@@ -24,7 +24,7 @@ export const INPUT_WIDE = `${INPUT_BASE} flex-[1_1_100%]`;
 export const ADD_ROW = "flex flex-wrap items-center gap-[0.4rem]";
 
 export const LIST = "m-0 mb-2 flex list-none flex-col gap-[0.3rem] p-0";
-const ROW = "flex items-center gap-2 max-[700px]:flex-wrap rounded-ui border border-overlay-0 bg-surface-1 px-2 py-[0.35rem] text-[0.82rem]";
+const ROW = "flex items-center gap-2 max-[700px]:flex-wrap rounded-ui bg-surface-1 px-2 py-[0.35rem] text-[0.82rem]";
 export const HOST_ROW = `settings-modal__host-row ${ROW}`;
 export const MODEL_ROW = `settings-modal__model-row ${ROW}`;
 export const NAME = "min-w-0 overflow-hidden font-semibold text-ellipsis whitespace-nowrap text-fg";

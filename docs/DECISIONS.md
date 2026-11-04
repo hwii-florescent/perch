@@ -7,6 +7,17 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-04 — One soft, borderless component language (owner)
+
+- Every control follows the main shell: filled surfaces, **no borders or
+  hairlines**, one 8px `--radius` (menus, dialogs, popovers, fields, buttons,
+  badges, settings, the Git drawer). Fields are a `surface-0`/`surface-1` fill
+  (one step off their container); focus is a 1px accent outline; hover and
+  selected are fills, never a border colour or a left accent bar.
+  `input, select, textarea` default to `border: 0` in `base.css`.
+- Hosted chat (`ui/chat.ts`, `ui/composer.ts`, `chat.css`) is frozen and keeps
+  its old chrome.
+
 ## 2026-11-03 — By status replaces Needs You; the core owns sidebar order (owner)
 
 - **By status** is the sidebar's default Organize view, shown as Needs you, Done,

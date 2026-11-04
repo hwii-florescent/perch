@@ -22,11 +22,11 @@ const unfold = StateEffect.define<null>();
 
 const ROW = "flex items-center gap-1";
 const CONTROL = "box-border h-7 rounded-ui text-[0.82rem] leading-none";
-const FIELD = `${CONTROL} min-w-0 flex-1 border border-overlay-0 bg-surface-0 px-[0.55rem] text-fg [font-family:inherit] placeholder:text-subtext-0 focus:[outline:1px_solid_var(--accent)]`;
+const FIELD = `${CONTROL} min-w-0 flex-1 bg-surface-0 px-[0.55rem] text-fg [font-family:inherit] placeholder:text-subtext-0 focus:[outline:1px_solid_var(--accent)]`;
 const BUTTON = `${CONTROL} inline-flex shrink-0 cursor-pointer items-center justify-center bg-transparent px-2 text-subtext-0 [border:0] [font-family:inherit] [transition:color_0.1s_ease,background_0.1s_ease] hover:bg-surface-0 hover:text-fg focus-visible:bg-surface-0 focus-visible:text-fg`;
 const SQUARE = `${BUTTON} w-7 px-0`;
 // A checkbox label drawn as a toggle: the real checkbox stays (screen readers, `checked`), the ring marks "on".
-const TOGGLE = `${SQUARE} has-[:checked]:bg-surface-0 has-[:checked]:text-fg has-[:checked]:[box-shadow:inset_0_0_0_1px_var(--overlay-1)] has-[:focus-visible]:bg-surface-0`;
+const TOGGLE = `${SQUARE} has-[:checked]:bg-surface-0 has-[:checked]:text-fg has-[:focus-visible]:bg-surface-0`;
 
 type Props = Record<string, string | ((event: Event) => void)>;
 

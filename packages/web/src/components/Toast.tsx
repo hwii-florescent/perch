@@ -18,7 +18,7 @@ function ToastItem({ id, sessionId, title }: { id: string; sessionId: string; ti
   return (
     <button
       type="button"
-      className="flex cursor-pointer items-center gap-2 rounded-ui border border-overlay-0 bg-surface-0 px-[0.8rem] py-[0.55rem] text-left text-[0.8rem] text-fg [font-family:inherit] shadow-[0_4px_16px_rgba(0,0,0,0.35)] animate-toast-in hover:border-accent"
+      className="flex cursor-pointer items-center gap-2 rounded-ui bg-surface-0 px-[0.8rem] py-[0.55rem] text-left text-[0.8rem] text-fg [font-family:inherit] shadow-[0_4px_16px_rgba(0,0,0,0.35)] animate-toast-in hover:bg-surface-1"
       data-testid={`toast-${sessionId}`}
       onClick={() => {
         switchSession(sessionId);

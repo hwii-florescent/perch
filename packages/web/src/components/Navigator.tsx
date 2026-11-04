@@ -30,8 +30,8 @@ import { shortcutFor } from "../keybinds";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { runInWorkspace } from "../runs";
 
-const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg [border-style:none_none_none_solid] border-current border-l-2 border-l-transparent";
-const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1 border-l-accent" : "[background:none]");
+const ROW = "flex w-full cursor-pointer items-center gap-2 px-4 py-[0.45rem] text-left [font-family:inherit] text-[0.85rem] text-fg";
+const row = (selected: boolean) => cn(ROW, selected ? "bg-surface-1" : "[background:none]");
 const ROW_TITLE = "min-w-12 shrink overflow-hidden text-ellipsis whitespace-nowrap";
 const ROW_CWD = "ml-auto min-w-0 shrink-[3] overflow-hidden text-ellipsis whitespace-nowrap text-[0.72rem] text-subtext-0";
 
@@ -212,7 +212,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
   const modal = (
     <div className="fixed inset-0 z-[2000] flex items-start justify-center bg-[rgba(0,0,0,0.55)] pt-[12vh]" onClick={onClose}>
       <div
-        className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[min(480px,calc(100dvh_-_16vh_-_2rem))] flex-col overflow-hidden rounded-ui border border-accent bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="flex w-[min(560px,calc(100vw_-_2rem))] max-h-[min(480px,calc(100dvh_-_16vh_-_2rem))] flex-col overflow-hidden rounded-ui bg-panel-bg shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
         role="dialog"
         aria-modal="true"
         aria-label="Navigator"
@@ -222,7 +222,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
         <input
           ref={inputRef}
           type="text"
-          className="shrink-0 bg-surface-1 px-4 py-3 [font-family:inherit] text-[0.95rem] text-fg [border-style:none_none_solid] border-current border-b border-b-overlay-0 [outline:none]"
+          className="shrink-0 bg-surface-1 px-4 py-3 [font-family:inherit] text-[0.95rem] text-fg [outline:none]"
           data-testid="navigator-input"
           aria-label="Search files, sessions and commands"
           placeholder="Search files, sessions, agents… or > command"
@@ -230,14 +230,14 @@ export function Navigator({ open, onClose }: NavigatorProps) {
           onChange={(e) => setQuery(e.target.value)}
         />
 
-        <div className="flex shrink-0 gap-[0.3rem] border-b border-b-overlay-0 px-4 py-2">
+        <div className="flex shrink-0 gap-[0.3rem] px-4 py-2">
           {FILTER_CHIPS.map((chip) => (
             <button
               key={chip.id}
               type="button"
               className={cn(
-                "cursor-pointer rounded-ui border border-overlay-0 bg-surface-1 px-[0.55rem] py-[0.15rem] [font-family:inherit] text-[0.72rem] text-subtext-0 [transition:color_0.12s_ease,border-color_0.12s_ease]",
-                filter === chip.id && "border-accent text-accent",
+                "cursor-pointer rounded-ui bg-surface-1 px-[0.55rem] py-[0.15rem] [font-family:inherit] text-[0.72rem] text-subtext-0 [transition:color_0.12s_ease,background_0.12s_ease]",
+                filter === chip.id && "bg-surface-0 text-accent",
               )}
               data-testid={`navigator-filter-${chip.id}`}
               onClick={() => setFilter(chip.id)}
@@ -278,7 +278,7 @@ export function Navigator({ open, onClose }: NavigatorProps) {
             </button>
           ))}
         </div>
-        {searchActive && <p className="m-0 shrink-0 border-t border-overlay-0 px-4 py-2 text-[0.72rem] [overflow-wrap:anywhere] text-subtext-0" role="status">
+        {searchActive && <p className="m-0 shrink-0 px-4 py-2 text-[0.72rem] [overflow-wrap:anywhere] text-subtext-0" role="status">
           Files in {workspace?.path}. Skips VCS, dependency and build folders; not .gitignore.
           {(matchingSearch?.truncated || (matchingSearch?.entries.length ?? 0) > 50) && " Results limited; narrow your search."}
         </p>}
