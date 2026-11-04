@@ -160,13 +160,13 @@ class AgentView extends KeptTerminal<ViewState> {
     finally { this.set({ pending: false }); }
   }
 
-  /** Take the size back from a phone: this terminal, or every one a phone holds. */
+  /** Take the size back from a phone: this terminal (with its stop authority, as "Fit here" did), or every one a phone holds. */
   async takeBack(all: boolean) {
     if (this.state.pending) return;
     this.set({ pending: true, error: null });
     try {
       if (all) await takeBackAllSizes();
-      else await this.binding.takeResize();
+      else await this.binding.takeControl();
       this.created.fit();
     } catch (reason) { this.set({ error: (reason as Error).message }); }
     finally { this.set({ pending: false }); }
@@ -232,16 +232,16 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   // exit — but its conversation is kept and reattaching resumes it. Saying
   // "exited (code 0)" for that would read as lost work.
   const sleeping = status?.state === "sleeping";
-  // Shared typing never needs takeover. The optional Fit here action moves
-  // sizing/stop authority, without making the other screens read-only.
+  // Shared typing never needs takeover. On a phone, Fit here moves sizing/stop authority
+  // without making the other screens read-only; the desktop has the take-back notice instead.
   // A phone holds the size of this computer's terminal: the notice offers it back, in place of "Fit here".
   const phoneSized = !isMobile && shared && !resizing && !!terminalId && sizedByOtherDevice(status);
-  const label = !connected ? "Reconnecting…" : phoneSized ? null : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? "Shared terminal" : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
+  const label = !connected ? "Reconnecting…" : phoneSized ? null : sleeping || exitCode !== null ? null : error && !terminalId ? "Agent unavailable" : !status ? "Opening agent…" : controlling ? null : shared ? (isMobile ? "Shared terminal" : null) : status.inputOwner ? "Another view is typing in this agent" : "Viewing agent";
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>
     {label && <div className={cn(glass, "absolute top-2 right-3 z-[2] flex items-center gap-1 py-0.5 pr-0.5 pl-3 text-[0.8rem] text-subtext-0")}>
       <span role="status">{label}</span>
       {!terminalId && error && connected && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending} onClick={startOver}>Retry CLI</button>}
-      {terminalId && status && !controlling && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending || !connected} onClick={() => void view?.takeControl()}>
+      {terminalId && status && !controlling && (isMobile || !shared) && <button type="button" className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })} disabled={pending || !connected} onClick={() => void view?.takeControl()}>
         {pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control"}
       </button>}
     </div>}

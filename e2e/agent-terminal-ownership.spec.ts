@@ -83,7 +83,8 @@ test("agent runtime survives view changes and control transfers between desktop 
     await expect(mobile.locator(".xterm-rows")).toContainText(`${marker}_phone`);
     await expect(mobile).toHaveAttribute("data-writable", "true");
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    expect((await desktop.getByRole("button", { name: "Fit here", exact: true }).boundingBox())!.height).toBeGreaterThan(0);
+    await expect(desktop.getByTestId("phone-size-notice")).toBeVisible();
+    await expect(desktop.getByRole("button", { name: "Fit here", exact: true })).toHaveCount(0);
     const shots = path.resolve(__dirname, "../.impeccable/review");
     fs.mkdirSync(shots, { recursive: true });
     await phone.screenshot({ path: path.join(shots, `agent-mobile-${testInfo.project.name}.png`) });
@@ -97,7 +98,7 @@ test("agent runtime survives view changes and control transfers between desktop 
     await expect(desktop).toHaveAttribute("data-terminal-id", id);
 
     // Owners can also choose observation-only dismissal in the close dialog.
-    await desktop.getByRole("button", { name: "Fit here", exact: true }).click();
+    await desktop.getByRole("button", { name: "Take back this tab" }).click();
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     await page.getByTestId(`tab-close-${sessionId}`).click();
     await page.getByRole("button", { name: "Keep running and dismiss this view", exact: true }).click();

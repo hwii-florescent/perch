@@ -142,3 +142,7 @@ body {
   inset: var(--visible-top, 0px) 0 auto 0;
   height: var(--visible-height, 100dvh);
 }
+/* With the keyboard up the terminal's own key bar is the bottom row; the pane tabs wait. */
+:root[data-keyboard] .mobile-pane-nav {
+  display: none;
+}

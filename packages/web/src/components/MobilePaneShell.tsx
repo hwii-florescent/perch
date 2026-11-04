@@ -70,7 +70,7 @@ export function MobilePaneShell({
           ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} />
           : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Pick a workspace in the switcher.</div>)}
       </div>
-      <nav className="shrink-0 px-2 pt-1 pb-[max(0.4rem,env(safe-area-inset-bottom))]" aria-label="Mobile panes">
+      <nav className="mobile-pane-nav shrink-0 px-2 pt-1 pb-[max(0.4rem,env(safe-area-inset-bottom))]" aria-label="Mobile panes">
        <div className={cn(glass, "flex gap-0.5 p-0.5")}>
         {panes.map(({ kind, label, testId, icon }) => (
           <button

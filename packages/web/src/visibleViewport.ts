@@ -5,8 +5,12 @@
  * viewport up and scrolls the page, so the header goes off the top and the terminal's bottom
  * stays under the keys. `.app--mobile` (base.css) is `position: fixed` and sized by these two
  * variables instead: `--visible-height` is the visual viewport's height and `--visible-top`
- * how far iOS panned it.
+ * how far iOS panned it. `data-keyboard` marks the root while the keyboard covers a real
+ * part of the screen, so the phone can drop its bottom bar and give the terminal the room.
  */
+/** Smaller gaps are browser toolbars sliding away, not a keyboard. */
+const KEYBOARD_MIN = 150;
+
 export function trackVisibleViewport(
   root: HTMLElement = document.documentElement,
   viewport: VisualViewport | null = window.visualViewport,
@@ -15,6 +19,7 @@ export function trackVisibleViewport(
   const update = () => {
     root.style.setProperty("--visible-height", `${viewport.height}px`);
     root.style.setProperty("--visible-top", `${viewport.offsetTop}px`);
+    root.toggleAttribute("data-keyboard", window.innerHeight - viewport.height > KEYBOARD_MIN);
   };
   update();
   viewport.addEventListener("resize", update);
@@ -24,5 +29,6 @@ export function trackVisibleViewport(
     viewport.removeEventListener("scroll", update);
     root.style.removeProperty("--visible-height");
     root.style.removeProperty("--visible-top");
+    root.removeAttribute("data-keyboard");
   };
 }

@@ -236,7 +236,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await page.getByTestId(`workspace-session-${sessionId}`).click({ timeout: 15_000 });
     const desktop = page.getByTestId("persistent-agent-terminal");
     await expect(desktop).toHaveAttribute("data-writable", "true");
-    await desktop.getByRole("button", { name: "Fit here", exact: true }).click();
+    await desktop.getByRole("button", { name: "Take back this tab" }).click();
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     await expect(terminal).toHaveAttribute("data-writable", "true");
     await expect(terminal).not.toHaveAttribute("data-controlling", "true");
