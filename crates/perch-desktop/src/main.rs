@@ -10,6 +10,7 @@ mod browser;
 mod glass;
 #[cfg(target_os = "macos")]
 mod menu;
+mod notify;
 mod permissions;
 #[cfg(target_os = "macos")]
 mod shortcuts;
@@ -212,6 +213,7 @@ fn main() {
             open_external,
             open_in_default_app,
             reveal_in_finder,
+            notify::notify_session,
             permissions::permissions_status,
             permissions::permissions_allow,
             permissions::permissions_verify,

@@ -7,6 +7,7 @@ fn main() {
             "open_external",
             "open_in_default_app",
             "reveal_in_finder",
+            "notify_session",
             "permissions_status",
             "permissions_allow",
             "permissions_verify",

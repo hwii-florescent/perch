@@ -2772,6 +2772,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "block2",
+ "mac-notification-sys",
  "muda",
  "objc2",
  "perch-core",

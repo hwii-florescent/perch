@@ -18,6 +18,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
+serde_json = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy = "0.6"
@@ -25,10 +26,8 @@ objc2 = "0.6"
 block2 = "0.6"
 # Use Tauri's already-transitive parser: its menu constructors silently ignore invalid keys.
 muda = { version = "0.19", default-features = false }
-
-[dev-dependencies]
-# Already used by core/Tauri; decode the complete Settings-derived native probe fixture.
-serde_json = "1"
+# Already transitive (the notification plugin); notify.rs waits for a notification click with it.
+mac-notification-sys = "0.6"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

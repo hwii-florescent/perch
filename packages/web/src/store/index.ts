@@ -11,6 +11,7 @@ import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { defaultModel } from "../models";
 import { applyTheme } from "../themes";
 import { playBlockedTone, playDoneTone } from "../sound";
+import { ensureNotificationPermission, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, windowFocused } from "../notifications";
 import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
   ACTIVE_PROJECT_ID_STORAGE_KEY,
@@ -2555,53 +2556,44 @@ export function handleServerMessage(msg: ServerMessage): void {
         // toast (gated on toastDelivery) and/or play a notification tone
         // (gated on soundEnabled) rather than relying on the user to notice
         // the sidebar dot.
-        const becameDone =
-          !!prev &&
-          prev.status === "running" &&
-          msg.session.status === "idle" &&
-          msg.session.id !== state.sessionId;
-        const becameBlocked =
-          !!prev && !prev.blocked && !!msg.session.blocked && msg.session.id !== state.sessionId;
+        // An unfocused window also alerts for the session being viewed, and
+        // escalates to an OS notification (see notifications.ts).
+        const focused = windowFocused();
+        const viewed = msg.session.id === state.sessionId;
+        const becameDone = !!prev && prev.status === "running" && msg.session.status === "idle";
+        const becameBlocked = !!prev && !prev.blocked && !!msg.session.blocked;
+        const hasEvent = becameDone || becameBlocked;
 
-        if (state.settings?.soundEnabled) {
+        if (state.settings?.soundEnabled && hasEvent && (!viewed || !focused)) {
           if (becameBlocked) playBlockedTone();
-          else if (becameDone) playDoneTone();
+          else playDoneTone();
         }
 
         let toasts = state.toasts;
-        const toastDelivery = state.settings?.toastDelivery ?? "app";
-        if ((becameDone || becameBlocked) && toastDelivery !== "off") {
-          if (toastDelivery === "system" && typeof Notification !== "undefined" && Notification.permission === "granted") {
-            try {
-              const sessionIdForClick = msg.session.id;
-              const notification = new Notification(
-                becameBlocked ? "Session needs attention" : "Session finished",
-                {
-                  body: msg.session.title || "(untitled session)",
-                  // Same id -> the OS replaces the prior notification instead
-                  // of stacking a queue of them for a repeatedly-firing session.
-                  tag: sessionIdForClick,
-                },
-              );
-              // Reuse the exact same action the in-app Toast's onClick uses
-              // (see components/Toast.tsx) so the two click-to-switch paths
-              // cannot diverge; switchSession already re-scopes host/project
-              // for remote sessions the same way the toast path does.
-              notification.onclick = () => {
-                window.focus();
-                usePerchStore.getState().switchSession(sessionIdForClick);
-                notification.close();
-              };
-            } catch {
-              // Fall through to the in-app toast as a best-effort fallback.
-              toasts = [...toasts, { id: newId(), sessionId: msg.session.id, title: msg.session.title }];
-            }
-          } else {
-            toasts = [
-              ...toasts,
-              { id: newId(), sessionId: msg.session.id, title: msg.session.title },
-            ];
+        const toast = { id: newId(), sessionId: msg.session.id, title: msg.session.title };
+        const channel = planNotification({
+          event: hasEvent,
+          viewed,
+          focused,
+          delivery: state.settings?.toastDelivery ?? "app",
+          permission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+        });
+        if (channel === "system") {
+          try {
+            // Click opens the session: same action as the in-app Toast's onClick
+            // (components/Toast.tsx); the desktop shell raises OPEN_SESSION_EVENT.
+            sendSystemNotification(
+              becameBlocked ? "Session needs attention" : "Session finished",
+              msg.session.title || "(untitled session)",
+              msg.session.id,
+              () => usePerchStore.getState().switchSession(msg.session.id),
+            );
+          } catch {
+            toasts = [...toasts, toast];
           }
+        } else if (channel === "toast") {
+          if (!focused) ensureNotificationPermission();
+          toasts = [...toasts, toast];
         }
         // The moment a brand-new session gets its DB row (Fix 3's lazy insert
         // fires on the first message) is the first time its cwd is known to
@@ -3148,6 +3140,9 @@ export function handleServerMessage(msg: ServerMessage): void {
     case "settings.current": {
       usePerchStore.setState({ settings: msg.settings });
       applyTheme(msg.settings.theme);
+      // Desktop: ask for OS permission up front so the first unfocused alert
+      // can show (browsers need a user gesture; Settings asks there).
+      if (msg.settings.toastDelivery !== "off" && "__TAURI_INTERNALS__" in window) ensureNotificationPermission();
       break;
     }
     case "hosts.list":
@@ -3316,4 +3311,9 @@ socket.onConnectionChange((connected) => {
 // Apply the default look immediately so there's no flash of unstyled content
 // before the server's settings.current (the persisted theme) arrives.
 applyTheme("perch");
+// The desktop shell raises this when an OS notification is clicked (notify.rs).
+window.addEventListener(OPEN_SESSION_EVENT, (event) => {
+  const id = (event as CustomEvent<unknown>).detail;
+  if (typeof id === "string" && id) usePerchStore.getState().switchSession(id);
+});
 socket.connect();
