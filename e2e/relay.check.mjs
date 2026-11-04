@@ -87,7 +87,7 @@ try {
 
   const { chromium, webkit } = await import("@playwright/test");
   browser = await (process.env.PERCH_E2E_WEBKIT === "1" ? webkit : chromium).launch({ headless: true });
-  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const seen = [];
   phone.on("request", (request) => seen.push(request.url()));
   phone.on("websocket", (socket) => seen.push(socket.url()));
@@ -183,7 +183,11 @@ try {
   await phone.locator('[data-testid^="workspace-session-"]:not([data-testid*="close"])').first().click();
   const phoneTerminal = phone.locator('[data-testid="persistent-agent-terminal"][data-writable="true"][data-controlling="true"]');
   await phoneTerminal.waitFor({ timeout: 30_000 });
-  await phone.locator(".xterm-helper-textarea").focus();
+  // A tap must focus the terminal's input, or a phone never opens its keyboard.
+  const surface = await phoneTerminal.locator(".terminal__surface").boundingBox();
+  await phone.touchscreen.tap(surface.x + surface.width / 2, surface.y + surface.height / 2);
+  await phone.waitForFunction(() => document.activeElement?.classList.contains("xterm-helper-textarea"), undefined, { timeout: 5000 })
+    .catch(() => { throw new Error("tapping the phone terminal did not focus its input, so no keyboard would open"); });
   await phone.keyboard.type("echo PHONE_TYPED_OK");
   await phone.keyboard.press("Enter");
   await desktop.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent.includes("PHONE_TYPED_OK"), undefined, { timeout: 15_000 });

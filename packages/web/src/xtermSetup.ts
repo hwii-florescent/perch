@@ -370,6 +370,22 @@ export function createPerchTerminal(
   term.open(container);
   const stopTuiWheel = attachTerminalTuiWheel(term);
 
+  // xterm 6.1's touch Gesture preventDefaults touchstart/touchend, so the browser never
+  // synthesizes the mousedown xterm focuses on: a tap on a phone left the keyboard closed.
+  // A touch that stays put is a tap; focus inside its own gesture so iOS opens the keyboard.
+  let tap: { x: number; y: number; at: number } | null = null;
+  const tapStart = (event: TouchEvent) => {
+    const touch = event.touches[0];
+    tap = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY, at: event.timeStamp } : null;
+  };
+  const tapEnd = (event: TouchEvent) => {
+    const touch = event.changedTouches[0];
+    if (tap && touch && Math.hypot(touch.clientX - tap.x, touch.clientY - tap.y) < 10 && event.timeStamp - tap.at < 500) term.focus();
+    tap = null;
+  };
+  container.addEventListener("touchstart", tapStart, { passive: true });
+  container.addEventListener("touchend", tapEnd, { passive: true });
+
   // macOS can consume Ctrl+Return as a contextual-menu shortcut before WebKit
   // dispatches keydown. The page gets contextmenu (without ctrlKey) and Enter
   // keyup only. Recover that missing press, not a new PTY encoding or shortcut.
@@ -642,6 +658,8 @@ export function createPerchTerminal(
       dropWebgl();
       mql?.removeEventListener("change", handleSchemeChange);
       stopTuiWheel();
+      container.removeEventListener("touchstart", tapStart);
+      container.removeEventListener("touchend", tapEnd);
       stopContext();
       commandMarks.dispose();
       keySurface?.removeEventListener("keydown", trackMenuKey, true);
