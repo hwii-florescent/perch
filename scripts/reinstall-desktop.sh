@@ -15,6 +15,27 @@ BUILT=target/release/bundle/macos/perch.app
 npm run build
 (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build --bundles app)
 
+# macOS ties Full Disk Access and the other grants to the app's signing identity, and the
+# daemon outliving this swap keeps the old one. A build signed differently (typically ad-hoc,
+# from a checkout without the gitignored crates/perch-desktop/tauri.macos.conf.json) would
+# drop the grants, so stop before touching the installed app. An installed ad-hoc app has no
+# stable identity to protect. PERCH_ALLOW_IDENTITY_CHANGE=1 installs anyway.
+requirement() { codesign -d -r- "$1" 2>&1 | sed -n 's/^designated => //p'; }
+if [ -d "$APP" ] && [ "${PERCH_ALLOW_IDENTITY_CHANGE:-}" != 1 ]; then
+  installed="$(requirement "$APP")"
+  built="$(requirement "$BUILT")"
+  case "$installed" in
+    ""|*cdhash*) ;;
+    *) if [ "$installed" != "$built" ]; then
+      echo "Refusing to install: the new build is signed differently from the installed app, so macOS would ask for every permission again." >&2
+      echo "  installed: $installed" >&2
+      echo "  built:     ${built:-none}" >&2
+      echo "Build from the checkout that has crates/perch-desktop/tauri.macos.conf.json, or set PERCH_ALLOW_IDENTITY_CHANGE=1." >&2
+      exit 1
+    fi ;;
+  esac
+fi
+
 # Exact argv match: only the app, never its `__perchd serve` daemon.
 app_pids() { pgrep -fx "$EXE" || true; }
 gone_within() { # seconds
