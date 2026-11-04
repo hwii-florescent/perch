@@ -34,6 +34,8 @@ class AgentView extends KeptTerminal<ViewState> {
   readonly created: PerchTerminal;
   /** The terminal id while this view may type into it. */
   inputId: string | null = null;
+  /** A phone fits the PTY to itself once, on opening; after that "Fit here" is the user's call. */
+  autoFitted = false;
   private binding: ReturnType<typeof openAgentTerminal>;
   private stop: () => void;
 
@@ -174,6 +176,13 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   );
   const search = useTerminalSearch(view?.created.term ?? null);
   const isMobile = useIsMobileWidth();
+  // A phone cannot show a desktop-sized grid, so it sizes the PTY on opening.
+  const fitOnOpen = isMobile && shared && !!terminalId && !!status && !controlling && !!view && !view.autoFitted;
+  useEffect(() => {
+    if (!fitOnOpen || !view) return;
+    view.autoFitted = true;
+    void view.takeControl();
+  }, [fitOnOpen, view]);
 
   useEffect(() => {
     if (!connected || !container.current) return;

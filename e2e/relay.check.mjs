@@ -168,6 +168,31 @@ try {
   // The address bar no longer holds the key or the code.
   assert(!phone.url().includes("pair=") && !phone.url().includes("r="), phone.url());
 
+  // The desktop controls a shell; the phone opens it through the relay, fits the PTY to itself and types.
+  {
+  const desktop = await browser.newPage({ viewport: { width: 1272, height: 820 } });
+  await desktop.goto(`http://127.0.0.1:${corePort}/`);
+  await desktop.getByTestId("onboarding-dismiss").click({ timeout: 5000 }).catch(() => {});
+  await desktop.getByTestId("new-session-local").click();
+  await desktop.getByTestId("new-session-popover-agent").selectOption("terminal");
+  await desktop.getByTestId("project-option-none").click();
+  await desktop.locator('[data-testid="persistent-agent-terminal"][data-controlling="true"]').waitFor({ timeout: 30_000 });
+  await phone.reload();
+  await inApp();
+  await phone.getByText("New session").first().click();
+  await phone.locator('[data-testid^="workspace-session-"]:not([data-testid*="close"])').first().click();
+  const phoneTerminal = phone.locator('[data-testid="persistent-agent-terminal"][data-writable="true"][data-controlling="true"]');
+  await phoneTerminal.waitFor({ timeout: 30_000 });
+  await phone.locator(".xterm-helper-textarea").focus();
+  await phone.keyboard.type("echo PHONE_TYPED_OK");
+  await phone.keyboard.press("Enter");
+  await desktop.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent.includes("PHONE_TYPED_OK"), undefined, { timeout: 15_000 });
+  const phoneCols = await phone.evaluate(() => document.querySelector(".xterm-rows").children[0].textContent.length);
+  // The desktop surface is ~150 columns wide; a phone left following it would show that many.
+  assert(phoneCols <= 100, `the phone terminal did not fit the phone: ${phoneCols} columns`);
+  await desktop.close();
+  }
+
   // A reload keeps working: the link is remembered, the token is the same.
   await phone.goto(relayOrigin);
   await inApp();

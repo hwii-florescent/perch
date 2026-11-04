@@ -52,7 +52,10 @@ fn long_text_is_split_into_frames_the_relay_accepts_and_joins_back_exactly() {
     let (last, rest) = frames.split_last().unwrap();
     assert_eq!(last.0, WS_TEXT);
     assert!(rest.iter().all(|(kind, _)| *kind == WS_TEXT_PART));
-    let joined: Vec<u8> = frames.iter().flat_map(|(_, piece)| piece.iter().copied()).collect();
+    let joined: Vec<u8> = frames
+        .iter()
+        .flat_map(|(_, piece)| piece.iter().copied())
+        .collect();
     assert_eq!(String::from_utf8(joined).unwrap(), text);
     // Short and empty messages stay a single plain frame.
     assert_eq!(host::text_frames("{}"), vec![(WS_TEXT, &b"{}"[..])]);
