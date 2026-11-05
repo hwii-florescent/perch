@@ -12,7 +12,7 @@
 //! Phase 3's session.rs commit) and are imported by name below.
 
 use super::*;
-use session::{prompt_payload_digest, resolve_review_target, review_snapshot_revision};
+use session::{resolve_review_target, review_snapshot_revision};
 
 fn review_error_response(request_id: String, error: review::ReviewError) -> ServerMessage {
     request_error(
@@ -874,207 +874,20 @@ fn spawn_review_batch_send(
             );
             return;
         };
-        // Route by what owns the session, not by what the provider *can* do.
-        // `native_ui::supported` is true for claude and codex, so keying on it
-        // alone sent a Hosted session's packet down the native path, where the
-        // write went to a CLI that does not exist and delivery never settled —
-        // the UI sat on "Waiting for the agent…" forever. A session with no
-        // `cli_provider_id` is Hosted and takes the ordinary prompt path.
+        // Route by what owns the session: only a started CLI session has a
+        // process to write to. Anything else is a client error, never a silent
+        // "Waiting for the agent…".
         if session.cli_provider_id.is_some() && crate::native_ui::supported(&agent) {
             native_ui::send_review(&state, request_id, row, &session_id, &agent).await;
             return;
         }
-        let agent = match agent.as_str() {
-            "claude" => AgentKind::Claude,
-            "codex" => AgentKind::Codex,
-            // Reachable now that routing keys on ownership rather than on
-            // provider capability: `target_agent_id` comes from the client,
-            // and a Hosted session can name any provider the target check
-            // allows. Only claude and codex have a hosted runner, so this is
-            // a client error, never a panic.
-            other => {
-                fail(
-                    &out_tx,
-                    request_id,
-                    "review_target_invalid",
-                    format!("{other} has no hosted runner; start its CLI in this session to send review notes."),
-                    false,
-                );
-                return;
-            }
-        };
-        let payload_digest = prompt_payload_digest(
-            &session_id,
-            Some(&workspace_id),
-            &session.host_id,
-            &session.cwd,
-            &row.packet.markdown,
-            agent,
-            None,
+        fail(
+            &out_tx,
+            request_id,
+            "review_target_invalid",
+            format!("{agent} has no native session here; start its CLI in this session to send review notes."),
             false,
-            None,
-            &[],
         );
-        let (prompt, _) = match app.db.reserve_prompt_operation(
-            &send_operation_id,
-            &session_id,
-            Some(&workspace_id),
-            &payload_digest,
-            &row.packet.markdown,
-            Some(agent_str(agent)),
-            None,
-        ) {
-            Ok(result) => result,
-            Err(error) => {
-                fail(
-                    &out_tx,
-                    request_id,
-                    "review_prompt_rejected",
-                    error.to_string(),
-                    false,
-                );
-                return;
-            }
-        };
-        if matches!(prompt.state.as_str(), "delivered" | "unconfirmed") {
-            match settle_review_packet_from_prompt(
-                &app,
-                &packet_id,
-                &send_operation_id,
-                &workspace_id,
-                &prompt.state,
-            ) {
-                Ok(row) => {
-                    let _ = out_tx.send(review_delivery_result(request_id, row));
-                }
-                Err(error) => {
-                    fail(
-                        &out_tx,
-                        request_id,
-                        "review_delivery_persistence_failed",
-                        error,
-                        false,
-                    );
-                }
-            }
-            return;
-        }
-
-        // Reserve the prompt first. If the process exits after the packet is
-        // claimed but before the normal chat path claims this operation,
-        // startup reconciliation marks both rows unconfirmed and a retry can
-        // never launch a duplicate provider turn.
-        let Some((claimed, won)) = (match app.db.claim_review_packet(
-            &packet_id,
-            &send_operation_id,
-            &workspace_id,
-            wall_clock_millis(),
-        ) {
-            Ok(result) => result,
-            Err(error) => {
-                fail(
-                    &out_tx,
-                    request_id,
-                    "review_packet_failed",
-                    error.to_string(),
-                    true,
-                );
-                return;
-            }
-        }) else {
-            fail(
-                &out_tx,
-                request_id,
-                "review_packet_not_found",
-                "review packet was not found",
-                false,
-            );
-            return;
-        };
-        if !won {
-            let _ = out_tx.send(review_delivery_result(request_id, claimed));
-            return;
-        }
-        let chat_session_id = session_id.clone();
-        let chat_text = claimed.packet.markdown.clone();
-        // The normal chat path owns prompt reservation, provider launch, and
-        // session routing. Reuse it with the packet's send operation id so a
-        // retry cannot create a second user message or provider turn.
-        let chat = ClientMessage::ChatSend {
-            session_id,
-            text: claimed.packet.markdown.clone(),
-            operation_id: Some(claimed.packet.send_operation_id.clone()),
-            agent,
-            model: None,
-            plan_mode: false,
-            effort: None,
-            attachments: None,
-        };
-        // `handle_message` only needs the raw JSON for hub routing. Supplying
-        // the complete wire payload keeps a remote session from receiving an
-        // empty prompt while preserving the typed local path.
-        let raw_chat = serde_json::json!({
-            "type": "chat.send",
-            "sessionId": chat_session_id,
-            "text": chat_text,
-            "operationId": send_operation_id,
-            "agent": agent_str(agent),
-        })
-        .to_string();
-        handle_message(&state, chat, &raw_chat);
-        tokio::task::yield_now().await;
-        // The normal path settles the prompt when its dispatch task is
-        // accepted. Until that durable outcome is visible, report the packet
-        // as claimed; a later retry will observe the same row and never start
-        // another provider process. A queued prompt here means the typed path
-        // rejected the target before claiming it, so preserve uncertainty
-        // rather than claiming delivery.
-        let result = match app.db.get_prompt_operation(&send_operation_id) {
-            Ok(Some(prompt)) if prompt.state == "claimed" => {
-                match app.db.get_review_packet(&packet_id) {
-                    Ok(Some(row)) => Ok(row),
-                    Ok(None) => Err("review packet disappeared while dispatching".to_string()),
-                    Err(error) => Err(error.to_string()),
-                }
-            }
-            Ok(Some(prompt)) if prompt.state == "queued" => {
-                // A queued operation is provably pre-dispatch. It can be
-                // claimed by the original sender after this retry observes
-                // it, so do not convert it into a terminal state.
-                match app.db.get_review_packet(&packet_id) {
-                    Ok(Some(row)) => Ok(row),
-                    Ok(None) => {
-                        Err("review packet disappeared while dispatching review packet".to_string())
-                    }
-                    Err(error) => Err(error.to_string()),
-                }
-            }
-            Ok(Some(prompt)) => settle_review_packet_from_prompt(
-                &app,
-                &packet_id,
-                &send_operation_id,
-                &workspace_id,
-                &prompt.state,
-            ),
-            Ok(None) => {
-                Err("prompt operation disappeared while dispatching review packet".to_string())
-            }
-            Err(error) => Err(error.to_string()),
-        };
-        match result {
-            Ok(row) => {
-                let _ = out_tx.send(review_delivery_result(request_id, row));
-            }
-            Err(error) => {
-                fail(
-                    &out_tx,
-                    request_id,
-                    "review_delivery_persistence_failed",
-                    error,
-                    false,
-                );
-            }
-        }
     });
 }
 

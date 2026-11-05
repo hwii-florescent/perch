@@ -1139,7 +1139,7 @@ pub(super) fn handle_fs_browse(
             let out_tx = state.out_tx.clone();
             let target = target.to_string();
             tokio::spawn(async move {
-                match crate::detached::browse_remote(&host.ssh_host, path.as_deref(), 30).await {
+                match crate::direct_host::browse_remote(&host.ssh_host, path.as_deref(), 30).await {
                     Ok((resolved, parent, home, entries)) => {
                         let _ = out_tx.send(ServerMessage::FsBrowseResult {
                             request_id,

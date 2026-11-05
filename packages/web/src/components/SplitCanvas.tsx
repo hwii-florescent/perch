@@ -246,7 +246,7 @@ export function SplitCanvas() {
         >
           {/* Only a shared canvas has pane headers; a lone pane has none. The tile controls sit over the right end. */}
           <div className="flex h-[30px] shrink-0 items-center gap-2 pr-[4.5rem] pl-3 text-[0.68rem] text-subtext-0" data-testid={`pane-header-${entry.id}`}>
-            <AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId ?? entry.session.lastAgent} size={12} />
+            <AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} />
             <span className="min-w-0 truncate">{entryLabel(entry)}</span>
             <span className="ml-auto flex shrink-0 items-center gap-[0.35rem]">
               <span className="size-[5px] rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />

@@ -112,9 +112,6 @@ fn open_agent_terminal(
                         .clone()
                         .unwrap_or_else(|| Uuid::new_v4().to_string());
                     state.app.db.set_claude_session_id(session_id, &id)?;
-                    if let Some(runtime) = state.runtimes.lock().unwrap().get(session_id) {
-                        runtime.claude_runner.resume_session(id.clone());
-                    }
                     if row.claude_session_id.is_none()
                         || claude_conversation_exists(&id) == Some(false)
                     {
@@ -132,31 +129,6 @@ fn open_agent_terminal(
                     .ok()
                     .and_then(|snapshot| snapshot.provider_session_id),
             };
-        }
-        let model = {
-            let runtimes = state.runtimes.lock().unwrap();
-            runtimes
-                .get(session_id)
-                .and_then(|runtime| match provider_id {
-                    "claude" => runtime.claude_runner.model(),
-                    "codex" => runtime
-                        .last_codex_runner
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|runner| runner.model()),
-                    _ => None,
-                })
-        }
-        .or_else(|| {
-            (row.last_agent.as_deref() == Some(provider_id))
-                .then_some(row.last_model)
-                .flatten()
-        });
-        // Codex resumes its own model/settings; a stale Hosted selection must
-        // not override the native conversation when attaching its UI.
-        if let Some(model) = model.filter(|_| !matches!(provider_id, "codex" | "opencode")) {
-            extra.extend(["--model".to_string(), model]);
         }
         if crate::native_ui::supported(provider_id) {
             let fresh = live.is_none()
@@ -455,27 +427,6 @@ fn maybe_capture_cli_title(app: &AppState, session_id: &str, data: &str) {
     }
 }
 
-/// Model alias to pass on a claude CLI attach, from the session's last
-/// completed turn — only meaningful when that turn *was* claude (aliases are
-/// per-agent). Without it claude falls back to the dated snapshot id in its
-/// transcript, which the GenAI proxy rejects.
-fn claude_model_of(row: &crate::db::SessionRow) -> Option<String> {
-    if row.last_agent.as_deref() == Some("claude") {
-        row.last_model.clone()
-    } else {
-        None
-    }
-}
-
-/// Codex counterpart of [`claude_model_of`].
-fn codex_model_of(row: &crate::db::SessionRow) -> Option<String> {
-    if row.last_agent.as_deref() == Some("codex") {
-        row.last_model.clone()
-    } else {
-        None
-    }
-}
-
 /// Does the claude CLI actually have a conversation for `session_id`?
 ///
 /// perch mints the claude session id *optimistically* — the id is recorded on
@@ -693,8 +644,7 @@ pub(super) fn handle_workspace_run(
                 .db
                 .set_cli_provider(&session_id, crate::agent_fleet::TERMINAL_PROVIDER)?;
             state.app.db.mark_cli_activity(&session_id)?;
-            state.app.registry.create(&session_id, &cwd);
-            session::insert_runtime(&state, &session_id, &cwd, None, None, None);
+            session::insert_runtime(&state, &session_id, &cwd);
             notify_session_updated(&state.app, &session_id);
             let opened = open_agent_terminal(
                 &state,
@@ -871,11 +821,10 @@ pub(super) fn handle_terminal_create(
             return;
         };
         let row = state.app.db.get_session(&attach.session_id).ok().flatten();
-        let (provider_id, model) = match attach.agent {
+        let provider_id = match attach.agent {
             AgentKind::Claude => {
                 // Mint the claude session id up front when the session
-                // has never run a turn, so CLI mode and a later hosted
-                // turn share one conversation.
+                // has never run, so later attaches resume one conversation.
                 let id = row.as_ref().and_then(|r| r.claude_session_id.clone());
                 let id = match id {
                     Some(id) => id,
@@ -893,20 +842,16 @@ pub(super) fn handle_terminal_create(
                         fresh
                     }
                 };
-                (Some(id), row.as_ref().and_then(claude_model_of))
+                Some(id)
             }
-            AgentKind::Codex => (
-                row.as_ref().and_then(|r| r.codex_thread_id.clone()),
-                row.as_ref().and_then(codex_model_of),
-            ),
+            AgentKind::Codex => row.as_ref().and_then(|r| r.codex_thread_id.clone()),
         };
-        let argv = crate::detached::cli_attach_argv(
+        let argv = crate::direct_host::cli_attach_argv(
             &host.ssh_host,
             &attach.session_id,
             &runtime_cwd,
             attach.agent,
             provider_id.as_deref(),
-            model.as_deref(),
         );
         // cwd is `None`: the *local* pty just runs ssh, and the remote
         // cd happens inside the tmux command.
@@ -961,12 +906,13 @@ pub(super) fn handle_terminal_create(
     }
     let argv = match attach.agent {
         AgentKind::Claude => {
-            let (claude_session_id, claude_model) = {
-                let map = state.runtimes.lock().unwrap();
-                map.get(&attach.session_id)
-                    .map(|r| (r.claude_runner.claude_session_id(), r.claude_runner.model()))
-                    .unwrap_or((None, None))
-            };
+            let claude_session_id = state
+                .app
+                .db
+                .get_session(&attach.session_id)
+                .ok()
+                .flatten()
+                .and_then(|row| row.claude_session_id);
             let mut argv = vec!["claude".to_string()];
             match claude_session_id {
                 // Known id *and* claude has (or might have) the
@@ -978,19 +924,13 @@ pub(super) fn handle_terminal_create(
                 // Known id but claude never created the conversation
                 // (CLI opened and closed without a single message).
                 // `--resume` would fail instantly; create it under the
-                // same id so hosted/CLI continuity is preserved.
+                // same id so the conversation stays one.
                 Some(id) => {
                     argv.push("--session-id".to_string());
                     argv.push(id);
                 }
                 None => {
                     let id = Uuid::new_v4().to_string();
-                    {
-                        let map = state.runtimes.lock().unwrap();
-                        if let Some(runtime) = map.get(&attach.session_id) {
-                            runtime.claude_runner.resume_session(id.clone());
-                        }
-                    }
                     // The sessions row is normally inserted lazily
                     // further down (once the pty actually spawned),
                     // but `set_claude_session_id` is an UPDATE — on a
@@ -1009,15 +949,6 @@ pub(super) fn handle_terminal_create(
                     argv.push(id);
                 }
             }
-            // Without an explicit --model, claude falls back to the
-            // dated snapshot id recorded in the transcript (e.g.
-            // claude-haiku-4-5-20251001), which the GenAI proxy
-            // rejects — only the bare alias works. Match whatever
-            // Hosted mode last used, same as every headless turn does.
-            if let Some(model) = claude_model {
-                argv.push("--model".to_string());
-                argv.push(model);
-            }
             argv
         }
         AgentKind::Codex => {
@@ -1029,44 +960,7 @@ pub(super) fn handle_terminal_create(
                 .flatten()
                 .and_then(|row| row.codex_thread_id);
             match codex_thread_id {
-                Some(id) => {
-                    // Prefer the in-memory runner's model (most accurate
-                    // for the current process lifetime). Fall back to the
-                    // DB's last_model for the case where the server was
-                    // restarted and last_codex_runner is None.
-                    let codex_model = {
-                        let map = state.runtimes.lock().unwrap();
-                        map.get(&attach.session_id).and_then(|r| {
-                            r.last_codex_runner
-                                .lock()
-                                .unwrap()
-                                .as_ref()
-                                .map(|r| r.model())
-                        })
-                    };
-                    let codex_model = codex_model.or_else(|| {
-                        state
-                            .app
-                            .db
-                            .get_session(&attach.session_id)
-                            .ok()
-                            .flatten()
-                            .and_then(|row| {
-                                // Only use last_model when the last agent was codex.
-                                if row.last_agent.as_deref() == Some("codex") {
-                                    row.last_model
-                                } else {
-                                    None
-                                }
-                            })
-                    });
-                    let mut argv = vec!["codex".to_string(), "resume".to_string(), id];
-                    if let Some(model) = codex_model {
-                        argv.push("-m".to_string());
-                        argv.push(model);
-                    }
-                    argv
-                }
+                Some(id) => vec!["codex".to_string(), "resume".to_string(), id],
                 None => vec!["codex".to_string()],
             }
         }

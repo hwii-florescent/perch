@@ -1,21 +1,6 @@
-import type { AgentKind, ModelEntry } from "@perch/shared";
-
-export type { ModelEntry };
-
-export interface ModelOption {
-  id: string;
-  label: string;
-}
+import type { AgentKind } from "@perch/shared";
 
 export const AGENTS: { id: AgentKind; label: string }[] = [
   { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
 ];
-
-/** Default model for an agent given the server-provided available list: the
- * entry flagged `isDefault` by the owning host (its CLI's own configured
- * default), else the first entry (lists arrive best-first).
- * Returns "" when the list is empty (server not yet connected). */
-export function defaultModel(agent: AgentKind, available: ModelEntry[]): string {
-  return available.find((m) => m.isDefault)?.id ?? available[0]?.id ?? "";
-}

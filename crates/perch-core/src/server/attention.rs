@@ -129,24 +129,6 @@ pub(super) fn answered(app: &AppState, session_id: &str) {
     changed(app, app.db.resolve_attention(session_id, "question", now()));
 }
 
-/// A Hosted or detached (direct-host) turn settled; both report their own
-/// turn end, so this is a verified boundary.
-pub(super) fn settled(app: &AppState, session_id: &str, failed: bool) {
-    let agent = app
-        .db
-        .get_session(session_id)
-        .ok()
-        .flatten()
-        .and_then(|row| row.cli_provider_id.or(row.last_agent))
-        .unwrap_or_default();
-    let (kind, summary) = if failed {
-        ("failed", "Turn failed")
-    } else {
-        ("finished", "Finished")
-    };
-    record(app, session_id, &agent, kind, "verified", summary);
-}
-
 /// Agents in a submitted turn, so a settle is a finished turn and not a
 /// provider starting up idle. `true` = the turn began before a core restart.
 pub(super) type OpenTurns = HashMap<AgentKey, bool>;

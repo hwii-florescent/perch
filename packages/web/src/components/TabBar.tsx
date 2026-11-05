@@ -192,7 +192,7 @@ export function TabBar() {
           }}
         >
           <span className="shrink-0 opacity-80" aria-hidden="true">
-            <AgentIcon provider={s.currentProviderId ?? cliAgentBySession[s.id] ?? s.cliProviderId ?? s.lastAgent} size={14} />
+            <AgentIcon provider={s.currentProviderId ?? cliAgentBySession[s.id] ?? s.cliProviderId} size={14} />
           </span>
           <span className="truncate">{sessionLabel(s)}</span>
         </button>

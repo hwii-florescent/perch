@@ -1,4 +1,3 @@
-pub mod agent;
 pub mod agent_catalog;
 pub mod agent_fleet;
 pub mod agent_persistence;
@@ -13,20 +12,18 @@ pub mod daemon;
 #[cfg(target_os = "macos")]
 pub mod daemon_host;
 pub mod db;
-pub mod detached;
 pub mod devices;
+pub mod direct_host;
 pub mod filesystem;
 pub mod ghostty_profile;
 pub mod hosts;
 pub mod hub;
 pub mod iterm_profile;
-pub mod models;
 pub mod native_ui;
 pub mod permissions;
 pub mod protocol;
 pub mod provider_config;
 mod provider_environment;
-pub mod registry;
 pub mod relay;
 pub mod review;
 pub mod server;

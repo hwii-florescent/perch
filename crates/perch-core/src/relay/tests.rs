@@ -320,7 +320,6 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
             // The LAN listener stays off: the relay alone must let a phone in.
             phone_access_port: None,
         },
-        Arc::new(crate::registry::SessionRegistry::new()),
         Arc::new(crate::db::HistoryDb::open(&db_path).unwrap()),
         root.display().to_string(),
     ));

@@ -24,7 +24,7 @@ use tokio::sync::{broadcast, watch};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::hosts::SshHost;
-use crate::protocol::{ModelEntry, ServerMessage, SessionSummary};
+use crate::protocol::{ServerMessage, SessionSummary};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,8 +64,6 @@ struct RemoteInfo {
     hostname: String,
     platform: String,
     is_ssh: bool,
-    claude_models: Vec<ModelEntry>,
-    codex_models: Vec<ModelEntry>,
     /// The subset of the remote's capabilities the hub relays.
     capabilities: Vec<String>,
 }
@@ -695,39 +693,6 @@ impl HubManager {
                         wait
                     }
                     None => {
-                        let catalogue = crate::models::catalogue();
-                        // The remote's own codex catalogue, one extra bounded
-                        // ssh exec on the probe cycle (cheap over the shared
-                        // control master) — so a catalogue change on the
-                        // devpod is picked up by the next re-probe with no
-                        // perch restart.
-                        let codex_models = if prereqs.codex_version.is_some() {
-                            let remote = crate::ssh::fetch_remote_codex_catalog(&ssh_host)
-                                .await
-                                .map(|payload| crate::models::parse_remote_codex_payload(&payload))
-                                .unwrap_or_default();
-                            if remote.is_empty() {
-                                tracing::info!(
-                                    "[hub] {host_id}: no readable codex model catalogue on the \
-                                     remote (~/.codex) — falling back to perch's built-in list"
-                                );
-                                catalogue.codex.clone()
-                            } else {
-                                tracing::info!(
-                                    "[hub] {host_id}: remote codex catalogue: {} entries \
-                                     (default {})",
-                                    remote.len(),
-                                    remote
-                                        .iter()
-                                        .find(|m| m.is_default)
-                                        .unwrap_or(&remote[0])
-                                        .id
-                                );
-                                remote
-                            }
-                        } else {
-                            Vec::new()
-                        };
                         let info = RemoteInfo {
                             hostname: if prereqs.hostname.is_empty() {
                                 ssh_host.clone()
@@ -736,12 +701,6 @@ impl HubManager {
                             },
                             platform: prereqs.platform.clone(),
                             is_ssh: true,
-                            claude_models: if prereqs.claude_version.is_some() {
-                                catalogue.claude.clone()
-                            } else {
-                                Vec::new()
-                            },
-                            codex_models,
                             // No perch runs there, so no perch capabilities.
                             capabilities: Vec::new(),
                         };
@@ -754,9 +713,6 @@ impl HubManager {
                         self.set_host_state(&host_id, &host_name, HostState::Connected(info));
                         healthy = true;
                         backoff_ms = MIN_BACKOFF_MS;
-                        // Explicit retention policy for run dirs perch has
-                        // already ingested (see `detached.rs`).
-                        crate::detached::prune_old_runs(&ssh_host).await;
                         HEALTHY_REPROBE_SECS
                     }
                 },
@@ -1154,8 +1110,6 @@ impl HubManager {
                 hostname,
                 is_ssh,
                 platform,
-                claude_models,
-                codex_models,
                 ref capabilities,
                 // A remote's terminal profile is deliberately ignored: the
                 // xterm rendering its output runs in the *local* client, so
@@ -1166,8 +1120,6 @@ impl HubManager {
                     hostname: hostname.clone(),
                     platform: platform.clone(),
                     is_ssh,
-                    claude_models: claude_models.clone(),
-                    codex_models: codex_models.clone(),
                     capabilities: relayed_capabilities(capabilities),
                 };
                 self.set_host_state(host_id, host_name, HostState::Connected(info));
@@ -1254,14 +1206,6 @@ impl HubManager {
             }
 
             // ----------------------------------------------------------------
-            // session.history → relay via Session unicast
-            // ----------------------------------------------------------------
-            ServerMessage::SessionHistory { ref session_id, .. } => {
-                let key = PendingKey::Session(session_id.clone());
-                self.relay_unicast(&key, Arc::new(msg));
-            }
-
-            // ----------------------------------------------------------------
             // session.layout → reply to session.layout.get, relay via Session
             // unicast (same key session.subscribe/chat.send already register).
             // ----------------------------------------------------------------
@@ -1270,11 +1214,10 @@ impl HubManager {
                 self.relay_unicast(&key, Arc::new(msg));
             }
 
-            // Mode/lifecycle/control replies are request-correlated.  Keep
-            // them on the originating connection instead of broadcasting a
-            // device-specific lease or mode result to every browser.
-            ServerMessage::SessionMode { ref request_id, .. }
-            | ServerMessage::AgentLifecycle { ref request_id, .. }
+            // Lifecycle/control replies are request-correlated.  Keep them on
+            // the originating connection instead of broadcasting a
+            // device-specific lease to every browser.
+            ServerMessage::AgentLifecycle { ref request_id, .. }
             | ServerMessage::AgentTerminalOpened { ref request_id, .. }
             | ServerMessage::AgentControl { ref request_id, .. }
             | ServerMessage::AgentUiResult { ref request_id, .. }
@@ -1322,27 +1265,6 @@ impl HubManager {
                 self.pending_unicast.lock().unwrap().remove(&key);
             }
 
-            // A mode mutation is broadcast by its owning perch without an
-            // effective value: each browser must refetch with its own device
-            // identity. Stamp the authenticated remote host so a local client
-            // can keep policy caches host-scoped.
-            ServerMessage::SessionModeInvalidated {
-                session_id,
-                workspace_id,
-                device_id,
-                revision,
-                ..
-            } => {
-                let tagged = ServerMessage::SessionModeInvalidated {
-                    session_id,
-                    workspace_id,
-                    device_id,
-                    host_id: Some(host_id.to_string()),
-                    revision,
-                };
-                let _ = self.hub_events_tx.send(Arc::new(tagged));
-            }
-
             ServerMessage::AgentLifecycleChanged { status, .. } => {
                 let _ = self
                     .hub_events_tx
@@ -1375,25 +1297,11 @@ impl HubManager {
             }
 
             // ----------------------------------------------------------------
-            // chat.* → relay via Session unicast; chat.done also clears it
+            // commands.list → relay via Session unicast
             // ----------------------------------------------------------------
-            ServerMessage::ChatChunk { ref session_id, .. }
-            | ServerMessage::ChatThinking { ref session_id, .. }
-            | ServerMessage::ChatToolUse { ref session_id, .. }
-            | ServerMessage::ChatPlan { ref session_id, .. }
-            | ServerMessage::CommandsList { ref session_id, .. }
-            | ServerMessage::ChatToolResult { ref session_id, .. } => {
+            ServerMessage::CommandsList { ref session_id, .. } => {
                 let key = PendingKey::Session(session_id.clone());
                 self.relay_unicast(&key, Arc::new(msg));
-            }
-            ServerMessage::ChatDone { ref session_id, .. } => {
-                let sid = session_id.clone();
-                self.relay_unicast(&PendingKey::Session(sid.clone()), Arc::new(msg));
-                // Clear the pending unicast so the sender doesn't leak.
-                self.pending_unicast
-                    .lock()
-                    .unwrap()
-                    .remove(&PendingKey::Session(sid));
             }
 
             // ----------------------------------------------------------------
@@ -1942,8 +1850,6 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             hostname: None,
             platform: None,
             is_ssh: None,
-            claude_models: None,
-            codex_models: None,
             capabilities: None,
         },
         HostState::Connected(info) => ServerMessage::HostInfo {
@@ -1954,8 +1860,6 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             hostname: Some(info.hostname.clone()),
             platform: Some(info.platform.clone()),
             is_ssh: Some(info.is_ssh),
-            claude_models: Some(info.claude_models.clone()),
-            codex_models: Some(info.codex_models.clone()),
             capabilities: Some(info.capabilities.clone()),
         },
         HostState::Error(err) => ServerMessage::HostInfo {
@@ -1966,8 +1870,6 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             hostname: None,
             platform: None,
             is_ssh: None,
-            claude_models: None,
-            codex_models: None,
             capabilities: None,
         },
         HostState::Disabled => ServerMessage::HostInfo {
@@ -1978,8 +1880,6 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
             hostname: None,
             platform: None,
             is_ssh: None,
-            claude_models: None,
-            codex_models: None,
             capabilities: None,
         },
     }
@@ -2021,7 +1921,6 @@ mod tests {
             "git.status",
             "git.commit",
             "review.batch.send",
-            "session.mode.get",
             "fs.tree",
             "gitx.fake",
         ]

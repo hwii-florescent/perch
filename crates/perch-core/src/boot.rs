@@ -1,6 +1,6 @@
 //! Shared boot logic used by both the headless `perch-core` binary and the
 //! `perch-desktop` Tauri shell.  Keeping it here avoids duplicating the
-//! db-open / registry / server-run plumbing across two crates.
+//! db-open / server-run plumbing across two crates.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,6 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::db::HistoryDb;
-use crate::registry::SessionRegistry;
 use crate::server::{run, CliArgs, ServerOptions};
 
 /// Remove Claude Code nesting markers from the current process environment
@@ -288,7 +287,6 @@ pub async fn boot(
         HistoryDb::open_default()?
     });
 
-    let registry = Arc::new(SessionRegistry::new());
     // A Dock/Finder launch starts in `/`, which would register `/` as a
     // project on the first session; fall back to $HOME there.
     let default_cwd = match std::env::current_dir()?.display().to_string() {
@@ -321,7 +319,6 @@ pub async fn boot(
             ready_tx,
             phone_access_port: None,
         },
-        registry,
         db,
         default_cwd,
     )

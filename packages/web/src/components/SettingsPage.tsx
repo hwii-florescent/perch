@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { usePerchStore } from "../store";
-import type { BrowserSearchEngine, ModelEntry, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
+import type { BrowserSearchEngine, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
 import { getPaneLabelsEnabled, setPaneLabelsEnabled } from "../paneLabels";
 import { ModeSwitch } from "./ModeSwitch";

@@ -28,18 +28,14 @@ use axum::Router;
 use futures::{SinkExt, StreamExt};
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use tokio::sync::mpsc::unbounded_channel;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
-use crate::agent::{
-    AgentEvent, AgentRunner, ClaudeRunner, ClaudeRunnerOptions, CodexRunner, CodexRunnerOptions,
-};
 use crate::agent_fleet::{
     now_millis, AgentKey, AgentLifecycleRegistry, AgentMode, AgentState, ClientIdentity,
     ClientKind, ControlChannel,
 };
-use crate::agent_persistence::{AgentPersistence, EffectiveModeScope};
+use crate::agent_persistence::AgentPersistence;
 use crate::agent_runtime::AgentRuntimeAdapter;
 use crate::cli_title::CliTitleBuffer;
 use crate::db::{
@@ -47,26 +43,22 @@ use crate::db::{
     FileSaveCompletion, FileSaveIntentRow, HistoryDb, ReviewDeleteResult, ReviewUpdateResult,
     MAX_FILE_BUFFERS_PER_WORKSPACE, MAX_FILE_BUFFER_BYTES, MAX_FILE_BUFFER_WATCHES,
 };
-use crate::detached::{DetachedManager, FinishedTurn, TurnRequest, TurnSink};
 use crate::filesystem::{FileService, FsError, WriteResult};
 use crate::hosts::HostsStore;
 use crate::hub::{HubManager, PendingKey};
 use crate::iterm_profile::TerminalProfile;
-use crate::models::{self, ModelLists};
 use crate::protocol::{
-    AgentKind, ChatUsage, ClientMessage, CustomModelsData, FileBuffer, FileBufferSummary, FsEntry,
-    ProjectSummary, ServerMessage, SessionMode as WireSessionMode, SessionModeScope, SessionStatus,
-    SessionSummary, SettingsData, SshHostEntry, WorkspaceState, WorkspaceSummary, WorktreeEntry,
-    PROTOCOL_VERSION,
+    AgentKind, ClientMessage, FileBuffer, FileBufferSummary, FsEntry, ProjectSummary,
+    ServerMessage, SessionStatus, SessionSummary, SettingsData, SshHostEntry, WorkspaceState,
+    WorkspaceSummary, WorktreeEntry, PROTOCOL_VERSION,
 };
-use crate::registry::SessionRegistry;
 use crate::review::{self, ReviewCommentDraft, ReviewSide};
 use crate::settings::SettingsStore;
 use crate::source_control::{
     self, ActionConfirmation, CommitRequest, DiffOptions, DiscardMode, GitConfig, GitError,
     GitService, WorkspaceTarget,
 };
-use crate::status::{get_server_info, get_status, LastUsage};
+use crate::status::{get_server_info, get_status};
 use crate::terminal::{
     AgentTerminalRegistry, AttachOutcome, TerminalManager, AGENT_QUIET_THRESHOLD,
 };
@@ -101,8 +93,8 @@ mod uploads;
 use terminal::claude_conversation_exists_in;
 mod session;
 use session::{
-    agent_str, build_session_summary, local_sessions_snapshot, mark_unseen_if_unviewed,
-    settle_prompt_dispatch, should_forward_to_viewer, status_message,
+    build_session_summary, local_sessions_snapshot, mark_unseen_if_unviewed,
+    should_forward_to_viewer, status_message,
 };
 mod dispatch;
 use dispatch::handle_message;
@@ -245,7 +237,6 @@ type GitStatus = (Option<String>, u32, u32);
 
 #[derive(Clone)]
 struct AppState {
-    registry: Arc<SessionRegistry>,
     db: Arc<HistoryDb>,
     default_cwd: String,
     /// Session ids that currently have an agent turn in flight.
@@ -289,8 +280,6 @@ struct AppState {
     /// 64: if a slow receiver falls behind it gets `Lagged` and catches up on
     /// the next event rather than blocking the sender.
     session_events_tx: tokio::sync::broadcast::Sender<SessionUpdatedEvent>,
-    /// Model lists discovered at startup — sent to each client in `server.info`.
-    model_lists: Arc<ModelLists>,
     /// The user's terminal appearance, read once at startup so CLI panes can
     /// match their real terminal instead of perch's UI theme. `None` when
     /// unavailable — see `iterm_profile.rs`.
@@ -301,12 +290,6 @@ struct AppState {
     hosts: Arc<HostsStore>,
     /// Hub manager: owns WS connections to remote perch instances.
     hub: Arc<HubManager>,
-    /// Detached-turn manager: owns turns running on `mode: "direct"` hosts,
-    /// which have no perch of their own (see `detached.rs`). Lives in
-    /// `AppState` rather than `ConnState` on purpose — a detached turn
-    /// outlives the WS connection that started it, and must not be cancelled
-    /// when that connection closes.
-    detached: Arc<DetachedManager>,
     /// Number of currently-open WS connections, incremented/decremented in
     /// `handle_socket`. Lets `spawn_git_poll_task` skip its per-tick work
     /// (a `list_sessions()` call plus one `git` subprocess per distinct cwd)
@@ -342,8 +325,6 @@ struct AppState {
     /// Durable lifecycle/provider identity and mode policy, backed by the same
     /// HistoryDb connection as sessions and messages.
     agent_persistence: Arc<AgentPersistence<Arc<HistoryDb>>>,
-    /// Mode and its monotonic persisted revision for each restored agent.
-    agent_modes: Arc<Mutex<HashMap<AgentKey, (AgentMode, u64)>>>,
     /// UUID for this process lifetime. Reconnects from a previous process
     /// cannot be mistaken for newer snapshots when their revisions overlap.
     snapshot_epoch: String,
@@ -372,103 +353,8 @@ struct AppState {
     git: Arc<GitService>,
 }
 
-/// `AppState`'s implementation of the detached-turn callback interface.
-///
-/// It exists so `detached.rs` can stream and finalize turns without owning any
-/// of the server's session bookkeeping: every method here is the same code
-/// path a local turn takes (`emit`-equivalent recording into the replay ring
-/// buffer, `running_sessions` + unseen dots, `persist_turn`'s single
-/// `messages` row), just reached from a task that has no `ConnState`.
-struct DetachedSink {
-    app: AppState,
-}
-
-impl TurnSink for DetachedSink {
-    fn emit(&self, session_id: &str, msg: ServerMessage) {
-        // Record for ring-buffer replay, exactly like the local `emit`, then
-        // fan out to *every* connection rather than one. A detached turn has
-        // no single "initiating connection" worth privileging — the whole
-        // point is that it outlives whoever started it.
-        self.app.registry.record(session_id, msg.clone());
-        let _ = self.app.hub.hub_events_tx.send(Arc::new(msg));
-    }
-
-    fn set_running(&self, session_id: &str, running: bool) {
-        if running {
-            self.app
-                .running_sessions
-                .lock()
-                .unwrap()
-                .insert(session_id.to_string());
-        } else {
-            let was_running = self.app.running_sessions.lock().unwrap().remove(session_id);
-            mark_unseen_if_unviewed(&self.app, session_id);
-            // ponytail: the sink is not told how a detached turn ended, so a
-            // failed one reads "Finished"; pass the run status here to split it.
-            if was_running {
-                attention::settled(&self.app, session_id, false);
-            }
-        }
-        notify_session_updated(&self.app, session_id);
-    }
-
-    fn persist_turn(&self, session_id: &str, turn: FinishedTurn) {
-        if !(turn.text.is_empty() && turn.thinking.is_empty()) {
-            let thinking = if turn.thinking.is_empty() {
-                None
-            } else {
-                Some(turn.thinking.as_str())
-            };
-            let _ = self.app.db.add_message(
-                session_id,
-                "assistant",
-                &turn.text,
-                Some(agent_str(turn.agent)),
-                turn.model.as_deref(),
-                thinking,
-            );
-            let _ = self.app.db.update_session_last_model(
-                session_id,
-                agent_str(turn.agent),
-                turn.model.as_deref(),
-            );
-        }
-        // A detached process can be spawned successfully while the provider
-        // binary, credentials, or prompt launch fails. Settle the durable
-        // operation from actual parsed provider progress, and preserve an
-        // ambiguous launch as unconfirmed so a retry cannot duplicate it.
-        if let Some(operation_id) = turn.operation_id.as_deref() {
-            let outcome = if turn.accepted {
-                "delivered"
-            } else {
-                "unconfirmed"
-            };
-            if let Err(error) = settle_prompt_dispatch(&self.app, operation_id, outcome) {
-                tracing::error!(
-                    session_id,
-                    operation_id,
-                    error = %error,
-                    "failed to persist detached prompt dispatch outcome"
-                );
-                self.emit(
-                    session_id,
-                    ServerMessage::Error {
-                        message: format!(
-                            "prompt operation {operation_id} could not be settled: {error}"
-                        ),
-                        request_id: None,
-                        code: Some("prompt_dispatch_persistence_failed".to_string()),
-                        retryable: false,
-                    },
-                );
-            }
-        }
-    }
-}
-
 pub async fn run(
     options: ServerOptions,
-    registry: Arc<SessionRegistry>,
     db: Arc<HistoryDb>,
     default_cwd: String,
 ) -> anyhow::Result<()> {
@@ -492,14 +378,6 @@ pub async fn run(
     let bound_addr = listener.local_addr()?;
 
     let (session_events_tx, _) = tokio::sync::broadcast::channel(64);
-
-    // Load the static model catalogue once at startup.
-    let model_lists = Arc::new(models::catalogue());
-    tracing::info!(
-        "[perch] catalogue: {} claude model(s), {} codex model(s)",
-        model_lists.claude.len(),
-        model_lists.codex.len(),
-    );
 
     // Read the user's terminal appearance once (best-effort, see
     // `iterm_profile.rs`) so CLI panes render in their colours and font.
@@ -532,8 +410,6 @@ pub async fn run(
     let hub = HubManager::new(bound_addr.port());
     let initial_hosts = hosts.list();
     hub.reload_hosts(&initial_hosts);
-
-    let detached = DetachedManager::new(db.clone());
 
     // Task 2: agent-attached (CLI-mode) terminals report PTY activity here.
     // Built with plain `Arc` clones (not the whole `AppState`, which doesn't
@@ -594,15 +470,6 @@ pub async fn run(
     let agent_persistence = Arc::new(AgentPersistence::new(db.clone()));
     agent_persistence.ensure_schema()?;
     let restored_agents = agent_persistence.load_snapshots(now_millis())?;
-    let agent_modes = restored_agents
-        .iter()
-        .map(|record| {
-            (
-                record.snapshot.key.clone(),
-                (record.mode, record.mode_revision),
-            )
-        })
-        .collect::<HashMap<_, _>>();
     let agent_lifecycle = Arc::new(AgentLifecycleRegistry::restore(
         restored_agents.iter().map(|record| record.snapshot.clone()),
         now_millis(),
@@ -650,7 +517,6 @@ pub async fn run(
         phone_port,
     ));
     let state = AppState {
-        registry,
         db,
         default_cwd: effective_cwd,
         running_sessions,
@@ -662,12 +528,10 @@ pub async fn run(
         cli_title_buffers: Arc::new(Mutex::new(HashMap::new())),
         workspace_git: Arc::new(Mutex::new(HashMap::new())),
         session_events_tx,
-        model_lists,
         terminal_profile,
         settings,
         hosts,
         hub,
-        detached,
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         devices,
@@ -679,7 +543,6 @@ pub async fn run(
         native_ui: Arc::new(crate::native_ui::NativeUiRegistry::default()),
         agent_operation_lock: Arc::new(Mutex::new(())),
         agent_persistence,
-        agent_modes: Arc::new(Mutex::new(agent_modes)),
         snapshot_epoch: Uuid::new_v4().to_string(),
         snapshot_revision: Arc::new(AtomicU64::new(0)),
         foundation_lock: Arc::new(Mutex::new(())),
@@ -743,14 +606,6 @@ pub async fn run(
         }
     }
 
-    // The detached manager needs `AppState` to report turn progress, and
-    // `AppState` holds the manager — hence the deferred wire-up. Recovery is
-    // kicked off immediately afterwards, before the listener starts accepting
-    // connections, so a turn that survived a perch restart is already being
-    // re-tailed by the time the first client asks for the session list.
-    state
-        .detached
-        .attach_sink(Arc::new(DetachedSink { app: state.clone() }));
     // Turn boundaries are recorded from a pty reader thread as well as from
     // async handlers, so `agent_history` needs this state.
     let _ = agent_activity_app.set(state.clone());
@@ -781,7 +636,6 @@ pub async fn run(
     if let Err(error) = state.db.reconcile_review_packets_with_prompt_operations() {
         tracing::warn!("could not reconcile review packet states: {error}");
     }
-    state.detached.recover_all();
     attention::reconcile_at_boot(&state);
     // Read before recovery turns them Reconnecting with another reason.
     let open_turns = attention::turns_open_at_boot(&state);
@@ -1352,14 +1206,7 @@ fn spawn_agent_lifecycle_task(state: AppState) {
                 {
                     continue;
                 }
-                let mode = state
-                    .agent_modes
-                    .lock()
-                    .unwrap()
-                    .get(&snapshot.key)
-                    .copied()
-                    .unwrap_or((AgentMode::Cli, 1));
-                let version = (snapshot.revision, mode);
+                let version = snapshot.revision;
                 if seen.get(&snapshot.key) == Some(&version) {
                     continue;
                 }
@@ -1557,15 +1404,13 @@ fn spawn_agent_idle_sweep_task(state: AppState) {
                 .agent_terminals
                 .sessions_quiet_since(AGENT_QUIET_THRESHOLD);
             for session_id in quiet_sessions {
-                // `running_sessions` already covers Hosted-mode turns and
-                // detached turns; a CLI terminal that never went "running" in
-                // the first place (a plain shell, or one that's already been
-                // marked idle) is a no-op remove — cheap and side-effect-free.
+                // A CLI terminal that never went "running" in the first place
+                // (a plain shell, or one that's already been marked idle) is a
+                // no-op remove — cheap and side-effect-free.
                 let was_running = state.running_sessions.lock().unwrap().remove(&session_id);
                 if was_running {
-                    // Mirror `DetachedSink::set_running(false)` exactly: a CLI
-                    // turn finishing while nobody is viewing the session must
-                    // mark it unseen, the same as a Hosted turn completing.
+                    // A CLI turn finishing while nobody is viewing the session
+                    // must mark it unseen.
                     mark_unseen_if_unviewed(&state, &session_id);
                     notify_session_updated(&state, &session_id);
                 }
@@ -1827,46 +1672,7 @@ async fn clipboard_image_upload(
 struct SessionRuntime {
     cwd: String,
     /// `"local"`, or the id of the `mode: "direct"` host this session runs on.
-    /// Direct sessions never touch `claude_runner`/`active_runner`: their turns
-    /// are launched detached over ssh by `detached.rs` and deliberately are
-    /// *not* cancelled when this connection closes.
     host_id: String,
-    /// Persistent across turns so claude's `--resume` continuity survives
-    /// multiple `chat.send`s in the same session (see `agent.rs`). The
-    /// model to use is set per-turn via `ClaudeRunner::set_model`.
-    claude_runner: Arc<ClaudeRunner>,
-    /// The runner actually dispatched for the most recent turn (claude or a
-    /// fresh, single-turn codex runner) — this is what `chat.cancel` kills.
-    active_runner: Mutex<Option<Arc<dyn AgentRunner>>>,
-    /// The concrete `CodexRunner` used for the most recent codex turn, if
-    /// any, kept alongside `active_runner` (which is type-erased) so its
-    /// `thread_id()` can be read and persisted once the turn completes.
-    last_codex_runner: Mutex<Option<Arc<CodexRunner>>>,
-    last_usage: LastUsage,
-    /// Accumulates the streamed assistant reply for the in-flight turn (text
-    /// + thinking) so it can be written to SQLite as one row on `chat.done`.
-    /// `None` when no turn is in flight.
-    pending_turn: Mutex<Option<PendingTurn>>,
-}
-
-/// The in-flight assistant turn being accumulated for a session, persisted
-/// to `messages` as a single row once `chat.done` fires.
-struct PendingTurn {
-    agent: AgentKind,
-    model: Option<String>,
-    /// The durable operation that caused this turn. Keeping it beside the
-    /// streaming accumulator lets completion settle a review outbox packet
-    /// after a reconnect without relying on the initiating socket.
-    operation_id: String,
-    /// Provider errors still produce a terminal `chat.done` event in both
-    /// runners. Remember the failure so that the later done event cannot
-    /// falsely promote an unconfirmed operation to delivered.
-    failed: bool,
-    /// Set only after a non-empty provider output, tool result/use, or plan
-    /// event arrives. A terminal `Done` by itself is not delivery evidence.
-    accepted: bool,
-    text: String,
-    thinking: String,
 }
 
 /// Per-connection state shared across the read loop, the writer task, the
@@ -2097,8 +1903,6 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         hostname: server_info.hostname,
         is_ssh: server_info.is_ssh,
         platform: server_info.platform.to_string(),
-        claude_models: state.app.model_lists.claude.clone(),
-        codex_models: state.app.model_lists.codex.clone(),
         terminal_profile: state.app.terminal_profile.clone(),
         protocol_version: PROTOCOL_VERSION,
         capabilities: foundation_capabilities(),
@@ -2355,11 +2159,6 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             }
         }
     }
-    for runtime in state.runtimes.lock().unwrap().values() {
-        if let Some(runner) = runtime.active_runner.lock().unwrap().as_ref() {
-            runner.cancel();
-        }
-    }
     event_task.abort();
     hub_task.abort();
     writer.abort();
@@ -2386,8 +2185,6 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.order.v1",
         "workspace.nest",
         "workspace.visibility",
-        "session.mode.get",
-        "session.mode.set",
         "agent.manifest.list",
         "agent.provider.configure",
         "agent.ui.get",
@@ -2524,20 +2321,6 @@ fn route_to_remote_host_or_fail(
     true
 }
 
-fn wire_session_mode(mode: AgentMode) -> WireSessionMode {
-    match mode {
-        AgentMode::Hosted => WireSessionMode::Hosted,
-        AgentMode::Cli => WireSessionMode::Cli,
-    }
-}
-
-fn fleet_session_mode(mode: WireSessionMode) -> AgentMode {
-    match mode {
-        WireSessionMode::Hosted => AgentMode::Hosted,
-        WireSessionMode::Cli => AgentMode::Cli,
-    }
-}
-
 /// Resolve a session's server-owned workspace id. A caller may echo the id
 /// for routing, but it cannot select a different workspace by putting one in
 /// the request. In-memory sessions have no durable workspace until their first
@@ -2569,68 +2352,16 @@ fn mode_workspace_for_session(
     Ok(workspace_id)
 }
 
-fn effective_session_mode(
-    state: &Arc<ConnState>,
-    device_id: &str,
-    session_id: &str,
-    workspace_id: Option<&str>,
-) -> Result<(AgentMode, SessionModeScope, u64), String> {
-    // Resolve both values in one SQLite read transaction. Independent reads
-    // could straddle a concurrent mutation and label stale mode state current.
-    let (mode, source, policy_revision) = state
-        .app
-        .agent_persistence
-        .resolve_mode_with_revision(device_id, session_id, workspace_id)
-        .map_err(|error| error.to_string())?;
-    let source = match source {
-        EffectiveModeScope::Session => SessionModeScope::Session,
-        EffectiveModeScope::Workspace => SessionModeScope::Workspace,
-        EffectiveModeScope::Device => SessionModeScope::Device,
-        EffectiveModeScope::Default => SessionModeScope::Default,
-    };
-    Ok((mode, source, policy_revision))
-}
-
-fn project_mode_to_lifecycle(
-    state: &Arc<ConnState>,
-    session_id: &str,
-    mode: AgentMode,
-    revision: u64,
-) {
-    let keys = state
-        .app
-        .agent_runtime
-        .lifecycle()
-        .list()
-        .into_iter()
-        .filter(|snapshot| snapshot.key.session_id == session_id)
-        .map(|snapshot| snapshot.key)
-        .collect::<Vec<_>>();
-    if keys.is_empty() {
-        return;
-    }
-    let mut modes = state.app.agent_modes.lock().unwrap();
-    for key in keys {
-        modes.insert(key, (mode, revision.max(1)));
-    }
-}
-
 fn persist_agent_runtime(app: &AppState, key: &AgentKey) -> anyhow::Result<()> {
     if !app.db.session_exists(&key.session_id)? {
         return Ok(());
     }
     let snapshot = app.agent_runtime.snapshot(key)?;
-    let (mode, revision) = app
-        .agent_modes
-        .lock()
-        .unwrap()
-        .get(key)
-        .copied()
-        .unwrap_or((AgentMode::Cli, 1));
-    app.agent_persistence.save_snapshot(
-        &crate::agent_persistence::PersistedAgentSnapshot::new(snapshot, mode)
-            .with_mode_revision(revision),
-    )
+    app.agent_persistence
+        .save_snapshot(&crate::agent_persistence::PersistedAgentSnapshot::new(
+            snapshot,
+            AgentMode::Cli,
+        ))
 }
 
 /// Publish a foundation metadata row to every connected client. The caller
@@ -2956,83 +2687,6 @@ mod session_viewer_filter_tests {
             observes_s2_codex
         ));
         assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers, none));
-        // The chat stream stays strictly session-scoped even for an observer.
-        let chunk = ServerMessage::ChatChunk {
-            session_id: "s2".to_string(),
-            text: "hi".to_string(),
-        };
-        assert!(!should_forward_to_viewer(
-            &chunk,
-            "conn-a",
-            &viewers,
-            observes_s2_pi
-        ));
-    }
-
-    #[test]
-    fn chat_chunk_forwards_to_a_viewer_of_its_session() {
-        let msg = ServerMessage::ChatChunk {
-            session_id: "s1".to_string(),
-            text: "hi".to_string(),
-        };
-        let viewers = viewers_of("s1", &["conn-a", "conn-b"]);
-        assert!(should_forward_to_viewer(&msg, "conn-a", &viewers, none));
-    }
-
-    #[test]
-    fn chat_chunk_drops_for_a_connection_not_viewing_that_session() {
-        let msg = ServerMessage::ChatChunk {
-            session_id: "s1".to_string(),
-            text: "hi".to_string(),
-        };
-        let viewers = viewers_of("s1", &["conn-a"]);
-        assert!(!should_forward_to_viewer(&msg, "conn-b", &viewers, none));
-    }
-
-    #[test]
-    fn chat_done_drops_when_session_has_no_viewers_entry_at_all() {
-        let msg = ServerMessage::ChatDone {
-            session_id: "s1".to_string(),
-            usage: None,
-        };
-        let viewers: HashMap<String, HashSet<String>> = HashMap::new();
-        assert!(!should_forward_to_viewer(&msg, "conn-a", &viewers, none));
-    }
-
-    #[test]
-    fn chat_thinking_tool_use_tool_result_and_plan_are_all_session_scoped() {
-        let viewers = viewers_of("s1", &["conn-a"]);
-        let thinking = ServerMessage::ChatThinking {
-            session_id: "s1".to_string(),
-            text: "thinking".to_string(),
-        };
-        let tool_use = ServerMessage::ChatToolUse {
-            session_id: "s2".to_string(),
-            name: "Bash".to_string(),
-            input: serde_json::Value::Null,
-        };
-        let tool_result = ServerMessage::ChatToolResult {
-            session_id: "s2".to_string(),
-            name: "Bash".to_string(),
-            result: serde_json::Value::Null,
-        };
-        let plan = ServerMessage::ChatPlan {
-            session_id: "s2".to_string(),
-            content: "plan".to_string(),
-        };
-        assert!(should_forward_to_viewer(
-            &thinking, "conn-a", &viewers, none
-        ));
-        assert!(!should_forward_to_viewer(
-            &tool_use, "conn-a", &viewers, none
-        ));
-        assert!(!should_forward_to_viewer(
-            &tool_result,
-            "conn-a",
-            &viewers,
-            none
-        ));
-        assert!(!should_forward_to_viewer(&plan, "conn-a", &viewers, none));
     }
 
     #[test]
@@ -3044,8 +2698,6 @@ mod session_viewer_filter_tests {
                 title: "t".to_string(),
                 cwd: "/tmp".to_string(),
                 created_at: 0,
-                last_agent: None,
-                last_model: None,
                 status: SessionStatus::Idle,
                 host_id: "local".to_string(),
                 cli_started: false,
@@ -3073,8 +2725,6 @@ mod session_viewer_filter_tests {
             hostname: None,
             platform: None,
             is_ssh: None,
-            claude_models: None,
-            codex_models: None,
             capabilities: None,
         };
         let bare_error = ServerMessage::Error {
@@ -3599,7 +3249,6 @@ mod boot_smoke_tests {
                 ready_tx: Some(ready_tx),
                 phone_access_port: Some(0),
             },
-            Arc::new(SessionRegistry::new()),
             Arc::new(HistoryDb::open(&db_path).unwrap()),
             root.display().to_string(),
         ));
@@ -3692,7 +3341,6 @@ mod boot_smoke_tests {
                 ready_tx: Some(ready_tx),
                 phone_access_port: None,
             },
-            Arc::new(SessionRegistry::new()),
             db,
             std::env::temp_dir().display().to_string(),
         ));

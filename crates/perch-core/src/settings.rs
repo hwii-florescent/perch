@@ -23,23 +23,13 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::ModelEntry;
-
 // ---------------------------------------------------------------------------
 // Value types (all serde(default) so missing fields fall back gracefully)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct CustomModelsData {
-    pub claude: Vec<ModelEntry>,
-    pub codex: Vec<ModelEntry>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the web client's `THEMES` table).
     /// Defaults to `"perch"`, perch's monotone look.
@@ -115,7 +105,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            custom_models: CustomModelsData::default(),
             default_cwd: None,
             theme: default_theme(),
             sound_enabled: false,
@@ -187,8 +176,6 @@ fn default_tab_shape() -> String {
 /// Patch applied by `settings.update`.
 ///
 /// Each field follows the "absent = unchanged" convention:
-/// - `custom_models: None`  → leave current custom models alone
-/// - `custom_models: Some(data)` → replace the whole struct
 /// - `default_cwd: None` → leave current default_cwd alone
 /// - `default_cwd: Some(None)` → clear (set to null)
 /// - `default_cwd: Some(Some("..."))` → set to that path
@@ -198,7 +185,6 @@ fn default_tab_shape() -> String {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
-    pub custom_models: Option<CustomModelsData>,
     /// Outer None = no change; Some(None) = clear; Some(Some(_)) = set.
     /// Deserialized with a custom helper because serde's double-Option
     /// needs special treatment: by default `"defaultCwd": null` and the
@@ -314,9 +300,6 @@ impl SettingsStore {
             );
         }
         let mut guard = self.inner.lock().unwrap();
-        if let Some(cm) = patch.custom_models {
-            guard.custom_models = cm;
-        }
         match patch.default_cwd {
             None => {}                              // absent → unchanged
             Some(None) => guard.default_cwd = None, // null → clear

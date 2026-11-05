@@ -39,7 +39,6 @@ pub(super) fn handle_settings_update(
     }
     // Convert protocol::SettingsPatch → settings::SettingsPatch.
     let store_patch = crate::settings::SettingsPatch {
-        custom_models: patch.custom_models.map(custom_models_to_store),
         default_cwd: patch.default_cwd,
         theme: patch.theme,
         sound_enabled: patch.sound_enabled,
@@ -229,10 +228,6 @@ pub(super) fn handle_hosts_delete(state: &Arc<ConnState>, id: String) {
 
 pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
     SettingsData {
-        custom_models: CustomModelsData {
-            claude: s.custom_models.claude.clone(),
-            codex: s.custom_models.codex.clone(),
-        },
         default_cwd: s.default_cwd.clone(),
         theme: s.theme.clone(),
         sound_enabled: s.sound_enabled,
@@ -253,13 +248,6 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         browser_search_suggestions: s.browser_search_suggestions,
         usage_limit_alert: s.usage_limit_alert,
         usage_daily_budget_usd: s.usage_daily_budget_usd,
-    }
-}
-
-pub(super) fn custom_models_to_store(cm: CustomModelsData) -> crate::settings::CustomModelsData {
-    crate::settings::CustomModelsData {
-        claude: cm.claude,
-        codex: cm.codex,
     }
 }
 

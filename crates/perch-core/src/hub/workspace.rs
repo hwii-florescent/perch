@@ -465,13 +465,7 @@ impl HubManager {
     /// are rewritten per connection/host; a peer cannot answer another peer's
     /// request. Metadata events reach other viewers without a correlation ID.
     pub(super) fn relay_workspace_message(&self, host: &str, message: &ServerMessage) -> bool {
-        if matches!(
-            message,
-            ServerMessage::TerminalData { .. }
-                | ServerMessage::ChatChunk { .. }
-                | ServerMessage::ChatThinking { .. }
-                | ServerMessage::SessionHistory { .. }
-        ) {
+        if matches!(message, ServerMessage::TerminalData { .. }) {
             return false;
         }
         let mut reply = serde_json::to_value(message).expect("server message serializes");
@@ -548,8 +542,6 @@ mod tests {
                 hostname: "test".into(),
                 platform: "linux".into(),
                 is_ssh: false,
-                claude_models: vec![],
-                codex_models: vec![],
                 capabilities: vec!["project.create".into(), "fs.read".into(), "fs.write".into()],
             }),
         );

@@ -55,12 +55,7 @@ fn provider_manifest_summary(
     crate::protocol::AgentManifestSummary {
         id: manifest.id.clone(),
         display_name: manifest.display_name.clone(),
-        supported_modes: manifest
-            .supported_modes
-            .iter()
-            .copied()
-            .map(wire_session_mode)
-            .collect(),
+        supported_modes: vec!["cli".to_string()],
         resumability: resumability.to_string(),
         capabilities,
         status_detection,

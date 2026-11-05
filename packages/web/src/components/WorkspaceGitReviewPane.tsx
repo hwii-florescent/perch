@@ -19,7 +19,7 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
   const workspaceSessions = useMemo(
     () => sessions
       .filter((session) => session.workspaceId === workspaceId || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path))
-      .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId ?? session.lastAgent })),
+      .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId })),
     [sessions, workspace, workspaceId],
   );
 

@@ -45,38 +45,6 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::SessionResume { session_id } => {
             session::handle_session_resume(state, session_id)
         }
-        ClientMessage::SessionModeGet {
-            request_id,
-            session_id,
-            device_id,
-            workspace_id,
-        } => session::handle_session_mode_get(
-            state,
-            raw_text,
-            request_id,
-            session_id,
-            device_id,
-            workspace_id,
-        ),
-        ClientMessage::SessionModeSet {
-            request_id,
-            session_id,
-            device_id,
-            scope,
-            workspace_id,
-            mode,
-            clear_override,
-        } => session::handle_session_mode_set(
-            state,
-            raw_text,
-            request_id,
-            session_id,
-            device_id,
-            scope,
-            workspace_id,
-            mode,
-            clear_override,
-        ),
         ClientMessage::AgentManifestList {
             request_id,
             host_id,
@@ -202,30 +170,6 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::AttentionList {} => super::attention::handle_list(state),
         ClientMessage::AttentionUpdate { ref ids, dismiss } => {
             super::attention::handle_update(state, ids, dismiss)
-        }
-        ClientMessage::ChatSend {
-            ref session_id,
-            ref text,
-            ref operation_id,
-            agent,
-            ref model,
-            plan_mode,
-            ref effort,
-            ref attachments,
-        } => session::handle_chat_send(
-            state,
-            raw_text,
-            session_id,
-            text,
-            operation_id,
-            agent,
-            model,
-            plan_mode,
-            effort,
-            attachments,
-        ),
-        ClientMessage::ChatCancel { session_id } => {
-            session::handle_chat_cancel(state, raw_text, session_id)
         }
         ClientMessage::CommandsList { ref session_id } => {
             session::handle_commands_list(state, raw_text, session_id)

@@ -10,19 +10,6 @@
 // Shared value types
 // ---------------------------------------------------------------------------
 
-/** A single model entry from the server's discovered model list.
- * Clients must use these server-provided lists rather than any hardcoded
- * catalogue — different machines expose different model sets. */
-export interface ModelEntry {
-  id: string;
-  label: string;
-  /** The model this machine's CLI is configured to use by default (e.g.
-   * codex's `model =` in config.toml). Lists stay in the catalogue's own
-   * best-first order — clients preselect the flagged entry rather than
-   * reordering; at most one entry per list carries it. Omitted when false. */
-  isDefault?: boolean;
-}
-
 /** Captures are frozen view excerpts, never promises about current disk/Git. */
 export type ContextSource =
   | { kind: "file"; path: string }
@@ -131,13 +118,6 @@ export interface AgentUiResultMessage {
   accepted: boolean;
 }
 
-export interface ChatUsage {
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-  contextTokens: number;
-}
-
 /** One invocable command/skill offered by an agent CLI in a given cwd, as
  * scraped by `commands.rs` and served in `commands.list`. `name` is bare (no
  * `/` or `$` sigil) — the client prepends whichever sigil the active agent
@@ -151,15 +131,9 @@ export interface CommandEntry {
 // Stage D: Settings & SSH hosts value types
 // ---------------------------------------------------------------------------
 
-export interface CustomModelsData {
-  claude: ModelEntry[];
-  codex: ModelEntry[];
-}
-
 export type BrowserSearchEngine = "google" | "duckduckgo" | "bing" | "brave";
 
 export interface SettingsData {
-  customModels: CustomModelsData;
   /** `null` means no default set (use process cwd). */
   defaultCwd: string | null;
   /** Selected theme name (key into the client's `THEMES` table).
@@ -222,7 +196,6 @@ export interface SettingsData {
 
 /**
  * Patch for `settings.update`. Absent fields = no change.
- * - `customModels` absent → unchanged; present → replace whole struct.
  * - `defaultCwd` absent → unchanged; `null` → clear; string → set.
  * - `theme` absent → unchanged; string → set (no "clear" case).
  * - `soundEnabled` absent → unchanged; boolean → set.
@@ -230,7 +203,6 @@ export interface SettingsData {
  * - `chatMode` absent → unchanged; string → set (no "clear" case).
  */
 export interface SettingsPatch {
-  customModels?: CustomModelsData;
   defaultCwd?: string | null;
   theme?: string;
   soundEnabled?: boolean;
@@ -293,8 +265,7 @@ export interface SshHostEntry {
 export type HostConnectionState = "connecting" | "connected" | "error" | "disabled";
 
 /** Pushed by the server once per known host after `server.info` on connect,
- * and again on every state change.  The `hostname`, `platform`, `isSsh`,
- * `claudeModels`, and `codexModels` fields are only present when the host
+ * and again on every state change.  The `hostname`, `platform`, `isSsh` fields are only present when the host
  * is in the `connected` state. */
 export interface HostInfoMessage {
   type: "host.info";
@@ -305,8 +276,6 @@ export interface HostInfoMessage {
   hostname?: string;
   platform?: string;
   isSsh?: boolean;
-  claudeModels?: ModelEntry[];
-  codexModels?: ModelEntry[];
   /** The remote's capabilities that the hub relays (`hub::RELAYED_CAPABILITIES`). */
   capabilities?: string[];
 }
@@ -330,40 +299,15 @@ export interface SessionSubscribeMessage {
 
 /** Resume a previously-known session (e.g. from `localStorage`) after a page
  * reload or PWA reopen. The server replies with `session.created` (echoing
- * the same id) followed by `session.history` if the session still exists in
+ * the same id) if the session still exists in
  * the database, or `session.created` with a brand-new id if it doesn't. */
 export interface SessionResumeMessage {
   type: "session.resume";
   sessionId: string;
 }
 
-export interface SessionModeGetMessage {
-  type: "session.mode.get";
-  requestId: string;
-  sessionId: string;
-  deviceId: string;
-  workspaceId?: string;
-}
-
-export interface SessionModeSetMessage {
-  type: "session.mode.set";
-  requestId: string;
-  sessionId: string;
-  deviceId: string;
-  scope: "session" | "workspace" | "device";
-  workspaceId?: string;
-  mode?: SessionMode;
-  clearOverride?: boolean;
-}
-
-/** Which backend a `chat.send` should be routed to. Defaults to "claude". */
+/** Agents with a direct-host attach path. */
 export type AgentKind = "claude" | "codex";
-
-/** Structured Chat/UI versus the real interactive CLI view. */
-export type SessionMode = "hosted" | "cli";
-
-/** Scope returned by session.mode; default means the device default or Hosted fallback. */
-export type SessionModeScope = "session" | "workspace" | "device" | "default";
 
 export interface AgentLifecycleKey {
   workspaceId: string;
@@ -374,7 +318,7 @@ export interface AgentLifecycleKey {
 export interface AgentManifestSummary {
   id: string;
   displayName: string;
-  supportedModes: SessionMode[];
+  supportedModes: string[];
   resumability: string;
   capabilities: string[];
   statusDetection: string;
@@ -423,10 +367,6 @@ export interface SessionSummary {
   title: string;
   cwd: string;
   createdAt: number;
-  /** Omitted when no agent has been used in this session yet. */
-  lastAgent?: AgentKind;
-  /** Omitted when no model has been recorded for this session yet. */
-  lastModel?: string;
   status: SessionStatus;
   /** Which hub host owns this session.  "local" (or absent) means the
    * session lives on the directly-connected server instance. */
@@ -778,32 +718,6 @@ export interface AgentAttach {
   agent: AgentKind;
 }
 
-export interface ChatSendMessage {
-  type: "chat.send";
-  sessionId: string;
-  text: string;
-  /** Stable id used to dedupe prompt insertion and runner dispatch. */
-  operationId?: string;
-  agent?: AgentKind;
-  model?: string;
-  /** Run this turn in *plan mode*: claude gets `--permission-mode plan`
-   * instead of `bypassPermissions`, codex gets `--sandbox read-only`. Absent
-   * ⇒ `false` (the pre-existing behaviour), so older clients are unaffected. */
-  planMode?: boolean;
-  /** Reasoning-effort level for this turn. Absent (or `"default"`) omits the
-   * flag entirely and lets the CLI use its own default. claude:
-   * `--effort <level>`; codex: `-c model_reasoning_effort="<level>"`.
-   * Legal values — claude: `low|medium|high|xhigh|max|none`;
-   * codex: `none|low|medium|high|xhigh`. */
-  effort?: string;
-  /** Absolute, server-side paths of files staged via `POST {base}upload` to
-   * attach to this turn. Images are passed to codex with `-i`; every other
-   * file (and every file for claude) is named in a trailing
-   * `[Attached files: …]` note appended to the turn text, which the CLI then
-   * reads itself. */
-  attachments?: string[];
-}
-
 /** Ask the server which slash commands / skills the agent CLIs know about in
  * this session's cwd, for composer autocomplete. The server probes the CLIs
  * (cached per host+cwd for a few minutes) and answers with the server-side
@@ -811,11 +725,6 @@ export interface ChatSendMessage {
  * appears in both directions — the union context disambiguates. */
 export interface CommandsListMessage {
   type: "commands.list";
-  sessionId: string;
-}
-
-export interface ChatCancelMessage {
-  type: "chat.cancel";
   sessionId: string;
 }
 
@@ -1911,8 +1820,6 @@ export type ClientMessage =
   | SessionCreateMessage
   | SessionSubscribeMessage
   | SessionResumeMessage
-  | SessionModeGetMessage
-  | SessionModeSetMessage
   | SessionListMessage
   | AttentionListMessage
   | BrowserHistoryRecordMessage
@@ -1921,8 +1828,6 @@ export type ClientMessage =
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
-  | ChatSendMessage
-  | ChatCancelMessage
   | CommandsListMessage
   | TerminalOpenMessage
   | TerminalListMessage
@@ -2024,93 +1929,6 @@ export interface SessionCreatedMessage {
   sessionId: string;
 }
 
-/** A single persisted turn, replayed to a resuming client. */
-export interface HistoryMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  agent?: AgentKind;
-  model?: string;
-  thinking?: string;
-  createdAt?: number;
-}
-
-/** Sent after `session.created` in response to `session.resume`, when the
- * session already existed in the database. Carries the full prior transcript
- * so the client can rebuild its message list before live events resume. */
-export interface SessionHistoryMessage {
-  type: "session.history";
-  sessionId: string;
-  messages: HistoryMessage[];
-}
-
-export interface ChatChunkMessage {
-  type: "chat.chunk";
-  sessionId: string;
-  text: string;
-}
-
-export interface ChatThinkingMessage {
-  type: "chat.thinking";
-  sessionId: string;
-  text: string;
-}
-
-export interface ChatToolUseMessage {
-  type: "chat.tool_use";
-  sessionId: string;
-  name: string;
-  input: unknown;
-}
-
-export interface ChatToolResultMessage {
-  type: "chat.tool_result";
-  sessionId: string;
-  name: string;
-  result: unknown;
-}
-
-export interface ChatDoneMessage {
-  type: "chat.done";
-  sessionId: string;
-  usage?: ChatUsage;
-}
-
-/** A plan produced by a plan-mode claude turn. claude 2.1.x has no
- * `ExitPlanMode` tool; the plan arrives as an ordinary `Write` tool_use whose
- * `input.file_path` lands under `.claude/plans/`, and `agent.rs` lifts its
- * `input.content` into this message. Codex plan mode (`--sandbox read-only`)
- * produces no such artifact, so this is claude-only. */
-export interface ChatPlanMessage {
-  type: "chat.plan";
-  sessionId: string;
-  content: string;
-}
-
-export interface SessionModeMessage {
-  type: "session.mode";
-  requestId: string;
-  sessionId: string;
-  deviceId: string;
-  /** Server-owned association, including sessions not yet in navigation. */
-  workspaceId?: string;
-  mode: SessionMode;
-  scope: SessionModeScope;
-  revision: number;
-}
-
-/** Policy changed elsewhere; refetch for this connection's device. */
-export interface SessionModeInvalidatedMessage {
-  type: "session.mode.invalidated";
-  sessionId: string;
-  workspaceId?: string;
-  /** Present only when a device default changed. */
-  deviceId?: string;
-  hostId?: string;
-  /** Monotonic persisted policy revision at the time of the mutation. */
-  revision: number;
-}
-
 /** Reply to the client `commands.list` — the slash commands / skills each CLI
  * knows about in this session's cwd. Either list may be empty (probe failed,
  * CLI not installed, …); the client just shows fewer suggestions. Note:
@@ -2196,8 +2014,7 @@ export interface SessionListResponseMessage {
 }
 
 /** Pushed by the server whenever a session's metadata changes (e.g. status
- * transitions idle→running on first chat.send, or lastAgent/lastModel is
- * recorded after a turn completes). Also sent after session.created. */
+ * transitions idle→running). Also sent after session.created. */
 export interface SessionUpdatedMessage {
   type: "session.updated";
   session: SessionSummary;
@@ -2298,8 +2115,6 @@ export interface ServerInfoMessage {
   hostname: string;
   isSsh: boolean;
   platform: string;
-  claudeModels: ModelEntry[];
-  codexModels: ModelEntry[];
   /** Absent when the server couldn't read one. */
   terminalProfile?: TerminalProfile;
   /** Additive protocol capability discovery for newer clients. */
@@ -2752,26 +2567,17 @@ export type ServerMessage =
   | ContextPreviewResultMessage
   | WorkspaceRunStartedMessage
   | SessionCreatedMessage
-  | SessionHistoryMessage
   | SessionListResponseMessage
   | SessionUpdatedMessage
   | AttentionSnapshotMessage
   | BrowserHistoryResultMessage
   | BrowserSuggestResultMessage
-  | SessionModeMessage
   | SessionDeletedMessage
   | ServerInfoMessage
-  | ChatChunkMessage
-  | ChatThinkingMessage
-  | ChatToolUseMessage
-  | ChatToolResultMessage
-  | ChatDoneMessage
-  | ChatPlanMessage
   | CommandsListResponseMessage
   | AgentManifestListResponseMessage
   | AgentUiSnapshotMessage
   | AgentUiResultMessage
-  | SessionModeInvalidatedMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

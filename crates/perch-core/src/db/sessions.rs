@@ -414,49 +414,6 @@ impl HistoryDb {
         Ok(())
     }
 
-    /// Persist the agent name and model alias used for the most recently
-    /// completed turn. Called from `persist_turn` in `server.rs` so that after
-    /// a server restart, entering CLI mode can reconstruct `--model <alias>`
-    /// from the DB row rather than letting claude fall back to the dated
-    /// snapshot id in its transcript (which the GenAI proxy 404s).
-    pub fn update_session_last_model(
-        &self,
-        id: &str,
-        agent: &str,
-        model: Option<&str>,
-    ) -> anyhow::Result<()> {
-        self.conn.lock().unwrap().execute(
-            "UPDATE sessions SET last_agent = ?2, last_model = ?3 WHERE id = ?1",
-            params![id, agent, model],
-        )?;
-        Ok(())
-    }
-
-    pub fn add_message(
-        &self,
-        session_id: &str,
-        role: &str,
-        content: &str,
-        agent: Option<&str>,
-        model: Option<&str>,
-        thinking: Option<&str>,
-    ) -> anyhow::Result<()> {
-        self.conn.lock().unwrap().execute(
-            "INSERT INTO messages (session_id, role, content, agent, model, thinking, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                session_id,
-                role,
-                content,
-                agent,
-                model,
-                thinking,
-                now_millis()
-            ],
-        )?;
-        Ok(())
-    }
-
     pub fn get_messages(&self, session_id: &str) -> anyhow::Result<Vec<MessageRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -480,29 +437,6 @@ impl HistoryDb {
             .filter_map(Result::ok)
             .collect();
         Ok(rows)
-    }
-
-    /// Load a session's full transcript as wire-ready `HistoryMessage`s,
-    /// used to answer `session.resume` (works even after a server restart,
-    /// since it reads from SQLite rather than the in-memory ring buffer).
-    pub fn load_messages(&self, session_id: &str) -> anyhow::Result<Vec<HistoryMessage>> {
-        Ok(self
-            .get_messages(session_id)?
-            .into_iter()
-            .map(|row| HistoryMessage {
-                id: row.id.to_string(),
-                role: row.role,
-                text: row.content,
-                agent: row.agent.and_then(|a| match a.as_str() {
-                    "claude" => Some(crate::protocol::AgentKind::Claude),
-                    "codex" => Some(crate::protocol::AgentKind::Codex),
-                    _ => None,
-                }),
-                model: row.model,
-                thinking: row.thinking,
-                created_at: Some(row.created_at),
-            })
-            .collect())
     }
 
     /// Return all sessions ordered newest-first, with title (first user

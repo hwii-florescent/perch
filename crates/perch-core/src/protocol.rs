@@ -29,19 +29,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 // Settings & hosts value types (Stage D)
 // ---------------------------------------------------------------------------
 
-/// Mirrored from `settings::CustomModelsData` for the wire protocol.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct CustomModelsData {
-    pub claude: Vec<ModelEntry>,
-    pub codex: Vec<ModelEntry>,
-}
-
 /// Settings sent to / received from the client over the wire.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsData {
-    pub custom_models: CustomModelsData,
     pub default_cwd: Option<String>,
     /// Selected theme name (key into the client's `THEMES` table). Defaults
     /// to `"perch"`, perch's monotone look.
@@ -146,7 +137,6 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
-    pub custom_models: Option<CustomModelsData>,
     /// Outer `None` = field absent (no change).
     /// `Some(None)` = field present as `null` (clear).
     /// `Some(Some(_))` = field present with a value (set).
@@ -269,27 +259,6 @@ fn default_mode() -> String {
 // Shared value types
 // ---------------------------------------------------------------------------
 
-/// A single model entry sent from server to client as part of `server.info`.
-/// The server discovers the available models at startup; clients must not
-/// maintain their own hardcoded lists — this struct is the single source of
-/// truth for what models are available on any given machine.
-///
-/// Stage D will replace the ad-hoc `~/.perch/settings.json` custom-model
-/// reader in `models.rs` with a formal settings module that also emits these.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelEntry {
-    pub id: String,
-    pub label: String,
-    /// The model this machine's CLI is configured to use by default (e.g.
-    /// codex's `model =` in `~/.codex/config.toml`). Lists stay in the
-    /// catalogue's own best-first order; clients preselect the flagged entry
-    /// (falling back to index 0 when no entry is flagged). At most one entry
-    /// per list carries it. Omitted on the wire when false.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub is_default: bool,
-}
-
 /// Running/idle indicator for a session, broadcast to all connected clients
 /// whenever a turn starts or completes. Mirrors the TS `SessionStatus` union.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -310,10 +279,6 @@ pub struct SessionSummary {
     pub title: String,
     pub cwd: String,
     pub created_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_agent: Option<AgentKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_model: Option<String>,
     pub status: SessionStatus,
     /// Which host this session belongs to.  `"local"` for the local perch
     /// instance; a host `id` for any federated remote.
@@ -666,15 +631,6 @@ pub struct AgentTurnSummary {
     pub state: AgentTurnState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cost_usd: f64,
-    pub context_tokens: u64,
-}
-
 /// One invocable command/skill offered by an agent CLI in a given cwd, as
 /// scraped by `commands.rs` and served in `commands.list`. `name` is bare (no
 /// `/` or `$` sigil) — the client prepends whichever sigil the active agent
@@ -697,27 +653,6 @@ pub enum AgentKind {
     Codex,
 }
 
-/// Structured Chat/UI versus interactive CLI view.  This wire enum is kept
-/// separate from the runtime's internal `agent_fleet::AgentMode` so protocol
-/// clients do not need to depend on lifecycle implementation details.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SessionMode {
-    Hosted,
-    Cli,
-}
-
-/// Scope reported by `session.mode`; `default` means no session/workspace
-/// override exists and the device default (or Hosted fallback) won.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SessionModeScope {
-    Session,
-    Workspace,
-    Device,
-    Default,
-}
-
 /// Stable identity fields exposed by the lifecycle endpoint.  The runtime
 /// keeps the provider continuation opaque; clients only use it to label the
 /// same agent and never synthesize one.
@@ -737,7 +672,7 @@ pub struct AgentLifecycleKey {
 pub struct AgentManifestSummary {
     pub id: String,
     pub display_name: String,
-    pub supported_modes: Vec<SessionMode>,
+    pub supported_modes: Vec<String>,
     pub resumability: String,
     pub capabilities: Vec<String>,
     pub status_detection: String,
@@ -847,24 +782,6 @@ pub struct AgentAttach {
     pub agent: AgentKind,
 }
 
-/// A single persisted turn, replayed to a resuming client. Mirrors the TS
-/// `HistoryMessage` interface.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryMessage {
-    pub id: String,
-    pub role: String,
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent: Option<AgentKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-}
-
 // ---------------------------------------------------------------------------
 // Client -> Server
 // ---------------------------------------------------------------------------
@@ -968,71 +885,6 @@ pub enum ClientMessage {
 
     #[serde(rename = "session.resume", rename_all = "camelCase")]
     SessionResume { session_id: String },
-
-    /// Read the effective mode after applying session/workspace/device
-    /// precedence.  `device_id` is an opaque client-stable identifier; the
-    /// server validates it as a key but authenticates control identities from
-    /// the connection itself.
-    #[serde(rename = "session.mode.get", rename_all = "camelCase")]
-    SessionModeGet {
-        request_id: String,
-        session_id: String,
-        device_id: String,
-        #[serde(default)]
-        workspace_id: Option<String>,
-    },
-
-    /// Set or clear a mode override.  `scope: "device"` changes the supplied
-    /// device default; session/workspace scopes require the corresponding id.
-    /// Omitting `mode` (or setting `clear_override`) clears the selected
-    /// session/workspace override and reveals lower-precedence policy.
-    #[serde(rename = "session.mode.set", rename_all = "camelCase")]
-    SessionModeSet {
-        request_id: String,
-        session_id: String,
-        device_id: String,
-        scope: SessionModeScope,
-        #[serde(default)]
-        workspace_id: Option<String>,
-        #[serde(default)]
-        mode: Option<SessionMode>,
-        #[serde(default)]
-        clear_override: bool,
-    },
-
-    #[serde(rename = "chat.send", rename_all = "camelCase")]
-    ChatSend {
-        session_id: String,
-        text: String,
-        /// Stable client supplied id used to make prompt insertion and
-        /// runner dispatch idempotent across reconnects.
-        #[serde(default)]
-        operation_id: Option<String>,
-        #[serde(default)]
-        agent: AgentKind,
-        model: Option<String>,
-        /// Run this turn in *plan mode*: claude gets
-        /// `--permission-mode plan` instead of `bypassPermissions`, codex gets
-        /// `--sandbox read-only`. Absent ⇒ `false` (the pre-existing
-        /// behaviour), so older clients are unaffected.
-        #[serde(default)]
-        plan_mode: bool,
-        /// Reasoning-effort level for this turn. `None` (or `"default"`) omits
-        /// the flag entirely and lets the CLI use its own default. claude:
-        /// `--effort <level>`; codex: `-c model_reasoning_effort="<level>"`.
-        #[serde(default)]
-        effort: Option<String>,
-        /// Absolute, server-side paths of files staged via `POST {base}upload`
-        /// to attach to this turn. Images are passed to codex with `-i`; every
-        /// other file (and every file for claude) is named in a trailing
-        /// `[Attached files: …]` note appended to the turn text, which the CLI
-        /// then reads itself.
-        #[serde(default)]
-        attachments: Option<Vec<String>>,
-    },
-
-    #[serde(rename = "chat.cancel", rename_all = "camelCase")]
-    ChatCancel { session_id: String },
 
     /// Ask the server which slash commands / skills the agent CLIs know about
     /// in this session's cwd, for composer autocomplete. The server probes the
@@ -1950,36 +1802,6 @@ pub enum ServerMessage {
         entries: Vec<BrowserHistoryEntry>,
     },
 
-    /// Effective session mode after session/workspace/device precedence.
-    #[serde(rename = "session.mode", rename_all = "camelCase")]
-    SessionMode {
-        request_id: String,
-        session_id: String,
-        device_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        workspace_id: Option<String>,
-        mode: SessionMode,
-        scope: SessionModeScope,
-        revision: u64,
-    },
-
-    /// Broadcast when a mode policy changes. It carries no effective mode:
-    /// each connected client must refetch for its own device and precedence
-    /// chain instead of applying another client's result.
-    #[serde(rename = "session.mode.invalidated", rename_all = "camelCase")]
-    SessionModeInvalidated {
-        session_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        workspace_id: Option<String>,
-        /// Set only for a device-default mutation; `None` means all devices.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        host_id: Option<String>,
-        /// Monotonic persisted policy revision at the time of the mutation.
-        revision: u64,
-    },
-
     /// Broadcast to every connection (mirrors `hosts.updated`'s fan-out via
     /// `hub_events_tx`) when a session is permanently deleted, since the row
     /// backing a normal `session.updated` no longer exists to look up. Client
@@ -1993,8 +1815,6 @@ pub enum ServerMessage {
         hostname: String,
         is_ssh: bool,
         platform: String,
-        claude_models: Vec<ModelEntry>,
-        codex_models: Vec<ModelEntry>,
         /// The user's real terminal appearance — their iTerm2 default
         /// profile's font and full ANSI palette — so CLI-mode panes look like
         /// their terminal instead of like perch's UI theme. Absent when it
@@ -2013,48 +1833,6 @@ pub enum ServerMessage {
         #[serde(default)]
         snapshot_revision: u64,
     },
-
-    #[serde(rename = "session.history", rename_all = "camelCase")]
-    SessionHistory {
-        session_id: String,
-        messages: Vec<HistoryMessage>,
-    },
-
-    #[serde(rename = "chat.chunk", rename_all = "camelCase")]
-    ChatChunk { session_id: String, text: String },
-
-    #[serde(rename = "chat.thinking", rename_all = "camelCase")]
-    ChatThinking { session_id: String, text: String },
-
-    #[serde(rename = "chat.tool_use", rename_all = "camelCase")]
-    ChatToolUse {
-        session_id: String,
-        name: String,
-        input: Value,
-    },
-
-    #[serde(rename = "chat.tool_result", rename_all = "camelCase")]
-    ChatToolResult {
-        session_id: String,
-        name: String,
-        result: Value,
-    },
-
-    #[serde(rename = "chat.done", rename_all = "camelCase")]
-    ChatDone {
-        session_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<ChatUsage>,
-    },
-
-    /// A plan produced by a plan-mode claude turn. claude 2.1.x has no
-    /// `ExitPlanMode` tool; the plan arrives as an ordinary `Write` tool_use
-    /// whose `input.file_path` lands under `.claude/plans/`, and `agent.rs`
-    /// lifts its `input.content` into this message (see
-    /// `ClaudeStreamParser::plan_content_of`). Codex plan mode (`--sandbox
-    /// read-only`) produces no such artifact, so this is claude-only.
-    #[serde(rename = "chat.plan", rename_all = "camelCase")]
-    ChatPlan { session_id: String, content: String },
 
     /// Reply to `commands.list` — the slash commands / skills each CLI knows
     /// about in this session's cwd. Either list may be empty (probe failed,
@@ -2239,7 +2017,7 @@ pub enum ServerMessage {
 
     /// Pushed to all connections when a hub-managed remote host changes state
     /// (connecting → connected → error → disabled).  Connected-only fields
-    /// (`hostname`, `platform`, `isSsh`, `claudeModels`, `codexModels`) are
+    /// (`hostname`, `platform`, `isSsh`) are
     /// omitted when the host is not connected.
     #[serde(rename = "host.info", rename_all = "camelCase")]
     HostInfo {
@@ -2256,10 +2034,6 @@ pub enum ServerMessage {
         platform: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         is_ssh: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        claude_models: Option<Vec<ModelEntry>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        codex_models: Option<Vec<ModelEntry>>,
         /// The remote's `server.info` capabilities that the hub relays
         /// (`hub::RELAYED_CAPABILITIES`). Absent from older hubs.
         #[serde(default, skip_serializing_if = "Option::is_none")]

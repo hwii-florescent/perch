@@ -239,7 +239,7 @@ it("status rings retain every status and select the actual harness rather than a
     [{ unseen: true }, "done", "var(--teal)"],
     [{ status: "running", stale: true }, "idle", "var(--green)"],
   ] as const) {
-    render(<StatusDot session={{ ...session, ...overrides, lastAgent: "claude" }} />);
+    render(<StatusDot session={{ ...session, ...overrides }} />);
     const badge = host.querySelector<HTMLElement>(".agent-status-dot")!;
     expect(badge.classList.contains(`agent-status-dot--${state}`)).toBe(true);
     expect(badge.style.borderColor).toBe(color);

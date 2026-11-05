@@ -14,7 +14,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
 use crate::agent_persistence::SqliteConnectionAdapter;
-use crate::protocol::HistoryMessage;
 use crate::review::{ReviewComment, ReviewPacket};
 
 mod attention;
@@ -23,8 +22,6 @@ mod browser_history;
 pub use browser_history::BrowserHistoryRow;
 mod workspace_order;
 pub use workspace_order::{ORDER_PROJECTS, ORDER_SESSIONS};
-mod detached;
-pub use detached::DetachedRunRow;
 mod prompts;
 pub use prompts::{
     AgentChangeSnapshotFinish, AgentChangeSnapshotRow, AgentChangeSnapshotStart, PromptClaim,
@@ -461,52 +458,6 @@ impl HistoryDb {
             conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT", [])?;
         }
 
-        // One row per *detached turn* launched on a direct host. This is the
-        // durable half of detached mode: everything needed to re-attach to a
-        // turn that is still running on the remote after perch itself has
-        // been killed and restarted (prior-art conventions B2/B3/B4 — cursor
-        // with file identity, pid *plus* start-time identity, and the
-        // tri-state recovery decision).
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS detached_runs (
-                run_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                host_id TEXT NOT NULL,
-                ssh_host TEXT NOT NULL,
-                agent TEXT NOT NULL,
-                model TEXT,
-                cwd TEXT NOT NULL,
-                run_dir TEXT NOT NULL,
-                log_path TEXT NOT NULL,
-                pid INTEGER,
-                pgid INTEGER,
-                proc_start TEXT,
-                cursor_offset INTEGER NOT NULL DEFAULT 0,
-                cursor_inode INTEGER NOT NULL DEFAULT 0,
-                provider_session_id TEXT,
-                status TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                operation_id TEXT
-            );
-            CREATE INDEX IF NOT EXISTS detached_runs_status
-                ON detached_runs (status);",
-        )?;
-        // `operation_id` links a detached run back to the durable prompt
-        // operation that authorized it. Older databases predate review and
-        // prompt outboxes, so add the nullable column without disturbing the
-        // existing run rows or their recovery identity.
-        let mut detached_run_columns = std::collections::HashSet::new();
-        {
-            let mut stmt = conn.prepare("PRAGMA table_info(detached_runs)")?;
-            let mut rows = stmt.query([])?;
-            while let Some(row) = rows.next()? {
-                let name: String = row.get(1)?;
-                detached_run_columns.insert(name);
-            }
-        }
-        if !detached_run_columns.contains("operation_id") {
-            conn.execute("ALTER TABLE detached_runs ADD COLUMN operation_id TEXT", [])?;
-        }
         Self::migrate_attention(&conn)?;
         Self::migrate_browser_history(&conn)?;
         Self::migrate_workspace_order(&conn)?;
