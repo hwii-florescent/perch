@@ -2,7 +2,7 @@ import { handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, UsageRedeemResultMessage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { resyncPendingBuffersAfterReconnect, useWorkspaceFilesStore } from "../filesystemStore";
 import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
@@ -11,7 +11,7 @@ import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { defaultModel } from "../models";
 import { applyTheme } from "../themes";
 import { playBlockedTone, playDoneTone } from "../sound";
-import { ensureNotificationPermission, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, windowFocused } from "../notifications";
+import { ensureNotificationPermission, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, USAGE_NOTIFICATION_ID, windowFocused } from "../notifications";
 import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
   ACTIVE_PROJECT_ID_STORAGE_KEY,
@@ -167,6 +167,8 @@ export interface ToastEntry {
   id: string;
   sessionId: string;
   title: string;
+  /** A usage alert's full text; such a toast opens no session. */
+  text?: string;
 }
 
 interface PendingTerminal {
@@ -299,6 +301,8 @@ export interface PerchState {
   spend: SpendSummary | null;
   /** Local receipt time for the latest usage response; drives refresh feedback. */
   usageUpdatedAt: number;
+  /** The latest `usage.redeemResult`, shown in the usage popover. */
+  usageRedeemResult: UsageRedeemResultMessage | null;
   /** Set while a CLI PTY is being attached for a given session, cleared on
    * success or error. Used to route ServerMessage::Error to cliError instead
    * of the chat message list when the error arrives during attach. */
@@ -1029,6 +1033,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   usage: [],
   spend: null,
   usageUpdatedAt: 0,
+  usageRedeemResult: null,
   attachingCliForSession: null,
   cliError: null,
   settingsOpen: false,
@@ -3241,6 +3246,34 @@ export function handleServerMessage(msg: ServerMessage): void {
     case "usage.result":
       usePerchStore.setState({ usage: msg.accounts, spend: msg.spend ?? null, usageUpdatedAt: Date.now() });
       break;
+    case "usage.redeemResult":
+      usePerchStore.setState({ usageRedeemResult: msg });
+      break;
+    case "usage.alert": {
+      // Same delivery rules as a finished session, but not session-scoped.
+      const state = usePerchStore.getState();
+      const focused = windowFocused();
+      if (state.settings?.soundEnabled && msg.kind !== "reset") playBlockedTone();
+      const channel = planNotification({
+        event: true,
+        viewed: false,
+        focused,
+        delivery: state.settings?.toastDelivery ?? "app",
+        permission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+      });
+      const toast = { id: newId(), sessionId: USAGE_NOTIFICATION_ID, title: msg.title, text: msg.body ? `${msg.title} · ${msg.body}` : msg.title };
+      if (channel === "system") {
+        try {
+          sendSystemNotification(msg.title, msg.body, USAGE_NOTIFICATION_ID, () => undefined);
+        } catch {
+          usePerchStore.setState({ toasts: [...state.toasts, toast] });
+        }
+      } else if (channel === "toast") {
+        if (!focused) ensureNotificationPermission();
+        usePerchStore.setState({ toasts: [...state.toasts, toast] });
+      }
+      break;
+    }
     case "fs.browse.result": {
       const resolve = pendingBrowses.get(msg.requestId);
       if (resolve) {
@@ -3317,6 +3350,6 @@ applyTheme("perch");
 // The desktop shell raises this when an OS notification is clicked (notify.rs).
 window.addEventListener(OPEN_SESSION_EVENT, (event) => {
   const id = (event as CustomEvent<unknown>).detail;
-  if (typeof id === "string" && id) usePerchStore.getState().switchSession(id);
+  if (typeof id === "string" && id && id !== USAGE_NOTIFICATION_ID) usePerchStore.getState().switchSession(id);
 });
 socket.connect();

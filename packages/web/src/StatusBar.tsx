@@ -29,6 +29,13 @@ function providerName(provider: string): string {
   return provider === "claude" ? "Claude" : provider === "codex" ? "Codex" : provider;
 }
 
+const REDEEM_TEXT: Record<string, string> = {
+  reset: "Limits reset.",
+  nothingToReset: "Nothing to reset; no credit spent.",
+  noCredit: "No banked reset available.",
+  alreadyRedeemed: "That reset was already used.",
+};
+
 function resetTitle(w: UsageWindow): string {
   if (w.resetsAt === undefined) return "Reset time unavailable";
   const at = new Date(typeof w.resetsAt === "number" ? w.resetsAt * 1000 : w.resetsAt);
@@ -44,6 +51,10 @@ export function UsageSummary({
   updatedAt: number;
 }) {
   const spend = usePerchStore((s) => s.spend);
+  const redeemResult = usePerchStore((s) => s.usageRedeemResult);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState<string | null>(null);
+  const [redeemNotice, setRedeemNotice] = useState<{ accountId: string; text: string } | null>(null);
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState("");
@@ -63,6 +74,13 @@ export function UsageSummary({
     }
     previousUpdatedAt.current = updatedAt;
   }, [updatedAt, refreshing]);
+  useEffect(() => {
+    if (!redeeming || redeemResult?.accountId !== redeeming) return;
+    setRedeeming(null);
+    const known = REDEEM_TEXT[redeemResult.outcome];
+    setRedeemNotice({ accountId: redeeming, text: known ?? redeemResult.message ?? "Could not reach Codex. Try again." });
+    if (known) socket.send({ type: "usage.get", force: true });
+  }, [redeemResult, redeeming]);
   useEffect(() => {
     if (!refreshing) return;
     const timeout = window.setTimeout(() => setRefreshing(false), 30_000);
@@ -192,6 +210,61 @@ export function UsageSummary({
                         {account.resetCredits} rate-limit {account.resetCredits === 1 ? "reset" : "resets"} banked
                       </p>
                     )}
+                    {(() => {
+                      const id = account.accountId;
+                      const credits = account.resetCredits ?? 0;
+                      if (!id) return null;
+                      return (
+                        <>
+                          {credits === 0 ? null : confirming === id ? (
+                            <div className="grid gap-1.5">
+                              <p className="m-0 text-[0.72rem]">
+                                Reset this Codex account&apos;s 5h and weekly limits now? This spends 1 of {credits} banked {credits === 1 ? "reset" : "resets"}.
+                              </p>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  data-testid="usage-redeem-confirm"
+                                  className={cn(GHOST_BUTTON, "px-2 py-1 text-[0.78rem] text-fg hover:bg-surface-0 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+                                  onClick={() => {
+                                    usePerchStore.setState({ usageRedeemResult: null });
+                                    setConfirming(null);
+                                    setRedeeming(id);
+                                    socket.send({ type: "usage.redeemReset", accountId: id });
+                                  }}
+                                >
+                                  Reset limits
+                                </button>
+                                <button
+                                  type="button"
+                                  className={cn(GHOST_BUTTON, "px-2 py-1 text-[0.78rem] text-subtext-0 hover:bg-surface-0 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+                                  onClick={() => setConfirming(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              data-testid="usage-redeem-reset"
+                              disabled={redeeming === id}
+                              aria-busy={redeeming === id}
+                              className={cn(GHOST_BUTTON, "justify-self-start px-2 py-1 text-[0.78rem] text-fg hover:bg-surface-0 disabled:cursor-wait disabled:opacity-50 focus-visible:[outline:1px_solid_var(--overlay-1)]")}
+                              onClick={() => {
+                                setRedeemNotice(null);
+                                setConfirming(id);
+                              }}
+                            >
+                              {redeeming === id ? "Resetting…" : "Use one"}
+                            </button>
+                          )}
+                          {redeemNotice?.accountId === id && (
+                            <p className="m-0 text-[0.72rem]" role="status" data-testid="usage-redeem-status">{redeemNotice.text}</p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </section>
                 );
               })}

@@ -215,6 +215,10 @@ export interface SettingsData {
   browserSearchEngine?: BrowserSearchEngine;
   /** Address-bar suggestions from the search engine (what is typed is sent to it). Absent = off. */
   browserSearchSuggestions?: boolean;
+  /** Plan-usage alert threshold in percent; 0 = off. Absent = 80. */
+  usageLimitAlert?: number;
+  /** Daily API-equivalent spend alert in dollars; 0 or absent = off. */
+  usageDailyBudgetUsd?: number;
 }
 
 /**
@@ -247,6 +251,8 @@ export interface SettingsPatch {
   permissionsSetupDismissed?: boolean;
   browserSearchEngine?: BrowserSearchEngine;
   browserSearchSuggestions?: boolean;
+  usageLimitAlert?: number;
+  usageDailyBudgetUsd?: number;
 }
 
 export type HostMode = "perch" | "direct";
@@ -1304,6 +1310,13 @@ export interface UsageGetMessage {
   force?: boolean;
 }
 
+/** Spend one banked Codex reset on the account with this `accountId`; reply
+ * is `usage.redeemResult`. Refused for paired phones. */
+export interface UsageRedeemResetMessage {
+  type: "usage.redeemReset";
+  accountId: string;
+}
+
 /** One rolling rate-limit window. `label` is derived from the duration
  * ("5h", "7d"). `resetsAt` is an ISO string (Claude) or epoch seconds
  * (Codex), as the provider reported it. */
@@ -1329,6 +1342,8 @@ export interface AccountUsage {
   windows: UsageWindow[];
   /** Banked Codex rate-limit resets still redeemable. */
   resetCredits?: number;
+  /** Stable id of the account (`codex:<12 hex>`); what `usage.redeemReset` names. */
+  accountId?: string;
   error?: string;
 }
 
@@ -1382,6 +1397,24 @@ export interface UsageResultMessage {
   accounts: AccountUsage[];
   /** Absent from older cores. */
   spend?: SpendSummary;
+}
+
+/** A usage threshold event, broadcast once to every client (capability
+ * `usage.alert.v1`). `kind`: `limit`, `reset` or `budget`. */
+export interface UsageAlertMessage {
+  type: "usage.alert";
+  kind: string;
+  title: string;
+  body: string;
+}
+
+/** Reply to `usage.redeemReset`: `reset`, `nothingToReset`, `noCredit`,
+ * `alreadyRedeemed`, else `error` with an optional explanation. */
+export interface UsageRedeemResultMessage {
+  type: "usage.redeemResult";
+  accountId: string;
+  outcome: string;
+  message?: string;
 }
 
 /** List directories at `path` (or the user's home directory when absent) on
@@ -1932,6 +1965,7 @@ export type ClientMessage =
   | SessionRenameMessage
   | FsBrowseMessage
   | UsageGetMessage
+  | UsageRedeemResetMessage
   | FsTreeMessage
   | WorkspaceRunMessage
   | FsSearchMessage
@@ -2777,6 +2811,8 @@ export type ServerMessage =
   | ReviewBatchDeliveryMessage
   | FsBrowseResultMessage
   | UsageResultMessage
+  | UsageAlertMessage
+  | UsageRedeemResultMessage
   | FsTreeResultMessage
   | FsSearchResultMessage
   | FsExtractResultMessage

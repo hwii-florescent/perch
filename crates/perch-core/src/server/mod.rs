@@ -2402,6 +2402,7 @@ fn foundation_capabilities() -> Vec<String> {
         "workspace.run.v1",
         "terminal.sharedInput",
         "upload.scp.v1",
+        "usage.alert.v1",
         "context.bridge.v1",
         "terminal.list",
         "terminal.release",

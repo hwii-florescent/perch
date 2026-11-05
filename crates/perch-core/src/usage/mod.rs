@@ -40,9 +40,13 @@
 //! `prices.rs`. That price list also names the subscription plans and their
 //! monthly price used below.
 
+pub mod alerts;
 mod cli;
 mod prices;
+mod redeem;
 pub mod spend;
+
+pub use redeem::redeem_reset;
 
 pub use prices::codex_turn_cost;
 
@@ -117,6 +121,10 @@ pub struct AccountUsage {
     /// Banked Codex rate-limit resets the user can still redeem.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<u32>,
+    /// Stable id of the account's config dir (`codex:<12 hex>`), what
+    /// `usage.redeemReset` names. Not the path itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     /// A provider-specific failure that explains why no windows are available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -132,11 +140,17 @@ struct Account {
     is_default: bool,
 }
 
+type Cached = Option<(Instant, Vec<AccountUsage>)>;
+static CACHE: OnceLock<tokio::sync::Mutex<Cached>> = OnceLock::new();
+
+/// The next `current` call fetches again (a redeemed reset changed the limits).
+pub async fn invalidate_cache() {
+    *CACHE.get_or_init(Default::default).lock().await = None;
+}
+
 /// Cached result. The lock is only held to read/write the cache; provider I/O
 /// and CLI conversations run without holding it.
 pub async fn current(force_refresh: bool) -> Vec<AccountUsage> {
-    type Cached = Option<(Instant, Vec<AccountUsage>)>;
-    static CACHE: OnceLock<tokio::sync::Mutex<Cached>> = OnceLock::new();
     let started = Instant::now();
     {
         let cache = CACHE.get_or_init(Default::default).lock().await;
@@ -169,13 +183,21 @@ pub async fn current(force_refresh: bool) -> Vec<AccountUsage> {
 }
 
 async fn fetch(a: &Account) -> Option<AccountUsage> {
-    match a.provider {
+    let mut usage = match a.provider {
         "claude" => Some(fetch_claude(a).await),
         "codex" => fetch_codex(a).await,
         "kimi" => fetch_kimi(a).await,
         "grok" => fetch_grok(a).await,
         _ => None,
-    }
+    }?;
+    usage.account_id = Some(account_id(a));
+    Some(usage)
+}
+
+/// Provider plus the first 12 hex of sha256 of the config dir as written.
+fn account_id(a: &Account) -> String {
+    let hash = Sha256::digest(a.dir.to_string_lossy().as_bytes());
+    format!("{}:{}", a.provider, &format!("{hash:x}")[..12])
 }
 
 /// An account whose credentials exist but whose usage could not be read.
@@ -712,20 +734,31 @@ fn classify_codex_error(code: Option<i64>, message: &str) -> Failure {
     }
 }
 
-async fn codex_cli_usage(a: &Account) -> Result<AccountUsage, Failure> {
+/// `codex app-server` for this account.
+fn codex_command(a: &Account) -> Command {
     let mut command = Command::new("codex");
     command.args(["-c", "features.plugins=false", "app-server"]);
     if !a.is_default {
         command.env("CODEX_HOME", &a.dir);
     }
+    command
+}
+
+/// `initialize` (request id 1) and the `initialized` notification.
+async fn codex_handshake(chat: &mut Conversation) -> Result<(), Failure> {
+    let client = json!({
+        "clientInfo": {"name": "perch", "title": "Perch", "version": env!("CARGO_PKG_VERSION")},
+        "capabilities": null
+    });
+    codex_rpc(chat, 1, "initialize", Some(client)).await?;
+    chat.send(&json!({"method": "initialized"})).await
+}
+
+async fn codex_cli_usage(a: &Account) -> Result<AccountUsage, Failure> {
+    let command = codex_command(a);
     let (account, limits) = with_deadline(CODEX_DEADLINE, async {
         let mut chat = Conversation::spawn(command)?;
-        let client = json!({
-            "clientInfo": {"name": "perch", "title": "Perch", "version": env!("CARGO_PKG_VERSION")},
-            "capabilities": null
-        });
-        codex_rpc(&mut chat, 1, "initialize", Some(client)).await?;
-        chat.send(&json!({"method": "initialized"})).await?;
+        codex_handshake(&mut chat).await?;
         let account = codex_rpc(
             &mut chat,
             2,

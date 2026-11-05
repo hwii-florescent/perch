@@ -26,6 +26,10 @@ export function windowFocused(): boolean {
 
 export const OPEN_SESSION_EVENT = "perch:open-session";
 
+/** The "session" id of usage alerts: never a real session, so clicking one
+ * only raises the window. */
+export const USAGE_NOTIFICATION_ID = "usage";
+
 type Invoke = (cmd: string, args?: unknown) => Promise<unknown>;
 
 /** Show an OS notification for `sessionId`. The desktop shell's `notify_session`

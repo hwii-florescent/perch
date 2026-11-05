@@ -74,7 +74,7 @@ Install to reduce coordination between terminals, paths, worktrees, machines and
 
 ### Deliberate noncompetition
 
-No best-model/harness race, comprehensive code intelligence, full debugger platform, Git history/branch-management replacement, issue tracker, orchestration engine, general browser, or provider account/quota management. External editors remain first-class companions.
+No best-model/harness race, comprehensive code intelligence, full debugger platform, Git history/branch-management replacement, issue tracker, orchestration engine, general browser, or provider account management (Perch reports plan usage, estimated spend and threshold alerts from local data; it does not hot-swap accounts or bill). External editors remain first-class companions.
 
 ## 3. Competitive analysis
 
@@ -675,7 +675,7 @@ No arbitrary lifecycle interception, cross-provider DOM access, unrestricted cor
 | External editor/Open With | Important | Makes bounded internal editing credible. |
 | Quick commands | Important, bounded | Saved explicit runs, not automation engine. |
 | PR open/status/checks | Important, later | Thin integration with existing tools such as gh. |
-| Usage/context display | Nice later | Report available facts, no accounting/quota product. |
+| Usage/context display | Shipped | Plan usage, estimated spend and threshold alerts from local data; no account hot-swapping, billing or provider account management. |
 | Mobile/PWA | Nice later expansion | Preserve existing access; focus on check-in, not full mobile IDE. |
 | Isolated app preview | Existing browser; remote expansion later | Validate isolation; remote service forwarding is separate work. |
 | Floating terminal | Unnecessary | Terminals already have tabs/splits. |

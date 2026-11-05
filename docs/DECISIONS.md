@@ -7,6 +7,23 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-04 — Usage popover: plan usage, spend and alerts (owner)
+
+Amends the earlier "report available facts, no accounting/quota product" stance.
+The status-bar trigger is unchanged; the popover grows:
+
+- **Plan usage:** plan names, model-scoped windows and, for Codex, banked
+  rate-limit resets with a confirmed **Use one** redeem (it spends a paid credit,
+  so never from a paired phone).
+- **API-equivalent spend:** estimated from the agents' local logs at list prices
+  (today / 7 days / 30 days, top models, the open Claude 5h block, burn rate, and
+  30-day spend beside the plan price). An estimate, not a bill.
+- **Alerts:** a plan window crossing a threshold (default 80%) and a daily spend
+  budget (default off) arrive through the existing toast / system-notification
+  path, not Needs You, which is session-scoped. Settings → Notifications → Usage.
+- Data stays local: usage is never relayed to remote hosts. Still no account
+  switching, billing or provider account management.
+
 ## 2026-11-04 — A native iPhone app, as a shell around the desktop's UI (owner)
 
 Reverses "no native app" (2026-11-02) for iOS only. `ios/` is a small SwiftUI

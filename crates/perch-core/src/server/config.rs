@@ -58,6 +58,8 @@ pub(super) fn handle_settings_update(
         permissions_setup_dismissed: patch.permissions_setup_dismissed,
         browser_search_engine: patch.browser_search_engine,
         browser_search_suggestions: patch.browser_search_suggestions,
+        usage_limit_alert: patch.usage_limit_alert,
+        usage_daily_budget_usd: patch.usage_daily_budget_usd,
     };
     let phone_access = patch.phone_access;
     let relay_url = patch.relay_url;
@@ -249,6 +251,8 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         permissions_setup_dismissed: s.permissions_setup_dismissed,
         browser_search_engine: s.browser_search_engine.clone(),
         browser_search_suggestions: s.browser_search_suggestions,
+        usage_limit_alert: s.usage_limit_alert,
+        usage_daily_budget_usd: s.usage_daily_budget_usd,
     }
 }
 

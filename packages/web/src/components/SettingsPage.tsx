@@ -551,6 +551,7 @@ function NotificationsSection() {
   };
 
   return (
+    <>
     <SettingsGroup>
       <SettingRow title="Sound" description="Play a sound when a session finishes or needs attention.">
         <Switch label="Play a sound when a session finishes or needs attention" testId="settings-sound-enabled" checked={soundEnabled} onChange={handleSoundEnabledChange} />
@@ -573,6 +574,35 @@ function NotificationsSection() {
         </select>
       </SettingRow>
     </SettingsGroup>
+    <SettingsGroup title="Usage">
+      <SettingRow title="Plan limit alert" description="Notify when a plan window crosses this share.">
+        <select
+          className={SELECT}
+          data-testid="settings-usage-limit-alert"
+          aria-label="Plan limit alert"
+          disabled={!settings}
+          value={settings?.usageLimitAlert ?? 80}
+          onChange={(e) => updateSettings({ usageLimitAlert: Number(e.target.value) })}
+        >
+          <option value={0}>Off</option>
+          {[50, 75, 80, 90, 95].map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
+        </select>
+      </SettingRow>
+      <SettingRow title="Daily spend alert" description="Notify once a day when API-equivalent spend passes this.">
+        <select
+          className={SELECT}
+          data-testid="settings-usage-daily-budget"
+          aria-label="Daily spend alert"
+          disabled={!settings}
+          value={settings?.usageDailyBudgetUsd ?? 0}
+          onChange={(e) => updateSettings({ usageDailyBudgetUsd: Number(e.target.value) })}
+        >
+          <option value={0}>Off</option>
+          {[5, 10, 25, 50, 100, 250].map((dollars) => <option key={dollars} value={dollars}>${dollars}</option>)}
+        </select>
+      </SettingRow>
+    </SettingsGroup>
+    </>
   );
 }
 

@@ -101,6 +101,35 @@ it("shows the plan and scoped windows only in the popover, plus banked Codex res
   expect(get("usage-reset-credits").textContent).toBe("3 rate-limit resets banked");
 });
 
+it("redeems a banked Codex reset only after confirmation and reports the outcome", () => {
+  usePerchStore.setState({ usageRedeemResult: null, usage: [
+    { provider: "codex", accountId: "codex:abc123abc123", windows: [], resetCredits: 3 },
+  ] });
+  render(<StatusBar />);
+  click(get("usage-summary"));
+  // Cancel sends nothing.
+  click(get("usage-redeem-reset"));
+  expect(get("usage-details").textContent).toContain("This spends 1 of 3 banked resets.");
+  click([...document.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!);
+  expect(socket.send).not.toHaveBeenCalled();
+  expect(document.querySelector("[data-testid='usage-redeem-confirm']")).toBeNull();
+  // Confirm sends the request and waits for the result.
+  click(get("usage-redeem-reset"));
+  click(get("usage-redeem-confirm"));
+  expect(socket.send).toHaveBeenCalledWith({ type: "usage.redeemReset", accountId: "codex:abc123abc123" });
+  expect((get("usage-redeem-reset") as HTMLButtonElement).disabled).toBe(true);
+  act(() => usePerchStore.setState({ usageRedeemResult: { type: "usage.redeemResult", accountId: "codex:abc123abc123", outcome: "reset" } }));
+  expect(get("usage-redeem-status").textContent).toBe("Limits reset.");
+  expect(socket.send).toHaveBeenLastCalledWith({ type: "usage.get", force: true });
+  // A failure shows the core's message and does not refetch.
+  vi.mocked(socket.send).mockClear();
+  click(get("usage-redeem-reset"));
+  click(get("usage-redeem-confirm"));
+  act(() => usePerchStore.setState({ usageRedeemResult: { type: "usage.redeemResult", accountId: "codex:abc123abc123", outcome: "error" } }));
+  expect(get("usage-redeem-status").textContent).toBe("Could not reach Codex. Try again.");
+  expect(socket.send).toHaveBeenCalledTimes(1);
+});
+
 const spend: SpendSummary = {
   pricesUpdated: "2026-10-09",
   periods: [

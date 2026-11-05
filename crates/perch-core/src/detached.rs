@@ -706,7 +706,7 @@ impl DetachedManager {
             "codex" => AgentKind::Codex,
             _ => AgentKind::Claude,
         };
-        let mut parser = Parser::new(agent);
+        let mut parser = Parser::new(agent, run.model.as_deref());
         let mut acc = Accumulator::default();
         // Always from byte 0: within one perch lifetime this *is* the start of
         // the run, and after a restart the in-memory transcript is gone and
@@ -728,7 +728,7 @@ impl DetachedManager {
                             run.run_id
                         );
                         offset = 0;
-                        parser = Parser::new(agent);
+                        parser = Parser::new(agent, run.model.as_deref());
                         acc = Accumulator::default();
                     }
                     inode = id.inode;
@@ -1272,10 +1272,16 @@ enum Parser {
 }
 
 impl Parser {
-    fn new(agent: AgentKind) -> Self {
+    /// `model` is the run's model: Codex reports no cost, so the parser prices
+    /// the turn from it (a run without one uses the launcher's default).
+    fn new(agent: AgentKind, model: Option<&str>) -> Self {
         match agent {
             AgentKind::Claude => Parser::Claude(Box::default()),
-            AgentKind::Codex => Parser::Codex(CodexStreamParser::new()),
+            AgentKind::Codex => {
+                let mut parser = CodexStreamParser::new();
+                parser.model = model.unwrap_or(DEFAULT_CODEX_MODEL).to_string();
+                Parser::Codex(parser)
+            }
         }
     }
     fn handle_line(&mut self, line: &str, tx: &UnboundedSender<AgentEvent>) {
@@ -1381,6 +1387,9 @@ pub(crate) fn claude_command(
     s
 }
 
+/// The model a Codex run without one uses.
+const DEFAULT_CODEX_MODEL: &str = "gpt-5.4-mini";
+
 /// The remote `codex` invocation. `codex exec resume <id>` gives the thread
 /// continuity the local `CodexRunner` never needed (it starts a fresh process
 /// per turn); the trailing `-` makes codex read the prompt from stdin.
@@ -1396,7 +1405,7 @@ pub(crate) fn codex_command(
     image_paths: &[String],
 ) -> String {
     let q = ssh::shell_quote;
-    let model = model.unwrap_or("gpt-5.4-mini");
+    let model = model.unwrap_or(DEFAULT_CODEX_MODEL);
     let flags = agent::codex_exec_flags(model, plan_mode, effort, image_paths);
     // `codex exec resume <id> …` — the subcommand+id sit right after `exec`.
     let mut parts: Vec<String> = vec!["codex".to_string()];
@@ -1696,7 +1705,7 @@ mod tests {
         agent: AgentKind,
         lines: &[String],
     ) {
-        let mut parser = Parser::new(agent);
+        let mut parser = Parser::new(agent, run.model.as_deref());
         let mut acc = Accumulator::default();
         for line in lines {
             if mgr.ingest_line(run, &mut parser, &mut acc, line) {
@@ -1972,7 +1981,7 @@ mod tests {
     fn claude_stream_json_parses_the_same_as_a_local_turn() {
         // The whole point of factoring the parsers out of agent.rs: a
         // detached turn's NDJSON is byte-for-byte a local turn's NDJSON.
-        let mut parser = Parser::new(AgentKind::Claude);
+        let mut parser = Parser::new(AgentKind::Claude, None);
         let (tx, mut rx) = unbounded_channel::<AgentEvent>();
         parser.handle_line(r#"{"type":"perch.meta","runId":"r1"}"#, &tx);
         parser.handle_line(
@@ -2005,7 +2014,7 @@ mod tests {
 
     #[test]
     fn codex_stream_json_parses_and_scrapes_the_thread_id() {
-        let mut parser = Parser::new(AgentKind::Codex);
+        let mut parser = Parser::new(AgentKind::Codex, Some("gpt-5.4-mini"));
         let (tx, mut rx) = unbounded_channel::<AgentEvent>();
         parser.handle_line(r#"{"type":"thread.started","thread_id":"th-7"}"#, &tx);
         parser.handle_line(
@@ -2020,15 +2029,19 @@ mod tests {
         assert!(parser.saw_terminal());
         assert_eq!(parser.provider_id().as_deref(), Some("th-7"));
         let mut text = String::new();
-        let mut usage_seen = false;
+        let mut cost = None;
         while let Ok(e) = rx.try_recv() {
             match e {
                 AgentEvent::Chunk(t) => text.push_str(&t),
-                AgentEvent::Done(u) => usage_seen = u.is_some(),
+                AgentEvent::Done(u) => cost = u.map(|u| u.cost_usd),
                 _ => {}
             }
         }
         assert_eq!(text, "CODEX_OK");
-        assert!(usage_seen);
+        // The run's model prices the turn: 10 in + 2 out at gpt-5.4-mini list prices.
+        assert!(
+            cost.is_some_and(|c| (c - 0.0000165).abs() < 1e-9),
+            "{cost:?}"
+        );
     }
 }

@@ -103,6 +103,13 @@ pub struct Settings {
     /// default: what is typed leaves the machine (Vivaldi and Brave also default off).
     #[serde(default)]
     pub browser_search_suggestions: bool,
+    /// Notify when a plan usage window reaches this percent (`usage/alerts.rs`);
+    /// 0 = off.
+    #[serde(default = "default_usage_limit_alert")]
+    pub usage_limit_alert: u8,
+    /// Notify once a day when API-equivalent spend passes this many dollars; 0 = off.
+    #[serde(default)]
+    pub usage_daily_budget_usd: f64,
 }
 
 impl Default for Settings {
@@ -127,8 +134,14 @@ impl Default for Settings {
             permissions_setup_dismissed: false,
             browser_search_engine: default_browser_search_engine(),
             browser_search_suggestions: false,
+            usage_limit_alert: default_usage_limit_alert(),
+            usage_daily_budget_usd: 0.0,
         }
     }
+}
+
+pub(crate) fn default_usage_limit_alert() -> u8 {
+    80
 }
 
 pub(crate) fn default_browser_search_engine() -> String {
@@ -201,6 +214,8 @@ pub struct SettingsPatch {
     pub permissions_setup_dismissed: Option<bool>,
     pub browser_search_engine: Option<String>,
     pub browser_search_suggestions: Option<bool>,
+    pub usage_limit_alert: Option<u8>,
+    pub usage_daily_budget_usd: Option<f64>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -280,6 +295,15 @@ impl SettingsStore {
                 "unknown browser search engine"
             );
         }
+        if let Some(percent) = patch.usage_limit_alert {
+            anyhow::ensure!(percent <= 100, "usage limit alert must be 0-100");
+        }
+        if let Some(budget) = patch.usage_daily_budget_usd {
+            anyhow::ensure!(
+                budget.is_finite() && (0.0..=100_000.0).contains(&budget),
+                "usage daily budget must be 0-100000"
+            );
+        }
         let mut guard = self.inner.lock().unwrap();
         if let Some(cm) = patch.custom_models {
             guard.custom_models = cm;
@@ -339,6 +363,12 @@ impl SettingsStore {
         }
         if let Some(suggestions) = patch.browser_search_suggestions {
             guard.browser_search_suggestions = suggestions;
+        }
+        if let Some(percent) = patch.usage_limit_alert {
+            guard.usage_limit_alert = percent;
+        }
+        if let Some(budget) = patch.usage_daily_budget_usd {
+            guard.usage_daily_budget_usd = budget;
         }
         let snapshot = guard.clone();
         drop(guard);
@@ -433,6 +463,38 @@ mod keybinding_tests {
             serde_json::from_value(serde_json::json!({"browserSearchSuggestions": true})).unwrap();
         store.update(on).unwrap();
         assert!(SettingsStore::load(&path).get().browser_search_suggestions);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn usage_alert_settings_default_round_trip_and_reject_out_of_range() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-usage-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert_eq!(store.get().usage_limit_alert, 80);
+        assert_eq!(store.get().usage_daily_budget_usd, 0.0);
+        let patch =
+            |value: serde_json::Value| -> SettingsPatch { serde_json::from_value(value).unwrap() };
+        store
+            .update(patch(
+                serde_json::json!({"usageLimitAlert": 0, "usageDailyBudgetUsd": 25.5}),
+            ))
+            .unwrap();
+        let loaded = SettingsStore::load(&path).get();
+        assert_eq!(loaded.usage_limit_alert, 0);
+        assert_eq!(loaded.usage_daily_budget_usd, 25.5);
+        for bad in [
+            serde_json::json!({"usageLimitAlert": 101}),
+            serde_json::json!({"usageDailyBudgetUsd": -1}),
+            serde_json::json!({"usageDailyBudgetUsd": 100001}),
+        ] {
+            assert!(store.update(patch(bad)).is_err());
+        }
+        assert_eq!(store.get().usage_limit_alert, 0);
+        assert_eq!(store.get().usage_daily_budget_usd, 25.5);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

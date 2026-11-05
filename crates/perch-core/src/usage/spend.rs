@@ -192,7 +192,7 @@ fn seconds(raw: f64) -> Option<f64> {
 
 /// An ISO string or a number of seconds/milliseconds; unparsable is `None`
 /// (the record is skipped, never dated "now").
-fn timestamp(v: &Value) -> Option<f64> {
+pub(super) fn timestamp(v: &Value) -> Option<f64> {
     match v {
         Value::String(s) => parse_iso(s.as_bytes()),
         Value::Number(n) => seconds(n.as_f64()?),
@@ -981,7 +981,7 @@ fn utc_offset(_: i64) -> i64 {
 }
 
 /// Local calendar day number (days since 1970 in the local time zone).
-fn local_day(t: f64) -> i64 {
+pub(super) fn local_day(t: f64) -> i64 {
     let secs = t.floor() as i64;
     (secs + utc_offset(secs)).div_euclid(86_400)
 }

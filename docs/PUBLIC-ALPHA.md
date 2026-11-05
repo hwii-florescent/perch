@@ -320,7 +320,7 @@ If this fails, revise the workflow or positioning. Do not answer failure by addi
 - Full PDF/data/media/archive/notebook suites.
 - Full editor/LSP/debugger platform.
 - Orchestration, automations, agent kanban/dashboard.
-- Provider account hot-swap, quota or usage-accounting dashboard.
+- Provider account hot-swap, billing or a usage-accounting dashboard beyond the usage popover.
 - Jira/Linear/GitHub project-management surfaces; comprehensive PR/checks integration.
 - Plugin marketplace/public extension system.
 - New Hosted/custom agent chat UI.

@@ -20,7 +20,7 @@ not a fresh runtime comparison. Orca reference revision: `564f1352`.
 | Files | CodeMirror/drafts/conflicts, images/PDF/media, archive extraction/download, desktop default-app open. | Markdown rendered file preview, image controls and richer Open With remain. |
 | Git/review | Status/diffs, commit/push, anchored comments and agent packets. | Thin PR/status/checks integration later. |
 | Context handoff | Local bounded Context Bridge; Claude explicit send, other harnesses Copy. | No arbitrary PTY injection; remote and further safe provider transports later. |
-| Usage/profiles | Plan usage windows and iTerm/Ghostty profiles. | Not an account/quota manager; Warp import not implemented. |
+| Usage/profiles | Plan usage windows, API-equivalent spend estimates and threshold alerts; iTerm/Ghostty profiles. | Not an account manager; Warp import not implemented. |
 | Remote/phone | Perch federation, reduced direct SSH/tmux, paired browser/PWA and shared CLI input. | Full managed remote workspace and phone refinements remain. |
 | Browser | Browser tabs/drawer; desktop native child webviews. | Remote service forwarding/security verification are distinct from merely having a viewer. |
 | Agent-facing CLI | No scoped Perch CLI yet. | Later, through core's services and authority model. |

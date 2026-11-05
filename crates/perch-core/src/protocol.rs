@@ -111,6 +111,12 @@ pub struct SettingsData {
     /// Address-bar search suggestions from the search engine. Missing means off.
     #[serde(default)]
     pub browser_search_suggestions: bool,
+    /// Plan-usage alert threshold in percent; 0 = off. Missing on older peers means 80.
+    #[serde(default = "crate::settings::default_usage_limit_alert")]
+    pub usage_limit_alert: u8,
+    /// Daily API-equivalent spend alert in dollars; 0 or missing = off.
+    #[serde(default)]
+    pub usage_daily_budget_usd: f64,
 }
 
 fn default_theme() -> String {
@@ -187,6 +193,10 @@ pub struct SettingsPatch {
     pub browser_search_engine: Option<String>,
     #[serde(default)]
     pub browser_search_suggestions: Option<bool>,
+    #[serde(default)]
+    pub usage_limit_alert: Option<u8>,
+    #[serde(default)]
+    pub usage_daily_budget_usd: Option<f64>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -1042,6 +1052,12 @@ pub enum ClientMessage {
         #[serde(default)]
         force: bool,
     },
+
+    /// Spend one banked Codex rate-limit reset on the account named by
+    /// `AccountUsage.accountId`; answered with `usage.redeemResult` (see
+    /// `usage/redeem.rs`). Refused for paired-device tokens; not forwarded.
+    #[serde(rename = "usage.redeemReset", rename_all = "camelCase")]
+    UsageRedeemReset { account_id: String },
 
     /// Persistent shell pane operations. Closing a view only releases its subscription.
     #[serde(rename = "terminal.open", rename_all = "camelCase")]
@@ -2059,6 +2075,25 @@ pub enum ServerMessage {
         /// API-equivalent spend from local agent logs; absent from older peers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spend: Option<crate::usage::spend::SpendSummary>,
+    },
+
+    /// A usage threshold event (`usage/alerts.rs`), broadcast once to every
+    /// client. `kind` is `limit`, `reset` or `budget`. Capability `usage.alert.v1`.
+    #[serde(rename = "usage.alert", rename_all = "camelCase")]
+    UsageAlert {
+        kind: String,
+        title: String,
+        body: String,
+    },
+
+    /// Reply to `usage.redeemReset`: `reset | nothingToReset | noCredit |
+    /// alreadyRedeemed`, else `error` with an optional explanation.
+    #[serde(rename = "usage.redeemResult", rename_all = "camelCase")]
+    UsageRedeemResult {
+        account_id: String,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
 
     /// Provider manifests plus best-effort executable availability.  The

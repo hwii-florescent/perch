@@ -231,13 +231,53 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session::handle_commands_list(state, raw_text, session_id)
         }
         ClientMessage::UsageGet { force } => {
-            let out_tx = state.out_tx.clone();
+            let state = state.clone();
             tokio::spawn(async move {
                 let (accounts, spend) =
                     tokio::join!(crate::usage::current(force), crate::usage::spend::spend());
-                let _ = out_tx.send(ServerMessage::UsageResult {
+                // The shared alert state dedupes, so however many clients poll,
+                // each alert is announced once, to everyone.
+                let settings = state.app.settings.get();
+                let alerts = crate::usage::alerts::check_now(
+                    &accounts,
+                    &spend,
+                    settings.usage_limit_alert,
+                    settings.usage_daily_budget_usd,
+                );
+                let _ = state.out_tx.send(ServerMessage::UsageResult {
                     accounts,
                     spend: Some(spend),
+                });
+                for alert in alerts {
+                    let _ = state
+                        .app
+                        .hub
+                        .hub_events_tx
+                        .send(Arc::new(ServerMessage::UsageAlert {
+                            kind: alert.kind.to_string(),
+                            title: alert.title,
+                            body: alert.body,
+                        }));
+                }
+            });
+        }
+        ClientMessage::UsageRedeemReset { account_id } => {
+            let out_tx = state.out_tx.clone();
+            // Spends a paid, irreversible credit: never from a paired phone.
+            let refused = state.device_id.is_some();
+            tokio::spawn(async move {
+                let (outcome, message) = if refused {
+                    (
+                        "error",
+                        Some("Resets can only be redeemed on the computer itself.".to_string()),
+                    )
+                } else {
+                    crate::usage::redeem_reset(&account_id).await
+                };
+                let _ = out_tx.send(ServerMessage::UsageRedeemResult {
+                    account_id,
+                    outcome: outcome.to_string(),
+                    message,
                 });
             });
         }

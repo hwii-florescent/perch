@@ -29,6 +29,11 @@ shells, real agent CLIs
   It does not own project/filesystem/Git/agent-product semantics.
 - SQLite metadata defaults to `~/.perch/history.sqlite`; settings/hosts are
   atomic JSON files under `~/.perch`. Actual files remain on disk.
+- `crates/perch-core/src/usage/` feeds the status-bar usage popover, local-only
+  (never relayed to remote hosts): `mod.rs` plan usage through the `claude` /
+  `codex` CLIs with an HTTP fallback, `spend.rs` an in-memory ledger of the
+  agents' local logs, `prices.rs` the bundled price list, `alerts.rs` in-memory
+  threshold/budget alert state, `redeem.rs` the confirmed Codex reset redeem.
 - Every protocol change updates Rust and TypeScript together. Optional/default
   fields and capability negotiation preserve older clients and federated peers.
 

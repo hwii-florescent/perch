@@ -8,7 +8,7 @@
 // file here stays on the fast default "node" environment). jsdom has no
 // WebSocket implementation, so a minimal stub is installed before import —
 // we are only after the pure selector exports below, not the socket.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { SessionSummary } from "@perch/shared";
 
 class FakeWebSocket {
@@ -734,6 +734,28 @@ describe("agent catalog revisions", () => {
     handleServerMessage({ type: "agent.manifest.list", requestId: "", hostId: "remote", manifests: [{ ...manifest, enabled: true }], revision: 10 });
     expect(usePerchStore.getState().agentManifestsByHost.local.manifests[0].enabled).toBe(false);
     expect(usePerchStore.getState().agentManifestsByHost.remote.manifests[0].enabled).toBe(true);
+  });
+});
+
+describe("usage.alert", () => {
+  const alert = { type: "usage.alert" as const, kind: "limit", title: "Claude 5h limit at 82%", body: "Resets in 2h 10m" };
+
+  it("toasts in a focused window and shows nothing when delivery is off", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const settings = usePerchStore.getState().settings;
+    try {
+      usePerchStore.setState({ toasts: [], settings: { toastDelivery: "app" } as never });
+      handleServerMessage(alert);
+      expect(usePerchStore.getState().toasts).toMatchObject([{ title: alert.title, text: "Claude 5h limit at 82% · Resets in 2h 10m" }]);
+
+      usePerchStore.setState({ toasts: [], settings: { toastDelivery: "off" } as never });
+      handleServerMessage(alert);
+      expect(usePerchStore.getState().toasts).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      usePerchStore.setState({ toasts: [], settings });
+    }
   });
 });
 

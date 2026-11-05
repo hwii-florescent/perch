@@ -36,7 +36,7 @@ or editor.** Useful without an agent or Git; optional worktrees, no task ceremon
   other providers Copy).
 - Browser tabs/drawer and desktop native child webviews; phone/PWA pairing and
   shared CLI input; terminal search, kitty keyboard, OSC 52, imported profiles,
-  plan-usage display.
+  plan usage, spend estimates and usage alerts.
 
 These are implementation facts, **not** a claim that D1–D3 or all failure,
 security, performance and packaged-install gates have passed. Start with the
@@ -181,6 +181,6 @@ npm/pnpm contributor workflow deliberately; do not delete a lockfile here.
 ## Not the goal
 
 No parity chase, agent kanban, floating terminal, third navigation palette,
-new Hosted chat, full IDE/debugger, account/quota manager, orchestration suite,
+new Hosted chat, full IDE/debugger, account switching / provider account manager, orchestration suite,
 issue-tracker clone, computer use/design mode or speculative frontend rewrite.
 Do not remove working features/data just because they are off the critical path.
