@@ -15,6 +15,17 @@ pub async fn permissions_verify() -> Result<perch_core::permissions::PermissionR
         .map_err(|e| e.to_string())?
 }
 
+/// Ends the terminal host's sessions, so it only runs for the pid and live
+/// count the user confirmed; the core re-verifies both and refuses on any doubt.
+#[tauri::command]
+pub async fn permissions_restart_host(pid: u32, live_sessions: usize) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        perch_core::permissions::restart_host(pid, live_sessions)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // Never stack native consent dialogs from multiple app windows or IPC calls.
 static REQUEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

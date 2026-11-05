@@ -134,7 +134,10 @@ fn stable_exe(exe: &str, dir: &std::path::Path) -> String {
         let copy = publish_copy(bundle, &root, &hash)
             .map_err(|e| eprintln!("perchd host copy failed: {e}"))
             .ok()?;
+        crate::daemon_host::clean_stale_staging(&root);
         retire_unused_copies(&root, &copy);
+        // Off this path: it only unloads exited jobs and must not delay the spawn.
+        std::thread::spawn(|| crate::daemon_host::sweep_dead_jobs(crate::daemon_host::JOB_PREFIX));
         Some(copy.join("Contents/MacOS").join(exe.file_name()?))
     })();
     copy.map_or_else(|| exe.to_string(), |p| p.display().to_string())
@@ -275,7 +278,7 @@ fn launchd_job(daemon: &std::process::Command, dir: &std::path::Path) -> std::pr
 /// The job: started once on load and never restarted by launchd (perchd
 /// exits on its own terms), its children (the agents) never killed with it.
 #[cfg(any(target_os = "macos", test))]
-fn launchd_plist(label: &str, argv: &[String], log: &std::path::Path) -> String {
+pub(crate) fn launchd_plist(label: &str, argv: &[String], log: &std::path::Path) -> String {
     let xml = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -365,7 +368,7 @@ pub fn terminate(key: &str) -> bool {
     terminate_with(&client, key)
 }
 
-fn terminate_with(client: &Client, key: &str) -> bool {
+pub(crate) fn terminate_with(client: &Client, key: &str) -> bool {
     for signal in [libc::SIGHUP, libc::SIGKILL] {
         if client.kill(key, signal).is_err() {
             return session_state_with(client, key).ok() == Some(RuntimeState::Exited);

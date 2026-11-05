@@ -18,6 +18,39 @@ pub struct PermissionReport {
     pub terminal: Option<PermissionSnapshot>,
     pub comparison: Comparison,
     pub note: Option<String>,
+    /// The running terminal host's macOS identity; macOS only.
+    pub host: Option<HostStatus>,
+}
+
+/// Whether the terminal host still runs from a file that exists. After an app
+/// update replaced its bundle, macOS no longer applies the app's grants to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Attribution {
+    Intact,
+    Severed,
+    /// Could not be read. Never treated as severed.
+    Unknown,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostStatus {
+    pub pid: u32,
+    pub attribution: Attribution,
+    /// Sessions a restart of this host would end.
+    pub live_sessions: usize,
+}
+
+/// Replace a severed host after the user confirmed `pid` and its live count.
+#[cfg(target_os = "macos")]
+pub fn restart_host(pid: u32, live_sessions: usize) -> Result<(), String> {
+    crate::daemon_host::restart_severed(pid, live_sessions)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn restart_host(_pid: u32, _live_sessions: usize) -> Result<(), String> {
+    Err("Not supported on this platform".into())
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -36,9 +69,14 @@ pub fn status() -> PermissionReport {
         terminal: None,
         comparison: Comparison::Unknown,
         note: None,
+        host: None,
     };
     if !report.supported {
         return report;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        report.host = crate::daemon_host::status();
     }
     // Do not start a daemon just because Settings or onboarding opened.
     match Client::connect(&perchd::server::socket_path(&crate::daemon::dir()))

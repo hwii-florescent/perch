@@ -13,8 +13,11 @@ export const macPermissionsAvailable = Boolean(tauriInvoke) && /Mac/.test(naviga
 export type PermissionState = "granted" | "notGranted" | "unknown";
 export interface PermissionCheck { id: string; title: string; description: string; state: PermissionState }
 export interface PermissionSnapshot { pid: number; checks: PermissionCheck[] }
+/** The terminal host's identity; `severed` means an app update deleted the file it runs from. */
+interface HostStatus { pid: number; attribution: "intact" | "severed" | "unknown"; liveSessions: number }
 export interface PermissionReport {
   supported: boolean;
+  host?: HostStatus | null;
   app: PermissionSnapshot;
   daemon: PermissionSnapshot | null;
   terminal: PermissionSnapshot | null;
@@ -39,17 +42,27 @@ export function MacPermissions() {
   const [report, setReport] = useState<PermissionReport | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const active = useRef(false);
   const mounted = useRef(false);
+  const shown = useRef<PermissionReport | null>(null);
+  shown.current = report;
 
-  const run = useCallback(async (command: "permissions_status" | "permissions_verify" | "permissions_allow", id?: string) => {
+  const run = useCallback(async (command: "permissions_status" | "permissions_verify" | "permissions_allow" | "permissions_restart_host", id?: string) => {
     if (!tauriInvoke || active.current) return;
     active.current = true;
     setPending(id ?? command);
     setError(null);
     try {
       if (command === "permissions_allow") await tauriInvoke(command, { id });
-      const next = await tauriInvoke(command === "permissions_allow" ? "permissions_status" : command) as PermissionReport;
+      if (command === "permissions_restart_host") {
+        // Exactly the daemon and session count the user was shown; the core re-verifies both.
+        const host = shown.current?.host;
+        if (!host) return;
+        await tauriInvoke(command, { pid: host.pid, liveSessions: host.liveSessions });
+        setConfirmRestart(false);
+      }
+      const next = await tauriInvoke(command === "permissions_allow" || command === "permissions_restart_host" ? "permissions_status" : command) as PermissionReport;
       if (mounted.current) setReport(next);
     } catch (cause) {
       if (mounted.current) {
@@ -78,6 +91,20 @@ export function MacPermissions() {
       <p className="m-0 mb-4 text-[0.85rem] text-fg">
         Choose what perch and the tools you run may access. Allow opens macOS System Settings; you still decide there. All permissions are optional.
       </p>
+      {report?.host?.attribution === "severed" && (
+        <div className="mb-4 text-[0.8rem] text-fg" role="status" data-testid="host-severed">
+          <p className="m-0">Terminals run from an older perch build that was replaced, so macOS no longer applies perch's permissions to them. Restarting the terminal host fixes that.</p>
+          {confirmRestart ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span>{report.host.liveSessions === 0 ? "No terminals are running." : `This ends ${report.host.liveSessions} running terminal${report.host.liveSessions === 1 ? "" : "s"}, including agents and anything they started.`}</span>
+              <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => { void run("permissions_restart_host"); }}>{pending === "permissions_restart_host" ? "Restarting…" : "Restart terminal host"}</button>
+              <button type="button" className={CATALOG_TOGGLE} disabled={pending !== null} onClick={() => setConfirmRestart(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className={`${CATALOG_TOGGLE} mt-2`} disabled={pending !== null} onClick={() => setConfirmRestart(true)}>Restart terminal host…</button>
+          )}
+        </div>
+      )}
       <SettingsGroup>
         {!report && <p className="m-0 py-4 text-[0.8rem] text-subtext-0" role="status">{pending ? "Checking macOS access…" : "Permission status unavailable. Try Refresh."}</p>}
         {report?.app.checks.map((check) => (

@@ -11,6 +11,7 @@ fn main() {
             "permissions_status",
             "permissions_allow",
             "permissions_verify",
+            "permissions_restart_host",
             "browser_show",
             "browser_hide",
             "browser_focus",

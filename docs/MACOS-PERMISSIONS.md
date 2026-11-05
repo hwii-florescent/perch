@@ -47,6 +47,20 @@ an old copy is deleted only when `lsof` shows nothing using it. A daemon
 started before this existed still runs from the installed bundle until it is
 restarted. Permission inheritance is **not assumed**.
 
+A host whose executable file no longer exists (`severed`) is detected with
+`proc_pidpath`, falling back to `lsof` for the text mapping; an unreadable path
+is `unknown`, never severed. Settings then offers **Restart terminal host**,
+which names how many running terminals it ends. The core re-verifies the same
+pid, that it is still severed, and the same live count, then ends each session
+(confirmed), checks again that none started meanwhile, and only then stops that
+pid. Any mismatch or uncertainty refuses and leaves the host running. It is
+native IPC only, never an HTTP route, and never automatic.
+
+On each daemon start perch also removes `<hash>.staging-<pid>` directories whose
+publisher is gone, and unloads launchd jobs (`dev.hwii.perch.perchd.*`) that
+have exited. A job with a pid, or one that has not yet run, is never touched,
+and unloading an exited job leaves the agents it abandoned running.
+
 Verify terminals creates a uniquely named, short shell PTY through the same
 daemon client as real terminals. That shell execs the app's
 `__perchd permissions` diagnostic, which only performs preflight checks.

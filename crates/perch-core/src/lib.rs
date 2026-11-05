@@ -10,6 +10,8 @@ pub mod clipboard_image;
 pub mod commands;
 pub mod context_bridge;
 pub mod daemon;
+#[cfg(target_os = "macos")]
+pub mod daemon_host;
 pub mod db;
 pub mod detached;
 pub mod devices;

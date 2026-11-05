@@ -63,6 +63,36 @@ it("refreshes on returning to the app, verifies terminals only on request, and c
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Native check unavailable");
 });
 
+it("offers a host restart only for a severed host, names the sessions it ends, and sends exactly what was shown", async () => {
+  await render(<MacPermissions />);
+  expect(document.querySelector('[data-testid="host-severed"]')).toBeNull();
+  for (const attribution of ["intact", "unknown"] as const) {
+    invoke.mockResolvedValueOnce({ ...report, host: { pid: 7, attribution, liveSessions: 2 } });
+    await click("Refresh");
+    expect(document.querySelector('[data-testid="host-severed"]')).toBeNull();
+  }
+  invoke.mockResolvedValue({ ...report, host: { pid: 7, attribution: "severed", liveSessions: 2 } });
+  await click("Refresh");
+  // First click only asks; nothing is sent until the warning is confirmed.
+  await click("Restart terminal host…");
+  expect(invoke.mock.calls.some(([name]) => name === "permissions_restart_host")).toBe(false);
+  expect(document.querySelector('[data-testid="host-severed"]')?.textContent).toContain("ends 2 running terminals");
+  await click("Cancel");
+  expect(invoke.mock.calls.some(([name]) => name === "permissions_restart_host")).toBe(false);
+  await click("Restart terminal host…");
+  await click("Restart terminal host");
+  expect(invoke).toHaveBeenCalledWith("permissions_restart_host", { pid: 7, liveSessions: 2 });
+});
+
+it("surfaces a refused restart and leaves the host untouched", async () => {
+  invoke.mockResolvedValue({ ...report, host: { pid: 7, attribution: "severed", liveSessions: 1 } });
+  await render(<MacPermissions />);
+  await click("Restart terminal host…");
+  invoke.mockRejectedValueOnce("The running sessions changed since you were shown them; nothing was restarted.");
+  await click("Restart terminal host");
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("nothing was restarted");
+});
+
 it("surfaces a busy native request and releases its loading state", async () => {
   await render(<MacPermissions />);
   invoke.mockRejectedValueOnce("A permission request is already open. Finish it before trying again.");

@@ -217,6 +217,7 @@ fn main() {
             permissions::permissions_status,
             permissions::permissions_allow,
             permissions::permissions_verify,
+            permissions::permissions_restart_host,
             browser::browser_show,
             browser::browser_hide,
             browser::browser_focus,
