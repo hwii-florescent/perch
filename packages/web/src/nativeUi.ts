@@ -17,12 +17,17 @@ export function subscribeNativeUi(session: string, provider: string, listener: (
   set.add(listener); listeners.set(id, set);
   return () => { set.delete(listener); if (!set.size) listeners.delete(id); };
 }
+/** `uncertain`: the request may have reached the CLI (timeout, lost connection, unconfirmed delivery),
+ * so a send must never be replayed as the same message. Anything else provably did not deliver. */
+export class NativeUiError extends Error {
+  constructor(message: string, readonly uncertain = false) { super(message); }
+}
 export function requestNativeUi(request: Request): Promise<Reply> {
   if (pending.size >= 32) return Promise.reject(new Error("Too many pending actions. Wait for the CLI to respond."));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(request.requestId); retire(request.requestId);
-      reject(new Error("The CLI has not confirmed this action. Reconnect to inspect the conversation before sending again."));
+      reject(new NativeUiError("The CLI has not confirmed this action. Reconnect to inspect the conversation before sending again.", true));
     }, 15_000);
     pending.set(request.requestId, { request, resolve, reject, timer });
     socket.send(request);
@@ -34,7 +39,7 @@ export function handleNativeUiMessage(message: ServerMessage): boolean {
   if (message.type !== "agent.ui.snapshot" && message.type !== "agent.ui.result" && !(message.type === "error" && (item || (id && retired.has(id))))) return false;
   if (item && id) {
     pending.delete(id); retire(id); clearTimeout(item.timer);
-    if (message.type === "error") item.reject(new Error(message.message));
+    if (message.type === "error") item.reject(new NativeUiError(message.message, message.code === "native_ui_delivery_unconfirmed"));
     else if (message.sessionId !== item.request.sessionId || (message.type === "agent.ui.snapshot" && message.providerId !== item.request.providerId)) item.reject(new Error("Unexpected native CLI response"));
     else item.resolve(message);
   }
@@ -47,7 +52,7 @@ socket.onConnectionChange((connected) => {
   if (connected) return;
   for (const [id, item] of pending) {
     clearTimeout(item.timer); retire(id);
-    item.reject(new Error("Connection lost. Reconnect to inspect the CLI's conversation."));
+    item.reject(new NativeUiError("Connection lost. Reconnect to inspect the CLI's conversation.", true));
   }
   pending.clear();
 });

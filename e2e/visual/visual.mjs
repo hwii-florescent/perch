@@ -53,11 +53,11 @@ const NATIVE_MESSAGES = [
 const NATIVE_MODEL = "claude_haiku_4_5_with_a_deliberately_long_model_name_that_has_to_be_cut_off_by_the_toolbar_0123456789";
 const nativeSnapshot = (over = {}) => ({ version: 1, revision: 1, pid: 4242, providerSessionId: "/native.jsonl", cwd: "/private/tmp/perch-visual/repo", model: NATIVE_MODEL, running: false, messages: NATIVE_MESSAGES, truncated: false, ...over });
 // `owner`: another view holds the input lease (we watch); otherwise the view takes control by itself.
-// `denyControl`: the lease request is answered with an error. `holdPrompt`: agent.ui.prompt is never answered.
-const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, denyControl = false, holdPrompt = false } = {}) => {
+// `denyControl`: the lease request is answered with an error. `holdPrompt`: agent.ui.prompt is never answered. `unconfirmedPrompt`: it is answered with the unconfirmed-delivery error.
+const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, denyControl = false, holdPrompt = false, unconfirmedPrompt = false } = {}) => {
   await page.getByTestId("onboarding-dismiss").click();
   await page.waitForFunction(() => !!window.usePerchStore.getState().settings);
-  await page.evaluate(({ snapshot, owner, denyControl, holdPrompt }) => {
+  await page.evaluate(({ snapshot, owner, denyControl, holdPrompt, unconfirmedPrompt }) => {
     const sid = "native-vis", now = 1767268800000;
     const lease = (clientId, generation) => ({ clientId, deviceId: `${clientId}-device`, generation, acquiredAtMs: now, lastActivityMs: now });
     const N = window.__native = { snapshot, unhandled: [], prompts: 0, cancels: 0, owner: owner ? lease("other-view", 1) : null, ws: null };
@@ -79,13 +79,13 @@ const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, de
           else { N.owner = lease("me", 1); r({ type: "agent.control", sessionId: sid, agentId: "claude", channel: m.channel, lease: N.owner, status: status(N.owner) }); }
           break;
         case "agent.ui.get": r({ type: "agent.ui.snapshot", sessionId: sid, providerId: "claude", snapshot: N.snapshot }); break;
-        case "agent.ui.prompt": N.prompts++; if (!holdPrompt) r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
+        case "agent.ui.prompt": N.prompts++; if (unconfirmedPrompt) r({ type: "error", code: "native_ui_delivery_unconfirmed", message: "The CLI did not confirm this action." }); else if (!holdPrompt) r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
         case "agent.ui.cancel": N.cancels++; r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
         case "agent.terminal.release": case "terminal.resize": case "terminal.input": case "terminal.kill": break;
         default: N.unhandled.push(m.type);
       }
     };
-  }, { snapshot, owner, denyControl, holdPrompt });
+  }, { snapshot, owner, denyControl, holdPrompt, unconfirmedPrompt });
   // the real manifests (claude has a native UI) and capabilities must have arrived before the session mounts the view
   await page.waitForFunction(() => {
     const st = window.usePerchStore.getState();
@@ -297,10 +297,10 @@ const STATES = [
     await page.locator('[data-testid="project-row"]').first().click();
     await sleep(300);
   } },
-  // The CLI start panel of a listed, not-yet-started session: the "Start in <folder>" primary button.
+  // The CLI start panel of a listed, not-yet-started session.
   { name: "01c2b-cli-start-primary", run: async (page) => {
     await page.evaluate(() => { window.__visSid = window.usePerchStore.getState().sessionId; window.usePerchStore.setState({ sessionId: "vis-s1" }); });
-    await page.getByTestId("cli-start-here").waitFor();
+    await page.getByTestId("cli-start-panel").waitFor();
     await sleep(300);
   } },
   { name: "01c3-session-row-hover", holdHover: "[data-session-id]", run: async () => {} },
@@ -1347,7 +1347,9 @@ const STATES = [
   { name: "25c-native-running", fresh: true, run: async (page) => {
     await nativePage(page, { snapshot: nativeSnapshot({ running: true }) });
     await page.getByRole("button", { name: "Cancel turn" }).waitFor({ timeout: 15000 });
+    await page.getByTestId("native-cli-composer").fill("Then run the tests");
     await page.getByRole("button", { name: "Queue message" }).waitFor();
+    if ((await page.getByRole("button", { name: "Cancel turn" }).count()) !== 0) throw new Error("25c: Stop stays beside a typed draft; it should give way to Queue");
     if (((await page.getByRole("status").first().textContent()) ?? "").trim() !== "Working") throw new Error("25c: the toolbar does not say Working");
     await nativeClean(page, "25c");
   } },
@@ -1382,6 +1384,28 @@ const STATES = [
     await page.getByRole("button", { name: "Sending…" }).waitFor();
     if ((await page.evaluate(() => window.__native.prompts)) !== 1) throw new Error("25g: the prompt did not reach the stub exactly once");
     await nativeClean(page, "25g");
+  } },
+  // An unconfirmed send is never replayed: the text stays visible as a pending message and returns to the composer as a new one.
+  { name: "25l-native-send-unconfirmed", fresh: true, run: async (page) => {
+    await nativePage(page, { unconfirmedPrompt: true });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.getByTestId("native-cli-composer").fill("Please continue");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.locator("[data-native-outbox=unconfirmed]").getByText("Not confirmed").waitFor();
+    if ((await page.getByTestId("native-cli-composer").inputValue()) !== "") throw new Error("25l: the unconfirmed text is still in the composer");
+    await page.getByRole("button", { name: "Edit and resend" }).click();
+    if ((await page.getByTestId("native-cli-composer").inputValue()) !== "Please continue") throw new Error("25l: Edit and resend did not restore the text");
+    if ((await page.evaluate(() => window.__native.prompts)) !== 1) throw new Error("25l: the prompt was replayed");
+    await nativeClean(page, "25l");
+  } },
+  // Escape stops a working turn from the composer.
+  { name: "25m-native-escape-stops", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeSnapshot({ running: true }) });
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.getByTestId("native-cli-composer").press("Escape");
+    await sleep(300);
+    if ((await page.evaluate(() => window.__native.cancels)) !== 1) throw new Error("25m: Escape did not send one cancel");
+    await nativeClean(page, "25m");
   } },
   // Scroll: pinned at the bottom a pushed message follows; scrolled up it does not (the pill shows); the pill returns.
   { name: "25h-native-scroll-follows", fresh: true, run: async (page) => {
@@ -1634,6 +1658,7 @@ async function snapEngine(engine, dist, outDir, only) {
     for (const [index, state] of STATES.entries()) {
       if (index > lastWanted) break;
       const wanted = !state.nocapture && (!only || state.name.includes(only));
+      if (process.env.VIS_SKIP_PRIOR && !wanted) continue; // fresh-page states need none of the earlier shared-page state
       try {
         if (state.fresh || state.tauri || state.unpaired) {
           if (!wanted) continue;

@@ -186,6 +186,14 @@ into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
   find, a background-task strip, and subagent child rows (step 2).
 - Restore open chats after a restart; offer to resume interrupted ones.
 
+Done so far (2026-11-05): Hosted chat removed, one global Chat/Terminal switch
+(Terminal default); composer's one round button (Send, Queue while working, Stop
+in its place when the draft is empty, Esc stops, disabled reason as title) and
+honest send states (pending copy in the transcript; an unconfirmed send is never
+replayed and returns to the composer as a new message). Not yet: queue cards,
+Steer, Rewind, `/compact`, slash/skill picker, `@file`, image paste, approvals,
+transcript features, Claude stream-json.
+
 ### 1. Projects: Birdhouse instructions and files
 
 Claude-classic-Projects style, stored **privately by Perch** per Birdhouse (and

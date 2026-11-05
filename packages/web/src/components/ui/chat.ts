@@ -22,5 +22,9 @@ export const WORKED_FOR =
   "[&>summary]:before:inline-block [&>summary]:before:text-[0.9em] [&>summary]:before:content-['›'] [&>summary]:before:[transition:transform_0.15s_ease] " +
   "[&[open]>summary]:before:[transform:rotate(90deg)]";
 /** `NativeCliChat`'s composer textarea: borderless, inherits the font, marks keyboard focus inside its box. */
-export const NATIVE_TEXTAREA = "box-border max-h-[30vh] min-h-[64px] w-full resize-y rounded-ui bg-transparent p-2 text-inherit [border:0] [font:inherit] focus:outline-1 focus:outline-solid focus:outline-accent focus-visible:outline-2 focus-visible:-outline-offset-2";
+export const NATIVE_TEXTAREA = "box-border max-h-[30vh] min-h-[2.5rem] w-full resize-none overflow-y-auto rounded-ui bg-transparent p-2 text-inherit [border:0] [font:inherit] focus:outline-1 focus:outline-solid focus:outline-accent focus-visible:outline-2 focus-visible:-outline-offset-2";
+/** The composer's one round button: Send / Queue (accent) or Stop (neutral), in the same place. */
+export const SEND_BUTTON = "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full [border:0] disabled:cursor-not-allowed disabled:opacity-40 ";
+export const SEND_BUTTON_GO = SEND_BUTTON + "bg-accent text-panel-bg";
+export const SEND_BUTTON_STOP = SEND_BUTTON + "bg-surface-1 text-fg";
 export const CHAT_INPUT = "flex shrink-0 flex-col gap-[0.35rem] border-t border-t-overlay-0 bg-surface-0 p-[0.6rem]";
