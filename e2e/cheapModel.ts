@@ -82,10 +82,19 @@ export function cheapModelEnv(provider: string, fixture: string, userHome = os.h
     }) };
   }
   if (provider === "pi") {
+    // Pi catalogs differ by install: keep the user's own `openai` provider when they use it, else `openai-codex`.
+    const piCheapSettings = (user: Record<string, unknown>) => ({
+      ...user,
+      defaultProvider: user.defaultProvider === "openai" ? "openai" : "openai-codex",
+      defaultModel: CHEAP_CODEX_MODEL,
+      defaultThinkingLevel: "low",
+      // A default outside the user's `enabledModels` scope silently falls back to its first entry.
+      enabledModels: [`${user.defaultProvider === "openai" ? "openai" : "openai-codex"}/${CHEAP_CODEX_MODEL}`],
+    });
     const home = overlayHome(fixture, "pi-agent", path.join(userHome, ".pi", "agent"), "settings.json", (config) =>
       // Like the inline config above, a malformed file deliberately aborts fixture setup.
       // pi-lens-ignore: unchecked-throwing-call
-      JSON.stringify({ ...JSON.parse(config), defaultProvider: "openai-codex", defaultModel: CHEAP_CODEX_MODEL, defaultThinkingLevel: "low" }),
+      JSON.stringify(piCheapSettings(JSON.parse(config))),
     );
     return { PI_CODING_AGENT_DIR: home };
   }

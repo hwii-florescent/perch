@@ -241,13 +241,13 @@ pub(super) fn control(
                 state.app.db.set_prompt_operation_state(operation, "unconfirmed")?;
                 state.app.agent_runtime.record_turn_boundary(&key, true)?;
                 let reply = bridge.enqueue(operation, Some(text))?;
-                if let Some(input) = input { write(&input)?; }
+                if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
                 let _ = state.app.db.set_cli_title(&session_id, text);
                 Ok(Some(reply))
             } else {
                 let input = crate::native_ui::claude::prepare_input(&key, None)?;
                 let reply = bridge.enqueue(&request_id, None)?;
-                if let Some(input) = input { write(&input)?; }
+                if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
                 Ok(Some(reply))
             }
         })
@@ -331,7 +331,7 @@ pub(super) async fn send_review(
                 .map_err(anyhow::Error::msg)?;
             state.app.agent_runtime.record_turn_boundary(&key, true)?;
             let reply = bridge.enqueue(operation, Some(text))?;
-            if let Some(input) = input { write(&input)?; }
+            if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
             Ok(Some(reply))
         });
         if borrowed {

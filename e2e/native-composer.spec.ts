@@ -1,0 +1,200 @@
+/**
+ * Live check of the native chat composer against every installed harness: `@file` mentions,
+ * `/command` / `$skill` menus, and image attachments must reach the real agent, not just the UI.
+ * Real (cheap-model) turns against an isolated core; see docs/TESTING.md.
+ *
+ *   cd e2e && npx playwright test -c native-composer.config.ts [-g claude]
+ *
+ * Staged uploads land under $HOME/.perch/uploads/<session id>; the spec removes its own session's folder.
+ */
+import { test, expect } from "@playwright/test";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import * as fs from "node:fs";
+import * as net from "node:net";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as zlib from "node:zlib";
+import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { setChatMode } from "./chatMode";
+import { addProject, startFromPanel } from "./projects";
+import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
+
+/** A solid red PNG, built by hand so the spec needs no image library. */
+function redPng(size = 32): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf: Buffer) => { let c = ~0; for (const byte of buf) c = crcTable[(c ^ byte) & 0xff]! ^ (c >>> 8); return ~c >>> 0; };
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0); body.copy(out, 4); out.writeUInt32BE(crc(body), body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0); header.writeUInt32BE(size, 4); header[8] = 8; header[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3).map((_, i) => (i % 3 === 0 ? 255 : 0))]);
+  const raw = Buffer.concat(Array.from({ length: size }, () => row));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @file, command menu and image attachment reach the agent`, async ({ page, context }, testInfo) => {
+  test.setTimeout(420_000);
+  const expectedModel = provider === "claude" ? CHEAP_CLAUDE_MODEL : CHEAP_CODEX_MODEL;
+  const root = path.resolve(__dirname, "..");
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-native-composer-"));
+  const port = await new Promise<number>((resolve) => {
+    const server = net.createServer();
+    server.listen(0, "127.0.0.1", () => { const port = (server.address() as net.AddressInfo).port; server.close(() => resolve(port)); });
+  });
+  const token = `composer_${provider}_${Date.now()}`;
+  fs.writeFileSync(path.join(fixture, "sentinel.txt"), token);
+  fs.writeFileSync(path.join(fixture, "red.png"), redPng());
+  // A project command (Claude) and skill (Codex) whose only job is to answer with a fixed word.
+  // Only for the harness that lists them: Pi and OMP ask to trust a project folder that carries agent resources.
+  if (provider === "claude") {
+    fs.mkdirSync(path.join(fixture, ".claude/commands"), { recursive: true });
+    fs.writeFileSync(path.join(fixture, ".claude/commands/perchping.md"), "---\ndescription: Perch composer check\n---\nReply with exactly PERCH_PING_OK and nothing else.\n");
+  }
+  if (provider === "codex") {
+    fs.mkdirSync(path.join(fixture, ".agents/skills/perchping"), { recursive: true });
+    fs.writeFileSync(path.join(fixture, ".agents/skills/perchping/SKILL.md"), "---\nname: perchping\ndescription: Perch composer check. Reply with exactly PERCH_PING_OK and nothing else.\n---\nWhen invoked, reply with exactly PERCH_PING_OK and nothing else.\n");
+  }
+  fs.writeFileSync(path.join(fixture, "hosts.json"), '{"hosts":[]}');
+  fs.writeFileSync(path.join(fixture, "providers.json"), '{"version":1,"providers":[]}');
+  const log = fs.openSync(path.join(fixture, "core.log"), "a");
+  const url = `http://127.0.0.1:${port}`;
+  let core: ChildProcess | undefined;
+  /** A failed send leaves its message pending in the transcript; clear it so the next check starts clean. */
+  const dismissUnconfirmed = async () => {
+    const dismiss = ui.getByRole("button", { name: "Dismiss" });
+    if (await dismiss.count()) await dismiss.click();
+    await box.fill("");
+  };
+  let sessionId: string | undefined;
+  // Each check reports its own failure so one broken path does not hide the others.
+  const failures: string[] = [];
+  const check = async (name: string, run: () => Promise<void>) => {
+    try { await run(); } catch (error) { failures.push(`${name}: ${String(error).split("\n").slice(0, 4).join(" ")}`); }
+  };
+  const errors: string[] = [];
+  const prompts: string[] = [];
+  const consoleLines: string[] = [];
+  page.on("console", (message) => { if (["error", "warning"].includes(message.type())) consoleLines.push(message.text().slice(0, 300)); });
+  page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
+  page.on("websocket", (socket) => {
+    socket.on("framereceived", ({ payload }) => {
+      const message = JSON.parse(String(payload));
+      if (message.type === "agent.terminal.opened") sessionId = message.status.key.sessionId;
+    });
+    socket.on("framesent", ({ payload }) => { const message = JSON.parse(String(payload)); if (message.type === "agent.ui.prompt") prompts.push(message.text); });
+  });
+  await context.addInitScript((directory) => {
+    if (location.protocol !== "http:" || window !== window.top) return;
+    localStorage.setItem("perch.onboarding.seen", "1");
+    localStorage.setItem("perch.dirBrowser.lastPath.local", directory);
+  }, fixture);
+  const ui = page.getByTestId("native-cli-chat");
+  const cli = page.getByTestId("persistent-agent-terminal");
+  const box = ui.getByTestId("native-cli-composer");
+  /** Send what is in the composer and wait for the agent's turn to finish; returns the final reply. */
+  async function sendAndWait(): Promise<string> {
+    const before = await ui.locator('[data-native-role="user"]').count();
+    await ui.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(box).toHaveValue("", { timeout: 15_000 });
+    await expect(ui.locator('[data-native-role="user"]')).toHaveCount(before + 1, { timeout: 60_000 });
+    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+    return (await ui.locator('[data-native-role="assistant"]').last().innerText());
+  }
+  try {
+    // Pi and OMP share one config-home variable but different formats: Pi gets its own cheap-model overlay
+    // through a launcher shim (as native-providers.spec.ts does) instead of the core's environment.
+    let launchPath = process.env.PATH;
+    if (provider === "pi") {
+      const piHome = cheapModelEnv("pi", fixture).PI_CODING_AGENT_DIR!;
+      const bin = path.join(fixture, "bin");
+      fs.mkdirSync(bin);
+      const quote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
+      fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piHome)}\nexec ${quote(execFileSync("which", ["pi"], { encoding: "utf8" }).trim())} "$@"\n`, { mode: 0o700 });
+      launchPath = `${bin}:${process.env.PATH}`;
+    }
+    core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info,perch_core::commands=debug", ...(provider === "pi" ? {} : cheapModelEnv(provider, fixture)), PATH: launchPath }, stdio: ["ignore", log, log] });
+    core.once("exit", (code, signal) => consoleLines.push(`CORE EXIT code=${code} signal=${signal} at ${new Date().toISOString()}`));
+    await expect.poll(async () => { if (core?.exitCode !== null) throw new Error("Core exited"); try { return (await fetch(url)).ok; } catch { return false; } }, { timeout: 20_000 }).toBe(true);
+    await page.goto(url, { waitUntil: "networkidle" });
+    await addProject(page, fixture);
+    await startFromPanel(page, { agent: provider, where: path.basename(fixture) });
+    await expect(cli).toHaveAttribute("data-terminal-id", /.+/, { timeout: 30_000 });
+    await expect(cli).toHaveAttribute("data-controlling", "true");
+    await expect(cli.locator(".xterm-rows")).toContainText(provider === "codex" ? /OpenAI Codex/ : provider === "claude" ? /Claude Code/ : provider === "omp" ? /OMP|oh.my.pi|omp v/i : /pi v|pi \(|pi coding|pi update|pi\.dev|\.pi\/agent/i, { timeout: 30_000 });
+    if (provider === "claude") await expect(cli.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
+    if (provider === "codex") {
+      await expect(cli.locator(".xterm-rows")).toContainText(/Do you trust the contents|To get started/i, { timeout: 30_000 });
+      if ((await cli.locator(".xterm-rows").innerText()).includes("Do you trust the contents")) await cli.locator(".xterm-helper-textarea").press("Enter");
+    }
+    await setChatMode(page, "ui");
+    await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
+    await expect(box).toBeEnabled();
+    // Fail before any paid turn if the cheap-model pin did not take.
+    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+
+    // 1. `@file`: pick the mention from the menu, the agent reads the file it names.
+    await check("@file", async () => {
+      await box.pressSequentially("What is inside @senti", { delay: 15 });
+      await ui.getByRole("option", { name: "sentinel.txt" }).click();
+      await expect(box).toHaveValue("What is inside @sentinel.txt ");
+      await box.pressSequentially("? Reply with its exact contents only.", { delay: 5 });
+      expect(await sendAndWait()).toContain(token);
+    });
+
+    // 2. Image: staged through the real upload endpoint, shown as a chip, handed to the agent as an attachment.
+    await check("image", async () => {
+      await ui.getByTestId("native-cli-file-input").setInputFiles(path.join(fixture, "red.png"));
+      await expect(ui.getByTestId("native-cli-attachments").getByText("red.png")).toBeVisible({ timeout: 15_000 });
+      await box.fill("What single colour fills the attached image? Reply with only the colour name.");
+      const reply = await sendAndWait();
+      await testInfo.attach("image-reply", { body: reply, contentType: "text/plain" });
+      expect(reply.toLowerCase()).toContain("red");
+    });
+    await dismissUnconfirmed();
+
+    // 3. Commands: Claude `/name` (project command), Codex `$name` (skill); Pi and OMP offer no menu.
+    await check("command menu", async () => {
+      if (provider === "claude" || provider === "codex") {
+        const sigil = provider === "claude" ? "/" : "$";
+        await box.pressSequentially(`${sigil}perchp`, { delay: 15 });
+        await ui.getByRole("option", { name: `${sigil}perchping` }).waitFor({ timeout: 30_000 }).catch(async (error) => {
+          const lists = await page.evaluate(({ id, kind }) => JSON.stringify((window as unknown as { usePerchStore?: { getState(): { sessionCommands: Record<string, Record<string, { name: string }[]>> } } }).usePerchStore?.getState().sessionCommands[id]?.[kind]?.map((entry: { name: string }) => entry.name).slice(0, 60)), { id: sessionId, kind: provider });
+          await testInfo.attach("command-list", { body: String(lists), contentType: "text/plain" });
+          throw error;
+        });
+        await box.press("Enter");
+        await expect(box).toHaveValue(`${sigil}perchping `);
+        expect(await sendAndWait()).toContain("PERCH_PING_OK");
+      } else {
+        await box.pressSequentially("/", { delay: 15 });
+        await expect(ui.getByTestId("native-cli-menu")).toHaveCount(0);
+        await box.fill("");
+      }
+    });
+    expect(failures).toEqual([]);
+    expect(errors).toEqual([]);
+  } catch (error) {
+    // Capture while the core is still up; the page looks "offline" once the finally block stops it.
+    fs.mkdirSync(path.join(root, ".impeccable/review"), { recursive: true });
+    await page.screenshot({ path: path.join(root, `.impeccable/review/native-composer-${provider}-failure.png`) }).catch(() => {});
+    await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
+    await testInfo.attach("terminal", { body: await cli.locator(".xterm-rows").innerText().catch(() => "unavailable (CLI view is not mounted)"), contentType: "text/plain" });
+    await testInfo.attach("prompts", { body: JSON.stringify(prompts, null, 2), contentType: "application/json" });
+    throw error;
+  } finally {
+    if (core && core.exitCode === null && core.signalCode === null) {
+      const child = core;
+      await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
+    }
+    // A halted cleanup keeps the fixture for manual review; do not let it hide the test's own failure.
+    await cleanupFixtureRuntime(root, fixture).catch((error) => testInfo.annotations.push({ type: "cleanup", description: String(error).slice(0, 400) }));
+    if (sessionId) fs.rmSync(path.join(os.homedir(), ".perch/uploads", sessionId), { recursive: true, force: true });
+    fs.closeSync(log);
+    await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").split("\n").filter((line) => /commands|WARN|ERROR|DEBUGSCREEN/.test(line)).join("\n"), contentType: "text/plain" });
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});

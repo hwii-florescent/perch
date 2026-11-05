@@ -251,7 +251,9 @@ pub fn parse_codex_prompt_input(stdout: &str) -> Vec<CommandEntry> {
         Ok(v) => collect_text(&v),
         Err(_) => stdout.to_string(),
     };
-    let Some(start) = text.find("### Available skills") else {
+    // Codex 0.166's base instructions also mention `"### Available skills"` in prose;
+    // only the heading line itself starts the block.
+    let Some(start) = text.find("### Available skills\n") else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -356,5 +358,15 @@ mod tests {
     fn parse_codex_prompt_input_returns_empty_without_a_skills_block() {
         assert!(parse_codex_prompt_input("[]").is_empty());
         assert!(parse_codex_prompt_input("").is_empty());
+    }
+
+    #[test]
+    fn parse_codex_prompt_input_skips_prose_that_names_the_heading() {
+        let payload = serde_json::json!([
+            {"text": "listed under \"### Available skills\".\n\nMore prose."},
+            {"text": "## Skills\n### Available skills\n- perchping: Ping (file: r6/perchping/SKILL.md)\n"}
+        ])
+        .to_string();
+        assert_eq!(parse_codex_prompt_input(&payload)[0].name, "perchping");
     }
 }

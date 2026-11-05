@@ -195,6 +195,11 @@ replayed and returns to the composer as a new message); one autocomplete menu
 every provider, from `commands.list` and `fs.search`); attach button, paste and
 drop stage files on this computer and send their paths with the message (remote
 sessions: not yet). Commands and skills come only from Claude and Codex today.
+Live-checked on Claude, Codex, Pi and OMP with cheap models
+(`e2e/native-composer.spec.ts`): `@file` mention, image path and the command or
+skill menu reach the agent. Found and fixed: Claude swallowed Enter when an image
+path was pasted (Enter is now a separate write), and Codex 0.166 skills never
+listed (the parser matched prose naming the heading).
 Not yet: queue cards, Steer, Rewind, `/compact` shortcut, prompt recall,
 approvals, transcript features, Claude stream-json.
 

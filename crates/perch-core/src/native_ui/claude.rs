@@ -287,7 +287,26 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
         empty_prompt(row),
         "The CLI has a draft or dialog open. Finish it in CLI view before sending from UI."
     );
-    Ok(Some(format!("\u{1b}[200~{prompt}\u{1b}[201~\r")))
+    Ok(Some(format!("\u{1b}[200~{prompt}\u{1b}[201~{SUBMIT}")))
+}
+
+const SUBMIT: &str = "\r";
+
+/// Write what [`prepare_input`] returned. Claude resolves a pasted image path
+/// into an `[Image #n]` chip asynchronously, and an Enter that arrives in the
+/// same write is swallowed, leaving the prompt typed but unsent. Orca likewise
+/// writes Enter separately after a pause.
+// ponytail: a fixed pause under the input lock; the ceiling is a very slow
+// image read. Upgrade path: wait for the chip to render on the PTY screen.
+pub fn write_input(input: &str, write: &dyn Fn(&str) -> anyhow::Result<()>) -> anyhow::Result<()> {
+    match input.strip_suffix(SUBMIT) {
+        Some(body) if input.starts_with("\u{1b}[200~") => {
+            write(body)?;
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            write(SUBMIT)
+        }
+        _ => write(input),
+    }
 }
 
 /// Did this `UserPromptSubmit` event report the text we sent?

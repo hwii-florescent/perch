@@ -195,7 +195,7 @@ pub(super) fn send(
                 state.app.db.set_prompt_operation_state(&operation_id, "unconfirmed")?;
                 state.app.agent_runtime.record_turn_boundary(&key, true)?;
                 let reply = native.enqueue(&operation_id, Some(text))?;
-                if let Some(input) = input { write(&input)?; }
+                if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
                 Ok(Some(reply))
             });
             if before.input_owner.is_none() {
