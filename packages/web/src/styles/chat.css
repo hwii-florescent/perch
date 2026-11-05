@@ -30,9 +30,9 @@
 }
 
 /* --- Markdown output (C2) ---------------------------------------------------
- * Descendants of the markdown HTML (`dangerouslySetInnerHTML`) and the injected
- * `.codeblock-copy` button can only be styled from here. The rest of the shared
- * chat shell (list, pill, message, worked-for, error) is in components/ui/chat.ts. */
+ * Descendants of the markdown HTML (`dangerouslySetInnerHTML`) can only be
+ * styled from here. The rest of the chat shell (list, pill, message, worked-for,
+ * error) is in components/ui/chat.ts. */
 
 .message__markdown p {
   margin: 0 0 0.5em;
@@ -89,35 +89,6 @@
   border: none;
   padding: 0;
   font-size: 0.85em;
-}
-
-/* Per-code-block copy button, injected into each rendered <pre> after
- * DOMPurify.sanitize() (see Chat.tsx's injectCodeCopyButtons). Top-right,
- * hover-to-reveal. */
-.codeblock-copy {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
-  background: var(--surface-1);
-  color: var(--subtext-0);
-  border: 1px solid var(--overlay-0);
-  border-radius: var(--radius);
-  padding: 0.1rem 0.45rem;
-  font-size: 0.7rem;
-  font-family: inherit;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.message__markdown pre:hover .codeblock-copy,
-.codeblock-copy:focus {
-  opacity: 1;
-}
-
-.codeblock-copy:hover {
-  color: var(--text);
-  border-color: var(--accent);
 }
 
 .message__markdown a {

@@ -58,10 +58,8 @@ pub struct SettingsData {
     /// when permission is denied). Defaults to `"app"`.
     #[serde(default = "default_toast_delivery")]
     pub toast_delivery: String,
-    /// Global chat rendering mode: `"hosted"` (structured chat UI) or
-    /// `"cli"` (xterm attached to the real interactive CLI PTY). Used to be
-    /// per-chat client state (a footer toggle); now a single global setting
-    /// so every open chat pane renders the same way. Defaults to `"cli"`.
+    /// One global view for every agent session: `"cli"` (terminal, the
+    /// default) or `"ui"` (native chat over the same agent process).
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
     /// Lines of scrollback each terminal pane retains. Defaults to 10000 —

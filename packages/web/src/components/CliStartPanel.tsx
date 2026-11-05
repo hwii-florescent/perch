@@ -16,7 +16,7 @@
  * new session is self-starting because the create was user-initiated.
  *
  * This is also the only place CLI mode lets the user pick which agent CLI to
- * launch — Hosted mode's provider/model chrome deliberately never renders in
+ * launch — provider/model chrome deliberately never renders over
  * CLI mode (AGENTS.md's "zero model chrome in CLI mode"). The choice is
  * provider selection only, threaded through `startCli`/`createSessionOnHost`
  * into `cliAgentBySession` (store.ts) so it's remembered per session.

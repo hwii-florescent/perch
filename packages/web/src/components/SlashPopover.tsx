@@ -3,7 +3,7 @@ import { cn } from "../lib/cn";
 import { SLASH_DESC, SLASH_ITEM_OFF, SLASH_ITEM_ON, SLASH_NAME_OFF, SLASH_NAME_ON, SLASH_POPOVER } from "./ui/composer";
 
 /**
- * SlashPopover — the floating suggestion list for the Hosted composer's
+ * SlashPopover — the floating suggestion list for the composer's
  * slash-command / skill autocomplete.
  *
  * This component is purely presentational: `Chat.tsx` owns the actual state

@@ -94,7 +94,7 @@
 
 /* CLI-mode variant: the agent process is gone and the xterm below is usually
  * a cleared screen, so this is the pane's only remaining affordance — centre
- * it and give it the two ways out (respawn the CLI, or drop back to Hosted)
+ * it and give it the two ways out (respawn the CLI, or close the tab)
  * rather than leaving a dead terminal the user can only stare at. */
 .terminal__exited--cli {
   top: 50%;

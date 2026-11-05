@@ -1,4 +1,4 @@
-import { ChatView } from "../views/Chat";
+import { AgentPane } from "../views/AgentPane";
 import { MobileFiles } from "./MobileFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
 import { useToolsContext } from "./WorkspaceTools";
@@ -62,7 +62,7 @@ export function MobilePaneShell({
   return (
     <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-panel-bg" data-testid="mobile-pane-shell" aria-label="Mobile workspace pane">
       <div className="mobile-pane-shell__content flex min-h-0 w-full min-w-0 flex-1 overflow-hidden" data-testid={`mobile-active-pane-${shown}`}>
-        {shown === "chat" && <ChatView />}
+        {shown === "chat" && <AgentPane />}
         {shown === "files" && (workspaceId
           ? <MobileFiles workspaceId={workspaceId} />
           : <div className="grid flex-1 place-items-center p-6 text-center text-[0.78rem] text-subtext-0">Pick a workspace in the switcher.</div>)}

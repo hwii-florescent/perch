@@ -174,12 +174,11 @@ export interface SettingsData {
    * the Web Notifications API, falling back to `"app"` when permission is
    * denied). Defaults to `"app"`. */
   toastDelivery: "off" | "app" | "system";
-  /** Global chat rendering mode: `"hosted"` (structured chat UI) or `"cli"`
-   * (xterm attached to the real interactive CLI PTY). Used to be per-chat
-   * client state (a footer toggle in the chat pane); now a single global
-   * setting controlled from Settings, applying to every open chat pane.
-   * Defaults to `"hosted"`. */
-  chatMode: "hosted" | "cli";
+  /** One global view for every agent session: `"cli"` (xterm attached to the
+   * agent's terminal) or `"ui"` (the native chat over the same process).
+   * Defaults to `"cli"`. A core older than 2026-11-05 may still send
+   * `"hosted"`; it means `"ui"`. */
+  chatMode: "ui" | "cli";
   /** Lines of scrollback each terminal pane retains. Defaults to 10000 — the
    * value that used to be hardcoded in `xtermSetup.ts`, so an existing
    * settings file behaves exactly as before. Clamped client-side: xterm.js
@@ -236,7 +235,7 @@ export interface SettingsPatch {
   theme?: string;
   soundEnabled?: boolean;
   toastDelivery?: "off" | "app" | "system";
-  chatMode?: "hosted" | "cli";
+  chatMode?: "ui" | "cli";
   terminalScrollback?: number;
   terminalLoginShell?: boolean;
   droppedPathDoubleQuotes?: boolean;

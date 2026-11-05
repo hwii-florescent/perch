@@ -12,7 +12,7 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import "./paneSplit.css";
-import { ChatView } from "../views/Chat";
+import { AgentPane } from "../views/AgentPane";
 import { TerminalView } from "../views/Terminal";
 import { usePerchStore } from "../store";
 import { useFileTabs } from "../fileTabs";
@@ -81,12 +81,9 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
   const paneLabelsEnabled = usePaneLabelsEnabled();
   const agent = usePerchStore((s) => {
     const sessionId = typeof props.params?.sessionId === "string" ? props.params.sessionId : s.sessionId;
-    if (!sessionId) return s.agent;
+    if (!sessionId) return "claude";
     const session = s.sessions.find((candidate) => candidate.id === sessionId);
-    const mode = s.settings?.chatMode ?? "cli";
-    return mode === "cli" || s.agentManifestsByHost[session?.hostId ?? "local"]?.manifests.some((entry) => entry.id === session?.cliProviderId && entry.nativeUi)
-      ? s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? s.agent
-      : s.hostedAgentBySession[sessionId] ?? session?.lastAgent ?? s.agent;
+    return s.cliAgentBySession[sessionId] ?? session?.cliProviderId ?? "claude";
   });
   const showAgentBadge = props.api.id === "chat" && paneLabelsEnabled;
   return (
@@ -115,10 +112,10 @@ function PaneTab(props: IDockviewPanelHeaderProps) {
 const PrimaryHidden = createContext(false);
 
 function ChatPanel() {
-  // Tiled tabs each have a stable, session-bound ChatView in SplitCanvas.
+  // Tiled tabs each have a stable, session-bound AgentPane in SplitCanvas.
   // Never attach a second xterm to the same PTY in the hidden Dockview.
   const hidden = useContext(PrimaryHidden);
-  return hidden ? null : <ChatView />;
+  return hidden ? null : <AgentPane />;
 }
 
 /** Renders a split-pane chat bound to a specific session (added via
@@ -129,7 +126,7 @@ function ChatPanel() {
  * same binding automatically — no bespoke persistence code needed here.
  * The wrapper div carries the `session-pane-<id>` testid the task asked for;
  * `display: contents` keeps it out of the box tree entirely so it doesn't
- * disturb `ChatView`'s `.chat` height/flex model (see that file's own CSS
+ * disturb `AgentPane`'s `.chat` height/flex model (see that file's own CSS
  * comment on its `.dv-react-part` parent contract). */
 function SessionChatPanel(props: IDockviewPanelProps) {
   const sessionId = typeof props.params?.sessionId === "string" ? (props.params.sessionId as string) : undefined;
@@ -141,7 +138,7 @@ function SessionChatPanel(props: IDockviewPanelProps) {
   }
   return (
     <div data-testid={`session-pane-${sessionId}`} style={{ display: "contents" }}>
-      <ChatView sessionId={sessionId} />
+      <AgentPane sessionId={sessionId} />
     </div>
   );
 }
@@ -284,7 +281,7 @@ const LAYOUT_SAVE_DEBOUNCE_MS = 500;
  * (nothing saved yet) — a very common case. If the live layout already IS
  * the default, skip the clear()+addPanel() churn: `clear()` disposes and
  * `addPanel()` re-creates the panel's component instance, which would
- * needlessly unmount/remount `ChatView` (discarding in-progress local state
+ * needlessly unmount/remount `AgentPane` (discarding in-progress local state
  * such as unsent typed text) purely to reproduce the layout that's already
  * showing. */
 function applyDefaultLayout(api: DockviewApi) {

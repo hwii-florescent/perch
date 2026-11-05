@@ -29,7 +29,7 @@
 /* The pane header's action buttons (the `⋯` pane menu and the split-session
  * button) live in dockview's `.dv-tabs-and-actions-container`, laid out as a
  * normal-flow flex sibling above `.dv-content-container`. Perch sets no
- * `z-index`/`isolation` on that header, while the Hosted chat column inside the
+ * `z-index`/`isolation` on that header, while the agent pane inside the
  * content (`.chat` height:100% → `.chat__list-container` position:relative →
  * `.chat__list`) shares the same stacking context — so the browser routed a
  * plain click on `[data-testid="pane-group-menu"]` to `.chat__list` instead of

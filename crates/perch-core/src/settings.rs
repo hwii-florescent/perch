@@ -52,10 +52,10 @@ pub struct Settings {
     /// Toast delivery mode: `"off"` | `"app"` | `"system"`. Defaults to `"app"`.
     #[serde(default = "default_toast_delivery")]
     pub toast_delivery: String,
-    /// Global chat rendering mode: `"hosted"` | `"cli"`. Used to be per-chat
-    /// client state (a footer toggle in the chat pane); now a single global
-    /// setting so every open chat pane renders the same way, controlled from
-    /// Settings. Defaults to `"cli"`; the one mode for every session.
+    /// The one global view for every agent session: `"cli"` (terminal, the
+    /// default) or `"ui"` (native chat over the same agent process). Files
+    /// written before 2026-11-05 may hold `"hosted"`, which now means `"ui"`
+    /// (see [`normalize_chat_mode`]).
     #[serde(default = "default_chat_mode")]
     pub chat_mode: String,
     /// Lines of scrollback each terminal pane retains. Defaults to the 10000
@@ -168,6 +168,14 @@ fn default_chat_mode() -> String {
     "cli".to_string()
 }
 
+/// Accept the legacy `"hosted"` spelling; anything unknown is the terminal.
+fn normalize_chat_mode(mode: &str) -> String {
+    match mode {
+        "ui" | "hosted" => "ui".to_string(),
+        _ => default_chat_mode(),
+    }
+}
+
 fn default_tab_shape() -> String {
     "square".to_string()
 }
@@ -273,6 +281,7 @@ impl SettingsStore {
                 if !valid_browser_search_engine(&s.browser_search_engine) {
                     s.browser_search_engine = default_browser_search_engine();
                 }
+                s.chat_mode = normalize_chat_mode(&s.chat_mode);
                 Some(s)
             }
             Err(e) => {
@@ -323,7 +332,7 @@ impl SettingsStore {
             guard.toast_delivery = toast_delivery;
         }
         if let Some(chat_mode) = patch.chat_mode {
-            guard.chat_mode = chat_mode;
+            guard.chat_mode = normalize_chat_mode(&chat_mode);
         }
         if let Some(scrollback) = patch.terminal_scrollback {
             guard.terminal_scrollback = scrollback;
@@ -495,6 +504,23 @@ mod keybinding_tests {
         }
         assert_eq!(store.get().usage_limit_alert, 0);
         assert_eq!(store.get().usage_daily_budget_usd, 25.5);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn chat_mode_defaults_to_cli_and_maps_legacy_hosted_to_ui() {
+        let dir = std::env::temp_dir().join(format!("perch-settings-mode-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"theme":"perch"}"#).unwrap();
+        assert_eq!(SettingsStore::load(&path).get().chat_mode, "cli");
+        std::fs::write(&path, r#"{"chatMode":"hosted"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        assert_eq!(store.get().chat_mode, "ui");
+        store
+            .update(serde_json::from_str(r#"{"chatMode":"bogus"}"#).unwrap())
+            .unwrap();
+        assert_eq!(store.get().chat_mode, "cli");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

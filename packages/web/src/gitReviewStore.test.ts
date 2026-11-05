@@ -150,23 +150,20 @@ describe("Git/review request lifecycle", () => {
     expect(state?.diffState).toBe("ready");
   });
 
-  it("keeps a correlated Git error out of the generic chat transcript", () => {
+  it("routes a correlated Git error to the Git subscriber", () => {
     seedReviewState(diffSnapshot({ kind: "workingTree" }, "rev-working-tree"));
     const actions = useWorkspaceGitReviewStore.getState().getWorkspaceActions("workspace-test");
     actions.createComment({ path: "src/main.ts", side: "new", start: 2, end: 2, body: "Pane-only failure." });
     const sent = request("review.create");
-    const before = usePerchStore.getState().messagesBySession["session-test"]?.length ?? 0;
 
     // The generic subscriber runs before the Git subscriber in the real
-    // socket fan-out. It must recognize the owned opaque id and leave chat
-    // history untouched; the Git subscriber still receives the same error.
+    // socket fan-out; the Git subscriber must still receive the same error.
     handleServerMessage({
       type: "error",
       requestId: sent.requestId as string,
       code: "review_anchor_conflict",
       message: "the reviewed source changed",
     });
-    expect(usePerchStore.getState().messagesBySession["session-test"]?.length ?? 0).toBe(before);
     expect(handleGitReviewMessage({
       type: "error",
       requestId: sent.requestId as string,

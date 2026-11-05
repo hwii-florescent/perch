@@ -1,5 +1,5 @@
 /**
- * Pure helpers behind the Hosted composer's slash-command autocomplete.
+ * Pure helpers behind the composer's slash-command autocomplete.
  *
  * Invocation itself needs nothing special: sending `"/name args"` as a claude
  * turn runs the command, and codex invokes a skill from a bare `$name` mention

@@ -135,7 +135,7 @@ function BrowserSection() {
 }
 
 // ---------------------------------------------------------------------------
-// ChatModeSection — the one global UI/CLI setting.
+// ChatModeSection — the one global UI/CLI setting. CLI (terminal) is the default.
 // ---------------------------------------------------------------------------
 
 function ChatModeSection() {
@@ -146,7 +146,7 @@ function ChatModeSection() {
   // control instantly on click rather than waiting on the settings.update
   // round-trip. The store's settings.current handler re-applies the
   // authoritative value (and drives every open chat pane) once it lands.
-  const [chatMode, setChatMode] = useState<"hosted" | "cli">(settings?.chatMode ?? "cli");
+  const [chatMode, setChatMode] = useState<"ui" | "cli">(settings?.chatMode ?? "cli");
   const { choices: agentChoices } = useAgentChoices(usePerchStore((s) => s.activeHostId));
   const isMobile = useIsMobileWidth();
 
@@ -155,14 +155,14 @@ function ChatModeSection() {
     setChatMode(settings.chatMode ?? "cli");
   }, [settings?.chatMode]);
 
-  const handleChange = (mode: "hosted" | "cli") => {
+  const handleChange = (mode: "ui" | "cli") => {
     setChatMode(mode);
     updateSettings({ chatMode: mode });
   };
 
   return (
     <SettingsGroup title="Chat mode">
-      <SettingRow title="UI / CLI" description="UI or CLI for every session.">
+      <SettingRow title="UI / CLI" description="CLI shows each agent's terminal; UI shows the native chat over the same agent. Agents without a chat view always use the terminal.">
         <ModeSwitch mode={chatMode} onChange={handleChange} testId="settings-chat-mode" />
       </SettingRow>
       <SettingRow title="Warn before closing an agent" description="Ask first when closing a tab that runs an agent. Terminals close without asking.">
@@ -203,7 +203,7 @@ function SshHostsSection() {
   const [newRemoteCmd, setNewRemoteCmd] = useState("");
   // "perch" = classic federation (remote runs its own perch); "direct" = the
   // remote has only claude/codex + tmux and perch drives them over SSH with
-  // every hosted turn detached. Defaults to "direct" — most SSH targets don't
+  // every turn detached. Defaults to "direct" — most SSH targets don't
   // have perch installed, so direct is the normal case for a newly added
   // host. (The Rust serde default for `mode` stays "perch", which only
   // matters for hosts persisted before the field existed.)
@@ -358,105 +358,6 @@ function SshHostsSection() {
           onChange={(e) => setNewRemoteCmd(e.target.value)}
         />
       </div>
-      </div>
-    </SettingsGroup>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CustomModelsSection
-// ---------------------------------------------------------------------------
-
-type AgentKindKey = "claude" | "codex";
-
-function CustomModelsSection() {
-  const settings = usePerchStore((s) => s.settings);
-  const updateSettings = usePerchStore((s) => s.updateSettings);
-
-  const [newId, setNewId] = useState<Record<AgentKindKey, string>>({ claude: "", codex: "" });
-  const [newLabel, setNewLabel] = useState<Record<AgentKindKey, string>>({ claude: "", codex: "" });
-
-  if (!settings) return null;
-
-  const handleRemove = (agent: AgentKindKey, idToRemove: string) => {
-    const current = settings.customModels[agent] as ModelEntry[];
-    updateSettings({
-      customModels: {
-        ...settings.customModels,
-        [agent]: current.filter((m) => m.id !== idToRemove),
-      },
-    });
-  };
-
-  const handleAdd = (agent: AgentKindKey) => {
-    const id = newId[agent].trim();
-    const label = newLabel[agent].trim() || id;
-    if (!id) return;
-    const current = settings.customModels[agent] as ModelEntry[];
-    if (current.some((m) => m.id === id)) return; // dedup
-    updateSettings({
-      customModels: {
-        ...settings.customModels,
-        [agent]: [...current, { id, label }],
-      },
-    });
-    setNewId((prev) => ({ ...prev, [agent]: "" }));
-    setNewLabel((prev) => ({ ...prev, [agent]: "" }));
-  };
-
-  return (
-    <SettingsGroup title="Custom Models">
-      <div className="py-3">
-      {(["claude", "codex"] as AgentKindKey[]).map((agent) => {
-        const list = (settings.customModels[agent] ?? []) as ModelEntry[];
-        return (
-          <div key={agent} className="settings-modal__agent-block mb-3">
-            <h4 className="m-0 mb-[0.35rem] text-[0.8rem] font-semibold tracking-[0.04em] text-subtext-0 uppercase">{agent}</h4>
-            {list.length === 0 ? (
-              <p className={EMPTY}>No custom {agent} models.</p>
-            ) : (
-              <ul className={LIST}>
-                {list.map((m) => (
-                  <li key={m.id} className={MODEL_ROW}>
-                    <span className={NAME}>{m.id}</span>
-                    <span className={ADDR}>{m.label}</span>
-                    <button
-                      type="button"
-                      className={BTN_DANGER}
-                      onClick={() => handleRemove(agent, m.id)}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className={ADD_ROW}>
-              <input
-                type="text"
-                className={INPUT}
-                placeholder="Model ID"
-                value={newId[agent]}
-                onChange={(e) => setNewId((prev) => ({ ...prev, [agent]: e.target.value }))}
-              />
-              <input
-                type="text"
-                className={INPUT}
-                placeholder="Label (optional)"
-                value={newLabel[agent]}
-                onChange={(e) => setNewLabel((prev) => ({ ...prev, [agent]: e.target.value }))}
-              />
-              <button
-                type="button"
-                className={BTN_PRIMARY}
-                onClick={() => handleAdd(agent)}
-              >
-                Add
-              </button>
-            </div>
-          </div>
-        );
-      })}
       </div>
     </SettingsGroup>
   );
@@ -833,7 +734,7 @@ function TabContent({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case "general": return <><ChatModeSection /><InterfaceSection /><BrowserSection /><DefaultCwdSection /></>;
     case "appearance": return <><ThemeSection /><TabShapeSection /></>;
-    case "agents": return <><AgentCatalog /><CustomModelsSection /></>;
+    case "agents": return <AgentCatalog />;
     case "keyboard": return <KeybindingsSection />;
     case "terminal": return <TerminalSection />;
     case "notifications": return <NotificationsSection />;

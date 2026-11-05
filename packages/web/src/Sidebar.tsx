@@ -151,7 +151,7 @@ interface HostChoice {
   detail?: string;
   /** Remote hosts only — drives the inline enabled checkbox. */
   entry?: SshHostEntry;
-  /** True for `mode: "direct"` hosts (no perch on the remote; hosted turns
+  /** True for `mode: "direct"` hosts (no perch on the remote; detached turns
    *  run detached over SSH). Surfaced as a badge so it's obvious *which*
    *  kind of remote a session is about to be created on — the two behave
    *  very differently on disconnect. */

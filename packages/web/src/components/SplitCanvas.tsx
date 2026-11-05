@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { DockviewShell } from "../dockview/DockviewShell";
-import { ChatView } from "../views/Chat";
+import { AgentPane } from "../views/AgentPane";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
@@ -24,7 +24,7 @@ const STATE_WORD: Record<AgentDotState, string> = { blocked: "Waiting for you", 
  * and an open file or review covers it. When the active tab belongs to a split
  * set, the set's members share the canvas instead, side by side or stacked
  * (`set.dir`), with draggable dividers. Any tabs share a set, several
- * terminals included: each has a stable session-bound ChatView. Focusing a
+ * terminals included: each has a stable session-bound AgentPane. Focusing a
  * tile must not move its xterm between a plain pane and Dockview (that created
  * duplicate PTY attachments and renderer churn on every focus change).
  * Every visible pane is marked `data-pane-id` for the tab drag (`tabDrag.ts`),
@@ -253,7 +253,7 @@ export function SplitCanvas() {
               {STATE_WORD[sessionDotState(entry.session)]}
             </span>
           </div>
-          <ChatView sessionId={entry.id} />
+          <AgentPane sessionId={entry.id} />
           {focusBar(entry.id === activeId)}
         </div>
       ))}

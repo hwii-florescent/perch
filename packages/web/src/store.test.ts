@@ -27,66 +27,17 @@ class FakeWebSocket {
 // `socket.connect()` call runs at import time, not inside any test/hook.
 (globalThis as { WebSocket?: unknown }).WebSocket = FakeWebSocket;
 
-// jsdom (this file's environment) has no requestAnimationFrame/
-// cancelAnimationFrame implementation, and store.ts's chunk-coalescing
-// buffer (see `scheduleChunkFlush`/`flushChunkBuffer`) calls both. The tests
-// below never rely on a real frame actually firing — they force a
-// synchronous flush via the exported `flushChunkBuffer()` — so a minimal
-// stub that never invokes its callback is enough to keep `scheduleChunkFlush`
-// from throwing.
-(globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame = () => 0;
-(globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame = () => {};
-
 const {
   projectsForHost,
   effectiveActiveProject,
   activeWorkspaceSessions,
   sessionIdsForProject,
-  shouldReuseCurrentSession,
-  resolveSessionAgent,
   omitKey,
   readLastAgentChoiceStored,
   usePerchStore,
   handleServerMessage,
-  flushChunkBuffer,
 } = await import("./store");
 type ProjectNavState = import("./store").ProjectNavState;
-type ChatMessage = import("./store").ChatMessage;
-
-/** Reset the store's per-session chat state between tests in this file's new
- * describe block — these tests mutate `messagesBySession`/
- * `streamingMessageIdBySession`/`sessionId` directly (there's no `reset()`
- * action, so this mirrors what a fresh page load's initial state looks
- * like). Declared here so a `beforeEach` throughout the multiplexing suite
- * can call it without repeating the shape. */
-function resetChatState(overrides: Partial<{
-  sessionId: string | null;
-  messagesBySession: Record<string, ChatMessage[]>;
-  streamingMessageIdBySession: Record<string, string | null>;
-}> = {}): void {
-  const sessionId = overrides.sessionId ?? null;
-  const messagesBySession = overrides.messagesBySession ?? {};
-  const streamingMessageIdBySession = overrides.streamingMessageIdBySession ?? {};
-  usePerchStore.setState({
-    sessionId,
-    messagesBySession,
-    streamingMessageIdBySession,
-    messages: sessionId ? (messagesBySession[sessionId] ?? []) : [],
-    streamingMessageId: sessionId ? (streamingMessageIdBySession[sessionId] ?? null) : null,
-  });
-}
-
-function assistantMsg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
-  return {
-    id,
-    role: "assistant",
-    text: "",
-    thinking: "",
-    tools: [],
-    streaming: true,
-    ...overrides,
-  };
-}
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -260,76 +211,6 @@ describe("sessionIdsForProject", () => {
   });
 });
 
-describe("shouldReuseCurrentSession (Bug 1: '+ New session' silently no-oping)", () => {
-  it("does NOT reuse (i.e. lets a create proceed) when there is no active session at all", () => {
-    // The exact repro: every session was deleted (or never created), so
-    // sessionId is null. The old `currentHostId = currentSession?.hostId ??
-    // "local"` fallback made this case look like a same-host match and the
-    // guard fired, silently no-opping the button.
-    const s = state({ sessions: [], sessionId: null });
-    expect(shouldReuseCurrentSession(s, "local", undefined, false, true)).toBe(false);
-  });
-
-  it("does not reuse when sessionId is null even if other sessions exist on the host", () => {
-    const sessions = [session({ id: "other", cwd: "/proj1" })];
-    const s = state({ sessions, sessionId: null });
-    expect(shouldReuseCurrentSession(s, "local", undefined, false, true)).toBe(false);
-  });
-
-  it("reuses (focuses the composer) when the current session is empty, same host, no cwd requested", () => {
-    const sessions = [session({ id: "cur", cwd: "/proj1", hostId: "local" })];
-    const s = state({ sessions, sessionId: "cur" });
-    expect(shouldReuseCurrentSession(s, "local", undefined, false, true)).toBe(true);
-  });
-
-  it("does not reuse when the current session belongs to a different host", () => {
-    const sessions = [session({ id: "cur", cwd: "/proj1", hostId: "remote1" })];
-    const s = state({ sessions, sessionId: "cur" });
-    expect(shouldReuseCurrentSession(s, "local", undefined, false, true)).toBe(false);
-  });
-
-  it("does not reuse when an explicit cwd is requested", () => {
-    const sessions = [session({ id: "cur", cwd: "/proj1", hostId: "local" })];
-    const s = state({ sessions, sessionId: "cur" });
-    expect(shouldReuseCurrentSession(s, "local", "/other", false, true)).toBe(false);
-  });
-
-  it("does not reuse when the current session already has messages", () => {
-    const sessions = [session({ id: "cur", cwd: "/proj1", hostId: "local" })];
-    const s = state({ sessions, sessionId: "cur" });
-    expect(shouldReuseCurrentSession(s, "local", undefined, false, false)).toBe(false);
-  });
-
-  it("CLI mode is exempt — always creates even on a matching empty session", () => {
-    const sessions = [session({ id: "cur", cwd: "/proj1", hostId: "local" })];
-    const s = state({ sessions, sessionId: "cur" });
-    expect(shouldReuseCurrentSession(s, "local", undefined, true, true)).toBe(false);
-  });
-});
-
-describe("resolveSessionAgent", () => {
-  it("prefers the server-confirmed lastAgent when present", () => {
-    const s = session({ id: "a", lastAgent: "codex" });
-    expect(resolveSessionAgent(s, { a: "claude" }, "a")).toBe("codex");
-  });
-
-  it("falls back to hostedAgentBySession when the session has no lastAgent yet", () => {
-    // The Bug 2/3 shape: a brand-new session created as codex, never sent a
-    // turn yet, switched away from and back to.
-    const s = session({ id: "a" });
-    expect(resolveSessionAgent(s, { a: "codex" }, "a")).toBe("codex");
-  });
-
-  it("falls back to 'claude' when neither is available", () => {
-    expect(resolveSessionAgent(undefined, {}, "a")).toBe("claude");
-    expect(resolveSessionAgent(session({ id: "a" }), {}, "a")).toBe("claude");
-  });
-
-  it("handles a null sessionId (no active session) without throwing", () => {
-    expect(resolveSessionAgent(undefined, { a: "codex" }, null)).toBe("claude");
-  });
-});
-
 describe("omitKey (per-session map cleanup on session.deleted)", () => {
   it("drops exactly the given key, immutably", () => {
     const map = { a: "claude", b: "codex" };
@@ -343,20 +224,16 @@ describe("omitKey (per-session map cleanup on session.deleted)", () => {
     expect(omitKey(map, "missing")).toEqual({ a: "claude" });
   });
 
-  it("mirrors across every per-session map session.deleted cleans up, including hostedAgentBySession", () => {
-    // hostedAgentBySession is the new map added alongside cliAgentBySession /
-    // cliTerminalIds / sessionLayouts — session.deleted's handler calls
-    // omitKey once per map with the same deleted id, so this documents that
-    // all four use the identical, tested cleanup rule.
+  it("mirrors across every per-session map session.deleted cleans up", () => {
+    // session.deleted's handler calls omitKey once per map with the same
+    // deleted id, so all of them use the identical, tested cleanup rule.
     const deletedId = "gone";
     const sessionLayouts = { [deletedId]: {}, keep: {} };
     const cliTerminalIds = { [deletedId]: "term-1", keep: "term-2" };
     const cliAgentBySession = { [deletedId]: "codex", keep: "claude" };
-    const hostedAgentBySession = { [deletedId]: "codex", keep: "claude" };
     expect(omitKey(sessionLayouts, deletedId)).toEqual({ keep: {} });
     expect(omitKey(cliTerminalIds, deletedId)).toEqual({ keep: "term-2" });
     expect(omitKey(cliAgentBySession, deletedId)).toEqual({ keep: "claude" });
-    expect(omitKey(hostedAgentBySession, deletedId)).toEqual({ keep: "claude" });
   });
 });
 
@@ -378,180 +255,6 @@ describe("readLastAgentChoiceStored / setLastAgentChoice (persisted create-flow 
     // Restore so this doesn't leak into other tests in this file.
     usePerchStore.getState().setLastAgentChoice("claude");
     expect(usePerchStore.getState().lastAgentChoice).toBe("claude");
-  });
-});
-
-describe("per-session chat multiplexing (messagesBySession / streamingMessageIdBySession)", () => {
-  it("routes chat.chunk for a background (non-active) session into its own bucket, not the active session's", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")], B: [assistantMsg("b1")] },
-      streamingMessageIdBySession: { A: "a1", B: "b1" },
-    });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "B", text: "hello" });
-    flushChunkBuffer();
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession.B![0]!.text).toBe("hello");
-    expect(state.messagesBySession.A![0]!.text).toBe(""); // untouched
-    // The active-session mirror tracks A only — B's text must not leak into it.
-    expect(state.messages).toEqual(state.messagesBySession.A);
-  });
-
-  it("keeps interleaved chunks for two concurrently-streaming sessions separate (no cross-session buffering)", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")], B: [assistantMsg("b1")] },
-      streamingMessageIdBySession: { A: "a1", B: "b1" },
-    });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "foo" });
-    handleServerMessage({ type: "chat.chunk", sessionId: "B", text: "bar" });
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "baz" });
-    handleServerMessage({ type: "chat.chunk", sessionId: "B", text: "qux" });
-    flushChunkBuffer();
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession.A![0]!.text).toBe("foobaz");
-    expect(state.messagesBySession.B![0]!.text).toBe("barqux");
-  });
-
-  it("chat.done for a background session does not clear the active session's streaming state", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")], B: [assistantMsg("b1")] },
-      streamingMessageIdBySession: { A: "a1", B: "b1" },
-    });
-
-    handleServerMessage({ type: "chat.done", sessionId: "B" });
-
-    const state = usePerchStore.getState();
-    // B is done.
-    expect(state.streamingMessageIdBySession.B).toBeNull();
-    expect(state.messagesBySession.B![0]!.streaming).toBe(false);
-    // A (active, still streaming) must be completely untouched, including
-    // the active-session mirror fields.
-    expect(state.streamingMessageIdBySession.A).toBe("a1");
-    expect(state.messagesBySession.A![0]!.streaming).toBe(true);
-    expect(state.streamingMessageId).toBe("a1");
-    expect(state.messages[0]!.streaming).toBe(true);
-  });
-
-  it("chat.done for the active session DOES clear its streaming state and mirror", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")] },
-      streamingMessageIdBySession: { A: "a1" },
-    });
-
-    handleServerMessage({ type: "chat.done", sessionId: "A" });
-
-    const state = usePerchStore.getState();
-    expect(state.streamingMessageIdBySession.A).toBeNull();
-    expect(state.streamingMessageId).toBeNull();
-    expect(state.messages[0]!.streaming).toBe(false);
-  });
-
-  it("a synchronous flush before reading messages applies buffered chunk text rather than dropping it", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")] },
-      streamingMessageIdBySession: { A: "a1" },
-    });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "partial" });
-    // Every real call site that reads/replaces messages (switchSession,
-    // createSessionOnHost, the disconnect handler, ...) calls this
-    // synchronously first, precisely so a still-pending animation frame can
-    // never cause the text below to go missing.
-    flushChunkBuffer();
-
-    expect(usePerchStore.getState().messagesBySession.A![0]!.text).toBe("partial");
-  });
-
-  it("handleServerMessage flushes pending chunks before processing any non-chunk message, so a chat.done right after a burst of chunks doesn't drop them", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")] },
-      streamingMessageIdBySession: { A: "a1" },
-    });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "hi " });
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "there" });
-    // No explicit flush call here — chat.done itself must flush first.
-    handleServerMessage({ type: "chat.done", sessionId: "A" });
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession.A![0]!.text).toBe("hi there");
-    expect(state.messagesBySession.A![0]!.streaming).toBe(false);
-  });
-
-  it("flushChunkBuffer() with no argument flushes every pending session, not just the active one", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")], B: [assistantMsg("b1")] },
-      streamingMessageIdBySession: { A: "a1", B: "b1" },
-    });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "A", text: "aaa" });
-    handleServerMessage({ type: "chat.chunk", sessionId: "B", text: "bbb" });
-    flushChunkBuffer(); // no sessionId argument
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession.A![0]!.text).toBe("aaa");
-    expect(state.messagesBySession.B![0]!.text).toBe("bbb");
-  });
-
-  it("drops chat.chunk for a session this client has never loaded (not the active session, no bucket) instead of spawning state for it", () => {
-    resetChatState({ sessionId: "A", messagesBySession: { A: [] }, streamingMessageIdBySession: {} });
-
-    handleServerMessage({ type: "chat.chunk", sessionId: "stranger", text: "should not appear" });
-    flushChunkBuffer();
-
-    expect(usePerchStore.getState().messagesBySession.stranger).toBeUndefined();
-  });
-
-  it("session.deleted cleans up messagesBySession/streamingMessageIdBySession for exactly the deleted session", () => {
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1")], B: [assistantMsg("b1")] },
-      streamingMessageIdBySession: { A: "a1", B: "b1" },
-    });
-    usePerchStore.setState({
-      sessions: [session({ id: "A" }), session({ id: "B" })],
-    });
-
-    // B is not the active session, so this doesn't also trigger
-    // switchAwayFromActiveSession's session-switch machinery.
-    handleServerMessage({ type: "session.deleted", sessionId: "B" });
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession).toEqual({ A: [assistantMsg("a1")] });
-    expect(state.streamingMessageIdBySession).toEqual({ A: "a1" });
-  });
-
-  it("session.history preserves an in-flight streaming message that hasn't been persisted yet, instead of wiping it", () => {
-    // Simulates switching into (or a split pane loading) a session whose
-    // turn is still streaming: the DB-backed history reply can't include the
-    // not-yet-persisted assistant reply, so the handler must splice the
-    // locally-accumulated streaming message back in rather than dropping it.
-    resetChatState({
-      sessionId: "A",
-      messagesBySession: { A: [assistantMsg("a1", { text: "still typing", streaming: true })] },
-      streamingMessageIdBySession: { A: "a1" },
-    });
-
-    handleServerMessage({
-      type: "session.history",
-      sessionId: "A",
-      messages: [{ id: "u1", role: "user", text: "hi" }],
-    });
-
-    const state = usePerchStore.getState();
-    expect(state.messagesBySession.A!.map((m) => m.id)).toEqual(["u1", "a1"]);
-    expect(state.messagesBySession.A![1]!.text).toBe("still typing");
-    expect(state.streamingMessageIdBySession.A).toBe("a1");
   });
 });
 

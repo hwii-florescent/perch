@@ -3,7 +3,7 @@
  * it). Pure move from store.ts — see the refactor plan's Phase 6. No logic
  * changed.
  */
-import type { AgentKind, SessionSummary } from "@perch/shared";
+import type { SessionSummary } from "@perch/shared";
 import type { ActiveProject, PerchState, WorkspaceRecord } from "./index";
 
 /** A project = every session sharing one `(hostId, cwd)`. The sidebar has
@@ -135,64 +135,10 @@ export function sessionIdsForProject(
     .map((s) => s.id);
 }
 
-/**
- * Which provider a session should resolve to when it becomes active, absent
- * any live turn already in flight. The server-confirmed `lastAgent` (present
- * once at least one turn has been sent, carried on the session summary) wins
- * whenever it exists — it reflects the actual conversation history. Before
- * that, `hostedAgentBySession` carries the client's create-time choice (Bug
- * 2/3 fix: without this, switching away from and back to a freshly-created,
- * still-empty session would silently reset the picker to "claude", since
- * `lastAgent` doesn't exist yet). `"claude"` is the final fallback, matching
- * every pre-existing session and pre-fix code path.
- */
-export function resolveSessionAgent(
-  session: Pick<SessionSummary, "lastAgent"> | undefined,
-  hostedAgentBySession: Record<string, AgentKind>,
-  sessionId: string | null,
-): AgentKind {
-  const lastAgent = session?.lastAgent as AgentKind | undefined;
-  if (lastAgent) return lastAgent;
-  if (sessionId && hostedAgentBySession[sessionId]) return hostedAgentBySession[sessionId];
-  return "claude";
-}
-
 /** Drop one key from a `Record`, immutably. Shared by every per-session map
- * (`sessionLayouts`, `cliTerminalIds`, `cliAgentBySession`,
- * `hostedAgentBySession`) that has to evict its entry for a deleted session —
- * kept as one pure helper so the four cleanups can't drift out of sync. */
+ * (`sessionLayouts`, `cliTerminalIds`, `cliAgentBySession`) that has to evict
+ * its entry for a deleted session. */
 export function omitKey<T>(map: Record<string, T>, key: string): Record<string, T> {
   const { [key]: _omitted, ...rest } = map;
   return rest;
-}
-
-/**
- * Bug 1: whether `createSessionOnHost` should skip creating a new session and
- * just focus the composer on the current one instead. The guard exists so
- * "+ New session" doesn't mint a second blank session when the user is
- * already sitting on an empty one for this host — but that reuse is only
- * possible when there IS a current session to reuse. With `sessionId: null`
- * (no session open at all — e.g. every session was just deleted, or a fresh
- * profile that hasn't created one yet) there is nothing to focus, so the old
- * `currentHostId = currentSession?.hostId ?? "local"` fallback made this
- * guard fire anyway (an absent session "matched" a `hostId` of `"local"`) and
- * silently no-op the button. Requiring an actual `currentSession` fixes that.
- *
- * CLI mode stays exempt regardless: the PTY conversation is never recorded as
- * hosted messages, so `messages.length === 0` is true for *every* CLI
- * session, including a dead one — reusing it would turn "New session" into a
- * silent no-op on an exited pane.
- */
-export function shouldReuseCurrentSession(
-  state: Pick<ProjectNavState, "sessions" | "sessionId">,
-  hostId: string,
-  cwd: string | undefined,
-  cliMode: boolean,
-  messagesEmpty: boolean,
-): boolean {
-  const currentSession = state.sessions.find((s) => s.id === state.sessionId);
-  if (!currentSession) return false;
-  const currentHostId = currentSession.hostId ?? "local";
-  const isCurrentHostMatch = currentHostId === hostId || (hostId === "local" && currentHostId === "local");
-  return isCurrentHostMatch && !cliMode && messagesEmpty && !cwd;
 }

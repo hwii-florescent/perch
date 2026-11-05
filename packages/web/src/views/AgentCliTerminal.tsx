@@ -46,7 +46,7 @@ function LegacyAgentCliTerminal({
   );
 
   // Create (or reattach to) the PTY exactly once per mount, and kill it again
-  // on unmount. Root cause of the Hosted->CLI->Hosted->CLI "lags and never
+  // on unmount. Root cause of the UI->CLI->UI->CLI "lags and never
   // renders" bug: leaving CLI mode never terminated the spawned
   // `claude --resume` process, so a still-alive PTY sat there with no
   // listener; terminalBus.ts drops any output emitted while unsubscribed
