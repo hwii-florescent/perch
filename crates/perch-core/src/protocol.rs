@@ -731,8 +731,31 @@ pub struct NativeUiSnapshot {
     /// Implies `running`. Absent from older peers and bridges.
     #[serde(default)]
     pub blocked: bool,
+    /// The numbered choices the CLI is waiting on, when its screen shows them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<NativeUiRequest>,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
+}
+
+/// A permission prompt or question, answered by `agent.ui.answer` with an option key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiRequest {
+    /// Fingerprint of the prompt text; an answer only applies to this exact prompt.
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    pub options: Vec<NativeUiRequestOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiRequestOption {
+    pub key: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// Connection-authenticated ownership token returned by the control endpoint.
@@ -1086,6 +1109,17 @@ pub enum ClientMessage {
         operation_id: String,
         generation: u64,
         text: String,
+    },
+    #[serde(rename = "agent.ui.answer", rename_all = "camelCase")]
+    AgentUiAnswer {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        generation: u64,
+        /// `NativeUiRequest.id` the user was looking at.
+        prompt_id: String,
+        /// `NativeUiRequestOption.key` they chose.
+        key: String,
     },
     #[serde(rename = "agent.ui.cancel", rename_all = "camelCase")]
     AgentUiCancel {

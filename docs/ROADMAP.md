@@ -200,8 +200,18 @@ Live-checked on Claude, Codex, Pi and OMP with cheap models
 skill menu reach the agent. Found and fixed: Claude swallowed Enter when an image
 path was pasted (Enter is now a separate write), and Codex 0.166 skills never
 listed (the parser matched prose naming the heading).
+Approvals and questions: while Claude or Codex reports a turn blocked, the PTY
+screen is read (`native_ui/dialog.rs`); a numbered dialog becomes a card whose
+number keys or buttons write that one digit under the input lease, only if the
+screen still shows the same prompt (`agent.ui.answer`, fingerprint `promptId`).
+Answered cards stay as receipts. Typed answers, multi-select and unknown layouts
+show "waiting for you, switch to Terminal", as does any blocked Pi/OMP/OpenCode
+turn (they have no prompt this view can answer). Live-checked: Claude
+`AskUserQuestion`, Codex command approval. Perch launches Claude and Codex with
+approvals bypassed, so only questions appear by default. Phone approval policy is
+still undecided: phones are not blocked from answering yet.
 Not yet: queue cards, Steer, Rewind, `/compact` shortcut, prompt recall,
-approvals, transcript features, Claude stream-json.
+transcript features, Claude stream-json (not needed for approvals now).
 
 ### 1. Projects: Birdhouse instructions and files
 

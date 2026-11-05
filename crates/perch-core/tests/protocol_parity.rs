@@ -105,6 +105,8 @@ const VALUE_TYPES: &[&str] = &[
     "NativeUiTool",
     "NativeUiMessage",
     "NativeUiSnapshot",
+    "NativeUiRequest",
+    "NativeUiRequestOption",
     "WorkspaceTerminal",
     "CommandEntry",
     "SessionSummary",

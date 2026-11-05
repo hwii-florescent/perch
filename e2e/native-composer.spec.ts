@@ -108,12 +108,20 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     // Pi and OMP share one config-home variable but different formats: Pi gets its own cheap-model overlay
     // through a launcher shim (as native-providers.spec.ts does) instead of the core's environment.
     let launchPath = process.env.PATH;
+    const bin = path.join(fixture, "bin");
+    const quote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
+    const real = (name: string) => quote(execFileSync("which", [name], { encoding: "utf8" }).trim());
     if (provider === "pi") {
       const piHome = cheapModelEnv("pi", fixture).PI_CODING_AGENT_DIR!;
-      const bin = path.join(fixture, "bin");
       fs.mkdirSync(bin);
-      const quote = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
-      fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piHome)}\nexec ${quote(execFileSync("which", ["pi"], { encoding: "utf8" }).trim())} "$@"\n`, { mode: 0o700 });
+      fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piHome)}\nexec ${real("pi")} "$@"\n`, { mode: 0o700 });
+      launchPath = `${bin}:${process.env.PATH}`;
+    }
+    if (provider === "codex") {
+      // Perch launches Codex with approvals bypassed. Swap that flag for a read-only sandbox that asks the user,
+      // so a command approval actually appears.
+      fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(bin, "codex"), `#!/bin/sh\nfor arg; do shift; if [ "$arg" = --dangerously-bypass-approvals-and-sandbox ]; then set -- "$@" -a on-request -s read-only -c approvals_reviewer=user; else set -- "$@" "$arg"; fi; done\nexec ${real("codex")} "$@"\n`, { mode: 0o700 });
       launchPath = `${bin}:${process.env.PATH}`;
     }
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], { cwd: root, env: { ...process.env, ...fixtureRuntimeEnv(fixture), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info,perch_core::commands=debug", ...(provider === "pi" ? {} : cheapModelEnv(provider, fixture)), PATH: launchPath }, stdio: ["ignore", log, log] });
@@ -174,6 +182,30 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         await expect(ui.getByTestId("native-cli-menu")).toHaveCount(0);
         await box.fill("");
       }
+    });
+    // 4. Questions and approvals: Claude's AskUserQuestion (answered with a number key) and a Codex
+    // command approval (answered with the button). Pi and OMP have no prompt of their own to answer.
+    if (provider === "claude" || provider === "codex") await check("request card", async () => {
+      const card = ui.getByTestId("native-cli-request");
+      await box.fill(provider === "claude"
+        ? "Use the AskUserQuestion tool to ask me which colour I like, with options Red, Blue and Green. Then reply with only my choice."
+        : "Run the shell command: touch approved.txt . Then say done.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(card).toBeVisible({ timeout: 90_000 });
+      await expect(ui.getByRole("status")).toHaveText("Waiting for you");
+      if (provider === "claude") {
+        await expect(card.getByTestId("native-cli-request-option-2")).toContainText("Blue");
+        await expect(card).toBeFocused();
+        await page.keyboard.press("2");
+      } else {
+        await expect(card.getByTestId("native-cli-request-detail")).toContainText("touch approved.txt");
+        await card.getByTestId("native-cli-request-option-1").click();
+      }
+      await expect(card).toHaveCount(0, { timeout: 30_000 });
+      await expect(ui.getByTestId("native-cli-receipts")).toContainText("Answered");
+      await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+      if (provider === "claude") expect((await ui.locator('[data-native-role="assistant"]').last().innerText()).toLowerCase()).toContain("blue");
+      else expect(fs.existsSync(path.join(fixture, "approved.txt"))).toBe(true);
     });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);

@@ -288,6 +288,72 @@ pub(super) fn control(
     }
 }
 
+/// Answer the numbered permission prompt or question the CLI is showing: one
+/// digit, written under the input lease, and only if the screen still shows
+/// the exact prompt (`prompt_id`) the user answered. Never retried or replayed.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn answer(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+    generation: u64,
+    prompt_id: String,
+    choice: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    let written = (|| -> anyhow::Result<()> {
+        let key = resolve(state, &session_id, &provider_id)?;
+        let lease_key = agents::lifecycle_control_key(&key, ControlChannel::Input);
+        let lease = state
+            .agent_input_leases
+            .lock()
+            .unwrap()
+            .get(&lease_key)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Take control of this agent before answering"))?;
+        anyhow::ensure!(
+            lease.generation == generation,
+            "Input control changed; take control again"
+        );
+        state
+            .app
+            .agent_runtime
+            .dispatch_native_control(&key, &lease, |write| {
+                let shown = crate::native_ui::dialog::read(&key)
+                    .ok_or_else(|| anyhow::anyhow!("The prompt is no longer on screen"))?;
+                anyhow::ensure!(
+                    shown.id == prompt_id,
+                    "The CLI is showing a different prompt now. Review it and answer again."
+                );
+                anyhow::ensure!(
+                    shown.options.iter().any(|option| option.key == choice),
+                    "That choice is not available"
+                );
+                write(&choice)
+            })
+    })();
+    match written {
+        Ok(()) => {
+            let _ = state.out_tx.send(ServerMessage::AgentUiResult {
+                request_id,
+                session_id,
+                accepted: true,
+            });
+        }
+        Err(error) => fail(
+            &state.out_tx,
+            request_id,
+            "native_ui_answer_failed",
+            error.to_string(),
+            false,
+        ),
+    }
+}
+
 /// A review is one explicit user-input operation. Git views may have no
 /// terminal view (especially on mobile), so the sender borrows input for the
 /// send — taking it over from another view, like any explicit action — and

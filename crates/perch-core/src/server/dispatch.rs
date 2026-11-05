@@ -70,6 +70,23 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             generation,
             Some((operation_id, text)),
         ),
+        ClientMessage::AgentUiAnswer {
+            request_id,
+            session_id,
+            provider_id,
+            generation,
+            prompt_id,
+            key,
+        } => native_ui::answer(
+            state,
+            raw_text,
+            request_id,
+            session_id,
+            provider_id,
+            generation,
+            prompt_id,
+            key,
+        ),
         ClientMessage::AgentUiCancel {
             request_id,
             session_id,

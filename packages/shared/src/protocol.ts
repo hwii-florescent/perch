@@ -78,8 +78,25 @@ export interface NativeUiSnapshot {
   running: boolean;
   /** The turn is paused on a human: a permission prompt or a question. Implies `running`. */
   blocked?: boolean;
+  /** The numbered choices the CLI is waiting on, when its screen shows them. */
+  request?: NativeUiRequest;
   messages: NativeUiMessage[];
   truncated: boolean;
+}
+
+/** A permission prompt or question, answered by `agent.ui.answer` with an option key. */
+export interface NativeUiRequest {
+  /** Fingerprint of the prompt text; an answer only applies to this exact prompt. */
+  id: string;
+  title: string;
+  detail: string;
+  options: NativeUiRequestOption[];
+}
+
+export interface NativeUiRequestOption {
+  key: string;
+  label: string;
+  detail?: string;
 }
 
 export interface AgentUiGetMessage {
@@ -96,6 +113,17 @@ export interface AgentUiPromptMessage {
   operationId: string;
   generation: number;
   text: string;
+}
+export interface AgentUiAnswerMessage {
+  type: "agent.ui.answer";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+  generation: number;
+  /** `NativeUiRequest.id` the user was looking at. */
+  promptId: string;
+  /** `NativeUiRequestOption.key` they chose. */
+  key: string;
 }
 export interface AgentUiCancelMessage {
   type: "agent.ui.cancel";
@@ -1849,6 +1877,7 @@ export type ClientMessage =
   | AgentProviderConfigureMessage
   | AgentUiGetMessage
   | AgentUiPromptMessage
+  | AgentUiAnswerMessage
   | AgentUiCancelMessage
   | AgentLifecycleGetMessage
   | AgentControlAcquireMessage

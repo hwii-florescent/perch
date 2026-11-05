@@ -2,7 +2,7 @@ import type { ClientMessage, NativeUiSnapshot, ServerMessage } from "@perch/shar
 import { socket } from "./ws";
 
 type Reply = Extract<ServerMessage, { type: "agent.ui.snapshot" | "agent.ui.result" }>;
-type Request = Extract<ClientMessage, { type: "agent.ui.get" | "agent.ui.prompt" | "agent.ui.cancel" }>;
+type Request = Extract<ClientMessage, { type: "agent.ui.get" | "agent.ui.prompt" | "agent.ui.cancel" | "agent.ui.answer" }>;
 const listeners = new Map<string, Set<(snapshot: NativeUiSnapshot) => void>>();
 const pending = new Map<string, { request: Request; resolve: (reply: Reply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 const retired = new Set<string>();

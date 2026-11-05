@@ -397,6 +397,7 @@ async fn connection(
             model: None,
             running: false,
             blocked: false,
+            request: None,
             messages: vec![],
             truncated: false,
         },
@@ -523,6 +524,9 @@ async fn connection(
         while alive() && view.next_thread.is_none() {
             tokio::select! {
                 _ = tick.tick() => {
+                    // Codex reports "waiting on approval"; its screen supplies the choices.
+                    let request = if view.snapshot.blocked { super::dialog::read(key) } else { None };
+                    if request != view.snapshot.request { view.snapshot.request = request; view.dirty = true; }
                     if waiting_for_history && (rollout.as_ref().is_some_and(|path| path.is_file()) || rollout.is_none() && tokio::time::Instant::now() >= discovery_deadline) { break; }
                     if view.dirty {
                         view.dirty = false;
@@ -709,6 +713,7 @@ mod tests {
                 model: None,
                 running: true,
                 blocked: false,
+                request: None,
                 messages: vec![],
                 truncated: false,
             },

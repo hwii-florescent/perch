@@ -12,6 +12,7 @@ import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
 import { MenuList, menuOptionId } from "./nativeChat/MenuList";
 import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
+import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
 
@@ -26,6 +27,8 @@ const drafts = new Map<string, Draft>();
 // it is never replayed as the same message, only restored to the composer as a new one.
 // `text` is the whole prompt as sent (attachment paths included); `draft` is what returns to the composer.
 type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "images">; phase: "sending" | "delivered" | "unconfirmed"; baseline: number };
+// Answered prompts stay under the transcript as receipts, bounded like drafts.
+const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
 const NativeMessage = memo(function NativeMessage({ message, streaming }: { message: NativeUiMessage; streaming: boolean }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
@@ -59,6 +62,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const [pending, setPending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [outbox, setOutbox] = useState<Outbox | null>(null);
+  const [answering, setAnswering] = useState(false);
+  const [receipts, setReceipts] = useState<Receipt[]>(() => receiptsBySession.get(draftKey) ?? []);
   const latest = useRef<NativeUiSnapshot | null>(null);
   latest.current = snapshot;
   const field = useRef<HTMLTextAreaElement>(null);
@@ -172,6 +177,20 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       setError((reason as Error).message);
     }
   }
+  // One digit to the CLI, for exactly the prompt on screen. The card goes away when the CLI's next snapshot drops it.
+  async function answer(key: string) {
+    const request = latest.current?.request;
+    const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
+    if (!request || generation === undefined || answering || !connected) return;
+    setAnswering(true); setError(null);
+    try {
+      const reply = await requestNativeUi({ type: "agent.ui.answer", requestId: newId(), sessionId, providerId, generation, promptId: request.id, key });
+      if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this answer.");
+      const next = [...(receiptsBySession.get(draftKey) ?? []), { id: `${request.id}:${Date.now()}`, title: request.title, label: request.options.find((option) => option.key === key)?.label ?? key }].slice(-20);
+      receiptsBySession.set(draftKey, next); setReceipts(next);
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setAnswering(false); }
+  }
   async function stop() {
     const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
     if (generation === undefined || stopping || !connected) return;
@@ -191,7 +210,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     field.current?.focus();
   }
   const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
-  const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : snapshot.running ? "Working" : "Ready";
+  const waiting = !!snapshot?.blocked || status?.state === "blocked";
+  const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
@@ -203,6 +223,9 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {snapshot?.messages.map((message, index) => <NativeMessage key={message.id} message={message} streaming={snapshot.running && index === snapshot.messages.length - 1} />)}
+        <Receipts items={receipts} />
+        {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />
+          : waiting && <WaitingNotice />}
         {outbox && <article className={messageClass("user", outbox.phase === "unconfirmed" ? "opacity-70" : undefined)} data-native-outbox={outbox.phase}>
           <div className="message__text">{outbox.text}</div>
           {outbox.phase === "sending" && <div className={HINT} role="status">Sending…</div>}

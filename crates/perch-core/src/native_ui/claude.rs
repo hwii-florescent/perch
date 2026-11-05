@@ -356,6 +356,7 @@ pub(super) async fn observe(
     let mut history = (Vec::new(), false);
     let mut last = String::new();
     let mut revision = 0;
+    let mut was_blocked = false;
     let mut pending = Vec::<super::Command>::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     while alive() {
@@ -383,7 +384,7 @@ pub(super) async fn observe(
                     if let Ok(next) = transcript(path, session) { history = next; history_key = next_history; changed = true; }
                     else if history_key.split(':').next() != Some(session) { history = (vec![], false); }
                 }
-                if !changed && pending.is_empty() { continue; }
+                if !changed && pending.is_empty() && !was_blocked { continue; }
                 let (mut running, mut blocked) = (false, false);
                 let mut model = start["model"].as_str().map(|model| clip(model, 256));
                 let mut ordered: Vec<_> = events.values().filter(|(_, event_pid, event)| event_pid == pid && event["session_id"] == session).collect();
@@ -393,7 +394,11 @@ pub(super) async fn observe(
                     else if let Some(state) = turn_state(event) { (running, blocked) = state; }
                 }
                 if history.0.last().is_some_and(|message| message.role == "user" && message.text.starts_with("[Request interrupted by user")) { (running, blocked) = (false, false); }
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, messages: history.0.clone(), truncated: history.1 };
+                // The hook says a human is needed; the screen says which choices. The dialog may
+                // draw after the hook fires, so keep reading while blocked.
+                was_blocked = blocked;
+                let request = if blocked { super::dialog::read(key) } else { None };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, messages: history.0.clone(), truncated: history.1 };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;

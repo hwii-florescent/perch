@@ -18,6 +18,7 @@ use tokio::{
 
 pub mod claude;
 pub mod codex;
+pub mod dialog;
 pub mod opencode;
 
 fn clip(text: &str, limit: usize) -> String {
