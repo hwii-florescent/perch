@@ -33,17 +33,12 @@ open questions, [research](evidence/agent-workspaces-2026-11-05.md) the evidence
 - Model and effort are picked when a session or child starts (reporters default
   to Haiku 5.5); still no model chrome over a live session.
 
-## 2026-11-04 — Real desktop apps as a switchable view (owner)
+## 2026-11-05 — Real desktop apps as a switchable view: withdrawn (owner)
 
-Perch switches to the real ChatGPT/Codex and Claude desktop apps, Tack Window Tabs
-style. Web versions stay in ordinary browser tabs; no dedicated web mode is built.
-
-- macOS cannot host another app's window, so the app's window is moved over Perch's,
-  leaving Perch's status bar visible as the tab strip. One view shows at a time.
-- Any return to Perch (clicking the bar, Cmd+Tab) hides the app. Accessibility is
-  needed only to fit the window; without it the app still opens, unfitted.
-- Local Mac only, installed apps from a fixed list, nothing shown when none is
-  installed. Not available while Perch is fullscreen. Not mirrored to the phone.
+The 2026-11-04 plan to move the ChatGPT/Codex and Claude desktop apps' windows over
+Perch's (and the later glued-window variant) is dropped. The native UI mode above
+covers the need inside Perch; the never-committed code was deleted. Do not rebuild
+window-overlay or window-gluing features.
 
 ## 2026-11-04 — Usage popover: plan usage, spend and alerts (owner)
 

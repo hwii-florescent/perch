@@ -271,33 +271,6 @@ Open before building (ask the owner when the step starts):
   port forwarding/remote app preview; phone wide-terminal and delivery polish.
 - Sort chats by last updated; chrome font trial remains undecided.
 
-## Paused: real desktop apps as a switchable view
-
-Paused 2026-11-04 before its first commit; the code is uncommitted in the working
-tree. The [decision](DECISIONS.md) records the approved behavior. Status-bar tabs
-open real desktop apps over Perch's window, Tack Window Tabs style.
-
-- **Passing:** unit, tab and status bar tests; launching and hiding the real
-  `ChatGPT.app`.
-- **Not verified:** moving and resizing its window, because the test process had no
-  Accessibility access, and clicking through the flow in the real Perch window.
-- **To resume:** allow Accessibility for the terminal, run
-  `cargo test -p perch-desktop live_app -- --ignored --nocapture`, then try
-  `cargo run -p perch-desktop`. Commit once both work.
-- **2026-11-05 owner review:** it feels like an app opened over Perch. Approved
-  direction: glue the app's window to the area above the status bar (follow Perch's
-  moves/resizes; snap back when the app is moved or resized) with a
-  `Perch | ChatGPT | Claude` strip. A spike showed Perch can order its window just
-  below the app's, but a click on Perch's strip still raises Perch over it, so
-  using the strip while the app shows needs more work. Paused behind the UI-mode
-  work above.
-- **Then:** the fade between views and one-click app-to-app switching (it takes two
-  clicks today). Confirm the `com.openai.chat` and
-  `com.anthropic.claudefordesktop` bundle IDs on Macs that have those apps.
-
-Start: `crates/perch-desktop/src/desktop_apps.rs`,
-`packages/web/src/components/DesktopAppTabs.tsx`.
-
 ## Release evidence still owed
 
 [PUBLIC-ALPHA](PUBLIC-ALPHA.md) owns the actual gates: D1 mixed restored canvas,
