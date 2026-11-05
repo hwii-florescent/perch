@@ -5,6 +5,10 @@ export type ComposerAction = "send" | "queue" | "stop" | "sending" | "stopping";
 
 export interface SendStateInput {
   draft: string;
+  /** Staged files that will go out with the message. */
+  attachments: number;
+  /** A file is still uploading: nothing may be sent without it. */
+  uploading: boolean;
   connected: boolean;
   /** The first snapshot has arrived. */
   ready: boolean;
@@ -40,8 +44,9 @@ export function sendState(input: SendStateInput): SendState {
     : input.exited ? "The CLI exited"
     : !input.ready ? "Connecting to CLI…"
     : !input.controlling ? "Take control to send"
+    : input.uploading ? "Uploading attachment…"
     : null;
-  const hasDraft = input.draft.trim() !== "";
+  const hasDraft = input.draft.trim() !== "" || input.attachments > 0;
   const action: ComposerAction = input.sending ? "sending"
     : input.working && !hasDraft ? (input.stopping ? "stopping" : "stop")
     : input.working ? "queue" : "send";

@@ -8,17 +8,24 @@ import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
 import { CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, WORKED_FOR, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
+import { withAttachmentPaths } from "./nativeChat/menuTokens";
+import { useComposerMenu } from "./nativeChat/useComposerMenu";
+import { MenuList, menuOptionId } from "./nativeChat/MenuList";
+import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
+import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
 
 const HINT = "text-[12px] text-subtext-0";
 
 // Keep drafts and retry identities across UI/CLI switches, bounded like the
 // transcript. A lost acknowledgement never turns Retry into a new operation.
-const drafts = new Map<string, { text: string; operationId: string }>();
+type Draft = { text: string; operationId: string; images: ComposerImage[] };
+const drafts = new Map<string, Draft>();
 
 // A message this view sent that the transcript does not show yet. `unconfirmed` means delivery is unknown:
 // it is never replayed as the same message, only restored to the composer as a new one.
-type Outbox = { operationId: string; text: string; phase: "sending" | "delivered" | "unconfirmed"; baseline: number };
+// `text` is the whole prompt as sent (attachment paths included); `draft` is what returns to the composer.
+type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "images">; phase: "sending" | "delivered" | "unconfirmed"; baseline: number };
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
 const NativeMessage = memo(function NativeMessage({ message, streaming }: { message: NativeUiMessage; streaming: boolean }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
@@ -36,6 +43,16 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const connected = usePerchStore((state) => state.connected);
   const draftKey = JSON.stringify([sessionId, providerId]);
   const [text, setText] = useState(() => drafts.get(draftKey)?.text ?? "");
+  const [images, setImages] = useState<ComposerImage[]>(() => drafts.get(draftKey)?.images ?? []);
+  const [uploading, setUploading] = useState(0);
+  const [caret, setCaret] = useState(0);
+  const textRef = useRef(text);
+  textRef.current = text;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const nextCaret = useRef<number | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
   const [controlling, setControlling] = useState(false);
@@ -95,12 +112,37 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
+    if (nextCaret.current !== null) { el.setSelectionRange(nextCaret.current, nextCaret.current); nextCaret.current = null; }
   }, [text]);
-  function updateDraft(value: string) {
+  // A new operation id on every edit: a draft that changed is a different message.
+  function updateDraft(value: string, nextImages = imagesRef.current) {
     if (new TextEncoder().encode(value).length > 64 * 1024) return;
-    setText(value);
-    drafts.set(draftKey, { text: value, operationId: newId() });
+    setText(value); setImages(nextImages);
+    drafts.set(draftKey, { text: value, operationId: newId(), images: nextImages });
     if (drafts.size > 128) drafts.delete(drafts.keys().next().value!);
+  }
+  const menu = useComposerMenu({ text, caret, sessionId, providerId, enabled: connected && controlling && !!snapshot });
+  function pickMenu(index: number) {
+    const picked = menu.pick(index);
+    if (!picked) return;
+    nextCaret.current = picked.caret;
+    updateDraft(picked.text);
+    setCaret(picked.caret);
+  }
+  // Files are staged on this computer and their paths go out with the message. Another host's files
+  // would need an explicit scp transfer, which stays a terminal action.
+  async function attach(files: File[]) {
+    if (!files.length) return;
+    if (hostId !== "local") { setError("Attachments work for sessions on this computer only."); return; }
+    setError(null); setUploading((count) => count + files.length);
+    for (const file of files) {
+      try {
+        const staged = await uploadAttachment(sessionId, file);
+        const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+        updateDraft(textRef.current, [...imagesRef.current, { ...staged, ...(previewUrl ? { previewUrl } : {}) }]);
+      } catch (reason) { setError((reason as Error).message); }
+      finally { setUploading((count) => count - 1); }
+    }
   }
   async function takeControl() {
     if (!binding.current || pending) return;
@@ -111,15 +153,16 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   }
   async function send() {
     const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
-    if (generation === undefined || pending || outbox?.phase === "sending" || !connected || !text.trim()) return;
-    const draft = drafts.get(draftKey) ?? { text, operationId: newId() };
+    if (generation === undefined || pending || outbox?.phase === "sending" || !connected || uploading || (!text.trim() && !images.length)) return;
+    const draft: Draft = drafts.get(draftKey) ?? { text, operationId: newId(), images };
     drafts.set(draftKey, draft);
     setError(null);
-    const sent: Outbox = { operationId: draft.operationId, text: draft.text, phase: "sending", baseline: sentCount(latest.current, draft.text) };
+    const prompt = withAttachmentPaths(draft.text, draft.images.map((image) => image.path));
+    const sent: Outbox = { operationId: draft.operationId, text: prompt, draft: { text: draft.text, images: draft.images }, phase: "sending", baseline: sentCount(latest.current, prompt) };
     setOutbox(sent);
-    const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); setText(""); } };
+    const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); setText(""); setImages([]); } };
     try {
-      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, ...draft });
+      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
       settled();
       setOutbox({ ...sent, phase: "delivered" });
@@ -142,12 +185,12 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   // Delivery was unknown, so the text comes back as a new message for the user to judge against the transcript.
   function restoreUnconfirmed() {
     if (!outbox) return;
-    setText(outbox.text);
-    drafts.set(draftKey, { text: outbox.text, operationId: newId() });
+    // Thumbnails were released with their chips; the staged files are still there.
+    updateDraft(outbox.draft.text, outbox.draft.images.map(({ previewUrl: _gone, ...image }) => image));
     setOutbox(null); setError(null);
     field.current?.focus();
   }
-  const sendable = sendState({ draft: text, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
+  const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
     <div className="terminal__toolbar flex-wrap">
@@ -171,15 +214,31 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       {showBottom && <button className={cn("scroll-bottom-pill", SCROLL_PILL)} type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
     </div>
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
-    <form className={cn("chat__input", CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}>
+    <form className={cn("chat__input relative", CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
+      onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
+      onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); void attach(Array.from(event.dataTransfer.files)); } }}>
+      {menu.open && <MenuList items={menu.items} active={menu.active} label={menu.label} onPick={pickMenu} onHover={menu.setActive} />}
+      <Attachments items={images} onRemove={(id) => updateDraft(text, images.filter((image) => image.id !== id))} />
       <textarea ref={field} className={NATIVE_TEXTAREA} aria-label="Message CLI" data-testid="native-cli-composer" value={text} disabled={!connected || !controlling || !snapshot} placeholder={controlling ? "Message this CLI…" : "Take control to send a message"} rows={1}
-        onChange={(event) => updateDraft(event.target.value)}
+        role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={menu.open} aria-activedescendant={menu.open ? menuOptionId(menu.active) : undefined}
+        onChange={(event) => { updateDraft(event.target.value); setCaret(event.target.selectionStart); }}
+        onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+        onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); void attach(Array.from(event.clipboardData.files)); } }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (text.trim()) void send(); }
+          if (event.nativeEvent.isComposing) return;
+          if (menu.open) {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); menu.move(event.key === "ArrowDown" ? 1 : -1); return; }
+            if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); pickMenu(menu.active); return; }
+            if (event.key === "Escape") { event.preventDefault(); menu.dismiss(); return; }
+          }
+          if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (!sendable.disabled && sendable.action !== "stop") void send(); }
           else if (event.key === "Escape" && snapshot?.running && controlling) { event.preventDefault(); void stop(); }
         }} />
       <div className="flex items-center gap-2 px-2 py-1">
-        <span className={cn(HINT, "flex-1")}>{controlling ? (snapshot?.running ? "Esc stops the turn" : "") : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
+        <input ref={picker} type="file" multiple hidden data-testid="native-cli-file-input" onChange={(event) => { void attach(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+        <button type="button" className="size-7 shrink-0 cursor-pointer rounded-full bg-transparent text-[1.1rem] leading-none text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40" aria-label="Attach file" title="Attach file" disabled={!connected || !controlling || !snapshot}
+          onMouseDown={(event) => event.preventDefault()} onClick={() => picker.current?.click()}>+</button>
+        <span className={cn(HINT, "flex-1")}>{controlling ? (uploading ? "Uploading…" : snapshot?.running ? "Esc stops the turn" : "") : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
         <button type="submit" className={sendable.action === "stop" || sendable.action === "stopping" ? SEND_BUTTON_STOP : SEND_BUTTON_GO} aria-label={sendable.label} title={sendable.reason ?? sendable.label} disabled={sendable.disabled}
           onMouseDown={(event) => event.preventDefault()}>
           {sendable.action === "stop" || sendable.action === "stopping"

@@ -68,7 +68,7 @@ const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, de
     WebSocket.prototype.send = function (data) {
       let m = null;
       try { m = JSON.parse(data); } catch {}
-      const mine = m && (m.sessionId === sid || m.terminalId === "native-term") && /^(agent\.|terminal\.)/.test(m.type);
+      const mine = m && ((m.sessionId === sid || m.terminalId === "native-term") && /^(agent\.|terminal\.|commands\.)/.test(m.type) || (m.type === "fs.search" && m.workspaceId === "ws-vis"));
       if (!mine) return send.call(this, data);
       N.ws = this;
       const r = (x) => setTimeout(() => N.reply({ requestId: m.requestId, ...x }), 0);
@@ -79,7 +79,9 @@ const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, de
           else { N.owner = lease("me", 1); r({ type: "agent.control", sessionId: sid, agentId: "claude", channel: m.channel, lease: N.owner, status: status(N.owner) }); }
           break;
         case "agent.ui.get": r({ type: "agent.ui.snapshot", sessionId: sid, providerId: "claude", snapshot: N.snapshot }); break;
-        case "agent.ui.prompt": N.prompts++; if (unconfirmedPrompt) r({ type: "error", code: "native_ui_delivery_unconfirmed", message: "The CLI did not confirm this action." }); else if (!holdPrompt) r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
+        case "commands.list": r({ type: "commands.list", sessionId: sid, claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] }); break;
+        case "fs.search": r({ type: "fs.search.result", workspaceId: m.workspaceId, query: m.query, truncated: false, entries: ["src/main.txt", "src/lib/main.rs"].filter((path) => path.includes(m.query)).map((path) => ({ name: path.split("/").pop(), path, kind: "file", size: 1, readonly: false, executable: false })) }); break;
+        case "agent.ui.prompt": N.lastPrompt = m.text; N.prompts++; if (unconfirmedPrompt) r({ type: "error", code: "native_ui_delivery_unconfirmed", message: "The CLI did not confirm this action." }); else if (!holdPrompt) r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
         case "agent.ui.cancel": N.cancels++; r({ type: "agent.ui.result", sessionId: sid, accepted: true }); break;
         case "agent.terminal.release": case "terminal.resize": case "terminal.input": case "terminal.kill": break;
         default: N.unhandled.push(m.type);
@@ -96,7 +98,7 @@ const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, de
     const sid = "native-vis";
     window.usePerchStore.setState({
       settings: { ...st.settings, chatMode: "ui" },
-      sessions: [{ id: sid, title: "Native chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, lastAgent: "claude", status: "idle", cliStarted: true }],
+      sessions: [{ id: sid, title: "Native chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, status: "idle", cliStarted: true, workspaceId: "ws-vis" }],
       sessionId: sid,
       cliAgentBySession: { ...st.cliAgentBySession, [sid]: "claude" },
     });
@@ -1397,6 +1399,69 @@ const STATES = [
     if ((await page.getByTestId("native-cli-composer").inputValue()) !== "Please continue") throw new Error("25l: Edit and resend did not restore the text");
     if ((await page.evaluate(() => window.__native.prompts)) !== 1) throw new Error("25l: the prompt was replayed");
     await nativeClean(page, "25l");
+  } },
+  // The composer menu: `/` commands at the start of a Claude message (arrows, Enter completes, Esc closes), `@` file mentions anywhere.
+  { name: "25n-native-slash-menu", fresh: true, run: async (page) => {
+    await nativePage(page);
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    const box = page.getByTestId("native-cli-composer");
+    await box.pressSequentially("/re");
+    await page.getByTestId("native-cli-menu").getByRole("option", { name: /\/review/ }).waitFor();
+    if ((await page.getByRole("option").count()) !== 3) throw new Error("25n: /re should list rename, resume and review");
+    await box.press("ArrowDown");
+    await box.press("Enter");
+    if ((await box.inputValue()) !== "/resume ") throw new Error(`25n: Enter did not complete the highlighted command (${await box.inputValue()})`);
+    if ((await page.getByTestId("native-cli-menu").count()) !== 0) throw new Error("25n: the menu stayed open after completing");
+    await box.fill("");
+    await box.pressSequentially("/re");
+    await page.getByTestId("native-cli-menu").waitFor();
+    await box.press("Escape");
+    if ((await page.getByTestId("native-cli-menu").count()) !== 0) throw new Error("25n: Escape did not close the menu");
+    await box.fill(""); // the token ended, so the next one may open the menu again
+    await sleep(100);
+    await box.fill("/re");
+    await page.getByTestId("native-cli-menu").waitFor();
+    await nativeClean(page, "25n");
+  } },
+  { name: "25o-native-file-mention", fresh: true, run: async (page) => {
+    await nativePage(page);
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    const box = page.getByTestId("native-cli-composer");
+    await box.pressSequentially("look at @main");
+    await page.getByRole("option", { name: "src/main.txt" }).waitFor();
+    await page.getByRole("option", { name: "src/lib/main.rs" }).click();
+    if ((await box.inputValue()) !== "look at @src/lib/main.rs ") throw new Error(`25o: the mention was not completed (${await box.inputValue()})`);
+    await nativeClean(page, "25o");
+  } },
+  // A pasted image is staged (upload stubbed), shown as a removable chip, and its path goes out with the message.
+  { name: "25p-native-image-paste", fresh: true, run: async (page) => {
+    await nativePage(page);
+    await page.getByRole("button", { name: "Take control" }).waitFor({ state: "detached", timeout: 15000 });
+    await page.evaluate(() => {
+      const real = window.fetch.bind(window);
+      window.__uploads = 0;
+      window.fetch = (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (/\/upload\?/.test(url)) { window.__uploads++; return Promise.resolve(new Response(JSON.stringify({ path: "/tmp/perch-visual/uploads/shot.png", name: "shot.png" }), { status: 200, headers: { "Content-Type": "application/json" } })); }
+        return real(input, init);
+      };
+    });
+    const box = page.getByTestId("native-cli-composer");
+    await box.focus();
+    await box.evaluate((el) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File([new Uint8Array([137, 80, 78, 71])], "shot.png", { type: "image/png" }));
+      el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dataTransfer }));
+    });
+    await page.getByTestId("native-cli-attachments").getByText("shot.png").waitFor();
+    if ((await page.evaluate(() => window.__uploads)) !== 1) throw new Error("25p: the image did not reach the upload stub once");
+    await box.fill("what is wrong here?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.waitForFunction(() => window.__native.prompts === 1);
+    const sent = await page.evaluate(() => window.__native.lastPrompt);
+    if (sent !== "what is wrong here?\n/tmp/perch-visual/uploads/shot.png") throw new Error(`25p: the prompt was ${JSON.stringify(sent)}`);
+    await page.getByTestId("native-cli-attachments").waitFor({ state: "detached" });
+    await nativeClean(page, "25p");
   } },
   // Escape stops a working turn from the composer.
   { name: "25m-native-escape-stops", fresh: true, run: async (page) => {

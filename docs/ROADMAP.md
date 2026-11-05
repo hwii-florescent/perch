@@ -190,9 +190,13 @@ Done so far (2026-11-05): Hosted chat removed, one global Chat/Terminal switch
 (Terminal default); composer's one round button (Send, Queue while working, Stop
 in its place when the draft is empty, Esc stops, disabled reason as title) and
 honest send states (pending copy in the transcript; an unconfirmed send is never
-replayed and returns to the composer as a new message). Not yet: queue cards,
-Steer, Rewind, `/compact`, slash/skill picker, `@file`, image paste, approvals,
-transcript features, Claude stream-json.
+replayed and returns to the composer as a new message); one autocomplete menu
+(`/command` at the start of a Claude message, `$skill` for Codex, `@file` for
+every provider, from `commands.list` and `fs.search`); attach button, paste and
+drop stage files on this computer and send their paths with the message (remote
+sessions: not yet). Commands and skills come only from Claude and Codex today.
+Not yet: queue cards, Steer, Rewind, `/compact` shortcut, prompt recall,
+approvals, transcript features, Claude stream-json.
 
 ### 1. Projects: Birdhouse instructions and files
 

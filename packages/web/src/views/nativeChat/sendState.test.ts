@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sendState, type SendStateInput } from "./sendState";
 
-const ready: SendStateInput = { draft: "", connected: true, ready: true, controlling: true, exited: false, working: false, sending: false, stopping: false };
+const ready: SendStateInput = { draft: "", attachments: 0, uploading: false, connected: true, ready: true, controlling: true, exited: false, working: false, sending: false, stopping: false };
 const state = (patch: Partial<SendStateInput>) => sendState({ ...ready, ...patch });
 
 describe("sendState", () => {
@@ -12,6 +12,11 @@ describe("sendState", () => {
   it("offers Stop in Send's place while working with an empty draft, and queues a typed one", () => {
     expect(state({ working: true })).toMatchObject({ action: "stop", label: "Cancel turn", disabled: false });
     expect(state({ working: true, draft: "next" })).toMatchObject({ action: "queue", label: "Queue message", disabled: false });
+  });
+  it("sends attachments without text, but not while one is uploading", () => {
+    expect(state({ attachments: 1 })).toMatchObject({ action: "send", disabled: false });
+    expect(state({ attachments: 1, working: true })).toMatchObject({ action: "queue", disabled: false });
+    expect(state({ draft: "hi", attachments: 1, uploading: true })).toMatchObject({ disabled: true, reason: "Uploading attachment…" });
   });
   it("shows in-flight sends and stops as disabled", () => {
     expect(state({ draft: "hi", sending: true })).toMatchObject({ action: "sending", label: "Sending…", disabled: true, reason: null });
