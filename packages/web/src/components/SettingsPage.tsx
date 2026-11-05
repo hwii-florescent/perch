@@ -593,10 +593,10 @@ function TerminalSection() {
       <SettingRow title="Login shell" description="Spawn plain terminal panes as a login shell. Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created terminals.">
         <Switch label="Spawn plain terminal panes as a login shell" testId="settings-terminal-login-shell" checked={loginShell} onChange={handleLoginShellChange} />
       </SettingRow>
-      <SettingRow title="Wrap dropped paths in double quotes" description="Applies to file drops in agent panes. Off uses single quotes; both safely escape shell characters.">
+      <SettingRow title="Wrap dropped paths in double quotes" description="Applies to file drops in agent and shell terminals. Off uses single quotes; both safely escape shell characters.">
         <Switch label="Wrap dropped paths in double quotes" testId="settings-dropped-path-double-quotes" checked={doubleQuotes} onChange={(on) => { setDoubleQuotes(on); updateSettings({ droppedPathDoubleQuotes: on }); }} />
       </SettingRow>
-      <SettingRow title="Remote file drops" description="Hold Option (Mac) or Alt while dropping onto a remote agent to upload via SCP to a private staging folder. Up to 1 GiB per file on direct connections; 64 MiB through the phone relay. Dropping never submits a prompt." />
+      <SettingRow title="Remote file drops" description="Hold Option (Mac) or Alt while dropping onto a remote terminal to upload via SCP to a private staging folder. Up to 1 GiB per file on direct connections; 64 MiB through the phone relay. Dropping never presses Enter." />
     </SettingsGroup>
   );
 }

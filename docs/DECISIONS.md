@@ -7,6 +7,14 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-05 — File drops also work in ordinary shells
+
+Owner correction: dropping files must not depend on the saved launch provider.
+Ordinary Terminal sessions and auxiliary shell panes accept the same file drops
+as agent tabs, including after an agent is started manually inside the shell.
+Keep writable-input checks, safe path quoting, no automatic Enter and explicit
+Option/Alt intent for remote SCP transfers.
+
 ## 2026-11-05 — Native UI mode, Projects and Perch sub-sessions (owner direction)
 
 Direction, not yet a detailed design; [ROADMAP](ROADMAP.md) holds the steps and

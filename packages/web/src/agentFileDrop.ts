@@ -1,4 +1,4 @@
-/** User-initiated file drops for CLI agents, never ordinary shell panes.
+/** User-initiated file drops for agent and ordinary shell terminals.
  * Remote transfers require an explicit Option/Alt-drop onto a configured host.
  * Paste paths through xterm's normal input/lease handling, without Enter. */
 import { uploadAttachment } from "./attachments";
@@ -57,11 +57,11 @@ export function attachAgentFileDrop(
     if (uploading) return;
     const target = getTarget();
     if (!target) {
-      report({ message: "File drops require a connected, writable agent. Remote drops also require a configured SSH host and an updated Perch server.", error: true });
+      report({ message: "File drops require a connected, writable terminal. Remote drops also require a configured SSH host and an updated Perch server.", error: true });
       return;
     }
     if (target.hostId !== "local" && !event.altKey) {
-      report({ message: "Hold Option (Mac) or Alt while dropping to upload via SCP to this agent's remote host.", error: true });
+      report({ message: "Hold Option (Mac) or Alt while dropping to upload via SCP to this terminal's remote host.", error: true });
       return;
     }
     const files = Array.from(event.dataTransfer?.files ?? []);
@@ -91,7 +91,7 @@ export function attachAgentFileDrop(
       }
       if (!active) return;
       if (!matches(target)) {
-        report({ message: "Agent input changed during upload. No paths were inserted; drop again when the agent is writable.", error: true });
+        report({ message: "Terminal input changed during upload. No paths were inserted; drop again when the terminal is writable.", error: true });
         return;
       }
       // One native paste preserves drop order and bracketed-paste behavior.

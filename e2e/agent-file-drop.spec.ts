@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -25,7 +25,7 @@ async function drop(target: Locator, names: string[], type = "drop", bytes = 0) 
   }, { names, type, bytes });
 }
 
-test("external files reach only agent prompts through native paste, without submitting", async ({ page, context, browser }, testInfo) => {
+test("external files reach agent and shell prompts through native paste, without submitting", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-file-drop-"));
   const port = await new Promise<number>((resolve) => {
@@ -74,7 +74,6 @@ test("external files reach only agent prompts through native paste, without subm
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--providers-path", providers], {
       cwd: root, env: {
         ...process.env, HOME: fixture, PERCH_NO_LOGIN_PATH: "1", PATH: `${bin}:${process.env.PATH}`,
-        PERCH_DB: path.join(fixture, "history.sqlite"), PERCH_HOSTS: path.join(fixture, "hosts.json"),
         ...fixtureRuntimeEnv(fixture),
       }, stdio: ["ignore", log, log],
     });
@@ -200,22 +199,62 @@ test("external files reach only agent prompts through native paste, without subm
       expect(fs.readFileSync(remotePath)[0]).toBe(66);
       expect(fs.readdirSync(path.join(fixture, ".perch/uploads", remoteSession))).toEqual([]);
       expect((await fetch(`${url}/upload?sessionId=${remoteSession}&hostId=missing&scp=1`, { method: "POST", body: "missing host" })).status).toBe(400);
+
+      // Seed a persisted Terminal launch: legacy agentAttach supports only
+      // Claude/Codex. Upload authorization must not reject the shell provider.
+      execFileSync("sqlite3", ["-cmd", ".timeout 5000", path.join(fixture, "history.sqlite"),
+        `UPDATE sessions SET cli_provider_id = 'terminal' WHERE id = '${remoteSession.replace(/'/g, "''")}'`]);
+      fs.unlinkSync(path.join(fixture, "fail-scp"));
+      const shellUploadUrl = `${url}/upload?sessionId=${remoteSession}&hostId=scp-fixture&name=shell.txt`;
+      expect((await fetch(shellUploadUrl, { method: "POST", body: "missing intent" })).status).toBe(400);
+      const shellUploaded = await fetch(`${shellUploadUrl}&scp=1`, { method: "POST", body: "remote shell drop" });
+      expect(shellUploaded.status, await shellUploaded.clone().text()).toBe(200);
+      expect(fs.readFileSync((await shellUploaded.json()).path, "utf8")).toBe("remote shell drop");
     } finally { ws.close(); }
 
     await startChat(page, "terminal");
     await expect(page.getByTestId("chat-tab-agent-badge")).toContainText("terminal");
     await expect(terminal).toHaveAttribute("data-writable", "true");
     const uploadsBeforeShellDrop = uploads;
-    await drop(surface, ["shell.png"], "dragover");
-    expect(await drop(surface, ["shell.png"])).toBe(false);
-    await expect(terminal.getByRole("status")).toHaveCount(0);
+    expect(await drop(surface, ["shell.png"], "dragover")).toBe(true);
+    expect(await drop(surface, ["shell.png"])).toBe(true);
+    await expect.poll(() => uploads).toBe(uploadsBeforeShellDrop + 1);
+    await expect.poll(() => input.filter((message) => message.data.includes("shell.png")).length).toBe(1);
+    const shellPaste = input.find((message) => message.data.includes("shell.png"))!;
+    expect(shellPaste.data).not.toMatch(/[\r\n]/);
     await expect(terminal.getByRole("alert")).toHaveCount(0);
-    expect(uploads).toBe(uploadsBeforeShellDrop);
-    expect(input.some((message) => message.data.includes("shell.png"))).toBe(false);
-    await terminal.locator(".xterm-helper-textarea").pressSequentially("printf SHELL_INPUT_OK");
-    await terminal.locator(".xterm-helper-textarea").press("Enter");
-    await expect(terminal.locator(".xterm-rows")).toContainText("SHELL_INPUT_OK");
-    expect(uploads).toBe(uploadsBeforeShellDrop);
+
+    // An agent started by typing in a Terminal tab must accept the same drops,
+    // without changing the tab's saved launch provider or submitting the prompt.
+    const shellInput = terminal.locator(".xterm-helper-textarea");
+    await shellInput.press("Control+u");
+    const manualAgent = `printf '\\033[2J\\033[H\\033[?2004hMANUAL_READY\\n'; while IFS= read -r line; do printf 'MANUAL_SUBMITTED_%s\\n' "$line"; done`;
+    // exec keeps the stand-in in the fixture's owned process group for cleanup.
+    await shellInput.pressSequentially(`exec /bin/sh -c '${manualAgent.replace(/'/g, "'\\''")}'`);
+    await shellInput.press("Enter");
+    await expect(terminal.locator(".xterm-rows")).toContainText("MANUAL_READY");
+    await expect(terminal.locator(".xterm-rows")).not.toContainText("while IFS=");
+    const inputBeforeManualDrop = input.length;
+    expect(await drop(surface, ["manual-agent.png"])).toBe(true);
+    await expect.poll(() => input.slice(inputBeforeManualDrop).filter((message) => message.data.includes("manual-agent.png")).length).toBe(1);
+    const manualPaste = input.slice(inputBeforeManualDrop).find((message) => message.data.includes("manual-agent.png"))!;
+    expect(manualPaste.data).toMatch(/^\x1b\[200~".*manual-agent.png" \x1b\[201~$/);
+    expect(manualPaste.data).not.toMatch(/[\r\n]/);
+    await expect(terminal.locator(".xterm-rows")).not.toContainText("MANUAL_SUBMITTED_");
+    await expect(page.getByTestId("chat-tab-agent-badge")).toContainText("terminal");
+    // A second shell tab must receive its own drop, not paste into the first.
+    const manualTerminalId = await terminal.getAttribute("data-terminal-id");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+p" : "Control+Shift+p");
+    await page.getByTestId("navigator-input").fill("new terminal");
+    await page.getByTestId("navigator-command-terminal").click();
+    const shell = page.locator(`[data-testid="persistent-agent-terminal"]:not([data-terminal-id="${manualTerminalId}"])`);
+    await expect(shell).toHaveAttribute("data-writable", "true");
+    const inputBeforePaneDrop = input.length;
+    expect(await drop(shell.locator(".terminal__surface"), ["shell-pane.png"])).toBe(true);
+    await expect.poll(() => input.slice(inputBeforePaneDrop).filter((message) => message.data.includes("shell-pane.png")).length).toBe(1);
+    const panePaste = input.slice(inputBeforePaneDrop).find((message) => message.data.includes("shell-pane.png"))!;
+    expect(panePaste.terminalId).toBe(await shell.getAttribute("data-terminal-id"));
+    expect(panePaste.data).not.toMatch(/[\r\n]/);
     expect(errors).toEqual([]);
     // Inspect both settings layouts only after terminal assertions: changing
     // device layout can remount a terminal view and change its control lease.

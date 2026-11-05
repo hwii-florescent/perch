@@ -208,11 +208,11 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
     setView(shown.view);
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
     setFileDrop(null);
-    const stopDrop = agent === "terminal" ? undefined : attachAgentFileDrop(
+    const stopDrop = attachAgentFileDrop(
       surface, sessionId, () => shown.view.inputId,
       (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
     );
-    return () => { stopDrop?.(); stopPaste(); shown.hide(); };
+    return () => { stopDrop(); stopPaste(); shown.hide(); };
   }, [connected, sessionId, agent, restart]);
 
   function startOver() {

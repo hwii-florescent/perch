@@ -80,7 +80,7 @@ Terminal-specific contracts:
 - One resize lease owns the PTY dimensions. Other views follow, never fit.
   Shared CLI input does not acquire resize/stop authority. Only the resize
   owner answers terminal queries; replay must not replay live side effects.
-- CLI agent panes accept user-dropped files/images up to 1 GiB per file on
+- Agent and ordinary shell terminals accept user-dropped files/images up to 1 GiB per file on
   direct connections (64 MiB through the buffered phone relay). Core authorizes
   before reading, streams to disk with a 60-second idle / one-hour total receive
   limit, and removes incomplete local copies. Local paths stay under
@@ -94,10 +94,11 @@ Terminal-specific contracts:
   or fall back locally when the remote is unavailable.
   Settings → Terminal can switch dropped paths from safe single quotes to safe
   double quotes; both escape shell expansion. Dropping never submits a turn.
-  This gesture uses native xterm paste, not Context Bridge delivery. Ordinary
-  shell panes do not accept drops. Agent file/image permissions still apply;
+  This gesture uses native xterm paste, not Context Bridge delivery. Support
+  does not depend on the launch provider: agents started manually in a shell
+  accept the same drops. Agent file/image permissions still apply;
   losing writable input or changing host/terminal during an upload must not
-  insert paths into a different agent.
+  insert paths into a different terminal.
 - Preserve xterm's native input (including kitty keyboard); do not guess or
   re-encode keystrokes. Shortcuts belong in `keybinds.ts::SHORTCUTS`, not
   scattered handlers; plain Ctrl letters must still reach the PTY.

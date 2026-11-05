@@ -7,6 +7,7 @@ import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
+import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { PersistentTerminal } from "./PersistentTerminal";
 
 export function TerminalView({ active, paneId, sessionId: ownerSessionId, layoutPanelId, onPaneChange }: {
@@ -16,16 +17,17 @@ export function TerminalView({ active, paneId, sessionId: ownerSessionId, layout
   const ready = usePerchStore((state) => state.connected && state.serverInfo !== null);
   const persistent = usePerchStore((state) => state.serverInfo?.capabilities?.includes("terminal.open") === true);
   if (!ready || !sessionId) return <div className="terminal__notice" role="status">Connecting to terminal…</div>;
-  return persistent ? <PersistentTerminal key={sessionId} active={active} sessionId={sessionId} paneId={paneId} layoutPanelId={layoutPanelId} onPaneChange={onPaneChange} /> : <LegacyTerminalView active={active} />;
+  return persistent ? <PersistentTerminal key={sessionId} active={active} sessionId={sessionId} paneId={paneId} layoutPanelId={layoutPanelId} onPaneChange={onPaneChange} /> : <LegacyTerminalView key={sessionId} active={active} sessionId={sessionId} />;
 }
 
-function LegacyTerminalView({ active }: { active: boolean }) {
+function LegacyTerminalView({ active, sessionId }: { active: boolean; sessionId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const perchTermRef = useRef<PerchTerminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
+  const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
   const search = useTerminalSearch(termInstance);
 
   const createTerminal = usePerchStore((s) => s.createTerminal);
@@ -55,7 +57,7 @@ function LegacyTerminalView({ active }: { active: boolean }) {
       },
       usePerchStore.getState().terminalProfile,
       undefined,
-      usePerchStore.getState().sessionId ?? undefined,
+      sessionId,
     );
     const term = perchTerm.term;
     xtermRef.current = term;
@@ -86,8 +88,18 @@ function LegacyTerminalView({ active }: { active: boolean }) {
       ? attachClipboardImagePaste(containerRef.current, () => terminalIdRef.current)
       : () => {};
 
+    const detachFileDrop = attachAgentFileDrop(
+      containerRef.current, sessionId,
+      () => {
+        const id = terminalIdRef.current;
+        return disposed || !id || usePerchStore.getState().terminals[id]?.exitCode != null ? null : id;
+      },
+      (text) => { term.paste(text); term.focus(); }, setFileDrop,
+    );
+
     return () => {
       disposed = true;
+      detachFileDrop();
       detachClipboardPaste();
       dataSub.dispose();
       perchTerm.dispose();
@@ -117,6 +129,7 @@ function LegacyTerminalView({ active }: { active: boolean }) {
     <div className="terminal">
       <div className="terminal__surface" ref={containerRef} />
       <TerminalSearchBar controller={search} />
+      {fileDrop && <div className="terminal__notice" role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
       {exitCode !== null && (
         <div className="terminal__exited">process exited (code {exitCode})</div>
       )}

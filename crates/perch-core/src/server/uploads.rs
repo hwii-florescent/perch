@@ -132,22 +132,19 @@ fn remote_host(
             .get_session(session_id)
             .ok()
             .flatten()
-            .is_some_and(|session| {
-                session.host_id == *host_id
-                    && session.cli_provider_id.as_deref() != Some("terminal")
-            })
+            .is_some_and(|session| session.host_id == *host_id)
     } else {
         state.hub.is_connected(host_id)
-            && state.hub.remote_sessions_snapshot().iter().any(|session| {
-                session.id == session_id
-                    && session.host_id == *host_id
-                    && session.cli_provider_id.as_deref() != Some("terminal")
-            })
+            && state
+                .hub
+                .remote_sessions_snapshot()
+                .iter()
+                .any(|session| session.id == session_id && session.host_id == *host_id)
     };
     if !matches {
         return Err((
             StatusCode::CONFLICT,
-            "remote agent session is missing, disconnected, or belongs to another host",
+            "remote session is missing, disconnected, or belongs to another host",
         ));
     }
     Ok(Some(host))

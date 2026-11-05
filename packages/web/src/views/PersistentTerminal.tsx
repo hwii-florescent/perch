@@ -6,6 +6,7 @@ import { createPerchTerminal, type PerchTerminal } from "../xtermSetup";
 import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
+import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { closeWorkspaceTerminal, listWorkspaceTerminals, openWorkspaceTerminal } from "../workspaceTerminals";
 import { getDockviewController } from "../dockview/dockviewController";
 import { newId } from "../ids";
@@ -89,6 +90,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
   const [listError, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState(false);
+  const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
   const shell = useSyncExternalStore(view?.subscribe ?? noSubscription, view?.getState ?? openingState);
   const current = closed ? null : shell.current;
   const error = listError ?? shell.error;
@@ -112,7 +114,12 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     const shown = showTerminal(shellTerminalKey(sessionId, selected), sessionId, surface, () => new ShellView(sessionId, selected, surface));
     setView(shown.view);
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
-    return () => { stopPaste(); shown.hide(); };
+    setFileDrop(null);
+    const stopDrop = attachAgentFileDrop(
+      surface, sessionId, () => shown.view.inputId,
+      (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
+    );
+    return () => { stopDrop(); stopPaste(); shown.hide(); };
   }, [connected, sessionId, selected]);
 
   useEffect(() => {
@@ -156,6 +163,7 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     </div>
     <div className="terminal__surface" ref={container} />
     <TerminalSearchBar controller={search} />
+    {fileDrop && <div className="terminal__notice" role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
     {status && <div className="terminal__notice" role={error ? "alert" : "status"}>{status}</div>}
   </div>;
 }
