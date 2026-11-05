@@ -1,10 +1,9 @@
 /**
- * Shared Hosted/CLI chat-mode handling for the suite.
+ * Shared UI/CLI chat-mode handling for the suite.
  *
  * Chat mode is a single global setting. The suite runs against an isolated
- * settings file (`PERCH_SETTINGS`, default "cli"), so specs that need Hosted
- * chrome (`model-chip`, `.chat__input textarea`) must switch to it explicitly
- * and put it back.
+ * settings file (`PERCH_SETTINGS`, default "cli"), so specs that need the native
+ * UI view must switch to it explicitly and put it back.
  *
  * So: remember what the user had, set what the spec needs through the real UI
  * (which also updates the running server, unlike a file write), and put the
@@ -17,7 +16,7 @@ import * as path from "node:path";
 
 export const SETTINGS_FILE = process.env.PERCH_SETTINGS ?? path.join(os.homedir(), ".perch", "settings.json");
 
-export type ChatMode = "hosted" | "cli";
+export type ChatMode = "ui" | "cli";
 
 /** Captured once per process, before any spec has flipped anything. */
 let original: ChatMode | undefined;
@@ -25,7 +24,7 @@ let original: ChatMode | undefined;
 function readChatMode(): ChatMode | undefined {
   try {
     const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) as Record<string, unknown>;
-    return data.chatMode === "cli" || data.chatMode === "hosted" ? data.chatMode : undefined;
+    return data.chatMode === "cli" || data.chatMode === "ui" ? data.chatMode : undefined;
   } catch {
     return undefined;
   }
@@ -73,10 +72,10 @@ export async function setChatMode(page: Page, mode: ChatMode): Promise<void> {
 }
 
 /**
- * For specs that need the Hosted composer. Call it after the first navigation;
- * it is a no-op when the app is already in Hosted mode, and it restores the
+ * For specs that need the native UI view. Call it after the first navigation;
+ * it is a no-op when the app is already in UI mode, and it restores the
  * user's own preference through `restoreChatMode` in the spec's `afterAll`.
  */
-export async function useHostedMode(page: Page): Promise<void> {
-  await setChatMode(page, "hosted");
+export async function useUiMode(page: Page): Promise<void> {
+  await setChatMode(page, "ui");
 }

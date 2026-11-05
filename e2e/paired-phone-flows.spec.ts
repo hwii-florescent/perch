@@ -216,7 +216,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await clearTrustPrompt(cli);
 
     // 3. CLI → Chat/UI (the global setting, flipped from the host page), for the *same* session.
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 40_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled({ timeout: 20_000 });
     // Stop here, before any real turn, if the cheap-model pin did not take.
@@ -236,7 +236,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await setChatMode(page, "cli");
     await expect(cli).toHaveAttribute("data-terminal-id", terminalId!);
     await expect(cli.locator(".xterm-rows")).toContainText(token, { timeout: 30_000 });
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     await expect(ui).toHaveAttribute("data-native-pid", nativePid!, { timeout: 30_000 });
     await expect(ui.locator('[data-native-role="user"]')).toHaveCount(1);
     const sessionId = await phone.evaluate(() => localStorage.getItem("perch.sessionId"));

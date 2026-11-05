@@ -105,7 +105,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const input = cli.locator(".xterm-helper-textarea");
     await input.pressSequentially("Reply with exactly: PERCH_READY", { delay: 10 });
     await input.press("Enter");
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     const ui = page.getByTestId("native-cli-chat");
     // An assistant-only row and Ready status cannot match the echoed prompt.
     await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText("PERCH_READY", { timeout: 90_000 });
@@ -160,7 +160,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     const awake = statuses.filter((status) => status.key.sessionId === sessionId).at(-1)!;
     expect(awake.state, "a woken agent is not still sleeping").not.toBe("sleeping");
     expect(awake.providerSessionId, "wake resumed the same provider session").toBe(providerSessionId);
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     await expect(ui).toHaveAttribute("data-native-session", providerSessionId, { timeout: 30_000 });
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/);
     expect(await ui.getAttribute("data-native-pid")).not.toBe(originalPid);

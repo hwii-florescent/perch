@@ -130,7 +130,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     for (const terminal of [omp, pi]) {
       await terminal.locator(".xterm-helper-textarea").press("Control+u");
     }
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     const ompUi = page.locator('[data-testid="native-cli-chat"][data-provider="omp"]');
     const piUi = page.locator('[data-testid="native-cli-chat"][data-provider="pi"]');
     for (const ui of [ompUi, piUi]) {

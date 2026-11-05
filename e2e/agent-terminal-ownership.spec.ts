@@ -66,7 +66,7 @@ test("agent runtime survives view changes and control transfers between desktop 
 
     // Chat mode is one global setting: switching to UI and back swaps every
     // view, preserving the same process.
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     await expect(phone.locator(".chat__input textarea")).toBeVisible();
     await expect(mobile).toHaveCount(0);
     await setChatMode(page, "cli");

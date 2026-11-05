@@ -4,7 +4,7 @@
 
 Perch is a lightweight, terminal-led project workspace: real shells and agents
 beside files, changes and previews, with reliable local/remote continuity.
-CLI first; Hosted/UI chat is frozen. Learn from Orca, do not chase parity.
+Terminal by default; a native UI mode is built on provider sessions. Learn from Orca, do not chase parity.
 Keep the UI quiet and useful without an agent or Git.
 
 - [Remaining work](docs/ROADMAP.md): current gaps and priorities.

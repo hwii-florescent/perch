@@ -147,9 +147,13 @@ never resolves, a question. Silence is not completion; uncertainty stays
 labelled. Failures and finished/exited events are distinct. Remote event relay,
 per-user read state and notification deep links remain deferred.
 
-Hosted/UI chat is frozen. When maintaining legacy message code, call
-`flushChunkBuffer()` before reading/replacing messages (see its store comment);
-preserve name-only attachments and plan-mode-off approval sends.
+There is one global view setting, `chatMode`: `ui` or `cli` (default `cli`;
+a legacy `hosted` value reads as `ui`). `AgentPane` routes every session by it:
+Terminal (`AgentCliTerminal`) by default, or the native chat view
+(`NativeCliChat`) when the agent has a native UI. The Hosted chat runners,
+`chat.*`/`session.history`/`session.mode*` messages, model catalogues and
+detached runs were removed on 2026-11-05; the native view reads provider
+sessions, never a Perch-owned transcript.
 
 ## Remote and network boundaries
 

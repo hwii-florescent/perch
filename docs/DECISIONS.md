@@ -14,8 +14,9 @@ open questions, [research](evidence/agent-workspaces-2026-11-05.md) the evidence
 
 - **UI mode becomes fully native**, at Orca/T3 Code's level, beside real terminals.
   This replaces "no new UI/CLI modes" (UI-UX-DIRECTION) and the "chat mode is one
-  global setting" constraint. Legacy Hosted chat code stays frozen; the new mode
-  is built on provider sessions, not on it. Claude runs as the unmodified binary
+  global setting" constraint. The legacy Hosted chat was **removed**
+  (runners, `chat.*`, `session.history`, model/effort plumbing, `hosted` mode);
+  the new mode is built on provider sessions. Claude runs as the unmodified binary
   under the user's own login; Perch never handles credentials. **Terminal stays
   the default** for every agent until the user picks Chat.
 - **Projects** are per-Birdhouse instructions and reference files stored privately
@@ -91,8 +92,8 @@ drifts from the desktop's protocol and the web code stays the one phone UI.
   (one step off their container); focus is a 1px accent outline; hover and
   selected are fills, never a border colour or a left accent bar.
   `input, select, textarea` default to `border: 0` in `base.css`.
-- Hosted chat (`ui/chat.ts`, `ui/composer.ts`, `chat.css`) is frozen and keeps
-  its old chrome.
+- Hosted chat was removed 2026-11-05; `ui/chat.ts`, `ui/composer.ts` and
+  `chat.css` now only serve the native chat view.
 
 ## 2026-11-03 — By status replaces Needs You; the core owns sidebar order (owner)
 
@@ -483,7 +484,7 @@ below. Naming is approved for phased adoption, not a reason to rename schemas.
 - No implicit project registration; `+ Add` is the only way a folder becomes a Birdhouse.
 - No process starts when a picker is cancelled.
 - No unrelated fallback after the last tab closes.
-- Hosted chat stays frozen. Terminals keep the user's terminal profile and native key encoding.
+- Terminals keep the user's terminal profile and native key encoding.
 
 ### Undecided — trial first
 
@@ -507,7 +508,7 @@ an exhaustive description of every component or a fresh acceptance result.
   the selected nest/Scratchpad; cancel starts nothing. Closing the last tab
   stays there. No mandatory Git, agent, model/account wizard or task object.
 - **CLI-first:** no provider/model/effort chrome over a live CLI. Chat mode is
-  one global setting, not per-session/device. Hosted/UI remains frozen.
+  one global setting, not per-session/device. Superseded 2026-11-05: Hosted is removed; Chat is the native view.
   Terminal is currently last in the harness picker; the older Terminal-first
   proposal is not approval to reorder it.
 - **Close:** confirm agent close (with a user-controlled warning preference);

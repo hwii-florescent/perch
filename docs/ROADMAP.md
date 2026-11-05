@@ -313,7 +313,7 @@ npm/pnpm contributor workflow deliberately; do not delete a lockfile here.
 ## Not the goal
 
 No parity chase, agent kanban, floating terminal, third navigation palette,
-new Hosted chat, full IDE/debugger, account switching / provider account manager,
+Hosted chat revival, full IDE/debugger, account switching / provider account manager,
 scheduler or autonomous planner (orchestration is runs the user starts, above),
 issue-tracker clone, computer use/design mode or speculative frontend rewrite.
 Do not remove working features/data just because they are off the critical path.

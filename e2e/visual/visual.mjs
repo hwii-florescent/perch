@@ -35,59 +35,6 @@ const URL_ = `http://127.0.0.1:${PORT}`;
 const WORK = "/tmp/perch-visual";
 const REPO = `${WORK}/repo`;
 const pinGitScroll = (page) => page.getByTestId("workspace-git-review").evaluate((root) => { for (const el of [root, ...root.querySelectorAll("*")]) if (el.scrollTop > 0) el.scrollTop = 0; });
-// A hosted transcript for the frozen chat view: markdown, a thinking row, a bash call, an edit (diff and badge), a plan card, an error.
-const TRANSCRIPT = [
-  { id: "m1", role: "user", text: "Please fix the login bug and add a test.", thinking: "", tools: [], streaming: false },
-  { id: "m2", role: "assistant", agent: "claude", model: "haiku", turnStartedAt: 1767268800000, elapsedSec: 12, streaming: false,
-    text: "Here is what I did:\n\n## Fix\n\n1. Read the **handler**\n2. Patched `auth.ts`\n\n```ts\nconst ok = check(user);\n```\n\n> The test now passes.\n\nSee [the docs](https://example.com) for details.\n\n---\n\nDone.",
-    thinking: "Considering the options carefully before editing.",
-    tools: [
-      { name: "Bash", input: { command: "npm test" }, result: "3 passed", done: true },
-      { name: "Edit", input: { file_path: "src/auth.ts", old_string: "const ok = false;\nreturn ok;", new_string: "const ok = check(user);\nreturn ok;" }, result: "ok", done: true },
-    ] },
-  { id: "m3", role: "assistant", text: "1. Read the handler\n2. Patch the check\n3. Add a test", kind: "plan", thinking: "", tools: [], streaming: false, planApproved: false },
-  { id: "m4", role: "assistant", text: "", thinking: "", tools: [], streaming: false, error: "The agent exited unexpectedly." },
-];
-// Hosted chat on a fresh page: hosted mode and one claude session (known only to the page), with its slash commands.
-// `sessionId` is the store's active-session key; `transcript` fills the session's messages.
-// Answer the composer's upload POST inside the page (a page-level fetch stub: the app's service worker bypasses
-// Playwright's request routing in WebKit, and a real upload would write into the user's ~/.perch/uploads).
-// Fails the state if the upload never reaches the stub.
-const stubUpload = async (page, status, body) => {
-  await page.evaluate(({ status, body }) => {
-    const real = window.fetch.bind(window);
-    window.__uploadHits = 0;
-    window.fetch = (input, init) => {
-      const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
-      if (/\/upload\?/.test(url)) { window.__uploadHits++; return Promise.resolve(new Response(body, { status, headers: { "Content-Type": "application/json" } })); }
-      return real(input, init);
-    };
-  }, { status, body });
-};
-const uploadHits = (page) => page.evaluate(() => window.__uploadHits);
-const hostedPage = async (page, transcript = []) => {
-  await page.getByTestId("onboarding-dismiss").click();
-  await page.waitForFunction(() => !!window.usePerchStore.getState().settings);
-  await sleep(800);
-  const inject = (messages) => page.evaluate((msgs) => {
-    const st = window.usePerchStore.getState();
-    const sid = "hosted-vis";
-    window.usePerchStore.setState({
-      settings: { ...st.settings, chatMode: "hosted" },
-      sessions: [{ id: sid, title: "Hosted chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, lastAgent: "claude", status: "idle", cliStarted: false }],
-      sessionId: sid,
-      cliAgentBySession: { ...st.cliAgentBySession, [sid]: "claude" },
-      sessionCommands: { [sid]: { claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] } },
-      messagesBySession: { ...st.messagesBySession, [sid]: msgs },
-      messages: msgs,
-    });
-  }, messages);
-  await inject(transcript);
-  await page.locator(".chat__input textarea").waitFor();
-  await sleep(1200);
-  await inject(transcript); // the session switch and command fetch land first; put the fixtures back
-  await sleep(500);
-};
 // --- NativeCliChat (UI mode over a CLI session) -----------------------------------------------------------------
 // No agent is started. A page-level WebSocket hook answers every agent.* request for the page-only session
 // "native-vis" itself (terminal open, control lease, ui get/prompt/cancel) and swallows the terminal frames, so
@@ -148,7 +95,7 @@ const nativePage = async (page, { snapshot = nativeSnapshot(), owner = false, de
     const st = window.usePerchStore.getState();
     const sid = "native-vis";
     window.usePerchStore.setState({
-      settings: { ...st.settings, chatMode: "hosted" },
+      settings: { ...st.settings, chatMode: "ui" },
       sessions: [{ id: sid, title: "Native chat", cwd: "/private/tmp/perch-visual/repo", createdAt: 1767268800000, lastAgent: "claude", status: "idle", cliStarted: true }],
       sessionId: sid,
       cliAgentBySession: { ...st.cliAgentBySession, [sid]: "claude" },
@@ -1373,141 +1320,6 @@ const STATES = [
   { name: "22f-pairing-gate-phone", unpaired: true, viewport: { width: 390, height: 700 }, run: async (page) => {
     await page.getByTestId("pairing-gate").waitFor();
     await page.getByTestId("pairing-code").fill("ABCD2345");
-  } },
-  // Hosted composer (frozen UI). A fresh page gets hosted mode, one claude session and its slash commands injected
-  // through the store (no agent runs); the transcript stays empty, so these states cover the composer only.
-  { name: "24-hosted-composer", fresh: true, run: async (page) => {
-    await hostedPage(page);
-  } },
-  { name: "24b-composer-typed-plan", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await page.locator(".chat__input textarea").fill("Please fix the login bug\nand add a test");
-    await page.getByTestId("composer-plan-toggle").click();
-    await sleep(300);
-  } },
-  { name: "24c-composer-model-popover", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await page.getByTestId("model-chip").click();
-    await page.locator(".model-chip__popover").waitFor();
-    await sleep(300);
-  } },
-  { name: "24d-composer-effort-menu", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await page.getByTestId("effort-chip").click();
-    await page.getByTestId("effort-option-high").waitFor();
-    await sleep(300);
-  } },
-  { name: "24e-composer-slash", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    const box = page.locator(".chat__input textarea");
-    await box.fill("/");
-    await sleep(1500); // the server's command fetch lands first; put the fixtures back, then narrow the query
-    await page.evaluate(() => window.usePerchStore.setState({ sessionCommands: { "hosted-vis": { claude: [{ name: "review", description: "Review the pending changes" }, { name: "rename", description: "Rename this session" }, { name: "resume", description: "Resume an earlier conversation" }], codex: [] } } }));
-    await box.fill("/re");
-    await page.getByTestId("composer-slash-popover").waitFor();
-    await page.mouse.move(2, 2); // a pointer resting over an item would move the highlight (onMouseEnter)
-    await sleep(300);
-    await page.keyboard.press("ArrowDown");
-    await sleep(300);
-  } },
-  // The upload endpoint is answered by the page (the fixture session is not a real server session), so success and
-  // failure are both deterministic and neither can stand in for the other.
-  { name: "24g-composer-attachment", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await stubUpload(page, 200, JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }));
-    await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
-    await page.getByTestId("attachment-chip-notes.txt").waitFor({ timeout: 15000 });
-    if ((await uploadHits(page)) !== 1) throw new Error("24g: the upload did not go through the stub");
-    if ((await page.locator(".attachment-bar__error").count()) !== 0) throw new Error("24g: an upload error is showing next to the success chip");
-    await sleep(500);
-  } },
-  { name: "24g2-composer-attachment-error", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await stubUpload(page, 500, "boom");
-    await page.locator(".attachment-bar__input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
-    await page.locator(".attachment-bar__error").waitFor({ timeout: 15000 });
-    if ((await uploadHits(page)) !== 1) throw new Error("24g2: the upload did not go through the stub");
-    const msg = (await page.locator(".attachment-bar__error").textContent()) ?? "";
-    if (!msg.includes("upload failed (500)")) throw new Error(`24g2: unexpected error text ${JSON.stringify(msg)}`);
-    if ((await page.locator(".attachment-chip").count()) !== 0) throw new Error("24g2: a chip is showing next to the upload error");
-    await sleep(300);
-  } },
-  { name: "24h-hosted-transcript", fresh: true, run: async (page) => {
-    await hostedPage(page, TRANSCRIPT);
-    await page.locator(".message--assistant").first().waitFor();
-    await sleep(300);
-  } },
-  { name: "24i-hosted-transcript-expanded", fresh: true, run: async (page) => {
-    await hostedPage(page, TRANSCRIPT);
-    await page.locator("details.message__worked-for").first().evaluate((el) => { el.open = true; });
-    await page.locator("details.tool-row").evaluateAll((els) => els.forEach((el) => { el.open = true; }));
-    await sleep(400);
-  } },
-  { name: "24j-hosted-message-actions", fresh: true, holdHover: ".message--assistant", run: async (page) => {
-    await hostedPage(page, TRANSCRIPT);
-    await sleep(200);
-  } },
-  { name: "24k-hosted-streaming", fresh: true, run: async (page) => {
-    await hostedPage(page, [...TRANSCRIPT, { id: "m-stream", role: "assistant", text: "", thinking: "", tools: [], streaming: true }]);
-    await page.evaluate(() => window.usePerchStore.setState({ streamingMessageId: "m-stream", streamingMessageIdBySession: { "hosted-vis": "m-stream" } }));
-    await page.getByRole("button", { name: "Stop" }).waitFor();
-    await sleep(300);
-  } },
-  // Plan card after "Approve & run": the button is spent ("Approved", disabled).
-  { name: "24l-hosted-plan-approved", fresh: true, run: async (page) => {
-    await hostedPage(page, TRANSCRIPT.map((m) => (m.kind === "plan" ? { ...m, planApproved: true } : m)));
-    const approve = page.getByTestId("plan-approve");
-    await approve.waitFor();
-    if ((await approve.textContent())?.trim() !== "Approved") throw new Error("24l: the plan card does not say Approved");
-    if (!(await approve.isDisabled())) throw new Error("24l: the approved plan button is not disabled");
-    await sleep(300);
-  } },
-  // Keyboard focus (no pointer) reveals a message's hidden actions: Tab from the user's action button lands on the
-  // assistant's, whose `focus-within` makes its (opacity 0) action row visible while the user's row hides again.
-  { name: "24m-hosted-message-actions-focus", fresh: true, run: async (page) => {
-    await hostedPage(page, TRANSCRIPT);
-    await page.mouse.move(1, 1);
-    const opacity = (testId) => page.getByTestId(testId).first().evaluate((el) => getComputedStyle(el.parentElement).opacity);
-    await sleep(300); // let any opacity transition settle before reading the resting state
-    if ((await opacity("msg-copy-assistant")) !== "0") throw new Error("24m: the assistant actions are not hidden at rest");
-    await page.getByTestId("msg-copy-user").first().focus();
-    const activeId = () => page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
-    // WebKit's Tab skips buttons (Safari: Option-Tab); if that also fails, fall back to a programmatic focus,
-    // which still exercises `focus-within`, and say so in the log.
-    let via = "Tab";
-    await page.keyboard.press("Tab");
-    if ((await activeId()) !== "msg-copy-assistant") {
-      await page.getByTestId("msg-copy-user").first().focus();
-      via = "Alt+Tab";
-      await page.keyboard.press("Alt+Tab");
-    }
-    if ((await activeId()) !== "msg-copy-assistant") {
-      via = "programmatic focus()";
-      await page.getByTestId("msg-copy-assistant").first().focus();
-    }
-    console.log(`[24m] focus reached the assistant copy button via ${via}`);
-    const focused = await activeId();
-    if (focused !== "msg-copy-assistant") throw new Error(`24m: focus landed on ${focused}, not the assistant copy button`);
-    await sleep(300);
-    if ((await opacity("msg-copy-assistant")) !== "1") throw new Error("24m: keyboard focus did not reveal the assistant actions");
-    if ((await opacity("msg-copy-user")) !== "0") throw new Error("24m: the user actions stayed visible after focus moved away");
-  } },
-  // `.chat__input--drag-active`: dragging a file over the composer. The state fires dragover only (never drop), so
-  // nothing is uploaded; the upload stub is installed anyway and its hit count asserted to stay at zero.
-  { name: "24n-composer-drag-active", fresh: true, run: async (page) => {
-    await hostedPage(page);
-    await stubUpload(page, 200, JSON.stringify({ path: "/tmp/perch-visual/uploads/notes.txt", name: "notes.txt" }));
-    const form = page.locator("div.chat__input");
-    await form.evaluate((el) => {
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(new File(["hello"], "notes.txt", { type: "text/plain" }));
-      el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer }));
-    });
-    await sleep(300);
-    const outline = await form.evaluate((el) => { const cs = getComputedStyle(el); return `${cs.outlineStyle} ${cs.outlineWidth}`; });
-    if (outline !== "dashed 2px") throw new Error(`24n: the composer outline is ${JSON.stringify(outline)}, not dashed 2px`);
-    if ((await uploadHits(page)) !== 0) throw new Error("24n: the drag started an upload");
-    await page.mouse.move(2, 2);
   } },
   // NativeCliChat: viewing (another view holds the lease), controlling, running, empty/truncated, expanded rows,
   // a refused lease, a send in flight, and the scroll behaviour (stick to the bottom, pill, back to the bottom).

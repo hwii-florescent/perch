@@ -85,7 +85,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(terminal.locator(".xterm-rows")).toContainText("bypass permissions on", { timeout: 30_000 });
       await expect(terminal.locator(".xterm-rows")).toContainText(/Haiku 4.5/i);
     }
-    await setChatMode(page, "hosted");
+    await setChatMode(page, "ui");
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);

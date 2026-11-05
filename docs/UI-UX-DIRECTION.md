@@ -20,7 +20,7 @@ specific interaction proposal below is already approved.
 
 Research baseline: Perch commit `82eb210a438932f54fd3445fb2364fb0e1541b6b`, inspected on 2026-10-03. Orca reference checkout: `564f1352`. External documentation describes the versions available during this research; it is not a version-pinned compatibility guarantee.
 
-This specification covers desktop interactions, with constraints for browser and phone. It does not reopen Hosted chat development. Proposed departures from current behavior require explicit approval in DECISIONS and an update to the affected contract; AGENTS is a brief contributor entry point, not the detailed UX spec.
+This specification covers desktop interactions, with constraints for browser and phone. Hosted chat was removed on 2026-11-05; the native UI mode replaces it. Proposed departures from current behavior require explicit approval in DECISIONS and an update to the affected contract; AGENTS is a brief contributor entry point, not the detailed UX spec.
 
 ### The decision in one paragraph
 
@@ -645,7 +645,7 @@ Select file, folder, text range, image or diff → **Ask agent about this…** �
 
 Show exactly what will be supplied: path, selected lines, bounded excerpt or explicitly attached media. Choose saved disk content versus unsaved draft when they differ. Folders send a path and intent, not an automatic recursive upload. Sensitive files require deliberate inclusion; no background indexing upload.
 
-Prepare a draft/reference for user review. Do not press Enter automatically or paste into a busy CLI. If a provider lacks a safe draft/attachment integration, offer **Copy context** and focus its terminal. Pending questions/permissions must be answered before preparing another input. This is a contextual handoff, not a new Hosted chat composer.
+Prepare a draft/reference for user review. Do not press Enter automatically or paste into a busy CLI. If a provider lacks a safe draft/attachment integration, offer **Copy context** and focus its terminal. Pending questions/permissions must be answered before preparing another input. This is a contextual handoff, not a second composer.
 
 ---
 
@@ -917,7 +917,7 @@ keeps sessions in the sidebar. Review DECISIONS before changing working UI.
 - Always-visible empty status chrome and file metadata controls.
 - Proposed agent kanban dashboard, third jump palette and floating terminal from the earlier roadmap.
 
-Do not delete legacy Hosted/UI views or old protocol fields just to remove their exposure. Freeze and isolate them; preserve access to existing data and layouts during migration.
+Hosted/UI views and protocol fields were deleted on 2026-11-05 (owner decision). A stored `chatMode: "hosted"` reads as `ui`; layouts are preserved.
 
 ---
 
