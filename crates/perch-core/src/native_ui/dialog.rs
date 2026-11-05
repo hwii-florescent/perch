@@ -1,23 +1,69 @@
 //! A permission prompt or question the CLI is showing, read from its screen.
 //!
-//! Neither Claude's hooks nor Codex's app-server let a second client answer the
-//! human, but both TUIs take a bare digit for a numbered choice. So: while the
-//! provider's own events say the turn is blocked, read the PTY screen, and if it
-//! shows a numbered dialog, offer exactly those choices. An answer writes the one
-//! digit, and only after the same dialog is read again under the input lease
-//! (the `id` fingerprint covers the text, so a newer prompt is never answered by
-//! a stale click). Anything this does not recognise returns `None`: the web view
-//! then points at Terminal instead of guessing.
+//! The provider's own events say *that* a turn is blocked on the human (Claude
+//! hooks, Codex app-server, OMP `ask`/approval events, Pi `ui_prompt_start`);
+//! none of them let a second client answer. So while blocked, read the PTY
+//! screen and, if it shows a choice list this module recognises, offer exactly
+//! those choices:
+//!
+//! - numbered lists (`❯ 1. Yes`), which take a bare digit: Claude, Codex, and
+//!   Pi extensions that copy Claude's dialog;
+//! - radio lists (`❯ ○ Red`) inside a box, which take arrow keys and Enter: OMP.
+//!
+//! An answer is written only after the same dialog is read again under the
+//! input lease (the `id` fingerprint covers the text, not the cursor, so a newer
+//! prompt is never answered by a stale click). Anything not recognised returns
+//! `None` and the web view points at Terminal. Extension dialogs vary, so this
+//! stays a list of known shapes, never a guess at arbitrary UI.
 use crate::protocol::{NativeUiRequest, NativeUiRequestOption};
 use sha2::{Digest, Sha256};
 
 const MAX_DETAIL: usize = 2000;
 const MAX_LOOKBACK: usize = 14;
+const ARROW_DOWN: &str = "\u{1b}[B";
+const ARROW_UP: &str = "\u{1b}[A";
 
-/// Labels that need typed text, which a digit cannot supply.
+/// How the dialog takes its answer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Keys {
+    /// Press the option's digit.
+    Digits,
+    /// Move the highlight (currently on this 0-based row), then Enter.
+    Arrows { cursor: usize },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dialog {
+    pub request: NativeUiRequest,
+    keys: Keys,
+}
+
+impl Dialog {
+    /// The terminal writes that choose `key`, in order; the caller paces them.
+    pub fn writes(&self, key: &str) -> Option<Vec<String>> {
+        let row: usize = key.parse::<usize>().ok()?.checked_sub(1)?;
+        self.request.options.iter().find(|o| o.key == key)?;
+        Some(match self.keys {
+            Keys::Digits => vec![key.to_string()],
+            Keys::Arrows { cursor } => {
+                let mut writes = Vec::new();
+                if row != cursor {
+                    let step = if row > cursor { ARROW_DOWN } else { ARROW_UP };
+                    writes.push(step.repeat(row.abs_diff(cursor)));
+                }
+                writes.push("\r".to_string());
+                writes
+            }
+        })
+    }
+}
+
+/// Labels that need typed text, which a key press cannot supply.
 fn typed_choice(label: &str) -> bool {
     let label = label.to_ascii_lowercase();
-    label.starts_with("type something") || label.starts_with("chat about this")
+    label.starts_with("type something")
+        || label.starts_with("chat about this")
+        || label.starts_with("other (type")
 }
 
 fn option_line(line: &str) -> Option<(usize, &str)> {
@@ -32,9 +78,26 @@ fn option_line(line: &str) -> Option<(usize, &str)> {
     Some((number.parse().ok()?, label.trim()))
 }
 
+/// `(highlighted, label)` for a radio row such as `❯ ○ Red`.
+fn radio_line(line: &str) -> Option<(bool, &str)> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.trim_start_matches(['❯', '›', '>', '→']);
+    let highlighted = rest.len() != trimmed.len();
+    let rest = rest.trim_start();
+    let label = rest.strip_prefix(['○', '●', '◉', '◯', '◌'])?;
+    let label = label.trim();
+    (!label.is_empty()).then_some((highlighted, label))
+}
+
 fn footer(line: &str) -> bool {
     let line = line.trim().to_ascii_lowercase();
     line.starts_with("esc to") || line.starts_with("enter to") || line.starts_with("press enter")
+}
+
+/// OMP: `⏎ select · n note · ↑/↓ move · ⎋ cancel`.
+fn radio_footer(line: &str) -> bool {
+    let line = line.to_ascii_lowercase();
+    line.contains("↑/↓") && (line.contains("select") || line.contains("enter"))
 }
 
 /// `───` solid rules end a dialog's frame; `╌╌╌` dashed rules only frame its body.
@@ -46,10 +109,32 @@ fn dashed_rule(line: &str) -> bool {
     !line.trim().is_empty() && line.trim().chars().all(|c| c == '╌' || c == '-')
 }
 
-pub fn parse(screen: &str) -> Option<NativeUiRequest> {
-    let lines: Vec<&str> = screen.lines().collect();
-    // The last numbered block that is followed by a "Esc to…"/"Enter to…" footer.
-    let mut found: Option<(usize, Vec<NativeUiRequestOption>)> = None;
+/// The top or bottom edge of a drawn box; its `├───┤` dividers only separate the box's parts.
+fn frame_edge(line: &str) -> bool {
+    line.trim_start().starts_with(['╭', '╰', '┌', '└'])
+}
+
+fn divider(line: &str) -> bool {
+    line.trim_start().starts_with('├')
+}
+
+/// A boxed dialog's text without its side borders.
+fn unboxed(line: &str) -> &str {
+    let trimmed = line.trim();
+    match trimmed
+        .strip_prefix('│')
+        .and_then(|rest| rest.strip_suffix('│'))
+    {
+        Some(inner) => inner,
+        None => line,
+    }
+}
+
+type Block = (usize, Vec<NativeUiRequestOption>, Keys);
+
+/// The last numbered block followed by an "Esc to…"/"Enter to…" footer.
+fn numbered(lines: &[&str]) -> Option<Block> {
+    let mut found = None;
     let mut index = 0;
     while index < lines.len() {
         let Some((1, _)) = option_line(lines[index]) else {
@@ -84,19 +169,60 @@ pub fn parse(screen: &str) -> Option<NativeUiRequest> {
             end += 1;
         }
         if end < lines.len() && footer(lines[end]) && !options.is_empty() {
-            found = Some((start, options));
+            found = Some((start, options, Keys::Digits));
         }
         index = end.max(index + 1);
     }
-    let (start, options) = found?;
+    found
+}
+
+/// The last run of radio rows with exactly one highlighted, followed by a
+/// "↑/↓ … select" footer.
+fn radio(lines: &[&str]) -> Option<Block> {
+    let mut found = None;
+    let mut index = 0;
+    while index < lines.len() {
+        if radio_line(lines[index]).is_none() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        let mut options = Vec::new();
+        let mut cursors = Vec::new();
+        while let Some((highlighted, label)) = lines.get(index).and_then(|line| radio_line(line)) {
+            if highlighted {
+                cursors.push(options.len());
+            }
+            options.push(NativeUiRequestOption {
+                key: (options.len() + 1).to_string(),
+                label: label.to_string(),
+                detail: None,
+            });
+            index += 1;
+        }
+        let footer_near = lines[index..].iter().take(6).any(|line| radio_footer(line));
+        if let ([cursor], true) = (cursors.as_slice(), footer_near) {
+            found = Some((start, options, Keys::Arrows { cursor: *cursor }));
+        }
+    }
+    found
+}
+
+pub fn parse_dialog(screen: &str) -> Option<Dialog> {
+    let lines: Vec<&str> = screen.lines().map(unboxed).collect();
+    let (start, options, keys) = [numbered(&lines), radio(&lines)]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(start, _, _)| *start)?;
 
     let mut title = None;
     let mut above = Vec::new();
     let mut blanks = 0;
     for line in lines[..start].iter().rev().take(MAX_LOOKBACK) {
         // Codex separates its fields with one blank line and the dialog from the
-        // transcript with several; Claude frames its dialog with a solid rule.
-        if solid_rule(line) || (blanks >= 2 && !above.is_empty()) {
+        // transcript with several; Claude frames its dialog with a solid rule and
+        // OMP with a box.
+        if solid_rule(line) || frame_edge(line) || (blanks >= 2 && !above.is_empty()) {
             break;
         }
         if line.trim().is_empty() {
@@ -104,7 +230,7 @@ pub fn parse(screen: &str) -> Option<NativeUiRequest> {
             continue;
         }
         blanks = 0;
-        if dashed_rule(line) {
+        if dashed_rule(line) || divider(line) {
             continue;
         }
         above.push(line.trim_end());
@@ -164,6 +290,7 @@ pub fn parse(screen: &str) -> Option<NativeUiRequest> {
     if options.is_empty() {
         return None;
     }
+    // Not the highlight: moving it must not turn the prompt into a different one.
     let mut hash = Sha256::new();
     hash.update(title.as_bytes());
     hash.update([0]);
@@ -173,21 +300,32 @@ pub fn parse(screen: &str) -> Option<NativeUiRequest> {
         hash.update(option.label.as_bytes());
     }
     let id = format!("{:x}", hash.finalize())[..16].to_string();
-    Some(NativeUiRequest {
-        id,
-        title,
-        detail,
-        options,
+    Some(Dialog {
+        request: NativeUiRequest {
+            id,
+            title,
+            detail,
+            options,
+        },
+        keys,
     })
 }
 
+pub fn parse(screen: &str) -> Option<NativeUiRequest> {
+    parse_dialog(screen).map(|dialog| dialog.request)
+}
+
 /// The dialog on this agent's terminal right now, if any.
-pub fn read(key: &crate::agent_fleet::AgentKey) -> Option<NativeUiRequest> {
+pub fn read_dialog(key: &crate::agent_fleet::AgentKey) -> Option<Dialog> {
     let client = crate::daemon::client().ok()?;
     let screen = client
         .snapshot(&crate::agent_runtime::terminal_key(key))
         .ok()?;
-    parse(&screen.text)
+    parse_dialog(&screen.text)
+}
+
+pub fn read(key: &crate::agent_fleet::AgentKey) -> Option<NativeUiRequest> {
+    read_dialog(key).map(|dialog| dialog.request)
 }
 
 #[cfg(test)]
@@ -288,6 +426,59 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     fn the_id_changes_with_the_command_being_approved() {
         let other = CODEX_APPROVAL.replace("touch approved.txt\n\n\n›", "rm -rf build\n\n\n›");
         assert_ne!(parse(&other).unwrap().id, parse(CODEX_APPROVAL).unwrap().id);
+    }
+
+    // Captured from OMP's `ask` tool; the earlier "Ask 1 questions" box is the tool call, not the dialog.
+    const OMP_ASK: &str = "
+╭─── Ask 1 questions ──────────────────────────────────────────────────────────────╮
+├─── [colour] · options:3 ─────────────────────────────────────────────────────────┤
+│  Which colour do you like?                                                       │
+│  ○ Red                                                                           │
+│  ○ Blue                                                                          │
+│  ○ Green                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+  ⎋ Choosing a preferred colour
+╭─ Ask ────────────────────────────────────────────────────────────────────────────╮
+│ Which colour do you like?                                                        │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ ❯ ○ Red                                                                          │
+│   ○ Blue                                                                         │
+│   ○ Green                                                                        │
+│   ○ Other (type your own)                                                        │
+│                                                                                  │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ ⏎ select · n note · ↑/↓ move · ⎋ cancel · ⌥H hide                                │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+ ⠏ 29s · ⬢ GPT-Reserve
+";
+
+    #[test]
+    fn reads_an_omp_ask_and_answers_with_arrows() {
+        let dialog = parse_dialog(OMP_ASK).unwrap();
+        assert_eq!(dialog.request.title, "Which colour do you like?");
+        let labels: Vec<_> = dialog
+            .request
+            .options
+            .iter()
+            .map(|o| o.label.as_str())
+            .collect();
+        assert_eq!(labels, ["Red", "Blue", "Green"]);
+        assert_eq!(dialog.writes("1").unwrap(), ["\r"]);
+        assert_eq!(dialog.writes("3").unwrap(), ["\u{1b}[B\u{1b}[B", "\r"]);
+        assert!(dialog.writes("4").is_none());
+        // Moving the highlight keeps the same prompt id.
+        let moved = OMP_ASK
+            .replace("│ ❯ ○ Red", "│   ○ Red")
+            .replace("│   ○ Blue", "│ ❯ ○ Blue");
+        let moved = parse_dialog(&moved).unwrap();
+        assert_eq!(moved.request.id, dialog.request.id);
+        assert_eq!(moved.writes("1").unwrap(), ["\u{1b}[A", "\r"]);
+    }
+
+    #[test]
+    fn numbered_dialogs_are_answered_with_their_digit() {
+        let dialog = parse_dialog(CLAUDE_PERMISSION).unwrap();
+        assert_eq!(dialog.writes("2").unwrap(), ["2"]);
     }
 
     #[test]

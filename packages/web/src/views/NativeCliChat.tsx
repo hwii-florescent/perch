@@ -210,7 +210,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     field.current?.focus();
   }
   const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
-  const waiting = !!snapshot?.blocked || status?.state === "blocked";
+  // The snapshot is what this view renders; the lifecycle's blocked state (from title evidence) can lag it.
+  const waiting = snapshot?.blocked === true;
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
     <div className="terminal__toolbar flex-wrap">

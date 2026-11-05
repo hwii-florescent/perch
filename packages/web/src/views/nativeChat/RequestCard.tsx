@@ -34,7 +34,7 @@ export function RequestCard({ request, canAnswer, answering, onAnswer, keepFocus
 
 /** The CLI is waiting on you but showed nothing this view can answer (another provider, a text answer, a layout it does not know). */
 export function WaitingNotice() {
-  return <div className="rounded-ui border border-overlay-0 bg-panel-bg p-3 text-[0.85rem] text-subtext-0" role="status" data-testid="native-cli-waiting">The CLI is waiting for you. Switch to Terminal to answer.</div>;
+  return <div className="rounded-ui border border-overlay-0 bg-panel-bg p-3 text-[0.85rem] text-subtext-0" aria-live="polite" data-testid="native-cli-waiting">The CLI is waiting for you. Switch to Terminal to answer.</div>;
 }
 
 export function Receipts({ items }: { items: Receipt[] }) {

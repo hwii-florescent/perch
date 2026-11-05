@@ -27,6 +27,9 @@ export default function (pi: any) {
   // dialog event, so an extension's own ctx.ui prompt is not seen here.
   const asking = new Set<string>();
   let approvals = 0;
+  // Pi 1.5 announces any blocking extension dialog (select/confirm/input/custom), including ones the
+  // user installed; OMP has no such event and its ask tool is covered above.
+  let uiPrompts = 0;
   function isAsk(name: unknown): boolean {
     if (PROVIDER === "omp") return name === "ask";
     const normalized = String(name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -108,7 +111,7 @@ export default function (pi: any) {
       providerSessionId: ctx.sessionManager.getSessionFile() ?? ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd, model: ctx.model?.id ?? null,
       running,
-      blocked: running && (asking.size > 0 || approvals > 0),
+      blocked: running && (asking.size > 0 || approvals > 0 || uiPrompts > 0),
       messages: recent, truncated: historyTruncated || messages.length > recent.length,
     };
   }
@@ -178,6 +181,7 @@ export default function (pi: any) {
     receipts.clear();
     asking.clear();
     approvals = 0;
+    uiPrompts = 0;
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === RECEIPT_TYPE && typeof entry.data?.id === "string") {
         receipts.set(entry.data.id, entry.data.state);
@@ -213,7 +217,7 @@ export default function (pi: any) {
     pi.on(name, (_event: any, context: any) => {
       ctx = context;
       if (name !== "agent_start") historyDirty = true;
-      if (name === "agent_end") { asking.clear(); approvals = 0; }
+      if (name === "agent_end") { asking.clear(); approvals = 0; uiPrompts = 0; }
       schedule();
     });
   }
@@ -229,6 +233,10 @@ export default function (pi: any) {
     // OMP only emits its approval lifecycle when an extension listens for it.
     pi.on("tool_approval_requested", (_event: any, context: any) => { ctx = context ?? ctx; approvals++; schedule(0); });
     pi.on("tool_approval_resolved", (_event: any, context: any) => { ctx = context ?? ctx; approvals = Math.max(0, approvals - 1); schedule(0); });
+  }
+  if (PROVIDER === "pi") {
+    pi.on("ui_prompt_start", (_event: any, context: any) => { ctx = context ?? ctx; uiPrompts++; schedule(0); });
+    pi.on("ui_prompt_end", (_event: any, context: any) => { ctx = context ?? ctx; uiPrompts = Math.max(0, uiPrompts - 1); schedule(0); });
   }
   if (PROVIDER === "pi") pi.on("agent_settled", (_event: any, context: any) => { ctx = context; schedule(0); });
   for (const name of ["message_start", "message_update", "message_end"]) {

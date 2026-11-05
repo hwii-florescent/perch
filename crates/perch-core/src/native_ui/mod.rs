@@ -303,16 +303,32 @@ impl NativeUiRegistry {
                 let (reader, mut writer) = stream.into_split();
                 let mut reader = BufReader::new(reader);
                 let mut line = Vec::new();
+                // The extension knows a human is needed; the screen supplies the choices, and the
+                // dialog may draw after the event, so keep reading while blocked.
+                let mut last: Option<NativeUiSnapshot> = None;
+                let mut dialog_tick = tokio::time::interval(Duration::from_millis(100));
                 loop {
                     pending.retain(|_, reply| !reply.is_closed());
                     tokio::select! {
+                        _ = dialog_tick.tick(), if last.as_ref().is_some_and(|s| s.blocked) => {
+                            if let Some(shown) = last.as_mut() {
+                                let request = dialog::read(&key);
+                                if request != shown.request {
+                                    shown.request = request;
+                                    on_snapshot(shown.clone());
+                                    let _ = snapshot_tx.send(Some(shown.clone()));
+                                }
+                            }
+                        }
                         frame = read_frame(&mut reader, &mut line) => {
                             let event = match frame.and_then(|_| serde_json::from_slice::<NativeEvent>(&line).map_err(Into::into)) {
                                 Ok(event) => event, Err(_) => break,
                             };
                             match event {
-                                NativeEvent::Snapshot { snapshot } => {
+                                NativeEvent::Snapshot { mut snapshot } => {
                                     if snapshot.version != 1 || (snapshot.provider_session_id.is_empty() && key.agent_id != "opencode") || snapshot.messages.len() > 129 { break; }
+                                    if snapshot.blocked { snapshot.request = dialog::read(&key); }
+                                    last = Some(snapshot.clone());
                                     on_snapshot(snapshot.clone());
                                     let _ = snapshot_tx.send(Some(snapshot));
                                 }

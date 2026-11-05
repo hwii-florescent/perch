@@ -323,17 +323,23 @@ pub(super) fn answer(
             .app
             .agent_runtime
             .dispatch_native_control(&key, &lease, |write| {
-                let shown = crate::native_ui::dialog::read(&key)
+                let shown = crate::native_ui::dialog::read_dialog(&key)
                     .ok_or_else(|| anyhow::anyhow!("The prompt is no longer on screen"))?;
                 anyhow::ensure!(
-                    shown.id == prompt_id,
+                    shown.request.id == prompt_id,
                     "The CLI is showing a different prompt now. Review it and answer again."
                 );
-                anyhow::ensure!(
-                    shown.options.iter().any(|option| option.key == choice),
-                    "That choice is not available"
-                );
-                write(&choice)
+                let writes = shown
+                    .writes(&choice)
+                    .ok_or_else(|| anyhow::anyhow!("That choice is not available"))?;
+                // A highlight move must render before Enter commits it.
+                for (index, data) in writes.iter().enumerate() {
+                    if index > 0 {
+                        std::thread::sleep(Duration::from_millis(150));
+                    }
+                    write(data)?;
+                }
+                Ok(())
             })
     })();
     match written {

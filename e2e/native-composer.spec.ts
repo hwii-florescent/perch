@@ -73,10 +73,11 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
   // Each check reports its own failure so one broken path does not hide the others.
   const failures: string[] = [];
   const check = async (name: string, run: () => Promise<void>) => {
-    try { await run(); } catch (error) { failures.push(`${name}: ${String(error).split("\n").slice(0, 4).join(" ")}`); }
+    try { await run(); } catch (error) { failures.push(`${name}: ${String(error).replace(/\u001b\[\d+m/g, "").split("\n").slice(0, 14).join(" ")}`); }
   };
   const errors: string[] = [];
   const prompts: string[] = [];
+  const snapshots: string[] = [];
   const consoleLines: string[] = [];
   page.on("console", (message) => { if (["error", "warning"].includes(message.type())) consoleLines.push(message.text().slice(0, 300)); });
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
@@ -84,6 +85,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     socket.on("framereceived", ({ payload }) => {
       const message = JSON.parse(String(payload));
       if (message.type === "agent.terminal.opened") sessionId = message.status.key.sessionId;
+      if (message.type === "agent.ui.snapshot") snapshots.push(`${new Date().toISOString().slice(11, 23)} running=${message.snapshot.running} blocked=${message.snapshot.blocked} request=${message.snapshot.request?.title ?? "-"} messages=${message.snapshot.messages.length}`);
     });
     socket.on("framesent", ({ payload }) => { const message = JSON.parse(String(payload)); if (message.type === "agent.ui.prompt") prompts.push(message.text); });
   });
@@ -183,29 +185,33 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         await box.fill("");
       }
     });
-    // 4. Questions and approvals: Claude's AskUserQuestion (answered with a number key) and a Codex
-    // command approval (answered with the button). Pi and OMP have no prompt of their own to answer.
-    if (provider === "claude" || provider === "codex") await check("request card", async () => {
+    // 4. Questions and approvals, answered from the card: Claude's AskUserQuestion (number key), a Codex
+    // command approval (button), OMP's `ask` tool (arrow keys under the hood) and Pi's `ask_user_question`
+    // extension tool, which exists only if the user installed it.
+    const piHasAsk = provider === "pi" && /ask-user-question/.test(fs.readFileSync(path.join(os.homedir(), ".pi/agent/settings.json"), "utf8"));
+    if (provider === "pi" && !piHasAsk) testInfo.annotations.push({ type: "skipped", description: "Pi: no ask-user-question extension installed" });
+    if (provider !== "pi" || piHasAsk) await check("request card", async () => {
       const card = ui.getByTestId("native-cli-request");
-      await box.fill(provider === "claude"
-        ? "Use the AskUserQuestion tool to ask me which colour I like, with options Red, Blue and Green. Then reply with only my choice."
-        : "Run the shell command: touch approved.txt . Then say done.");
+      const tool = { claude: "AskUserQuestion", omp: "ask", pi: "ask user question" }[provider];
+      await box.fill(provider === "codex"
+        ? "Run the shell command: touch approved.txt . Then say done."
+        : `Use the ${tool} tool to ask me which colour I like, with options Red, Blue and Green. Then reply with only my choice.`);
       await ui.getByRole("button", { name: "Send", exact: true }).click();
       await expect(card).toBeVisible({ timeout: 90_000 });
       await expect(ui.getByRole("status")).toHaveText("Waiting for you");
-      if (provider === "claude") {
-        await expect(card.getByTestId("native-cli-request-option-2")).toContainText("Blue");
-        await expect(card).toBeFocused();
-        await page.keyboard.press("2");
-      } else {
+      if (provider === "codex") {
         await expect(card.getByTestId("native-cli-request-detail")).toContainText("touch approved.txt");
         await card.getByTestId("native-cli-request-option-1").click();
+      } else {
+        await expect(card.getByTestId("native-cli-request-option-2")).toContainText("Blue");
+        if (provider === "omp") { await card.getByTestId("native-cli-request-option-2").click(); }
+        else { await expect(card).toBeFocused(); await page.keyboard.press("2"); }
       }
       await expect(card).toHaveCount(0, { timeout: 30_000 });
       await expect(ui.getByTestId("native-cli-receipts")).toContainText("Answered");
       await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
-      if (provider === "claude") expect((await ui.locator('[data-native-role="assistant"]').last().innerText()).toLowerCase()).toContain("blue");
-      else expect(fs.existsSync(path.join(fixture, "approved.txt"))).toBe(true);
+      if (provider === "codex") expect(fs.existsSync(path.join(fixture, "approved.txt"))).toBe(true);
+      else expect((await ui.locator('[data-native-role="assistant"]').last().innerText()).toLowerCase()).toContain("blue");
     });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);
@@ -215,6 +221,8 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     await page.screenshot({ path: path.join(root, `.impeccable/review/native-composer-${provider}-failure.png`) }).catch(() => {});
     await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
     await testInfo.attach("terminal", { body: await cli.locator(".xterm-rows").innerText().catch(() => "unavailable (CLI view is not mounted)"), contentType: "text/plain" });
+    await testInfo.attach("snapshots", { body: snapshots.slice(-40).join("\n"), contentType: "text/plain" });
+    fs.writeFileSync(`/tmp/nc-${provider}-snapshots.txt`, snapshots.join("\n") + "\n" + failures.join("\n---\n"));
     await testInfo.attach("prompts", { body: JSON.stringify(prompts, null, 2), contentType: "application/json" });
     throw error;
   } finally {
