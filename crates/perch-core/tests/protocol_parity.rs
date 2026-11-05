@@ -121,6 +121,8 @@ const VALUE_TYPES: &[&str] = &[
     "ProjectSummary",
     "WorkspaceSummary",
     "GitPreviewReceipt",
+    "UsageWindow",
+    "AccountUsage",
 ];
 
 /// A single field's wire name plus the two independent facts this test
@@ -150,7 +152,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn rust_source() -> String {
-    ["protocol.rs", "workspace_terminals.rs"]
+    ["protocol.rs", "workspace_terminals.rs", "usage/mod.rs"]
         .iter()
         .map(|file| {
             let path = repo_root().join("crates/perch-core/src").join(file);

@@ -19,6 +19,10 @@ function usageTone(pct: number): string {
   return pct >= 90 ? "text-red" : pct >= 70 ? "text-yellow" : "";
 }
 
+function providerName(provider: string): string {
+  return provider === "claude" ? "Claude" : provider === "codex" ? "Codex" : provider;
+}
+
 function resetTitle(w: UsageWindow): string {
   if (w.resetsAt === undefined) return "Reset time unavailable";
   const at = new Date(typeof w.resetsAt === "number" ? w.resetsAt * 1000 : w.resetsAt);
@@ -89,12 +93,12 @@ export function UsageSummary({
           <span>Usage unavailable</span>
         ) : usage.map((account, i) => {
           const several = accountCount(account.provider) > 1;
-          const provider = account.provider === "claude" ? "Claude" : account.provider === "codex" ? "Codex" : account.provider;
+          const provider = providerName(account.provider);
           const name = several && account.label ? `${provider} ${account.label}` : provider;
           return (
             <span key={`${account.provider}:${account.label ?? i}`} className="flex items-center gap-1.5 text-[9px]">
               <span>{name}</span>
-              {account.windows.map((w, index) => (
+              {account.windows.filter((w) => !w.scope).map((w, index) => (
                 <span key={w.label} className={cn("tabular-nums", index === 0 && "text-fg", usageTone(w.usedPercent))}>
                   {w.label} {Math.round(w.usedPercent)}%
                 </span>
@@ -148,20 +152,27 @@ export function UsageSummary({
             <div className="grid gap-3">
               {usage.map((account, i) => {
                 const several = accountCount(account.provider) > 1;
-                const name = several && account.label ? `${account.provider} ${account.label}` : account.provider;
+                const provider = providerName(account.provider);
+                const base = several && account.label ? `${provider} ${account.label}` : provider;
+                const name = account.plan ? `${base} ${account.plan}` : base;
                 return (
                   <section key={`${account.provider}:${account.label ?? i}`} className="grid gap-1.5">
                     <h3 className="m-0 text-[0.78rem] font-medium">{name}</h3>
                     {account.error && <p className="m-0 text-[0.78rem] text-red" role="status">{account.error}</p>}
                     {account.windows.map((w) => (
-                      <div key={w.label} className="flex items-baseline justify-between gap-3 text-[0.78rem]">
-                        <span className="text-subtext-0">{w.label} window</span>
+                      <div key={`${w.label}:${w.scope ?? ""}`} className="flex items-baseline justify-between gap-3 text-[0.78rem]">
+                        <span className="text-subtext-0">{w.label} {w.scope ? `${w.scope} ` : ""}window</span>
                         <span className="text-right tabular-nums">
                           <span className={usageTone(w.usedPercent)}>{Math.round(w.usedPercent)}% used</span>
                           <span className="ml-2 text-subtext-0">Resets {resetTitle(w)}</span>
                         </span>
                       </div>
                     ))}
+                    {account.resetCredits !== undefined && (
+                      <p className="m-0 text-[0.72rem] text-subtext-0" data-testid="usage-reset-credits">
+                        {account.resetCredits} rate-limit {account.resetCredits === 1 ? "reset" : "resets"} banked
+                      </p>
+                    )}
                   </section>
                 );
               })}

@@ -1309,6 +1309,9 @@ export interface UsageWindow {
   usedPercent: number;
   windowMinutes: number;
   resetsAt?: string | number;
+  /** What a narrower limit applies to (a model name); absent for the
+   * account-wide window. */
+  scope?: string;
 }
 
 /** One provider login. `label` tells accounts apart (email, dir suffix, or
@@ -1316,11 +1319,15 @@ export interface UsageWindow {
 export interface AccountUsage {
   provider: string;
   label?: string;
+  /** Subscription tier, e.g. "Max 5×" or "Plus". */
+  plan?: string;
   windows: UsageWindow[];
+  /** Banked Codex rate-limit resets still redeemable. */
+  resetCredits?: number;
   error?: string;
 }
 
-/** Reply to `usage.get`; failed Claude usage fetches carry an account error. */
+/** Reply to `usage.get`; a provider whose fetch failed carries an account error. */
 export interface UsageResultMessage {
   type: "usage.result";
   accounts: AccountUsage[];

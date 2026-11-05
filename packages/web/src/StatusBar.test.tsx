@@ -79,6 +79,27 @@ it("shows a failed Claude account when refreshing could not restore usage", () =
   expect(get("usage-refresh")).not.toBeNull();
 });
 
+it("shows the plan and scoped windows only in the popover, plus banked Codex resets", () => {
+  usePerchStore.setState({ usage: [
+    { provider: "claude", plan: "Max 5×", windows: [
+      { label: "5h", usedPercent: 6, windowMinutes: 300 },
+      { label: "7d", usedPercent: 24, windowMinutes: 10080 },
+      { label: "7d", usedPercent: 9, windowMinutes: 10080, scope: "Fable" },
+    ] },
+    { provider: "codex", windows: [{ label: "5h", usedPercent: 20, windowMinutes: 300 }], resetCredits: 3 },
+  ] });
+  render(<StatusBar />);
+  const trigger = get("usage-summary");
+  expect(trigger.textContent).toContain("7d 24%");
+  expect(trigger.textContent).not.toContain("Fable");
+  expect(trigger.textContent).not.toContain("9%");
+  click(trigger);
+  const details = get("usage-details");
+  expect(details.textContent).toContain("Claude Max 5×");
+  expect(details.textContent).toContain("7d Fable window");
+  expect(details.textContent).toContain("9% used");
+  expect(get("usage-reset-credits").textContent).toBe("3 rate-limit resets banked");
+});
 
 it("keeps vertically centered usage at the right end, just before the connection mark", () => {
   render(<StatusBar />);
