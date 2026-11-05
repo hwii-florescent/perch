@@ -38,7 +38,14 @@ runtime entitlement are bundled; those declarations do not grant consent.
 ## Verify the process chain, not just the window
 
 The runtime launches perchd as the app binary re-run through a per-user
-launchd job. Permission inheritance is **not assumed**.
+launchd job. The job runs a private, signature-verified copy of the app bundle
+at `<perchd dir>/host/terminal-host-<cdhash>/`, so replacing
+`/Applications/perch.app` never deletes the running daemon's binary (macOS
+stops attributing a process on a deleted path to the app's grants). An update
+with the same code hash reuses the copy; a different one gets a new copy, and
+an old copy is deleted only when `lsof` shows nothing using it. A daemon
+started before this existed still runs from the installed bundle until it is
+restarted. Permission inheritance is **not assumed**.
 
 Verify terminals creates a uniquely named, short shell PTY through the same
 daemon client as real terminals. That shell execs the app's

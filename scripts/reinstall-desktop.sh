@@ -5,7 +5,10 @@
 #
 # Terminals live in perchd (the same binary run as `__perchd serve`), which
 # keeps running across the swap, so agents and shells survive, including the
-# one running this script.
+# one running this script. On macOS the daemon runs from its own signed copy of
+# the app (~/.perch/daemon/host/terminal-host-<cdhash>), not from /Applications,
+# so the swap neither deletes its binary nor drops its privacy grants. A daemon
+# started before that copy existed still runs from the old bundle: restart it once.
 set -eu
 cd "$(dirname "$0")/.."
 

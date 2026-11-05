@@ -107,11 +107,134 @@ fn connect() -> anyhow::Result<Client> {
     .display()
     .to_string();
     Ok(Client::connect_or_spawn(&dir, || {
+        #[cfg(target_os = "macos")]
+        let exe = stable_exe(&exe, &dir);
         let command = perchd::spawn_command(&[exe, "__perchd".into()], &dir);
         #[cfg(target_os = "macos")]
         let command = launchd_job(&command, &dir);
         command
     })?)
+}
+
+/// The daemon outlives app updates, and an update replaces the installed
+/// bundle, so a daemon running from it ends up on a deleted path and macOS
+/// stops attributing its terminals to the app's grants (Full Disk Access...).
+/// Run it from a private copy of the bundle instead, named by the code
+/// directory hash: an update that keeps the hash reuses the copy; one that
+/// changes it gets a new copy beside it, and an older copy is deleted only
+/// once no process uses it. Same approach as Orca's terminal host. Any failure
+/// falls back to the installed exe, with the old update caveat.
+#[cfg(all(target_os = "macos", not(test)))]
+fn stable_exe(exe: &str, dir: &std::path::Path) -> String {
+    let root = dir.join("host");
+    let copy = (|| {
+        let exe = std::path::Path::new(exe);
+        let bundle = bundle_of(exe)?;
+        let hash = cdhash(bundle)?;
+        let copy = publish_copy(bundle, &root, &hash)
+            .map_err(|e| eprintln!("perchd host copy failed: {e}"))
+            .ok()?;
+        retire_unused_copies(&root, &copy);
+        Some(copy.join("Contents/MacOS").join(exe.file_name()?))
+    })();
+    copy.map_or_else(|| exe.to_string(), |p| p.display().to_string())
+}
+
+/// `<name>.app` of `<name>.app/Contents/MacOS/<exe>`.
+#[cfg(target_os = "macos")]
+fn bundle_of(exe: &std::path::Path) -> Option<&std::path::Path> {
+    let macos = exe.parent()?;
+    let bundle = macos.parent()?.parent()?;
+    (macos.ends_with("Contents/MacOS") && bundle.extension()? == "app").then_some(bundle)
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn cdhash(bundle: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("/usr/bin/codesign")
+        .arg("-dvvv")
+        .arg(bundle)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    let hash = text.lines().find_map(|l| l.strip_prefix("CDHash="))?;
+    (hash.len() >= 40 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then(|| hash.to_string())
+}
+
+/// `<root>/terminal-host-<hash>/app.noindex/<name>.app` (`.noindex` keeps
+/// Spotlight out), cloned and verified in a staging dir before it appears.
+#[cfg(target_os = "macos")]
+fn publish_copy(
+    bundle: &std::path::Path,
+    root: &std::path::Path,
+    hash: &str,
+) -> std::io::Result<PathBuf> {
+    let name = bundle.file_name().unwrap_or_default();
+    let published = root.join(format!("terminal-host-{hash}"));
+    let copy = published.join("app.noindex").join(name);
+    if copy.exists() {
+        return Ok(copy);
+    }
+    let staging = root.join(format!("{hash}.staging-{}", std::process::id()));
+    let staged = staging.join("app.noindex").join(name);
+    let _ = std::fs::remove_dir_all(&staging);
+    let built = (|| {
+        std::fs::create_dir_all(staged.parent().unwrap())?;
+        let ok =
+            |status: std::io::Result<std::process::ExitStatus>| status.is_ok_and(|s| s.success());
+        let cloned = std::process::Command::new("/usr/bin/ditto")
+            .arg(bundle)
+            .arg(&staged)
+            .status();
+        let verified = std::process::Command::new("/usr/bin/codesign")
+            .args(["--verify", "--strict"])
+            .arg(&staged)
+            .status();
+        if !ok(cloned) || !ok(verified) {
+            return Err(std::io::Error::other(
+                "could not copy and verify the bundle",
+            ));
+        }
+        // A concurrent core may have published the same copy first.
+        std::fs::rename(&staging, &published).or_else(|e| copy.exists().then_some(()).ok_or(e))
+    })();
+    let _ = std::fs::remove_dir_all(&staging);
+    built.map(|()| copy)
+}
+
+/// Delete other copies only after a complete `lsof` scan finds no user (it
+/// exits 1 with no output); anything uncertain keeps the copy.
+#[cfg(all(target_os = "macos", not(test)))]
+fn retire_unused_copies(root: &std::path::Path, keep: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_copy = entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("terminal-host-");
+        if !is_copy || keep.starts_with(&path) {
+            continue;
+        }
+        let Ok(scan) = std::process::Command::new("/usr/sbin/lsof")
+            .args(["-F", "p", "+D"])
+            .arg(&path)
+            .output()
+        else {
+            continue;
+        };
+        if scan.status.code() == Some(1) && scan.stdout.is_empty() && scan.stderr.is_empty() {
+            // Running a copy may have registered it with LaunchServices.
+            let _ = std::process::Command::new(
+                "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+            )
+            .arg("-u")
+            .arg(path.join("app.noindex").join(keep.file_name().unwrap_or_default()))
+            .status();
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 /// macOS keeps an app "running in the background" while anything it spawned
@@ -288,6 +411,34 @@ mod tests {
         // Both list and kill now fail on a genuinely closed transport.
         assert!(super::session_state_with(&client, "still-running").is_err());
         assert!(!super::terminate_with(&client, "still-running"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn host_copy_is_published_once_and_keeps_the_signature() {
+        use std::path::Path;
+        let root = std::env::temp_dir().join(format!("perch-host-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("t.app");
+        let macos = app.join("Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>t</string><key>CFBundleIdentifier</key><string>dev.test.t</string></dict></plist>"#).unwrap();
+        std::fs::copy("/usr/bin/true", macos.join("t")).unwrap();
+        let signed = std::process::Command::new("/usr/bin/codesign")
+            .args(["-s", "-", "--force"])
+            .arg(&app)
+            .status()
+            .unwrap();
+        assert!(signed.success());
+        assert_eq!(super::bundle_of(&macos.join("t")), Some(app.as_path()));
+        assert_eq!(super::bundle_of(Path::new("/usr/bin/true")), None);
+        let host = root.join("host");
+        let first = super::publish_copy(&app, &host, "abc123").unwrap();
+        assert!(first.join("Contents/MacOS/t").exists());
+        // The installed bundle can now vanish without touching the copy.
+        std::fs::remove_dir_all(&app).unwrap();
+        assert_eq!(super::publish_copy(&app, &host, "abc123").unwrap(), first);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// launchd silently refuses a malformed job, which would leave perch
