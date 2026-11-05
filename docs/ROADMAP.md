@@ -154,10 +154,115 @@ text and snooze are deferred, not forgotten requirements of the first local slic
 Start: `crates/perch-core/src/server/attention.rs`, `db/attention.rs`,
 `packages/web/src/attention.ts`, `e2e/needs-you.spec.ts`.
 
+## Next: native UI mode, then Projects and sub-sessions
+
+Owner direction 2026-11-05 ([decision](DECISIONS.md),
+[research](evidence/agent-workspaces-2026-11-05.md)). Order: polish UI mode first;
+each later step builds on it. Terminal stays the default for every agent; Chat
+is opt-in per agent until the user changes it.
+
+### 0. Native UI mode at Orca's level (first)
+
+Today `NativeCliChat.tsx` (124 lines) renders hook/transcript snapshots and types
+into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
+
+- **Transport per provider.** Codex: the existing private app-server
+  (`native_ui/codex.rs`). Claude: a structured stream-json session of the
+  unmodified `claude` binary under the user's own login, as Orca does; Perch never
+  sees or stores credentials. Others and remote hosts: today's terminal-backed
+  view. Choose Chat or Terminal per agent; move a conversation between them by
+  resuming it, one writer at a time (never two processes on one conversation).
+- **Composer.** Enter queues as reorderable cards while a turn runs; Steer sends
+  into the turn where supported; Stop; Rewind to a message (idle only); `/compact`;
+  one slash/skill picker; `@file`; image paste; prompt recall. Model/effort are
+  chosen before the session starts, not changed mid-session.
+- **Send states.** Sending / Not sent (Retry) / unconfirmed after a restart,
+  settled from the transcript; never resend a steer or an unproven message.
+- **Approvals and questions in the UI.** Claude permission prompt tool and
+  `AskUserQuestion`; Codex `requestApproval`. Number keys answer choices; answered
+  cards stay as receipts. Phone policy decided before phones can approve.
+- **Transcript.** Collapsed tool/thinking runs, inline diff cards, per-turn
+  changed files (reuse `agent_change_snapshots`), context-use ring, message rail,
+  find, a background-task strip, and subagent child rows (step 2).
+- Restore open chats after a restart; offer to resume interrupted ones.
+
+### 1. Projects: Birdhouse instructions and files
+
+Claude-classic-Projects style, stored **privately by Perch** per Birdhouse (and
+Quickchat), not in the repo: shared instructions plus reference files/folders that
+every new agent session there receives at launch. **Must work for Pi, OMP,
+Claude and Codex** in the first cut; label other providers unsupported. Launch
+flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
+
+| Agent | Instructions (appended, never replacing the default prompt) | Reference folders |
+|---|---|---|
+| Claude | `--append-system-prompt-file <file>` | `--add-dir` |
+| Pi | `--append-system-prompt <file>` (text or file contents) | none: list paths in the instructions |
+| OMP | `--append-system-prompt=<file>` | `--add-dir=` |
+| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt); pass it to the shared app-server too | `--add-dir` |
+
+Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
+`AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
+`CLAUDE.md`/`AGENTS.md` and Claude memory beside it, read-only. No hosted
+knowledge search. Remote Birdhouses keep theirs on the owning core.
+
+### 2. Observe native subagents and teams
+
+Child rows under a session, with status, description, model and a read-only
+transcript: Claude `SubagentStart`/`SubagentStop` hooks plus
+`<session>/subagents/agent-*.jsonl` and `.meta.json` (undocumented; best effort);
+Codex `parentThreadId`; Claude agent teams via `TeammateIdle`/`Task*` hooks and
+`~/.claude/{teams,tasks}` when the user enabled them. Worktree subagents link to
+their diff. Stop a child only where the provider offers it (Codex app-server,
+Claude structured session).
+
+### 3. Perch sub-sessions and orchestration
+
+What Claude agent teams do, across providers: full sessions, not in-process
+subagents, that a lead and the user can see, message and stop.
+
+- **Runs you start.** A Perch-owned run graph: lead session, child sessions
+  (any provider/model, same Nest or a new worktree), a shared task list, messages
+  and reports. Children are ordinary Perch sessions shown under their parent.
+- **Child session from here.** User-started, optionally seeded through the
+  Context Bridge (explicit send).
+- **Agents take part through a `perch` CLI plus one skill, not an MCP server**
+  (no tool schemas in every context). Sketch: `perch spawn --agent --model
+  --worktree --task`, `perch send`, `perch report --outcome --files`, `perch wait`,
+  `perch tasks`. Authority is a per-session token in the launched environment,
+  checked by the core; it only reaches its own run.
+- **Reports.** A child's Stop hook files its last message as a report; optionally
+  summarized by a cheap model (default Haiku 5.5) through the provider's own CLI
+  and the user's login.
+- **Delivery.** Automatic within a run the user started, only into an idle,
+  verified-empty prompt (or queued until idle); logged in both transcripts and
+  the run view; pause/stop the run at any time. Never paste into a busy PTY,
+  never auto-approve a permission. Bounded children, depth and messages per run.
+- **Workstream changes:** one combined changed-files view across a run.
+
+Start: `crates/perch-core/src/native_ui/`, `agent_fleet.rs`,
+`server/agent_history.rs`, `context_bridge.rs`, `packages/web/src/views/NativeCliChat.tsx`.
+
+Open before building (ask the owner when the step starts):
+
+- Codex app-server and Claude structured sessions: re-check provider terms at
+  each release; Anthropic paused, not dropped, SDK subscription changes.
+- Project instructions: one per Birdhouse or also per Nest; size limits; can a
+  session opt out?
+- Run UI: a run view in the drawer, a tab, or only child rows plus Needs You?
+  Decision gates (lead asks the user) in the first cut?
+- Remote and phone: may a phone approve, message or stop a child? Remote runs
+  wait for owned remote runtimes (alpha item 1).
+
 ## Later, bounded additions
 
 - **Honest reopen/resume:** stopped-tab UI and retained provider conversation ID.
   Cmd-Shift-T currently starts a fresh harness, not the previous conversation.
+  The provider ID part is needed by step 0 (move/resume) and fork.
+- From peers ([research](evidence/agent-workspaces-2026-11-05.md)): mark unread and
+  a Dock badge; listening ports per Nest; "why this state" from the evidence
+  source Perch already records; sleep idle Nests; review size/activity before
+  worktree cleanup.
 - **Thin PR workflow:** open PR, status/checks through existing tools, not a
   Git hosting or issue-management suite.
 - **Scoped CLI:** list/read/open/notify and authorized mutations through core,
@@ -165,6 +270,33 @@ Start: `crates/perch-core/src/server/attention.rs`, `db/attention.rs`,
 - Saved runs; structured JSON/CSV/log viewers where useful; workspace-associated
   port forwarding/remote app preview; phone wide-terminal and delivery polish.
 - Sort chats by last updated; chrome font trial remains undecided.
+
+## Paused: real desktop apps as a switchable view
+
+Paused 2026-11-04 before its first commit; the code is uncommitted in the working
+tree. The [decision](DECISIONS.md) records the approved behavior. Status-bar tabs
+open real desktop apps over Perch's window, Tack Window Tabs style.
+
+- **Passing:** unit, tab and status bar tests; launching and hiding the real
+  `ChatGPT.app`.
+- **Not verified:** moving and resizing its window, because the test process had no
+  Accessibility access, and clicking through the flow in the real Perch window.
+- **To resume:** allow Accessibility for the terminal, run
+  `cargo test -p perch-desktop live_app -- --ignored --nocapture`, then try
+  `cargo run -p perch-desktop`. Commit once both work.
+- **2026-11-05 owner review:** it feels like an app opened over Perch. Approved
+  direction: glue the app's window to the area above the status bar (follow Perch's
+  moves/resizes; snap back when the app is moved or resized) with a
+  `Perch | ChatGPT | Claude` strip. A spike showed Perch can order its window just
+  below the app's, but a click on Perch's strip still raises Perch over it, so
+  using the strip while the app shows needs more work. Paused behind the UI-mode
+  work above.
+- **Then:** the fade between views and one-click app-to-app switching (it takes two
+  clicks today). Confirm the `com.openai.chat` and
+  `com.anthropic.claudefordesktop` bundle IDs on Macs that have those apps.
+
+Start: `crates/perch-desktop/src/desktop_apps.rs`,
+`packages/web/src/components/DesktopAppTabs.tsx`.
 
 ## Release evidence still owed
 
@@ -181,6 +313,7 @@ npm/pnpm contributor workflow deliberately; do not delete a lockfile here.
 ## Not the goal
 
 No parity chase, agent kanban, floating terminal, third navigation palette,
-new Hosted chat, full IDE/debugger, account switching / provider account manager, orchestration suite,
+new Hosted chat, full IDE/debugger, account switching / provider account manager,
+scheduler or autonomous planner (orchestration is runs the user starts, above),
 issue-tracker clone, computer use/design mode or speculative frontend rewrite.
 Do not remove working features/data just because they are off the critical path.

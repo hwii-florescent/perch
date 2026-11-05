@@ -42,7 +42,7 @@ newer decisions or current bindings merely because they appear here.
 | Tab / Surface | Users see **Tab**. Internally a surface presents a resource or runtime. |
 | Sidebar | Projects and, when needed, one flat level of contexts. No repeated session/tab tree. |
 | Tabs | One horizontal mixed-type strip for the active context. |
-| Agents | Real CLI terminals, enhanced with identity and status; no new UI/CLI modes. |
+| Agents | Real CLI terminals, enhanced with identity and status; a native UI mode per agent is approved (DECISIONS 2026-11-05). |
 | Cmd-K | Contextual actions and navigation to already-open work. |
 | Cmd-P | Files and folders in the current context. |
 | Cmd-J | No separate surface or default binding. |

@@ -7,6 +7,43 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-05 — Native UI mode, Projects and Perch sub-sessions (owner direction)
+
+Direction, not yet a detailed design; [ROADMAP](ROADMAP.md) holds the steps and
+open questions, [research](evidence/agent-workspaces-2026-11-05.md) the evidence.
+
+- **UI mode becomes fully native**, at Orca/T3 Code's level, beside real terminals.
+  This replaces "no new UI/CLI modes" (UI-UX-DIRECTION) and the "chat mode is one
+  global setting" constraint. Legacy Hosted chat code stays frozen; the new mode
+  is built on provider sessions, not on it. Claude runs as the unmodified binary
+  under the user's own login; Perch never handles credentials. **Terminal stays
+  the default** for every agent until the user picks Chat.
+- **Projects** are per-Birdhouse instructions and reference files stored privately
+  by Perch and passed to agents at launch; the first cut must support Pi, OMP,
+  Claude and Codex. No coordinator chat, no hosted RAG.
+- **Sub-sessions** are full child sessions (like Claude agent teams, not
+  in-process subagents) in runs the user starts: visible under their parent,
+  messaging and reporting through Perch. Native subagents/teams are observed.
+- **Agents reach Perch through a `perch` CLI plus a skill, not an MCP server**, to
+  keep tool schemas out of every context. This narrows "no orchestration suite" to
+  no scheduler, kanban or autonomous planner.
+- Inter-agent messages are automatic within a user-started run, but only into an
+  idle verified prompt; never into a busy PTY, never auto-approving permissions.
+- Model and effort are picked when a session or child starts (reporters default
+  to Haiku 5.5); still no model chrome over a live session.
+
+## 2026-11-04 — Real desktop apps as a switchable view (owner)
+
+Perch switches to the real ChatGPT/Codex and Claude desktop apps, Tack Window Tabs
+style. Web versions stay in ordinary browser tabs; no dedicated web mode is built.
+
+- macOS cannot host another app's window, so the app's window is moved over Perch's,
+  leaving Perch's status bar visible as the tab strip. One view shows at a time.
+- Any return to Perch (clicking the bar, Cmd+Tab) hides the app. Accessibility is
+  needed only to fit the window; without it the app still opens, unfitted.
+- Local Mac only, installed apps from a fixed list, nothing shown when none is
+  installed. Not available while Perch is fullscreen. Not mirrored to the phone.
+
 ## 2026-11-04 — Usage popover: plan usage, spend and alerts (owner)
 
 Amends the earlier "report available facts, no accounting/quota product" stance.
