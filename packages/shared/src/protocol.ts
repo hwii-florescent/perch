@@ -1321,16 +1321,64 @@ export interface AccountUsage {
   label?: string;
   /** Subscription tier, e.g. "Max 5×" or "Plus". */
   plan?: string;
+  /** The plan's monthly price in US dollars, when the price list knows it. */
+  planMonthlyUsd?: number;
   windows: UsageWindow[];
   /** Banked Codex rate-limit resets still redeemable. */
   resetCredits?: number;
   error?: string;
 }
 
+/** A provider, model or project's part of the spend in a period. */
+export interface SpendShare {
+  name: string;
+  /** Set on model shares. */
+  provider?: string;
+  costUsd: number;
+  tokens: number;
+}
+
+/** API-equivalent spend over the last `days` local calendar days (today included). */
+export interface SpendPeriod {
+  days: number;
+  costUsd: number;
+  /** Dollars the cache reads avoided versus plain input rates. */
+  savedUsd: number;
+  /** Input, cache and output tokens (reasoning not added). */
+  tokens: number;
+  /** Records with neither a list price nor a recorded cost. */
+  unpriced: number;
+  providers: SpendShare[];
+  /** Top 5. */
+  models: SpendShare[];
+  /** Top 5. */
+  projects: SpendShare[];
+}
+
+/** The Claude 5-hour block still open; epoch seconds. */
+export interface SpendBlock {
+  start: number;
+  end: number;
+  costUsd: number;
+  tokens: number;
+}
+
+/** What local agent logs say was used, priced at API list prices. */
+export interface SpendSummary {
+  periods: SpendPeriod[];
+  block?: SpendBlock;
+  /** API-equivalent dollars per hour at the last 30 minutes' pace. */
+  burnPerHourUsd?: number;
+  /** `updated` day of the price list used. */
+  pricesUpdated: string;
+}
+
 /** Reply to `usage.get`; a provider whose fetch failed carries an account error. */
 export interface UsageResultMessage {
   type: "usage.result";
   accounts: AccountUsage[];
+  /** Absent from older cores. */
+  spend?: SpendSummary;
 }
 
 /** List directories at `path` (or the user's home directory when absent) on

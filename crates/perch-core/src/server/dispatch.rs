@@ -233,8 +233,12 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::UsageGet { force } => {
             let out_tx = state.out_tx.clone();
             tokio::spawn(async move {
-                let accounts = crate::usage::current(force).await;
-                let _ = out_tx.send(ServerMessage::UsageResult { accounts });
+                let (accounts, spend) =
+                    tokio::join!(crate::usage::current(force), crate::usage::spend::spend());
+                let _ = out_tx.send(ServerMessage::UsageResult {
+                    accounts,
+                    spend: Some(spend),
+                });
             });
         }
         ClientMessage::TerminalOpen {

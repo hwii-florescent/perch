@@ -123,6 +123,10 @@ const VALUE_TYPES: &[&str] = &[
     "GitPreviewReceipt",
     "UsageWindow",
     "AccountUsage",
+    "SpendSummary",
+    "SpendPeriod",
+    "SpendShare",
+    "SpendBlock",
 ];
 
 /// A single field's wire name plus the two independent facts this test
@@ -152,14 +156,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn rust_source() -> String {
-    ["protocol.rs", "workspace_terminals.rs", "usage/mod.rs"]
-        .iter()
-        .map(|file| {
-            let path = repo_root().join("crates/perch-core/src").join(file);
-            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    [
+        "protocol.rs",
+        "workspace_terminals.rs",
+        "usage/mod.rs",
+        "usage/spend.rs",
+    ]
+    .iter()
+    .map(|file| {
+        let path = repo_root().join("crates/perch-core/src").join(file);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"))
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn ts_source() -> String {

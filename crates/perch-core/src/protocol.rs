@@ -2051,6 +2051,9 @@ pub enum ServerMessage {
     #[serde(rename = "usage.result")]
     UsageResult {
         accounts: Vec<crate::usage::AccountUsage>,
+        /// API-equivalent spend from local agent logs; absent from older peers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spend: Option<crate::usage::spend::SpendSummary>,
     },
 
     /// Provider manifests plus best-effort executable availability.  The

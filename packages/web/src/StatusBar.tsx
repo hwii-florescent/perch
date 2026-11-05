@@ -11,8 +11,14 @@ import { IS_MAC, formatCombo } from "./keyCombo";
 import type { AccountUsage, UsageWindow } from "@perch/shared";
 
 function formatTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+/** Two decimals; whole dollars from $100 up. */
+function formatUsd(n: number): string {
+  return n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
 }
 
 function usageTone(pct: number): string {
@@ -37,6 +43,7 @@ export function UsageSummary({
   usage: AccountUsage[];
   updatedAt: number;
 }) {
+  const spend = usePerchStore((s) => s.spend);
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState("");
@@ -66,6 +73,8 @@ export function UsageSummary({
   const updatedText = updatedAt
     ? new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : "Not refreshed yet";
+  const month = spend?.periods.find((p) => p.days === 30);
+  const topModels = month?.models.slice(0, 3) ?? [];
 
   return (
     <>
@@ -168,6 +177,16 @@ export function UsageSummary({
                         </span>
                       </div>
                     ))}
+                    {(() => {
+                      const share = account.planMonthlyUsd !== undefined && accountCount(account.provider) === 1
+                        ? month?.providers.find((s) => s.name === account.provider)
+                        : undefined;
+                      return share && (
+                        <p className="m-0 text-[0.72rem] text-subtext-0" data-testid="usage-plan-value">
+                          30 days: {formatUsd(share.costUsd)} API-equivalent on a ${account.planMonthlyUsd}/mo plan
+                        </p>
+                      );
+                    })()}
                     {account.resetCredits !== undefined && (
                       <p className="m-0 text-[0.72rem] text-subtext-0" data-testid="usage-reset-credits">
                         {account.resetCredits} rate-limit {account.resetCredits === 1 ? "reset" : "resets"} banked
@@ -177,6 +196,50 @@ export function UsageSummary({
                 );
               })}
             </div>
+          )}
+          {spend && spend.periods.length > 0 && (
+            <section data-testid="usage-spend" className="mt-3 grid gap-1.5">
+              <h3 className="m-0 text-[0.78rem] font-medium">API-equivalent spend</h3>
+              <p className="m-0 text-[0.72rem] text-subtext-0">
+                Estimated from local agent logs at list prices ({spend.pricesUpdated}).
+              </p>
+              {([[1, "Today"], [7, "7 days"], [30, "30 days"]] as const).map(([days, label]) => {
+                const period = spend.periods.find((p) => p.days === days);
+                return period && (
+                  <div key={days} data-testid={`usage-spend-${days}`} className="flex items-baseline justify-between gap-3 text-[0.78rem]">
+                    <span className="text-subtext-0">{label}</span>
+                    <span className="text-right tabular-nums">
+                      {formatUsd(period.costUsd)}
+                      <span className="ml-2 text-subtext-0">
+                        {formatTokens(period.tokens)} tokens{period.unpriced > 0 && ` · ${period.unpriced} unpriced`}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+              {topModels.length > 0 && (
+                <div data-testid="usage-spend-models" className="mt-1 grid gap-1.5">
+                  <span className="text-[0.72rem] text-subtext-0">Top models, 30 days</span>
+                  {topModels.map((m) => (
+                    <div key={`${m.provider ?? ""}:${m.name}`} className="flex items-baseline justify-between gap-3 text-[0.78rem]">
+                      <span className="min-w-0 truncate">{m.name}</span>
+                      <span className="tabular-nums">{formatUsd(m.costUsd)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {spend.block && (
+                <p className="m-0 text-[0.78rem] tabular-nums" data-testid="usage-spend-block">
+                  Claude 5h block {formatUsd(spend.block.costUsd)}, ends{" "}
+                  {new Date(spend.block.end * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                </p>
+              )}
+              {spend.burnPerHourUsd !== undefined && (
+                <p className="m-0 text-[0.78rem] tabular-nums" data-testid="usage-spend-burn">
+                  Burning {formatUsd(spend.burnPerHourUsd)}/h
+                </p>
+              )}
+            </section>
           )}
         </div>,
         document.body,

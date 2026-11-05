@@ -543,6 +543,9 @@ pub struct CodexStreamParser {
     /// Set once a terminal event (`turn.completed`/`turn.failed`/`error`) has
     /// been seen.
     pub saw_terminal: bool,
+    /// The model the turn runs on, to price it at API list prices. Empty =
+    /// unknown (cost stays 0).
+    pub model: String,
 }
 
 impl CodexStreamParser {
@@ -614,8 +617,18 @@ impl CodexStreamParser {
                             .get("output_tokens")
                             .and_then(Value::as_u64)
                             .unwrap_or(0),
-                        // codex reports no cost; ChatUsage has no optional cost field.
-                        cost_usd: 0.0,
+                        // codex reports no cost: estimate it at API list prices.
+                        cost_usd: crate::usage::codex_turn_cost(
+                            &self.model,
+                            input_tokens,
+                            raw.get("cached_input_tokens")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0),
+                            raw.get("output_tokens")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0),
+                        )
+                        .unwrap_or(0.0),
                         context_tokens: input_tokens,
                     }
                 });
@@ -1166,6 +1179,7 @@ impl AgentRunner for CodexRunner {
 
             let mut stdout_lines = BufReader::new(stdout).lines();
             let mut parser = CodexStreamParser::new();
+            parser.model = model.clone();
             let stderr_task = tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = BufReader::new(stderr).lines();

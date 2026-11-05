@@ -2,7 +2,7 @@ import { handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
 import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
 import { create } from "zustand";
-import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
+import type { AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, ChatUsage, ClientMessage, CommandEntry, FsBrowseResultMessage, ModelEntry, ProjectSummary, ServerInfoMessage, ServerMessage, SessionMode, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
 import { resyncPendingBuffersAfterReconnect, useWorkspaceFilesStore } from "../filesystemStore";
 import { forgetClosedTabs, recordClosedTab } from "../closedTabs";
@@ -295,6 +295,8 @@ export interface PerchState {
   terminalProfile: TerminalProfile | null;
   /** Claude/Codex plan usage for the status bar (`usage.result`). */
   usage: AccountUsage[];
+  /** API-equivalent spend from local agent logs (`usage.result`), when the core reports it. */
+  spend: SpendSummary | null;
   /** Local receipt time for the latest usage response; drives refresh feedback. */
   usageUpdatedAt: number;
   /** Set while a CLI PTY is being attached for a given session, cleared on
@@ -1025,6 +1027,7 @@ export const usePerchStore = create<PerchState>((set, get) => ({
   serverInfo: null,
   terminalProfile: null,
   usage: [],
+  spend: null,
   usageUpdatedAt: 0,
   attachingCliForSession: null,
   cliError: null,
@@ -3236,7 +3239,7 @@ export function handleServerMessage(msg: ServerMessage): void {
       break;
     }
     case "usage.result":
-      usePerchStore.setState({ usage: msg.accounts, usageUpdatedAt: Date.now() });
+      usePerchStore.setState({ usage: msg.accounts, spend: msg.spend ?? null, usageUpdatedAt: Date.now() });
       break;
     case "fs.browse.result": {
       const resolve = pendingBrowses.get(msg.requestId);

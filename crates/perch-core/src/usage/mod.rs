@@ -34,8 +34,17 @@
 //! crate), with headers on stdin so tokens never show in `ps`. Results are
 //! cached because the endpoints rate-limit. An account whose credentials were
 //! found but whose fetch failed is returned with `error` rather than dropped.
+//!
+//! `spend.rs` is the other half of the status-bar popover: token/cost
+//! accounting from the agents' local logs ("API-equivalent spend"), priced by
+//! `prices.rs`. That price list also names the subscription plans and their
+//! monthly price used below.
 
 mod cli;
+mod prices;
+pub mod spend;
+
+pub use prices::codex_turn_cost;
 
 use cli::{with_deadline, Conversation, Failure};
 use serde::{Deserialize, Serialize};
@@ -101,6 +110,9 @@ pub struct AccountUsage {
     /// The subscription tier ("Max 5×", "Plus"), when the provider says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    /// The plan's monthly price in US dollars, when the price list knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_monthly_usd: Option<f64>,
     pub windows: Vec<UsageWindow>,
     /// Banked Codex rate-limit resets the user can still redeem.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -420,7 +432,7 @@ fn claude_organization(state: Option<&Value>) -> Option<String> {
     )
 }
 
-fn claude_plan(a: &Account) -> Option<String> {
+fn claude_plan(a: &Account) -> Option<prices::Plan> {
     let state = claude_state(a)?;
     let account = &state["oauthAccount"];
     claude_plan_name(
@@ -431,21 +443,29 @@ fn claude_plan(a: &Account) -> Option<String> {
     )
 }
 
-fn claude_plan_name(org_type: Option<&str>, tier: Option<&str>) -> Option<String> {
-    let haystack = format!("{} {}", tier.unwrap_or(""), org_type.unwrap_or("")).to_lowercase();
-    for (needle, name) in [
-        ("max_20x", "Max 20×"),
-        ("max_5x", "Max 5×"),
-        ("max", "Max"),
-        ("enterprise", "Enterprise"),
-        ("team", "Team"),
-        ("pro", "Pro"),
-    ] {
-        if haystack.contains(needle) {
-            return Some(name.into());
-        }
-    }
-    humanize(&org_type?.replace("claude_", ""))
+/// The price list names the plans (first match in list order); a plan newer
+/// than the list still shows its own name, without a price.
+fn claude_plan_name(org_type: Option<&str>, tier: Option<&str>) -> Option<prices::Plan> {
+    prices::current().claude_plan(tier, org_type).or_else(|| {
+        Some(prices::Plan {
+            name: humanize(&org_type?.replace("claude_", ""))?,
+            monthly: None,
+        })
+    })
+}
+
+fn codex_plan(plan_type: &str) -> Option<prices::Plan> {
+    prices::current().codex_plan(plan_type).or_else(|| {
+        Some(prices::Plan {
+            name: humanize(plan_type)?,
+            monthly: None,
+        })
+    })
+}
+
+/// `AccountUsage`'s `plan` and `plan_monthly_usd`.
+fn plan_fields(plan: Option<prices::Plan>) -> (Option<String>, Option<f64>) {
+    plan.map_or((None, None), |p| (Some(p.name), p.monthly))
 }
 
 /// Whether `get_usage` was a live fetch for the same account, not the cached
@@ -584,10 +604,12 @@ async fn fetch_claude(a: &Account) -> AccountUsage {
             ),
         },
     };
+    let (plan, plan_monthly_usd) = plan_fields(claude_plan(a));
     AccountUsage {
         provider: "claude".into(),
         label: a.label.clone().or_else(|| claude_email(a)),
-        plan: claude_plan(a),
+        plan,
+        plan_monthly_usd,
         windows,
         error: error.map(Into::into),
         ..Default::default()
@@ -722,9 +744,12 @@ async fn codex_cli_usage(a: &Account) -> Result<AccountUsage, Failure> {
     if windows.is_empty() {
         return Err(Failure::Unreachable);
     }
+    let (plan, plan_monthly_usd) =
+        plan_fields(account["account"]["planType"].as_str().and_then(codex_plan));
     Ok(AccountUsage {
         provider: "codex".into(),
-        plan: account["account"]["planType"].as_str().and_then(humanize),
+        plan,
+        plan_monthly_usd,
         windows,
         reset_credits: codex_reset_credits(&limits, now_secs()),
         ..Default::default()
@@ -853,9 +878,11 @@ fn codex_from_json(body: &Value) -> Option<AccountUsage> {
             w.get("reset_at"),
         ));
     }
+    let (plan, plan_monthly_usd) = plan_fields(body["plan_type"].as_str().and_then(codex_plan));
     (!windows.is_empty()).then(|| AccountUsage {
         provider: "codex".into(),
-        plan: body["plan_type"].as_str().and_then(humanize),
+        plan,
+        plan_monthly_usd,
         windows,
         ..Default::default()
     })
@@ -1193,7 +1220,7 @@ mod tests {
             (None, None, None),
         ] {
             assert_eq!(
-                claude_plan_name(org_type, tier).as_deref(),
+                claude_plan_name(org_type, tier).map(|p| p.name).as_deref(),
                 expected,
                 "{org_type:?} {tier:?}"
             );

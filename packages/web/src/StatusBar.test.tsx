@@ -2,7 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AccountUsage } from "@perch/shared";
+import type { AccountUsage, SpendSummary } from "@perch/shared";
 
 vi.mock("./ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 const { socket } = await import("./ws");
@@ -25,7 +25,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  usePerchStore.setState({ connected: false, activeHostId: "local", hosts: [], hostStates: {}, sessions: [], sessionId: null, activeWorkspaceId: null, workspaces: [], status: null, usage, usageUpdatedAt: 1_791_800_000_000 });
+  usePerchStore.setState({ connected: false, activeHostId: "local", hosts: [], hostStates: {}, sessions: [], sessionId: null, activeWorkspaceId: null, workspaces: [], status: null, usage, spend: null, usageUpdatedAt: 1_791_800_000_000 });
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -99,6 +99,73 @@ it("shows the plan and scoped windows only in the popover, plus banked Codex res
   expect(details.textContent).toContain("7d Fable window");
   expect(details.textContent).toContain("9% used");
   expect(get("usage-reset-credits").textContent).toBe("3 rate-limit resets banked");
+});
+
+const spend: SpendSummary = {
+  pricesUpdated: "2026-10-09",
+  periods: [
+    { days: 1, costUsd: 12.345, savedUsd: 1, tokens: 1_234_567, unpriced: 0, providers: [], models: [], projects: [] },
+    { days: 7, costUsd: 80, savedUsd: 5, tokens: 9_500, unpriced: 2, providers: [], models: [], projects: [] },
+    {
+      days: 30,
+      costUsd: 412.4,
+      savedUsd: 50,
+      tokens: 50_000_000,
+      unpriced: 0,
+      providers: [{ name: "claude", costUsd: 412.4, tokens: 50_000_000 }],
+      models: [
+        { name: "Opus 5", provider: "claude", costUsd: 300, tokens: 1 },
+        { name: "GPT-6 Luna", provider: "codex", costUsd: 90.5, tokens: 1 },
+        { name: "Sonnet 4.5", provider: "claude", costUsd: 21.9, tokens: 1 },
+        { name: "Haiku 4.5", provider: "claude", costUsd: 0.04, tokens: 1 },
+      ],
+      projects: [],
+    },
+  ],
+  block: { start: 1_791_800_000, end: 1_791_810_000, costUsd: 4.1, tokens: 1 },
+  burnPerHourUsd: 3.2,
+};
+
+it("shows API-equivalent spend in the popover only, with periods, top models, block and burn", () => {
+  usePerchStore.setState({ spend });
+  render(<StatusBar />);
+  expect(get("usage-summary").textContent).not.toContain("$");
+  click(get("usage-summary"));
+  const section = get("usage-spend");
+  expect(section.textContent).toContain("API-equivalent spend");
+  expect(section.textContent).toContain("Estimated from local agent logs at list prices (2026-10-09).");
+  expect(get("usage-spend-1").textContent).toBe("Today$12.351.2M tokens");
+  expect(get("usage-spend-7").textContent).toBe("7 days$80.009.5k tokens · 2 unpriced");
+  expect(get("usage-spend-30").textContent).toBe("30 days$41250.0M tokens");
+  const models = get("usage-spend-models");
+  expect(models.textContent).toContain("Top models, 30 days");
+  expect(models.textContent).toContain("Opus 5$300");
+  expect(models.textContent).toContain("Sonnet 4.5$21.90");
+  expect(models.textContent).not.toContain("Haiku");
+  const ends = new Date(1_791_810_000 * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  expect(get("usage-spend-block").textContent).toBe(`Claude 5h block $4.10, ends ${ends}`);
+  expect(get("usage-spend-burn").textContent).toBe("Burning $3.20/h");
+});
+
+it("leaves the spend section out when the core reports none", () => {
+  render(<StatusBar />);
+  click(get("usage-summary"));
+  expect(document.querySelector("[data-testid='usage-spend']")).toBeNull();
+  expect(document.querySelector("[data-testid='usage-plan-value']")).toBeNull();
+});
+
+it("compares 30-day API value with the plan price for a single account of that provider", () => {
+  const claude: AccountUsage = { provider: "claude", plan: "Max 5×", planMonthlyUsd: 100, windows: [] };
+  usePerchStore.setState({ spend, usage: [claude] });
+  render(<StatusBar />);
+  click(get("usage-summary"));
+  expect(get("usage-plan-value").textContent).toBe("30 days: $412 API-equivalent on a $100/mo plan");
+  // Two accounts of one provider: the shared log total cannot be split between them.
+  act(() => usePerchStore.setState({ usage: [claude, { ...claude, label: "work" }] }));
+  expect(document.querySelector("[data-testid='usage-plan-value']")).toBeNull();
+  // A plan without a known price shows no comparison.
+  act(() => usePerchStore.setState({ usage: [{ ...claude, planMonthlyUsd: undefined }] }));
+  expect(document.querySelector("[data-testid='usage-plan-value']")).toBeNull();
 });
 
 it("keeps vertically centered usage at the right end, just before the connection mark", () => {
