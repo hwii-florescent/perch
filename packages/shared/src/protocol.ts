@@ -190,6 +190,8 @@ export interface SettingsData {
    * visibly change the user's prompt and PATH. Does not affect agent-attach
    * (CLI-mode) panes, which spawn the CLI directly. */
   terminalLoginShell: boolean;
+  /** Shell-escaped double quotes for dropped paths. Absent = off (single quotes). */
+  droppedPathDoubleQuotes?: boolean;
   /** Provider id a click on a workspace with no sessions starts (e.g.
    * `"terminal"`). Empty (the default, and absent from older peers) shows
    * the start picker instead. */
@@ -233,6 +235,7 @@ export interface SettingsPatch {
   chatMode?: "hosted" | "cli";
   terminalScrollback?: number;
   terminalLoginShell?: boolean;
+  droppedPathDoubleQuotes?: boolean;
   emptyWorkspaceAgent?: string;
   /** Replaces the whole override map. */
   keybindings?: Record<string, string>;

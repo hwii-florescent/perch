@@ -96,6 +96,7 @@ mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
 mod surfaces;
 mod terminal;
+mod uploads;
 #[cfg(test)]
 use terminal::claude_conversation_exists_in;
 mod session;
@@ -819,8 +820,17 @@ pub async fn run(
     let pair_path = format!("{base_path}pair");
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
-        .route(&clipboard_image_path, post(clipboard_image_upload))
-        .route(&upload_path, post(attachment_upload))
+        .route(
+            &clipboard_image_path,
+            post(clipboard_image_upload)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
+        // The streaming receiver owns the byte cap; never inherit the 2 MiB
+        // buffered-extractor default on this route.
+        .route(
+            &upload_path,
+            post(uploads::attachment_upload).layer(axum::extract::DefaultBodyLimit::disable()),
+        )
         .route(&pair_path, get(pair_status).post(pair_claim))
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
@@ -1814,57 +1824,6 @@ async fn clipboard_image_upload(
     }
 }
 
-/// `POST {base}upload?sessionId=…&name=…` — stage one composer attachment.
-///
-/// The body is the raw file bytes (the client sends the `File` object
-/// directly; there is no multipart parser in the dependency set and none is
-/// needed for one file per request). The reply is `{"path": "/abs/path"}`,
-/// and that path is what the client echoes back in `chat.send`'s
-/// `attachments`.
-///
-/// Staging is always **local**, exactly like `clipboard-image`: there is no
-/// HTTP route from the browser to a remote host. For a direct-mode session
-/// `detached.rs` copies the staged file into the turn's remote run directory
-/// and rewrites the path before launching the CLI.
-async fn attachment_upload(
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(params): Query<HashMap<String, String>>,
-    body: Bytes,
-) -> impl IntoResponse {
-    if let Err(status) = authorize_request(&state, &peer, &headers, &params) {
-        return (status, "device access denied").into_response();
-    }
-    const MAX_BYTES: usize = 25 * 1024 * 1024;
-    if body.len() > MAX_BYTES {
-        return (StatusCode::PAYLOAD_TOO_LARGE, "file too large (max 25MB)").into_response();
-    }
-    if body.is_empty() {
-        return (StatusCode::BAD_REQUEST, "empty upload").into_response();
-    }
-    let session_id = params
-        .get("sessionId")
-        .map(|s| s.as_str())
-        .unwrap_or("unknown");
-    let name = params
-        .get("name")
-        .map(|s| s.as_str())
-        .unwrap_or("attachment");
-    match crate::uploads::stage(session_id, name, &body) {
-        Ok(path) => axum::Json(serde_json::json!({
-            "path": path.to_string_lossy(),
-            "name": crate::uploads::sanitize_filename(name),
-        }))
-        .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to stage attachment: {e}"),
-        )
-            .into_response(),
-    }
-}
-
 struct SessionRuntime {
     cwd: String,
     /// `"local"`, or the id of the `mode: "direct"` host this session runs on.
@@ -2442,6 +2401,7 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.open",
         "workspace.run.v1",
         "terminal.sharedInput",
+        "upload.scp.v1",
         "context.bridge.v1",
         "terminal.list",
         "terminal.release",

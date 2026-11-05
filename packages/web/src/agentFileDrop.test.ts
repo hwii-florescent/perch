@@ -1,18 +1,27 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Terminal } from "@xterm/xterm";
+import { execFileSync } from "node:child_process";
 
 const { state, upload } = vi.hoisted(() => ({
-  state: { connected: true, activeHostId: "remote", sessions: [{ id: "agent", hostId: "local" as string | undefined }] },
+  state: {
+    connected: true, activeHostId: "remote", sessions: [{ id: "agent", hostId: "local" as string | undefined }],
+    settings: { droppedPathDoubleQuotes: false },
+    serverInfo: { capabilities: ["upload.scp.v1"] },
+    hosts: [] as { id: string; sshHost: string; enabled: boolean; directUrl?: string }[],
+  },
   upload: vi.fn(),
 }));
 vi.mock("./store", () => ({ usePerchStore: { getState: () => state } }));
 vi.mock("./attachments", () => ({ uploadAttachment: upload }));
-import { attachAgentFileDrop } from "./agentFileDrop";
+import { attachAgentFileDrop, quoteDroppedPath } from "./agentFileDrop";
 
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
   state.connected = true;
+  state.settings.droppedPathDoubleQuotes = false;
+  state.hosts = [];
+  state.serverInfo.capabilities = ["upload.scp.v1"];
   state.sessions = [{ id: "agent", hostId: "local" }];
   upload.mockReset().mockImplementation(async (_session: string, file: File) => ({ path: `/uploads/${file.name}` }));
 });
@@ -30,10 +39,11 @@ function setup() {
   cleanups.push(() => { stop(); element.remove(); });
   return { element, child, paste, report, stop, setId: (id: string | null) => { terminalId = id; } };
 }
-function drag(element: HTMLElement, type: string, files: File[] = [], types = ["Files"]) {
+function drag(element: HTMLElement, type: string, files: File[] = [], types = ["Files"], altKey = false) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   const dataTransfer = { types, files, dropEffect: "none" };
   Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+  Object.defineProperty(event, "altKey", { value: altKey });
   element.dispatchEvent(event);
   return { event, dataTransfer };
 }
@@ -87,7 +97,7 @@ it("uses the owning session, including legacy absent hostId, not the selected ho
   await vi.waitFor(() => expect(paste).toHaveBeenCalledOnce());
 });
 
-it.each(["unmount", "replacement", "lease-loss", "disconnect", "deleted"])("does not insert a late upload after %s", async (change) => {
+it.each(["unmount", "replacement", "lease-loss", "disconnect", "deleted", "host-change"])("does not insert a late upload after %s", async (change) => {
   let finish!: (value: { path: string }) => void;
   upload.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   const { child, paste, stop, setId, report } = setup();
@@ -97,6 +107,7 @@ it.each(["unmount", "replacement", "lease-loss", "disconnect", "deleted"])("does
   if (change === "lease-loss") setId(null);
   if (change === "disconnect") state.connected = false;
   if (change === "deleted") state.sessions = [];
+  if (change === "host-change") state.sessions[0].hostId = "another-host";
   finish({ path: "/uploads/late.txt" });
   await vi.waitFor(() => expect(upload).toHaveResolved());
   await Promise.resolve();
@@ -134,6 +145,59 @@ it("rejects folders or an empty file payload", () => {
   drag(child, "drop");
   expect(upload).not.toHaveBeenCalled();
   expect(report).toHaveBeenLastCalledWith({ message: "Drop files or images, not folders.", error: true });
+});
+
+it.each(["remote", "direct"])("requires explicit Option/Alt-drop and uploads only to the owning %s host", async (hostId) => {
+  state.sessions[0].hostId = hostId;
+  state.hosts = [{ id: hostId, sshHost: "example.test", enabled: true }];
+  const { child, paste, report } = setup();
+  expect(drag(child, "dragover").dataTransfer.dropEffect).toBe("none");
+  drag(child, "drop", [file()]);
+  expect(upload).not.toHaveBeenCalled();
+  expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining("Hold Option"), error: true }));
+  expect(drag(child, "dragover", [], ["Files"], true).dataTransfer.dropEffect).toBe("copy");
+  const dropped = file();
+  drag(child, "drop", [dropped], ["Files"], true);
+  await vi.waitFor(() => expect(paste).toHaveBeenCalledOnce());
+  expect(upload).toHaveBeenCalledWith("agent", dropped, hostId);
+  expect(report).toHaveBeenCalledWith({ message: "Uploading file via SCP…" });
+});
+
+it("does not insert a completed path after the configured SSH alias changes", async () => {
+  state.sessions[0].hostId = "remote";
+  state.hosts = [{ id: "remote", sshHost: "first.example.test", enabled: true }];
+  let finish!: (value: { path: string }) => void;
+  upload.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const { child, paste, report } = setup();
+  drag(child, "drop", [file()], ["Files"], true);
+  state.hosts[0].sshHost = "second.example.test";
+  finish({ path: "/remote/staged.txt" });
+  await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ error: true })));
+  expect(paste).not.toHaveBeenCalled();
+});
+
+it.each(["old-server", "disabled", "url-only"])("refuses unsupported remote targets: %s", (kind) => {
+  state.sessions[0].hostId = "remote";
+  state.hosts = [{ id: "remote", sshHost: "example.test", enabled: kind !== "disabled", ...(kind === "url-only" ? { directUrl: "ws://example.test/ws" } : {}) }];
+  if (kind === "old-server") state.serverInfo.capabilities = [];
+  const { child } = setup();
+  drag(child, "drop", [file()], ["Files"], true);
+  expect(upload).not.toHaveBeenCalled();
+});
+
+it("uses the double-quote setting without changing native paste behavior", async () => {
+  state.settings.droppedPathDoubleQuotes = true;
+  const { child, paste } = setup();
+  drag(child, "drop", [file("a file.txt")]);
+  await vi.waitFor(() => expect(paste).toHaveBeenCalledWith('"/uploads/a file.txt" '));
+});
+
+it.each([false, true])("quotes literal paths safely (double quotes = %s)", (doubleQuotes) => {
+  for (const path of ["/a file's.pdf", '/a"b/$HOME/`printf injected`/$(printf injected)/back\\slash!', "/literal!history"]) {
+    const quoted = quoteDroppedPath(path, doubleQuotes);
+    expect(execFileSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" })).toBe(path);
+  }
+  expect(() => quoteDroppedPath("/bad\\npath".replace("\\n", "\n"), doubleQuotes)).toThrow(/unsafe path/);
 });
 
 describe("native xterm drop input", () => {

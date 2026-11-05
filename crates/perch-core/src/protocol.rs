@@ -77,6 +77,9 @@ pub struct SettingsData {
     /// agent-attach (CLI-mode) panes, which spawn the CLI directly.
     #[serde(default)]
     pub terminal_login_shell: bool,
+    /// Use shell-escaped double quotes for dropped paths. Missing means off.
+    #[serde(default)]
+    pub dropped_path_double_quotes: bool,
     /// Provider id a click on a workspace with no sessions starts (e.g.
     /// `"terminal"`). Empty (the default) shows the start picker instead.
     #[serde(default)]
@@ -159,6 +162,8 @@ pub struct SettingsPatch {
     pub terminal_scrollback: Option<u32>,
     /// Absent = unchanged; present = set. No "clear" case needed.
     pub terminal_login_shell: Option<bool>,
+    #[serde(default)]
+    pub dropped_path_double_quotes: Option<bool>,
     /// Absent = unchanged; present = set; `""` = back to the picker.
     #[serde(default)]
     pub empty_workspace_agent: Option<String>,

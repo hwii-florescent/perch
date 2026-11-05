@@ -13,10 +13,12 @@
 //! are trivially inspectable.
 
 use std::fs;
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+pub const MAX_UPLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const STAGED_UPLOAD_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn uploads_root() -> PathBuf {
@@ -106,16 +108,36 @@ fn cleanup_stale(root: &Path) {
     }
 }
 
-/// Write `data` to `~/.perch/uploads/<sessionId>/<name>`, returning the
-/// absolute path. An existing file of the same name is superseded by a
-/// `-1`, `-2`, … suffix rather than overwritten, so re-attaching a file under
-/// a name a *previous* turn already used can't change what that turn referred
-/// to.
-pub fn stage(session_id: &str, name: &str, data: &[u8]) -> io::Result<PathBuf> {
-    let root = uploads_root();
-    fs::create_dir_all(&root)?;
-    restrict_dir_permissions(&root)?;
-    cleanup_stale(&root);
+/// An upload stays private until completed. Dropping it on error, cancellation,
+/// or after an SCP transfer removes the local copy, including partial bytes.
+#[derive(Debug)]
+pub struct StagedUpload {
+    path: Option<PathBuf>,
+}
+
+impl StagedUpload {
+    pub fn path(&self) -> &Path {
+        self.path.as_deref().expect("uncommitted upload")
+    }
+
+    pub fn persist(mut self) -> PathBuf {
+        self.path.take().expect("uncommitted upload")
+    }
+}
+
+impl Drop for StagedUpload {
+    fn drop(&mut self) {
+        if let Some(path) = &self.path {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Reserve without clobbering paths used by earlier turns.
+fn reserve(root: &Path, session_id: &str, name: &str) -> io::Result<(StagedUpload, fs::File)> {
+    fs::create_dir_all(root)?;
+    restrict_dir_permissions(root)?;
+    cleanup_stale(root);
 
     let dir = root.join(sanitize_session_id(session_id));
     fs::create_dir_all(&dir)?;
@@ -136,18 +158,63 @@ pub fn stage(session_id: &str, name: &str, data: &[u8]) -> io::Result<PathBuf> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         restrict_file_options(&mut options);
-        let mut file = match options.open(&path) {
+        let file = match options.open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         };
-        file.write_all(data)?;
-        return Ok(path);
+        return Ok((StagedUpload { path: Some(path) }, file));
     }
     Err(io::Error::new(
         io::ErrorKind::AlreadyExists,
         "failed to allocate a unique upload path",
     ))
+}
+
+/// Receive with constant memory, a 1 GiB bound and a 60-second idle timeout.
+pub async fn receive<R: AsyncRead + Unpin>(
+    session_id: &str,
+    name: &str,
+    reader: R,
+) -> io::Result<StagedUpload> {
+    receive_at(&uploads_root(), session_id, name, reader, MAX_UPLOAD_BYTES).await
+}
+
+async fn receive_at<R: AsyncRead + Unpin>(
+    root: &Path,
+    session_id: &str,
+    name: &str,
+    mut reader: R,
+    limit: u64,
+) -> io::Result<StagedUpload> {
+    let (upload, file) = reserve(root, session_id, name)?;
+    let mut file = tokio::fs::File::from_std(file);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let count = tokio::time::timeout(Duration::from_secs(60), reader.read(&mut buffer))
+            .await
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "upload stalled for 60 seconds")
+            })??;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "file too large (max 1 GiB)",
+            ));
+        }
+        file.write_all(&buffer[..count]).await?;
+    }
+    if total == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty upload"));
+    }
+    file.flush().await?;
+    drop(file);
+    Ok(upload)
 }
 
 #[cfg(test)]
@@ -165,20 +232,58 @@ mod tests {
         assert_eq!(sanitize_filename("a;rm$(x).png"), "a_rm__x_.png");
     }
 
-    #[test]
-    fn stage_writes_into_a_per_session_directory_without_clobbering() {
-        let tmp = std::env::temp_dir().join(format!("perch-upload-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&tmp).unwrap();
-        // Safety: test-only; no concurrent HOME mutation in this suite.
-        unsafe {
-            std::env::set_var("HOME", &tmp);
-        }
-        let first = stage("sess-1", "shot.png", b"one").unwrap();
-        let second = stage("sess-1", "shot.png", b"two").unwrap();
-        assert!(first.starts_with(tmp.join(".perch").join("uploads").join("sess-1")));
-        assert_ne!(first, second);
+    #[tokio::test]
+    async fn streamed_uploads_are_bounded_private_and_never_clobber() {
+        let root = std::env::temp_dir().join(format!("perch-upload-test-{}", uuid::Uuid::new_v4()));
+        let first = receive_at(&root, "sess-1", "shot.png", &b"one"[..], 3)
+            .await
+            .unwrap()
+            .persist();
+        let second = receive_at(&root, "sess-1", "shot.png", &b"two"[..], 3)
+            .await
+            .unwrap();
         assert_eq!(fs::read(&first).unwrap(), b"one");
-        assert_eq!(fs::read(&second).unwrap(), b"two");
-        assert_eq!(second.file_name().unwrap(), "shot-1.png");
+        assert_eq!(fs::read(second.path()).unwrap(), b"two");
+        assert_eq!(second.path().file_name().unwrap(), "shot-1.png");
+        let temporary = second.path().to_path_buf();
+        drop(second);
+        assert!(!temporary.exists());
+        for (bytes, kind) in [
+            (&b"four"[..], io::ErrorKind::FileTooLarge),
+            (&b""[..], io::ErrorKind::InvalidInput),
+        ] {
+            assert_eq!(
+                receive_at(&root, "sess-1", "bad.bin", bytes, 3)
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                kind
+            );
+            assert!(!root.join("sess-1/bad.bin").exists());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_and_cancelled_readers_remove_partial_uploads() {
+        let root = std::env::temp_dir().join(format!("perch-upload-test-{}", uuid::Uuid::new_v4()));
+        let (mut writer, reader) = tokio::io::duplex(16);
+        writer.write_all(b"partial").await.unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            receive_at(&root, "sess", "partial.bin", reader, 100)
+        )
+        .await
+        .is_err());
+        assert!(!root.join("sess/partial.bin").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

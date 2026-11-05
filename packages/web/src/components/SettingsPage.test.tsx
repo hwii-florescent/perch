@@ -10,6 +10,31 @@ const { usePerchStore } = await import("../store");
 const { SettingsPage } = await import("./SettingsPage");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+it("persists the dropped-path quoting toggle and follows authoritative settings", async () => {
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+  const updateSettings = vi.fn();
+  usePerchStore.setState({ settingsOpen: true, settings: { theme: "perch" } as never, fetchSettings: vi.fn(), fetchHosts: vi.fn(), updateSettings });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<SettingsPage />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-terminal"]')!.click());
+    const toggle = host.querySelector<HTMLInputElement>('[aria-label="Wrap dropped paths in double quotes"]')!;
+    expect(toggle.checked).toBe(false);
+    await act(async () => toggle.click());
+    expect(toggle.checked).toBe(true);
+    expect(updateSettings).toHaveBeenCalledWith({ droppedPathDoubleQuotes: true });
+    act(() => usePerchStore.setState({ settings: { theme: "perch", droppedPathDoubleQuotes: false } as never }));
+    expect(toggle.checked).toBe(false);
+    expect(host.textContent).toContain("1 GiB");
+    expect(host.textContent).toContain("SCP");
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("offers the supported engines in General and follows the saved setting", async () => {
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   const updateSettings = vi.fn();

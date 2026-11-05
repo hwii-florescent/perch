@@ -617,12 +617,14 @@ function TerminalSection() {
   // then resync from the authoritative settings.current once it lands.
   const [scrollback, setScrollback] = useState(String(settings?.terminalScrollback ?? 10000));
   const [loginShell, setLoginShell] = useState(settings?.terminalLoginShell ?? false);
+  const [doubleQuotes, setDoubleQuotes] = useState(settings?.droppedPathDoubleQuotes ?? false);
 
   useEffect(() => {
     if (!settings) return;
     setScrollback(String(settings.terminalScrollback ?? 10000));
     setLoginShell(settings.terminalLoginShell ?? false);
-  }, [settings?.terminalScrollback, settings?.terminalLoginShell]);
+    setDoubleQuotes(settings.droppedPathDoubleQuotes ?? false);
+  }, [settings?.terminalScrollback, settings?.terminalLoginShell, settings?.droppedPathDoubleQuotes]);
 
   const handleScrollbackChange = (value: string) => {
     // The text box always shows exactly what was typed — clamping mid-keystroke
@@ -660,6 +662,10 @@ function TerminalSection() {
       <SettingRow title="Login shell" description="Spawn plain terminal panes as a login shell. Applies to plain terminal panes only, not CLI-mode agent panes, and only to newly-created terminals.">
         <Switch label="Spawn plain terminal panes as a login shell" testId="settings-terminal-login-shell" checked={loginShell} onChange={handleLoginShellChange} />
       </SettingRow>
+      <SettingRow title="Wrap dropped paths in double quotes" description="Applies to file drops in agent panes. Off uses single quotes; both safely escape shell characters.">
+        <Switch label="Wrap dropped paths in double quotes" testId="settings-dropped-path-double-quotes" checked={doubleQuotes} onChange={(on) => { setDoubleQuotes(on); updateSettings({ droppedPathDoubleQuotes: on }); }} />
+      </SettingRow>
+      <SettingRow title="Remote file drops" description="Hold Option (Mac) or Alt while dropping onto a remote agent to upload via SCP to a private staging folder. Up to 1 GiB per file on direct connections; 64 MiB through the phone relay. Dropping never submits a prompt." />
     </SettingsGroup>
   );
 }

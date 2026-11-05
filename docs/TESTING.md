@@ -53,6 +53,11 @@ Useful existing coverage (not a claim of a fresh passing run):
   core restart, draft/conflict recovery.
 - `workspace-file-browser.spec.ts`: CodeMirror, media, read-only and extraction.
 - `agent-terminal-ownership.spec.ts`, `terminal-width.spec.ts`: authority/size.
+- `cd e2e && npx playwright test -c provider-config.config.ts agent-file-drop.spec.ts`:
+  isolated Chromium/WebKit drops, a real 3 MiB HTTP upload, the 1 GiB declared
+  limit, quote-setting persistence, and configured-host SCP success/failure
+  cleanup using local SSH/SCP stand-ins (no network hosts or paid turns).
+  This is not certification against a real SSH/SFTP server.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

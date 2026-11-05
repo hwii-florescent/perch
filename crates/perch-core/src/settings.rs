@@ -65,6 +65,9 @@ pub struct Settings {
     /// Spawn plain terminal panes as a login shell. Defaults to `false`.
     #[serde(default)]
     pub terminal_login_shell: bool,
+    /// Use shell-escaped double quotes for dropped paths; false keeps single quotes.
+    #[serde(default)]
+    pub dropped_path_double_quotes: bool,
     /// Provider id a click on a workspace with no sessions starts
     /// (e.g. `"terminal"`). Empty (the default) shows the start picker.
     #[serde(default)]
@@ -113,6 +116,7 @@ impl Default for Settings {
             chat_mode: default_chat_mode(),
             terminal_scrollback: default_terminal_scrollback(),
             terminal_login_shell: false,
+            dropped_path_double_quotes: false,
             empty_workspace_agent: String::new(),
             keybindings: Default::default(),
             warn_close_agent: true,
@@ -186,6 +190,7 @@ pub struct SettingsPatch {
     pub chat_mode: Option<String>,
     pub terminal_scrollback: Option<u32>,
     pub terminal_login_shell: Option<bool>,
+    pub dropped_path_double_quotes: Option<bool>,
     pub empty_workspace_agent: Option<String>,
     pub keybindings: Option<std::collections::BTreeMap<String, String>>,
     pub warn_close_agent: Option<bool>,
@@ -301,6 +306,9 @@ impl SettingsStore {
         }
         if let Some(login_shell) = patch.terminal_login_shell {
             guard.terminal_login_shell = login_shell;
+        }
+        if let Some(double_quotes) = patch.dropped_path_double_quotes {
+            guard.dropped_path_double_quotes = double_quotes;
         }
         if let Some(agent) = patch.empty_workspace_agent {
             guard.empty_workspace_agent = agent;
@@ -437,12 +445,13 @@ mod keybinding_tests {
         std::fs::write(&path, r#"{"theme":"perch"}"#).unwrap();
         let store = SettingsStore::load(&path);
         assert!(store.get().keybindings.is_empty());
+        assert!(!store.get().dropped_path_double_quotes);
         assert!(!store.get().permissions_setup_dismissed);
         assert!(store.get().warn_close_agent);
         assert_eq!(store.get().tab_shape, "square");
 
         let patch: SettingsPatch = serde_json::from_str(
-            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false,"tabShape":"round","permissionsSetupDismissed":true}"#,
+            r#"{"keybindings":{"tabs.new":"cmd+t","panes.splitRight":""},"warnCloseAgent":false,"tabShape":"round","permissionsSetupDismissed":true,"droppedPathDoubleQuotes":true}"#,
         )
         .unwrap();
         store.update(patch).unwrap();
@@ -461,6 +470,11 @@ mod keybinding_tests {
         assert!(!reloaded.warn_close_agent);
         assert_eq!(reloaded.tab_shape, "round");
         assert!(reloaded.permissions_setup_dismissed);
+        assert!(reloaded.dropped_path_double_quotes);
+        store
+            .update(serde_json::from_str(r#"{"droppedPathDoubleQuotes":false}"#).unwrap())
+            .unwrap();
+        assert!(!SettingsStore::load(&path).get().dropped_path_double_quotes);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

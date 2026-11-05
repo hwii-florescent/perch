@@ -8,11 +8,15 @@ vi.mock("./base", () => ({
     `http://local.test/upload?sessionId=${sessionId}&name=${encodeURIComponent(name)}`,
 }));
 
-import { uploadAttachment, MAX_ATTACHMENT_BYTES } from "./attachments";
+vi.mock("./relay/transport", () => ({ isRelayMode: vi.fn(() => false) }));
+import { isRelayMode } from "./relay/transport";
+import { uploadAttachment, MAX_ATTACHMENT_BYTES, MAX_RELAY_ATTACHMENT_BYTES } from "./attachments";
 
 function makeFile(name: string, size: number, content = "x"): File {
-  const bytes = content.repeat(Math.max(1, size)).slice(0, size);
-  return new File([bytes], name, { type: "text/plain" });
+  const file = new File([content], name, { type: "text/plain" });
+  // Metadata-only boundary tests must not allocate a gigabyte in the test runner.
+  Object.defineProperty(file, "size", { value: size });
+  return file;
 }
 
 describe("uploadAttachment", () => {
@@ -20,6 +24,7 @@ describe("uploadAttachment", () => {
 
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    vi.mocked(isRelayMode).mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -34,7 +39,7 @@ describe("uploadAttachment", () => {
 
   it("rejects a file over the size cap without making a request", async () => {
     const file = makeFile("huge.bin", MAX_ATTACHMENT_BYTES + 1);
-    await expect(uploadAttachment("s1", file)).rejects.toThrow(/25MB/);
+    await expect(uploadAttachment("s1", file)).rejects.toThrow(/1 GiB/);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -52,10 +57,24 @@ describe("uploadAttachment", () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       status: 413,
+      text: async () => "file too large (max 1 GiB)",
       json: async () => ({}),
     });
     const file = makeFile("x.png", 10);
     await expect(uploadAttachment("s1", file)).rejects.toThrow(/413/);
+  });
+
+  it("rejects large relay uploads before reading or sending the file", async () => {
+    vi.mocked(isRelayMode).mockReturnValue(true);
+    await expect(uploadAttachment("s1", makeFile("large.bin", MAX_RELAY_ATTACHMENT_BYTES + 1))).rejects.toThrow(/direct connection/);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("sends the File itself rather than buffering it as an ArrayBuffer", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ path: "/abs/file.bin" }) } as Response);
+    const file = makeFile("file.bin", 3 * 1024 * 1024);
+    await uploadAttachment("s1", file);
+    expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBe(file);
   });
 
   it("throws when the server response has no path", async () => {

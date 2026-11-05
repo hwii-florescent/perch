@@ -370,89 +370,188 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-/// Copy raw **bytes** to `path` on the remote, creating parent directories.
-///
-/// [`write_remote_file`]'s `cat > file` is fine for text but not for an
-/// attachment: a PNG contains NUL bytes and invalid UTF-8, and perch's payload
-/// type is `&str`. Base64 on the way out and `base64 -d` on the way in keeps
-/// the transport 7-bit-clean while still going over ssh **stdin**, so nothing
-/// binary is ever shell-quoted into an argv. (`-d` is GNU/coreutils; the
-/// `-D` fallback covers BSD/macOS remotes.)
-pub async fn write_remote_bytes(
+/// Transfer an existing file without buffering or base64-encoding it in memory.
+/// System scp uses SFTP (-s), the user's SSH config and our bounded mux policy.
+pub async fn copy_file(
     ssh_host: &str,
-    path: &str,
-    data: &[u8],
-    timeout_secs: u64,
+    local: &std::path::Path,
+    remote: &str,
 ) -> Result<(), String> {
-    let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-    let command = format!(
-        "mkdir -p {} && {{ if base64 -d </dev/null >/dev/null 2>&1; then base64 -d; else base64 -D; fi; }} > {}",
-        shell_quote(dir),
-        shell_quote(path)
-    );
-    let encoded = base64_encode(data);
-    let mut owned = base_args(ssh_host);
-    owned.push(command);
+    validate_upload_host(ssh_host)?;
+    let dir = remote.rsplit_once('/').map(|(dir, _)| dir).unwrap_or(".");
+    run_remote(
+        ssh_host,
+        &format!("umask 077; mkdir -p {}", shell_quote(dir)),
+        15,
+        "prepare upload",
+    )
+    .await?;
+    scp_file(ssh_host, local, remote).await
+}
 
-    let mut cmd = tokio::process::Command::new("ssh");
-    cmd.args(&owned)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+fn validate_upload_host(host: &str) -> Result<(), String> {
+    if host.is_empty()
+        || host.starts_with('-')
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_-.@[]:".contains(c))
+    {
+        return Err("invalid configured SSH host for SCP".into());
+    }
+    Ok(())
+}
+
+fn scp_command(
+    host: &str,
+    local: &std::path::Path,
+    remote: &str,
+    mux: bool,
+) -> Result<tokio::process::Command, String> {
+    validate_upload_host(host)?;
+    if !local.is_absolute() || !remote.starts_with('/') || remote.chars().any(char::is_control) {
+        return Err("SCP upload requires absolute, safe paths".into());
+    }
+    // scp requires brackets around IPv6 addresses, unlike ssh's destination.
+    let (user, address) = host
+        .rsplit_once('@')
+        .map(|(u, h)| (format!("{u}@"), h))
+        .unwrap_or_else(|| (String::new(), host));
+    let address = if address.contains(':') && !address.starts_with('[') {
+        format!("[{address}]")
+    } else {
+        address.to_string()
+    };
+    let mut command = tokio::process::Command::new("scp");
+    command.args([
+        "-s",
+        "-p",
+        "-B",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+    ]);
+    if mux {
+        command.args(mux_opts());
+    } else {
+        command.args(["-o", "ControlMaster=no", "-o", "ControlPath=none"]);
+    }
+    command
+        .arg("--")
+        .arg(local)
+        .arg(format!("{user}{address}:{remote}"));
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("ssh failed (upload {path}): {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(encoded.as_bytes()).await;
-        let _ = stdin.shutdown().await;
+    Ok(command)
+}
+
+async fn scp_file(host: &str, local: &std::path::Path, remote: &str) -> Result<(), String> {
+    for mux in [true, false] {
+        let mut command = scp_command(host, local, remote, mux)?;
+        let output = tokio::time::timeout(std::time::Duration::from_secs(3600), command.output())
+            .await
+            .map_err(|_| "SCP upload timed out after one hour".to_string())?
+            .map_err(|error| format!("could not start SCP: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if mux && is_session_limit_error(&stderr) {
+            continue;
+        }
+        return Err(format!(
+            "SCP upload failed: {}",
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
     }
-    let out = match tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        child.wait_with_output(),
-    )
-    .await
-    {
-        Ok(Ok(out)) => out,
-        Ok(Err(e)) => return Err(format!("ssh failed (upload {path}): {e}")),
-        Err(_) => return Err(format!("ssh timed out (upload {path})")),
-    };
-    if out.status.success() {
-        Ok(())
-    } else {
-        let err: String = String::from_utf8_lossy(&out.stderr)
-            .trim()
-            .chars()
-            .take(300)
-            .collect();
-        Err(format!("failed uploading {path}: {err}"))
+    unreachable!()
+}
+
+/// Only these two files in a freshly minted directory belong to this transfer.
+/// Cancellation/error cleanup never touches another upload or a workspace file.
+struct RemoteUpload {
+    host: String,
+    directory: String,
+    path: String,
+    committed: bool,
+}
+
+impl Drop for RemoteUpload {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let host = self.host.clone();
+        let command = format!(
+            "rm -f -- {} {}; rmdir -- {}",
+            shell_quote(&format!("{}/.partial", self.directory)),
+            shell_quote(&self.path),
+            shell_quote(&self.directory)
+        );
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                if let Err(error) =
+                    run_remote(&host, &command, 15, "remove incomplete upload").await
+                {
+                    tracing::warn!("could not remove incomplete SCP upload: {error}");
+                }
+            });
+        }
     }
 }
 
-/// Standard base64 (RFC 4648, padded). Hand-rolled rather than pulling in a
-/// crate for the ~20 lines the one caller above needs.
-fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[(n >> 18) as usize & 63] as char);
-        out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[n as usize & 63] as char
-        } else {
-            '='
-        });
+/// Upload to a fresh per-session remote directory; return only a completed path.
+/// ponytail: successful remote drops are retained, and a core crash can leave
+/// a partial directory. Add an owning-core retention service before sweeping remotely.
+pub async fn stage_upload(
+    host: &str,
+    session_id: &str,
+    name: &str,
+    local: &std::path::Path,
+) -> Result<String, String> {
+    validate_upload_host(host)?;
+    let session = crate::uploads::sanitize_filename(session_id);
+    let command = format!(
+        "umask 077; root=\"$HOME/.perch/uploads\"; mkdir -p \"$root/{session}\" && chmod 700 \"$root\" \"$root/{session}\" && mktemp -d \"$root/{session}/drop.XXXXXXXXXX\""
+    );
+    let directory = run_remote(host, &command, 15, "prepare remote staging").await?;
+    if !directory.starts_with('/')
+        || directory.chars().any(char::is_control)
+        || !directory
+            .rsplit_once("/drop.")
+            .is_some_and(|(parent, suffix)| {
+                parent.ends_with(&format!("/.perch/uploads/{session}"))
+                    && suffix.len() == 10
+                    && suffix.chars().all(|c| c.is_ascii_alphanumeric())
+            })
+    {
+        return Err("SSH returned an unsafe staging directory".into());
     }
-    out
+    let path = format!("{directory}/{}", crate::uploads::sanitize_filename(name));
+    let mut upload = RemoteUpload {
+        host: host.into(),
+        directory,
+        path,
+        committed: false,
+    };
+    scp_file(host, local, &format!("{}/.partial", upload.directory)).await?;
+    run_remote(
+        host,
+        &format!(
+            "chmod 600 {} && mv -- {} {}",
+            shell_quote(&format!("{}/.partial", upload.directory)),
+            shell_quote(&format!("{}/.partial", upload.directory)),
+            shell_quote(&upload.path)
+        ),
+        15,
+        "finish remote upload",
+    )
+    .await?;
+    upload.committed = true;
+    Ok(upload.path.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -917,13 +1016,54 @@ mod tests {
     }
 
     #[test]
-    fn base64_encode_matches_rfc4648_including_padding() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
-        // Binary (non-UTF8) input is exactly what an attachment upload is.
-        assert_eq!(base64_encode(&[0x89, 0x50, 0x4e, 0x47]), "iVBORw==");
+    fn scp_is_noninteractive_streamed_and_keeps_paths_as_separate_arguments() {
+        let command = scp_command(
+            "user@example.test",
+            std::path::Path::new("/tmp/a file.bin"),
+            "/home/a user/upload.bin",
+            false,
+        )
+        .unwrap();
+        let args: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|s| s.to_str().unwrap())
+            .collect();
+        assert!(args.contains(&"-s"));
+        assert!(args.contains(&"BatchMode=yes"));
+        assert!(args.contains(&"ControlPath=none"));
+        assert_eq!(
+            &args[args.len() - 3..],
+            &[
+                "--",
+                "/tmp/a file.bin",
+                "user@example.test:/home/a user/upload.bin"
+            ]
+        );
+        assert!(scp_command(
+            "-oProxyCommand=bad",
+            std::path::Path::new("/tmp/file"),
+            "/tmp/file",
+            true
+        )
+        .is_err());
+        assert!(scp_command(
+            "example.test",
+            std::path::Path::new("/tmp/file"),
+            "/tmp/bad\npath",
+            true
+        )
+        .is_err());
+        let ipv6 = scp_command(
+            "user@::1",
+            std::path::Path::new("/tmp/file"),
+            "/tmp/file",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            ipv6.as_std().get_args().last().unwrap(),
+            "user@[::1]:/tmp/file"
+        );
     }
 }

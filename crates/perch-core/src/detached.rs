@@ -406,14 +406,8 @@ impl DetachedManager {
         // aborts the turn rather than launching a CLI that would be told to
         // read a file that isn't there.
         for (local, remote) in req.attachments.iter().zip(remote_attachments.iter()) {
-            let bytes = match std::fs::read(local) {
-                Ok(b) => b,
-                Err(e) => {
-                    let _ = self.db.finish_detached_run(&run_id, "failed", None);
-                    return Err(format!("could not read attachment {local}: {e}"));
-                }
-            };
-            if let Err(e) = ssh::write_remote_bytes(&req.ssh_host, remote, &bytes, 120).await {
+            if let Err(e) = ssh::copy_file(&req.ssh_host, std::path::Path::new(local), remote).await
+            {
                 let _ = self.db.finish_detached_run(&run_id, "failed", None);
                 return Err(e);
             }

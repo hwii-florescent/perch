@@ -75,14 +75,24 @@ Terminal-specific contracts:
 - One resize lease owns the PTY dimensions. Other views follow, never fit.
   Shared CLI input does not acquire resize/stop authority. Only the resize
   owner answers terminal queries; replay must not replay live side effects.
-- Local CLI agent panes accept user-dropped files/images (up to 25 MiB per
-  file), staging copies under `~/.perch/uploads/<sessionId>/` with the existing
-  24-hour stale-directory sweep. Paths are quoted and pasted into the prompt;
-  dropping never submits a turn. This explicit user gesture uses native xterm
-  paste, not Context Bridge delivery. Shell/Terminal panes do not accept drops.
-  Remote sessions are refused (no file-transfer route); agent filesystem/image
-  permissions still apply. Switching panes or losing writable input during an
-  upload must not insert paths into a different terminal.
+- CLI agent panes accept user-dropped files/images up to 1 GiB per file on
+  direct connections (64 MiB through the buffered phone relay). Core authorizes
+  before reading, streams to disk with a 60-second idle / one-hour total receive
+  limit, and removes incomplete local copies. Local paths stay under
+  `~/.perch/uploads/<sessionId>/` with the existing 24-hour stale-directory sweep.
+  Remote drops require explicit Option/Alt-drop, `upload.scp.v1` on the serving
+  core, a configured SSH host and verified session ownership. System SCP/SFTP
+  uses the existing SSH config/multiplexing and a private per-drop remote folder;
+  only completed paths are pasted. Failed/cancelled transfers attempt bounded
+  remote cleanup; successful remote files are retained (no remote sweep), and
+  a core crash may leave partial remote staging. Never overwrite project files
+  or fall back locally when the remote is unavailable.
+  Settings → Terminal can switch dropped paths from safe single quotes to safe
+  double quotes; both escape shell expansion. Dropping never submits a turn.
+  This gesture uses native xterm paste, not Context Bridge delivery. Ordinary
+  shell panes do not accept drops. Agent file/image permissions still apply;
+  losing writable input or changing host/terminal during an upload must not
+  insert paths into a different agent.
 - Preserve xterm's native input (including kitty keyboard); do not guess or
   re-encode keystrokes. Shortcuts belong in `keybinds.ts::SHORTCUTS`, not
   scattered handlers; plain Ctrl letters must still reach the PTY.
