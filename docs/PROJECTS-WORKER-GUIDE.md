@@ -74,29 +74,15 @@ Skip for the terminal-backed chat (Orca feeds them only from its structured jour
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.
 
-## Slice 0: feasibility spike (*own*, zero tokens first)
+## Slice 0 results (landed 2026-11-06)
 
-Deliverable: a table appended to the evidence file. No product code kept.
-
-1. **Pointer reaches the model.** Text: `You are in Perch session <id>. Run "perch guide" before coordinating with other sessions.`
-   - Codex: `codex -c developer_instructions='<text>' debug prompt-input x` and grep the
-     output (no model call). Repeat with `-c` passed to `codex app-server` (Perch's
-     shared server), since the TUI flag may not reach it.
-   - Claude: launch in tmux with `--append-system-prompt '<text>'`, open `/context`,
-     capture the screen, never press Enter on a prompt. Repeat with the hidden
-     `--append-system-prompt-file`; if it is gone, slice 1 passes text.
-   - Pi: `--append-system-prompt`; OMP: `--append-system-prompt=`. Read the system
-     prompt through the bridge if exposed, else one cheap turn ("quote the line that
-     starts with You are in Perch").
-2. **Token reaches the agent's shell.** A stub script `perch` on PATH that prints
-   `PERCH_SESSION` and whether `PERCH_TOKEN` is set (never its value). One cheap turn per
-   provider: "run `perch whoami` and paste the output". Watch for Codex
-   `shell_environment_policy`/sandbox and Claude 2.1.310+ subprocess env scrubbing of
-   names ending in `_TOKEN`/`_KEY` (Orca works around it with neutral aliases,
-   `shared/agent-hook-listener/transport/agent-hook-scrub-safe-env.ts`). If scrubbed,
-   pick a neutral name such as `PERCH_SESSION_AUTH`.
-3. **Queues.** Pi/OMP: send through the bridge while a turn runs and record follow-up
-   behaviour. Codex: `turn/start` while busy (expect refusal → deliver at idle only).
+Table in the [evidence file](evidence/claude-projects-subsessions-2026-11-06.md). Nothing
+contradicted the plan. What later slices must use: Claude `--append-system-prompt-file`
+works (and Claude pins its own prompt on resume, `--system-prompt-snapshot`); Pi and OMP
+take a file; Codex takes `-c developer_instructions=<text>` on the app-server; every
+`PERCH_*` name, `_TOKEN` included, reached the shell tool of all four; Pi/OMP follow-ups
+queue until the turn ends; **Codex does not refuse a busy `turn/start`** (it joins the
+running turn), so idle delivery is the core's check alone.
 
 ## Slice 1: Instructions injection (*own*: Orca injects nothing at launch)
 
