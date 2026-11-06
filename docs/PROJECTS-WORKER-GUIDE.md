@@ -6,6 +6,14 @@ and the decisions live in ROADMAP and [DECISIONS](DECISIONS.md) (2026-11-06); th
 says **where the code comes from, where it goes and how to prove it**. Delete a section
 when its slice lands. Research: [evidence](evidence/claude-projects-subsessions-2026-11-06.md).
 
+**Status of the references.** Orca paths and line counts come from a read-only mapping at
+`308b5000` (MIT licence checked in that clone) and are mostly unread bodies: read each
+file in full before porting, and re-check the licence and notice at the commit you copy
+from. Items written as "verify" or "probe" (Claude `TodoWrite` input in the transcript,
+`structuredPatch`, ExitPlanMode's dialog shape, Pi subagent events, `--plugin-dir`,
+the hidden `--append-system-prompt-file`) are hypotheses until checked at the start of
+their slice.
+
 ## Rules for every slice
 
 1. **Source policy.**
@@ -36,13 +44,15 @@ when its slice lands. Research: [evidence](evidence/claude-projects-subsessions-
 
 ## Fix first (found while mapping; small, blocking)
 
-- **`native_ui/claude.rs` `read_event` drops `tool_name`.** It keeps only seven fields,
-  so `turn_state` (`tool_name == "AskUserQuestion"`) never sees it; the unit test builds
-  events by hand and passes. Keep `tool_name` and `tool_use_id`; add a test that goes
+- **Suspected: `native_ui/claude.rs` `read_event` drops `tool_name`.** It keeps only
+  seven fields, and the poll loop passes its result to `turn_state`, which tests
+  `tool_name == "AskUserQuestion"` (statically traced, not yet reproduced); the unit test
+  builds events by hand and passes. Confirm with a fixture test first. Keep `tool_name` and `tool_use_id`; add a test that goes
   through `read_event` from a written event file. Then check live whether Claude
   questions were detected only through another path.
-- **Hook version floors.** Unknown hook names can make an older Claude reject the whole
-  `--settings` file (Orca `src/main/claude/claude-hook-event-versions.ts`). Gate each
+- **Hook version floors.** Orca records that unknown hook names can make an older Claude
+  reject the whole `--settings` file (`src/main/claude/claude-hook-event-versions.ts`);
+  reproduce once with an old CLI or treat it as Orca's claim. Gate each
   event in `EVENTS` on the detected CLI version; port that table (MIT).
 
 ## Step 0 UI rows (between slices; Orca code exists)
