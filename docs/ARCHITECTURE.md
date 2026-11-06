@@ -257,7 +257,12 @@ omits its token gets nothing from any route. The `perch`
 command finds the core through `<daemon dir>/core.json` (0600, read on every call). It reaches
 the agent through a `perch` entry in the session's private shim directory that `exec`s the real
 binary by absolute path; **a packaged build must ship `perch` beside the core**, or agents get
-neither identity nor pointer.
+neither identity nor pointer. The desktop bundle does (`bundle.macOS.files` and the Linux
+`deb`/`rpm`/`appimage` `files` in `crates/perch-desktop/tauri.conf.json` copy
+`target/release/perch` next to the app executable, so build it first: the release workflow and
+`scripts/reinstall-desktop.sh` do). There is no separate headless package yet; a headless build
+has `perch` beside `perch-core` in `target/<profile>/` once `cargo build --workspace` has run, and
+any future headless archive must keep the two together (`e2e/packaged-perch.check.mjs`).
 
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;

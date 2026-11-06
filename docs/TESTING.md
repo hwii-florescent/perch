@@ -220,6 +220,17 @@ target/debug/perch cleanup                  # confirms the exact preview
 `-p perchd --bin perch` too): a core with no `perch` beside it gives agents no identity and no
 pointer, by design.
 
+**Packaged `perch`** (`e2e/packaged-perch.check.mjs`, zero tokens, no browser): after
+`cargo build --release -p perchd --bin perch && cargo build -p perch-core` and a local bundle
+(`cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build --bundles app`), run
+`node --experimental-strip-types e2e/packaged-perch.check.mjs [perch.app|dir]`. It requires an
+executable `perch` beside the package's own executable, checks `perch whoami` and `guide` outside a
+session, then puts that `perch` next to a headless `perch-core` (the lookup the app makes beside
+its own executable), starts a terminal session under private state and requires `perch whoami`
+in it to name the session without echoing the token. The desktop app embeds its core and has no
+headless mode, so the check does not launch the app; open the built app once for a visual pass
+(`codesign --verify --deep --strict` on the bundle also passes with `perch` inside it).
+
 These commands connect only; they never start a missing daemon. Older daemons
 can be listed, but cleanup refuses without `released-cleanup.v1`. Do not restart
 the installed daemon to enable it: upgrade during a planned session shutdown.

@@ -337,13 +337,16 @@ What later slices build on (the rule and the threat model are in ARCHITECTURE):
   logs hide them. The pairing screen of a tokenless local browser says "open Settings → Devices"
   (a headless dev core has no such window); the printed `local-login` link is the way in.
 
-## Slice 3b: ship `perch` in packages (owner, 2026-11-06)
+## Slice 3b landed (2026-11-06): `perch` ships in the desktop bundle
 
-Bundle the `perch` binary beside the core in the desktop app bundle and the headless package
-(see `packaging/`, Tauri bundle config in `crates/perch-desktop`), so `binary_beside` finds it.
-Check: build the package locally, launch it isolated, open one agent session and confirm a
-`perch whoami` turn (or, zero-token, that the shim exists and `perch whoami` run in the session's
-environment succeeds). Document in TESTING/PUBLIC-ALPHA.
+`bundle.macOS.files` / `linux.{deb,rpm,appimage}.files` in `crates/perch-desktop/tauri.conf.json`
+place `target/release/perch` beside the app executable, where `binary_beside` looks; the release
+workflow and `scripts/reinstall-desktop.sh` build it before bundling. The check is
+`e2e/packaged-perch.check.mjs` (TESTING): packaged `perch` found, runs outside a session, and
+answers `perch whoami` inside a session of a core it sits beside. **Not done:** no headless package
+exists in the repo (the release job ships only the desktop installers and the static `perchd`), so
+there was nothing to put it in; the Linux bundles were not built here; the app itself was not
+launched (it has no headless mode).
 
 ## Row 10b: live model/effort/mode pickers (owner yes, 2026-11-06)
 

@@ -464,9 +464,11 @@ UI rows from step 0 continue between slices.
    token as a header (SSH hosts read the remote `core.json`). Limit, written in ARCHITECTURE:
    not a boundary against a same-user process that reads the user's files or another
    process's environment (needs an OS sandbox); a federated desktop-app core is unreachable
-   over SSH. **3b. Packaging follow-up (next):** desktop and headless packages must ship `perch`
-   beside the core, or agents get no identity and no pointer. Slice 4 makes `perch list` the
-   caller's run (decided); the daemon list becomes `perch daemon list`.
+   over SSH. **3b. Done 2026-11-06 — `perch` ships in the desktop bundle** (macOS and the Linux
+   deb/rpm/AppImage `files` in `tauri.conf.json`; release workflow and `reinstall-desktop.sh`
+   build it first; `e2e/packaged-perch.check.mjs`). Not done: there is no headless package to
+   put it in (open question for the owner), and the Linux packages were not built here. Slice 4
+   makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
 4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
    person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
    duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed
