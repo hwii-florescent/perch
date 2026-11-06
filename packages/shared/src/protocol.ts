@@ -181,6 +181,8 @@ export interface NativeUiSnapshot {
   context?: NativeUiContext;
   messages: NativeUiMessage[];
   truncated: boolean;
+  /** Older messages than `messages` hold can be loaded (`agent.ui.older`). Absent from older cores. */
+  canLoadOlder?: boolean;
   /** Absent from older cores. */
   transcript?: NativeUiTranscript;
 }
@@ -234,6 +236,20 @@ export interface AgentUiDraftMessage {
   requestId: string;
   sessionId: string;
   providerId: string;
+}
+/** Read one page further back; the longer snapshot follows as usual and `agent.ui.older.result` says what happened. */
+export interface AgentUiOlderMessage {
+  type: "agent.ui.older";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+}
+export interface AgentUiOlderResultMessage {
+  type: "agent.ui.older.result";
+  requestId: string;
+  sessionId: string;
+  /** `applied`: more is loaded. `exhausted`: nothing older, or Perch will not load more. `unchanged`: the read added nothing. `failed`: it did not finish. */
+  outcome: "applied" | "exhausted" | "unchanged" | "failed";
 }
 export interface AgentUiDraftedMessage {
   type: "agent.ui.drafted";
@@ -2063,6 +2079,7 @@ export type ClientMessage =
   | AgentUiGetMessage
   | AgentUiFindMessage
   | AgentUiDraftMessage
+  | AgentUiOlderMessage
   | AgentUiPromptMessage
   | AgentUiAnswerMessage
   | AgentUiCancelMessage
@@ -2833,6 +2850,7 @@ export type ServerMessage =
   | AgentUiResultMessage
   | AgentUiFoundMessage
   | AgentUiDraftedMessage
+  | AgentUiOlderResultMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

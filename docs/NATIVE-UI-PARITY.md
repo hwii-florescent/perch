@@ -76,7 +76,7 @@ live e2e, update this file, commit.
 4. **Host-answered commands.** `/context` answer and "Ran /x" markers interleaved in the
    transcript (read `native-chat-command-envelope.ts`, `use-native-chat-local-command-answer.ts`
    fully; slice 2 only did the send).
-5. Older-history paging (bridge caps 129 messages), remote-host attachments, OMP tool
+5. Older-history paging for Codex, Pi, OMP and OpenCode (Claude's is done), remote-host attachments, OMP tool
    approvals and plan review, restore open chats after restart, rewind.
 6. Then ROADMAP steps: SubagentStart/Stop hooks (also feeds the task strip and subagent rows),
    Projects, sub-sessions.
@@ -92,7 +92,7 @@ Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect a
 
 | Area | Orca source | Perch |
 | --- | --- | --- |
-| Virtualized message list, row height estimate, windowing, older-history pagination and autoload | `NativeChatMessageList.tsx`, `native-chat-row-height-estimate.ts`, `native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts` | ⬜ (bridge caps 129 messages, no paging) |
+| Virtualized message list, row height estimate, windowing, older-history pagination and autoload | `NativeChatMessageList.tsx`, `native-chat-row-height-estimate.ts`, `native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts` | 🟡 older-history paging for Claude: a snapshot that is cut off carries `canLoadOlder`, an observer on the transcript's top asks (`agent.ui.older`), the core widens that session's window by 200 messages (and its byte and file-tail budgets) up to 528 and the longer snapshot follows; a failed or empty page stops the automatic loading and offers a button; the reader's place is kept. Codex (cursor `nextCursor`), Pi, OMP and OpenCode bridges send a fixed window from the CLI's own process and keep the "Showing recent messages" note. Not ported: virtualization and row-height estimates (the list is plain DOM) |
 | Autoscroll, jump to latest, reader scroll, reveal latest | `native-chat-autoscroll.ts`, `NativeChatJumpToLatest.tsx` | 🟡 pill + follow |
 | User message fold, prompt collapse/pill | `NativeChatUserMessageFold.tsx`, `NativeChatPromptCollapse.tsx` | ⬜ |
 | Message grouping, timestamps, turn activity line, elapsed timer, working status | `native-chat-message-grouping.ts`, `NativeChatMessageTimestamp.tsx`, `NativeChatTurnActivityLine.tsx`, `NativeChatWorkingStatus.tsx` | 🟡 activity line (text from the core, no spinner); no grouping, timestamps or timer |

@@ -815,10 +815,29 @@ pub struct NativeUiSnapshot {
     pub context: Option<NativeUiContext>,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
+    /// Older messages than `messages` hold can be loaded (`agent.ui.older`): `truncated`, and the
+    /// provider's bridge can read further back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub can_load_older: bool,
     /// What the chat draws, derived from `messages` when the core sends the snapshot to a viewer
     /// (`native_ui::transcript`). Absent from bridges and from older cores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Box<crate::native_ui::transcript::NativeUiTranscript>>,
+}
+
+/// What a request for an older page came to (Orca `NativeChatOlderPageResult`, less `superseded`:
+/// one core keeps one window per session).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OlderPageOutcome {
+    /// More history is now loaded.
+    Applied,
+    /// Nothing older exists, or Perch will not load more of it.
+    Exhausted,
+    /// The read finished with no more messages than before.
+    Unchanged,
+    /// The read did not finish.
+    Failed,
 }
 
 /// Context use from the last model response. Never a cost or a quota.
@@ -1228,6 +1247,14 @@ pub enum ClientMessage {
     /// The text half-typed on the CLI's own input line, if it can be read whole (`agent.ui.drafted`).
     #[serde(rename = "agent.ui.draft", rename_all = "camelCase")]
     AgentUiDraft {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+    },
+    /// Read one page further back in the conversation; the longer snapshot follows as usual and
+    /// `agent.ui.older.result` says what happened.
+    #[serde(rename = "agent.ui.older", rename_all = "camelCase")]
+    AgentUiOlder {
         request_id: String,
         session_id: String,
         provider_id: String,
@@ -2106,6 +2133,12 @@ pub enum ServerMessage {
         /// Absent when the input line is empty or cannot be read whole.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+    #[serde(rename = "agent.ui.older.result", rename_all = "camelCase")]
+    AgentUiOlderResult {
+        request_id: String,
+        session_id: String,
+        outcome: OlderPageOutcome,
     },
     #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
     AgentUiResult {

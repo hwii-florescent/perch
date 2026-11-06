@@ -327,6 +327,49 @@ pub(super) fn draft(
     }
 }
 
+/// One page further back. The longer snapshot reaches viewers the usual way; the reply says whether
+/// the page changed anything.
+pub(super) fn older(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    let bridge = resolve(state, &session_id, &provider_id).and_then(|target| {
+        state
+            .app
+            .native_ui
+            .get(&target.bridge)
+            .ok_or_else(|| anyhow::anyhow!("Native UI is starting. Retry shortly."))
+    });
+    let bridge = match bridge {
+        Ok(bridge) => bridge,
+        Err(error) => {
+            fail(
+                &state.out_tx,
+                request_id,
+                "native_ui_unavailable",
+                error.to_string(),
+                true,
+            );
+            return;
+        }
+    };
+    let tx = state.out_tx.clone();
+    tokio::spawn(async move {
+        let outcome = bridge.load_older().await;
+        let _ = tx.send(ServerMessage::AgentUiOlderResult {
+            request_id,
+            session_id,
+            outcome,
+        });
+    });
+}
+
 pub(super) fn get(
     state: &Arc<ConnState>,
     raw: &str,

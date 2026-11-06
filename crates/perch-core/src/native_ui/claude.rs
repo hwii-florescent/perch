@@ -367,7 +367,19 @@ fn context(row: &Value) -> Option<NativeUiContext> {
 
 type History = (Vec<NativeUiMessage>, bool, Option<NativeUiContext>);
 
-fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
+/// What a snapshot of a session carries by default, and how far a person can page back (Orca
+/// `native-chat-pagination.ts`: a page is added to the window and the transcript is read again).
+/// Each 128 messages of window also allow another 192 KiB of messages and 2 MiB of file tail.
+/// ponytail: the tail is parsed again on every change to the transcript, so the window stops at
+/// 528 messages (10 MiB) rather than growing without bound; the CLI view has the rest.
+pub(super) const WINDOW: usize = 128;
+pub(super) const PAGE: usize = 200;
+pub(super) const MAX_WINDOW: usize = WINDOW + 2 * PAGE;
+
+fn transcript(path: &Path, session: &str, window: usize) -> anyhow::Result<History> {
+    let scale = window.div_ceil(WINDOW);
+    let max_tail = MAX_TAIL * scale as u64;
+    let max_bytes = 192 * 1024 * scale;
     ensure!(
         path.file_name().and_then(|name| name.to_str()) == Some(&format!("{session}.jsonl")),
         "native transcript identity mismatch"
@@ -378,10 +390,10 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
         metadata.is_file(),
         "native transcript must be a regular file"
     );
-    let offset = metadata.len().saturating_sub(MAX_TAIL);
+    let offset = metadata.len().saturating_sub(max_tail);
     file.seek(SeekFrom::Start(offset))?;
     let mut bytes = Vec::new();
-    file.take(MAX_TAIL).read_to_end(&mut bytes)?;
+    file.take(max_tail).read_to_end(&mut bytes)?;
     let mut nodes = HashMap::new();
     let mut leaf = String::new();
     for (index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
@@ -422,13 +434,13 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
         }
         for message in row.into_iter().rev() {
             size += serde_json::to_vec(&message)?.len();
-            if history.len() >= 128 || size > 192 * 1024 {
+            if history.len() >= window || size > max_bytes {
                 truncated = true;
                 break;
             }
             history.push(message);
         }
-        if truncated && (history.len() >= 128 || size > 192 * 1024) {
+        if truncated && (history.len() >= window || size > max_bytes) {
             break;
         }
         leaf = parent;
@@ -558,6 +570,7 @@ pub(super) async fn observe(
     on_snapshot: Arc<dyn Fn(NativeUiSnapshot) + Send + Sync>,
     snapshots: watch::Sender<Option<NativeUiSnapshot>>,
     mut commands: mpsc::Receiver<super::Command>,
+    window: Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let Ok(paths) = paths(key) else {
         return;
@@ -590,9 +603,10 @@ pub(super) async fn observe(
                 let Some((_, pid, start)) = events.get("SessionStart") else { continue; };
                 let Some(session) = start["session_id"].as_str().filter(|id| uuid::Uuid::parse_str(id).is_ok()) else { continue; };
                 let Some(path) = start["transcript_path"].as_str().map(Path::new) else { continue; };
-                let next_history = format!("{session}:{}", stamp(path));
+                let shown = window.load(std::sync::atomic::Ordering::Relaxed);
+                let next_history = format!("{session}:{}:{shown}", stamp(path));
                 if next_history != history_key {
-                    if let Ok(next) = transcript(path, session) { history = next; history_key = next_history; changed = true; }
+                    if let Ok(next) = transcript(path, session, shown) { history = next; history_key = next_history; changed = true; }
                     else if history_key.split(':').next() != Some(session) { history = (vec![], false, None); }
                 }
                 if !changed && pending.is_empty() && !was_blocked { continue; }
@@ -609,7 +623,7 @@ pub(super) async fn observe(
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
                 let request = if blocked { super::dialog::read(key) } else { None };
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, transcript: None };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, can_load_older: history.1 && shown < MAX_WINDOW, transcript: None };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;
@@ -875,6 +889,113 @@ mod tests {
         );
         assert_eq!(tool[0].role, "toolResult");
         assert_eq!(tool[0].text, "sentinel");
+    }
+
+    /// A transcript of `count` chained messages, written as Claude does (one JSON row each).
+    fn write_transcript(count: usize, text: &str) -> (Removed, std::path::PathBuf, String) {
+        let session = uuid::Uuid::new_v4().to_string();
+        let dir = std::env::temp_dir().join(format!("perch-claude-transcript-{session}"));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{session}.jsonl"));
+        let mut rows = String::new();
+        for n in 0..count {
+            let parent = if n == 0 {
+                Value::Null
+            } else {
+                format!("m{}", n - 1).into()
+            };
+            let (kind, role) = if n % 2 == 0 {
+                ("user", "user")
+            } else {
+                ("assistant", "assistant")
+            };
+            rows += &serde_json::json!({"type": kind, "uuid": format!("m{n}"), "parentUuid": parent, "sessionId": session,
+                "message": {"role": role, "content": format!("{text} {n}")}}).to_string();
+            rows.push('\n');
+        }
+        fs::write(&path, rows).unwrap();
+        (Removed(dir), path, session)
+    }
+
+    /// Deletes the directory when the test ends, passing or not.
+    struct Removed(std::path::PathBuf);
+    impl Drop for Removed {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_larger_window_reads_further_back_until_the_file_is_exhausted() {
+        let (_dir, path, session) = write_transcript(500, "hello");
+        let (first, truncated, _) = transcript(&path, &session, WINDOW).unwrap();
+        assert_eq!(first.len(), 128);
+        assert!(truncated);
+        assert_eq!(first.last().unwrap().text, "hello 499");
+        let (more, truncated, _) = transcript(&path, &session, WINDOW + PAGE).unwrap();
+        assert_eq!(more.len(), 328);
+        assert!(truncated);
+        // The older page is prepended: the newest messages are the same ones.
+        let ids =
+            |rows: &[NativeUiMessage]| rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&more[more.len() - 128..]), ids(&first));
+        let (all, truncated, _) = transcript(&path, &session, MAX_WINDOW).unwrap();
+        assert_eq!(all.len(), 500);
+        assert!(!truncated, "the whole file fits, so nothing older exists");
+    }
+
+    /// The whole path with no CLI: hook files and a transcript on disk, the real observer, and
+    /// the bridge's page request. No model turn is involved.
+    #[tokio::test]
+    async fn paging_through_the_real_observer_reads_further_back_and_stops_at_the_start() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (_dir, path, session) = write_transcript(300, "hello");
+        let key = AgentKey::new("native-test", uuid::Uuid::new_v4().to_string(), "claude").unwrap();
+        let paths = paths(&key).unwrap();
+        let start = event_path(&paths.extension, "SessionStart");
+        let event = serde_json::json!({"session_id": session, "transcript_path": path, "cwd": "/",
+            "hook_event_name": "SessionStart", "model": "claude-haiku-4-5"});
+        fs::write(&start, format!("{}\n{event}", std::process::id())).unwrap();
+        let alive = Arc::new(AtomicBool::new(true));
+        let registry = Arc::new(super::super::NativeUiRegistry::default());
+        let watched = alive.clone();
+        registry
+            .start(
+                key.clone(),
+                None,
+                Arc::new(move || watched.load(Ordering::Relaxed)),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+        let bridge = registry.get(&key).unwrap();
+        let first = bridge.snapshot().await.unwrap();
+        assert_eq!(first.messages.len(), 128);
+        assert!(first.truncated && first.can_load_older);
+        assert_eq!(first.messages.last().unwrap().text, "hello 299");
+        assert_eq!(
+            bridge.load_older().await,
+            crate::protocol::OlderPageOutcome::Applied
+        );
+        let all = bridge.latest().unwrap();
+        assert_eq!(all.messages.len(), 300);
+        assert!(!all.truncated && !all.can_load_older);
+        assert_eq!(all.messages.first().unwrap().text, "hello 0");
+        assert_eq!(
+            bridge.load_older().await,
+            crate::protocol::OlderPageOutcome::Exhausted
+        );
+        alive.store(false, Ordering::Relaxed);
+        let _ = fs::remove_file(start);
+    }
+
+    #[test]
+    fn a_larger_window_also_lifts_the_byte_budget() {
+        // 1 KiB per message: 128 of them are past 192 KiB's worth only when about 190 fit.
+        let (_dir, path, session) = write_transcript(400, &"x".repeat(2048));
+        let (small, truncated, _) = transcript(&path, &session, WINDOW).unwrap();
+        assert!(truncated && small.len() < 128, "{} messages", small.len());
+        let (large, _, _) = transcript(&path, &session, WINDOW + PAGE).unwrap();
+        assert!(large.len() > small.len());
     }
 
     #[test]

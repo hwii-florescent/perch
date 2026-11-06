@@ -4,7 +4,7 @@
 use crate::{
     agent_fleet::AgentKey,
     agent_runtime::terminal_key,
-    protocol::{CommandEntry, NativeUiSnapshot},
+    protocol::{CommandEntry, NativeUiSnapshot, OlderPageOutcome},
 };
 use anyhow::{bail, ensure, Context};
 use serde::Deserialize;
@@ -81,6 +81,17 @@ fn shortened(value: &serde_json::Value, limit: usize, clipped: &mut bool) -> ser
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+/// What a page request came to, from the snapshot before it and the one after.
+fn paging_outcome(before: &NativeUiSnapshot, after: &NativeUiSnapshot) -> OlderPageOutcome {
+    if after.messages.len() > before.messages.len() {
+        OlderPageOutcome::Applied
+    } else if !after.truncated || !after.can_load_older {
+        OlderPageOutcome::Exhausted
+    } else {
+        OlderPageOutcome::Unchanged
     }
 }
 
@@ -255,8 +266,50 @@ pub struct NativeBridge {
     snapshot: watch::Receiver<Option<NativeUiSnapshot>>,
     commands: mpsc::Sender<Command>,
     slash: Arc<Mutex<Vec<CommandEntry>>>,
+    /// How many messages a Claude snapshot may hold; `load_older` raises it.
+    window: Arc<std::sync::atomic::AtomicUsize>,
+    /// One page request at a time: a second one waits and then reads the next page.
+    paging: tokio::sync::Mutex<()>,
 }
 impl NativeBridge {
+    /// Read one page further back (`agent.ui.older`). Only Claude's bridge can: the core reads its
+    /// transcript file itself, while the other providers' bridges send a fixed window. The longer
+    /// snapshot reaches viewers the usual way; this says what came of the request.
+    pub async fn load_older(&self) -> OlderPageOutcome {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _one_at_a_time = self.paging.lock().await;
+        let Some(before) = self.latest() else {
+            return OlderPageOutcome::Failed;
+        };
+        if !before.truncated || self.key.agent_id != "claude" {
+            return OlderPageOutcome::Exhausted;
+        }
+        let window = self.window.load(Relaxed);
+        if window >= claude::MAX_WINDOW {
+            return OlderPageOutcome::Exhausted;
+        }
+        self.window
+            .store((window + claude::PAGE).min(claude::MAX_WINDOW), Relaxed);
+        let mut receiver = self.snapshot.clone();
+        let wait = async {
+            loop {
+                if receiver.changed().await.is_err() {
+                    return None;
+                }
+                let after = receiver.borrow().clone()?;
+                if after.revision > before.revision
+                    && after.provider_session_id == before.provider_session_id
+                {
+                    return Some(after);
+                }
+            }
+        };
+        match tokio::time::timeout(Duration::from_secs(10), wait).await {
+            Ok(Some(after)) => paging_outcome(&before, &after),
+            _ => OlderPageOutcome::Failed,
+        }
+    }
+
     /// The slash commands the CLI reported for this session; empty until it has, and for CLIs that
     /// report none over the bridge.
     pub fn slash_commands(&self) -> Vec<CommandEntry> {
@@ -347,6 +400,7 @@ impl NativeUiRegistry {
         let (snapshot_tx, snapshot) = watch::channel(None);
         let (commands, mut commands_rx) = mpsc::channel::<Command>(16);
         let slash = Arc::new(Mutex::new(Vec::new()));
+        let window = Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW));
         bridges.insert(
             key.clone(),
             Arc::new(NativeBridge {
@@ -354,6 +408,8 @@ impl NativeUiRegistry {
                 snapshot,
                 commands,
                 slash: slash.clone(),
+                window: window.clone(),
+                paging: tokio::sync::Mutex::new(()),
             }),
         );
         let registry = Arc::downgrade(self);
@@ -370,7 +426,8 @@ impl NativeUiRegistry {
                     )
                     .await;
                 } else {
-                    claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx).await;
+                    claude::observe(&key, alive, on_snapshot, snapshot_tx, commands_rx, window)
+                        .await;
                 }
                 if let Some(registry) = registry.upgrade() {
                     registry.bridges.lock().unwrap().remove(&key);
@@ -492,6 +549,151 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::UnixListener;
+
+    fn shown(
+        revision: u64,
+        count: usize,
+        truncated: bool,
+        can_load_older: bool,
+    ) -> NativeUiSnapshot {
+        NativeUiSnapshot {
+            version: 1,
+            revision,
+            pid: 1,
+            provider_session_id: "s".into(),
+            cwd: "/".into(),
+            model: None,
+            running: false,
+            blocked: false,
+            request: None,
+            context: None,
+            messages: (0..count)
+                .map(|n| crate::protocol::NativeUiMessage {
+                    id: n.to_string(),
+                    role: "user".into(),
+                    ..Default::default()
+                })
+                .collect(),
+            truncated,
+            can_load_older,
+            transcript: None,
+        }
+    }
+
+    #[test]
+    fn a_page_is_applied_when_messages_grew_and_exhausted_when_nothing_older_is_left() {
+        let before = shown(1, 128, true, true);
+        assert_eq!(
+            paging_outcome(&before, &shown(2, 328, true, true)),
+            OlderPageOutcome::Applied
+        );
+        assert_eq!(
+            paging_outcome(&before, &shown(2, 128, false, false)),
+            OlderPageOutcome::Exhausted
+        );
+        assert_eq!(
+            paging_outcome(&before, &shown(2, 128, true, false)),
+            OlderPageOutcome::Exhausted
+        );
+        assert_eq!(
+            paging_outcome(&before, &shown(2, 128, true, true)),
+            OlderPageOutcome::Unchanged
+        );
+    }
+
+    /// A bridge whose "observer" answers a bigger window with a longer snapshot, as Claude's does.
+    fn claude_bridge(total: usize) -> (Arc<NativeBridge>, watch::Sender<Option<NativeUiSnapshot>>) {
+        let (snapshot_tx, snapshot) = watch::channel(Some(shown(
+            1,
+            claude::WINDOW.min(total),
+            total > claude::WINDOW,
+            total > claude::WINDOW,
+        )));
+        let (commands, _unused) = mpsc::channel(1);
+        let window = Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW));
+        let bridge = Arc::new(NativeBridge {
+            key: AgentKey::new("workspace", "session", "claude").unwrap(),
+            snapshot,
+            commands,
+            slash: Arc::new(Mutex::new(vec![])),
+            window: window.clone(),
+            paging: tokio::sync::Mutex::new(()),
+        });
+        let publisher = snapshot_tx.clone();
+        tokio::spawn(async move {
+            let mut seen = claude::WINDOW;
+            let mut revision = 1;
+            loop {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                let now = window.load(Ordering::Relaxed);
+                if now != seen {
+                    seen = now;
+                    revision += 1;
+                    let count = now.min(total);
+                    publisher.send_replace(Some(shown(
+                        revision,
+                        count,
+                        count < total,
+                        count < total && now < claude::MAX_WINDOW,
+                    )));
+                }
+            }
+        });
+        (bridge, snapshot_tx)
+    }
+
+    #[tokio::test]
+    async fn pages_load_one_at_a_time_until_there_is_nothing_older() {
+        let (bridge, _keep) = claude_bridge(500);
+        let (first, second) = tokio::join!(bridge.load_older(), bridge.load_older());
+        // Two requests at once are two pages, not one page twice.
+        assert_eq!(first, OlderPageOutcome::Applied);
+        assert_eq!(second, OlderPageOutcome::Applied);
+        assert_eq!(bridge.latest().unwrap().messages.len(), 500);
+        assert!(!bridge.latest().unwrap().truncated);
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Exhausted);
+    }
+
+    #[tokio::test]
+    async fn paging_stops_at_the_window_ceiling_and_other_providers_do_not_page() {
+        let (bridge, _keep) = claude_bridge(5_000);
+        for _ in 0..2 {
+            assert_eq!(bridge.load_older().await, OlderPageOutcome::Applied);
+        }
+        assert_eq!(bridge.latest().unwrap().messages.len(), claude::MAX_WINDOW);
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Exhausted);
+        let (other, _keep) = claude_bridge(5_000);
+        let pi = NativeBridge {
+            key: AgentKey::new("workspace", "session", "pi").unwrap(),
+            snapshot: other.snapshot.clone(),
+            commands: other.commands.clone(),
+            slash: other.slash.clone(),
+            window: other.window.clone(),
+            paging: tokio::sync::Mutex::new(()),
+        };
+        assert_eq!(pi.load_older().await, OlderPageOutcome::Exhausted);
+        assert_eq!(
+            pi.window.load(Ordering::Relaxed),
+            claude::WINDOW,
+            "no window was raised"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bridge_that_went_away_fails_the_page() {
+        let (snapshot_tx, snapshot) = watch::channel(Some(shown(1, 128, true, true)));
+        let (commands, _unused) = mpsc::channel(1);
+        let bridge = NativeBridge {
+            key: AgentKey::new("workspace", "session", "claude").unwrap(),
+            snapshot,
+            commands,
+            slash: Arc::new(Mutex::new(vec![])),
+            window: Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW)),
+            paging: tokio::sync::Mutex::new(()),
+        };
+        drop(snapshot_tx);
+        assert_eq!(bridge.load_older().await, OlderPageOutcome::Failed);
+    }
 
     #[test]
     fn prepare_preserves_live_codex_session_even_with_pid_sidecar() {

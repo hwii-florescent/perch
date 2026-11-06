@@ -1224,6 +1224,7 @@ impl HubManager {
             | ServerMessage::AgentUiResult { ref request_id, .. }
             | ServerMessage::AgentUiFound { ref request_id, .. }
             | ServerMessage::AgentUiDrafted { ref request_id, .. }
+            | ServerMessage::AgentUiOlderResult { ref request_id, .. }
             | ServerMessage::TerminalOpened { ref request_id, .. }
             | ServerMessage::TerminalListResult { ref request_id, .. }
             | ServerMessage::TerminalClosed { ref request_id, .. }

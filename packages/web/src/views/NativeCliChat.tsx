@@ -21,6 +21,8 @@ import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
 import { TurnDiffRollup } from "./nativeChat/TurnDiffRollup";
+import { OlderHistoryRow } from "./nativeChat/OlderHistoryRow";
+import { useOlderHistory } from "./nativeChat/useOlderHistory";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
@@ -285,6 +287,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const waiting = snapshot?.blocked === true;
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
   const blocks = useMemo(() => blocksOf(snapshot), [snapshot]);
+  const older = useOlderHistory({ sessionId, providerId, available: !!snapshot?.canLoadOlder, list, revision: snapshot?.revision });
   const messages = useMemo(() => new Map((snapshot?.messages ?? []).map((message) => [message.id, message])), [snapshot?.messages]);
   // Each rollup is drawn after its turn's last block; a turn's cards are the run steps' own.
   const rollups = useMemo(() => {
@@ -320,7 +323,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <MessageRail prompts={prompts} onJump={jump} />
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         <div className={cn(CHAT_COLUMN, "gap-3")}>
-        {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
+        {snapshot?.canLoadOlder ? <OlderHistoryRow older={older} />
+          : snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block) => {
           const row = block.kind === "run" ? <RunRow key={block.id} run={block} find={mark(block.id)} />

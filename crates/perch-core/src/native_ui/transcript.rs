@@ -1006,6 +1006,7 @@ mod tests {
             context: None,
             messages,
             truncated: false,
+            can_load_older: false,
             transcript: None,
         }
     }

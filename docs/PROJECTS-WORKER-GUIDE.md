@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
 | 7 | Plan review | `shared/omp-plan-review-prompt.ts` (91, pure) → a shape in `native_ui/dialog.rs`; `main/pi/omp-plan-review-source.ts` → `pi-extension.ts` event | `NativeChatInteractiveCard.tsx` | `agent-status-omp-plan-review.test.ts` | probe Claude ExitPlanMode live: may already be a numbered dialog |
 | 8 | Interrupted row | status text from `transcript-line-decoders-claude.ts:90`, `transcript-turn-lifecycle.ts` | row only, no Continue button | `transcript-interruption-message.test.ts` | transcript |
 | 9 | Command envelope | `shared/native-chat/native-chat-command-envelope.ts` (50) → `typed.rs` | none | `native-chat-command-envelope.spec.ts` | Claude transcript `<command-name>` |
@@ -106,6 +105,18 @@ step id, so card rows are not sent twice), `nativeChat/TurnDiffRollup.tsx`. Git'
 changed-files card (`useLastTurnChanges`) stays the truth for the newest settled turn and
 replaces the rollup there; the rollup serves older turns and workspaces without Git. Not
 ported: Orca's reveal target (scroll to the card), subagent sections.
+
+Row 6 (older-history paging) landed 2026-11-06 for **Claude only**: `NativeBridge::load_older`
+raises a per-session window (`claude::WINDOW` 128 messages, `PAGE` 200, `MAX_WINDOW` 528; each
+128 also allows another 192 KiB and 2 MiB of file tail), `agent.ui.older` and
+`agent.ui.older.result` (`applied`/`exhausted`/`unchanged`/`failed`, Orca's names less
+`superseded`), `NativeUiSnapshot.can_load_older`, `nativeChat/useOlderHistory.ts` and
+`OlderHistoryRow.tsx`. Checked in-process with the real observer on hook files and a 300-row
+transcript, and with browser unit tests; **no live paid run** (a real transcript past 128
+messages needs about 65 turns or writing into `~/.claude`). Open: the window ceiling exists
+because the tail is parsed again on every transcript change (an incremental reader would lift
+it); Codex can page with `thread/turns/list` and its cursor; Pi, OMP and OpenCode would need
+a window command in their extension or plugin.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background

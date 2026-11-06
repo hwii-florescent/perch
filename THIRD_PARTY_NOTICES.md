@@ -82,6 +82,9 @@ Each module's `//!` header names the files it follows:
 - `packages/web/src/views/nativeChat/DiffCard.tsx`, `editRows.ts`: layout and copy text of
   `NativeChatDiffCard.tsx` and `native-chat-edit-cards.ts` (`nativeChatEditFilePatchText`);
   `TurnDiffRollup.tsx`: `NativeChatTurnDiffRollup.tsx`.
+- `packages/web/src/views/nativeChat/useOlderHistory.ts`, `OlderHistoryRow.tsx`:
+  `use-native-chat-older-history-autoload.ts`, `NativeChatOlderHistoryRow.tsx`; the page
+  and outcome names in `native_ui/mod.rs` and `protocol.rs` follow `native-chat-pagination.ts`.
 
 ## PDF.js
 
