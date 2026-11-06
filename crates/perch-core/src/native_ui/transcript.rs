@@ -36,6 +36,10 @@ pub struct NativeUiTranscript {
     /// without a landed edit has none. Each is drawn after the block named in `after`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turn_diffs: Vec<super::turn_diffs::NativeUiTurnDiff>,
+    /// The subagents each spawning turn started, one roster per turn (`native_ui/subagents.rs`),
+    /// drawn after the block named in `after`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<super::subagents::NativeUiSubagentGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -660,6 +664,8 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
     let mut task_history = super::tasks::History::default();
     // Each landed edit call: its turn, its step and the files it changed.
     let mut landed: Vec<(String, String, Vec<super::turn_diffs::Landed>)> = vec![];
+    // Each tool call that has a provider id: (id, its turn, its step), which place a subagent's roster.
+    let mut calls: Vec<(String, String, String)> = vec![];
     // The steps of the run being built, and the categories of its calls.
     let work = |blocks: &mut Vec<NativeUiBlock>, turn: &str, step: NativeUiStep| {
         if let Some(NativeUiBlock::Run { steps, .. }) = blocks.last_mut() {
@@ -732,6 +738,13 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                         .flatten()
                     {
                         body = changes;
+                    }
+                    if let Some(id) = &tool.id {
+                        calls.push((
+                            id.clone(),
+                            turn.clone(),
+                            format!("{}:tool:{position}", message.id),
+                        ));
                     }
                     let edit = super::edits::files_from_tool_pair(
                         &tool.name,
@@ -831,13 +844,53 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
             .unwrap_or_default();
     }
     cap_edit_cards(&mut blocks);
+    let subagents = subagent_groups(snapshot, &blocks, &calls);
     let working = (running && !snapshot.blocked).then(|| working_line(snapshot, &blocks));
     NativeUiTranscript {
         blocks,
         working,
         tasks: task_history.docked(),
         turn_diffs,
+        subagents,
     }
+}
+
+/// Place each child's roster after the block that holds its spawn call.
+fn subagent_groups(
+    snapshot: &NativeUiSnapshot,
+    blocks: &[NativeUiBlock],
+    calls: &[(String, String, String)],
+) -> Vec<super::subagents::NativeUiSubagentGroup> {
+    if snapshot.subagents.is_empty() {
+        return vec![];
+    }
+    let block_of = |step: &str| {
+        blocks
+            .iter()
+            .enumerate()
+            .find_map(|(index, block)| match block {
+                NativeUiBlock::Run { id, steps, .. } if steps.iter().any(|s| s.id == step) => {
+                    Some((index, id.as_str()))
+                }
+                _ => None,
+            })
+    };
+    let sites: Vec<super::subagents::SpawnSite> = calls
+        .iter()
+        .filter_map(|(call, turn, step)| {
+            let (index, block) = block_of(step)?;
+            Some(super::subagents::SpawnSite {
+                call_id: call,
+                turn,
+                block,
+                index,
+            })
+        })
+        .collect();
+    let last = blocks.last().map(|block| match block {
+        NativeUiBlock::Message { id, .. } | NativeUiBlock::Run { id, .. } => id.as_str(),
+    });
+    super::subagents::groups(&snapshot.subagents, &sites, last)
 }
 
 /// The transcript goes out with every snapshot, so the cards of the whole history share one row
@@ -992,6 +1045,71 @@ mod tests {
             ..message(id, "toolResult")
         }
     }
+    #[test]
+    fn a_roster_is_drawn_after_the_block_holding_its_spawn_call_and_one_row_per_turn() {
+        let mut snap = snapshot(
+            vec![
+                message("u1", "user"),
+                assistant(
+                    "a1",
+                    vec![call("Agent", r#"{"description":"audit"}"#, Some("c1"))],
+                ),
+                result("r1", Some("c1"), "Async agent launched", false),
+                assistant(
+                    "a2",
+                    vec![call("Agent", r#"{"description":"review"}"#, Some("c2"))],
+                ),
+                result("r2", Some("c2"), "Async agent launched", false),
+                NativeUiMessage {
+                    text: "waiting".into(),
+                    ..message("a3", "assistant")
+                },
+            ],
+            false,
+        );
+        let child =
+            |id: &str, label: &str, state: &str, call: &str| crate::protocol::NativeUiSubagent {
+                id: id.into(),
+                label: label.into(),
+                state: state.into(),
+                tool_use_id: Some(call.into()),
+                ..Default::default()
+            };
+        snap.subagents = vec![
+            child("x", "audit", "working", "c1"),
+            child("y", "review", "completed", "c2"),
+            child("z", "lost one", "working", "gone"),
+        ];
+        let transcript = project(&snap);
+        let rows = &transcript.subagents;
+        assert_eq!(rows.len(), 2);
+        // Both calls belong to the turn of u1: one row, after the block of the later call.
+        assert_eq!(rows[0].turn, "u1");
+        assert_eq!(
+            rows[0]
+                .agents
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["x", "y"]
+        );
+        let run = transcript.blocks.iter().find_map(|block| match block {
+            NativeUiBlock::Run { id, steps, .. }
+                if steps.iter().any(|step| step.id == "a2:tool:0") =>
+            {
+                Some(id.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(Some(rows[0].after.clone()), run);
+        assert_eq!(rows[0].header.headline, "Kicked off 2 subagents");
+        // The child whose spawn call is not in the history gets a row after the last block.
+        assert_eq!((rows[1].turn.as_str(), rows[1].after.as_str()), ("", "a3"));
+        assert!(project(&snapshot(vec![message("u", "user")], false))
+            .subagents
+            .is_empty());
+    }
+
     fn snapshot(messages: Vec<NativeUiMessage>, running: bool) -> NativeUiSnapshot {
         NativeUiSnapshot {
             version: 1,

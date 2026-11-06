@@ -280,6 +280,10 @@ knowledge search. Remote Birdhouses keep theirs on the owning core.
 
 ### 2. Observe native subagents and teams
 
+Done for Claude's native subagents as roster rows (2026-11-06, details in the
+[worker guide](PROJECTS-WORKER-GUIDE.md) slice 2): read from Claude's per-session `subagents/`
+files, not from hooks. Still open below: a read-only child transcript, Codex, Pi/OMP, teams.
+
 Child rows under a session, with status, description, model and a read-only
 transcript: Claude `SubagentStart`/`SubagentStop` hooks plus
 `<session>/subagents/agent-*.jsonl` and `.meta.json` (undocumented; best effort);

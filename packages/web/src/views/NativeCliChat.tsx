@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot, NativeUiTurnDiff } from "@perch/shared";
+import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot, NativeUiSubagentGroup, NativeUiTurnDiff } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
@@ -27,6 +27,7 @@ import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLin
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
 import { OptionLabels } from "./nativeChat/OptionLabels";
+import { SubagentRoster } from "./nativeChat/SubagentRoster";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
@@ -299,6 +300,12 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     for (const diff of snapshot?.transcript?.turnDiffs ?? []) after.set(diff.after, [...(after.get(diff.after) ?? []), diff]);
     return { after, card: (step: string, fileIndex: number) => steps.get(step)?.tool?.edit?.[fileIndex] };
   }, [blocks, snapshot]);
+  // A roster of subagents is drawn after the block holding its spawn call.
+  const rosters = useMemo(() => {
+    const after = new Map<string, NativeUiSubagentGroup[]>();
+    for (const group of snapshot?.transcript?.subagents ?? []) after.set(group.after, [...(after.get(group.after) ?? []), group]);
+    return after;
+  }, [snapshot]);
   const hits = useFindHits(sessionId, providerId, find, snapshot?.revision, !!snapshot?.transcript);
   const current = hits.length ? hits[((findIndex % hits.length) + hits.length) % hits.length] : undefined;
   const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
@@ -335,7 +342,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
             : messages.get(block.id) && <NativeMessage key={block.id} message={messages.get(block.id)!} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
           // Git's changed-files card speaks for the newest turn once it has settled; the rollup is for the others and for no Git.
           const diffs = rollups.after.get(block.id)?.filter((diff) => !(lastTurn && diff.turn === blocks[blocks.length - 1]?.turn));
-          return diffs?.length ? <Fragment key={block.id}>{row}{diffs.map((diff) => <TurnDiffRollup key={`${diff.turn}:rollup`} diff={diff} cards={rollups.card} />)}</Fragment> : row;
+          const groups = rosters.get(block.id);
+          return diffs?.length || groups?.length ? <Fragment key={block.id}>{row}{groups?.map((group) => <SubagentRoster key={`${group.turn}:subagents`} group={group} />)}{diffs?.map((diff) => <TurnDiffRollup key={`${diff.turn}:rollup`} diff={diff} cards={rollups.card} />)}</Fragment> : row;
         })}
         {snapshot?.transcript?.working && <div className={cn(HINT, "px-1")} aria-live="polite" data-testid="native-cli-working">{snapshot.transcript.working}</div>}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}

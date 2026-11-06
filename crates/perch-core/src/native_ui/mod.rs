@@ -29,6 +29,7 @@ pub mod edits;
 pub mod file_links;
 pub mod opencode;
 pub mod session_options;
+pub mod subagents;
 pub mod tasks;
 pub mod transcript;
 pub mod turn_diffs;

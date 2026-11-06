@@ -209,23 +209,27 @@ What later slices build on:
 
 ## Slice 2: rows sub-sessions need
 
-**Claude subagents (port Orca's feed, MIT):**
-- Add to `EVENTS`, version-gated: `SubagentStart` (2.0.43), `SubagentStop`,
-  `TeammateIdle` (2.1.33), `PostCompact` (2.1.76), `Elicitation`/`ElicitationResult`.
-  Orca list: `src/main/claude/claude-managed-hook-events.ts`.
-- `read_event` today rejects every event with `agent_id`. Route those to a child
-  roster keyed by `agent_id` instead (fields `agent_id`, `agent_type`,
-  `transcript_path`; Stop/SubagentStop `background_tasks[]`; `is_interrupt`). Orca:
-  `shared/agent-hook-listener/providers/claude-lifecycle-events.ts`, `claude-events.ts`,
-  `claude-subagent-roster.ts`.
-- Child transcript `<parent stem>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json`
-  (`description`, `agentType`); Orca `ai-vault/scanners/claude/session-scanner-claude-subagents.ts`.
-  Read-only, best effort, undocumented format.
-- Rows: Orca `shared/native-chat/transcript/native-chat-subagent-{items,summary,group-header}.ts`
-  and `renderer/.../native-chat-subagent-{sections,section-slots,live-frontier}.ts` →
-  `native_ui/subagents.rs`; component `NativeChatSubagentRun.tsx`. Tests:
-  `native-chat-subagent-items.test.ts`, `-summary.test.ts`,
-  `native-chat-subagent-sections.test.ts`.
+**Claude subagents: landed 2026-11-06 (roster rows).** `native_ui/subagents.rs` (Orca's state
+vocabulary and precedence, header words, elapsed-clock anchor and sibling ordinals, with the cases
+of `native-chat-subagent-{summary,items}.test.ts` that do not need Orca's journal rows),
+`claude.rs` `subagent_roster` (reads `<session>/subagents/agent-<id>.meta.json` and `.jsonl`),
+`NativeUiSnapshot.subagents` (raw) and `NativeUiTranscript.subagents` (one roster per spawning turn,
+`after` the block holding the spawn call, matched by the meta file's `toolUseId`),
+`nativeChat/SubagentRoster.tsx`. **Probed live (2.1.319, haiku):** an `Agent` call runs the child in
+the background ("Backgrounded agent"); hooks `SubagentStart` (`agent_id`, `agent_type`) and
+`SubagentStop` (plus `agent_transcript_path`, `last_assistant_message`, `background_tasks[]`) fire;
+the meta file holds `agentType`, `description`, `toolUseId`, `finished`, `pickedEffortModel`.
+**Deviation from the plan above:** the roster is read from those files, not from the hooks: Perch's
+hook files keep only the latest event per name, so concurrent children would overwrite each other,
+and the meta file carries Claude's own `finished` mark. So `SubagentStart/Stop` were not added to
+`EVENTS`, and `read_event` still drops events carrying `agent_id`. A child is `completed` only when
+`finished` and its last reply ended its turn (`end_turn`), `unverifiable` when finished without that,
+or when unfinished and its files have been still for 10 minutes; Claude writes `finished` before the
+child's last rows, so the roster is re-read as the child's transcript grows (found by the live run),
+and its tail window is 1 MiB because a child's rows can be 85 KB. There is no `failed`/`stopped`
+state: nothing in those files says it. Not done: per-child transcript view, token totals, a live
+elapsed clock (a settled run shows its length), nested helpers, `TeammateIdle`/`PostCompact`/
+`Elicitation` events, agent teams, the background-task strip.
 
 **Codex:** keep `primary()`; add a child roster from threads with `parentThreadId`;
 names from the rollout's `session_meta.source.subagent.thread_spawn`

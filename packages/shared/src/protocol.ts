@@ -99,6 +99,33 @@ export interface NativeUiTranscript {
   tasks?: NativeUiTaskList;
   /** What each turn's landed edits changed, once per file; drawn after the block named in `after`. */
   turnDiffs?: NativeUiTurnDiff[];
+  /** The subagents each spawning turn started, one roster per turn, drawn after the block named in `after`. */
+  subagents?: NativeUiSubagentGroup[];
+}
+/** One spawning turn's roster (`native_ui/subagents.rs`). */
+export interface NativeUiSubagentGroup {
+  /** The user message that opened the spawning turn; empty when its spawn call is not in the loaded history. */
+  turn: string;
+  /** The block this is drawn after. */
+  after: string;
+  working: boolean;
+  /** "Kicked off 2 subagents" while any child works, else "Ran 2 subagents". */
+  headline: string;
+  verdictState: string;
+  verdict: string;
+  /** An adverse outcome already recorded while siblings still work. */
+  alertState?: string;
+  alert?: string;
+  /** How long the settled group ran. */
+  durationMs?: number;
+  agents: NativeUiSubagentRow[];
+}
+export interface NativeUiSubagentRow {
+  id: string;
+  label: string;
+  state: string;
+  stateLabel: string;
+  agentType?: string;
 }
 export interface NativeUiTurnDiff {
   /** The user message that opened the turn. */
@@ -191,6 +218,20 @@ export interface NativeUiSnapshot {
   transcript?: NativeUiTranscript;
   /** The model, effort and mode worded for the toolbar, read-only. Absent from older cores. */
   options?: NativeUiOptions;
+  /** The subagents the session started (raw; the transcript groups and words them). Claude only. */
+  subagents?: NativeUiSubagent[];
+}
+
+export interface NativeUiSubagent {
+  id: string;
+  label: string;
+  agentType?: string;
+  /** The lead's spawn call, which places the row in the transcript. */
+  toolUseId?: string;
+  /** `working`, `completed` or `unverifiable`. */
+  state: string;
+  startedAt?: number;
+  settledAt?: number;
 }
 
 /** Display text for the toolbar (`native_ui/session_options.rs`); never an instruction to change anything. */

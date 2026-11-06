@@ -308,6 +308,18 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await run.locator(":scope > summary").click();
       await expect(run).toContainText("Added Read the notes");
     });
+    // 5c. A native subagent: Claude records it beside the session, and the chat draws one roster row for the turn
+    // that started it, settling from "Kicked off" to "Ran 1 subagent, completed".
+    if (provider === "claude") await check("subagent roster", async () => {
+      await box.fill('Use the Agent tool exactly once to start a subagent with the description "count words" whose prompt is: reply with only the number 3. Then reply with only the number it returned.');
+      await sendAndWait();
+      const roster = ui.getByTestId("native-cli-subagents").last();
+      await expect(roster).toBeVisible({ timeout: 30_000 });
+      await expect(roster.getByTestId("native-cli-subagents-verdict")).toHaveText(/^completed/, { timeout: 90_000 });
+      await expect(roster).toContainText("Ran 1 subagent");
+      await roster.getByRole("button").click();
+      await expect(roster.getByTestId("native-cli-subagent")).toContainText("count words");
+    });
     // 6. After real turns the provider has reported how full the context is (OpenCode has no source).
     await check("context ring", async () => {
       const ring = ui.getByTestId("native-cli-context");

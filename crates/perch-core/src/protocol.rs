@@ -835,6 +835,32 @@ pub struct NativeUiSnapshot {
     /// when the core sends the snapshot to a viewer. Absent from bridges and from older cores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<NativeUiOptions>,
+    /// The subagents the session started, as the provider's own files report them (Claude:
+    /// `<session>/subagents/*.meta.json`). Raw; the transcript groups and words them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<NativeUiSubagent>,
+}
+
+/// One subagent a lead session started.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiSubagent {
+    /// The provider's id for the child.
+    pub id: String,
+    /// What the lead called it: its description, else its type.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// The id of the lead's spawn call, which places the row in the transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    /// `working`, `completed` or `unverifiable`; anything else reads as `unverifiable`.
+    pub state: String,
+    /// Milliseconds since the epoch, from the child's own transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<i64>,
 }
 
 /// What the toolbar says about a session's options; display text, never an instruction to change
