@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { NativeUiBlock } from "@perch/shared";
 import { WORKED_FOR } from "../../components/ui/chat";
 import { cn } from "../../lib/cn";
+import { DiffCard } from "./DiffCard";
 
 export type FindMark = "hit" | "current";
 export const FIND_MARK = { none: "", hit: "bg-accent/10", current: "outline outline-2 outline-accent" };
@@ -15,11 +16,14 @@ export const RunRow = memo(function RunRow({ run, find }: { run: Run; find?: Fin
   return <details className={cn("message__worked-for", WORKED_FOR, FIND_MARK[find ?? "none"])} open={live || find === "current" || undefined} data-testid="native-cli-run" data-native-run={steps.length} data-native-turn={run.turn} data-block-id={id}>
     <summary>{summary}{failed > 0 && <span className="text-red" data-testid="native-cli-run-failed">· {failed} failed</span>}</summary>
     <div className="ml-[0.55rem] flex flex-col">
-      {steps.map((step) => <details key={step.id} className={cn("message__worked-for", WORKED_FOR)} data-native-step={step.tool?.state ?? step.kind}>
-        <summary className={step.tool?.state === "failed" ? "text-red" : undefined}>{step.label}</summary>
-        {step.body && <pre>{step.body}</pre>}
-        {step.tool?.output && <pre data-testid="native-cli-tool-output">{step.tool.output}</pre>}
-      </details>)}
+      {steps.map((step) => step.tool?.edit
+        // A landed edit is its file card, which opens by itself.
+        ? <div key={step.id} data-native-step={step.tool.state}>{step.tool.edit.map((file, index) => <DiffCard key={`${file.path}:${index}`} file={file} />)}</div>
+        : <details key={step.id} className={cn("message__worked-for", WORKED_FOR)} data-native-step={step.tool?.state ?? step.kind}>
+          <summary className={step.tool?.state === "failed" ? "text-red" : undefined}>{step.label}</summary>
+          {step.body && <pre>{step.body}</pre>}
+          {step.tool?.output && <pre data-testid="native-cli-tool-output">{step.tool.output}</pre>}
+        </details>)}
     </div>
   </details>;
 }, (before, after) => before.find === after.find && JSON.stringify(before.run) === JSON.stringify(after.run));

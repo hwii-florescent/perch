@@ -74,6 +74,20 @@ export interface NativeUiMessage {
   toolCallId?: string;
   /** On a `toolResult`: the tool reported failure. */
   isError?: boolean;
+  /** On a `toolResult` of a file edit: the provider's resolved hunks (Claude's `structuredPatch`). */
+  editPatch?: NativeUiEditPatch;
+}
+export interface NativeUiEditPatch {
+  filePath?: string;
+  hunks: NativeUiEditHunk[];
+}
+/** One unified-diff hunk; `lines` keep their leading `+`, `-` or space. */
+export interface NativeUiEditHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
 }
 
 /** What the chat draws, derived in Rust from `NativeUiSnapshot.messages` (`native_ui/transcript.rs`). */
@@ -103,7 +117,32 @@ export interface NativeUiStep {
   kind: "thinking" | "tool" | "result";
   label: string;
   body: string;
-  tool?: { category: string; state: "running" | "completed" | "failed" | "unfinished"; output?: string };
+  tool?: {
+    category: string;
+    state: "running" | "completed" | "failed" | "unfinished";
+    output?: string;
+    /** What a landed file edit changed, one card per file (`native_ui/edits.rs`). */
+    edit?: NativeUiEditFile[];
+  };
+}
+export interface NativeUiEditFile {
+  path: string;
+  /** Set only when the change moved the file. */
+  oldPath?: string;
+  changeKind: "added" | "deleted" | "edited" | "renamed";
+  lines: NativeUiEditLine[];
+  added: number;
+  removed: number;
+  /** False when positions are snippet-relative: the rows then carry no numbers. */
+  lineNumbersKnown: boolean;
+  truncated?: boolean;
+}
+/** A removed row has no `newLineNumber`, an added one no `oldLineNumber`; a gap carries neither nor text. */
+export interface NativeUiEditLine {
+  kind: "context" | "add" | "del" | "gap";
+  text: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
 }
 export interface NativeUiSnapshot {
   version: number;

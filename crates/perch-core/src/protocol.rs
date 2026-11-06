@@ -767,6 +767,29 @@ pub struct NativeUiMessage {
     /// On a `toolResult`: the tool reported failure.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_error: bool,
+    /// On a `toolResult` of a file edit: the hunks the provider resolved (Claude's
+    /// `structuredPatch`), which carry true file line numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_patch: Option<NativeUiEditPatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiEditPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    pub hunks: Vec<NativeUiEditHunk>,
+}
+
+/// One unified-diff hunk; `lines` keep their leading `+`, `-` or space.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiEditHunk {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    pub lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

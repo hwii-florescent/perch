@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
 | 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
 | 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
 | 7 | Plan review | `shared/omp-plan-review-prompt.ts` (91, pure) → a shape in `native_ui/dialog.rs`; `main/pi/omp-plan-review-source.ts` → `pi-extension.ts` event | `NativeChatInteractiveCard.tsx` | `agent-status-omp-plan-review.test.ts` | probe Claude ExitPlanMode live: may already be a numbered dialog |
@@ -90,6 +89,17 @@ as Perch's own, keyed by task number. `TodoWrite` input is now kept to 6 KiB (a 
 does not parse). Not done: Codex `turn/plan/updated` (the bridge does not surface it), the
 frame projection, Pi/OMP lists.
 
+Row 4 (edit cards) landed 2026-11-06: `native_ui/edits.rs` (Orca's normalizer, LCS, unified
+patch and begin_patch, with the normalize tests; Perch's own tests for LCS, the prefix/suffix
+fallback and the clipped-input flag), `NativeUiMessage.edit_patch` (Claude's
+`toolUseResult.structuredPatch`, 40 hunks of 400 lines), `NativeUiToolLine.edit`,
+`nativeChat/DiffCard.tsx`. Claude edit inputs are now kept up to 12 KiB per string (the
+generic 300) and a string still cut sets `_perchClipped`, which the card turns into
+"Diff truncated"; the history shares 4,000 card rows. Not ported: Orca's journal `Diff` tool
+and bounded-text markers. Codex's `file changes` input (the bridge sends the `changes` array
+itself) is read as `apply_patch`'s `changes`; unit-tested only. Row 5 builds on the cards
+(`EditFile`).
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.
@@ -119,6 +129,9 @@ What later slices build on:
 - **Codex has no per-thread folder flag through the shared app-server**: the TUI refuses
   `--add-dir` with `--remote` (0.166), so Codex's reference folders are listed in the
   `developer_instructions` text, like Pi's.
+- **Codex's Instructions text travels in argv** (`-c developer_instructions=<text>`), so any
+  local process can read it with `ps`. Accepted: Instructions are not secrets. Never put a
+  credential in them.
 - Not done: showing the repo's own `CLAUDE.md`/`AGENTS.md` and Claude memory beside the
   Instructions; remote Birdhouses (the dialog is local only; their core would own them).
 - Live check: `e2e/instructions.spec.ts` (in `native-composer.config.ts`), one turn per

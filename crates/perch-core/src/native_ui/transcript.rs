@@ -90,6 +90,10 @@ pub struct NativeUiToolLine {
     /// The result this call owns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// What a landed file edit changed (`native_ui/edits.rs`), one card per file. Absent for a
+    /// call that is not an edit, has not landed, or whose cards were dropped for size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<Vec<super::edits::EditFile>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -723,6 +727,18 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                     {
                         body = changes;
                     }
+                    let edit = super::edits::files_from_tool_pair(
+                        &tool.name,
+                        &tool.input,
+                        tool.state,
+                        result
+                            .map(|result| super::edits::EditResult {
+                                output: &result.text,
+                                is_error: result.is_error,
+                                edit_patch: result.edit_patch.as_ref(),
+                            })
+                            .as_ref(),
+                    );
                     work(
                         &mut blocks,
                         &turn,
@@ -735,6 +751,7 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                                 category,
                                 state,
                                 output: result.map(|result| result.text.clone()),
+                                edit,
                             }),
                         },
                     );
@@ -780,11 +797,34 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
             }
         }
     }
+    cap_edit_cards(&mut blocks);
     let working = (running && !snapshot.blocked).then(|| working_line(snapshot, &blocks));
     NativeUiTranscript {
         blocks,
         working,
         tasks: task_history.docked(),
+    }
+}
+
+/// The transcript goes out with every snapshot, so the cards of the whole history share one row
+/// budget: the newest edits keep theirs and older ones fall back to their plain row.
+const MAX_CARD_ROWS: usize = 4_000;
+
+fn cap_edit_cards(blocks: &mut [NativeUiBlock]) {
+    let mut rows = 0;
+    for block in blocks.iter_mut().rev() {
+        let NativeUiBlock::Run { steps, .. } = block else {
+            continue;
+        };
+        for tool in steps.iter_mut().rev().filter_map(|step| step.tool.as_mut()) {
+            let Some(files) = &tool.edit else {
+                continue;
+            };
+            rows += files.iter().map(|file| file.lines.len()).sum::<usize>();
+            if rows > MAX_CARD_ROWS {
+                tool.edit = None;
+            }
+        }
     }
 }
 
@@ -1177,6 +1217,66 @@ mod tests {
         let clipped = r#"{"content":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","file_path":"/repo/notes/out.md","old"#;
         let label = super::line(&call("Write", clipped, None), LineState::Completed).label;
         assert_eq!(label, "Edited out.md");
+    }
+
+    #[test]
+    fn a_landed_edit_carries_its_card_and_a_rejected_one_does_not() {
+        let edit = r#"{"file_path":"/repo/a.ts","old_string":"was","new_string":"now"}"#;
+        let mut landed = result("r1", Some("1"), "updated", false);
+        landed.edit_patch = Some(crate::protocol::NativeUiEditPatch {
+            file_path: Some("/repo/a.ts".into()),
+            hunks: vec![crate::protocol::NativeUiEditHunk {
+                old_start: 7,
+                old_lines: 1,
+                new_start: 7,
+                new_lines: 1,
+                lines: vec!["-was".into(), "+now".into()],
+            }],
+        });
+        let transcript = project(&snapshot(
+            vec![
+                assistant("a1", vec![call("Edit", edit, Some("1"))]),
+                landed,
+                assistant("a2", vec![call("Edit", edit, Some("2"))]),
+                result("r2", Some("2"), "not found", true),
+                assistant("a3", vec![call("Edit", edit, Some("3"))]),
+            ],
+            false,
+        ));
+        let (_, steps) = run(&transcript, 0);
+        let cards = |index: usize| steps[index].tool.as_ref().unwrap().edit.as_ref();
+        // The resolved hunks win over the snippet pair and carry real positions.
+        let first = &cards(0).unwrap()[0];
+        assert!(first.line_numbers_known);
+        assert_eq!(first.lines[0].old_line_number, Some(7));
+        assert_eq!((first.added, first.removed), (1, 1));
+        // A rejected call and one nobody answered keep their plain rows.
+        assert!(cards(1).is_none() && cards(2).is_none());
+        assert_eq!(steps[1].tool.as_ref().unwrap().state, LineState::Failed);
+    }
+
+    #[test]
+    fn only_the_newest_edit_cards_keep_their_rows_when_the_history_is_large() {
+        let write = |rows: usize| {
+            serde_json::json!({"file_path": "/repo/a.ts", "content": "x\n".repeat(rows)})
+                .to_string()
+        };
+        // A card holds at most MAX_EDIT_LINES rows, so three of them pass the shared budget.
+        let big = write(1_900);
+        let transcript = project(&snapshot(
+            vec![
+                assistant("a1", vec![call("Write", &big, Some("1"))]),
+                result("r1", Some("1"), "ok", false),
+                assistant("a2", vec![call("Write", &big, Some("2"))]),
+                result("r2", Some("2"), "ok", false),
+                assistant("a3", vec![call("Write", &big, Some("3"))]),
+                result("r3", Some("3"), "ok", false),
+            ],
+            false,
+        ));
+        let (_, steps) = run(&transcript, 0);
+        let kept = |index: usize| steps[index].tool.as_ref().unwrap().edit.is_some();
+        assert!(!kept(0) && kept(1) && kept(2));
     }
 
     #[test]

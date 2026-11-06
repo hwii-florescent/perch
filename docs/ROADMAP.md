@@ -268,6 +268,10 @@ flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
 | OMP | `--append-system-prompt=<file>` | `--add-dir=` |
 | Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt), passed to the shared app-server that builds each thread | none: the TUI refuses `--add-dir` with `--remote` (0.166), so list paths in the instructions |
 
+Codex's Instructions text travels in argv (`-c developer_instructions=…`), so a local `ps`
+can read it. Accepted: Instructions are shared context, not secrets (never put a credential
+in them).
+
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
 `CLAUDE.md`/`AGENTS.md` and Claude memory beside it, read-only. No hosted

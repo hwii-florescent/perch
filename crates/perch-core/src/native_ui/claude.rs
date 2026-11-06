@@ -7,7 +7,9 @@
 //! `--settings` file that names a hook event it does not know, so each event is only
 //! registered once the detected CLI version has reached its floor.
 use super::*;
-use crate::protocol::{NativeUiContext, NativeUiMessage, NativeUiTool};
+use crate::protocol::{
+    NativeUiContext, NativeUiEditHunk, NativeUiEditPatch, NativeUiMessage, NativeUiTool,
+};
 use serde_json::Value;
 use std::{
     fs,
@@ -220,6 +222,40 @@ fn text(value: &Value) -> String {
     result
 }
 
+const MAX_PATCH_HUNKS: usize = 40;
+const MAX_PATCH_HUNK_LINES: usize = 400;
+
+/// The hunks Claude resolved for a file edit (`toolUseResult.structuredPatch`), bounded as Orca
+/// bounds them (`transcript-line-decoders-claude.ts`): they carry true file line numbers, which
+/// the snippet pair in the call cannot.
+fn edit_patch(row: &Value) -> Option<NativeUiEditPatch> {
+    let result = &row["toolUseResult"];
+    let hunks: Vec<NativeUiEditHunk> = result["structuredPatch"]
+        .as_array()?
+        .iter()
+        .take(MAX_PATCH_HUNKS)
+        .filter_map(|hunk| {
+            Some(NativeUiEditHunk {
+                old_start: u32::try_from(hunk["oldStart"].as_u64()?).ok()?,
+                new_start: u32::try_from(hunk["newStart"].as_u64()?).ok()?,
+                old_lines: hunk["oldLines"].as_u64().unwrap_or(0) as u32,
+                new_lines: hunk["newLines"].as_u64().unwrap_or(0) as u32,
+                lines: hunk["lines"]
+                    .as_array()?
+                    .iter()
+                    .take(MAX_PATCH_HUNK_LINES)
+                    .filter_map(Value::as_str)
+                    .map(|line| clip(line, 2048))
+                    .collect(),
+            })
+        })
+        .collect();
+    (!hunks.is_empty()).then(|| NativeUiEditPatch {
+        file_path: result["filePath"].as_str().map(|path| clip(path, 1024)),
+        hunks,
+    })
+}
+
 fn messages(row: &Value) -> Vec<NativeUiMessage> {
     if row["isSidechain"] == true || row["isMeta"] == true {
         return vec![];
@@ -238,6 +274,9 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
     };
     let mut result = vec![];
     let mut tool_budget = 8 * 1024usize;
+    // An edit's input is the change itself, so it has its own room.
+    let mut edit_budget = 48 * 1024usize;
+    let mut edit_patch = edit_patch(row);
     if let Some(blocks) = raw["content"].as_array() {
         for (index, block) in blocks.iter().enumerate() {
             match block["type"].as_str().unwrap_or_default() {
@@ -247,10 +286,20 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                 )),
                 "tool_use" if message.tools.len() < 32 => {
                     let name = clip(block["name"].as_str().unwrap_or("Tool"), 128);
-                    // A clipped to-do list does not parse, so it gets room for a long one.
-                    let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
-                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
-                    tool_budget -= input.len();
+                    let input = if super::edits::is_edit_tool_name(&name) {
+                        let input = clip(
+                            &bounded_edit_json(&block["input"]),
+                            edit_budget.min(24 * 1024),
+                        );
+                        edit_budget -= input.len();
+                        input
+                    } else {
+                        // A clipped to-do list does not parse, so it gets room for a long one.
+                        let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
+                        let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
+                        tool_budget -= input.len();
+                        input
+                    };
                     message.tools.push(NativeUiTool {
                         name,
                         input,
@@ -265,6 +314,8 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                     error: (block["is_error"] == true).then(|| "Tool reported an error".into()),
                     tool_call_id: block["tool_use_id"].as_str().map(|id| clip(id, 256)),
                     is_error: block["is_error"] == true,
+                    // Claude puts the resolved hunks on the row, one edit per row.
+                    edit_patch: edit_patch.take(),
                     ..Default::default()
                 }),
                 "image" | "document" => message.text.push_str("\n[attachment in CLI]"),
@@ -824,6 +875,41 @@ mod tests {
         );
         assert_eq!(tool[0].role, "toolResult");
         assert_eq!(tool[0].text, "sentinel");
+    }
+
+    #[test]
+    fn an_edit_keeps_its_text_and_its_resolved_hunks_ride_on_the_result() {
+        let content = "line of the new file\n".repeat(100);
+        let call = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"Write","input":{"file_path":"/r/a.txt","content":content}}]}});
+        let tool = &messages(&call)[0].tools[0];
+        // Past the 300 characters other tools keep, and whole: nothing says it was cut.
+        let input: Value = serde_json::from_str(&tool.input).unwrap();
+        assert_eq!(input["content"].as_str().unwrap(), content);
+        assert!(input.get(crate::native_ui::edits::CLIPPED_KEY).is_none());
+        let huge = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"Write","input":{"file_path":"/r/a.txt","content":"y".repeat(20_000)}}]}});
+        let cut: Value = serde_json::from_str(&messages(&huge)[0].tools[0].input).unwrap();
+        assert_eq!(cut[crate::native_ui::edits::CLIPPED_KEY], true);
+
+        let row = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]},
+            "toolUseResult":{"filePath":"/r/a.txt","structuredPatch":[
+                {"oldStart":3,"oldLines":2,"newStart":3,"newLines":2,"lines":[" a","-b","+c"]},
+                {"oldStart":"bad","lines":[]}]}});
+        let patch = messages(&row)[0].edit_patch.clone().unwrap();
+        assert_eq!(patch.file_path.as_deref(), Some("/r/a.txt"));
+        assert_eq!(patch.hunks.len(), 1);
+        assert_eq!(patch.hunks[0].lines, [" a", "-b", "+c"]);
+        // A result with no patch (a failed edit's text), or an empty one, carries none.
+        let plain = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]},
+            "toolUseResult":"Error: nope"});
+        assert!(messages(&plain)[0].edit_patch.is_none());
+        let empty = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]},
+            "toolUseResult":{"structuredPatch":[]}});
+        assert!(messages(&empty)[0].edit_patch.is_none());
     }
 
     #[test]

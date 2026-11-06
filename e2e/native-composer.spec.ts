@@ -266,6 +266,21 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(ui.getByTestId("native-cli-find-count")).toHaveText(/^1 of \d+$/, { timeout: 10_000 });
       await ui.getByLabel("Close find").click();
     });
+    // An edit card: the file the agent edited, with its rows. Claude only: it is the provider whose call and
+    // result Perch reads as an edit in every run (Codex file changes and Pi/OMP edits get no card).
+    if (provider === "claude") await check("edit card", async () => {
+      await box.fill("Edit changed.txt so that it reads exactly: hello cards (replace the old text). Do nothing else, then reply done.");
+      await sendAndWait();
+      const run = ui.getByTestId("native-cli-run").last();
+      await run.locator(":scope > summary").click();
+      const card = run.getByTestId("native-cli-diff-card").last();
+      await expect(card).toContainText("Edited");
+      await expect(card).toContainText("changed.txt");
+      await card.getByRole("button", { expanded: false }).click();
+      const rows = card.getByTestId("native-cli-diff-rows");
+      await expect(rows).toContainText("hello perch");
+      await expect(rows).toContainText("hello cards");
+    });
     // The agent's own to-do list is docked above the composer. Claude 2.1.319 keeps it with TaskCreate and
     // TaskUpdate calls (it offers no TodoWrite); Codex's plan updates do not reach the bridge as calls.
     if (provider === "claude") await check("task list", async () => {

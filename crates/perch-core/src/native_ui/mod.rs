@@ -24,6 +24,7 @@ pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod dialog;
+pub mod edits;
 pub mod file_links;
 pub mod opencode;
 pub mod tasks;
@@ -41,23 +42,45 @@ fn clip(text: &str, limit: usize) -> String {
 /// A tool's input as JSON text with each long string shortened (a file's whole contents, a patch),
 /// so a size limit applied afterwards rarely cuts the object itself and its path stays readable.
 pub(crate) fn bounded_json(value: &serde_json::Value) -> String {
-    fn shorten(value: &serde_json::Value) -> serde_json::Value {
-        use serde_json::Value;
-        match value {
-            Value::String(text) if text.len() > 300 => {
-                Value::String(format!("{}…", clip(text, 300)))
-            }
-            Value::Array(items) => Value::Array(items.iter().map(shorten).collect()),
-            Value::Object(fields) => Value::Object(
-                fields
-                    .iter()
-                    .map(|(key, value)| (key.clone(), shorten(value)))
-                    .collect(),
-            ),
-            other => other.clone(),
-        }
+    shortened(value, 300, &mut false).to_string()
+}
+
+/// Strings of an edit tool's input kept this long, so an edit card shows what was written.
+const EDIT_STRING_LIMIT: usize = 12 * 1024;
+
+/// Like `bounded_json` for a file-edit tool, whose strings are the change itself. A string that
+/// still had to be cut sets `_perchClipped` on the input object, so a card made from it says it
+/// is truncated instead of showing a diff of half the text as if it were whole.
+pub(crate) fn bounded_edit_json(value: &serde_json::Value) -> String {
+    let mut clipped = false;
+    let mut shortened = shortened(value, EDIT_STRING_LIMIT, &mut clipped);
+    if let (true, Some(fields)) = (clipped, shortened.as_object_mut()) {
+        fields.insert(edits::CLIPPED_KEY.into(), serde_json::Value::Bool(true));
     }
-    shorten(value).to_string()
+    shortened.to_string()
+}
+
+fn shortened(value: &serde_json::Value, limit: usize, clipped: &mut bool) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(text) if text.len() > limit => {
+            *clipped = true;
+            Value::String(format!("{}…", clip(text, limit)))
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| shortened(item, limit, clipped))
+                .collect(),
+        ),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, value)| (key.clone(), shortened(value, limit, clipped)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 const MAX_FRAME: usize = 256 * 1024;
