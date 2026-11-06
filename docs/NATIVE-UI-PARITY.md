@@ -42,6 +42,39 @@ the Rust projection below when it exists.
 | Session options (model, effort, mode) applied by agent commands in the terminal | `input/native-chat-session-option*.ts`, `NativeChatSessionOption*.tsx`, `NativeChatModelCombobox.tsx` | ⬜ (decided: chosen at start, no chrome over a live session; revisit now that Orca does it through `/model` in the terminal) |
 | Rewind (eligibility, copy, host) | `native-chat-rewind-*.ts`, `NativeChatRewindAction.tsx` | ⬜ |
 
+## Where we are, and what is next
+
+Done and live-checked on Claude, Codex, Pi, OMP (OpenCode has a bridge but no catalog or e2e):
+composer menus and attachments, approvals and questions, collapsed runs, changed-files card,
+find and rail, context ring, slash catalog, built-in slash commands sent to the terminal,
+and chat for agents typed into a Terminal tab (`SHELL-AGENT-STATUS.md`, not an Orca feature).
+
+Next slices, in this order. For each: read the named Orca files first (mark ❓ rows read),
+probe the real CLIs before claiming a gap, build it in Rust with a unit test, run the relevant
+live e2e, update this file, commit.
+
+1. **Rust transcript projection.** Move `toBlocks`/`findBlocks` and the changed-files logic out
+   of `nativeChat/transcript.ts` into `crates/perch-core`; then tool pairing (call ↔ result),
+   per-tool lines and outcomes, turn membership, working line (rows under "Engine").
+2. **Composer.** Queued-message cards and Steer, prompt recall, draft persistence across reload,
+   pick up a draft typed in the terminal (replaces the "empty prompt only" refusal).
+3. **Provider notices.** Usage limit (we hit it in e2e and show nothing), retry, interrupted
+   continue.
+4. **Host-answered commands.** `/context` answer and "Ran /x" markers interleaved in the
+   transcript (read `native-chat-command-envelope.ts`, `use-native-chat-local-command-answer.ts`
+   fully; slice 2 only did the send).
+5. Older-history paging (bridge caps 129 messages), remote-host attachments, OMP tool
+   approvals and plan review, restore open chats after restart, rewind.
+6. Then ROADMAP steps: SubagentStart/Stop hooks (also feeds the task strip and subagent rows),
+   Projects, sub-sessions.
+
+Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect at e2e start
+(`data-native-pid` never set); Codex and Pi accounts hit usage limits. Test setup:
+`TESTING.md`; composer specs run with
+`cd e2e && npx playwright test -c native-composer.config.ts <spec> --workers 1`
+(`native-composer`, `native-terminal`, `native-slash-send`). Slash-menu data regenerates with
+`e2e/capture-slash-menu.py`.
+
 ## Transcript view (React, thin)
 
 | Area | Orca source | Perch |
