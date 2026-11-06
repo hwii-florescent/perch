@@ -116,6 +116,10 @@ export interface ToastEntry {
   title: string;
   /** A usage alert's full text; such a toast opens no session. */
   text?: string;
+  /** What happened; absent on older entries (treated as finished). */
+  kind?: "done" | "blocked" | "usage";
+  /** A usage alert's detail line. */
+  body?: string;
 }
 
 interface PendingTerminal {
@@ -2105,7 +2109,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         }
 
         let toasts = state.toasts;
-        const toast = { id: newId(), sessionId: msg.session.id, title: msg.session.title };
+        const toast = { id: newId(), sessionId: msg.session.id, title: msg.session.title, kind: becameBlocked ? ("blocked" as const) : ("done" as const) };
         const channel = planNotification({
           event: hasEvent,
           viewed,
@@ -2531,7 +2535,7 @@ export function handleServerMessage(msg: ServerMessage): void {
         permission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
         native: hasNativeNotifications(),
       });
-      const toast = { id: newId(), sessionId: USAGE_NOTIFICATION_ID, title: msg.title, text: msg.body ? `${msg.title} · ${msg.body}` : msg.title };
+      const toast = { id: newId(), sessionId: USAGE_NOTIFICATION_ID, title: msg.title, text: msg.body ? `${msg.title} · ${msg.body}` : msg.title, kind: "usage" as const, body: msg.body };
       if (channel === "system") {
         void sendSystemNotification(msg.title, msg.body, USAGE_NOTIFICATION_ID, () => undefined)
           .catch(() => usePerchStore.setState((current) => ({ toasts: [...current.toasts, toast] })));

@@ -44,7 +44,7 @@
 }
 
 @theme {
-  --animate-toast-in: toast-in 0.15s ease-out;
+  --animate-toast-in: toast-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-host-pulse: host-connecting-pulse 1.4s ease-in-out infinite;
   --animate-scroll-pill: scroll-pill-pulse 1s ease-in-out infinite;
   --animate-drop-zone: drop-zone-in 0.14s ease-out, drop-zone-pulse 1.2s ease-in-out 0.14s infinite;
@@ -100,7 +100,7 @@
   @keyframes toast-in {
     from {
       opacity: 0;
-      transform: translateY(0.4rem);
+      transform: translateY(-0.5rem);
     }
     to {
       opacity: 1;
