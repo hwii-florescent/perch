@@ -456,10 +456,10 @@ synthetic study (not code). Desktop only; the phone layout is unchanged.
   (toolbar) and square at the bottom (page). Other panes, and the web/iframe
   browser, are rounded on all four corners. Unverified in WKWebView.
 - **No split marker in the tab strip.** The split glyph/underline is gone; the
-  layout shows the split. A tab whose pane is on screen has a subdued fill; the
-  focused pane's tab has a stronger fill **and** heavier text; hidden tabs stay
-  plain (`tabPaneState.ts`; fills mix `--text` into `--panel-bg`, readable in
-  all 19 themes).
+  layout shows the split. Only the focused pane's tab has a fill **and** heavier
+  text; all unfocused tabs stay plain, including other panes in the visible split
+  (owner refinement, 2026-11-06). `tabPaneState.ts` mixes `--text` into
+  `--panel-bg` for the focused fill, readable in all 19 themes.
 - **Needs You moves to the status bar.** A fixed 124px slot at its right end
   (bell, "Needs You", count or unread dot); the panel opens upward. Path, branch
   and usage truncate before the slot. The top row no longer carries a bell.

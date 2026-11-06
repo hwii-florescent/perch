@@ -27,7 +27,7 @@ const FOCUS = "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[ou
 const TAB = `min-w-0 flex-1 gap-2 text-left px-3 pr-[1.6rem] text-[0.8rem] leading-[1.2] whitespace-nowrap ${FOCUS}`;
 // Small gutters inset each tab from its neighbors and the strip edge, like a browser tab bar.
 const TAB_SLOT = "relative flex min-w-[7rem] max-w-[16rem] flex-1 basis-0 items-stretch";
-// A hairline in the gap before a tab, drawn only between two tabs that are both off screen (no fill to tell them apart).
+// A hairline in the gap between two unfocused tabs (no fill to tell them apart).
 const SEPARATOR = "pointer-events-none absolute top-1/2 -left-[2px] h-4 w-px -translate-y-1/2 bg-overlay-0";
 // "square" is the shell's soft corner (--radius-pane), not a literal square.
 const TAB_SHAPE = (shape: "square" | "round") => shape === "round" ? "rounded-full" : "rounded-ui";
@@ -59,9 +59,8 @@ const closeButton = (state: TabPaneState) => cn(CLOSE, state === "focused" ? "te
  * Right-clicking a session tab opens its pane menu (split, zoom, stop agent),
  * since a single-pane layout shows no pane header.
  *
- * The strip has no split marker: the canvas shows a split, and the tabs show which
- * panes are on screen (subdued fill) and which has focus (stronger fill, heavier
- * text). See `tabPaneState.ts`.
+ * The strip has no split marker: the canvas shows a split. Only the focused
+ * pane's tab is highlighted (fill, heavier text). See `tabPaneState.ts`.
  */
 export function TabBar() {
   const sessionId = usePerchStore((s) => s.sessionId);
@@ -216,7 +215,7 @@ export function TabBar() {
   return (
     <div ref={stripRef} className="tab-bar flex min-w-0 flex-1 items-stretch gap-[3px] self-stretch overflow-x-auto px-2 py-[6px] max-[700px]:hidden" data-testid="tab-bar" data-tauri-drag-region>
       {entries.map((entry, i) => {
-        const separated = i > 0 && (paneStates.get(entry.id) ?? "hidden") === "hidden" && (paneStates.get(entries[i - 1]!.id) ?? "hidden") === "hidden";
+        const separated = i > 0 && paneStates.get(entry.id) !== "focused" && paneStates.get(entries[i - 1]!.id) !== "focused";
         return entry.kind === "resource" ? (
           <ResourceTabButton key={entry.id} tab={entry.tab} id={entry.id} state={paneStates.get(entry.id) ?? "hidden"} tabShape={tabShape}
             dragging={entry.id === draggingId} separated={separated} />

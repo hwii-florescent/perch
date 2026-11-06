@@ -4,10 +4,9 @@ import { visibleSplit, type SplitSet } from "./splitSets";
 export type TabPaneState = "focused" | "visible" | "hidden";
 
 /**
- * The state of every tab in the strip (`ids`, strip order). A split is shown by
- * the fills alone: the focused tab is the active one, the other members of its
- * visible split are `visible`, the rest `hidden`. A zoomed pane shows alone, so
- * only its tab is lit.
+ * The state of every tab in the strip (`ids`, strip order). The focused tab is
+ * the active one, the other members of its visible split are `visible`, the
+ * rest `hidden`. Only the focused tab is highlighted.
  */
 export function tabPaneStates(sets: SplitSet[], ids: readonly string[], activeId: string | null, zoomedId: string | null): Map<string, TabPaneState> {
   const states = new Map<string, TabPaneState>(ids.map((id) => [id, "hidden"]));
@@ -20,12 +19,11 @@ export function tabPaneStates(sets: SplitSet[], ids: readonly string[], activeId
   return states;
 }
 
-// Fills mix the theme's text color into panel-bg, so they stay visible in dark and
-// light themes alike (a fixed surface token can sit within 5% of panel-bg: tokyo-night-day,
-// rose-pine-dawn). The percentages keep text readable on them in all 19 themes
+// The focused fill mixes text into panel-bg to stay readable in all themes
 // (tabPaneState.test.ts). Focus is also heavier text, never color alone.
+// Unfocused split panes use the same plain tab style as hidden panes.
 export const TAB_PANE_CLASS: Record<TabPaneState, string> = {
   focused: "bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] hover:bg-[color-mix(in_srgb,var(--text)_10%,var(--panel-bg))] text-fg font-semibold",
-  visible: "bg-[color-mix(in_srgb,var(--text)_6%,var(--panel-bg))] hover:bg-[color-mix(in_srgb,var(--text)_6%,var(--panel-bg))] text-subtext-0 hover:text-fg",
+  visible: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
   hidden: "bg-transparent text-subtext-0 hover:bg-surface-0 hover:text-fg",
 };

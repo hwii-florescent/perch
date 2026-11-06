@@ -42,25 +42,26 @@ const contrast = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (
 const mix = (top: string, base: string, pct: number) =>
   `#${[0, 1, 2].map((i) => Math.round((channel(top, i) * pct + channel(base, i) * (100 - pct)) / 100).toString(16).padStart(2, "0")).join("")}`;
 /** The text share of a tab state's `color-mix(in srgb, var(--text) N%, var(--panel-bg))` fill. */
-const textShare = (state: "focused" | "visible") => Number(/color-mix\(in_srgb,var\(--text\)_(\d+)%,var\(--panel-bg\)\)/.exec(TAB_PANE_CLASS[state])?.[1]);
+const textShare = (state: "focused") => Number(/color-mix\(in_srgb,var\(--text\)_(\d+)%,var\(--panel-bg\)\)/.exec(TAB_PANE_CLASS[state])?.[1]);
 
 describe("tab fills", () => {
   it("uses a heavier weight for the focused tab only", () => {
     expect(TAB_PANE_CLASS.focused).toContain("font-semibold");
     expect(TAB_PANE_CLASS.visible).not.toContain("font-");
     expect(TAB_PANE_CLASS.hidden).not.toContain("font-");
-    expect(textShare("focused")).toBeGreaterThan(textShare("visible"));
   });
 
-  it.each(THEME_NAMES)("%s: stays readable and the visible/focused steps stay perceivable", (name) => {
+  it("styles unfocused split tabs exactly like normal inactive tabs, including hover", () => {
+    expect(TAB_PANE_CLASS.visible).toBe(TAB_PANE_CLASS.hidden);
+    expect(TAB_PANE_CLASS.visible).toContain("bg-transparent");
+  });
+
+  it.each(THEME_NAMES)("%s: stays readable and the focused fill stays perceivable", (name) => {
     const p = resolveTheme(name);
-    const visible = mix(p.text, p.panelBg, textShare("visible"));
     const focused = mix(p.text, p.panelBg, textShare("focused"));
-    expect(contrast(p.subtext0, visible)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(p.subtext0, p.panelBg)).toBeGreaterThanOrEqual(4.5);
     expect(contrast(p.text, focused)).toBeGreaterThanOrEqual(4.5);
-    // Luminance ratios of fill against the shell; the weight change adds to the focus cue.
-    expect(contrast(visible, p.panelBg)).toBeGreaterThanOrEqual(1.05);
+    // Luminance ratio of fill against the shell; the weight change adds to the focus cue.
     expect(contrast(focused, p.panelBg)).toBeGreaterThanOrEqual(1.1);
-    expect(contrast(focused, visible)).toBeGreaterThanOrEqual(1.05);
   });
 });
