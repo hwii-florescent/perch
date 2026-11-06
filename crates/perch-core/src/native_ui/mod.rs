@@ -29,6 +29,7 @@ pub mod file_links;
 pub mod opencode;
 pub mod tasks;
 pub mod transcript;
+pub mod turn_diffs;
 pub mod typed;
 
 fn clip(text: &str, limit: usize) -> String {

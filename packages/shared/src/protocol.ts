@@ -97,6 +97,26 @@ export interface NativeUiTranscript {
   working?: string;
   /** The agent's own to-do list as of its latest plan call, docked above the composer; absent without one. */
   tasks?: NativeUiTaskList;
+  /** What each turn's landed edits changed, once per file; drawn after the block named in `after`. */
+  turnDiffs?: NativeUiTurnDiff[];
+}
+export interface NativeUiTurnDiff {
+  /** The user message that opened the turn. */
+  turn: string;
+  /** The block this is drawn after: the last one of the turn. */
+  after: string;
+  files: NativeUiTurnDiffFile[];
+  added: number;
+  removed: number;
+  truncated?: boolean;
+}
+export interface NativeUiTurnDiffFile {
+  path: string;
+  added: number;
+  removed: number;
+  truncated?: boolean;
+  /** In the order the edits ran: the step that holds each card, and which of its cards. */
+  edits: { step: string; fileIndex: number }[];
 }
 export interface NativeUiTaskList {
   tasks: NativeUiTask[];

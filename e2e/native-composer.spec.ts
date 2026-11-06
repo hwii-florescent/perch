@@ -280,6 +280,13 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       const rows = card.getByTestId("native-cli-diff-rows");
       await expect(rows).toContainText("hello perch");
       await expect(rows).toContainText("hello cards");
+      // The turn that created the file keeps a rollup from its own edit calls; the newest turn has Git's card instead.
+      const rollup = ui.getByTestId("native-cli-turn-rollup");
+      await expect(rollup).toHaveCount(1);
+      await expect(rollup).toContainText("1 changed file");
+      await expect(rollup).toContainText("+1");
+      await rollup.getByRole("button", { name: /changed\.txt/ }).click();
+      await expect(rollup.getByTestId("native-cli-diff-card")).toContainText("Added");
     });
     // The agent's own to-do list is docked above the composer. Claude 2.1.319 keeps it with TaskCreate and
     // TaskUpdate calls (it offers no TodoWrite); Codex's plan updates do not reach the bridge as calls.

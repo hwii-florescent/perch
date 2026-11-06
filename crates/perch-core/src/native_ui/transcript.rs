@@ -32,6 +32,10 @@ pub struct NativeUiTranscript {
     /// the composer; absent when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tasks: Option<super::tasks::TaskList>,
+    /// What each turn's landed edits changed, once per file (`native_ui/turn_diffs.rs`); a turn
+    /// without a landed edit has none. Each is drawn after the block named in `after`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turn_diffs: Vec<super::turn_diffs::NativeUiTurnDiff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -654,6 +658,8 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
     let mut blocks: Vec<NativeUiBlock> = vec![];
     let mut turn = String::new();
     let mut task_history = super::tasks::History::default();
+    // Each landed edit call: its turn, its step and the files it changed.
+    let mut landed: Vec<(String, String, Vec<super::turn_diffs::Landed>)> = vec![];
     // The steps of the run being built, and the categories of its calls.
     let work = |blocks: &mut Vec<NativeUiBlock>, turn: &str, step: NativeUiStep| {
         if let Some(NativeUiBlock::Run { steps, .. }) = blocks.last_mut() {
@@ -739,6 +745,13 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                             })
                             .as_ref(),
                     );
+                    if let Some(files) = &edit {
+                        landed.push((
+                            turn.clone(),
+                            format!("{}:tool:{position}", message.id),
+                            files.iter().map(Into::into).collect(),
+                        ));
+                    }
                     work(
                         &mut blocks,
                         &turn,
@@ -797,12 +810,33 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
             }
         }
     }
+    // Counted from the cards before the size cap takes any away.
+    let mut turn_diffs = super::turn_diffs::rollups(
+        landed
+            .iter()
+            .map(|(turn, step, files)| (turn.as_str(), step.as_str(), files.as_slice())),
+    );
+    for diff in &mut turn_diffs {
+        diff.after = blocks
+            .iter()
+            .rev()
+            .find_map(|block| match block {
+                NativeUiBlock::Message { id, turn, .. } | NativeUiBlock::Run { id, turn, .. }
+                    if *turn == diff.turn =>
+                {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+    }
     cap_edit_cards(&mut blocks);
     let working = (running && !snapshot.blocked).then(|| working_line(snapshot, &blocks));
     NativeUiTranscript {
         blocks,
         working,
         tasks: task_history.docked(),
+        turn_diffs,
     }
 }
 
@@ -1253,6 +1287,50 @@ mod tests {
         // A rejected call and one nobody answered keep their plain rows.
         assert!(cards(1).is_none() && cards(2).is_none());
         assert_eq!(steps[1].tool.as_ref().unwrap().state, LineState::Failed);
+    }
+
+    #[test]
+    fn each_turn_rolls_up_its_landed_edits_after_its_last_block() {
+        let edit = |path: &str| {
+            format!(r#"{{"file_path":"{path}","old_string":"a","new_string":"b\nc"}}"#)
+        };
+        let mut first = message("u1", "user");
+        first.text = "fix".into();
+        let mut second = message("u2", "user");
+        second.text = "again".into();
+        let mut done = message("done", "assistant");
+        done.text = "done".into();
+        let transcript = project(&snapshot(
+            vec![
+                // Before any prompt: no known turn, so not rolled up.
+                assistant("x", vec![call("Edit", &edit("/r/orphan.ts"), Some("0"))]),
+                result("r0", Some("0"), "ok", false),
+                first,
+                assistant("a1", vec![call("Edit", &edit("/r/a.ts"), Some("1"))]),
+                result("r1", Some("1"), "ok", false),
+                assistant("a2", vec![call("Edit", &edit("/r/a.ts"), Some("2"))]),
+                result("r2", Some("2"), "ok", false),
+                assistant("a3", vec![call("Edit", &edit("/r/rejected.ts"), Some("3"))]),
+                result("r3", Some("3"), "nope", true),
+                done,
+                second,
+                assistant("a4", vec![call("Edit", &edit("/r/b.ts"), Some("4"))]),
+                result("r4", Some("4"), "ok", false),
+            ],
+            false,
+        ));
+        let diffs = &transcript.turn_diffs;
+        assert_eq!(diffs.len(), 2);
+        assert_eq!(diffs[0].turn, "u1");
+        assert_eq!(diffs[0].after, "done");
+        assert_eq!(diffs[0].files.len(), 1);
+        assert_eq!(diffs[0].files[0].path, "/r/a.ts");
+        assert_eq!((diffs[0].added, diffs[0].removed), (4, 2));
+        assert_eq!(diffs[0].files[0].edits.len(), 2);
+        // A turn that ends in a run is drawn after that run.
+        assert_eq!(diffs[1].turn, "u2");
+        assert_eq!(diffs[1].after, "a4:tool:0");
+        assert!(project(&snapshot(vec![], false)).turn_diffs.is_empty());
     }
 
     #[test]

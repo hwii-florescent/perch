@@ -73,13 +73,15 @@ Each module's `//!` header names the files it follows:
   patch-files,cards}.ts`, `native-chat-unified-patch.ts`, `native-chat-begin-patch.ts`,
   `native-chat-diff.ts` (the parts they use), and `src/main/native-chat/
   transcript-line-decoders-claude.ts` (`structuredPatch`, in `native_ui/claude.rs`).
+- `native_ui/turn_diffs.rs`: `src/shared/native-chat/tools/native-chat-turn-diffs.ts`.
 - `native_ui/file_links.rs`: `src/shared/native-chat/native-chat-href-routing.ts` and
   `src/shared/file-links/{file-link-location,explicit-file-link-target,
   file-link-path-normalization,file-uri-path}.ts`.
 - `packages/web/src/views/nativeChat/CopyButton.tsx`: behaviour and labels of
   `src/renderer/src/components/native-chat/NativeChatCopyButton.tsx`.
 - `packages/web/src/views/nativeChat/DiffCard.tsx`, `editRows.ts`: layout and copy text of
-  `NativeChatDiffCard.tsx` and `native-chat-edit-cards.ts` (`nativeChatEditFilePatchText`).
+  `NativeChatDiffCard.tsx` and `native-chat-edit-cards.ts` (`nativeChatEditFilePatchText`);
+  `TurnDiffRollup.tsx`: `NativeChatTurnDiffRollup.tsx`.
 
 ## PDF.js
 

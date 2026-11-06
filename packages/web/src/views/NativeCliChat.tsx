@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot } from "@perch/shared";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot, NativeUiTurnDiff } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
@@ -20,6 +20,7 @@ import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
+import { TurnDiffRollup } from "./nativeChat/TurnDiffRollup";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
@@ -285,6 +286,13 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
   const blocks = useMemo(() => blocksOf(snapshot), [snapshot]);
   const messages = useMemo(() => new Map((snapshot?.messages ?? []).map((message) => [message.id, message])), [snapshot?.messages]);
+  // Each rollup is drawn after its turn's last block; a turn's cards are the run steps' own.
+  const rollups = useMemo(() => {
+    const steps = new Map(blocks.flatMap((block) => block.kind === "run" ? block.steps.map((step) => [step.id, step] as const) : []));
+    const after = new Map<string, NativeUiTurnDiff[]>();
+    for (const diff of snapshot?.transcript?.turnDiffs ?? []) after.set(diff.after, [...(after.get(diff.after) ?? []), diff]);
+    return { after, card: (step: string, fileIndex: number) => steps.get(step)?.tool?.edit?.[fileIndex] };
+  }, [blocks, snapshot]);
   const hits = useFindHits(sessionId, providerId, find, snapshot?.revision, !!snapshot?.transcript);
   const current = hits.length ? hits[((findIndex % hits.length) + hits.length) % hits.length] : undefined;
   const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
@@ -315,9 +323,11 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block) => {
-          if (block.kind === "run") return <RunRow key={block.id} run={block} find={mark(block.id)} />;
-          const message = messages.get(block.id);
-          return message && <NativeMessage key={block.id} message={message} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
+          const row = block.kind === "run" ? <RunRow key={block.id} run={block} find={mark(block.id)} />
+            : messages.get(block.id) && <NativeMessage key={block.id} message={messages.get(block.id)!} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
+          // Git's changed-files card speaks for the newest turn once it has settled; the rollup is for the others and for no Git.
+          const diffs = rollups.after.get(block.id)?.filter((diff) => !(lastTurn && diff.turn === blocks[blocks.length - 1]?.turn));
+          return diffs?.length ? <Fragment key={block.id}>{row}{diffs.map((diff) => <TurnDiffRollup key={`${diff.turn}:rollup`} diff={diff} cards={rollups.card} />)}</Fragment> : row;
         })}
         {snapshot?.transcript?.working && <div className={cn(HINT, "px-1")} aria-live="polite" data-testid="native-cli-working">{snapshot.transcript.working}</div>}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}

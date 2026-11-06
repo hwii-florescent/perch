@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
 | 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
 | 7 | Plan review | `shared/omp-plan-review-prompt.ts` (91, pure) → a shape in `native_ui/dialog.rs`; `main/pi/omp-plan-review-source.ts` → `pi-extension.ts` event | `NativeChatInteractiveCard.tsx` | `agent-status-omp-plan-review.test.ts` | probe Claude ExitPlanMode live: may already be a numbered dialog |
 | 8 | Interrupted row | status text from `transcript-line-decoders-claude.ts:90`, `transcript-turn-lifecycle.ts` | row only, no Continue button | `transcript-interruption-message.test.ts` | transcript |
@@ -99,6 +98,14 @@ generic 300) and a string still cut sets `_perchClipped`, which the card turns i
 and bounded-text markers. Codex's `file changes` input (the bridge sends the `changes` array
 itself) is read as `apply_patch`'s `changes`; unit-tested only. Row 5 builds on the cards
 (`EditFile`).
+
+Row 5 (per-turn diff rollup) landed 2026-11-06: `native_ui/turn_diffs.rs` (Orca's merge,
+rename folding and totals, with the cases of its test that do not need the journal `Diff`
+item), `NativeUiTranscript.turn_diffs` (each names the block it follows and its edits by
+step id, so card rows are not sent twice), `nativeChat/TurnDiffRollup.tsx`. Git's
+changed-files card (`useLastTurnChanges`) stays the truth for the newest settled turn and
+replaces the rollup there; the rollup serves older turns and workspaces without Git. Not
+ported: Orca's reveal target (scroll to the card), subagent sections.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
