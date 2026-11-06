@@ -198,6 +198,11 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         await box.press("Enter");
         await expect(box).toHaveValue(`${sigil}perchping `);
         expect(await sendAndWait()).toContain("PERCH_PING_OK");
+        // Claude records the skill as a command envelope; the transcript shows what the person typed.
+        if (provider === "claude") {
+          await expect(ui.locator('[data-native-role="user"]').last()).toHaveText("/perchping");
+          await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "<command-" })).toHaveCount(0);
+        }
       }
     });
     // 4. Questions and approvals, answered from the card: Claude's AskUserQuestion (number key), a Codex
@@ -356,9 +361,10 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     // choices that need no typed feedback. Approving by hand lets the turn finish.
     if (provider === "claude") await check("plan review", async () => {
       await box.fill("/plan Create a file named planned.txt containing exactly: hello plan. Keep the plan to one line, then call the ExitPlanMode tool to ask for my approval.");
-      const before = await ui.locator('[data-native-role="user"]').count();
       await ui.getByRole("button", { name: "Send", exact: true }).click();
-      await expect.poll(() => ui.locator('[data-native-role="user"]').count(), { timeout: 30_000 }).toBeGreaterThan(before);
+      // `/plan` is Claude's own command: it is typed into the CLI, and its rows in the transcript are hidden.
+      await expect(ui.getByTestId("native-cli-command-ran")).toContainText("/plan", { timeout: 30_000 });
+      await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "command-" })).toHaveCount(0);
       const card = ui.getByTestId("native-cli-request");
       await expect(card).toBeVisible({ timeout: 120_000 });
       await expect(card.getByTestId("native-cli-request-detail")).toContainText(/planned\.txt/);

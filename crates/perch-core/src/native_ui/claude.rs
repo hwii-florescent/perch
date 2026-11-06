@@ -281,6 +281,29 @@ fn ends_interrupted(history: &[NativeUiMessage]) -> bool {
     })
 }
 
+/// Names of Claude's own commands: a `<command-name>` envelope for one is hidden, any other (a
+/// skill, a plugin command) is shown as the person typed it.
+fn is_builtin_command(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            super::catalog::builtins("claude")
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect()
+        })
+        .contains(name)
+}
+
+/// A user row made only of text (a string, or text blocks), the only kind harness tags come in.
+fn text_only(content: &Value) -> bool {
+    content.is_string()
+        || content
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().all(|block| block["type"] == "text"))
+}
+
 fn messages(row: &Value) -> Vec<NativeUiMessage> {
     if row["isSidechain"] == true || row["isMeta"] == true {
         return vec![];
@@ -302,6 +325,13 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
         model: raw["model"].as_str().map(|model| clip(model, 256)),
         ..Default::default()
     };
+    if role == "user" && text_only(&raw["content"]) {
+        match super::command_envelope::classify(&message.text, &is_builtin_command) {
+            super::command_envelope::UserTurn::Keep => {}
+            super::command_envelope::UserTurn::Hidden => return vec![],
+            super::command_envelope::UserTurn::Shown(text) => message.text = text,
+        }
+    }
     let mut result = vec![];
     let mut tool_budget = 8 * 1024usize;
     // An edit's input is the change itself, so it has its own room.
@@ -703,6 +733,34 @@ mod tests {
             assert_eq!(rows[0].text, "Conversation interrupted");
             assert!(ends_interrupted(&rows));
         }
+    }
+
+    fn user_row(content: serde_json::Value) -> serde_json::Value {
+        json!({"type": "user", "uuid": "u", "message": {"role": "user", "content": content}})
+    }
+
+    #[test]
+    fn command_envelopes_show_a_skill_hide_a_builtin_and_hide_local_output() {
+        let skill = messages(&user_row(json!(
+            "<command-message>perchping</command-message>\n<command-name>/perchping</command-name>\n<command-args>now</command-args>"
+        )));
+        assert_eq!(skill[0].text, "/perchping now");
+        // `plan` is one of Claude's own commands; its output row is machinery too.
+        let plan = "<command-name>/plan</command-name>\n    <command-message>plan</command-message>\n    <command-args>x</command-args>";
+        assert!(messages(&user_row(json!(plan))).is_empty());
+        assert!(messages(&user_row(json!([{"type": "text", "text": plan}]))).is_empty());
+        assert!(messages(&user_row(json!(
+            "<local-command-stdout>Enabled plan mode</local-command-stdout>"
+        )))
+        .is_empty());
+        assert_eq!(
+            messages(&user_row(json!("<bash-input>ls</bash-input>")))[0].text,
+            "!ls"
+        );
+        assert_eq!(
+            messages(&user_row(json!("fix the bug")))[0].text,
+            "fix the bug"
+        );
     }
 
     #[test]

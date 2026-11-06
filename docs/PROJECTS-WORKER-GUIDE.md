@@ -140,6 +140,19 @@ never see it. No Continue button, as planned. Unit tests port Orca's two cases (
 one as the app-server status). Live: `native-composer.spec.ts` claude "interrupted row" (stop a
 `sleep 60`). Not done: Pi/OMP/OpenCode rows, usage-limit and auto-continue notices.
 
+Row 9 (command envelope) landed 2026-11-06 for **Claude's transcript**: `native_ui/command_envelope.rs`
+(Orca's envelope parser, its catalog-versus-skill split, the harness-injected-turn predicate and
+`<bash-input>`, with their tests), applied in `native_ui/claude.rs` `messages()`. Seen in real 2.1.318
+transcripts: a skill is one user row `<command-message>x</command-message><command-name>/x</command-name>`
+(shown now as `/x args`, so the reply has its prompt and the sent text matches its transcript echo), a
+built-in such as `/plan` is an envelope row plus a `<local-command-stdout>` row (both hidden; the
+composer's "Ran /x in the CLI" notice remains), `!ls` shows as typed. Before this, those rows showed as
+raw tags and a `/plan` output became the newest recalled prompt. The built-in names come from
+`slash_commands.json` (Claude's captured menu), so a command newer than the capture shows as `/name`.
+Not ported: Orca's `surfaceNativeChatCommandOutputs` (a reporting command's answer, e.g. `/context`,
+stays hidden), the host-answered commands, and any non-Claude provider (Codex/Pi/OMP write no envelopes).
+Live: the `native-composer.spec.ts` claude "command menu" check asserts the `/perchping` row.
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.

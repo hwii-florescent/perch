@@ -23,6 +23,7 @@ use tokio::{
 pub mod catalog;
 pub mod claude;
 pub mod codex;
+pub mod command_envelope;
 pub mod dialog;
 pub mod edits;
 pub mod file_links;
