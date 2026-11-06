@@ -272,6 +272,19 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(ring).toBeVisible({ timeout: 15_000 });
       expect(Number(await ring.getAttribute("data-percent"))).toBeGreaterThan(0);
     });
+    // 7. Composer: Up recalls the prompts sent from the transcript (newest first), Down walks back to empty,
+    // and a half-typed draft survives a reload.
+    await check("recall and draft", async () => {
+      await box.fill("");
+      await box.press("ArrowUp");
+      await expect(box).toHaveValue(/Create a file named changed\.txt/);
+      await box.press("ArrowDown");
+      await expect(box).toHaveValue("");
+      await box.fill("half a thought");
+      await page.reload({ waitUntil: "networkidle" });
+      await expect(box).toHaveValue("half a thought", { timeout: 30_000 });
+      await box.fill("");
+    });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);
   } catch (error) {

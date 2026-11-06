@@ -7,6 +7,7 @@ import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
 import { PlusIcon } from "../components/ui/icons";
+import { loadDraftText, saveDraftText, sentPrompts, stepRecall, type RecallPosition } from "./nativeChat/composerDraft";
 import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
@@ -52,7 +53,7 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, turn, fi
 export function NativeCliChat({ sessionId, providerId, terminalProviderId = providerId }: { sessionId: string; providerId: string; terminalProviderId?: string }) {
   const connected = usePerchStore((state) => state.connected);
   const draftKey = JSON.stringify([sessionId, providerId]);
-  const [text, setText] = useState(() => drafts.get(draftKey)?.text ?? "");
+  const [text, setText] = useState(() => drafts.get(draftKey)?.text ?? loadDraftText(draftKey));
   const [images, setImages] = useState<ComposerImage[]>(() => drafts.get(draftKey)?.images ?? []);
   const [uploading, setUploading] = useState(0);
   const [caret, setCaret] = useState(0);
@@ -61,6 +62,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const imagesRef = useRef(images);
   imagesRef.current = images;
   const nextCaret = useRef<number | null>(null);
+  const recall = useRef<RecallPosition | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
@@ -136,6 +138,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     if (new TextEncoder().encode(value).length > 64 * 1024) return;
     setText(value); setImages(nextImages);
     drafts.set(draftKey, { text: value, operationId: newId(), images: nextImages });
+    saveDraftText(draftKey, value);
     if (drafts.size > 128) drafts.delete(drafts.keys().next().value!);
   }
   const menu = useComposerMenu({ text, caret, sessionId, providerId, enabled: connected && controlling && !!snapshot });
@@ -177,7 +180,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     const prompt = withAttachmentPaths(draft.text, draft.images.map((image) => image.path));
     const sent: Outbox = { operationId: draft.operationId, text: prompt, draft: { text: draft.text, images: draft.images }, phase: "sending", baseline: sentCount(latest.current, prompt) };
     setOutbox(sent);
-    const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); setText(""); setImages([]); } };
+    const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); saveDraftText(draftKey, ""); setText(""); setImages([]); } };
     try {
       const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
@@ -299,6 +302,14 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
             if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); menu.move(event.key === "ArrowDown" ? 1 : -1); return; }
             if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); pickMenu(menu.active); return; }
             if (event.key === "Escape") { event.preventDefault(); menu.dismiss(); return; }
+          }
+          if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+            const back = event.key === "ArrowUp";
+            const { selectionStart, selectionEnd } = event.currentTarget;
+            // A recalled multi-line prompt keeps its arrows for the caret until the caret is on the edge.
+            const onEdge = selectionStart === selectionEnd && (back ? selectionStart === 0 : selectionStart === text.length);
+            const step = (!text || onEdge) && stepRecall({ direction: back ? "back" : "forward", prompts: sentPrompts(snapshot?.messages ?? []), position: recall.current, draft: text });
+            if (step) { event.preventDefault(); recall.current = step.position; nextCaret.current = step.draft.length; updateDraft(step.draft); setCaret(step.draft.length); return; }
           }
           if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (!sendable.disabled && sendable.action !== "stop") void send(); }
           else if (event.key === "Escape" && snapshot?.running && controlling) { event.preventDefault(); void stop(); }

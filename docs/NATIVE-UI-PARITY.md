@@ -59,8 +59,11 @@ live e2e, update this file, commit.
    asks git for the newest turn (`useLastTurnChanges`; `transcript.ts` held none of it, the web
    keeps a one-line predicate), per-turn diffs and edit cards (rows above), tool icons, file
    links, question calls (`AskUserQuestion`, OMP `ask`) as their own transcript rows.
-2. **Composer.** Queued-message cards and Steer, prompt recall, draft persistence across reload,
-   pick up a draft typed in the terminal (replaces the "empty prompt only" refusal).
+2. **Composer.** Prompt recall and draft persistence across reload: done, live-checked on
+   Claude, Codex, Pi and OMP (`native-composer.spec.ts` "recall and draft"). Queue cards and
+   Steer: not applicable to the terminal-backed chat (see the Composer table). Still open: pick
+   up a draft typed in the terminal (replaces the "empty prompt only" refusal); needs a live
+   probe of each CLI's input line first.
 3. **Provider notices.** Usage limit (we hit it in e2e and show nothing), retry, interrupted
    continue.
 4. **Host-answered commands.** `/context` answer and "Ran /x" markers interleaved in the
@@ -102,10 +105,10 @@ Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect a
 | Area | Orca source | Perch |
 | --- | --- | --- |
 | Rich prompt editor with pills for skills, files, images, pasted text | `NativeChatPromptEditor.tsx`, `NativeChatSkillPill.tsx`, `native-chat-pasted-text-*.ts` | 🟡 plain textarea + menu |
-| Draft persistence across reload (IndexedDB journal), per tab | `native-chat-composer-draft-*.ts` | 🟡 in-memory per session |
+| Draft persistence across reload (IndexedDB journal), per tab | `native-chat-composer-draft-*.ts` | 🟡 text survives reload and restart (`composerDraft.ts`: localStorage per viewer, newest 50 chats, 7 days); staged files do not (a path on the host that may be gone) |
 | Attachments: images, text files, pasted text as file, folders, drop from workspace, remote hosts | `use-native-chat-composer-attachments.ts`, `native-chat-paste-*.ts`, `NativeChatTextAttachments.tsx` | 🟡 images/files, local host only |
-| Queued messages: cards, edit, reorder, delete; follow-up behaviour (queue vs steer) | `NativeChatQueuedMessage*.tsx`, `native-chat-follow-up-behavior.ts`, `native-chat-queued-edit-*.ts` | ⬜ |
-| Prompt recall (sent prompt history) | `use-native-chat-composer-recall.ts`, `native-chat-sent-prompt-history.ts` | ⬜ |
+| Queued messages: cards, edit, reorder, delete; follow-up behaviour (queue vs steer) | `NativeChatQueuedMessage*.tsx`, `native-chat-follow-up-behavior.ts`, `native-chat-queued-edit-*.ts` | not applicable. Read in Orca: the cards, edit leases and reorder live in its **structured** session journal (`NativeChatStructuredSession`, `agent-session-journal/queued-message-*`), not the terminal-backed chat. Here the CLI owns its queue: a send during a turn goes to the CLI, which queues or steers it its own way (the button reads "Queue message"). A second queue in Perch would hide what the CLI really holds, so there are no cards |
+| Prompt recall (sent prompt history) | `use-native-chat-composer-recall.ts`, `native-chat-sent-prompt-history.ts` | ✅ Up from an empty composer recalls the transcript's user prompts newest first, Down walks back and clears; in a multi-line recalled prompt the arrows move the caret until it reaches the edge; any edit ends recall (`composerDraft.ts`, unit-tested, live-checked on all four). Ceilings: slash commands have no transcript entry so are not recalled; a prompt sent with files recalls with their paths |
 | Interrupt / stop | `use-native-chat-composer-interrupt.ts` | ✅ |
 | Slash and `$` picker with descriptions and argument hints; `@` mention files | `NativeChatAutocompleteMenus.tsx`, `use-native-chat-composer-command-picker.ts`, `use-native-chat-mention-files.ts` | ✅ all four providers, descriptions and Pi's argument hints, whole list reachable (scrolls); no kind grouping or badges yet |
 | Quick commands menu | `use-native-chat-quick-commands-menu.tsx` | ⬜ |
