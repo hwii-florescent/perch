@@ -6,7 +6,7 @@ import { effectiveWorkspace, usePerchStore } from "../store";
 import { fileTabKey, isBlankBrowser, restoreSelection, useFileTabs, type FileTab } from "../fileTabs";
 import { gapped, layout, MIN_PANE_PX, useSplitSets, visibleSplit, type Strip } from "../splitSets";
 import { acquirePassthrough, focusMainResponder } from "../browserNative";
-import { activateTab, entryLabel, workspaceTabs } from "../workspaceTabs";
+import { activateTab, entryLabel, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { closeTab, exitSplit } from "../tiledPanes";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { AgentIcon } from "./AgentIcon";
@@ -220,6 +220,17 @@ export function SplitCanvas() {
     ? <div className="pointer-events-none absolute top-0 right-0 left-0 z-20 h-[2px] bg-overlay-1" data-testid="split-focus-bar" />
     : null;
 
+  const tileControls = (entry: TabEntry) => (
+    <span className="flex shrink-0 items-center" data-testid={`tile-controls-${entry.id}`}>
+      <button type="button" className={cn(GHOST_BUTTON, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Show this tab full size — leave the split" aria-label={`Exit split for ${entryLabel(entry)}`} data-testid={`tile-expand-${entry.id}`} onClick={() => exitSplit(entry.id)}>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
+      </button>
+      <button type="button" className={cn(GHOST_BUTTON, "flex size-6 items-center justify-center p-0 text-subtext-0 hover:text-fg")} title="Close this tab" aria-label={`Close ${entryLabel(entry)}`} data-testid={`tile-close-${entry.id}`} onClick={() => closeTab(entry.id)}>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg>
+      </button>
+    </span>
+  );
+
   return (
     <div ref={hostRef} className="absolute inset-0" data-testid="split-canvas" data-split={split ? split.ids.length : 0}>
       <div
@@ -244,14 +255,16 @@ export function SplitCanvas() {
           onMouseDownCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
           onFocusCapture={() => { if (activeId !== entry.id) activateTab(entry); }}
         >
-          {/* Only a shared canvas has pane headers; a lone pane has none. The tile controls sit over the right end. */}
-          <div className="flex h-[30px] shrink-0 items-center gap-2 pr-[4.5rem] pl-3 text-[0.68rem] text-subtext-0" data-testid={`pane-header-${entry.id}`}>
-            <AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} />
-            <span className="min-w-0 truncate">{entryLabel(entry)}</span>
-            <span className="ml-auto flex shrink-0 items-center gap-[0.35rem]">
-              <span className="size-[5px] rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
-              {STATE_WORD[sessionDotState(entry.session)]}
+          {/* One compact row owns the name, status and actions; no floating controls over the header. */}
+          <div className="flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-xs text-subtext-0" data-testid={`pane-header-${entry.id}`}
+            onContextMenu={(event) => { event.preventDefault(); useSplitSets.getState().openMenu(entry.id, event.clientX, event.clientY); }}>
+            <span className="shrink-0"><AgentIcon provider={entry.session.currentProviderId ?? cliAgentBySession[entry.id] ?? entry.session.cliProviderId} size={12} /></span>
+            <span className="min-w-0 flex-1 truncate" title={entry.session.title}>{entryLabel(entry)}</span>
+            <span className="flex min-w-0 items-center gap-1" title={STATE_WORD[sessionDotState(entry.session)]}>
+              <span className="size-[5px] shrink-0 rounded-full" style={{ background: DOT_GLYPH[sessionDotState(entry.session)].color }} aria-hidden="true" />
+              <span className="truncate">{STATE_WORD[sessionDotState(entry.session)]}</span>
             </span>
+            {tileControls(entry)}
           </div>
           <AgentPane sessionId={entry.id} />
           {focusBar(entry.id === activeId)}
@@ -280,16 +293,9 @@ export function SplitCanvas() {
           {focusBar(id === activeKey)}
         </div>
       ))}
-      {split && entries.filter((entry) => split.ids.includes(entry.id) && tileVisible(entry.id)).map((entry) => (
+      {split && entries.filter((entry) => entry.kind === "resource" && split.ids.includes(entry.id) && tileVisible(entry.id)).map((entry) => (
         <div key={`controls-${entry.id}`} className="pointer-events-none absolute z-40" style={slot(entry.id)}>
-          <div className="pointer-events-auto absolute top-1 right-1 flex gap-1 rounded-ui bg-panel-bg" data-testid={`tile-controls-${entry.id}`}>
-            <button type="button" className={cn(GHOST_BUTTON, "flex h-7 w-7 items-center justify-center p-0 text-fg")} title="Exit split — show this tab full size" aria-label={`Exit split for ${entryLabel(entry)}`} data-testid={`tile-expand-${entry.id}`} onClick={() => exitSplit(entry.id)}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
-            </button>
-            <button type="button" className={cn(GHOST_BUTTON, "flex h-7 w-7 items-center justify-center p-0 text-fg")} title="Close this tab" aria-label={`Close ${entryLabel(entry)}`} data-testid={`tile-close-${entry.id}`} onClick={() => closeTab(entry.id)}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg>
-            </button>
-          </div>
+          <div className="pointer-events-auto absolute top-1 right-1 rounded-ui bg-panel-bg">{tileControls(entry)}</div>
         </div>
       ))}
       {split && !zoomed && dividers.map(({ strip, i, edge }, n) => {

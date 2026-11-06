@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SessionSummary, WorkspaceSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { connect: vi.fn(), send: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
-vi.mock("../dockview/DockviewShell", () => ({ openSessionPaneMenu: vi.fn() }));
 
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key), clear: () => storage.clear() });
@@ -16,6 +15,9 @@ const { WorkspaceOverview } = await import("./WorkspaceOverview");
 const { StatusDot } = await import("./StatusDot");
 const { AgentIcon } = await import("./AgentIcon");
 const { saveTabOrder } = await import("../tabOrder");
+const { useSplitSets } = await import("../splitSets");
+const { useFileTabs } = await import("../fileTabs");
+const { useCloseGuard } = await import("../closeGuard");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -34,6 +36,9 @@ beforeEach(() => {
   // These cover the project tree; By status is the default view.
   localStorage.setItem("perch.sidebar.organize", "project");
   vi.clearAllMocks();
+  useSplitSets.setState({ sets: [], menu: null, zoomedId: null });
+  useFileTabs.setState({ tabs: [], active: null });
+  useCloseGuard.setState({ pending: null });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -50,6 +55,48 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 function render(node: ReactNode) { act(() => root.render(node)); }
 function click(element: Element) { act(() => element.dispatchEvent(new MouseEvent("click", { bubbles: true }))); }
 function get(testId: string) { const element = document.querySelector(`[data-testid="${testId}"]`); expect(element).not.toBeNull(); return element!; }
+
+it.each(["project", "status", "list"])("%s sidebar and horizontal tabs share direct tab actions without selecting on right-click", (organize) => {
+  localStorage.setItem("perch.sidebar.organize", organize);
+  usePerchStore.setState({ sessions: [session, { ...session, id: "other", title: "Other chat" }], sessionId: "other" });
+  render(<><WorkspaceOverview /><TabBar /></>);
+  const open = (id: string) => act(() => get(id).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+  const labels = () => [...get("tab-split-menu").querySelectorAll("button")].map((button) => button.textContent);
+  open("workspace-session-session");
+  const sidebar = labels();
+  expect(sidebar).toContain("Rename tab");
+  expect(sidebar).toContain("Close tab");
+  expect(sidebar).toContain("Split right with new terminal");
+  expect(sidebar).toContain("Show beside Other chat");
+  expect(sidebar.join()).not.toContain("Session pane actions");
+  expect(switchSession).not.toHaveBeenCalled();
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+  open("tab-session");
+  expect(labels()).toEqual(sidebar);
+  expect(switchSession).not.toHaveBeenCalled();
+});
+
+it("renames and closes a background workspace's tab directly, without touching the active session or its pane title", () => {
+  const renameSession = vi.fn();
+  usePerchStore.setState({ activeWorkspaceId: "main", sessionId: "foreground", renameSession, sessions: [session, { ...session, id: "foreground", workspaceId: "main", cwd: workspace.path }] });
+  render(<><WorkspaceOverview /><TabBar /></>);
+  const open = () => act(() => get("workspace-session-session").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+  open();
+  click(get("tab-menu-rename"));
+  const input = get("tab-menu-rename-input") as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "  Renamed chat  ");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  act(() => input.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(renameSession).toHaveBeenCalledExactlyOnceWith("session", "Renamed chat");
+  expect(switchSession).not.toHaveBeenCalled();
+  open();
+  click(get("tab-menu-close"));
+  expect(useCloseGuard.getState().pending?.id).toBe("session");
+  expect(usePerchStore.getState().sessionId).toBe("foreground");
+});
 
 it("tab + starts the chosen harness in the active worktree and on its host, without a project confirmation", () => {
   render(<TabBar />);

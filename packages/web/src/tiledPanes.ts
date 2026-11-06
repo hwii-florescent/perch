@@ -16,7 +16,7 @@ export function focusedSplit() {
 
 export function closeTab(id: string): void {
   const entry = currentTabs().tabs.find((tab) => tab.id === id);
-  if (entry?.kind === "session") requestCloseSession(id);
+  if (usePerchStore.getState().sessions.some((session) => session.id === id)) requestCloseSession(id);
   else if (entry) useFileTabs.getState().close(id);
 }
 
@@ -105,8 +105,8 @@ function resize(delta: number) {
 let pendingSplit = false;
 /** Split the active tab with a new Terminal tab, placed exactly as if dragged onto that side of
  * it. The session is matched to the captured nest/host. */
-export function splitActiveTab(direction: "right" | "below") {
-  const { activeId } = currentTabs();
+export function splitActiveTab(direction: "right" | "below", targetId = currentTabs().activeId) {
+  const activeId = targetId;
   const state = usePerchStore.getState();
   const workspace = effectiveWorkspace(state);
   const home = useSplitSets.getState().sets.find((set) => set.ids.includes(activeId ?? ""));

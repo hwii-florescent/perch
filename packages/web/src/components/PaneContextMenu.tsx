@@ -116,7 +116,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
               onClose();
             }}
           >
-            Split Right
+            Split right with new terminal
           </button>
           <button
             type="button"
@@ -127,31 +127,32 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
               onClose();
             }}
           >
-            Split Down
+            Split below with new terminal
           </button>
           <button
             type="button"
             className={menuItem()}
             data-testid="pane-menu-split-session"
+            title="Add a session pane to this tab's saved layout; other tabs stay separate"
             onClick={() => {
               onSplitSession();
               onClose();
             }}
           >
-            Split with Session…
+            Add session inside this tab…
           </button>
           {sessionId && (
             <button
               type="button"
               className={menuItem()}
               data-testid="pane-menu-split-tab"
-              title="Show this tab beside another tab; the tab strip stays one row"
+              title="Show two open tabs side by side; both stay in the tab strip"
               onClick={() => {
                 useSplitSets.getState().openMenu(sessionId, left, top);
                 onClose();
               }}
             >
-              Split with tab…
+              Show beside an open tab…
             </button>
           )}
           <button
@@ -175,7 +176,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
               setRenaming(true);
             }}
           >
-            Rename
+            Rename pane
           </button>
           <div className={menuDivider} />
           {sessionId && canStopAgent(sessionId) && (
@@ -204,7 +205,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
               onClose();
             }}
           >
-            Close
+            Close pane
           </button>
         </>
       )}

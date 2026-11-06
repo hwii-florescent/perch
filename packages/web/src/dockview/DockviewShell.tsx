@@ -46,12 +46,6 @@ import { focusMainResponder } from "../browserNative";
  * module-level-singleton shell. */
 let openPaneContextMenu: ((panelId: string, title: string, x: number, y: number) => void) | null = null;
 
-/** The session's pane menu, opened from its top-row tab (TabBar.tsx): a
- * single-pane layout hides the pane header that otherwise carries it. */
-export function openSessionPaneMenu(x: number, y: number): void {
-  openPaneContextMenu?.("chat", "Chat", x, y);
-}
-
 /** One pane needs no header: the top row's tab already names it. Splits show
  * every group's header so panes can be told apart, moved and closed. */
 function syncPaneHeaders(api: DockviewApi): void {

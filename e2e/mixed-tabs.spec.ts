@@ -362,6 +362,23 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
     await expect(canvas).toHaveAttribute("data-split", "2");
     await expect(page.getByTestId(`tile-expand-${first}`)).toBeVisible();
     await expect(page.getByTestId(`tile-close-${second}`)).toBeVisible();
+    for (const id of [first, second]) {
+      const header = page.getByTestId(`pane-header-${id}`);
+      await expect(header.getByTestId(`tile-controls-${id}`)).toHaveCount(1);
+      await expect(header).toHaveCSS("height", "28px");
+      await expect(header.getByTestId(`tile-close-${id}`)).toHaveCSS("width", "24px");
+    }
+    // Sidebar and top-row tabs expose the same actions; rename edits the session, not "Chat".
+    await page.getByTestId(`workspace-session-${second}`).click({ button: "right" });
+    const sidebarActions = (await page.getByTestId("tab-split-menu").locator("button").allTextContents()).filter((label) => !label.startsWith("Move ")); // sidebar-only row ordering
+    await page.keyboard.press("Escape");
+    await page.getByTestId(`tab-${second}`).click({ button: "right" });
+    expect(await page.getByTestId("tab-split-menu").locator("button").allTextContents()).toEqual(sidebarActions);
+    await page.getByTestId("tab-menu-rename").click();
+    await page.getByTestId("tab-menu-rename-input").fill("Renamed terminal");
+    await page.getByTestId("tab-menu-rename-input").press("Enter");
+    await expect(page.getByTestId(`tab-${second}`)).toContainText("Renamed terminal");
+    await expect(page.getByTestId(`pane-header-${second}`)).toContainText("Renamed terminal");
 
     // The same actions listed in Settings: previous/next, zoom/restore and directional focus.
     await page.keyboard.press("Meta+]");
@@ -403,6 +420,19 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
     await page.getByTestId(`tab-${first}`).click({ button: "right" });
     await page.getByTestId("tab-unsplit").click();
     await expect(canvas).toHaveAttribute("data-split", "0");
+
+    // The phone reuses the same menu, without requiring the hidden desktop tab strip.
+    await page.setViewportSize({ width: 375, height: 700 });
+    await page.getByTestId("mobile-switch").click();
+    await page.getByTestId("mobile-switcher").getByTestId(`workspace-session-${second}`).click({ button: "right" });
+    await expect(page.getByTestId("tab-menu-rename")).toBeVisible();
+    await expect(page.getByTestId("tab-menu-close")).toBeVisible();
+    await expect(page.getByTestId("tab-menu-close")).toHaveCSS("min-height", "44px");
+    const menu = await page.getByTestId("tab-split-menu").boundingBox();
+    expect(menu!.x).toBeGreaterThanOrEqual(0);
+    expect(menu!.x + menu!.width).toBeLessThanOrEqual(375);
+    expect(menu!.y + menu!.height).toBeLessThanOrEqual(700);
+    await page.screenshot({ path: testInfo.outputPath("phone-tab-menu.png") });
   } finally {
     cleanup();
   }

@@ -31,6 +31,8 @@ import { chatsInStripOrder, moveChat, workspaceTabs } from "../workspaceTabs";
 import { moveBeside, TAB_ORDER_EVENT } from "../tabOrder";
 import { beginSlideDrag } from "../slideDrag";
 import { useNestShortcutHints } from "../keybinds";
+import { TabSplitMenu } from "./TabSplitMenu";
+import { useFileTabs } from "../fileTabs";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
 // `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
@@ -361,6 +363,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ menu: { id: string; x: number; y: number }; entries: ReturnType<typeof workspaceTabs>; extraItems: Exclude<MenuItem, "divider">[] } | null>(null);
   const createSessionOnHost = usePerchStore((state) => state.createSessionOnHost);
   // A folder that isn't a git repo has no worktrees, so its "+" starts a session there.
   const [newSession, setNewSession] = useState<{ project: WorkspaceProject; rect: DOMRect } | null>(null);
@@ -442,7 +445,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   /** A chat row's wrapper props: drag within `group`, and a menu (right-click or hold) with Move up/down. */
   function sessionRowProps(session: SessionSummary, siblings: SessionSummary[], group: string) {
     const flip = group === "chats" || group.startsWith("status:"); // groups shown newest first
-    const { handle, zone } = dnd("session", session.id, group, siblings.map((other) => other.id), flip);
+    const { handle, zone } = group === "list" ? { handle: {}, zone: {} } : dnd("session", session.id, group, siblings.map((other) => other.id), flip);
     return {
       ...zone,
       ...withDrag(longPress((x, y) => sessionMenu(session, x, y, siblings, flip)), handle),
@@ -567,10 +570,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     try { localStorage.setItem(SESSION_VIEW_KEY, next); } catch { /* per-viewer convenience */ }
   }
   function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[], flip = false) {
-    setMenu({ x, y, label: "Session actions", items: [
-      ...moveItems("session", session.id, siblings.map((other) => other.id), flip),
-      { label: "Close session", testId: `workspace-session-close-${session.id}`, danger: true, onSelect: () => requestCloseSession(session.id) },
-    ] });
+    const hostId = session.hostId ?? "local";
+    const entries = workspaceTabs({ ...usePerchStore.getState(), sessionId: session.id, activeHostId: hostId, activeWorkspaceId: session.workspaceId ?? null, activeProject: { hostId, cwd: session.cwd } }, useFileTabs.getState().tabs);
+    setTabMenu({ menu: { id: session.id, x, y }, entries, extraItems: moveItems("session", session.id, siblings.map((other) => other.id), flip).filter((item) => item !== "divider") });
   }
   function pickSession(id: string) {
     switchSession(id);
@@ -647,7 +649,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       {allSessions.map((session) => {
         const owner = projects.find((project) => project.id === session.projectId);
         return (
-          <div className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+          <div {...sessionRowProps(session, [], "list")} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -1238,6 +1240,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           </>}
       </div>
       {menu && <RowMenu {...menu} onClose={() => setMenu(null)} />}
+      {tabMenu && <TabSplitMenu key={tabMenu.menu.id} {...tabMenu} onClose={() => setTabMenu(null)} />}
       {newSession && (
         <NewSessionPopover
           hostId={newSession.project.hostId}

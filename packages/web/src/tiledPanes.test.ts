@@ -6,7 +6,7 @@ import { useFileTabs } from "./fileTabs";
 import { useSplitSets } from "./splitSets";
 import { registerDockviewController, type DockviewController } from "./dockview/dockviewController";
 import { SHORTCUTS } from "./keybinds";
-import { getPaneController, exitSplit } from "./tiledPanes";
+import { getPaneController, exitSplit, splitActiveTab } from "./tiledPanes";
 
 const dock = { focusPaneDirection: vi.fn(), toggleMaximizeActive: vi.fn() } as unknown as DockviewController;
 const session = (id: string, createdAt: number) => ({ id, title: id, cwd: "/p", createdAt, status: "idle", workspaceId: "w", cliProviderId: "terminal" }) as SessionSummary;
@@ -74,6 +74,19 @@ it("grow/shrink and swap operate on the tiled set", () => {
   getPaneController()!.swapPaneDirection("right");
   run("panes.focus.left"); // a is now the right pane
   expect(usePerchStore.getState().sessionId).toBe("b");
+});
+
+it("a menu split targets the right-clicked tab, even before the session switch reply arrives", () => {
+  const create = vi.fn();
+  usePerchStore.setState({ createSessionOnHost: create, startCli: vi.fn() });
+  useSplitSets.setState({ sets: [] });
+  splitActiveTab("below", "b");
+  expect(create).toHaveBeenCalledExactlyOnceWith("local", "/p", "terminal");
+  // The active id still names a, but the menu was opened on b.
+  expect(usePerchStore.getState().sessionId).toBe("a");
+  usePerchStore.setState({ sessions: [...usePerchStore.getState().sessions, session("new", 3)], sessionId: "new" });
+  expect(useSplitSets.getState().sets[0]?.ids).toEqual(["b", "new"]);
+  expect(useSplitSets.getState().sets[0]?.dir).toBe("col");
 });
 
 it("falls back to Dockview for session-internal panes outside tiling", () => {
