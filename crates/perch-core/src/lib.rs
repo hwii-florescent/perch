@@ -18,6 +18,7 @@ pub mod filesystem;
 pub mod ghostty_profile;
 pub mod hosts;
 pub mod hub;
+pub mod instructions;
 pub mod iterm_profile;
 pub mod native_ui;
 pub mod permissions;

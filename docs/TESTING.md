@@ -59,7 +59,7 @@ Useful existing coverage (not a claim of a fresh passing run):
   cleanup using local SSH/SCP stand-ins (no network hosts or paid turns).
   This is not certification against a real SSH/SFTP server.
 - Native chat e2e (`native-composer.config.ts`: `native-composer`, `native-terminal`,
-  `native-slash-send`): do not run it from a shell inside a Perch terminal. Its PATH starts with
+  `native-slash-send`, `instructions` (one real turn per provider and a dialog test)): do not run it from a shell inside a Perch terminal. Its PATH starts with
   that Perch's command shims, the fixture core inherits them, the picker's `claude` becomes a
   shim-launched agent of the *outer* Perch and the UI never connects (`data-native-pid` unset).
   Strip `perch-native-*.shell/bin` from `PATH` and unset `PERCH_SHELL`, `TERM_PROGRAM` and

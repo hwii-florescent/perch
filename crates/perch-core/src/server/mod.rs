@@ -83,6 +83,7 @@ mod attention;
 mod browser_history;
 mod browser_suggest;
 mod context_bridge;
+mod instructions;
 mod native_ui;
 mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -581,6 +582,18 @@ pub async fn run(
             } else {
                 capture()
             }
+        }))?;
+
+    // Every launch reads its session's Instructions pin through the database; a session the
+    // database does not know has nothing to inject.
+    let instructions_db = state.db.clone();
+    state
+        .agent_runtime
+        .set_instructions_resolver(Arc::new(move |key| {
+            if instructions_db.get_session(&key.session_id)?.is_none() {
+                return Ok(None);
+            }
+            instructions_db.pin_session_instructions(&key.session_id)
         }))?;
 
     // Mark every previously launched local runtime attach-only BEFORE accepting
@@ -2215,6 +2228,7 @@ fn foundation_capabilities() -> Vec<String> {
         "attention.v1",
         "browser.history.v1",
         "browser.suggest.v1",
+        "instructions.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

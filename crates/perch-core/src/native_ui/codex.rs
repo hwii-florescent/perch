@@ -8,16 +8,30 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-// Both children inherit the provider's actual environment. No model, auth,
-// approval, or instruction settings are replaced by this launcher.
+// Both children inherit the provider's actual environment. No model, auth or approval
+// settings are replaced by this launcher; Instructions arrive only as the app-server arguments
+// the caller passes. Arguments: executable, endpoint, pid file, N, then N app-server arguments,
+// then the TUI's own arguments.
 pub(super) const LAUNCHER: &str = r#"#!/bin/sh
 umask 077
 perch_codex_executable=$1
 perch_codex_endpoint=$2
 perch_codex_pid_file=$3
-shift 3
-"$perch_codex_executable" app-server --listen "$perch_codex_endpoint" >/dev/null 2>&1 &
+perch_codex_server_argc=$4
+shift 4
+# A subshell has its own copy of the arguments: rotate the server's N arguments to the end,
+# drop the TUI's, and exec. The exec keeps the subshell's pid, which is what `$!` records.
+(
+  perch_codex_i=0
+  perch_codex_tui_argc=$(($# - perch_codex_server_argc))
+  while [ "$perch_codex_i" -lt "$perch_codex_server_argc" ]; do
+    set -- "$@" "$1"; shift; perch_codex_i=$((perch_codex_i + 1))
+  done
+  shift "$perch_codex_tui_argc"
+  exec "$perch_codex_executable" app-server "$@" --listen "$perch_codex_endpoint" >/dev/null 2>&1
+) &
 perch_codex_server=$!
+shift "$perch_codex_server_argc"
 printf '%s\n' "$perch_codex_server" > "$perch_codex_pid_file"
 perch_codex_cleanup() {
   if [ -n "$perch_codex_tui" ]; then
@@ -47,7 +61,13 @@ perch_codex_tui=$!
 wait "$perch_codex_tui"
 "#;
 
-pub fn launch(key: &AgentKey, command: Vec<String>) -> anyhow::Result<Vec<String>> {
+/// `server_args` go to the shared `codex app-server` (Instructions); the rest of `command`
+/// goes to the TUI that connects to it.
+pub fn launch(
+    key: &AgentKey,
+    command: Vec<String>,
+    server_args: &[String],
+) -> anyhow::Result<Vec<String>> {
     ensure!(!command.is_empty(), "missing Codex executable");
     let paths = paths(key)?;
     let mut wrapped = vec![
@@ -60,7 +80,9 @@ pub fn launch(key: &AgentKey, command: Vec<String>) -> anyhow::Result<Vec<String
             .with_extension("pid")
             .to_string_lossy()
             .into_owned(),
+        server_args.len().to_string(),
     ];
+    wrapped.extend(server_args.iter().cloned());
     wrapped.extend(command.into_iter().skip(1));
     Ok(wrapped)
 }
@@ -628,6 +650,90 @@ pub(super) async fn observe(
 
 #[cfg(test)]
 mod tests {
+    /// The app-server gets exactly its N arguments (Instructions) and the TUI exactly its own,
+    /// whatever characters they hold; the recorded server pid is the app-server's.
+    #[test]
+    fn the_launcher_gives_each_child_only_its_own_arguments() {
+        use std::os::unix::{fs::PermissionsExt, net::UnixListener};
+        use std::process::{Command, Stdio};
+        let directory = std::env::temp_dir().join(format!("pc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let socket = directory.join("s");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        let (executable, launcher) = (directory.join("codex"), directory.join("launch.sh"));
+        std::fs::write(&launcher, super::LAUNCHER).unwrap();
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nrole=tui; [ \"$1\" = app-server ] && role=server\nprintf '%s\\n' \"$$\" \"$@\" > \"$PERCH_TEST_OUT/$role\"\nsleep 5\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (server_pid, out) = (directory.join("server.pid"), directory.join("out"));
+        std::fs::create_dir(&out).unwrap();
+        let instructions = "developer_instructions=\"line one\\nit's $(not run)\"";
+        let mut parent = Command::new("/bin/sh")
+            .args([
+                launcher.to_str().unwrap(),
+                executable.to_str().unwrap(),
+                &format!("unix://{}", socket.display()),
+                server_pid.to_str().unwrap(),
+                "2",
+                "-c",
+                instructions,
+                "--add-dir",
+                "/a b",
+                "resume",
+            ])
+            .env("PERCH_TEST_OUT", &out)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        for _ in 0..200 {
+            if out.join("server").is_file() && out.join("tui").is_file() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let read = |role: &str| std::fs::read_to_string(out.join(role)).unwrap_or_default();
+        let (server, tui) = (read("server"), read("tui"));
+        let recorded = std::fs::read_to_string(&server_pid).unwrap_or_default();
+        let pids: Vec<i32> = [&server, &tui, &recorded]
+            .iter()
+            .filter_map(|text| text.lines().next()?.trim().parse().ok())
+            .collect();
+        unsafe {
+            libc::kill(parent.id() as i32, libc::SIGHUP);
+        }
+        let _ = parent.wait();
+        for pid in &pids {
+            unsafe {
+                libc::kill(*pid, libc::SIGKILL);
+            }
+        }
+        let endpoint = format!("unix://{}", socket.display());
+        std::fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(
+            server.lines().skip(1).collect::<Vec<_>>(),
+            [
+                "app-server",
+                "-c",
+                instructions,
+                "--listen",
+                endpoint.as_str()
+            ]
+        );
+        assert_eq!(
+            tui.lines().skip(1).collect::<Vec<_>>(),
+            ["--remote", endpoint.as_str(), "--add-dir", "/a b", "resume"]
+        );
+        assert_eq!(
+            server.lines().next(),
+            recorded.lines().next(),
+            "the pid file names the app-server itself"
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -651,6 +757,7 @@ mod tests {
                 executable.to_str().unwrap(),
                 &format!("unix://{}", socket.display()),
                 server_pid.to_str().unwrap(),
+                "0",
             ])
             .env("PERCH_TEST_TUI_PID", &tui_pid)
             .stdout(Stdio::null())
@@ -793,8 +900,18 @@ mod tests {
                 "resume".into(),
                 "literal '$() session".into(),
             ],
+            &["-c".into(), "developer_instructions=\"a b\"".into()],
         )
         .unwrap();
-        assert_eq!(&args[5..], &["resume", "literal '$() session"]);
+        assert_eq!(
+            &args[5..],
+            &[
+                "2",
+                "-c",
+                "developer_instructions=\"a b\"",
+                "resume",
+                "literal '$() session"
+            ]
+        );
     }
 }

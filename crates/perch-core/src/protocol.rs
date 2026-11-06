@@ -952,6 +952,28 @@ pub enum ClientMessage {
     #[serde(rename = "browser.suggest", rename_all = "camelCase")]
     BrowserSuggest { request_id: String, query: String },
 
+    /// Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on
+    /// this core (capability `instructions.v1`). Answered with `instructions.state`.
+    #[serde(rename = "instructions.get", rename_all = "camelCase")]
+    InstructionsGet {
+        request_id: String,
+        scope: String,
+        id: String,
+    },
+
+    /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
+    /// there launch with them; running sessions keep what they started with. Answered with
+    /// `instructions.state`, which carries `error` and the unchanged content when refused.
+    #[serde(rename = "instructions.set", rename_all = "camelCase")]
+    InstructionsSet {
+        request_id: String,
+        scope: String,
+        id: String,
+        text: String,
+        #[serde(default)]
+        folders: Vec<String>,
+    },
+
     /// Forget one page.
     #[serde(rename = "browser.history.remove")]
     BrowserHistoryRemove { url: String },
@@ -1903,6 +1925,21 @@ pub enum ServerMessage {
     BrowserSuggestResult {
         request_id: String,
         suggestions: Vec<String>,
+    },
+
+    /// Reply to `instructions.get` and `instructions.set`: what is stored for the scope.
+    /// `revision` is 0 until something was saved; `error` explains a refused request.
+    #[serde(rename = "instructions.state", rename_all = "camelCase")]
+    InstructionsState {
+        request_id: String,
+        scope: String,
+        id: String,
+        text: String,
+        folders: Vec<String>,
+        revision: u64,
+        max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 
     /// Reply to `browser.history.search`, best match first.

@@ -266,7 +266,7 @@ flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
 | Claude | `--append-system-prompt-file <file>` (checked live 2026-11-06; 2.1.319 `--help` names it under `--bare`, and `--append-system-prompt <text>` works too; Claude also pins the prompt on resume, `--system-prompt-snapshot`) | `--add-dir` |
 | Pi | `--append-system-prompt <file>` (text or file contents) | none: list paths in the instructions |
 | OMP | `--append-system-prompt=<file>` | `--add-dir=` |
-| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt); pass it to the shared app-server too (`codex.rs` launches `app-server --listen` with no flags today) | `--add-dir` (adds no skills; checked with `codex debug prompt-input`) |
+| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt), passed to the shared app-server that builds each thread | none: the TUI refuses `--add-dir` with `--remote` (0.166), so list paths in the instructions |
 
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
@@ -432,7 +432,9 @@ UI rows from step 0 continue between slices.
    Pi/OMP follow-ups queue until the turn ends; Codex does **not** refuse a busy
    `turn/start`, it joins the running turn, so idle delivery is the core's check alone.
    Nothing contradicted the plan.
-1. **Instructions injection**, shippable alone. Store per Birdhouse/Nest, pin a snapshot
+1. **Instructions injection. Done 2026-11-06** (local Birdhouses and Nests; remote ones
+   and the read-only view of the repo's own `CLAUDE.md`/`AGENTS.md` are not done).
+   Store per Birdhouse/Nest, pin a snapshot
    per launch, record provenance; apply on wake/resume, the shell shim and the Codex
    app-server. Check: Rust unit tests for argv per provider and the snapshot; a live
    haiku/luna turn per provider quoting a marker from the instructions; repo

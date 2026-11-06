@@ -84,21 +84,25 @@ take a file; Codex takes `-c developer_instructions=<text>` on the app-server; e
 queue until the turn ends; **Codex does not refuse a busy `turn/start`** (it joins the
 running turn), so idle delivery is the core's check alone.
 
-## Slice 1: Instructions injection (*own*: Orca injects nothing at launch)
+## Slice 1 landed (2026-11-06): Instructions injection
 
-- **Store:** new table for Birdhouse/Nest Instructions text (≤16,000 chars) and
-  reference folder list; edit UI in Birdhouse/Nest settings (reuse `components/ui/`).
-- **Pin per launch:** write the text to a 0600 file under the private native dir
-  (`native_ui::paths`), record `(source, revision, hash)` on the session; wake and
-  resume reuse the pinned file, never the current text.
-- **Argv seam:** `server/terminal.rs` `open_agent_terminal` extra args (after
-  `--settings`/`--extension`); also the shell shim (`shell_integration.rs`) and the
-  Codex app-server launcher (`native_ui/codex.rs` `LAUNCHER`). Flags: ROADMAP step 1
-  table, corrected by slice 0. Never `--system-prompt` or `--no-context-files`.
-- **Pointer** (slice 3 onward) is appended in the same place.
-- **Tests:** Rust argv per provider and per path (picker, shim, wake, Codex
-  app-server); snapshot pinning; 16k refusal. Live: a haiku/luna turn per provider
-  quotes a marker from the Instructions, and repo `AGENTS.md`/`CLAUDE.md` still load.
+What later slices build on:
+
+- `instructions.rs` (pure: caps, `compose`, `Pinned`, `launch_args`), `db/instructions.rs`
+  (tables `instructions`, `session_instructions`), `server/instructions.rs`
+  (`instructions.get`/`set`/`state`, capability `instructions.v1`, local targets only).
+- **The seam for the slice 3 pointer** is `agent_runtime::with_instructions`, which every
+  launch path goes through (picker, wake/resume, Codex app-server) and
+  `shell_integration::prepare_with` for agents typed into a shell. Append the pointer to
+  the pin's text there; it must be pinned with the rest, and a session with no
+  Instructions then still needs a pin row (today it keeps an empty one).
+- **Codex has no per-thread folder flag through the shared app-server**: the TUI refuses
+  `--add-dir` with `--remote` (0.166), so Codex's reference folders are listed in the
+  `developer_instructions` text, like Pi's.
+- Not done: showing the repo's own `CLAUDE.md`/`AGENTS.md` and Claude memory beside the
+  Instructions; remote Birdhouses (the dialog is local only; their core would own them).
+- Live check: `e2e/instructions.spec.ts` (in `native-composer.config.ts`), one turn per
+  provider quoting a marker from the Instructions and from the repo's own file.
 
 ## Slice 2: rows sub-sessions need
 

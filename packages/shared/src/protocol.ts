@@ -1176,6 +1176,27 @@ export interface BrowserSuggestMessage {
   query: string;
 }
 
+/** Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on this core
+ * (capability `instructions.v1`). Answered with `instructions.state`. */
+export interface InstructionsGetMessage {
+  type: "instructions.get";
+  requestId: string;
+  scope: string;
+  id: string;
+}
+
+/** Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions there
+ * launch with them; running sessions keep what they started with. Answered with
+ * `instructions.state`, which carries `error` and the unchanged content when refused. */
+export interface InstructionsSetMessage {
+  type: "instructions.set";
+  requestId: string;
+  scope: string;
+  id: string;
+  text: string;
+  folders?: string[];
+}
+
 /** Forget one page. */
 export interface BrowserHistoryRemoveMessage {
   type: "browser.history.remove";
@@ -1935,6 +1956,8 @@ export type ClientMessage =
   | BrowserHistoryRecordMessage
   | BrowserHistorySearchMessage
   | BrowserSuggestMessage
+  | InstructionsGetMessage
+  | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
@@ -2171,6 +2194,20 @@ export interface BrowserSuggestResultMessage {
   type: "browser.suggest.result";
   requestId: string;
   suggestions: string[];
+}
+
+/** Reply to `instructions.get` and `instructions.set`: what is stored for the scope.
+ * `revision` is 0 until something was saved; `error` explains a refused request. */
+export interface InstructionsStateMessage {
+  type: "instructions.state";
+  requestId: string;
+  scope: string;
+  id: string;
+  text: string;
+  folders: string[];
+  revision: number;
+  maxChars: number;
+  error?: string;
 }
 
 /** Reply to `browser.history.search`, best match first. */
@@ -2688,6 +2725,7 @@ export type ServerMessage =
   | AttentionSnapshotMessage
   | BrowserHistoryResultMessage
   | BrowserSuggestResultMessage
+  | InstructionsStateMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage
