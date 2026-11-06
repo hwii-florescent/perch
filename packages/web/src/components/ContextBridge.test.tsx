@@ -11,6 +11,7 @@ vi.mock("../workspaceTabs", () => ({ activateTab: (entry: { session: { id: strin
 vi.mock("../filesystemStore", () => ({ useWorkspaceFilesStore: { getState: () => ({ documents: {} }) } }));
 import { askAgent, handleContextBridgeMessage, useContextBridge } from "../contextBridge";
 import { ContextBridge } from "./ContextBridge";
+import { chooseDropdown } from "./ui/selectTesting";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
 const agent: ContextAgent = { sessionId: "claude", title: "Investigation", providerId: "claude", canSend: true, reason: "" };
@@ -46,8 +47,7 @@ it("only previews on open; cancel and copy never dispatch or save", async () => 
 
 it("requires an explicit target and sends the reviewed bytes exactly once", async () => {
   await respond();
-  const select = document.querySelector("select")!;
-  await act(async () => { select.value = agent.sessionId; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await chooseDropdown(document.querySelector('[role="combobox"]')!, agent.sessionId);
   expect(button("Send to agent").disabled).toBe(false);
   await act(async () => { button("Send to agent").click(); button("Send to agent").click(); });
   const sends = transport.send.mock.calls.map(([request]) => request).filter((request) => request.type === "context.send") as ContextSendMessage[];
@@ -61,8 +61,7 @@ it("requires an explicit target and sends the reviewed bytes exactly once", asyn
 
 it("supports copy-only agents and traps Tab without Enter sending", async () => {
   await respond([{ ...agent, providerId: "pi", canSend: false, reason: "Copy context for this agent" }]);
-  const select = document.querySelector("select")!;
-  await act(async () => { select.value = agent.sessionId; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await chooseDropdown(document.querySelector('[role="combobox"]')!, agent.sessionId);
   expect(button("Send to agent").disabled).toBe(true);
   expect(document.body.textContent).toContain("Copy context for this agent");
   const copy = button("Copy context");
@@ -74,8 +73,7 @@ it("supports copy-only agents and traps Tab without Enter sending", async () => 
 
 it("keeps context visible but refuses another send after uncertain delivery", async () => {
   await respond();
-  const select = document.querySelector("select")!;
-  await act(async () => { select.value = agent.sessionId; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await chooseDropdown(document.querySelector('[role="combobox"]')!, agent.sessionId);
   await click("Send to agent");
   await act(async () => { state.connected = false; transport.connection(false); });
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Nothing will be retried");

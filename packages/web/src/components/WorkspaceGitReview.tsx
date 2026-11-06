@@ -18,6 +18,7 @@ import type { ContextSource } from "@perch/shared";
 import { newId } from "../ids";
 import { cn } from "../lib/cn";
 import { FileIcon, GitMarker } from "./fileDecorations";
+import { Select } from "./ui/select";
 
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
@@ -721,30 +722,29 @@ export function WorkspaceGitReview({
             <div className={`${TB_GROUP} [@container(max-width:700px)]:grid [@container(max-width:700px)]:w-full [@container(max-width:700px)]:grid-cols-2`}>
               <label className={TB_FIELD}>
                 <span>Compare</span>
-                <select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} data-testid="git-diff-target" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={(event) => chooseTarget(event.target.value)}>
-                  <option value="workingTree">Working tree</option>
-                  <option value="staged">Staged</option>
-                  <option value="head">HEAD</option>
-                  <option value="workspaceStart" disabled={!startSnapshot}>{startSnapshot ? "Workspace start" : "Workspace start (not recorded)"}</option>
-                  <option value="lastAgentTurn" disabled={!turnBase}>{turnLabel}</option>
-                  <option value="compare">Another ref…</option>
-                </select>
+                <Select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} testId="git-diff-target" ariaLabel="Compare" value={compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind} onChange={chooseTarget}
+                  options={[
+                    { value: "workingTree", label: "Working tree" },
+                    { value: "staged", label: "Staged" },
+                    { value: "head", label: "HEAD" },
+                    { value: "workspaceStart", label: startSnapshot ? "Workspace start" : "Workspace start (not recorded)", disabled: !startSnapshot },
+                    { value: "lastAgentTurn", label: turnLabel, disabled: !turnBase },
+                    { value: "compare", label: "Another ref…" },
+                  ]} />
               </label>
               <label className={TB_FIELD}>
                 <span>Turn session</span>
-                <select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} data-testid="git-turn-session" value={agentSessionId ?? ""} onChange={(event) => {
+                <Select className={`${TB_INPUT} [@container(max-width:700px)]:w-full`} testId="git-turn-session" ariaLabel="Turn session" value={agentSessionId ?? ""} onChange={(value) => {
                   chooseTarget("workingTree");
-                  actions.selectAgentSession(event.target.value || undefined);
-                }}>
-                  <option value="">Latest in workspace</option>
-                  {sessions.map((session) => <option key={session.id} value={session.id}>{session.title} · {session.agent ?? "agent"}</option>)}
-                </select>
+                  actions.selectAgentSession(value || undefined);
+                }}
+                  options={[{ value: "", label: "Latest in workspace" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title} · ${session.agent ?? "agent"}` }))]} />
               </label>
               {compareOpen && (
                 <>
                   <label className={TB_FIELD}><span>Base ref</span>
-                    <input className={TB_INPUT} list="git-review-refs" data-testid="git-base-selector" value={compareBase} onChange={(event) => setCompareBase(event.target.value)} placeholder="main" />
-                    <datalist id="git-review-refs">{refs.map((ref) => <option value={ref.name} key={`${ref.remote ? "remote" : "local"}:${ref.name}`}>{ref.target.slice(0, 8)}</option>)}</datalist>
+                    <Select freeText className={TB_INPUT} testId="git-base-selector" ariaLabel="Base ref" value={compareBase} onChange={setCompareBase} placeholder="main"
+                      options={[...new Map(refs.map((ref) => [ref.name, { value: ref.name, label: <>{ref.name} <span className="text-subtext-0">{ref.target.slice(0, 8)}</span></>, text: ref.name }])).values()]} />
                   </label>
                   <label className={TB_FIELD}><span>Head <em className="font-normal">optional</em></span><input className={TB_INPUT} value={compareHead} onChange={(event) => setCompareHead(event.target.value)} placeholder="HEAD" /></label>
                   <button type="button" className={BTN_QUIET} onClick={() => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }}>Clear base</button>
@@ -754,7 +754,7 @@ export function WorkspaceGitReview({
             <div className={`${TB_GROUP} justify-end [@container(max-width:700px)]:w-full [@container(max-width:700px)]:flex-row`}>
               <label className={TB_CHECK}><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)} /> Untracked</label>
               <label className={TB_CHECK}><input type="checkbox" checked={ignoreWhitespace} onChange={(event) => setIgnoreWhitespace(event.target.checked)} /> Ignore whitespace</label>
-              <label className={TB_FIELD}><span>Context</span><select className={`${TB_INPUT} w-[5rem]`} value={contextLines} onChange={(event) => setContextLines(Number(event.target.value))}><option value={0}>0 lines</option><option value={3}>3 lines</option><option value={8}>8 lines</option></select></label>
+              <label className={TB_FIELD}><span>Context</span><Select className={`${TB_INPUT} w-[6rem]`} ariaLabel="Context" value={String(contextLines)} onChange={(value) => setContextLines(Number(value))} options={[{ value: "0", label: "0 lines" }, { value: "3", label: "3 lines" }, { value: "8", label: "8 lines" }]} /></label>
             </div>
           </div>
 
@@ -793,19 +793,14 @@ export function WorkspaceGitReview({
 
             <label className="hidden shrink-0 items-center gap-2 px-[0.65rem] py-[0.4rem] text-[0.68rem] text-subtext-0 [@container(max-width:700px)]:flex">
               <span className="shrink-0">File</span>
-              <select
+              <Select
                 className={`${TB_INPUT} min-w-0 flex-1`}
-                aria-label="Diff file"
-                data-testid="git-diff-file-select"
+                ariaLabel="Diff file"
+                testId="git-diff-file-select"
                 value={selectedFile ?? ""}
-                onChange={(event) => { setActiveFile(event.target.value || undefined); setSelection(null); }}
-              >
-                <option value="">All files · {diffFiles.length}</option>
-                {diffFiles.map((file) => {
-                  const path = filePath(file);
-                  return <option value={path} key={path}>{file.status} · {path}</option>;
-                })}
-              </select>
+                onChange={(value) => { setActiveFile(value || undefined); setSelection(null); }}
+                options={[{ value: "", label: `All files · ${diffFiles.length}` }, ...diffFiles.map((file) => { const path = filePath(file); return { value: path, label: `${file.status} · ${path}` }; })]}
+              />
             </label>
 
             <div className={`workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [@container(max-width:700px)]:min-h-[12rem]`} data-testid="git-diff">
@@ -877,7 +872,7 @@ export function WorkspaceGitReview({
             )}
             {unresolvedCount > 0 && (
               <div className="flex items-end gap-[0.55rem] px-[0.7rem] pb-[0.55rem] [@container(max-width:700px)]:flex-col [@container(max-width:700px)]:items-stretch">
-                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><select aria-label="Send to agent session" className={TB_INPUT} value={selectedSessionId ?? ""} onChange={(event) => setSelectedSessionId(event.target.value || undefined)}><option value="">Choose a session</option>{sessions.map((session) => <option value={session.id} key={session.id}>{session.title}{session.agent ? ` · ${session.agent}` : ""}</option>)}</select></label>
+                <label className={`${TB_FIELD} flex-1`}><span>Send to agent session</span><Select ariaLabel="Send to agent session" className={TB_INPUT} value={selectedSessionId ?? ""} onChange={(value) => setSelectedSessionId(value || undefined)} options={[{ value: "", label: "Choose a session" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title}${session.agent ? ` · ${session.agent}` : ""}` }))]} /></label>
                 <label className={`${TB_FIELD} flex-[2]`}><span>Request</span><input className={TB_INPUT} value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} /></label>
               </div>
             )}

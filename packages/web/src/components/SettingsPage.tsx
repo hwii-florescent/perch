@@ -25,6 +25,7 @@ import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
 import { SettingsGroup, SettingRow } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
+import { Select } from "./ui/select";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { PhoneAccessRows, QrCode, pairLink, pickAddress, usePhoneAccess } from "./PhoneAccess";
 import { GHOST_BUTTON } from "./ui/icon-button";
@@ -93,16 +94,14 @@ function TabShapeSection() {
   return (
     <SettingsGroup title="Tabs">
       <SettingRow title="Tab shape" description="Choose square corners or rounded browser-style tabs.">
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-tab-shape"
-          aria-label="Tab shape"
+          testId="settings-tab-shape"
+          ariaLabel="Tab shape"
           value={settings?.tabShape ?? "square"}
-          onChange={(e) => updateSettings({ tabShape: e.target.value as "square" | "round" })}
-        >
-          <option value="square">Square</option>
-          <option value="round">Rounded</option>
-        </select>
+          onChange={(value) => updateSettings({ tabShape: value as "square" | "round" })}
+          options={[{ value: "square", label: "Square" }, { value: "round", label: "Rounded" }]}
+        />
       </SettingRow>
     </SettingsGroup>
   );
@@ -114,16 +113,15 @@ function BrowserSection() {
   return (
     <SettingsGroup title="Browser">
       <SettingRow title="Default search engine" description="Used for searches from the address bar in browser tabs and the drawer.">
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-browser-search-engine"
-          aria-label="Default search engine"
+          testId="settings-browser-search-engine"
+          ariaLabel="Default search engine"
           disabled={!settings}
           value={settings?.browserSearchEngine ?? "google"}
-          onChange={(e) => updateSettings({ browserSearchEngine: e.target.value as BrowserSearchEngine })}
-        >
-          {BROWSER_SEARCH_ENGINES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-        </select>
+          onChange={(value) => updateSettings({ browserSearchEngine: value as BrowserSearchEngine })}
+          options={BROWSER_SEARCH_ENGINES.map(({ id, label }) => ({ value: id, label }))}
+        />
       </SettingRow>
       <SettingRow title="Search suggestions" description="Ask the search engine to complete what you type in the address bar. Off by default: everything you type, even if you never search, is sent to the engine. Addresses are never sent.">
         <Switch label="Search suggestions" testId="settings-browser-search-suggestions" checked={settings?.browserSearchSuggestions === true} onChange={(on) => updateSettings({ browserSearchSuggestions: on })} />
@@ -173,15 +171,14 @@ function ChatModeSection() {
         <Switch label="Preview files in tabs" testId="settings-preview-tabs" checked={settings?.previewTabs !== false} onChange={(on) => updateSettings({ previewTabs: on })} />
       </SettingRow>}
       <SettingRow title="Empty workspace opens" description="What clicking a workspace with no open tabs starts.">
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-empty-workspace-agent"
+          testId="settings-empty-workspace-agent"
+          ariaLabel="Empty workspace opens"
           value={settings?.emptyWorkspaceAgent ?? ""}
-          onChange={(e) => updateSettings({ emptyWorkspaceAgent: e.target.value })}
-        >
-          <option value="">Ask (show the picker)</option>
-          {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-        </select>
+          onChange={(value) => updateSettings({ emptyWorkspaceAgent: value })}
+          options={[{ value: "", label: "Ask (show the picker)" }, ...agentChoices.map((choice) => ({ value: choice.id, label: choice.label }))]}
+        />
       </SettingRow>
     </SettingsGroup>
   );
@@ -259,16 +256,15 @@ function SshHostsSection() {
                 {/* Mode is editable in place: switching an existing host to
                     direct is the normal migration path once the remote no
                     longer needs a perch checkout. */}
-                <select
+                <Select
                   className={SELECT_HOST}
-                  data-testid={`host-mode-${h.name}`}
+                  testId={`host-mode-${h.name}`}
+                  ariaLabel={`${h.name} mode`}
                   title="perch = remote runs its own perch; direct = remote only needs claude/codex + tmux"
                   value={h.mode ?? "perch"}
-                  onChange={(e) => upsertHost({ ...h, mode: e.target.value as HostMode })}
-                >
-                  <option value="perch">perch</option>
-                  <option value="direct">direct</option>
-                </select>
+                  onChange={(value) => upsertHost({ ...h, mode: value as HostMode })}
+                  options={[{ value: "perch", label: "perch" }, { value: "direct", label: "direct" }]}
+                />
                 {state === "error" && info?.error && (
                   <span className="min-w-0 flex-1 overflow-hidden text-[0.72rem] text-ellipsis whitespace-nowrap text-red max-[700px]:basis-full" title={info.error}>
                     {info.error.length > 40 ? info.error.slice(0, 40) + "…" : info.error}
@@ -320,16 +316,15 @@ function SshHostsSection() {
           value={newPort}
           onChange={(e) => setNewPort(e.target.value)}
         />
-        <select
+        <Select
           className={SELECT}
-          data-testid="host-mode-input"
+          testId="host-mode-input"
+          ariaLabel="New host mode"
           title="direct = remote only needs claude/codex + tmux; perch = remote runs its own perch"
           value={newMode}
-          onChange={(e) => setNewMode(e.target.value as HostMode)}
-        >
-          <option value="direct">direct</option>
-          <option value="perch">perch</option>
-        </select>
+          onChange={(value) => setNewMode(value as HostMode)}
+          options={[{ value: "direct", label: "direct" }, { value: "perch", label: "perch" }]}
+        />
         <button
           type="button"
           className={BTN_PRIMARY}
@@ -515,17 +510,14 @@ function NotificationsSection() {
         title="Notification delivery"
         description="In-app alerts also try system notifications while Perch is unfocused. Off disables visual alerts, not sound."
       >
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-toast-delivery"
-          aria-label="Notification delivery"
+          testId="settings-toast-delivery"
+          ariaLabel="Notification delivery"
           value={toastDelivery}
-          onChange={(e) => handleToastDeliveryChange(e.target.value as "off" | "app" | "system")}
-        >
-          <option value="off">Off</option>
-          <option value="app">In-app</option>
-          <option value="system">System notifications</option>
-        </select>
+          onChange={(value) => handleToastDeliveryChange(value as "off" | "app" | "system")}
+          options={[{ value: "off", label: "Off" }, { value: "app", label: "In-app" }, { value: "system", label: "System notifications" }]}
+        />
       </SettingRow>
       <SettingRow title="Notification permission" description={<span role="status" data-testid="notification-permission-status">{permissionText}</span>}>
         {(permission === "default" || permission === "provisional") ? (
@@ -543,30 +535,26 @@ function NotificationsSection() {
     </SettingsGroup>
     <SettingsGroup title="Usage">
       <SettingRow title="Plan limit alert" description="Notify when a plan window crosses this share.">
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-usage-limit-alert"
-          aria-label="Plan limit alert"
+          testId="settings-usage-limit-alert"
+          ariaLabel="Plan limit alert"
           disabled={!settings}
-          value={settings?.usageLimitAlert ?? 80}
-          onChange={(e) => updateSettings({ usageLimitAlert: Number(e.target.value) })}
-        >
-          <option value={0}>Off</option>
-          {[50, 75, 80, 90, 95].map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
-        </select>
+          value={String(settings?.usageLimitAlert ?? 80)}
+          onChange={(value) => updateSettings({ usageLimitAlert: Number(value) })}
+          options={[{ value: "0", label: "Off" }, ...[50, 75, 80, 90, 95].map((percent) => ({ value: String(percent), label: `${percent}%` }))]}
+        />
       </SettingRow>
       <SettingRow title="Daily spend alert" description="Notify once a day when API-equivalent spend passes this.">
-        <select
+        <Select
           className={SELECT}
-          data-testid="settings-usage-daily-budget"
-          aria-label="Daily spend alert"
+          testId="settings-usage-daily-budget"
+          ariaLabel="Daily spend alert"
           disabled={!settings}
-          value={settings?.usageDailyBudgetUsd ?? 0}
-          onChange={(e) => updateSettings({ usageDailyBudgetUsd: Number(e.target.value) })}
-        >
-          <option value={0}>Off</option>
-          {[5, 10, 25, 50, 100, 250].map((dollars) => <option key={dollars} value={dollars}>${dollars}</option>)}
-        </select>
+          value={String(settings?.usageDailyBudgetUsd ?? 0)}
+          onChange={(value) => updateSettings({ usageDailyBudgetUsd: Number(value) })}
+          options={[{ value: "0", label: "Off" }, ...[5, 10, 25, 50, 100, 250].map((dollars) => ({ value: String(dollars), label: `$${dollars}` }))]}
+        />
       </SettingRow>
     </SettingsGroup>
     </>

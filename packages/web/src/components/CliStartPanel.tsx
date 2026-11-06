@@ -26,6 +26,7 @@ import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
 import { AGENT_PICKER } from "./AgentPicker";
+import { Select } from "./ui/select";
 import { START_LINK, StartCard } from "./StartCard";
 
 const STATUS = "flex items-baseline gap-[0.45rem] text-[0.78rem] text-subtext-0";
@@ -104,15 +105,14 @@ export function CliStartPanel() {
       disabled={!ready || !choices.length}
       onPick={pick}
       target={targets.length > 1 && (
-        <select
+        <Select
           className={cn(AGENT_PICKER, "max-w-full text-[0.8rem] [--picker-bg:var(--surface-0)]")}
-          aria-label="Where to open"
-          data-testid="cli-start-target"
+          ariaLabel="Where to open"
+          testId="cli-start-target"
           value={target.key}
-          onChange={(event) => setTargetKey(event.target.value)}
-        >
-          {targets.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
-        </select>
+          onChange={setTargetKey}
+          options={targets.map((candidate) => ({ value: candidate.key, label: candidate.label }))}
+        />
       )}
       status={<>
         {manifestCapability && manifestState?.state === "ready" && !choices.length && (

@@ -25,6 +25,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { choose } from "./select";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -261,7 +262,7 @@ async function createRemoteSessionViaPicker(page: Page, hostId: string, agent: s
   await newBtn.click();
   const picker = page.getByTestId("new-session-popover-agent");
   await expect(picker).toBeEnabled({ timeout: 10_000 });
-  await picker.selectOption(agent);
+  await choose(picker, agent);
   const noneOpt = page.locator('[data-testid="project-option-none"]');
   await expect(noneOpt).toBeVisible({ timeout: 5000 });
   await noneOpt.click();

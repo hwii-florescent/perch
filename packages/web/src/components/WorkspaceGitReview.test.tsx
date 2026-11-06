@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceGitReview, type WorkspaceGitReviewProps } from "./WorkspaceGitReview";
+import { chooseDropdown } from "./ui/selectTesting";
 import type {
   GitDiffSnapshot,
   GitStatusSnapshot,
@@ -177,13 +178,10 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     };
     await render({ ...props(actionSet), diff: twoFileDiff });
 
-    const picker = document.querySelector('[data-testid="git-diff-file-select"]') as HTMLSelectElement | null;
+    const picker = document.querySelector('[data-testid="git-diff-file-select"]');
     expect(picker).not.toBeNull();
     if (!picker) throw new Error("missing narrow diff file picker");
-    await act(async () => {
-      picker.value = "src/other.ts";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await chooseDropdown(picker, "src/other.ts");
 
     const editor = document.querySelector('[data-testid="git-diff"]');
     expect(editor?.className).toContain("overflow-auto");

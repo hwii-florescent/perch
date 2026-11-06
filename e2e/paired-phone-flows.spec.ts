@@ -24,6 +24,7 @@
  * Headless.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { choose } from "./select";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
@@ -260,7 +261,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
 
     // 7. One packet to the session the phone is already driving (turn 2 of 2).
     const receipt = `PHONE_REVIEW_OK_${RUN_ID}`;
-    await phone.getByLabel("Send to agent session").selectOption(sessionId!);
+    await choose(phone.getByLabel("Send to agent session"), sessionId!);
     await phone.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If this packet includes both notes, reply with exactly ${receipt}.`);
     await phone.getByTestId("git-review-preview").click();
     const packet = phone.getByTestId("git-review-packet");

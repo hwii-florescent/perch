@@ -4,6 +4,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { cn } from "../lib/cn";
 import { pageScale } from "./pdfPageScale";
 import { GHOST_BUTTON } from "./ui/icon-button";
+import { Select } from "./ui/select";
 
 /** Native PDF plugins aren't reliable in WKWebView or headless browsers.
  * Load PDF.js only for PDF tabs; no PDF scripts, forms or links are executed. */
@@ -81,9 +82,8 @@ export function WorkspacePdf({ url }: { url: string }) {
         <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={!document || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous page</button>
         <span aria-live="polite">Page {pageNumber} of {document?.numPages ?? "…"}</span>
         <button type="button" className={cn(GHOST_BUTTON, "min-h-8 px-2")} disabled={!document || pageNumber >= document.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next page</button>
-        <select aria-label="PDF zoom" className="min-h-8 rounded-ui bg-panel-bg px-1 text-fg" value={zoom} onChange={(event) => setZoom(event.target.value)}>
-          <option value="fit">Fit width</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option>
-        </select>
+        <Select ariaLabel="PDF zoom" className="min-h-8 rounded-ui bg-panel-bg px-2 text-fg" value={zoom} onChange={setZoom}
+          options={[{ value: "fit", label: "Fit width" }, { value: "1", label: "100%" }, { value: "1.5", label: "150%" }, { value: "2", label: "200%" }]} />
       </nav>
       {state === "loading" && <p role="status" className="m-0 px-3 py-1 text-[0.75rem] text-subtext-0">Loading PDF…</p>}
       {state === "error" && <p role="alert" className="m-0 px-3 py-2 text-[0.75rem] text-red">Could not preview this PDF. {error} Use Download to open it in another app.</p>}

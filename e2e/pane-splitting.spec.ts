@@ -30,6 +30,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { shellPanes, startChat, switchViaSidebar, switchViaTabBar } from "./projects";
+import { optionStates } from "./select";
 
 const BASE_URL = "http://127.0.0.1:7799";
 
@@ -132,7 +133,7 @@ test.describe("Pane splitting/zoom/context-menu (Phase 5)", () => {
     async function splitWithOneShell(): Promise<void> {
       await leaderChord(page, "_");
       await expect(shellPanes(page)).toHaveCount(1, { timeout: 10000 });
-      await expect(picker.locator("option")).toHaveCount(1, { timeout: 10000 });
+      await expect.poll(async () => (await optionStates(picker)).length, { timeout: 10000 }).toBe(1);
     }
     async function reload(): Promise<void> {
       await expect(shellPanes(page)).toHaveCount(0, { timeout: 10000 });

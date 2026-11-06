@@ -11,6 +11,7 @@ import { closeWorkspaceTerminal, listWorkspaceTerminals, openWorkspaceTerminal }
 import { getDockviewController } from "../dockview/dockviewController";
 import { newId } from "../ids";
 import { KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
+import { Select } from "../components/ui/select";
 
 interface ShellState { current: WorkspaceTerminal | null; error: string | null }
 const OPENING: ShellState = { current: null, error: null };
@@ -149,10 +150,9 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
 
   return <div className="terminal terminal--persistent" data-terminal-id={current?.id} data-pane-id={selected ?? undefined}>
     <div className="terminal__toolbar">
-      {terminals.length > 0 && <select aria-label="Shell pane" disabled={closing || !connected} value={selected ?? ""} onChange={(event) => { explicitlyClosed.current = false; setSelected(event.target.value); onPaneChange?.(event.target.value); }}>
-        {!selected && <option value="" disabled>Choose a shell</option>}
-        {terminals.map((row, index) => <option key={row.id} value={row.paneId}>Shell {index + 1}{row.state === "lost" ? " · unavailable" : ""}</option>)}
-      </select>}
+      {terminals.length > 0 && <Select className="min-w-0 max-w-[140px]" ariaLabel="Shell pane" disabled={closing || !connected} value={selected ?? ""} onChange={(value) => { explicitlyClosed.current = false; setSelected(value); onPaneChange?.(value); }}
+        options={[...(selected ? [] : [{ value: "", label: "Choose a shell", disabled: true }]), ...terminals.map((row, index) => ({ value: row.paneId, label: `Shell ${index + 1}${row.state === "lost" ? " · unavailable" : ""}` }))]} />
+      }
       <span className="terminal__connection">{current?.state === "running" ? "Shell running" : "Shell"}</span>
       <button type="button" disabled={!connected || closing} onClick={() => {
         explicitlyClosed.current = false;

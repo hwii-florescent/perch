@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CATALOG_ACTION, CATALOG_TOGGLE, MUTED } from "./ui/settings";
+import { Select } from "./ui/select";
 import { cn } from "../lib/cn";
 import type { AgentManifestSummary } from "@perch/shared";
 import { usePerchStore } from "../store";
@@ -53,9 +54,8 @@ export function AgentCatalog() {
   return <div className="px-4 pt-1 pb-4" data-testid="agent-catalog">
     <p className={MUTED}>Run your agent’s CLI in a workspace folder. Install links open each agent’s setup instructions; Refresh checks this host again.</p>
     <div className="my-4 flex items-center justify-between gap-2">
-      <label className="flex items-center gap-2">Host <select className={FIELD} aria-label="Agent host" value={hostId} onChange={(e) => setHostId(e.target.value)}>
-        <option value="local">This host</option>{hosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}
-      </select></label>
+      <label className="flex items-center gap-2">Host <Select className={`${FIELD} min-w-[8rem]`} ariaLabel="Agent host" value={hostId} onChange={setHostId}
+        options={[{ value: "local", label: "This host" }, ...hosts.map((host) => ({ value: host.id, label: host.name }))]} /></label>
       <button type="button" className={CATALOG_ACTION} disabled={busy || !discoverable} onClick={() => fetch(hostId)}>Refresh</button>
     </div>
     {!discoverable ? <p role="status">This host does not expose an agent catalog. Update its Perch core to manage agents here.</p> : <>

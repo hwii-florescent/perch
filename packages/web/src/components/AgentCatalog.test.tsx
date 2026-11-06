@@ -74,11 +74,15 @@ it("opens setup only on confirmation; enabling cannot put a missing harness in t
   expect(fetch).toHaveBeenCalledExactlyOnceWith("local", { providerId: "opencode", enabled: true });
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   act(() => setCatalog({ ...missing, enabled: true }));
-  expect(document.querySelector('option[value="opencode"]')).toBeNull();
+  const picker = () => document.querySelector('[data-testid="new-session-agent"]')!;
+  const opencode = () => document.querySelector('[role="option"][data-value="opencode"]');
+  click(picker());
+  expect(opencode()).toBeNull();
   click(button("Refresh"));
   expect(fetch).toHaveBeenLastCalledWith("local");
   act(() => setCatalog({ ...missing, enabled: true, available: true }));
-  expect(document.querySelector('option[value="opencode"]')?.textContent).toBe("OpenCode");
+  click(picker());
+  expect(opencode()?.querySelector("span")?.textContent).toBe("OpenCode");
 });
 
 it("enables installed harnesses and disables missing ones without an installation prompt", () => {
@@ -122,8 +126,9 @@ it("dismisses an unconfirmed installation request on disconnect or host change",
   fetch.mockClear();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   click(button("Enabled"));
-  const select = document.querySelector<HTMLSelectElement>('select[aria-label="Agent host"]')!;
-  act(() => { select.value = "remote"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  const select = document.querySelector('[role="combobox"][aria-label="Agent host"]')!;
+  act(() => { (select as HTMLElement).click(); });
+  act(() => { document.querySelector<HTMLElement>('[role="option"][data-value="remote"]')!.click(); });
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(fetch.mock.calls.every((args) => args.length === 1)).toBe(true);
   expect(openExternal).not.toHaveBeenCalled();

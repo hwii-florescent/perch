@@ -3,10 +3,10 @@ import { usePerchStore } from "../store";
 import { AGENTS } from "../models";
 import { cn } from "../lib/cn";
 import { menuItem } from "./ui/menu";
+import { Select } from "./ui/select";
 
-/** The native select, with a drawn chevron (WebKit ignores min-height on a native select).
- * Phones lift the min-height to a 44px touch target. */
-export const AGENT_PICKER = "min-h-[32px] [.app--mobile_&]:min-h-[44px] w-full appearance-none rounded-ui py-[0.3rem] pr-[1.6rem] pl-[0.45rem] text-[0.8rem] text-fg [background:linear-gradient(45deg,transparent_50%,var(--subtext-0)_50%)_right_0.85rem_center/5px_5px_no-repeat,linear-gradient(135deg,var(--subtext-0)_50%,transparent_50%)_right_0.55rem_center/5px_5px_no-repeat,var(--picker-bg,var(--panel-bg))] [font-family:inherit] focus-visible:[outline:1px_solid_var(--accent)]";
+/** Trigger look for an agent `Select`. Phones lift the min-height to a 44px touch target. */
+export const AGENT_PICKER = "min-h-[32px] [.app--mobile_&]:min-h-[44px] w-full rounded-ui py-[0.3rem] pr-[0.55rem] pl-[0.45rem] text-[0.8rem] text-fg bg-[var(--picker-bg,var(--panel-bg))] [font-family:inherit] focus-visible:[outline:1px_solid_var(--accent)]";
 
 /** The CLI agents `hostId` can start in a pane (its enabled, installed
  * manifests), fetched on demand. Shared by every "start a session" surface. */
@@ -49,11 +49,9 @@ export function AgentPicker({ value, onChange, onManage, hostId: hostIdProp, tes
     if (!valid && first) onChange(first);
   }, [catalog?.state, discovery, first, hostId, onChange, preferred, valid, value]);
   return <div className={wrapClassName}>
-    <select className={cn(AGENT_PICKER, className)} aria-label="Agent"
-      data-testid={testIdPrefix} value={valid ? value : ""} disabled={!connected || (discovery && catalog?.state !== "ready") || !choices.length}
-      onChange={(event) => onChange(event.target.value)}>
-      {choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-    </select>
+    <Select className={cn(AGENT_PICKER, className)} ariaLabel="Agent"
+      testId={testIdPrefix} value={valid ? value : ""} disabled={!connected || (discovery && catalog?.state !== "ready") || !choices.length}
+      onChange={onChange} options={choices.map((entry) => ({ value: entry.id, label: entry.label }))} />
     {discovery && <button type="button" className={cn(menuItem(), "text-subtext-0")} onClick={() => { onManage?.(); manage(); }}>Manage agents…</button>}
     {discovery && catalog?.state === "error" && <p role="alert">{catalog.error}</p>}
     {discovery && catalog?.state === "ready" && !choices.length && <p role="status">Enable or install an agent in Manage agents.</p>}

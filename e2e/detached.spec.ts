@@ -13,6 +13,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { choose, expectChoice } from "./select";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -136,24 +137,25 @@ test("D1. hosts editor exposes the perch/direct mode select", async ({ page }) =
   await freshSession(page);
   await page.locator('[data-testid="settings-gear"]').click();
   await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 10000 });
+  await page.locator('[data-testid="settings-nav-hosts"]').click(); // Settings is paged: hosts live under SSH hosts
 
   // The add-host form's mode select defaults to "direct" — most SSH targets
   // don't have perch installed, so direct is the normal case for a new host.
   const addMode = page.locator('[data-testid="host-mode-input"]');
   await expect(addMode).toBeVisible({ timeout: 10000 });
-  await expect(addMode).toHaveValue("direct");
+  await expectChoice(addMode, "direct");
 
   // Choosing "perch" from the add form still works (opt-in classic
   // federation for hosts that do run their own perch).
-  await addMode.selectOption("perch");
-  await expect(addMode).toHaveValue("perch");
-  await addMode.selectOption("direct");
-  await expect(addMode).toHaveValue("direct");
+  await choose(addMode, "perch");
+  await expectChoice(addMode, "perch");
+  await choose(addMode, "direct");
+  await expectChoice(addMode, "direct");
 
   // The existing direct host's row select reflects (and can change) its mode.
   const rowMode = page.locator(`[data-testid="host-mode-${DIRECT_HOST_NAME}"]`);
   await expect(rowMode).toBeVisible({ timeout: 10000 });
-  await expect(rowMode).toHaveValue("direct");
+  await expectChoice(rowMode, "direct");
 });
 
 test("D2. a direct host is badged in the host switcher", async ({ page }) => {

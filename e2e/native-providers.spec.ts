@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { choose } from "./select";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -89,7 +90,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
       await expect(current.getByTestId(`cli-start-agent-${provider}`)).toHaveCount(1);
       if (provider === "pi") {
         await current.getByTestId("new-session-local").click();
-        await current.getByTestId("new-session-popover-agent").selectOption("pi");
+        await choose(current.getByTestId("new-session-popover-agent"), "pi");
         await current.getByTestId("project-option-none").click();
       } else {
         await startFromPanel(current, { agent: provider });

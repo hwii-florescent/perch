@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { choose, optionStates } from "./select";
 import { realpathSync } from "node:fs";
 
 /** Start a CLI session from the start panel: pick where (a project whose name contains `where`, else the
@@ -6,12 +7,9 @@ import { realpathSync } from "node:fs";
 export async function startFromPanel(page: Page, opts: { agent?: string; where?: string } = {}): Promise<void> {
   const target = page.getByTestId("cli-start-target");
   if (await target.count()) {
-    const value = await target.locator("option").evaluateAll(
-      (options, where) => (options as HTMLOptionElement[]).find((option) => (where ? option.textContent!.includes(where) : option.value === "~"))?.value,
-      opts.where,
-    );
+    const value = (await optionStates(target)).find((option) => (opts.where ? option.text.includes(opts.where) : option.value === "~"))?.value;
     if (value === undefined) throw new Error(`no start target matching ${opts.where ?? "Quickchat"}`);
-    await target.selectOption(value);
+    await choose(target, value);
   }
   await (opts.agent ? page.getByTestId(`cli-start-agent-${opts.agent}`) : page.locator('[data-testid^="cli-start-agent-"]').first()).click();
 }
@@ -56,7 +54,7 @@ export async function startChat(page: Page, agent = "terminal", dir?: string): P
   await page.getByTestId("new-session-local").click();
   const picker = page.getByTestId("new-session-popover-agent");
   await expect(picker).toBeEnabled({ timeout: 10_000 });
-  await picker.selectOption(agent);
+  await choose(picker, agent);
   if (dir) await pickProject(page, dir);
   else await page.getByTestId("project-option-none").click();
   await expect.poll(async () => {

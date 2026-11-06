@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
+import { choose, openList, optionStates } from "./select";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const RUN_ID = `${Date.now()}-${process.pid}`;
@@ -199,18 +200,15 @@ async function latestCreate(page: Page, body: string): Promise<WireMessage> {
 }
 
 /**
- * Assert whether the "Workspace start" target is offered.
- *
- * Playwright's disabled/enabled matchers are useless on this option: it
- * computes an `<option>`'s state as *enabled* whenever the `<select>` sits
- * inside a `<label>`, which this toolbar's does, so both matchers pass no
- * matter what the page renders. Read the DOM property the browser actually
- * holds, plus the label the user reads.
+ * Assert whether the "Workspace start" target is offered: read the option's own
+ * disabled state (`aria-disabled`) and the label the user reads.
  */
 async function expectWorkspaceStartOffered(page: Page, recorded: boolean): Promise<void> {
-  const option = page.getByTestId("git-diff-target").locator('option[value="workspaceStart"]');
-  await expect(option).toHaveJSProperty("disabled", !recorded);
-  await expect(option).toHaveText(recorded ? "Workspace start" : "Workspace start (not recorded)");
+  const trigger = page.getByTestId("git-diff-target");
+  expect((await optionStates(trigger)).find((option) => option.value === "workspaceStart")?.disabled).toBe(!recorded);
+  const options = await openList(trigger);
+  await expect(options.filter({ hasText: /^Workspace start/ })).toHaveText(recorded ? "Workspace start" : "Workspace start (not recorded)");
+  await trigger.press("Escape");
 }
 
 test.describe("Workspace Git/review UI", () => {
@@ -246,7 +244,7 @@ test.describe("Workspace Git/review UI", () => {
       expect(workingCreate.baseRevision).toBe(workingRevision);
 
       // Staged diff: HEAD is the old side and the index is the new side.
-      await page.getByTestId("git-diff-target").selectOption("staged");
+      await choose(page.getByTestId("git-diff-target"), "staged");
       await expect(diff).toContainText(HEAD_TEXT, { timeout: 15000 });
       await expect(diff).toContainText(INDEX_TEXT);
       const stagedDiff = await latestDiff(page, "staged");
@@ -265,7 +263,7 @@ test.describe("Workspace Git/review UI", () => {
 
       // HEAD diff includes both staged and worktree edits, proving the three
       // server-owned source snapshots remain separate in the UI.
-      await page.getByTestId("git-diff-target").selectOption("head");
+      await choose(page.getByTestId("git-diff-target"), "head");
       await expect(diff).toContainText(HEAD_TEXT, { timeout: 15000 });
       await expect(diff).toContainText(WORKTREE_TEXT);
       const headDiff = await latestDiff(page, "head");
@@ -319,7 +317,7 @@ test.describe("Workspace Git/review UI", () => {
       await page.keyboard.press("Escape");
       await expect(menu).toHaveCount(0);
       await page.getByTestId("git-refresh").click();
-      await page.getByTestId("git-diff-target").selectOption("head");
+      await choose(page.getByTestId("git-diff-target"), "head");
       await expect(page.getByTestId("git-diff")).toContainText(HEAD_TEXT);
       await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT);
       await expectWorkspaceStartOffered(page, false);
@@ -342,7 +340,7 @@ test.describe("Workspace Git/review UI", () => {
       const selector = page.getByTestId("git-diff-target");
       const diff = page.getByTestId("git-diff");
       await expectWorkspaceStartOffered(page, true);
-      await selector.selectOption("workspaceStart");
+      await choose(selector, "workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
       await expect(diff).toContainText(WORKTREE_TEXT);
       const initial = await latestDiff(page, "compare");
@@ -354,10 +352,10 @@ test.describe("Workspace Git/review UI", () => {
       git(["commit", "-q", "-m", "advance head"]);
       fs.writeFileSync(path.join(FIXTURE_ROOT, "new.txt"), "UNTRACKED_AFTER_START\n");
       await page.getByTestId("git-refresh").click();
-      await selector.selectOption("head");
+      await choose(selector, "head");
       await expect(diff).toContainText(INDEX_TEXT);
       await expect(diff).not.toContainText(HEAD_TEXT);
-      await selector.selectOption("workspaceStart");
+      await choose(selector, "workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
       await expect(diff).toContainText("UNTRACKED_AFTER_START");
       expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
@@ -369,7 +367,7 @@ test.describe("Workspace Git/review UI", () => {
       await page.reload({ waitUntil: "networkidle" });
       const project = page.locator(".workspace-project").filter({ hasText: PROJECT_NAME });
       await openWorkspaceTool(page, workspaceId, "gitReview");
-      await selector.selectOption("workspaceStart");
+      await choose(selector, "workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
       expect((await latestDiff(page, "compare")).target).toEqual(initial.target);
       await expect(page.getByTestId("git-inline-comment").filter({ hasText: body })).toBeVisible();
@@ -379,7 +377,7 @@ test.describe("Workspace Git/review UI", () => {
       await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
       await page.getByRole("navigation", { name: "Mobile panes" }).getByRole("button", { name: "Git", exact: true }).click();
       await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible();
-      await selector.selectOption("workspaceStart");
+      await choose(selector, "workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
       await expect(diff).toContainText(WORKTREE_TEXT);
       await expectDiffSurfaceUsable(page, WORKTREE_TEXT);

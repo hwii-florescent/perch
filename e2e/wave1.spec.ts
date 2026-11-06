@@ -10,6 +10,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { choose, expectChoice } from "./select";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -177,15 +178,15 @@ test.describe("Wave 1 functionality gaps", () => {
 
     // Wait for the real values to arrive before touching anything, so the
     // flips below act on hydrated state rather than the pre-hydration default.
-    await expect(toastSelect).toHaveValue(originalToast, { timeout: 8000 });
+    await expectChoice(toastSelect, originalToast, { timeout: 8000 });
     await expect(soundToggle).toBeChecked({ checked: originalSound });
 
     try {
       await soundToggle.setChecked(!originalSound);
       await expect(soundToggle).toBeChecked({ checked: !originalSound });
 
-      await toastSelect.selectOption(flippedToast);
-      await expect(toastSelect).toHaveValue(flippedToast);
+      await choose(toastSelect, flippedToast);
+      await expectChoice(toastSelect, flippedToast);
 
       // Close and reopen — settings persist server-side (settings.json).
       await page.keyboard.press("Escape");
@@ -197,7 +198,7 @@ test.describe("Wave 1 functionality gaps", () => {
       await expect(page.locator('[data-testid="settings-sound-enabled"]')).toBeChecked({
         checked: !originalSound,
       });
-      await expect(page.locator('[data-testid="settings-toast-delivery"]')).toHaveValue(flippedToast);
+      await expectChoice(page.locator('[data-testid="settings-toast-delivery"]'), flippedToast);
 
       await page.screenshot({ path: "artifacts/wave1-f3f4-settings.png" });
     } finally {
@@ -211,7 +212,7 @@ test.describe("Wave 1 functionality gaps", () => {
         await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 8000 });
         await page.locator('[data-testid="settings-nav-notifications"]').click();
         await page.locator('[data-testid="settings-sound-enabled"]').setChecked(originalSound);
-        await page.locator('[data-testid="settings-toast-delivery"]').selectOption(originalToast);
+        await choose(page.locator('[data-testid="settings-toast-delivery"]'), originalToast);
         await page.keyboard.press("Escape");
       } catch {
         // swallow — see above

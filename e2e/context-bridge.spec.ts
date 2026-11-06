@@ -1,5 +1,6 @@
 /** Isolated, headless Context Bridge workflow. One real Haiku turn per engine. */
 import { test, expect } from "@playwright/test";
+import { choose } from "./select";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -195,7 +196,7 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     const marker = `BRIDGE_OK_${Date.now()}`;
     await dialog.getByLabel("Question for agent", { exact: true }).fill(`Do not use tools, execute commands, or modify files. If the excerpt contains unsaved bridge selection, reply exactly ${marker}.`);
     await expect(prepared).toHaveValue(new RegExp(marker));
-    await dialog.getByLabel("Agent in this nest", { exact: true }).selectOption(targetSessionId);
+    await choose(dialog.getByLabel("Agent in this nest", { exact: true }), targetSessionId);
     await expect(dialog.getByRole("button", { name: "Send to agent", exact: true })).toBeEnabled();
     const sendsBefore = sent.filter((message) => message.type === "context.send").length;
     await dialog.getByRole("button", { name: "Send to agent", exact: true }).click();

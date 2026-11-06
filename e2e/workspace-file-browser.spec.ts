@@ -1,5 +1,6 @@
 /** Local-only file browsing; no agent/model calls. */
 import { test, expect } from "@playwright/test";
+import { choose } from "./select";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -83,7 +84,7 @@ test("search, media tabs, readonly files and safe extraction", async ({ page, re
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect(page.getByRole("document", { name: "PDF page 2 text" })).toHaveText("Second page!");
     await page.getByRole("button", { name: "Previous page", exact: true }).click();
-    await page.getByRole("combobox", { name: "PDF zoom" }).selectOption("1.5");
+    await choose(page.getByRole("combobox", { name: "PDF zoom" }), "1.5");
     await expect(page.getByTestId("workspace-file-pdf")).toHaveAttribute("data-ready", "true");
     await page.screenshot({ path: testInfo.outputPath("file-browser-pdf.png"), fullPage: true });
     await expect(page.getByTestId("file-tab-document.pdf")).toHaveClass(/tab-bar__tab--active/);

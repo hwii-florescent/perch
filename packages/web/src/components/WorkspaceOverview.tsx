@@ -17,6 +17,7 @@ import { Dialog } from "./ui/dialog";
 import { EllipsisIcon, PlusIcon } from "./ui/icons";
 import { rowAction } from "./ui/row-action";
 import { SELECT } from "./ui/settings";
+import { Select } from "./ui/select";
 import { cn } from "../lib/cn";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -907,13 +908,11 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           {sshHosts.length > 0 && (
             <label className="grid gap-[0.16rem] text-[0.7rem] text-subtext-0">
               <span>Host</span>
-              <select className={SELECT} data-testid="workspace-add-host" value={addHostId} onChange={(event) => setAddHostId(event.target.value)}>
-                <option value="local">This machine</option>
-                {sshHosts.filter((host) => host.enabled).map((host) => {
+              <Select className={SELECT} testId="workspace-add-host" ariaLabel="Host" value={addHostId} onChange={setAddHostId}
+                options={[{ value: "local", label: "This machine" }, ...sshHosts.filter((host) => host.enabled).map((host) => {
                   const state = hostStates[host.id]?.state ?? "connecting";
-                  return <option key={host.id} value={host.id} disabled={state !== "connected"}>{host.name}{state === "connected" ? "" : ` (${state})`}</option>;
-                })}
-              </select>
+                  return { value: host.id, label: `${host.name}${state === "connected" ? "" : ` (${state})`}`, disabled: state !== "connected" };
+                })]} />
             </label>
           )}
           {tauriInvoke && addHostId === "local" && (

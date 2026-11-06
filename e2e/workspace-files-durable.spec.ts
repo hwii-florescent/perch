@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { MOD, expectDoc } from "./editor";
+import { optionStates } from "./select";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -240,9 +241,8 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("git-refresh").click();
       await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE, { timeout: 15000 });
-      const changedFile = page.getByTestId("git-diff-file-select").locator(`option[value="${RELATIVE_FILE}"]`);
-      await expect(changedFile).toHaveCount(1, { timeout: 15000 });
-      await expect(changedFile).toContainText("modified");
+      const fileSelect = page.getByTestId("git-diff-file-select");
+      await expect.poll(async () => (await optionStates(fileSelect)).filter((file) => file.value === RELATIVE_FILE).map((file) => file.text), { timeout: 15000 }).toEqual([expect.stringContaining("modified")]);
       await expect(page.getByTestId("git-diff")).toContainText("saved sentinel", { timeout: 15000 });
       await page.screenshot({ path: testInfo.outputPath("files-durable-status.png"), fullPage: true });
 

@@ -12,6 +12,7 @@
  *         starts the Settings default ("Empty workspace opens") directly.
  */
 import { spawnSync } from "node:child_process";
+import { choose, expectChoice, optionState } from "./select";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,9 +23,9 @@ import { addProject, startChat } from "./projects";
 async function setEmptyWorkspaceAgent(page: Page, agent: string): Promise<void> {
   await page.getByTestId("settings-gear").click();
   const select = page.getByTestId("settings-empty-workspace-agent");
-  if (agent) await expect(select.locator(`option[value="${agent}"]`)).toHaveCount(1, { timeout: 10_000 });
-  await select.selectOption(agent);
-  await expect(select).toHaveValue(agent);
+  if (agent) await expect.poll(() => optionState(select, agent), { timeout: 10_000 }).toBeDefined();
+  await choose(select, agent);
+  await expectChoice(select, agent);
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("settings-modal")).toHaveCount(0);
 }

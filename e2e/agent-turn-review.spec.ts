@@ -16,6 +16,7 @@
  * touches the shared hub or ~/.perch. Headless only.
  */
 import { test, expect } from "@playwright/test";
+import { choose, expectChoice, optionState, optionStates } from "./select";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
@@ -227,19 +228,19 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     const selector = page.getByTestId("git-diff-target");
     const diff = page.getByTestId("git-diff");
-    const option = selector.locator('option[value="lastAgentTurn"]');
+    const turn = () => optionState(selector, "lastAgentTurn");
     await expect.poll(async () => {
       await page.getByTestId("git-refresh").click();
       await page.waitForTimeout(400);
-      return (await option.textContent()) ?? "";
+      return (await turn())?.text ?? "";
     }, { timeout: 30_000 }).toBe(`Last agent turn (${provider})`);
-    await expect(option).not.toHaveAttribute("disabled", /.*/);
+    expect((await turn())?.disabled).toBe(false);
 
     // 5. A human edit *after* the recorded turn, which its diff must not claim.
     fs.writeFileSync(path.join(repo, "human_after_turn.txt"), "HUMAN_AFTER_TURN\n");
     await page.getByTestId("git-refresh").click();
 
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT alpha", { timeout: 15000 });
     // The summary answers "whose turn, how much" — a diff alone does not.
     await expect(page.getByTestId("git-turn-summary")).toContainText(`${provider} changed 2 paths`);
@@ -255,16 +256,17 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     git("mv to_rename.txt renamed.txt", repo);
     git("rm -q to_delete.txt", repo);
     await page.getByTestId("git-refresh").click();
-    await selector.selectOption("head");
-    const files = page.getByTestId("git-diff-file-select").locator("option");
-    await expect(files.filter({ hasText: "renamed.txt" })).toContainText(/renamed|added/i, { timeout: 20000 });
-    await expect(files.filter({ hasText: "to_delete.txt" })).toContainText(/deleted/i);
+    await choose(selector, "head");
+    const fileSelect = page.getByTestId("git-diff-file-select");
+    const fileText = async (name: string) => (await optionStates(fileSelect)).find((file) => file.text.includes(name))?.text ?? "";
+    await expect.poll(() => fileText("renamed.txt"), { timeout: 20000 }).toMatch(/renamed|added/i);
+    await expect.poll(() => fileText("to_delete.txt")).toMatch(/deleted/i);
     await expect(page.getByTestId("git-status")).toContainText("to_delete.txt");
     // Staged-only comparison after committing the staged rename/delete: the
     // index matches HEAD, so the surface must say so rather than render blank.
     git('-c core.hooksPath=/dev/null commit -q -m "rename and delete"', repo);
     await page.getByTestId("git-refresh").click();
-    await selector.selectOption("staged");
+    await choose(selector, "staged");
     await expect(page.getByTestId("git-diff-empty")).toBeVisible({ timeout: 20000 });
 
     // 7. Durable: the boundary survives a reload, and the working tree base
@@ -273,9 +275,9 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
     await page.reload({ waitUntil: "networkidle" });
     await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT alpha", { timeout: 15000 });
-    await selector.selectOption("workingTree");
+    await choose(selector, "workingTree");
     await expect(diff).toContainText("HUMAN_AFTER_TURN", { timeout: 15000 });
 
     if (provider === "turnbot") {
@@ -296,20 +298,20 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       expect(betaSession).not.toBe(alphaSession);
       await openWorkspaceTool(page, workspaceId, "gitReview");
       await page.getByTestId("git-refresh").click();
-      await selector.selectOption("lastAgentTurn");
+      await choose(selector, "lastAgentTurn");
       await expect(diff).toContainText("AGENT_EDIT beta");
 
       // Each session's recorded comparison remains reviewable after another
       // session edits the same files. Switching must discard a path filter too.
-      await page.getByTestId("git-diff-file-select").selectOption("src/main.txt");
+      await choose(page.getByTestId("git-diff-file-select"), "src/main.txt");
       const sessionSelector = page.getByTestId("git-turn-session");
       const selectTurnFor = async (sessionId: string) => {
-        await sessionSelector.selectOption(sessionId);
+        await choose(sessionSelector, sessionId);
         // selectOption can dispatch for a disabled option. Wait for this
         // session's status reply before choosing its newly available turn.
-        await expect(option).toHaveJSProperty("disabled", false);
-        await selector.selectOption("lastAgentTurn");
-        await expect(selector).toHaveValue("lastAgentTurn");
+        await expect.poll(async () => (await turn())?.disabled).toBe(false);
+        await choose(selector, "lastAgentTurn");
+        await expectChoice(selector, "lastAgentTurn");
       };
       await selectTurnFor(alphaSession);
       await expect(diff).toContainText(BASE_TEXT);
@@ -335,8 +337,8 @@ for (const provider of ["turnbot", "claude"]) test(`${provider}: a real CLI agen
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByTestId("mobile-switch").click();
       await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
-      await expect(sessionSelector).toHaveValue(alphaSession);
-      await selector.selectOption("lastAgentTurn");
+      await expectChoice(sessionSelector, alphaSession);
+      await choose(selector, "lastAgentTurn");
       await expect(diff).toContainText("AGENT_NEW alpha");
       await page.screenshot({ path: testInfo.outputPath("turn-session-mobile.png"), fullPage: true });
       await selectTurnFor(betaSession);
@@ -439,17 +441,17 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
     const selector = page.getByTestId("git-diff-target");
-    const option = selector.locator('option[value="lastAgentTurn"]');
+    const turn = () => optionState(selector, "lastAgentTurn");
     const diff = page.getByTestId("git-diff");
     const settle = async (label: string) => {
       await expect.poll(async () => {
         await page.getByTestId("git-refresh").click();
         await page.waitForTimeout(400);
-        return (await option.textContent()) ?? "";
+        return (await turn())?.text ?? "";
       }, { timeout: 30_000 }).toBe(label);
     };
     await settle("Last agent turn (turnbot)");
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT alpha", { timeout: 15000 });
     const alphaTurn = sql("SELECT snapshot_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
 
@@ -459,23 +461,23 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await prompt("hang");
     await expect.poll(() => fs.readFileSync(path.join(repo, RELATIVE_FILE), "utf8"), { timeout: 30_000 }).toContain("AGENT_EDIT hang");
     await settle("Last agent turn (turnbot · running)");
-    await expect(option).not.toHaveAttribute("disabled", /.*/);
+    expect((await turn())?.disabled).toBe(false);
     await expect(page.getByTestId("git-turn-summary")).toContainText("turn in progress, comparing against the working tree");
     await expect(page.getByTestId("git-turn-unavailable")).toHaveCount(0);
     await expect(diff).toContainText("AGENT_EDIT hang", { timeout: 15000 });
     // The base is a content commit that carries the untracked file, so Git
     // calls it deleted while the untracked pass adds it back. One entry, and
     // no deletion claimed for a file the reviewer can see on disk.
-    const untracked = page.getByTestId("git-diff-file-select").locator('option[value="agent_new.txt"]');
-    await expect(untracked).toHaveCount(1);
-    await expect(untracked).not.toContainText(/deleted/i);
+    const untracked = (await optionStates(page.getByTestId("git-diff-file-select"))).filter((file) => file.value === "agent_new.txt");
+    expect(untracked).toHaveLength(1);
+    expect(untracked[0]!.text).not.toMatch(/deleted/i);
     await page.screenshot({ path: testInfo.outputPath("turn-running.png"), fullPage: true });
 
     // Let the turn finish so nothing is in flight any more.
     fs.writeFileSync(release, "go\n");
     await expect(rows).toContainText("turnbot_done hang", { timeout: 60_000 });
     await settle("Last agent turn (turnbot)");
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT hang", { timeout: 15000 });
     const hangTurn = sql("SELECT snapshot_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
     expect(hangTurn).not.toBe(alphaTurn);
@@ -484,11 +486,11 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     //    restart mid-turn leaves behind, with the client still showing its diff.
     sql(`UPDATE agent_change_snapshots SET completed = 0, after_head = NULL, after_branch = NULL, changed_paths_json = NULL, completed_at = NULL WHERE snapshot_id = '${hangTurn}';`);
     await settle("Last agent turn (turnbot · not captured)");
-    await expect(option).toHaveAttribute("disabled", /.*/);
+    expect((await turn())?.disabled).toBe(true);
     await expect(page.getByTestId("git-turn-unavailable")).toBeVisible();
     // The cached comparison is gone rather than silently stale, and the older
     // successful turn is never substituted for the one the label names.
-    await expect(selector).toHaveValue("workingTree");
+    await expectChoice(selector, "workingTree");
     await expect(page.getByTestId("git-turn-summary")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("turn-unavailable.png"), fullPage: true });
 
@@ -496,14 +498,14 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await page.reload({ waitUntil: "networkidle" });
     await openWorkspaceTool(page, workspaceId, "gitReview");
     await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
-    await expect(option).toHaveText("Last agent turn (turnbot · not captured)", { timeout: 20_000 });
-    await expect(option).toHaveAttribute("disabled", /.*/);
+    await expect.poll(async () => (await turn())?.text, { timeout: 20_000 }).toBe("Last agent turn (turnbot · not captured)");
+    expect((await turn())?.disabled).toBe(true);
 
     // 4. The next turn restores review, and nothing rewrote the stranded row.
     await prompt("beta");
     await expect(rows).toContainText("turnbot_done beta", { timeout: 60_000 });
     await settle("Last agent turn (turnbot)");
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(diff).toContainText("AGENT_EDIT beta", { timeout: 15000 });
     expect(sql(`SELECT completed FROM agent_change_snapshots WHERE snapshot_id = '${hangTurn}';`)).toBe("0");
     expect(sql(`SELECT after_head FROM agent_change_snapshots WHERE snapshot_id = '${hangTurn}';`)).toBe("");
@@ -513,7 +515,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await prompt("bulk");
     await expect(rows).toContainText("turnbot_done bulk", { timeout: 60_000 });
     await settle("Last agent turn (turnbot)");
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     const summary = page.getByTestId("git-turn-summary");
     await expect(summary).toContainText("turnbot changed 513 paths");
     const bulkTurn = sql("SELECT snapshot_id FROM agent_change_snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1;");
@@ -522,7 +524,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await page.screenshot({ path: testInfo.outputPath("turn-large-count-desktop.png"), fullPage: true });
     await page.reload({ waitUntil: "networkidle" });
     await openWorkspaceTool(page, workspaceId, "gitReview");
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(summary).toContainText("turnbot changed 513 paths");
     sql(`UPDATE agent_change_snapshots SET after_status = '{}' WHERE snapshot_id = '${bulkTurn}';`);
     await settle("Last agent turn (turnbot)");
@@ -530,7 +532,7 @@ test("turnbot: an uncaptured newest turn is reported honestly and clears stale r
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByTestId("mobile-switch").click();
     await page.getByTestId("mobile-switcher").getByTestId(`workspace-git-${workspaceId}`).click();
-    await selector.selectOption("lastAgentTurn");
+    await choose(selector, "lastAgentTurn");
     await expect(summary).toContainText("turnbot changed at least 512 paths");
     await expect(diff).toContainText("AGENT_NEW bulk", { timeout: 15_000 });
     await page.screenshot({ path: testInfo.outputPath("turn-large-count-mobile.png"), fullPage: true });

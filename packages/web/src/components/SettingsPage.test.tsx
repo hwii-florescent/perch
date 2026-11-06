@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { chooseDropdown, openDropdown, optionLabels } from "./ui/selectTesting";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 vi.mock("./AgentPicker", () => ({ useAgentChoices: () => ({ choices: [] }) }));
@@ -56,8 +57,7 @@ it("detects real macOS notification permission, requests only on opt-in, and rec
     await click("Send test");
     expect(invoke).toHaveBeenCalledWith("notify_session", { title: "Perch test notification", body: expect.any(String), sessionId: "usage" });
     expect(host.textContent).toContain("Test submitted");
-    const delivery = host.querySelector<HTMLSelectElement>('[data-testid="settings-toast-delivery"]')!;
-    await act(async () => { delivery.value = "system"; delivery.dispatchEvent(new Event("change", { bubbles: true })); });
+    await chooseDropdown(host.querySelector('[data-testid="settings-toast-delivery"]')!, "system");
     expect(updateSettings).toHaveBeenCalledWith({ toastDelivery: "system" });
     expect(invoke).toHaveBeenLastCalledWith("notification_request_permission");
     expect(pluginRequest).not.toHaveBeenCalled();
@@ -123,25 +123,21 @@ it("sets the usage alert thresholds from Notifications and follows the saved val
   try {
     await act(async () => root.render(<SettingsPage />));
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-notifications"]')!.click());
-    const limit = host.querySelector<HTMLSelectElement>('[data-testid="settings-usage-limit-alert"]')!;
-    const budget = host.querySelector<HTMLSelectElement>('[data-testid="settings-usage-daily-budget"]')!;
-    expect(limit.value).toBe("80");
-    expect(budget.value).toBe("0");
-    expect([...limit.options].map((option) => option.text)).toEqual(["Off", "50%", "75%", "80%", "90%", "95%"]);
-    expect([...budget.options].map((option) => option.text)).toEqual(["Off", "$5", "$10", "$25", "$50", "$100", "$250"]);
-    await act(async () => {
-      limit.value = "90";
-      limit.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const limit = host.querySelector<HTMLElement>('[data-testid="settings-usage-limit-alert"]')!;
+    const budget = host.querySelector<HTMLElement>('[data-testid="settings-usage-daily-budget"]')!;
+    expect(limit.dataset.value).toBe("80");
+    expect(budget.dataset.value).toBe("0");
+    expect(optionLabels(await openDropdown(limit))).toEqual(["Off", "50%", "75%", "80%", "90%", "95%"]);
+    await act(async () => { limit.click(); });
+    expect(optionLabels(await openDropdown(budget))).toEqual(["Off", "$5", "$10", "$25", "$50", "$100", "$250"]);
+    await act(async () => { budget.click(); });
+    await chooseDropdown(limit, "90");
     expect(updateSettings).toHaveBeenCalledWith({ usageLimitAlert: 90 });
-    await act(async () => {
-      budget.value = "25";
-      budget.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await chooseDropdown(budget, "25");
     expect(updateSettings).toHaveBeenCalledWith({ usageDailyBudgetUsd: 25 });
     act(() => usePerchStore.setState({ settings: { theme: "perch", usageLimitAlert: 0, usageDailyBudgetUsd: 100 } as never }));
-    expect(limit.value).toBe("0");
-    expect(budget.value).toBe("100");
+    expect(limit.dataset.value).toBe("0");
+    expect(budget.dataset.value).toBe("100");
   } finally {
     act(() => root.unmount());
     host.remove();
@@ -157,16 +153,14 @@ it("offers the supported engines in General and follows the saved setting", asyn
   const root = createRoot(host);
   try {
     await act(async () => root.render(<SettingsPage />));
-    const select = host.querySelector<HTMLSelectElement>('[aria-label="Default search engine"]')!;
-    expect(select.value).toBe("google");
-    expect([...select.options].map((option) => option.text)).toEqual(["Google", "DuckDuckGo", "Bing", "Brave"]);
-    await act(async () => {
-      select.value = "duckduckgo";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const select = host.querySelector<HTMLElement>('[aria-label="Default search engine"]')!;
+    expect(select.dataset.value).toBe("google");
+    expect(optionLabels(await openDropdown(select))).toEqual(["Google", "DuckDuckGo", "Bing", "Brave"]);
+    await act(async () => { select.click(); });
+    await chooseDropdown(select, "duckduckgo");
     expect(updateSettings).toHaveBeenCalledWith({ browserSearchEngine: "duckduckgo" });
     act(() => usePerchStore.setState({ settings: { theme: "perch", browserSearchEngine: "brave" } as never }));
-    expect(select.value).toBe("brave");
+    expect(select.dataset.value).toBe("brave");
   } finally {
     act(() => root.unmount());
     host.remove();

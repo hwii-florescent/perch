@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { choose } from "./select";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -122,7 +123,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await phone.locator('.workspace-git__path-button[title="notes.txt"]').click();
     await expect(phone.getByTestId("git-diff")).toContainText("review_first");
     await expect(phone.locator(".workspace-git__comment").filter({ hasText: `First note ${token}` })).toBeVisible();
-    await phone.getByLabel("Send to agent session", { exact: true }).selectOption(nativeKey!.sessionId);
+    await choose(phone.getByLabel("Send to agent session", { exact: true }), nativeKey!.sessionId);
     await expect(phone.getByLabel("Send to agent session", { exact: true }).locator("option:checked")).toContainText(provider);
     await phone.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If both First note and Second note are present, reply exactly ACCEPTED_${token}.`);
     await phone.getByTestId("git-review-preview").click();

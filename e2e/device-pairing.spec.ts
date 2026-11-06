@@ -18,6 +18,7 @@
  * Boots its own core with its own database, hosts and devices files. Headless.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { choose } from "./select";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
@@ -290,7 +291,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS", { timeout: 20_000 });
     // Session creation records this workspace's boundary before starting
     // the CLI, so the phone can compare against the original committed line.
-    await phone.getByTestId("git-diff-target").selectOption("workspaceStart");
+    await choose(phone.getByTestId("git-diff-target"), "workspaceStart");
     await expect(phone.getByTestId("git-diff")).toContainText("committed line");
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS");
     await phone.getByTestId("mobile-switch").click();

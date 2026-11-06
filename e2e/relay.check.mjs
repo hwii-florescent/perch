@@ -174,7 +174,8 @@ try {
   await desktop.goto(`http://127.0.0.1:${corePort}/`);
   await desktop.getByTestId("onboarding-dismiss").click({ timeout: 5000 }).catch(() => {});
   await desktop.getByTestId("new-session-local").click();
-  await desktop.getByTestId("new-session-popover-agent").selectOption("terminal");
+  await desktop.getByTestId("new-session-popover-agent").click();
+  await desktop.locator('[role="option"][data-value="terminal"]').click(); // Perch's own dropdown
   await desktop.getByTestId("project-option-none").click();
   await desktop.locator('[data-testid="persistent-agent-terminal"][data-controlling="true"]').waitFor({ timeout: 30_000 });
   await phone.reload();

@@ -42,6 +42,7 @@ import { cn } from "../lib/cn";
 import { ICON_BUTTON } from "./ui/icon-button";
 import { button } from "./ui/button";
 import { menuItem } from "./ui/menu";
+import { Select } from "./ui/select";
 import { PlusIcon } from "./ui/icons";
 import { usePerchStore } from "../store";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -463,24 +464,21 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                       if (e.key === "Enter") void submitCreate();
                     }}
                   />
-                  <input
-                    type="text"
+                  <Select
+                    freeText
                     className={INPUT}
-                    data-testid="worktree-start-input"
-                    list={`worktree-refs-${projectKey}`}
+                    testId="worktree-start-input"
                     placeholder={`start from ${cached?.baseRef ?? "HEAD"} (base ref)`}
-                    aria-label="Start from: branch, remote branch or commit"
+                    ariaLabel="Start from: branch, remote branch or commit"
                     title="A local branch, a remote branch (fetched first) or a commit SHA. Empty = the repo's base ref."
                     value={startFrom}
-                    onChange={(e) => setStartFrom(e.target.value)}
+                    onChange={setStartFrom}
+                    options={(cached?.refs ?? []).map((ref) => ({ value: ref, label: ref }))}
                     onKeyDown={(e) => {
                       e.stopPropagation();
                       if (e.key === "Enter") void submitCreate();
                     }}
                   />
-                  <datalist id={`worktree-refs-${projectKey}`}>
-                    {(cached?.refs ?? []).map((ref) => <option key={ref} value={ref} />)}
-                  </datalist>
                 </>
               )}
               <input
@@ -500,18 +498,14 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                 }}
               />
               {parentChoices.length > 0 && (
-                <select
+                <Select
                   className={INPUT}
-                  data-testid="worktree-parent-select"
-                  aria-label="Parent workspace"
+                  testId="worktree-parent-select"
+                  ariaLabel="Parent workspace"
                   value={parentId}
-                  onChange={(e) => setParentId(e.target.value)}
-                >
-                  <option value="">no parent workspace</option>
-                  {parentChoices.map((w) => (
-                    <option key={w.id} value={w.id}>nest under {w.name || basename(w.path)}</option>
-                  ))}
-                </select>
+                  onChange={setParentId}
+                  options={[{ value: "", label: "no parent workspace" }, ...parentChoices.map((w) => ({ value: w.id, label: `nest under ${w.name || basename(w.path)}` }))]}
+                />
               )}
               {!startFromSupported && (
                 <label className="flex cursor-pointer items-center gap-[0.35rem] text-[0.74rem] text-subtext-0">
@@ -540,16 +534,14 @@ export function WorktreeMenu({ hostId, cwd, projectKey, className }: WorktreeMen
                   if (e.key === "Enter") void submitCreate();
                 }}
               />
-              <select
+              <Select
                 className={cn(AGENT_PICKER, "text-[0.78rem]")}
-                data-testid="worktree-agent-select"
-                aria-label="Starting pane"
+                testId="worktree-agent-select"
+                ariaLabel="Starting pane"
                 value={agent}
-                onChange={(e) => setAgentPick(e.target.value)}
-              >
-                <option value="">no starting pane</option>
-                {agentChoices.map((choice) => <option key={choice.id} value={choice.id}>start with {choice.label}</option>)}
-              </select>
+                onChange={setAgentPick}
+                options={[{ value: "", label: "no starting pane" }, ...agentChoices.map((choice) => ({ value: choice.id, label: `start with ${choice.label}` }))]}
+              />
               <div className="mt-[0.15rem] flex justify-end gap-[0.35rem]">
                 <button
                   type="button"

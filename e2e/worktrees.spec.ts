@@ -26,6 +26,7 @@
  */
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { choose } from "./select";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -513,8 +514,10 @@ test.describe("Git worktrees", () => {
     await popover.locator('[data-testid="worktree-name-input"]').fill("Stack on base!");
     await expect(popover.locator('[data-testid="worktree-branch-input"]')).toHaveAttribute(
       "placeholder", "branch (optional): stack-on-base");
-    await expect(popover.locator('datalist option[value="wt-base"]')).toHaveCount(1);
-    await popover.locator('[data-testid="worktree-start-input"]').fill("wt-base");
+    const startInput = popover.locator('[data-testid="worktree-start-input"]');
+    await startInput.press("ArrowDown"); // the ref suggestions
+    await expect(page.locator('[role="listbox"] [role="option"][data-value="wt-base"]')).toHaveCount(1);
+    await startInput.fill("wt-base");
     await page.screenshot({ path: "artifacts/worktrees-wt8-form.png" });
     await popover.locator('[data-testid="worktree-create-submit"]').click();
 
@@ -570,7 +573,7 @@ test.describe("Git worktrees", () => {
     const menu = await openWorktreeMenu(page);
     if (await menu.locator('[data-testid="worktree-new"]').isVisible()) await menu.locator('[data-testid="worktree-new"]').click(); // + opens on the form
     await menu.locator('[data-testid="worktree-branch-input"]').fill("wt-child");
-    await menu.locator('[data-testid="worktree-parent-select"]').selectOption(parentId);
+    await choose(menu.locator('[data-testid="worktree-parent-select"]'), parentId);
     await menu.locator('[data-testid="worktree-create-submit"]').click();
     const nested = page.getByTestId(`workspace-children-${parentId}`);
     await expect(nested.locator(".workspace-entry").filter({ hasText: "wt-child" })).toHaveCount(1, { timeout: 20000 });
@@ -611,7 +614,7 @@ test.describe("Git worktrees", () => {
     await freshPage(page);
     const popover = await openWorktreeMenu(page);
     if (await popover.locator('[data-testid="worktree-new"]').isVisible()) await popover.locator('[data-testid="worktree-new"]').click();
-    await popover.locator('[data-testid="worktree-agent-select"]').selectOption("terminal");
+    await choose(popover.locator('[data-testid="worktree-agent-select"]'), "terminal");
     const row = page.locator(".workspace-entry button[title]").filter({ hasText: /^[a-z]+-[a-z]+$/ });
     const before = await row.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("title")));
     await popover.locator('[data-testid="worktree-create-submit"]').click();

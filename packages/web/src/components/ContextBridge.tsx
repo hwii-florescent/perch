@@ -6,7 +6,7 @@ import { usePerchStore } from "../store";
 import { activateTab } from "../workspaceTabs";
 import { newId } from "../ids";
 import { Dialog } from "./ui/dialog";
-import { Chevron } from "./ui/chevron";
+import { Select } from "./ui/select";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { menuItem, menuPanel } from "./ui/menu";
 
@@ -117,13 +117,8 @@ function ContextDialog({ workspaceId, source }: { workspaceId: string; source: C
         <textarea className={`${CONTROL} min-h-40 resize-y whitespace-pre [tab-size:2]`} aria-label="Prepared context" readOnly value={current ? preview.packet.markdown : ""} placeholder={error ? "Context unavailable" : "Preparing context…"} />
       </label>
       <label className="grid gap-1 text-[0.78rem] text-fg">Agent in this nest
-        <span className="relative block">
-        <select className={`${CONTROL} appearance-none pr-8`} aria-label="Agent in this nest" value={targetId} disabled={attempted || !ready} onChange={(event) => setTargetId(event.target.value)}>
-          <option value="">Choose an agent…</option>
-          {preview?.agents.map((agent) => <option key={agent.sessionId} value={agent.sessionId}>{agent.title} · {agent.providerId}{agent.canSend ? "" : " · copy only"}</option>)}
-        </select>
-        <Chevron open className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" />
-        </span>
+        <Select className={CONTROL} ariaLabel="Agent in this nest" value={targetId} disabled={attempted || !ready} onChange={setTargetId}
+          options={[{ value: "", label: "Choose an agent…" }, ...(preview?.agents.map((agent) => ({ value: agent.sessionId, label: `${agent.title} · ${agent.providerId}${agent.canSend ? "" : " · copy only"}` })) ?? [])]} />
       </label>
       <p className="m-0 text-[0.75rem] text-subtext-0">{target?.reason || (ready && !preview.agents.length ? "No agents in this nest. Close this dialog and start one from +, then try again. Nothing is started here." : "Send starts a turn in an existing Claude CLI with an empty prompt. Other agents support Copy context. Nothing is sent until you click Send.")}</p>
       {!connected && <p className="m-0 text-[0.78rem] text-subtext-0" role="status">Disconnected. Prepared context can still be copied; reconnect before sending.</p>}

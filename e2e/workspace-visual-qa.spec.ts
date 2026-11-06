@@ -14,6 +14,7 @@
  * or ~/.perch. Headless only.
  */
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { choose } from "./select";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
@@ -212,10 +213,10 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     const filePicker = page.getByTestId("git-diff-file-select");
     await expect(diff).toContainText("modified sentinel", { timeout: 20000 });
     await expect(filePicker).toBeVisible();
-    await filePicker.selectOption("untracked-with-a-long-name.txt");
+    await choose(filePicker, "untracked-with-a-long-name.txt");
     await expect(diff).toContainText("untracked-with-a-long-name.txt");
     await expect(diff).not.toContainText("modified sentinel");
-    await filePicker.selectOption("");
+    await choose(filePicker, "");
     await expect(diff).toContainText("modified sentinel");
     await expectWholeDiffScrollable(diff);
     await page.screenshot({ path: path.join(shots, "git-narrow-desktop.png"), fullPage: false });

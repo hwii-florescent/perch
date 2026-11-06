@@ -29,6 +29,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** Perch's own dropdown (components/ui/select.tsx): open the trigger, click the option by value or { index }. */
+async function choose(trigger, value) {
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") await trigger.click();
+  const options = trigger.page().locator(`[role="listbox"][id="${await trigger.getAttribute("aria-controls")}"]`).locator('[role="option"]');
+  const index = typeof value === "string" ? await options.evaluateAll((els, wanted) => els.findIndex((el) => el.dataset.value === wanted), value) : value.index;
+  if (index < 0) throw new Error(`no option ${JSON.stringify(value)}`);
+  await options.nth(index).click();
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = 7791;
 const URL_ = `http://127.0.0.1:${PORT}`;
@@ -936,8 +945,10 @@ const STATES = [
     await installGitStub(page);
     await page.evaluate((beforeRef) => { window.__gitStub.turn = { snapshotId: "snap-vis", sessionId: "sess-vis", agent: "claude", beforeRef, changedPaths: ["src/main.txt", "untracked.txt"], changedPathCount: 2, state: "complete" }; }, head);
     await page.getByTestId("git-refresh").click();
-    await page.locator('[data-testid="git-diff-target"] option[value="lastAgentTurn"]:not([disabled])').waitFor({ state: "attached", timeout: 20000 });
-    await page.getByTestId("git-diff-target").selectOption("lastAgentTurn");
+    await page.getByTestId("git-diff-target").click();
+    await page.locator('[role="option"][data-value="lastAgentTurn"]:not([aria-disabled])').waitFor({ timeout: 20000 });
+    await page.keyboard.press("Escape");
+    await choose(page.getByTestId("git-diff-target"), "lastAgentTurn");
     const summary = page.getByTestId("git-turn-summary");
     await summary.waitFor({ timeout: 20000 });
     const text = ((await summary.textContent()) ?? "").replace(/\s+/g, " ").trim();
