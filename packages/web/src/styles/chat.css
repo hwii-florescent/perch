@@ -65,8 +65,7 @@
 }
 
 .message__markdown code {
-  background: var(--surface-dim);
-  border: 1px solid var(--overlay-0);
+  background: var(--surface-0);
   border-radius: 0.25rem;
   padding: 0.1em 0.35em;
   font-size: 0.88em;
@@ -76,9 +75,8 @@
 /* Fenced code blocks (jean CodeBlock treatment, adapted to perch tokens). */
 .message__markdown pre {
   position: relative;
-  background: var(--surface-dim);
-  border: 1px solid var(--overlay-0);
-  border-radius: 0.4rem;
+  background: var(--surface-0);
+  border-radius: var(--radius);
   padding: 0.6rem 0.75rem;
   overflow-x: auto;
   margin: 0.4em 0;

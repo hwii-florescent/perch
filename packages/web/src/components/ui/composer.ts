@@ -1,10 +1,10 @@
 /** Composer chrome shared by `SlashPopover` and the UI/CLI `ModeSwitch`. */
-const OVERLAY = "z-[9999] rounded-ui border border-accent bg-panel-bg shadow-[0_8px_24px_rgba(0,0,0,0.45)]";
+const OVERLAY = "z-[9999] rounded-ui bg-surface-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]";
 
 /** Portal-rendered into document.body, anchored to the textarea's left edge. */
 export const SLASH_POPOVER = `${OVERLAY} min-w-[260px] overflow-y-auto py-[0.25rem]`;
-const SLASH_ITEM = "flex w-full cursor-pointer flex-col items-start gap-[0.1rem] px-[0.75rem] py-[0.35rem] text-left [border:none] [transition:background_0.1s_ease] hover:bg-surface-1";
-export const SLASH_ITEM_ON = `${SLASH_ITEM} bg-surface-1`;
+const SLASH_ITEM = "flex w-full cursor-pointer flex-col items-start gap-[0.1rem] px-[0.75rem] py-[0.35rem] text-left [border:none] [transition:background_0.1s_ease] hover:bg-surface-0";
+export const SLASH_ITEM_ON = `${SLASH_ITEM} bg-surface-0`;
 export const SLASH_ITEM_OFF = `${SLASH_ITEM} bg-transparent`;
 const SLASH_NAME = "text-[0.82rem] [font-family:var(--font-mono)]";
 export const SLASH_NAME_ON = `${SLASH_NAME} text-accent`;

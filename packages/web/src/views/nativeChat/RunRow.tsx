@@ -14,7 +14,7 @@ export const RunRow = memo(function RunRow({ run, find }: { run: Run; find?: Fin
   const { id, steps, live, summary, failed } = run;
   return <details className={cn("message__worked-for", WORKED_FOR, FIND_MARK[find ?? "none"])} open={live || find === "current" || undefined} data-testid="native-cli-run" data-native-run={steps.length} data-native-turn={run.turn} data-block-id={id}>
     <summary>{summary}{failed > 0 && <span className="text-red" data-testid="native-cli-run-failed">· {failed} failed</span>}</summary>
-    <div className="mt-1 flex flex-col gap-1">
+    <div className="ml-[0.55rem] flex flex-col">
       {steps.map((step) => <details key={step.id} className={cn("message__worked-for", WORKED_FOR)} data-native-step={step.tool?.state ?? step.kind}>
         <summary className={step.tool?.state === "failed" ? "text-red" : undefined}>{step.label}</summary>
         {step.body && <pre>{step.body}</pre>}

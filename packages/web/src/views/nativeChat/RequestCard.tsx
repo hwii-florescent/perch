@@ -5,8 +5,8 @@ import { cn } from "../../lib/cn";
 /** What the user chose, kept under the transcript once the CLI moves on. */
 export type Receipt = { id: string; title: string; label: string };
 
-const CARD = "flex flex-col gap-2 rounded-ui border border-accent bg-panel-bg p-3 text-[0.85rem] focus:outline-none";
-const OPTION = "flex w-full cursor-pointer items-baseline gap-2 rounded-ui bg-surface-1 px-2 py-1.5 text-left text-fg [border:0] [font:inherit] hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50";
+const CARD = "flex flex-col gap-2 rounded-soft bg-surface-0 p-3 text-[0.85rem] outline-1 outline-solid outline-accent focus:outline-2";
+const OPTION = "flex w-full cursor-pointer items-baseline gap-2 rounded-ui bg-surface-1 px-2 py-1.5 text-left text-fg [border:0] [font:inherit] hover:bg-overlay-0 disabled:cursor-not-allowed disabled:opacity-50";
 
 /** The permission prompt or question the CLI is waiting on. Number keys choose; focus lands here so they work at once. */
 export function RequestCard({ request, canAnswer, answering, onAnswer, keepFocus }: { request: NativeUiRequest; canAnswer: boolean; answering: boolean; onAnswer: (key: string) => void; keepFocus: boolean }) {
@@ -21,10 +21,10 @@ export function RequestCard({ request, canAnswer, answering, onAnswer, keepFocus
       if (option) { event.preventDefault(); onAnswer(option.key); }
     }}>
     {request.title && <strong className="font-semibold">{request.title}</strong>}
-    {request.detail && <pre className="m-0 max-h-40 overflow-auto rounded-ui bg-surface-0 p-2 text-[0.8rem] whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="native-cli-request-detail">{request.detail}</pre>}
+    {request.detail && <pre className="m-0 max-h-40 overflow-auto rounded-ui bg-surface-1 p-2 text-[0.8rem] whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="native-cli-request-detail">{request.detail}</pre>}
     <div className="flex flex-col gap-1">
       {request.options.map((option) => <button key={option.key} type="button" className={OPTION} disabled={disabled} data-testid={`native-cli-request-option-${option.key}`} onClick={() => onAnswer(option.key)}>
-        <kbd className="shrink-0 rounded-[0.25rem] bg-surface-0 px-1.5 text-[0.75rem] text-subtext-0">{option.key}</kbd>
+        <kbd className="shrink-0 rounded-[0.25rem] bg-surface-1 px-1.5 text-[0.75rem] text-subtext-0">{option.key}</kbd>
         <span className="min-w-0"><span>{option.label}</span>{option.detail && <span className="block text-[0.78rem] text-subtext-0">{option.detail}</span>}</span>
       </button>)}
     </div>
@@ -34,7 +34,7 @@ export function RequestCard({ request, canAnswer, answering, onAnswer, keepFocus
 
 /** The CLI is waiting on you but showed nothing this view can answer (another provider, a text answer, a layout it does not know). */
 export function WaitingNotice() {
-  return <div className="rounded-ui border border-overlay-0 bg-panel-bg p-3 text-[0.85rem] text-subtext-0" aria-live="polite" data-testid="native-cli-waiting">The CLI is waiting for you. Switch to Terminal to answer.</div>;
+  return <div className="rounded-soft bg-surface-0 p-3 text-[0.85rem] text-subtext-0" aria-live="polite" data-testid="native-cli-waiting">The CLI is waiting for you. Switch to Terminal to answer.</div>;
 }
 
 export function Receipts({ items }: { items: Receipt[] }) {

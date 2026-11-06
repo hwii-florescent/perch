@@ -6,8 +6,8 @@ export function FindBar({ query, onQuery, count, index, onStep, onClose }: {
 }) {
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => { field.current?.focus(); field.current?.select(); }, []);
-  return <div className="flex items-center gap-2 border-b border-surface-1 px-2 py-1 text-[12px]" role="search" data-testid="native-cli-find">
-    <input ref={field} className="min-w-0 flex-1 rounded-ui bg-surface-0 px-2 py-1 text-inherit [border:0] [font:inherit]" aria-label="Find in chat" placeholder="Find in chat" value={query}
+  return <div className="flex items-center gap-2 bg-surface-0 px-3 py-1 text-[12px]" role="search" data-testid="native-cli-find">
+    <input ref={field} className="min-w-0 flex-1 rounded-ui bg-surface-1 px-2 py-1 text-inherit [border:0] [font:inherit]" aria-label="Find in chat" placeholder="Find in chat" value={query}
       onChange={(event) => onQuery(event.target.value)}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing) return;

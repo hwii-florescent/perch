@@ -27,7 +27,7 @@ function FileDiff({ workspaceId, hostId, turn, path }: { workspaceId: string; ho
   if ("error" in loaded) return <p className="m-0 text-[12px] text-red" role="alert">{loaded.error}</p>;
   const lines = loaded.files.flatMap((file) => file.isBinary ? [{ kind: "context" as const, content: "Binary file" }] : file.hunks.flatMap((hunk) => [{ kind: "context" as const, content: hunk.header }, ...hunk.lines]));
   if (!lines.length) return <p className="m-0 text-[12px] text-subtext-0">No textual change.</p>;
-  return <pre className="m-0 max-h-72 overflow-auto rounded-ui bg-surface-0 p-2 text-[0.78rem] whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="native-cli-turn-diff">
+  return <pre className="m-0 max-h-72 overflow-auto rounded-ui bg-surface-1 p-2 text-[0.78rem] whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="native-cli-turn-diff">
     {lines.slice(0, MAX_LINES).map((line, index) => <span key={index} className={cn("block", line.kind === "addition" && "text-green", line.kind === "deletion" && "text-red", line.kind === "context" && "text-subtext-0")}>{line.kind === "addition" ? "+" : line.kind === "deletion" ? "-" : " "}{line.content}</span>)}
     {lines.length > MAX_LINES && <span className="block text-subtext-0">… {lines.length - MAX_LINES} more lines. Open the Git view for the full diff.</span>}
   </pre>;
@@ -38,7 +38,7 @@ export function ChangedFiles({ turn, workspaceId, hostId }: { turn: AgentTurnSum
   const total = turn.changedPathCount ?? turn.changedPaths.length;
   // A diff is fetched only for a row the user opens, never for every file at once.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  return <section className="flex flex-col gap-1 rounded-ui border border-overlay-0 bg-panel-bg p-2 text-[0.85rem]" aria-label="Files changed this turn" data-testid="native-cli-changed-files">
+  return <section className="flex flex-col gap-1 rounded-soft bg-surface-0 px-3 py-2 text-[0.85rem]" aria-label="Files changed this turn" data-testid="native-cli-changed-files">
     <strong className="font-semibold">Changed {total} {total === 1 ? "file" : "files"}</strong>
     {turn.changedPaths.map((path) => <details key={path} className="[&_summary]:cursor-pointer" onToggle={(event) => { if (event.currentTarget.open) setOpened((before) => new Set(before).add(path)); }}>
       <summary className="truncate" title={path}>{path}</summary>

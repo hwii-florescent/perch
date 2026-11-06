@@ -6,7 +6,8 @@ import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
-import { CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
+import { PlusIcon } from "../components/ui/icons";
+import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
@@ -253,6 +254,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     <div className={cn("chat__list-container", CHAT_LIST_CONTAINER)}>
       <MessageRail prompts={prompts} onJump={jump} />
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
+        <div className={cn(CHAT_COLUMN, "gap-3")}>
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block) => {
@@ -273,13 +275,15 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
             <button type="button" onClick={restoreUnconfirmed}>Edit and resend</button>
             <button type="button" onClick={() => setOutbox(null)}>Dismiss</button></div>}
         </article>}
+        </div>
       </div>
       {showBottom && <button className={cn("scroll-bottom-pill", SCROLL_PILL)} type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
     </div>
     {ranCommand && !error && <div className={cn(HINT, "flex flex-wrap items-center gap-2 px-3 py-1")} role="status" data-testid="native-cli-command-ran">Ran <code>{ranCommand}</code> in the CLI. Its output is in CLI view.
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
-    <form className={cn("chat__input relative", CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
+    <div className="shrink-0 px-4 pt-1 pb-3">
+    <form className={cn("chat__input relative", CHAT_COLUMN, CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
       onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); void attach(Array.from(event.dataTransfer.files)); } }}>
       {menu.open && <MenuList items={menu.items} active={menu.active} label={menu.label} onPick={pickMenu} onHover={menu.setActive} />}
@@ -299,10 +303,10 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
           if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (!sendable.disabled && sendable.action !== "stop") void send(); }
           else if (event.key === "Escape" && snapshot?.running && controlling) { event.preventDefault(); void stop(); }
         }} />
-      <div className="flex items-center gap-2 px-2 py-1">
+      <div className="flex items-center gap-2 px-2 pt-1 pb-2">
         <input ref={picker} type="file" multiple hidden data-testid="native-cli-file-input" onChange={(event) => { void attach(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-        <button type="button" className="size-7 shrink-0 cursor-pointer rounded-full bg-transparent text-[1.1rem] leading-none text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40" aria-label="Attach file" title="Attach file" disabled={!connected || !controlling || !snapshot}
-          onMouseDown={(event) => event.preventDefault()} onClick={() => picker.current?.click()}>+</button>
+        <button type="button" className="size-7 shrink-0 cursor-pointer rounded-full bg-transparent flex items-center justify-center text-subtext-0 [border:0] hover:bg-surface-1 hover:text-fg disabled:cursor-not-allowed disabled:opacity-40" aria-label="Attach file" title="Attach file" disabled={!connected || !controlling || !snapshot}
+          onMouseDown={(event) => event.preventDefault()} onClick={() => picker.current?.click()}><PlusIcon size={16} /></button>
         <span className={cn(HINT, "flex-1")}>{controlling ? (uploading ? "Uploading…" : snapshot?.running ? "Esc stops the turn" : "") : status?.inputOwner ? "Another view is typing in this agent" : "Viewing agent"}</span>
         <button type="submit" className={sendable.action === "stop" || sendable.action === "stopping" ? SEND_BUTTON_STOP : SEND_BUTTON_GO} aria-label={sendable.label} title={sendable.reason ?? sendable.label} disabled={sendable.disabled}
           onMouseDown={(event) => event.preventDefault()}>
@@ -312,5 +316,6 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
         </button>
       </div>
     </form>
+    </div>
   </div>;
 }
