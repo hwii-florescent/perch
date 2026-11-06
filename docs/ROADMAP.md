@@ -299,16 +299,83 @@ subagents, that a lead and the user can see, message and stop.
 Start: `crates/perch-core/src/native_ui/`, `agent_fleet.rs`,
 `server/agent_history.rs`, `context_bridge.rs`, `packages/web/src/views/NativeCliChat.tsx`.
 
-Open before building (ask the owner when the step starts):
+#### Perch's version of Claude Projects and sub-sessions (design notes, 2026-11, owner direction)
 
-- Codex app-server and Claude structured sessions: re-check provider terms at
-  each release; Anthropic paused, not dropped, SDK subscription changes.
-- Project instructions: one per Birdhouse or also per Nest; size limits; can a
-  session opt out?
-- Run UI: a run view in the drawer, a tab, or only child rows plus Needs You?
-  Decision gates (lead asks the user) in the first cut?
-- Remote and phone: may a phone approve, message or stop a child? Remote runs
-  wait for owned remote runtimes (alpha item 1).
+Anthropic's Claude Code Projects (public beta, claude.ai/code and the desktop app, not
+the CLI; read from `code.claude.com/docs/en/claude-projects`) is a coordinator
+conversation that starts a thread per task. Each thread is a separate session, usually
+in the cloud on its own branch, optionally on your machine through Remote Control. Shared
+instructions and memory, a file library and an Overview of what finished, what is ready
+and what needs you sit around it. Its sub-sessions (desktop) let one session list, read,
+message and archive others. Both live on Anthropic's side; Perch cannot drive them without
+account credentials, and neither crosses providers. Perch builds its own version on its
+own sessions, so Claude, Codex, Pi and OMP can work together. Steps 1 to 3 above are this
+version; the order below replaces their implied order.
+
+**Decided**
+
+- Same Nest by default; a child gets its own worktree only when asked
+  (`perch spawn --worktree`). No automatic worktree per thread in the first cut.
+- Built on ordinary Perch sessions and the `perch` CLI plus a skill, not structured/RPC
+  chat. Structured chat would not run a Projects thread either (those live in Anthropic's
+  cloud); it stays a possible later mode for what only it gives (history, timestamps,
+  rewind, queue cards).
+- Perch hosts no model: no Perch-run coordinator, scheduler, kanban or planner.
+
+**Open: decide before the step that needs it**
+
+1. **Who coordinates.** A normal session of any provider the user picks as lead
+   (leaning yes; Perch never assigns, retries or summarises work), or a Perch-run
+   coordinator chat (reverses "no coordinator chat"). Being an ordinary session does not
+   by itself keep the old decision: the line is behavioural. A user-chosen session that
+   spawns and messages children is fine; Perch deciding what to split, retrying or
+   synthesising is not.
+2. **What a Project holds.** Instructions only (as step 1), or also reference files, a
+   shared memory file and a library. Memory needs a scope and atomic, conflict-safe
+   updates, and agent-written memory or documents must never silently become trusted
+   instructions. Size limit (Anthropic's is reportedly 16,000 characters; unconfirmed).
+   One per Birdhouse or also per Nest; can a session opt out.
+3. **Naming.** "Project" already means a repository in the sidebar (Birdhouse).
+4. **Overview.** A drawer, a tab, or only child rows plus Needs You; whether a lead can
+   ask the user a question (decision gates) in the first cut.
+5. **Reports are claims, not proof.** An agent's `perch report` or a Stop-hook last
+   message does not show the work finished, tests passed or a PR is ready. Keep lifecycle,
+   task disposition, delivery receipts and reports as separate records; label the hook and
+   last-message paths as fallbacks; unknown or disconnected state stays unknown.
+6. **Message authority.** Agent-originated sends are not Context Bridge's reviewed,
+   explicit send, so they need their own provenance and authorisation. Prefer a
+   provider's own queue (Pi, Codex and OMP through the bridge) over typing into a PTY. For
+   Claude, checking the prompt and taking the input lease must be one step, not two.
+   Queued messages are re-validated at delivery for session incarnation, scope,
+   cancellation and authority, and survive a restart without duplicating.
+7. **Credentials.** A token per session incarnation, bound to explicit operations and
+   targets; a child never inherits its parent's. Environment delivery is not isolation from
+   that agent's subprocesses. Audit propagation through the launch bootstrap (it snapshots
+   the core environment by default), tmux, resumed sessions, logs and remote launches.
+8. **Limits.** Children, depth, descendants, messages and turns are capped and enforced
+   before dispatch; usage reported afterwards cannot stop runaway cost.
+9. Remote and phone: may a phone approve, message or stop a child? Remote runs wait for
+   owned remote runtimes (alpha item 1).
+10. Codex app-server and Claude structured sessions: re-check provider terms each release;
+    Anthropic paused, not dropped, SDK subscription changes.
+
+**Order** (changed after review)
+
+1. **Feasibility spike, zero tokens first.** An installed skill is discovered by Claude,
+   Codex, Pi and OMP, and an agent can call an authenticated `perch whoami` and
+   `perch report`. Help output proves a flag exists, not that the text reaches the model or
+   that a skill is found, so check the effect.
+2. **Project injection**, shippable alone: each launch pins a snapshot of its instructions
+   and files and records where they came from. Not coupled to orchestration.
+3. **Explicit `perch spawn` / `list` / `report`** with bounded concurrency and total
+   descendants; thread rows under the parent.
+4. **Messaging** (`send`, `wait`) only after restart, cancellation, duplicate-request and
+   lease-contention behaviour is written down.
+5. **Overview, shared memory** after the lifecycle underneath is reliable.
+
+Validation beyond the happy path: token isolation, cross-scope refusal, duplicate spawn and
+send, queue recovery after restart, stale credentials, busy and approval-blocked prompts,
+and a person typing at the same time.
 
 ## Later, bounded additions
 
