@@ -7,6 +7,7 @@ import { GHOST_BUTTON } from "./ui/icon-button";
 import { DrawerBrowser } from "./DrawerBrowser";
 import { WorkspaceFilesView } from "./WorkspaceFiles";
 import { WorkspaceGitReviewPane } from "./WorkspaceGitReviewPane";
+import { terminalScopeId, workspaceRecord } from "../terminalScope";
 
 const BTN = "h-7 self-center rounded-ui px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
 /** The drawer header's action (same as the Browser section's buttons): the ghost button, filled only on hover. */
@@ -20,17 +21,23 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
   { id: "browser", label: "Browser" },
 ];
 
-/** The workspace the drawer shows and whether it offers Git (the phone's pane bar asks the same). */
-export function useToolsContext(requestedWorkspaceId?: string | null) {
+/** The workspace the drawer shows and whether it offers Git (the phone's pane bar asks the same).
+ * `scopeId`, for the desktop drawer (`scoped`), is what Files and Git read instead when the
+ * active terminal's shell has left the workspace folder: its own directory. The phone keeps the workspace. */
+export function useToolsContext(requestedWorkspaceId?: string | null, scoped = false) {
   const activeId = usePerchStore((state) =>
     state.activeWorkspaceId ?? state.sessions.find((candidate) => candidate.id === state.sessionId)?.workspaceId ?? null);
   const workspaceId = requestedWorkspaceId ?? activeId;
-  const row = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
+  const scopeId = usePerchStore((state) => {
+    const session = state.sessions.find((candidate) => candidate.id === state.sessionId);
+    return scoped && !requestedWorkspaceId && session?.workspaceId === workspaceId ? terminalScopeId(state, session) : null;
+  });
+  const row = usePerchStore((state) => (scopeId ?? workspaceId) ? workspaceRecord(state, scopeId ?? workspaceId!) : undefined);
   const project = usePerchStore((state) => state.workspaceProjects.find((candidate) => candidate.id === row?.projectId));
   // A requested id with no local row is a remote checkout, offered Git only
   // when its host relays git (`ProjectGitReviewButton`).
   const isGit = Boolean(row?.branch || project?.repoPath || (requestedWorkspaceId && !row));
-  return { workspaceId, row, isGit };
+  return { workspaceId, scopeId, row, isGit };
 }
 
 /** Files / Git / Browser switch. It lives in the top row beside the drawer toggle
@@ -40,7 +47,7 @@ export function WorkspaceToolsTabs({ requestedWorkspaceId, tab, onTabChange }: {
   tab: WorkspaceToolsTab;
   onTabChange: (tab: WorkspaceToolsTab) => void;
 }) {
-  const { isGit } = useToolsContext(requestedWorkspaceId);
+  const { isGit } = useToolsContext(requestedWorkspaceId, true);
   const tabs = isGit ? TABS : TABS.filter(({ id }) => id !== "gitReview");
   const shown = tab === "gitReview" && !isGit ? "files" : tab;
   return (
@@ -74,7 +81,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
   requestedWorkspaceId?: string | null;
   tab: WorkspaceToolsTab;
 }) {
-  const { workspaceId, row, isGit } = useToolsContext(requestedWorkspaceId);
+  const { workspaceId, scopeId, row, isGit } = useToolsContext(requestedWorkspaceId, true);
   if (tab === "gitReview" && !isGit) tab = "files";
   const missing = <div className="p-4 text-[0.8rem] text-overlay-1">Pick a workspace in the sidebar.</div>;
 
@@ -85,7 +92,7 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
           {row ? row.name || row.path.split("/").pop() : ""}
         </span>
         {tab === "gitReview" && workspaceId && (
-          <button type="button" className={HEADER_ACTION} data-testid="workspace-tools-open-review" title="Open the review as a tab" onClick={() => useFileTabs.getState().open(workspaceId, "", "review")}>
+          <button type="button" className={HEADER_ACTION} data-testid="workspace-tools-open-review" title="Open the review as a tab" onClick={() => useFileTabs.getState().open(workspaceId, "", "review", scopeId ?? undefined)}>
             Open as tab
           </button>
         )}
@@ -93,18 +100,19 @@ export function WorkspaceTools({ requestedWorkspaceId, tab }: {
       <div className="flex min-h-0 flex-1 overflow-hidden [&>*]:min-h-0 [&>*]:min-w-0 [&>*]:flex-1">
         {tab === "files" && (workspaceId ? (
           <WorkspaceFilesView
-            key={workspaceId}
+            key={scopeId ?? workspaceId}
             layout="explorer"
-            workspaceId={workspaceId}
+            workspaceId={scopeId ?? workspaceId}
             onOpenFile={(path, pinned) => {
-              if (!pinned) return openFilePreview(workspaceId, path);
+              const scope = scopeId ?? undefined;
+              if (!pinned) return openFilePreview(workspaceId, path, scope);
               const files = useFileTabs.getState();
-              files.open(workspaceId, path);
-              files.pin(fileTabKey({ workspaceId, path }));
+              files.open(workspaceId, path, undefined, scope);
+              files.pin(fileTabKey({ workspaceId, path, scope }));
             }}
           />
         ) : missing)}
-        {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={workspaceId} workspaceId={workspaceId} /> : missing)}
+        {tab === "gitReview" && (workspaceId ? <WorkspaceGitReviewPane key={scopeId ?? workspaceId} workspaceId={scopeId ?? workspaceId} /> : missing)}
         {tab === "browser" && (workspaceId ? <DrawerBrowser key={workspaceId} workspaceId={workspaceId} /> : missing)}
       </div>
       {row?.branch && (

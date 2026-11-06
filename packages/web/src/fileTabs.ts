@@ -9,6 +9,9 @@ import { useWorkspaceFilesStore } from "./filesystemStore";
  * a page in perch's browser, whose `path` is its URL. */
 export interface FileTab {
   workspaceId: string;
+  /** A terminal's Files/Git scope (`terminalScope.ts`), which the file or review is
+   * read through instead of `workspaceId`. Shown only while that terminal is. */
+  scope?: string;
   /** The file's path; "" for a review. */
   path: string;
   kind?: "review" | "browser";
@@ -18,7 +21,7 @@ export interface FileTab {
 }
 
 // NUL cannot occur in a path, so a review never collides with a file.
-export const fileTabKey = (tab: FileTab) => `${tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.path}`;
+export const fileTabKey = (tab: FileTab) => `${tab.scope ?? tab.workspaceId}\n${tab.kind === "review" ? "\0review" : tab.kind === "browser" ? `\0browser\n${tab.path}` : tab.path}`;
 
 /** A browser tab starts blank under a unique `blank:` path (a tab is keyed by its path, so two blank
  * pages need distinct ones); the page's own address lives in the webview, not the tab. */
@@ -29,11 +32,11 @@ interface FileTabsState {
   tabs: FileTab[];
   /** The file shown in the main area instead of the session, if any. */
   active: string | null;
-  open: (workspaceId: string, path: string, kind?: FileTab["kind"]) => void;
+  open: (workspaceId: string, path: string, kind?: FileTab["kind"], scope?: string) => void;
   close: (key: string) => void;
   /** Show `path` as the workspace's preview tab: in `replaceKey`'s slot (that preview tab goes,
    * unrecorded), else at the end. An already open file is just shown, preview or not. */
-  openPreview: (workspaceId: string, path: string, replaceKey?: string) => void;
+  openPreview: (workspaceId: string, path: string, replaceKey?: string, scope?: string) => void;
   /** A preview tab becomes a regular one. */
   pin: (key: string) => void;
   /** Back to the session view (a session tab was clicked or switched to). */
@@ -57,14 +60,14 @@ function loadTabs(): FileTab[] {
 export const useFileTabs = create<FileTabsState>((set, get) => ({
   tabs: loadTabs(),
   active: null,
-  open: (workspaceId, path, kind) => set((state) => {
-    const next: FileTab = kind ? { workspaceId, path, kind } : { workspaceId, path };
+  open: (workspaceId, path, kind, scope) => set((state) => {
+    const next: FileTab = { workspaceId, path, ...(kind ? { kind } : {}), ...(scope ? { scope } : {}) };
     const key = fileTabKey(next);
     const known = state.tabs.some((tab) => fileTabKey(tab) === key);
     return { tabs: known ? state.tabs : [...state.tabs, next], active: key };
   }),
-  openPreview: (workspaceId, path, replaceKey) => set((state) => {
-    const next: FileTab = { workspaceId, path, preview: true };
+  openPreview: (workspaceId, path, replaceKey, scope) => set((state) => {
+    const next: FileTab = { workspaceId, path, preview: true, ...(scope ? { scope } : {}) };
     const key = fileTabKey(next);
     if (state.tabs.some((tab) => fileTabKey(tab) === key)) return { active: key };
     const at = replaceKey ? state.tabs.findIndex((tab) => fileTabKey(tab) === replaceKey && tab.preview) : -1;
@@ -99,7 +102,7 @@ useWorkspaceFilesStore.subscribe((state, previous) => {
   if (state.documents === previous.documents) return;
   const { tabs } = useFileTabs.getState();
   const edited = tabs.filter((tab) => {
-    const document = tab.preview ? state.documents[tab.workspaceId]?.[tab.path] : undefined;
+    const document = tab.preview ? state.documents[tab.scope ?? tab.workspaceId]?.[tab.path] : undefined;
     return document != null && document.content !== document.savedContent;
   });
   if (edited.length > 0) useFileTabs.setState({ tabs: tabs.map((tab) => (edited.includes(tab) ? { ...tab, preview: false } : tab)) });

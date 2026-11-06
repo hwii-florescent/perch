@@ -327,4 +327,41 @@ describe("createPerchTerminal", () => {
       userAgent.mockRestore();
     }
   });
+
+  it.each([
+    ["keypress sent the first char", "t"],
+    ["keypress sent nothing", ""],
+  ])("forwards a whole multi-character IME insertion once (%s)", async (_name, first) => {
+    HTMLCanvasElement.prototype.getContext = (() => ({ measureText: () => ({ width: 8 }), clearRect() {}, fillRect() {} })) as never;
+    window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} } as never;
+    globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} } as never;
+    const { createPerchTerminal } = await import("./xtermSetup");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const { term, dispose } = createPerchTerminal(container, () => {});
+    const sent: string[] = [];
+    term.onData((data) => sent.push(data));
+    const textarea = term.textarea!;
+    const insert = (data: string, init: InputEventInit = {}) => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: data, keyCode: 0, bubbles: true, cancelable: true }));
+      if (first) {
+        const press = new KeyboardEvent("keypress", { key: data, bubbles: true, cancelable: true });
+        Object.defineProperty(press, "charCode", { value: first.charCodeAt(0) });
+        textarea.dispatchEvent(press);
+      }
+      textarea.dispatchEvent(new InputEvent("input", { data, inputType: "insertText", bubbles: true, ...init }));
+      textarea.dispatchEvent(new KeyboardEvent("keyup", { key: data, bubbles: true }));
+    };
+    try {
+      insert("text");
+      expect(sent.join("")).toBe("text");
+      sent.length = 0;
+      insert("a");
+      expect(sent.join(""), "single characters stay with xterm").toBe(first ? "t" : "a");
+    } finally {
+      dispose();
+      container.remove();
+    }
+  });
 });

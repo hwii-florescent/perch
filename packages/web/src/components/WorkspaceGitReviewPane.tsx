@@ -3,6 +3,7 @@ import { WorkspaceGitReview } from "./WorkspaceGitReview";
 import { EMPTY_GIT_REVIEW_STATE, gitCapabilityForWorkspace, useWorkspaceGitReviewStore } from "../gitReviewStore";
 import { askAgent, contextBridgeAvailable } from "../contextBridge";
 import { usePerchStore } from "../store";
+import { scopeSessionId, workspaceRecord } from "../terminalScope";
 
 /**
  * Shared workspace Git/review surface used by both Dockview and the narrow
@@ -14,11 +15,11 @@ export function WorkspaceGitReviewPane({ workspaceId }: { workspaceId: string })
   const state = useWorkspaceGitReviewStore((current) => current.workspaces[workspaceId] ?? EMPTY_GIT_REVIEW_STATE);
   const getWorkspaceActions = useWorkspaceGitReviewStore((current) => current.getWorkspaceActions);
   const actions = useMemo(() => getWorkspaceActions(workspaceId), [getWorkspaceActions, workspaceId]);
-  const workspace = usePerchStore((current) => current.workspaces.find((candidate) => candidate.id === workspaceId));
+  const workspace = usePerchStore((current) => workspaceRecord(current, workspaceId));
   const sessions = usePerchStore((current) => current.sessions);
   const workspaceSessions = useMemo(
     () => sessions
-      .filter((session) => session.workspaceId === workspaceId || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path))
+      .filter((session) => session.workspaceId === workspaceId || scopeSessionId(workspaceId) === session.id || (workspace != null && (session.hostId ?? "local") === workspace.hostId && session.cwd === workspace.path))
       .map((session) => ({ id: session.id, title: session.title || "New session", agent: session.cliProviderId })),
     [sessions, workspace, workspaceId],
   );

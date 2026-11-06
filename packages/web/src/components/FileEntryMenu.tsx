@@ -15,6 +15,7 @@ import { askAgentAboutFile, contextBridgeAvailable } from "../contextBridge";
 import { freeName, joinPath, mutateEntry, namesIn, parentPath, useEntryClipboard } from "../fileOps";
 import { tauriInvoke } from "../links";
 import { usePerchStore } from "../store";
+import { workspaceRecord } from "../terminalScope";
 import { menuDivider, menuItem, menuPanel } from "./ui/menu";
 import { Dialog } from "./ui/dialog";
 import { button } from "./ui/button";
@@ -47,7 +48,7 @@ export function FileEntryMenu({ workspaceId, workspacePath, target, x, y, onClos
   const [busy, setBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const held = useEntryClipboard((state) => state.entry);
-  const localWorkspace = usePerchStore((state) => state.workspaces.some((workspace) => workspace.id === workspaceId && workspace.hostId === "local"));
+  const localWorkspace = usePerchStore((state) => workspaceRecord(state, workspaceId)?.hostId === "local");
   const nativeAvailable = !!tauriInvoke && localWorkspace;
 
   useLayoutEffect(() => {

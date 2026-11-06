@@ -18,6 +18,7 @@ import type {
   ServerMessage,
 } from "@perch/shared";
 import { usePerchStore } from "./store";
+import { workspaceRecord } from "./terminalScope";
 import { socket } from "./ws";
 import { registerGitReviewRequest, retireGitReviewRequest } from "./requestOwnership";
 import type {
@@ -96,7 +97,7 @@ function workspaceStateFor(state: GitReviewStoreState, workspaceId: string): Wor
 }
 
 function hostForWorkspace(workspaceId: string, perch = usePerchStore.getState()): string {
-  const workspace = perch.workspaces.find((candidate) => candidate.id === workspaceId);
+  const workspace = workspaceRecord(perch, workspaceId);
   // A remote host's workspace has no local row; its sessions name the owner.
   const session = workspace ? undefined : perch.sessions.find((candidate) => candidate.workspaceId === workspaceId);
   return workspace?.hostId ?? session?.hostId ?? perch.activeHostId;

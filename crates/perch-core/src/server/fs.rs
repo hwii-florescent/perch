@@ -92,13 +92,12 @@ pub(super) fn workspace_file_service(
     app: &AppState,
     workspace_id: &str,
 ) -> Result<FileService, FsAdapterFailure> {
-    let workspace =
-        app.db
-            .resolve_workspace(workspace_id)
-            .map_err(|error| FsAdapterFailure::Workspace {
-                code: "workspace_unavailable",
-                message: format!("workspace {workspace_id:?} is unavailable: {error}"),
-            })?;
+    let workspace = super::session::resolve_tool_workspace(app, workspace_id).map_err(|error| {
+        FsAdapterFailure::Workspace {
+            code: "workspace_unavailable",
+            message: format!("workspace {workspace_id:?} is unavailable: {error}"),
+        }
+    })?;
     if workspace.host_id != "local" {
         return Err(FsAdapterFailure::Workspace {
             code: "unsupported_remote",

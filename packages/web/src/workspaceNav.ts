@@ -7,7 +7,9 @@ import type { SessionSummary } from "@perch/shared";
 import { takeClosedTab } from "./closedTabs";
 import { useFileTabs } from "./fileTabs";
 import { lastWorkspaceSession } from "./surfaceSync";
-import { usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "./store";
+import { usePerchStore, type WorkspaceRecord } from "./store";
+import { isChatsProject } from "./terminalScope";
+import type { WorkspaceProject } from "./store";
 
 /** A project's live workspaces: pinned first, then active, then most recent. */
 export function workspacesForProject(workspaces: WorkspaceRecord[], projectId: string): WorkspaceRecord[] {
@@ -20,11 +22,7 @@ export function workspacesForProject(workspaces: WorkspaceRecord[], projectId: s
     });
 }
 
-/** The Chats project: the scratch folder "No project" sessions run in
- * (`session::chats_pair`). Listed as a flat chat list after the projects. */
-export function isChatsProject(project: WorkspaceProject): boolean {
-  return project.path.endsWith("/.perch/scratch");
-}
+export { isChatsProject };
 
 export function sessionsForWorkspace(sessions: SessionSummary[], workspace: WorkspaceRecord): SessionSummary[] {
   return sessions
@@ -63,14 +61,14 @@ function favoritesThenRecent(a: WorkspaceProject, b: WorkspaceProject): number {
 }
 
 /** The active host's nests in the sidebar's order: favourite projects first,
- * then by recent activity; Chats and hidden worktrees left out.
+ * then by recent activity, then Quickchat (the Chats workspace) last, so it is one more
+ * stop for the nest keys without renumbering the projects. Hidden worktrees left out.
  * ponytail: a worktree nested under another renders under it in the sidebar
  * but sorts flat here; port the sidebar's parent grouping if that matters. */
 export function orderedNests(): WorkspaceRecord[] {
   const state = usePerchStore.getState();
-  return state.workspaceProjects
-    .filter((project) => project.hostId === state.activeHostId && !isChatsProject(project))
-    .sort(favoritesThenRecent)
+  const hostProjects = state.workspaceProjects.filter((project) => project.hostId === state.activeHostId);
+  return [...hostProjects.filter((project) => !isChatsProject(project)).sort(favoritesThenRecent), ...hostProjects.filter(isChatsProject)]
     .flatMap((project) => workspacesForProject(state.workspaces, project.id).filter((workspace) => !workspace.hidden));
 }
 
@@ -112,7 +110,7 @@ export function reopenClosedTab(): void {
   const tab = takeClosedTab((candidate) => !candidate.workspaceId || nests.has(candidate.workspaceId));
   if (!tab) return;
   if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
-  if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : tab.browser ? "browser" : undefined);
+  if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : tab.browser ? "browser" : undefined, tab.scope);
   else {
     // Scratchpad executes in HOME, but new sessions are requested by its
     // listed workspace path, not by the execution directory.

@@ -140,7 +140,7 @@ export function SplitCanvas() {
 
   // A pane is also activated by keyboard focus (while panes are shared); both guard against redundant activation.
   const focusSession = () => { if (useFileTabs.getState().active) useFileTabs.getState().showSession(); };
-  const focusResource = (tab: FileTab) => { if (fileTabKey(tab) !== useFileTabs.getState().active) useFileTabs.getState().open(tab.workspaceId, tab.path, tab.kind); };
+  const focusResource = (tab: FileTab) => { if (fileTabKey(tab) !== useFileTabs.getState().active) useFileTabs.getState().open(tab.workspaceId, tab.path, tab.kind, tab.scope); };
 
   // Which resource panes to mount: the set's resource members, else the one open file or review.
   const panes = [...resources].filter(([id]) => (split ? split.ids.includes(id) : id === activeKey && fileShown));
@@ -271,11 +271,11 @@ export function SplitCanvas() {
           onFocusCapture={split ? () => focusResource(tab) : undefined}
         >
           {tab.kind === "review" ? (
-            <WorkspaceGitReviewPane workspaceId={tab.workspaceId} />
+            <WorkspaceGitReviewPane workspaceId={tab.scope ?? tab.workspaceId} />
           ) : tab.kind === "browser" ? (
             <WorkspaceBrowser tabId={id} initialUrl={isBlankBrowser(tab) ? "" : tab.path} active={id === activeId} />
           ) : (
-            <WorkspaceFilesView layout="editor" workspaceId={tab.workspaceId} initialPath={tab.path} />
+            <WorkspaceFilesView layout="editor" workspaceId={tab.scope ?? tab.workspaceId} initialPath={tab.path} />
           )}
           {focusBar(id === activeKey)}
         </div>

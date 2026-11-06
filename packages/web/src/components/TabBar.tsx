@@ -286,7 +286,7 @@ function ResourceTabButton({ tab, id, state, tabShape, dragging, separated }: {
   const pin = useFileTabs((s) => s.pin);
   const review = tab.kind === "review";
   const dirty = useWorkspaceFilesStore((s) => {
-    const document = s.documents[tab.workspaceId]?.[tab.path];
+    const document = s.documents[tab.scope ?? tab.workspaceId]?.[tab.path];
     return !review && document != null && document.content !== document.savedContent;
   });
   const browser = tab.kind === "browser";

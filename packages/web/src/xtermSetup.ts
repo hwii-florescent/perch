@@ -432,6 +432,25 @@ export function createPerchTerminal(
     keySurface.addEventListener("focusout", resetMenuKey);
   }
 
+  // Event-tap IMEs (Vietnamese Telex auto-restore) post one key event carrying a
+  // multi-character string. xterm forwards only its first char from keypress and
+  // then ignores the full `input` event (`_keyPressHandled`, or `composed` while
+  // a keydown is open), truncating `text` to `t`. Send what keypress didn't.
+  // See docs/IME-MULTICHAR-INPUT.md. Single chars and real composition are untouched.
+  let keypressSent = "";
+  const keypressKey = term.onKey(({ key, domEvent }) => { if (domEvent.type === "keypress") keypressSent = key; });
+  const resetKeypress = () => { keypressSent = ""; };
+  const multiCharInput = (event: Event) => {
+    const { data, inputType, isComposing } = event as InputEvent;
+    const sent = keypressSent;
+    keypressSent = "";
+    if (inputType !== "insertText" || isComposing || !data || data.length < 2 || term.options.disableStdin) return;
+    event.stopImmediatePropagation();
+    term.input(sent && data.startsWith(sent) ? data.slice(sent.length) : data);
+  };
+  keySurface?.addEventListener("keydown", resetKeypress, true);
+  keySurface?.addEventListener("input", multiCharInput, true);
+
   // xterm 5.5's Viewport schedules constructor/reset callbacks without
   // cancelling them on dispose. A short-lived Dockview pane can disappear
   // before those callbacks run and they then read a destroyed renderer.
@@ -666,6 +685,9 @@ export function createPerchTerminal(
       document.removeEventListener("contextmenu", trackMenu, true);
       keySurface?.removeEventListener("keyup", recoverMenuKey, true);
       keySurface?.removeEventListener("focusout", resetMenuKey);
+      keySurface?.removeEventListener("keydown", resetKeypress, true);
+      keySurface?.removeEventListener("input", multiCharInput, true);
+      keypressKey.dispose();
       term.dispose();
     },
   };

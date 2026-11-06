@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { DirectoryEntry, FileMetadata } from "@perch/shared";
 import { usePerchStore } from "../store";
+import { workspaceRecord } from "../terminalScope";
 import {
   normalizeWorkspacePath,
   useWorkspaceFilesStore,
@@ -312,7 +313,7 @@ let wrapPreference = false;
 
 export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, layout, onOpenFile }: WorkspaceFilesViewProps) {
   usePerchStore((state) => state.settings?.keybindings);
-  const workspace = usePerchStore((state) => state.workspaces.find((candidate) => candidate.id === workspaceId));
+  const workspace = usePerchStore((state) => workspaceRecord(state, workspaceId));
   const trees = useWorkspaceFilesStore((state) => state.trees[workspaceId] ?? EMPTY_TREES);
   const documents = useWorkspaceFilesStore((state) => state.documents[workspaceId] ?? EMPTY_DOCUMENTS);
   const previews = useWorkspaceFilesStore((state) => state.previews[workspaceId] ?? EMPTY_PREVIEWS);

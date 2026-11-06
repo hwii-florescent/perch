@@ -13,9 +13,7 @@ use super::*;
 /// receive a root path from the client: the DB row is authoritative and the
 /// target canonicalizes that row before opening a subprocess.
 fn git_workspace_target(app: &AppState, workspace_id: &str) -> Result<WorkspaceTarget, String> {
-    let workspace = app
-        .db
-        .resolve_workspace(workspace_id)
+    let workspace = super::session::resolve_tool_workspace(app, workspace_id)
         .map_err(|error| format!("workspace {workspace_id:?} is unavailable: {error}"))?;
     if workspace.host_id != "local" {
         return Err(format!(

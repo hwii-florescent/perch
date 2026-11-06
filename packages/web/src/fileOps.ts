@@ -70,13 +70,13 @@ function followUp(workspaceId: string, op: FsMutateOp, path: string, to?: string
     const held = useEntryClipboard.getState().entry;
     if (held && held.workspaceId === workspaceId && within(held.path, path)) useEntryClipboard.setState({ entry: null });
     const { tabs, active } = useFileTabs.getState();
-    const affected = tabs.filter((tab) => tab.workspaceId === workspaceId && !tab.kind && within(tab.path, path));
+    const affected = tabs.filter((tab) => (tab.scope ?? tab.workspaceId) === workspaceId && !tab.kind && within(tab.path, path));
     if (affected.length > 0) {
       const gone = new Set(affected.map(fileTabKey));
       useFileTabs.setState({ tabs: tabs.filter((tab) => !gone.has(fileTabKey(tab))), active: active && gone.has(active) ? null : active });
       // A renamed file that was on screen stays on screen under its new name.
       const shown = affected.find((tab) => fileTabKey(tab) === active);
-      if (op === "rename" && to && shown) useFileTabs.getState().open(workspaceId, to + shown.path.slice(path.length));
+      if (op === "rename" && to && shown) useFileTabs.getState().open(shown.workspaceId, to + shown.path.slice(path.length), undefined, shown.scope);
     }
   }
   const { requestTree } = useWorkspaceFilesStore.getState();

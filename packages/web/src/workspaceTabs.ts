@@ -6,6 +6,7 @@ import { applySessionOrder, refillSlots, writeScope } from "./sidebarOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
 import { useBrowserPages } from "./browserPages";
+import { scopeSessionId } from "./terminalScope";
 
 /** One entry of the strip: a session (a terminal or agent) or an open resource.
  * `id` is the session id or `fileTabKey`, so one stored order covers both. */
@@ -28,7 +29,8 @@ export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEn
   const ws = effectiveWorkspace(nav);
   const entries: TabEntry[] = [
     ...activeWorkspaceSessions(nav).map((session): TabEntry => ({ id: session.id, kind: "session", session })),
-    ...(ws ? resources.filter((tab) => tab.workspaceId === ws.id) : [])
+    // A scoped tab (a terminal's file) shows only while that terminal is on screen.
+    ...(ws ? resources.filter((tab) => tab.workspaceId === ws.id && (!tab.scope || scopeSessionId(tab.scope) === nav.sessionId)) : [])
       .map((tab): TabEntry => ({ id: fileTabKey(tab), kind: "resource", tab })),
   ];
   const key = tabOrderKey(nav);
@@ -103,16 +105,16 @@ export function moveChat(moved: string, target: string, after: boolean, shown: s
 /** A single click on a file in the explorer: show it in the workspace's preview tab, replacing
  * the previous preview in place (strip slot and drag order included), VS Code style. A preview
  * tab that was edited is already a regular tab, and one in a split set is kept. */
-export function openFilePreview(workspaceId: string, path: string): void {
+export function openFilePreview(workspaceId: string, path: string, scope?: string): void {
   const files = useFileTabs.getState();
   // Settings > "Preview files in tabs" off: every click is a regular tab.
-  if (usePerchStore.getState().settings?.previewTabs === false) return files.open(workspaceId, path);
+  if (usePerchStore.getState().settings?.previewTabs === false) return files.open(workspaceId, path, undefined, scope);
   const sets = useSplitSets.getState().sets;
-  const old = files.tabs.find((tab) => tab.workspaceId === workspaceId && tab.preview && !tab.kind
+  const old = files.tabs.find((tab) => tab.workspaceId === workspaceId && tab.scope === scope && tab.preview && !tab.kind
     && !sets.some((set) => set.ids.includes(fileTabKey(tab))));
   const oldKey = old ? fileTabKey(old) : undefined;
-  const newKey = fileTabKey({ workspaceId, path });
-  files.openPreview(workspaceId, path, oldKey);
+  const newKey = fileTabKey({ workspaceId, path, scope });
+  files.openPreview(workspaceId, path, oldKey, scope);
   if (!oldKey || oldKey === newKey || !useFileTabs.getState().tabs.some((tab) => fileTabKey(tab) === newKey)) return;
   const orderKey = tabOrderKey(usePerchStore.getState());
   const order = orderKey ? storedTabOrder(orderKey) : [];
@@ -159,7 +161,7 @@ export function activateTab(entry: TabEntry): void {
     // (Not when the current session is already one of the set's.)
     const partner = set?.ids.includes(state.sessionId ?? "") ? undefined : set?.ids.find((id) => id !== entry.id && state.sessions.some((session) => session.id === id));
     if (partner && partner !== state.sessionId) state.switchSession(partner);
-    files.open(entry.tab.workspaceId, entry.tab.path, entry.tab.kind);
+    files.open(entry.tab.workspaceId, entry.tab.path, entry.tab.kind, entry.tab.scope);
     return;
   }
   files.showSession();

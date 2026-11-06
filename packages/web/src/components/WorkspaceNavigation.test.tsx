@@ -287,3 +287,26 @@ it("all catalog harnesses have bundled artwork; custom and unknown harnesses hav
   render(<AgentIcon />);
   expect(host.textContent).toBe("?");
 });
+
+it("Quickchat is the last nest: the nest keys reach it, wrap past it, and leave project numbers alone", () => {
+  const chats = { ...workspace, id: "chats", projectId: "chats-project", path: "/home/.perch/scratch", name: "Quickchat" };
+  const chat = (id: string, createdAt: number): SessionSummary => ({ ...session, id, workspaceId: "chats", cwd: chats.path, createdAt });
+  usePerchStore.setState({
+    workspaces: [workspace, chats], activeWorkspaceId: "main", sessionId: "project-chat",
+    sessions: [{ ...session, id: "project-chat", workspaceId: "main", cwd: workspace.path }, chat("old", 1), chat("mid", 2), chat("new", 3)],
+    workspaceProjects: [...usePerchStore.getState().workspaceProjects, { id: "chats-project", hostId: "remote", name: "Quickchat", path: chats.path, favorite: false, createdAt: 1, updatedAt: 1 }],
+  });
+  expect(orderedNests().map(({ id }) => id)).toEqual(["main", "chats"]);
+  jumpToNest(1);
+  expect(focus).toHaveBeenLastCalledWith("main"); // projects keep their numbers
+  stepNest(1);
+  expect(focus).toHaveBeenLastCalledWith("chats");
+  expect(switchSession).toHaveBeenLastCalledWith("new"); // its newest chat, as the sidebar lists first
+  act(() => usePerchStore.setState({ activeWorkspaceId: "chats", sessionId: "new" }));
+  stepNest(1); // wraps back to the first project
+  expect(focus).toHaveBeenLastCalledWith("main");
+  stepNest(-1);
+  expect(focus).toHaveBeenLastCalledWith("main");
+  jumpToNest(2);
+  expect(focus).toHaveBeenLastCalledWith("chats");
+});

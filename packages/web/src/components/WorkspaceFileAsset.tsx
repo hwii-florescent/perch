@@ -4,6 +4,7 @@ import { getWorkspaceFileUrl } from "../base";
 import { isRelayMode, relayDownload, useRelayUrl } from "../relay/transport";
 import { useWorkspaceFilesStore } from "../filesystemStore";
 import { usePerchStore } from "../store";
+import { workspaceRecord } from "../terminalScope";
 import { cn } from "../lib/cn";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { MAX_IMAGE_BYTES, WorkspaceImage } from "./WorkspaceImage";
@@ -20,7 +21,7 @@ export function WorkspaceFileAsset({ workspaceId, metadata }: { workspaceId: str
   // On the LAN the URL itself; through the relay, the file fetched into an object URL.
   const url = useRelayUrl(fileUrl, useCallback(() => setFailed(true), []));
   const kind = assetKind(metadata.mediaType);
-  const remote = usePerchStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.hostId !== "local");
+  const remote = usePerchStore((state) => workspaceRecord(state, workspaceId)?.hostId !== "local");
   const archive = kind === "archive";
   const oversized = kind === "image" && metadata.size > MAX_IMAGE_BYTES;
   const hasPreview = kind !== undefined && !archive && !remote && !oversized;
