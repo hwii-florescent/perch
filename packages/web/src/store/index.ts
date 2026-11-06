@@ -333,7 +333,7 @@ export interface PerchState {
   /** Dismiss a toast by id (click or auto-dismiss timeout). */
   dismissToast: (id: string) => void;
 
-  sessionCommands: Record<string, { claude: CommandEntry[]; codex: CommandEntry[] }>;
+  sessionCommands: Record<string, { claude: CommandEntry[]; codex: CommandEntry[]; pi: CommandEntry[]; omp: CommandEntry[] }>;
   fetchCommands: (sessionId: string) => void;
   /** Ask the server for a fresh session list push. */
   listSessions: () => void;
@@ -2234,7 +2234,7 @@ export function handleServerMessage(msg: ServerMessage): void {
       usePerchStore.setState((state) => ({
         sessionCommands: {
           ...state.sessionCommands,
-          [msg.sessionId]: { claude: msg.claude, codex: msg.codex },
+          [msg.sessionId]: { claude: msg.claude, codex: msg.codex, pi: msg.pi ?? [], omp: msg.omp ?? [] },
         },
       }));
       break;

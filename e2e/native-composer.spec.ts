@@ -49,12 +49,13 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
   fs.writeFileSync(path.join(fixture, "sentinel.txt"), token);
   fs.writeFileSync(path.join(fixture, "red.png"), redPng());
   // A project command (Claude) and skill (Codex) whose only job is to answer with a fixed word.
-  // Only for the harness that lists them: Pi and OMP ask to trust a project folder that carries agent resources.
+  // Only for the harnesses that list them; Pi asks to trust a project folder that carries agent resources.
   if (provider === "claude") {
     fs.mkdirSync(path.join(fixture, ".claude/commands"), { recursive: true });
     fs.writeFileSync(path.join(fixture, ".claude/commands/perchping.md"), "---\ndescription: Perch composer check\n---\nReply with exactly PERCH_PING_OK and nothing else.\n");
   }
-  if (provider === "codex") {
+  // OMP reads the same project folder and does not ask to trust it (Pi does, so its skill lives in its agent home).
+  if (provider === "codex" || provider === "omp") {
     fs.mkdirSync(path.join(fixture, ".agents/skills/perchping"), { recursive: true });
     fs.writeFileSync(path.join(fixture, ".agents/skills/perchping/SKILL.md"), "---\nname: perchping\ndescription: Perch composer check. Reply with exactly PERCH_PING_OK and nothing else.\n---\nWhen invoked, reply with exactly PERCH_PING_OK and nothing else.\n");
   }
@@ -115,6 +116,8 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     const real = (name: string) => quote(execFileSync("which", [name], { encoding: "utf8" }).trim());
     if (provider === "pi") {
       const piHome = cheapModelEnv("pi", fixture).PI_CODING_AGENT_DIR!;
+      fs.mkdirSync(path.join(piHome, "skills/perchping"), { recursive: true });
+      fs.writeFileSync(path.join(piHome, "skills/perchping/SKILL.md"), "---\nname: perchping\ndescription: Perch composer check. Reply with exactly PERCH_PING_OK and nothing else.\n---\nWhen invoked, reply with exactly PERCH_PING_OK and nothing else.\n");
       fs.mkdirSync(bin);
       fs.writeFileSync(path.join(bin, "pi"), `#!/bin/sh\nexport PI_CODING_AGENT_DIR=${quote(piHome)}\nexec ${real("pi")} "$@"\n`, { mode: 0o700 });
       launchPath = `${bin}:${process.env.PATH}`;
@@ -166,8 +169,24 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     });
     await dismissUnconfirmed();
 
-    // 3. Commands: Claude `/name` (project command), Codex `$name` (skill); Pi and OMP offer no menu.
+    // 3. Commands. Every provider offers its built-ins after `/` (Claude's terminal-only `/rewind` is not in its
+    // headless list, so seeing it proves the catalog); what the CLI itself reports is merged in: Claude's project
+    // command, Codex's `$skill`, and the Pi/OMP session's own skills.
     await check("command menu", async () => {
+      const builtin = { claude: "rewind", codex: "compact", pi: "compact", omp: "compact" }[provider];
+      await box.pressSequentially(`/${builtin.slice(0, 4)}`, { delay: 15 });
+      await expect(ui.getByRole("option", { name: `/${builtin}` })).toBeVisible({ timeout: 30_000 });
+      if (provider === "codex") {
+        // `/` lists Codex's built-ins and `$` its skills, never the other's.
+        await box.fill("/perchp");
+        await expect(ui.getByRole("option", { name: "/perchping" })).toHaveCount(0);
+      }
+      await box.fill("");
+      if (provider === "pi" || provider === "omp") {
+        await box.pressSequentially("/skill:perchp", { delay: 15 });
+        await expect(ui.getByRole("option", { name: "/skill:perchping" })).toBeVisible({ timeout: 30_000 });
+        await box.fill("");
+      }
       if (provider === "claude" || provider === "codex") {
         const sigil = provider === "claude" ? "/" : "$";
         await box.pressSequentially(`${sigil}perchp`, { delay: 15 });
@@ -179,10 +198,6 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         await box.press("Enter");
         await expect(box).toHaveValue(`${sigil}perchping `);
         expect(await sendAndWait()).toContain("PERCH_PING_OK");
-      } else {
-        await box.pressSequentially("/", { delay: 15 });
-        await expect(ui.getByTestId("native-cli-menu")).toHaveCount(0);
-        await box.fill("");
       }
     });
     // 4. Questions and approvals, answered from the card: Claude's AskUserQuestion (number key), a Codex

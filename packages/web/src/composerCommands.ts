@@ -42,9 +42,9 @@ export function activeSigilToken(text: string, caret: number, sigil: string): Si
   return { start: sigilIndex, query };
 }
 
-/** Max suggestions shown at once — the claude probe returns ~150 entries and
- * an unbounded list would cover the whole window. */
-export const MAX_COMMAND_SUGGESTIONS = 40;
+/** Max suggestions kept. The menu scrolls, and a bare sigil has to reach every
+ * command: OMP offers ~90 built-ins and Claude ~110 with its skills. */
+export const MAX_COMMAND_SUGGESTIONS = 200;
 
 /**
  * Commands matching `query`, prefix matches first (then substring matches),

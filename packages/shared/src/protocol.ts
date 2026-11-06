@@ -163,6 +163,10 @@ export interface AgentUiResultMessage {
 export interface CommandEntry {
   name: string;
   description?: string;
+  /** Provider-authored argument sketch, e.g. `<provider/model>`. */
+  argumentHint?: string;
+  /** `builtin`, `skill`, `command` (a user's or plugin's), `extension` or `prompt`. */
+  kind?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1978,6 +1982,9 @@ export interface CommandsListResponseMessage {
   sessionId: string;
   claude: CommandEntry[];
   codex: CommandEntry[];
+  /** Read from the running CLI, so built-ins only until it is up. Absent from older cores. */
+  pi?: CommandEntry[];
+  omp?: CommandEntry[];
 }
 
 export interface AgentManifestListResponseMessage {

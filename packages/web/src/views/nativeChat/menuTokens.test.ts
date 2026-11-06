@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeMenu, applyMenuItem, fileMention, withAttachmentPaths } from "./menuTokens";
+import { activeMenu, applyMenuItem, fileMention, sigilLists, withAttachmentPaths } from "./menuTokens";
 
 describe("activeMenu", () => {
   it("opens the command menu only at the start of a Claude message", () => {
@@ -11,16 +11,32 @@ describe("activeMenu", () => {
     expect(activeMenu("use $fr", 7, "codex")).toMatchObject({ kind: "command", sigil: "$", token: { start: 4, query: "fr" } });
     expect(activeMenu("echo a$b", 8, "codex")).toBeNull();
   });
-  it("opens the file menu for @ in any provider, and gives other providers no command menu", () => {
+  it("opens the file menu for @ in any provider, and gives an unlisted provider no command menu", () => {
     expect(activeMenu("look at @src/ma", 15, "pi")).toMatchObject({ kind: "file", token: { start: 8, query: "src/ma" } });
-    expect(activeMenu("/rev", 4, "pi")).toBeNull();
+    expect(activeMenu("/rev", 4, "opencode")).toBeNull();
     expect(activeMenu("mail a@b.c", 10, "claude")).toBeNull();
+  });
+  it("opens the slash menu for Pi, OMP and Codex too, and Codex also takes $ skills", () => {
+    for (const provider of ["pi", "omp", "codex"]) expect(activeMenu("/com", 4, provider)).toMatchObject({ kind: "command", sigil: "/", token: { start: 0, query: "com" } });
+    expect(activeMenu("see /com", 8, "pi")).toBeNull();
+    expect(activeMenu("use $fr", 7, "codex")).toMatchObject({ sigil: "$" });
+    expect(activeMenu("use $fr", 7, "pi")).toBeNull();
   });
   it("closes once the token is finished", () => {
     expect(activeMenu("@src/main.ts ", 13, "claude")).toBeNull();
   });
   it("prefers the token nearest the caret", () => {
     expect(activeMenu("$skill @fi", 10, "codex")).toMatchObject({ kind: "file" });
+  });
+});
+
+describe("sigilLists", () => {
+  it("splits Codex into built-ins under / and skills under $, and lists everything elsewhere", () => {
+    expect(sigilLists("codex", "/", "builtin")).toBe(true);
+    expect(sigilLists("codex", "/", "skill")).toBe(false);
+    expect(sigilLists("codex", "$", "skill")).toBe(true);
+    expect(sigilLists("codex", "$", "builtin")).toBe(false);
+    for (const kind of ["builtin", "skill", "extension", undefined]) expect(sigilLists("pi", "/", kind)).toBe(true);
   });
 });
 

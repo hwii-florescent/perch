@@ -641,6 +641,12 @@ pub struct CommandEntry {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Provider-authored argument sketch, e.g. `<provider/model>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument_hint: Option<String>,
+    /// `builtin`, `skill`, `command` (a user's or plugin's), `extension` or `prompt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 /// Which backend a `chat.send` should be routed to. Mirrors the TS union
@@ -1890,6 +1896,11 @@ pub enum ServerMessage {
         session_id: String,
         claude: Vec<CommandEntry>,
         codex: Vec<CommandEntry>,
+        /// Read from the running CLI's own session, so empty until it is up.
+        #[serde(default)]
+        pi: Vec<CommandEntry>,
+        #[serde(default)]
+        omp: Vec<CommandEntry>,
     },
 
     /// Reply to `usage.get`; an account that couldn't be read is absent.

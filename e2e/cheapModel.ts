@@ -95,6 +95,8 @@ export function cheapModelEnv(provider: string, fixture: string, userHome = os.h
       // Like the inline config above, a malformed file deliberately aborts fixture setup.
       // pi-lens-ignore: unchecked-throwing-call
       JSON.stringify(piCheapSettings(JSON.parse(config))),
+      // A private skills folder: the command-menu check adds one there instead of touching the user's.
+      ["skills"],
     );
     return { PI_CODING_AGENT_DIR: home };
   }

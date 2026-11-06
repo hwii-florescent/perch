@@ -125,10 +125,32 @@ export default function (pi: any) {
     if (Buffer.byteLength(line) > MAX_FRAME || client.writableLength + Buffer.byteLength(line) > MAX_FRAME * 2) { client.destroy(); return; }
     client.write(line);
   }
+  // What the CLI's own `/` menu adds to its built-ins: extension commands, prompt templates, skills.
+  // They change on /reload or when an extension registers one, so resend only on change.
+  let sentCommands = "";
+  function commandsEvent() {
+    let list: any[] = [];
+    try { list = pi.getCommands?.() ?? []; } catch { list = []; }
+    const commands = list.slice(0, 512).map((entry: any) => ({
+      name: String(entry.name ?? "").slice(0, 128),
+      description: typeof entry.description === "string" ? entry.description.slice(0, 512) : undefined,
+      kind: entry.source === "skill" || entry.source === "prompt" ? entry.source : "extension",
+    })).filter((entry: any) => entry.name);
+    return { type: "commands", commands };
+  }
   function publish() {
     timer = undefined;
     if (stopped || !ctx || !clients.size) return;
-    try { const event = snapshot(); for (const client of clients) send(client, event); }
+    try {
+      const event = snapshot();
+      const commands = commandsEvent();
+      const serialized = JSON.stringify(commands);
+      for (const client of clients) {
+        send(client, event);
+        if (serialized !== sentCommands) send(client, commands);
+      }
+      sentCommands = serialized;
+    }
     catch { for (const client of clients) client.destroy(); }
   }
   function schedule(delay = 100) {
@@ -209,7 +231,7 @@ export default function (pi: any) {
           try { command(client, JSON.parse(line)); } catch { client.destroy(); return; }
         }
       });
-      try { send(client, snapshot()); } catch { client.destroy(); }
+      try { send(client, snapshot()); send(client, commandsEvent()); } catch { client.destroy(); }
     });
     server.on("error", () => { void stop(); });
     // The core removes a stale socket only before a fresh native process is

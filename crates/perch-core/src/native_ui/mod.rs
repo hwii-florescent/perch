@@ -1,7 +1,11 @@
 //! Native CLI UI bridges: Pi/OMP extension sockets and Claude hooks/transcripts.
 //! Each interactive provider owns its conversation and turn loop. Perch observes
 //! native state and forwards explicit controls without a second provider process.
-use crate::{agent_fleet::AgentKey, agent_runtime::terminal_key, protocol::NativeUiSnapshot};
+use crate::{
+    agent_fleet::AgentKey,
+    agent_runtime::terminal_key,
+    protocol::{CommandEntry, NativeUiSnapshot},
+};
 use anyhow::{bail, ensure, Context};
 use serde::Deserialize;
 use std::{
@@ -16,6 +20,7 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
 };
 
+pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod dialog;
@@ -170,6 +175,8 @@ enum NativeEvent {
         #[serde(default)]
         error: Option<String>,
     },
+    /// What the running CLI itself offers after `/`: extensions, prompt templates and skills.
+    Commands { commands: Vec<CommandEntry> },
 }
 
 struct Command {
@@ -182,8 +189,14 @@ pub struct NativeBridge {
     key: AgentKey,
     snapshot: watch::Receiver<Option<NativeUiSnapshot>>,
     commands: mpsc::Sender<Command>,
+    slash: Arc<Mutex<Vec<CommandEntry>>>,
 }
 impl NativeBridge {
+    /// The slash commands the CLI reported for this session; empty until it has, and for CLIs that
+    /// report none over the bridge.
+    pub fn slash_commands(&self) -> Vec<CommandEntry> {
+        self.slash.lock().unwrap().clone()
+    }
     pub async fn snapshot(&self) -> anyhow::Result<NativeUiSnapshot> {
         let mut receiver = self.snapshot.clone();
         let result = tokio::time::timeout(Duration::from_secs(10), async {
@@ -264,12 +277,14 @@ impl NativeUiRegistry {
         let socket = paths(&key)?.socket;
         let (snapshot_tx, snapshot) = watch::channel(None);
         let (commands, mut commands_rx) = mpsc::channel::<Command>(16);
+        let slash = Arc::new(Mutex::new(Vec::new()));
         bridges.insert(
             key.clone(),
             Arc::new(NativeBridge {
                 key: key.clone(),
                 snapshot,
                 commands,
+                slash: slash.clone(),
             }),
         );
         let registry = Arc::downgrade(self);
@@ -336,6 +351,10 @@ impl NativeUiRegistry {
                                     last = Some(snapshot.clone());
                                     on_snapshot(snapshot.clone());
                                     let _ = snapshot_tx.send(Some(snapshot));
+                                }
+                                NativeEvent::Commands { commands } => {
+                                    // Bounded like every other frame from the CLI's process.
+                                    *slash.lock().unwrap() = commands.into_iter().take(512).collect();
                                 }
                                 NativeEvent::Ack { request_id, accepted, error } => {
                                     if let Some(reply) = pending.remove(&request_id) { let _ = reply.send(error.map_or(Ok(accepted), Err)); }

@@ -75,7 +75,7 @@ pub async fn list_for(host_id: &str, ssh_host: Option<&str>, cwd: &str) -> Comma
     let key = format!("{host_id}\u{1}{cwd}");
     if let Some(entry) = cache().lock().unwrap().get(&key) {
         if entry.at.elapsed() < CACHE_TTL {
-            return entry.lists.clone();
+            return with_builtins(entry.lists.clone());
         }
     }
 
@@ -97,7 +97,16 @@ pub async fn list_for(host_id: &str, ssh_host: Option<&str>, cwd: &str) -> Comma
             lists: lists.clone(),
         },
     );
-    lists
+    with_builtins(lists)
+}
+
+/// Add each CLI's built-in commands to what its probe found.
+fn with_builtins(lists: CommandLists) -> CommandLists {
+    use crate::native_ui::catalog::with_builtins;
+    CommandLists {
+        claude: with_builtins("claude", lists.claude),
+        codex: with_builtins("codex", lists.codex),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,9 +190,12 @@ async fn probe_codex_remote(ssh_host: &str, cwd: &str) -> String {
 // Parsers
 // ---------------------------------------------------------------------------
 
-/// Pull `slash_commands` + `skills` + `agents` out of claude's `system/init`
-/// line. The line is *not* first in the stream (SessionStart hook events come
-/// before it), so every line is scanned.
+/// Pull `slash_commands` and `skills` out of claude's `system/init` line. The line is *not* first in
+/// the stream (SessionStart hook events come before it), so every line is scanned.
+///
+/// `agents` is left out on purpose: they are subagent types, and Claude's `/` menu does not list them.
+/// This is the headless list, so it lacks the terminal-only built-ins; [`crate::native_ui::catalog`]
+/// supplies those. A name in `skills` is a skill; any other is a user's or plugin's command.
 pub fn parse_claude_init(stdout: &str) -> Vec<CommandEntry> {
     let mut out: Vec<CommandEntry> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -200,39 +212,43 @@ pub fn parse_claude_init(stdout: &str) -> Vec<CommandEntry> {
         {
             continue;
         }
-        // `slash_commands` first so the built-ins keep their natural order;
-        // `skills`/`agents` mostly repeat those names and only contribute the
-        // handful the CLI does not also expose as a slash command.
-        for key in ["slash_commands", "skills", "agents"] {
-            let Some(items) = v.get(key).and_then(Value::as_array) else {
+        let names = |key: &str| -> Vec<String> {
+            v.get(key)
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| match item {
+                            Value::String(name) => Some(name.clone()),
+                            Value::Object(_) => {
+                                item.get("name").and_then(Value::as_str).map(str::to_string)
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let skills: std::collections::HashSet<String> = names("skills").into_iter().collect();
+        for name in names("slash_commands")
+            .into_iter()
+            .chain(skills.iter().cloned().collect::<Vec<_>>())
+        {
+            let name = name.trim_start_matches('/').to_string();
+            if name.is_empty() || !seen.insert(name.clone()) {
                 continue;
-            };
-            for item in items {
-                let entry = match item {
-                    Value::String(name) => CommandEntry {
-                        name: name.clone(),
-                        description: None,
-                    },
-                    Value::Object(_) => {
-                        let Some(name) = item.get("name").and_then(Value::as_str) else {
-                            continue;
-                        };
-                        CommandEntry {
-                            name: name.to_string(),
-                            description: item
-                                .get("description")
-                                .and_then(Value::as_str)
-                                .map(str::to_string),
-                        }
-                    }
-                    _ => continue,
-                };
-                let name = entry.name.trim_start_matches('/').to_string();
-                if name.is_empty() || !seen.insert(name.clone()) {
-                    continue;
-                }
-                out.push(CommandEntry { name, ..entry });
             }
+            let kind = if skills.contains(&name) {
+                "skill"
+            } else {
+                "command"
+            };
+            out.push(CommandEntry {
+                name,
+                description: None,
+                argument_hint: None,
+                kind: Some(kind.into()),
+            });
         }
         break;
     }
@@ -285,6 +301,8 @@ pub fn parse_codex_prompt_input(stdout: &str) -> Vec<CommandEntry> {
             } else {
                 Some(desc.to_string())
             },
+            argument_hint: None,
+            kind: Some("skill".into()),
         });
     }
     out
@@ -314,21 +332,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_claude_init_reads_slash_commands_skills_and_agents() {
+    fn parse_claude_init_reads_commands_and_skills_but_not_subagent_types() {
         // Hook events precede the init line in a real stream.
         let stdout = concat!(
             r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart"}"#,
             "\n",
-            r#"{"type":"system","subtype":"init","slash_commands":["effort","/review"],"#,
-            r#""skills":["dataviz","effort"],"agents":[{"name":"Explore","description":"search"}]}"#,
+            r#"{"type":"system","subtype":"init","slash_commands":["effort","/review","dataviz"],"#,
+            r#""skills":["dataviz","impeccable"],"agents":[{"name":"Explore","description":"search"}]}"#,
             "\n",
             r#"{"type":"result","subtype":"success","num_turns":0}"#,
         );
         let out = parse_claude_init(stdout);
-        let names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
-        // `/review` loses its sigil, `effort` is not duplicated by `skills`.
-        assert_eq!(names, vec!["effort", "review", "dataviz", "Explore"]);
-        assert_eq!(out[3].description.as_deref(), Some("search"));
+        let seen: Vec<(&str, &str)> = out
+            .iter()
+            .map(|c| (c.name.as_str(), c.kind.as_deref().unwrap()))
+            .collect();
+        // `/review` loses its sigil, `dataviz` is a skill whichever list names it first, and a skill
+        // that is not also a slash command is still offered.
+        assert_eq!(
+            seen,
+            vec![
+                ("effort", "command"),
+                ("review", "command"),
+                ("dataviz", "skill"),
+                ("impeccable", "skill")
+            ]
+        );
     }
 
     #[test]

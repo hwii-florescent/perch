@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePerchStore } from "../../store";
 import { filterCommands } from "../../composerCommands";
-import { activeMenu, applyMenuItem, type ActiveMenu } from "./menuTokens";
+import { activeMenu, applyMenuItem, sigilLists, type ActiveMenu } from "./menuTokens";
 import { useFileSearch } from "./useFileSearch";
 import type { MenuItem } from "./MenuList";
 
@@ -28,8 +28,11 @@ export function useComposerMenu({ text, caret, sessionId, providerId, enabled }:
   const items = useMemo<MenuItem[]>(() => {
     if (!menu) return [];
     if (menu.kind === "file") return files.slice(0, MAX_FILES).map((entry) => ({ key: entry.path, label: entry.path }));
-    const list = providerId === "claude" || providerId === "codex" ? commands?.[providerId] ?? [] : [];
-    return filterCommands(list, query).map((entry) => ({ key: entry.name, label: `${menu.sigil}${entry.name}`, ...(entry.description ? { detail: entry.description } : {}) }));
+    const list = (commands?.[providerId as keyof typeof commands] ?? []).filter((entry) => sigilLists(providerId, menu.sigil, entry.kind));
+    return filterCommands(list, query).map((entry) => {
+      const detail = [entry.argumentHint, entry.description].filter(Boolean).join("  ");
+      return { key: entry.name, label: `${menu.sigil}${entry.name}`, ...(detail ? { detail } : {}) };
+    });
   }, [menu, files, commands, providerId, query]);
   useEffect(() => { setActive(0); }, [menu?.kind, query, items.length]);
 

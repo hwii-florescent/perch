@@ -565,6 +565,8 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
             session_id,
             claude: Vec::new(),
             codex: Vec::new(),
+            pi: Vec::new(),
+            omp: Vec::new(),
         });
         return;
     };
@@ -574,6 +576,10 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
     } else {
         direct_host(state, &host_id).map(|h| h.ssh_host)
     };
+    // Pi and OMP list their own commands from inside the running CLI; the built-ins are known
+    // without it, so the menu is not empty while the CLI starts.
+    let pi = super::native_ui::live_commands(state, &session_id, "pi");
+    let omp = super::native_ui::live_commands(state, &session_id, "omp");
     let out_tx = state.out_tx.clone();
     tokio::spawn(async move {
         let lists = crate::commands::list_for(&host_id, ssh_host.as_deref(), &cwd).await;
@@ -581,6 +587,8 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
             session_id,
             claude: lists.claude,
             codex: lists.codex,
+            pi: crate::native_ui::catalog::with_builtins("pi", pi),
+            omp: crate::native_ui::catalog::with_builtins("omp", omp),
         });
     });
 }

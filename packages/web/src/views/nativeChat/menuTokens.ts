@@ -1,26 +1,36 @@
 /**
  * Pure helpers behind the native chat composer's one autocomplete menu: slash commands and skills
- * (`/name` for Claude, `$name` for Codex) and `@file` mentions. The picked text is only typed into the
- * prompt; the agent itself resolves it, so nothing here needs provider knowledge beyond the sigil.
+ * (`/name` everywhere, plus `$skill` for Codex) and `@file` mentions. The picked text is only typed
+ * into the prompt; the agent itself resolves it, so nothing here needs provider knowledge beyond
+ * the sigils and which kinds of entry each one lists.
  */
 import { activeSigilToken, applyCommand, type SigilToken } from "../../composerCommands";
 
 type MenuKind = "command" | "file";
 export interface ActiveMenu { kind: MenuKind; sigil: string; token: SigilToken }
 
-/** The command sigil per provider; providers with no command list get no command menu. */
-const COMMAND_SIGIL: Record<string, string> = { claude: "/", codex: "$" };
+/** The command sigils per provider; a provider with none gets no command menu. */
+const COMMAND_SIGILS: Record<string, readonly string[]> = { claude: ["/"], codex: ["/", "$"], pi: ["/"], omp: ["/"] };
+
+/** Which entries a sigil lists. Codex keeps its built-ins under `/` and its skills under `$`;
+ * every other provider's `/` lists everything it offers. */
+export function sigilLists(providerId: string, sigil: string, kind: string | undefined): boolean {
+  if (providerId !== "codex") return true;
+  return sigil === "$" ? kind === "skill" : kind !== "skill";
+}
 
 /** The menu the caret is in, or null. `/name` only starts a command at the beginning of the message
- * (that is where Claude reads it); `$skill` and `@file` may appear anywhere a word starts. */
+ * (that is where the CLIs read it); `$skill` and `@file` may appear anywhere a word starts. */
 export function activeMenu(text: string, caret: number, providerId: string): ActiveMenu | null {
   const file = activeSigilToken(text, caret, "@");
-  const sigil = COMMAND_SIGIL[providerId];
-  const command = sigil ? activeSigilToken(text, caret, sigil) : null;
+  let command: ActiveMenu | null = null;
+  for (const sigil of COMMAND_SIGILS[providerId] ?? []) {
+    const token = activeSigilToken(text, caret, sigil);
+    if (token && (sigil !== "/" || token.start === 0) && (!command || token.start > command.token.start)) command = { kind: "command", sigil, token };
+  }
   // The token nearest the caret wins when both could match (`$` after an `@`, say).
-  if (file && (!command || file.start > command.start)) return { kind: "file", sigil: "@", token: file };
-  if (command && sigil && (sigil !== "/" || command.start === 0)) return { kind: "command", sigil, token: command };
-  return null;
+  if (file && (!command || file.start > command.token.start)) return { kind: "file", sigil: "@", token: file };
+  return command;
 }
 
 /** `@path`, quoted when the path has whitespace so it stays one mention. */

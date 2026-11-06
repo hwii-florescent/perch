@@ -19,10 +19,10 @@ the Rust projection below when it exists.
 
 | Area | Orca source | Perch |
 | --- | --- | --- |
-| Slash catalog per agent, curated (Claude, Codex, OMP; common fallback) | `input/native-chat-slash-commands.ts` | 🟡 Claude via CLI `init` list; Codex lists skills only (built-ins missing); **Pi and OMP: nothing read** (Orca curates OMP's registry; Pi uses `skill:<name>`; extension commands need a source, ❓ check Pi's extension API) |
-| Agent profiles: skill prefix (`/` or `$`), `skill:` name prefix, which commands the host claims vs the agent expands | `native-chat-agent-profiles.ts` | ⬜ |
-| Skill discovery by scanning skill folders (shared roots, own, other agent's) | `shared/skills`, `native-chat-skill-visibility.ts`, `use-native-chat-skills.ts` | 🟡 Codex via prompt probe only |
-| Send classification: chat / command / unknown token; slash drafts get no user bubble | `native-chat-slash-commands.ts` (`classifyNativeChatSend`) | ⬜ |
+| Slash catalog per agent (Claude, Codex, Pi, OMP) | `input/native-chat-slash-commands.ts` | ✅ built-ins captured from each CLI's real `/` menu (`native_ui/slash_commands.json`, regenerate with `e2e/capture-slash-menu.py`; Orca's hand list was already stale: Codex 49 vs its 23, OMP 94 vs its 22) plus what the running CLI reports: Claude `init` (skills, plugin and project commands), Codex skills, Pi/OMP `getCommands()` (extensions, prompt templates, `skill:<name>`) over the bridge. Live-checked on all four |
+| Agent profiles: skill prefix (`/` or `$`), `skill:` name prefix, which commands the host claims vs the agent expands | `native-chat-agent-profiles.ts` | 🟡 sigils and per-sigil kinds done (`menuTokens.ts`); host-claimed vs agent-expanded is the send slice |
+| Skill discovery by scanning skill folders (shared roots, own, other agent's) | `shared/skills`, `native-chat-skill-visibility.ts`, `use-native-chat-skills.ts` | 🟡 names come from each CLI itself (more accurate than guessing roots); Claude gives no skill descriptions, so those rows have none; remote hosts: Claude/Codex probes only |
+| Send classification: chat / command / unknown token; slash drafts get no user bubble | `native-chat-slash-commands.ts` (`classifyNativeChatSend`) | ⬜ **next slice.** Probed: Claude built-ins (`/context`, `/compact`, `/help`, `/model`, `/resume`) fire no `UserPromptSubmit`, so a UI send ends "unconfirmed"; only Claude is typed into the PTY, Codex/Pi/OMP prompts go through app-server / `sendUserMessage`, so a built-in sent that way would reach the model as prose |
 | Command envelopes, host-answered commands (`/context`, `/clear`) | `native-chat-command-envelope.ts`, `use-native-chat-local-command-answer.ts` ❓ | ⬜ |
 | Tool pairing (call ↔ result), folding, run header/sentence/outcome, tool identity, line labels, file targets | `tools/native-chat-tool-*.ts` ❓ | 🟡 runs fold; no call↔result pairing, no per-tool lines or outcomes |
 | Edit cards from tool input (`begin_patch`, edits, unified patch, LCS diff) | `tools/native-chat-edit-*.ts`, `native-chat-unified-patch.ts` ❓ | ⬜ (we show git diff of the last turn instead) |
@@ -71,7 +71,7 @@ the Rust projection below when it exists.
 | Queued messages: cards, edit, reorder, delete; follow-up behaviour (queue vs steer) | `NativeChatQueuedMessage*.tsx`, `native-chat-follow-up-behavior.ts`, `native-chat-queued-edit-*.ts` | ⬜ |
 | Prompt recall (sent prompt history) | `use-native-chat-composer-recall.ts`, `native-chat-sent-prompt-history.ts` | ⬜ |
 | Interrupt / stop | `use-native-chat-composer-interrupt.ts` | ✅ |
-| Slash and `$` picker with descriptions and argument hints; `@` mention files | `NativeChatAutocompleteMenus.tsx`, `use-native-chat-composer-command-picker.ts`, `use-native-chat-mention-files.ts` | 🟡 no descriptions or hints from curated catalog |
+| Slash and `$` picker with descriptions and argument hints; `@` mention files | `NativeChatAutocompleteMenus.tsx`, `use-native-chat-composer-command-picker.ts`, `use-native-chat-mention-files.ts` | ✅ all four providers, descriptions and Pi's argument hints, whole list reachable (scrolls); no kind grouping or badges yet |
 | Quick commands menu | `use-native-chat-quick-commands-menu.tsx` | ⬜ |
 | Goal chip, permission picker, option pickers, context ring in actions row | `NativeChatComposerActions.tsx` | 🟡 ring only |
 | Dictation | `use-native-chat-dictation.ts` | not pursued |

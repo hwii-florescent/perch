@@ -199,6 +199,19 @@ fn resolve(
     Ok(key)
 }
 
+/// What the running `provider` CLI reports after `/` for this session, or nothing when it is not
+/// running here (the caller adds the built-ins either way).
+pub(super) fn live_commands(
+    state: &Arc<ConnState>,
+    session_id: &str,
+    provider_id: &str,
+) -> Vec<crate::protocol::CommandEntry> {
+    resolve(state, session_id, provider_id)
+        .ok()
+        .and_then(|key| state.app.native_ui.get(&key))
+        .map_or_else(Vec::new, |bridge| bridge.slash_commands())
+}
+
 pub(super) fn get(
     state: &Arc<ConnState>,
     raw: &str,
