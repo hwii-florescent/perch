@@ -319,7 +319,7 @@ pub fn parse(screen: &str) -> Option<NativeUiRequest> {
 pub fn read_dialog(key: &crate::agent_fleet::AgentKey) -> Option<Dialog> {
     let client = crate::daemon::client().ok()?;
     let screen = client
-        .snapshot(&crate::agent_runtime::terminal_key(key))
+        .snapshot(&crate::shell_integration::pty_key(key))
         .ok()?;
     parse_dialog(&screen.text)
 }

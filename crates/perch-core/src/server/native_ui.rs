@@ -167,11 +167,16 @@ fn observe_runtime(
     )
 }
 
-fn resolve(
-    state: &Arc<ConnState>,
-    session_id: &str,
-    provider_id: &str,
-) -> anyhow::Result<AgentKey> {
+/// `key` owns the PTY, leases and lifecycle; `bridge` owns the native connection. They are the
+/// same agent for a picker launch. For an agent typed into a Terminal tab the tab (provider
+/// `terminal`) is `key` and the shim-launched agent is `bridge`/`shell`.
+struct Target {
+    key: AgentKey,
+    bridge: AgentKey,
+    shell: Option<crate::shell_integration::ShellAgent>,
+}
+
+fn resolve(state: &Arc<ConnState>, session_id: &str, provider_id: &str) -> anyhow::Result<Target> {
     anyhow::ensure!(
         crate::native_ui::supported(provider_id),
         "This CLI does not yet expose a structured UI connection"
@@ -181,22 +186,49 @@ fn resolve(
         .db
         .get_session(session_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
+    let workspace = row
+        .workspace_id
+        .clone()
+        .unwrap_or_else(|| format!("session-{session_id}"));
+    if row.cli_provider_id.as_deref() == Some(crate::agent_fleet::TERMINAL_PROVIDER) {
+        let key = AgentKey::new(
+            &workspace,
+            session_id,
+            crate::agent_fleet::TERMINAL_PROVIDER,
+        )?;
+        let shell = state
+            .app
+            .agent_runtime
+            .shell_agents()
+            .into_iter()
+            .find_map(|(owner, agent)| {
+                (owner == key && agent.key.agent_id == provider_id).then_some(agent)
+            })
+            .ok_or_else(|| anyhow::anyhow!("{provider_id} is not running in this terminal"))?;
+        anyhow::ensure!(
+            state.app.agent_runtime.shell_agent_is_current(&key, &shell),
+            "{provider_id} is not running in this terminal"
+        );
+        return Ok(Target {
+            bridge: shell.key.clone(),
+            key,
+            shell: Some(shell),
+        });
+    }
     anyhow::ensure!(
         row.cli_provider_id.as_deref() == Some(provider_id),
         "provider does not own this session"
     );
-    let key = AgentKey::new(
-        row.workspace_id
-            .as_deref()
-            .unwrap_or(&format!("session-{session_id}")),
-        session_id,
-        provider_id,
-    )?;
+    let key = AgentKey::new(&workspace, session_id, provider_id)?;
     anyhow::ensure!(
         state.app.agent_runtime.runtime_alive(&key),
         "Open this CLI session before using its web view"
     );
-    Ok(key)
+    Ok(Target {
+        bridge: key.clone(),
+        key,
+        shell: None,
+    })
 }
 
 /// What the running `provider` CLI reports after `/` for this session, or nothing when it is not
@@ -208,7 +240,7 @@ pub(super) fn live_commands(
 ) -> Vec<crate::protocol::CommandEntry> {
     resolve(state, session_id, provider_id)
         .ok()
-        .and_then(|key| state.app.native_ui.get(&key))
+        .and_then(|target| state.app.native_ui.get(&target.bridge))
         .map_or_else(Vec::new, |bridge| bridge.slash_commands())
 }
 
@@ -222,12 +254,15 @@ pub(super) fn get(
     if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
         return;
     }
-    let result = resolve(state, &session_id, &provider_id).and_then(|key| {
-        observe(&state.app, key.clone())?;
+    let result = resolve(state, &session_id, &provider_id).and_then(|target| {
+        match target.shell {
+            Some(agent) => observe_shell(&state.app, target.key, agent)?,
+            None => observe(&state.app, target.key)?,
+        }
         state
             .app
             .native_ui
-            .get(&key)
+            .get(&target.bridge)
             .ok_or_else(|| anyhow::anyhow!("Native UI is starting. Retry shortly."))
     });
     let bridge = match result {
@@ -266,13 +301,18 @@ pub(super) fn control(
         return;
     }
     let operation_id = prompt.as_ref().map(|(id, _)| id.clone());
+    let command = std::cell::Cell::new(false);
     let prepared =
         (|| -> anyhow::Result<Option<tokio::sync::oneshot::Receiver<Result<bool, String>>>> {
             anyhow::ensure!(
                 !request_id.is_empty() && request_id.len() <= 128,
                 "invalid request id"
             );
-            let key = resolve(state, &session_id, &provider_id)?;
+            let Target {
+                key,
+                bridge: bridge_key,
+                ..
+            } = resolve(state, &session_id, &provider_id)?;
             let lease_key = agents::lifecycle_control_key(&key, ControlChannel::Input);
             let lease = state
                 .agent_input_leases
@@ -290,7 +330,7 @@ pub(super) fn control(
             let bridge = state
                 .app
                 .native_ui
-                .get(&key)
+                .get(&bridge_key)
                 .ok_or_else(|| anyhow::anyhow!("native CLI UI is unavailable"))?;
             state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
             if let Some((operation, text)) = &prompt {
@@ -298,7 +338,24 @@ pub(super) fn control(
                 let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
                 let (existing, _) = state.app.db.reserve_prompt_operation(operation, &session_id, Some(&key.workspace_id), &digest, text, Some(&provider_id), None)?;
                 if existing.state == "delivered" { return Ok(None); }
-                let input = crate::native_ui::claude::prepare_input(&key, Some(text))?;
+                // A built-in slash command is a TUI control, not a message: it runs in the terminal, has no
+                // turn and nothing to confirm, and must never reach the model as prose.
+                if crate::native_ui::typed::route(&provider_id, text, bridge.slash_commands()) == crate::native_ui::typed::Route::Terminal {
+                    crate::native_ui::typed::prepare(&bridge_key, text, bridge.latest().as_ref())?;
+                    let input = crate::native_ui::claude::prepare_input(&bridge_key, Some(text))?;
+                    let claim = state.app.db.claim_prompt_operation(operation)?.ok_or_else(|| anyhow::anyhow!("missing prompt operation"))?;
+                    anyhow::ensure!(claim.won_claim, "This command was already dispatched. It will not be sent twice.");
+                    state.app.db.set_prompt_operation_state(operation, "unconfirmed")?;
+                    match input {
+                        // Claude's paste path is the one it already confirms an empty prompt for.
+                        Some(input) => crate::native_ui::claude::write_input(&input, write)?,
+                        None => crate::native_ui::typed::type_command(text, write)?,
+                    }
+                    session::settle_prompt_dispatch(&state.app, operation, "delivered").map_err(anyhow::Error::msg)?;
+                    command.set(true);
+                    return Ok(None);
+                }
+                let input = crate::native_ui::claude::prepare_input(&bridge_key, Some(text))?;
                 let claim = state.app.db.claim_prompt_operation(operation)?.ok_or_else(|| anyhow::anyhow!("missing prompt operation"))?;
                 anyhow::ensure!(claim.won_claim, "This prompt was already dispatched; delivery is still unconfirmed. It will not be sent twice.");
                 // Persist uncertainty before any bytes cross to the native CLI.
@@ -309,7 +366,7 @@ pub(super) fn control(
                 let _ = state.app.db.set_cli_title(&session_id, text);
                 Ok(Some(reply))
             } else {
-                let input = crate::native_ui::claude::prepare_input(&key, None)?;
+                let input = crate::native_ui::claude::prepare_input(&bridge_key, None)?;
                 let reply = bridge.enqueue(&request_id, None)?;
                 if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
                 Ok(Some(reply))
@@ -322,6 +379,7 @@ pub(super) fn control(
                 request_id,
                 session_id,
                 accepted: true,
+                command: command.get(),
             });
         }
         Ok(Some(reply)) => {
@@ -336,7 +394,7 @@ pub(super) fn control(
                             }
                         }
                         notify_session_updated(&state.app, &session_id);
-                        let _ = state.out_tx.send(ServerMessage::AgentUiResult { request_id, session_id, accepted: true });
+                        let _ = state.out_tx.send(ServerMessage::AgentUiResult { request_id, session_id, accepted: true, command: false });
                     }
                     other => fail(&state.out_tx, request_id, "native_ui_delivery_unconfirmed", format!("The CLI did not confirm this action ({other:?}). Reconnect to inspect its transcript before sending again."), false),
                 }
@@ -370,7 +428,11 @@ pub(super) fn answer(
         return;
     }
     let written = (|| -> anyhow::Result<()> {
-        let key = resolve(state, &session_id, &provider_id)?;
+        let Target {
+            key,
+            bridge: bridge_key,
+            ..
+        } = resolve(state, &session_id, &provider_id)?;
         let lease_key = agents::lifecycle_control_key(&key, ControlChannel::Input);
         let lease = state
             .agent_input_leases
@@ -387,7 +449,7 @@ pub(super) fn answer(
             .app
             .agent_runtime
             .dispatch_native_control(&key, &lease, |write| {
-                let shown = crate::native_ui::dialog::read_dialog(&key)
+                let shown = crate::native_ui::dialog::read_dialog(&bridge_key)
                     .ok_or_else(|| anyhow::anyhow!("The prompt is no longer on screen"))?;
                 anyhow::ensure!(
                     shown.request.id == prompt_id,
@@ -412,6 +474,7 @@ pub(super) fn answer(
                 request_id,
                 session_id,
                 accepted: true,
+                command: false,
             });
         }
         Err(error) => fail(
@@ -436,15 +499,18 @@ pub(super) async fn send_review(
     provider_id: &str,
 ) {
     let prepared = async {
-        let key = resolve(state, session_id, provider_id)?;
-        observe(&state.app, key.clone())?;
-        let bridge = state.app.native_ui.get(&key).ok_or_else(|| anyhow::anyhow!("Native CLI UI is unavailable"))?;
+        let target = resolve(state, session_id, provider_id)?;
+        match target.shell {
+            Some(agent) => observe_shell(&state.app, target.key, agent)?,
+            None => observe(&state.app, target.key)?,
+        }
+        let bridge = state.app.native_ui.get(&target.bridge).ok_or_else(|| anyhow::anyhow!("Native CLI UI is unavailable"))?;
         // Readiness precedes reservation: an unavailable CLI leaves the
         // frozen packet retryable and does not consume its operation id.
         bridge.snapshot().await?;
         let _operation = state.app.agent_operation_lock.lock().unwrap();
         anyhow::ensure!(!state.out_tx.is_closed(), "Review sender disconnected");
-        let key = resolve(state, session_id, provider_id)?;
+        let Target { key, bridge: bridge_key, .. } = resolve(state, session_id, provider_id)?;
         let client = connection_client_identity(state).map_err(anyhow::Error::msg)?;
         let before = state.app.agent_runtime.snapshot(&key)?;
         let had_observer = before.observers.contains(&client.id);
@@ -457,7 +523,7 @@ pub(super) async fn send_review(
             let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
             let (existing, _) = state.app.db.reserve_prompt_operation(operation, session_id, Some(&key.workspace_id), &digest, text, Some(provider_id), None)?;
             if existing.state == "delivered" { return Ok(None); }
-            let input = crate::native_ui::claude::prepare_input(&key, Some(text))?;
+            let input = crate::native_ui::claude::prepare_input(&bridge_key, Some(text))?;
             let (_, won) = state.app.db.claim_review_packet(&packet.packet.packet_id, operation, &key.workspace_id, wall_clock_millis())?
                 .ok_or_else(|| anyhow::anyhow!("Review packet disappeared"))?;
             if !won { return Ok(None); }

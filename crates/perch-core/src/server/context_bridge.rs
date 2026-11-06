@@ -226,6 +226,7 @@ pub(super) fn send(
                     request_id,
                     session_id: target_session_id,
                     accepted: true,
+                    command: false,
                 });
             }
             Err(err) => fail(

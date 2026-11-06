@@ -154,6 +154,9 @@ export interface AgentUiResultMessage {
   requestId: string;
   sessionId: string;
   accepted: boolean;
+  /** The text was a built-in slash command, run in the CLI's terminal instead of sent as a message.
+   * Its effect shows there, not in the transcript. */
+  command?: boolean;
 }
 
 /** One invocable command/skill offered by an agent CLI in a given cwd, as
@@ -430,6 +433,13 @@ export interface SessionSummary {
   /** Observed foreground CLI identity, or "terminal" for a shell/other job.
    * Display only; never replaces the saved launch/resume provider. */
   currentProviderId?: string;
+  /** The native-chat agent running in this terminal tab (started via Perch's
+   * command shims); present only while it runs. The chat view follows it. */
+  chatProviderId?: string;
+  /** Where a local terminal's shell is now (follows `cd`) and that directory's
+   * git branch (absent outside a repo). the Files/Git drawer follows these. */
+  currentCwd?: string;
+  currentBranch?: string;
   /** Whether the session's agent is waiting on the human (a permission
    * prompt or a question), from native CLI events, the OSC title, or as a
    * last resort an output pattern. Defaults to false when absent. */

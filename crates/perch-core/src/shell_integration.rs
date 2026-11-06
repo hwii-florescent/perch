@@ -26,6 +26,22 @@ pub(crate) fn bridge_key(key: &AgentKey, provider: &str) -> anyhow::Result<Agent
     )
     .map_err(Into::into)
 }
+/// The PTY a native bridge's agent runs in. A shim-launched agent's bridge key is
+/// `shell-<tab>`; its terminal is the tab's own, not one derived from the bridge key.
+pub(crate) fn pty_key(key: &AgentKey) -> String {
+    let tab = key.session_id.strip_prefix("shell-").and_then(|session| {
+        AgentKey::new(
+            &key.workspace_id,
+            session,
+            crate::agent_fleet::TERMINAL_PROVIDER,
+        )
+        .ok()
+    });
+    crate::agent_runtime::terminal_key(tab.as_ref().unwrap_or(key))
+}
+/// Every generated wrapper directory has this file, including those written before the recursion fix,
+/// so another Perch shell can tell an inherited wrapper `ZDOTDIR` from the user's own.
+const MARKER: &str = "bash-launch";
 fn directory(key: &AgentKey) -> anyhow::Result<PathBuf> {
     Ok(native_ui::paths(key)?.socket.with_extension("shell"))
 }
@@ -80,6 +96,18 @@ pub(crate) fn snapshot_matches(agent: &ShellAgent, pid: u32) -> bool {
 /// Add integration only to new local runtime launches. Existing daemon
 /// attachments keep their original environment and processes unchanged.
 pub(crate) fn prepare(key: &AgentKey, command: Vec<String>) -> anyhow::Result<Vec<String>> {
+    prepare_with(
+        key,
+        command,
+        &std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+    )
+}
+
+fn prepare_with(
+    key: &AgentKey,
+    command: Vec<String>,
+    real_shell: &str,
+) -> anyhow::Result<Vec<String>> {
     #[cfg(not(unix))]
     return Ok(command);
     #[cfg(unix)]
@@ -183,13 +211,14 @@ exec {exec} "$@"
             );
             write(&bin.join(provider), &script, 0o700)?;
         }
-        let real_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let shell = dir.join("shell");
         // zsh sources each original startup file with the user's ZDOTDIR, then
         // restores the private shim directory for the next startup stage.
         for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
             let source = format!(
                 r#"ZDOTDIR=${{PERCH_USER_ZDOTDIR:-$HOME}}
+[[ -e "$ZDOTDIR/{MARKER}" ]] && ZDOTDIR=$HOME
+[[ ${{HISTFILE-}} == {dir}/.zsh_history ]] && HISTFILE=$ZDOTDIR/.zsh_history
 [[ -r "$ZDOTDIR/{file}" ]] && source "$ZDOTDIR/{file}"
 PERCH_USER_ZDOTDIR=$ZDOTDIR
 ZDOTDIR={dir}
@@ -212,13 +241,13 @@ __perch_path
                 quoted(&bin.join(provider))
             ));
         }
-        bash.push_str(&format!("exec {} \"$@\"\n", quote(&real_shell)));
+        bash.push_str(&format!("exec {} \"$@\"\n", quote(real_shell)));
         write(&dir.join("bash-launch"), &bash, 0o600)?;
         let shell_script = format!(
             r#"#!/bin/sh
 export PATH={bin}:"$PATH"
 case {name} in
-  zsh) if [ "${{ZDOTDIR-}}" != {dir} ]; then export PERCH_USER_ZDOTDIR="${{ZDOTDIR:-$HOME}}"; fi; export ZDOTDIR={dir};;
+  zsh) if [ "${{ZDOTDIR-}}" != {dir} ] && [ ! -e "${{ZDOTDIR-}}/{MARKER}" ]; then export PERCH_USER_ZDOTDIR="${{ZDOTDIR:-$HOME}}"; fi; export ZDOTDIR={dir};;
   bash) exec {real} --noprofile --norc {bash} "$@";;
   fish) exec {real} --init-command {fish} "$@";;
 esac
@@ -232,7 +261,7 @@ exec {real} "$@"
                     .unwrap_or_default()
             ),
             dir = quoted(&dir),
-            real = quote(&real_shell),
+            real = quote(real_shell),
             bash = quoted(&dir.join("bash-launch")),
             fish = quote(&format!("set -gx PATH {} $PATH", quoted(&bin)))
         );
@@ -264,6 +293,200 @@ fn write(path: &Path, source: &str, mode: u32) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::process::Command;
+
+    /// A Perch shell started from another Perch shell inherits its generated ZDOTDIR. That must not become
+    /// "the user's" ZDOTDIR, or the generated startup files source themselves until zsh gives up.
+    #[test]
+    fn zsh_started_inside_another_perch_shell_does_not_recurse() {
+        const ZSH: &str = "/bin/zsh";
+        if !Path::new(ZSH).exists() {
+            eprintln!(
+                "SKIPPED: {ZSH} is not installed, so the zsh startup chain was not exercised"
+            );
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("perch-zdot-{}", uuid::Uuid::new_v4()));
+        // The user's own config lives in a custom ZDOTDIR; $HOME holds decoys that must never run.
+        let (home, user) = (root.join("home"), root.join("user"));
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&user).unwrap();
+        for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
+            fs::write(user.join(file), format!("export RAN=\"$RAN {file}\"\n")).unwrap();
+            fs::write(home.join(file), "export DECOY=1\n").unwrap();
+        }
+        let new_key =
+            || AgentKey::new("zdot", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        let inner = new_key();
+        prepare_with(&inner, vec!["true".into()], ZSH).unwrap();
+        let run = |outer: &AgentKey, flags: &str, inherited_user: Option<&Path>| {
+            let mut command = Command::new(directory(&inner).unwrap().join("shell"));
+            command
+                .args([flags, "print -r -- \"ran=$RAN decoy=$DECOY\""])
+                .env_remove("RAN")
+                .env("HOME", &home)
+                .env("ZDOTDIR", directory(outer).unwrap())
+                .env_remove("PERCH_USER_ZDOTDIR");
+            if let Some(user) = inherited_user {
+                command.env("PERCH_USER_ZDOTDIR", user);
+            }
+            let output = command.output().unwrap();
+            String::from_utf8_lossy(&[output.stdout, output.stderr].concat()).into_owned()
+        };
+        for legacy in [false, true] {
+            let outer = new_key();
+            prepare_with(&outer, vec!["true".into()], ZSH).unwrap();
+            if legacy {
+                // Wrappers from before the fix: same files, but their startup files had no guard.
+                for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
+                    let text = fs::read_to_string(directory(&outer).unwrap().join(file)).unwrap();
+                    let old = text
+                        .lines()
+                        .filter(|line| !line.contains(MARKER))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    fs::write(directory(&outer).unwrap().join(file), old + "\n").unwrap();
+                }
+            }
+            for (flags, expected) in [
+                ("-ic", &[".zshenv", ".zshrc"][..]),
+                ("-lic", &[".zshenv", ".zprofile", ".zshrc", ".zlogin"][..]),
+            ] {
+                let text = run(&outer, flags, Some(&user));
+                assert!(
+                    !text.contains("recursion"),
+                    "legacy={legacy} {flags}: {text}"
+                );
+                assert!(
+                    text.contains("decoy=\n") || text.ends_with("decoy="),
+                    "HOME config ran instead of the user's: {text}"
+                );
+                assert!(
+                    text.contains(&format!("ran= {}", expected.join(" "))),
+                    "legacy={legacy} {flags}: the user's own startup must run in order: {text}"
+                );
+            }
+            // A wrapper that lost its remembered user directory falls back to $HOME, not to itself.
+            let text = run(&outer, "-lic", None);
+            assert!(
+                !text.contains("recursion"),
+                "legacy={legacy} no PERCH_USER_ZDOTDIR: {text}"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// macOS's /etc/zshrc sets `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history` while ZDOTDIR is still Perch's private
+    /// directory, so the user's history silently moved there. Only that default is repaired; a path the user's
+    /// own config chooses stays.
+    #[test]
+    fn zsh_history_stays_in_the_users_directory() {
+        const ZSH: &str = "/bin/zsh";
+        if !Path::new(ZSH).exists() {
+            eprintln!("SKIPPED: {ZSH} is not installed");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("perch-hist-{}", uuid::Uuid::new_v4()));
+        let (home, user, custom) = (
+            root.join("home"),
+            root.join("user"),
+            root.join("custom-history"),
+        );
+        for dir in [&home, &user] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let key = AgentKey::new("hist", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH).unwrap();
+        let histfile = |zshrc: &str, zdotdir: &Path| {
+            fs::write(user.join(".zshrc"), zshrc).unwrap();
+            let output = Command::new(directory(&key).unwrap().join("shell"))
+                .args(["-ic", "print -r -- \"histfile=$HISTFILE\""])
+                .env("HOME", &home)
+                .env_remove("ZDOTDIR")
+                .env("ZDOTDIR", zdotdir)
+                .env_remove("PERCH_USER_ZDOTDIR")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        // The user's own ZDOTDIR, and no HISTFILE in their config: the system default must land there.
+        let text = histfile("", &user);
+        let system_sets_it =
+            fs::read_to_string("/etc/zshrc").is_ok_and(|rc| rc.contains("HISTFILE="));
+        assert!(
+            !text.contains(".shell/"),
+            "history moved into Perch's private directory: {text}"
+        );
+        if system_sets_it {
+            assert!(
+                text.contains(&format!("histfile={}/.zsh_history", user.display())),
+                "{text}"
+            );
+        }
+        // A history path the user's config picks is theirs.
+        let text = histfile(&format!("HISTFILE={}\n", custom.display()), &user);
+        assert!(
+            text.contains(&format!("histfile={}", custom.display())),
+            "{text}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Perch's shell and a plain terminal (iTerm) are the same user's shells: a command typed in one is the
+    /// latest history entry of the other, in both directions.
+    #[test]
+    fn perch_and_plain_zsh_share_one_history() {
+        const ZSH: &str = "/bin/zsh";
+        if !Path::new(ZSH).exists() {
+            eprintln!("SKIPPED: {ZSH} is not installed");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("perch-share-{}", uuid::Uuid::new_v4()));
+        let (home, user) = (root.join("home"), root.join("user"));
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&user).unwrap();
+        // Size options only: where history lives is left to the system default, which is what is under test.
+        fs::write(user.join(".zshrc"), "HISTSIZE=100; SAVEHIST=100\n").unwrap();
+        fs::write(user.join(".zsh_history"), "echo from-iterm\n").unwrap();
+        let key = AgentKey::new("share", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH).unwrap();
+        let run = |program: PathBuf, script: &str| {
+            let output = Command::new(program)
+                .args(["-ic", script])
+                .env("HOME", &home)
+                .env("ZDOTDIR", &user)
+                .env_remove("PERCH_USER_ZDOTDIR")
+                .env_remove("HISTFILE")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        let perch = directory(&key).unwrap().join("shell");
+        // Perch's shell sees what iTerm saved, and adds `ssh ABC` (saved when the shell exits).
+        let seen = run(perch.clone(), "fc -R; fc -l -1; print -s -- 'ssh ABC'");
+        assert!(
+            seen.contains("echo from-iterm"),
+            "Perch's shell lost the user's history: {seen}"
+        );
+        // A plain shell started afterwards has it as the newest entry.
+        let newest = run(PathBuf::from(ZSH), "fc -R; fc -l -1");
+        assert!(
+            newest.contains("ssh ABC"),
+            "plain zsh did not see Perch's command: {newest}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bridge_pty_is_the_terminal_tab_not_a_derived_key() {
+        let tab = AgentKey::new("w", "s1", "terminal").unwrap();
+        let bridge = bridge_key(&tab, "pi").unwrap();
+        assert_eq!(pty_key(&bridge), crate::agent_runtime::terminal_key(&tab));
+        let picker = AgentKey::new("w", "s1", "pi").unwrap();
+        assert_eq!(
+            pty_key(&picker),
+            crate::agent_runtime::terminal_key(&picker)
+        );
+    }
 
     #[test]
     fn shell_agents_receive_native_adapters_without_rewriting_arguments() {

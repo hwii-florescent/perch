@@ -223,6 +223,11 @@ pub struct AgentRuntimeAdapter {
     authority: Mutex<()>,
     /// Display-only foreground identity; never changes launch/resume ownership.
     current_providers: Mutex<HashMap<String, String>>,
+    /// Terminal tab → native agent a shim launched in it (the chat view's provider).
+    shell_chats: Mutex<HashMap<String, String>>,
+    /// Each terminal's working directories as its root process reported them,
+    /// oldest first; the last is current. Display and Files/Git scoping only.
+    cwds: Mutex<HashMap<String, Vec<String>>>,
     turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
 }
 
@@ -240,6 +245,8 @@ impl AgentRuntimeAdapter {
             starts: Arc::new((Mutex::new(HashSet::new()), Condvar::new())),
             authority: Mutex::new(()),
             current_providers: Mutex::new(HashMap::new()),
+            shell_chats: Mutex::new(HashMap::new()),
+            cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
         }
     }
@@ -254,6 +261,25 @@ impl AgentRuntimeAdapter {
             .unwrap()
             .get(session_id)
             .cloned()
+    }
+
+    /// The native-chat agent running inside this terminal tab right now, if any.
+    pub fn shell_chat_provider(&self, session_id: &str) -> Option<String> {
+        self.shell_chats.lock().unwrap().get(session_id).cloned()
+    }
+
+    /// Where the terminal's shell is now (follows `cd`), once observed.
+    pub fn current_cwd(&self, session_id: &str) -> Option<String> {
+        self.cwds.lock().unwrap().get(session_id)?.last().cloned()
+    }
+
+    /// Whether `path` is a directory this terminal has actually been in.
+    pub fn cwd_seen(&self, session_id: &str, path: &str) -> bool {
+        self.cwds
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_some_and(|seen| seen.iter().any(|seen| seen == path))
     }
 
     /// Observe foreground jobs, including agents typed into a plain shell.
@@ -370,16 +396,60 @@ impl AgentRuntimeAdapter {
                 Some((runtime.handle.key.session_id.clone(), provider))
             })
             .collect();
+        let next_chats: HashMap<_, _> = active
+            .iter()
+            .filter_map(|(key, runtime)| {
+                Some((
+                    key.session_id.clone(),
+                    runtime.shell_agent.as_ref()?.key.agent_id.clone(),
+                ))
+            })
+            .collect();
+        // ponytail: one cheap syscall per terminal per tick; the daemon could push cwd changes instead.
+        let mut moved = Vec::new();
+        {
+            let mut cwds = self.cwds.lock().unwrap();
+            for runtime in active.values() {
+                let identity = &runtime.handle.terminal;
+                if identity.daemon_session.is_none() {
+                    continue;
+                }
+                let Some(cwd) = identity.process_id.and_then(process_cwd) else {
+                    continue;
+                };
+                let seen = cwds
+                    .entry(runtime.handle.key.session_id.clone())
+                    .or_default();
+                if seen.last() == Some(&cwd) {
+                    continue;
+                }
+                seen.retain(|old| old != &cwd);
+                seen.push(cwd);
+                if seen.len() > 32 {
+                    seen.remove(0);
+                }
+                moved.push(runtime.handle.key.session_id.clone());
+            }
+        }
         let mut previous = self.current_providers.lock().unwrap();
+        let mut chats = self.shell_chats.lock().unwrap();
         let changed = previous
             .keys()
             .chain(next.keys())
             .filter(|id| previous.get(*id) != next.get(*id))
+            .chain(
+                chats
+                    .keys()
+                    .chain(next_chats.keys())
+                    .filter(|id| chats.get(*id) != next_chats.get(*id)),
+            )
             .cloned()
+            .chain(moved)
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
         *previous = next;
+        *chats = next_chats;
         Ok(changed)
     }
 
@@ -1570,6 +1640,47 @@ struct ForegroundProcess<'a> {
     names: Vec<&'a str>,
 }
 
+/// A process's current directory, or `None` where the OS will not say.
+fn process_cwd(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+        Some(path.to_string_lossy().into_owned())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: a zeroed plain-data struct the kernel fills; the byte count is checked.
+        let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info) as libc::c_int;
+        let read = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDVNODEPATHINFO,
+                0,
+                (&mut info as *mut libc::proc_vnodepathinfo).cast(),
+                size,
+            )
+        };
+        if read != size {
+            return None;
+        }
+        let bytes: Vec<u8> = info
+            .pvi_cdir
+            .vip_path
+            .iter()
+            .flatten()
+            .map(|byte| *byte as u8)
+            .take_while(|byte| *byte != 0)
+            .collect();
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 fn process_snapshot(text: &str) -> HashMap<u32, ForegroundProcess<'_>> {
     text.lines()
         .filter_map(|line| {
@@ -1666,6 +1777,15 @@ fn foreground_provider(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn process_cwd_reads_a_live_process_directory() {
+        let here = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let seen = super::process_cwd(std::process::id()).unwrap();
+        assert_eq!(std::path::Path::new(&seen).canonicalize().unwrap(), here);
+        assert_eq!(super::process_cwd(u32::MAX - 1), None);
+    }
+
     #[test]
     fn in_shell_keeps_argv_and_falls_back_to_the_login_shell() {
         let dir = std::env::temp_dir().join(format!("perch-in-shell-{}", std::process::id()));

@@ -221,6 +221,12 @@ pub(super) fn build_session_summary(
     };
     SessionSummary {
         current_provider_id: runtime.current_provider(&row.id),
+        chat_provider_id: runtime.shell_chat_provider(&row.id),
+        current_cwd: runtime.current_cwd(&row.id),
+        current_branch: runtime
+            .current_cwd(&row.id)
+            .map(|cwd| crate::status::get_branch(&cwd))
+            .filter(|branch| !branch.is_empty()),
         id: row.id.clone(),
         title: row.title,
         cwd: row.cwd,
@@ -385,16 +391,87 @@ pub(super) fn chats_pair(
         .create_project("local", &scratch.display().to_string(), Some("Chats"), None)
 }
 
+fn is_chats_workspace(workspace: &crate::db::WorkspaceRow) -> bool {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
+    workspace.host_id == "local"
+        && workspace.path == crate::db::canonical_path_for_host("local", &scratch.to_string_lossy())
+}
+
+/// Files/Git follow the terminal, not just the workspace: the id
+/// `term:<session id>:<base64url directory>` names one local terminal and a
+/// directory its shell has actually been in (the client uses it only once the
+/// shell has left the workspace's own folder). The client never picks a root:
+/// anything the terminal has not visited is refused. Other ids are plain
+/// workspaces.
+pub(super) fn resolve_tool_workspace(
+    app: &AppState,
+    id: &str,
+) -> anyhow::Result<crate::db::WorkspaceRow> {
+    resolve_scoped_workspace(&app.db, id, |session, path| {
+        app.agent_runtime.cwd_seen(session, path)
+    })
+}
+
+fn resolve_scoped_workspace(
+    db: &crate::db::HistoryDb,
+    id: &str,
+    cwd_seen: impl Fn(&str, &str) -> bool,
+) -> anyhow::Result<crate::db::WorkspaceRow> {
+    use base64::Engine;
+    let Some((session_id, encoded)) = id
+        .strip_prefix("term:")
+        .and_then(|rest| rest.split_once(':'))
+    else {
+        return db.resolve_workspace(id);
+    };
+    let path = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .ok_or_else(|| anyhow::anyhow!("malformed terminal scope"))?;
+    let session = db
+        .get_session(session_id)?
+        .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
+    let workspace = db.resolve_workspace(session.workspace_id.as_deref().unwrap_or_default())?;
+    anyhow::ensure!(
+        workspace.host_id == "local" && session.host_id == "local",
+        "terminal Files and Git are local only"
+    );
+    anyhow::ensure!(
+        path == session.cwd || cwd_seen(session_id, &path),
+        "the terminal has not been in {path}"
+    );
+    anyhow::ensure!(
+        std::path::Path::new(&path).is_dir(),
+        "{path} is not a directory"
+    );
+    Ok(crate::db::WorkspaceRow {
+        id: id.to_string(),
+        name: path
+            .rsplit('/')
+            .find(|part| !part.is_empty())
+            .unwrap_or("/")
+            .to_string(),
+        path,
+        branch: None,
+        base_branch: None,
+        dirty: false,
+        start_snapshot: None,
+        parent_workspace_id: None,
+        pinned: false,
+        hidden: true,
+        ..workspace
+    })
+}
+
 pub(super) fn create_workspace_session(
     db: &crate::db::HistoryDb,
     session_id: &str,
     workspace: &crate::db::WorkspaceRow,
 ) -> anyhow::Result<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
-    let cwd = if workspace.host_id == "local"
-        && workspace.path == crate::db::canonical_path_for_host("local", &scratch.to_string_lossy())
-    {
+    let cwd = if is_chats_workspace(workspace) {
         home
     } else {
         workspace.path.clone()
@@ -879,6 +956,54 @@ mod scratchpad_tests {
         assert_eq!(
             create_workspace_session(&db, "remote", &remote).unwrap(),
             remote.path
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn terminal_scope_is_per_session_and_only_for_visited_directories() {
+        use base64::Engine;
+        let path = std::env::temp_dir().join(format!("perch-scope-{}.sqlite", Uuid::new_v4()));
+        let db = crate::db::HistoryDb::open(&path).unwrap();
+        let home = std::env::var("HOME").unwrap();
+        let scratch = std::path::Path::new(&home).join(".perch/scratch");
+        let (_, chats) = db
+            .create_project("local", &scratch.to_string_lossy(), Some("Chats"), None)
+            .unwrap();
+        create_workspace_session(&db, "chat", &chats).unwrap();
+        let dir = std::env::temp_dir();
+        let dir = dir.to_string_lossy().trim_end_matches('/').to_string();
+        let scope = |session: &str, dir: &str| {
+            let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(dir);
+            format!("term:{session}:{encoded}")
+        };
+        let seen = |session: &str, path: &str| session == "chat" && path == dir;
+
+        let row = resolve_scoped_workspace(&db, &scope("chat", &dir), seen).unwrap();
+        assert_eq!(
+            (row.path.as_str(), row.host_id.as_str()),
+            (dir.as_str(), "local")
+        );
+        assert_eq!(row.project_id, chats.project_id);
+        // The terminal's start directory is always allowed.
+        resolve_scoped_workspace(&db, &scope("chat", &home), |_, _| false).unwrap();
+        // A directory the terminal never visited, and a session that is not there, are refused.
+        resolve_scoped_workspace(&db, &scope("chat", "/etc"), seen).unwrap_err();
+        resolve_scoped_workspace(&db, &scope("gone", &dir), seen).unwrap_err();
+        // A project terminal scopes too, but only to directories it has been in; plain ids still resolve as workspaces.
+        let (_, project) = db.create_project("local", &dir, None, None).unwrap();
+        db.create_session_in_workspace("proj", &project, &dir)
+            .unwrap();
+        let sub = format!("{dir}/sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        resolve_scoped_workspace(&db, &scope("proj", &sub), |s, p| s == "proj" && p == sub)
+            .unwrap();
+        resolve_scoped_workspace(&db, &scope("proj", &sub), |_, _| false).unwrap_err();
+        std::fs::remove_dir(&sub).unwrap();
+        assert_eq!(
+            resolve_scoped_workspace(&db, &project.id, seen).unwrap().id,
+            project.id
         );
         drop(db);
         std::fs::remove_file(path).unwrap();

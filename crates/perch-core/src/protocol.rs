@@ -327,6 +327,18 @@ pub struct SessionSummary {
     /// Display only: never replaces the saved launch/resume provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_provider_id: Option<String>,
+    /// The native-chat agent (claude, codex, pi, omp, opencode) running in this
+    /// terminal tab, started through Perch's command shims. Present only while
+    /// it runs; the web chat view follows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_provider_id: Option<String>,
+    /// Where a local terminal's shell is now (follows `cd`), and that
+    /// directory's git branch (absent outside a repo). the Files/Git
+    /// drawer follows these; other peers omit them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_branch: Option<String>,
 }
 
 /// One remembered page of the built-in browser (`server/browser_history.rs`).
@@ -1958,6 +1970,10 @@ pub enum ServerMessage {
         request_id: String,
         session_id: String,
         accepted: bool,
+        /// The text was a built-in slash command, run in the CLI's terminal instead of sent as a
+        /// message. Its effect shows there, not in the transcript.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        command: bool,
     },
 
     #[serde(rename = "agent.lifecycle", rename_all = "camelCase")]

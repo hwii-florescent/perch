@@ -45,7 +45,9 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, find }: 
   </article>;
 }, (before, after) => before.streaming === after.streaming && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
 
-export function NativeCliChat({ sessionId, providerId }: { sessionId: string; providerId: string }) {
+/** `providerId` is the agent being shown; `terminalProviderId` is what owns the PTY and leases when
+ * that differs: an agent typed into a Terminal tab runs under the tab's own `terminal` runtime. */
+export function NativeCliChat({ sessionId, providerId, terminalProviderId = providerId }: { sessionId: string; providerId: string; terminalProviderId?: string }) {
   const connected = usePerchStore((state) => state.connected);
   const draftKey = JSON.stringify([sessionId, providerId]);
   const [text, setText] = useState(() => drafts.get(draftKey)?.text ?? "");
@@ -72,6 +74,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   latest.current = snapshot;
   const field = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | null>(null);
+  // A built-in slash command runs in the CLI's terminal: it has no transcript entry to wait for.
+  const [ranCommand, setRanCommand] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [exited, setExited] = useState(false);
   const binding = useRef<ReturnType<typeof openAgentTerminal> | null>(null);
@@ -87,7 +91,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     let initiallyUnowned = false;
     setSnapshot(null); setError(null); setControlling(false); setPending(false); setStopping(false); setExited(false);
     const unsubscribe = subscribeNativeUi(sessionId, providerId, (next) => { if (!disposed) { setSnapshot(next); } });
-    const opened = openAgentTerminal(sessionId, providerId, 80, 24,
+    const opened = openAgentTerminal(sessionId, terminalProviderId, 80, 24,
       (id, next) => { terminalId.current = id; initiallyUnowned = !next.inputOwner; },
       () => {},
       (next, owned) => { if (!disposed) { setStatus(next); setControlling(owned); } },
@@ -106,7 +110,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       await history;
     }).catch((reason: Error) => { if (!disposed) setError(reason.message); });
     return () => { disposed = true; unsubscribe(); stopExit(); opened.release(); binding.current = null; terminalId.current = null; };
-  }, [connected, sessionId, providerId, retry]);
+  }, [connected, sessionId, providerId, terminalProviderId, retry]);
   useEffect(() => { if (atBottom.current && list.current) list.current.scrollTop = list.current.scrollHeight; }, [snapshot, outbox]);
   // The transcript is the proof of delivery: drop the pending copy once it shows the message (or, if it
   // never does, a while after the CLI confirmed it).
@@ -167,7 +171,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     if (generation === undefined || pending || outbox?.phase === "sending" || !connected || uploading || (!text.trim() && !images.length)) return;
     const draft: Draft = drafts.get(draftKey) ?? { text, operationId: newId(), images };
     drafts.set(draftKey, draft);
-    setError(null);
+    setError(null); setRanCommand(null);
     const prompt = withAttachmentPaths(draft.text, draft.images.map((image) => image.path));
     const sent: Outbox = { operationId: draft.operationId, text: prompt, draft: { text: draft.text, images: draft.images }, phase: "sending", baseline: sentCount(latest.current, prompt) };
     setOutbox(sent);
@@ -176,7 +180,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
       settled();
-      setOutbox({ ...sent, phase: "delivered" });
+      if (reply.command) { setOutbox(null); setRanCommand(draft.text.trim()); }
+      else setOutbox({ ...sent, phase: "delivered" });
     } catch (reason) {
       if (reason instanceof NativeUiError && reason.uncertain) { settled(); setOutbox({ ...sent, phase: "unconfirmed" }); }
       else { setOutbox(null); }
@@ -252,7 +257,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
         <Receipts items={receipts} />
         {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />
           : waiting && <WaitingNotice />}
-        {outbox && <article className={messageClass("user", outbox.phase === "unconfirmed" ? "opacity-70" : undefined)} data-native-outbox={outbox.phase}>
+        {/* A slash draft may be a terminal command rather than a message: show it only once the reply says it was a message (Orca suppresses these bubbles too). */}
+        {outbox && !(outbox.phase === "sending" && outbox.text.trimStart().startsWith("/")) && <article className={messageClass("user", outbox.phase === "unconfirmed" ? "opacity-70" : undefined)} data-native-outbox={outbox.phase}>
           <div className="message__text">{outbox.text}</div>
           {outbox.phase === "sending" && <div className={HINT} role="status">Sending…</div>}
           {outbox.phase === "unconfirmed" && <div className={cn(HINT, "mt-1 flex flex-wrap items-center gap-2")} role="alert">Not confirmed — check the transcript before sending again.
@@ -262,6 +268,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       </div>
       {showBottom && <button className={cn("scroll-bottom-pill", SCROLL_PILL)} type="button" onClick={() => { atBottom.current = true; setShowBottom(false); if (list.current) list.current.scrollTop = list.current.scrollHeight; }}>↓ Bottom</button>}
     </div>
+    {ranCommand && !error && <div className={cn(HINT, "flex flex-wrap items-center gap-2 px-3 py-1")} role="status" data-testid="native-cli-command-ran">Ran <code>{ranCommand}</code> in the CLI. Its output is in CLI view.
+      <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
     <form className={cn("chat__input relative", CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}

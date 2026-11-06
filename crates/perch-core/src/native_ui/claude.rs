@@ -283,6 +283,21 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
     Ok((history, truncated, usage))
 }
 
+/// The row holding Claude's input box: the last `❯` line sitting between two horizontal rules. The cursor
+/// row is only a fallback; under a status line, or after Claude was resized from a shell, the cursor is
+/// parked on a different row than the prompt (seen one row below it).
+fn prompt_row(screen: &str, cursor_row: usize) -> &str {
+    let rows: Vec<&str> = screen.lines().collect();
+    let rule = |row: &str| !row.trim().is_empty() && row.trim().chars().all(|ch| ch == '─');
+    (1..rows.len().saturating_sub(1))
+        .rev()
+        .find(|&i| rows[i].trim_start().starts_with('❯') && rule(rows[i - 1]) && rule(rows[i + 1]))
+        .map_or_else(
+            || rows.get(cursor_row).copied().unwrap_or_default(),
+            |i| rows[i],
+        )
+}
+
 fn empty_prompt(line: &str) -> bool {
     line.trim_start()
         .strip_prefix('❯')
@@ -302,7 +317,7 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
             .any(|ch| ch.is_control() && ch != '\n' && ch != '\t'),
         "A CLI prompt cannot contain terminal control characters"
     );
-    let terminal = terminal_key(key);
+    let terminal = crate::shell_integration::pty_key(key);
     let client = crate::daemon::client().context("CLI prompt is unavailable")?;
     let session = client
         .session(&terminal)?
@@ -321,11 +336,7 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
         return Ok(Some("\u{1b}".into()));
     };
     let screen = client.snapshot(&terminal)?;
-    let row = screen
-        .text
-        .lines()
-        .nth(screen.cursor_row as usize)
-        .unwrap_or_default();
+    let row = prompt_row(&screen.text, screen.cursor_row as usize);
     // ponytail: this recognizes Claude's native empty prompt on the installed
     // TUI. Fail closed on other layouts; replace with a native editor API if
     // Claude exposes one. Never clear or append to an unsubmitted CLI draft.
@@ -465,6 +476,30 @@ pub(super) async fn observe(
 
 #[cfg(test)]
 mod tests {
+    use super::{empty_prompt, prompt_row};
+
+    /// Captured from a Claude started in a Terminal tab: the prompt is row 7 but the cursor was reported on 8.
+    #[test]
+    fn prompt_is_found_by_its_box_not_the_cursor_row() {
+        let rule = "─".repeat(40);
+        let screen = format!("claude --dang%\n ▐▛███▛█   Claude Code\n\n{rule}\n❯\u{a0}\n{rule}\n  \u{a0}Haiku\u{a0}4.5\n  ⏵⏵ bypass permissions on");
+        assert!(
+            empty_prompt(prompt_row(&screen, 5)),
+            "cursor one row below the prompt"
+        );
+        assert!(empty_prompt(prompt_row(&screen, 99)), "cursor off screen");
+        let draft = screen.replace("❯\u{a0}", "❯ half-typed message");
+        assert!(
+            !empty_prompt(prompt_row(&draft, 5)),
+            "an unsent draft must still block a send"
+        );
+        let dialog = format!("{rule}\n❯ 1. Yes\n  2. No\n");
+        assert!(
+            !empty_prompt(prompt_row(&dialog, 1)),
+            "a permission dialog is not an empty prompt"
+        );
+    }
+
     #[test]
     fn parent_pid_reads_this_process_parent() {
         let child = std::process::Command::new("sleep")

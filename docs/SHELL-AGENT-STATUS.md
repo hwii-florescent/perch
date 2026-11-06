@@ -36,8 +36,26 @@ retain their native behavior rather than being silently overridden.
 One agent invocation per terminal owns the native endpoint. Additional
 concurrent background agents in that same terminal do not steal it. Providers
 without native events or meaningful marker/title evidence cannot have verified
-turn state merely from output volume, process liveness or silence. This change
-adds status observation, not native-chat controls for a shell-owned session.
+turn state merely from output volume, process liveness or silence.
+
+## Chat view
+
+In UI mode a Terminal tab shows the native chat while a shim-launched agent
+runs in it (`SessionSummary.chatProviderId`, set only while that invocation is
+live) and returns to the shell when it exits. The tab keeps owning the PTY,
+leases and lifecycle (`server/native_ui.rs` `Target { key, bridge, shell }`);
+the agent's bridge only supplies the transcript and prompt delivery, and
+`pty_key` points its screen reads at the tab's PTY. Checked live for Pi and
+Claude by `e2e/native-terminal.spec.ts`.
+
+## Startup files
+
+The generated zsh files must behave like a plain zsh: the user's history file
+is the system default under the *user's* `ZDOTDIR` (macOS `/etc/zshrc` runs
+while `ZDOTDIR` is still Perch's), and a Perch shell started inside another
+Perch shell never mistakes the outer wrapper directory for the user's.
+Covered by the `shell_integration` zsh tests, including a Perch shell and a
+plain zsh sharing one history.
 
 ## Checks
 

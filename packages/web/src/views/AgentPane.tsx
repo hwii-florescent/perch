@@ -24,13 +24,15 @@ export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } =
   const activeHostId = usePerchStore((s) => s.activeHostId);
   const session = usePerchStore((s) => (sessionId ? s.sessions.find((candidate) => candidate.id === sessionId) : undefined));
   const cliAgent = usePerchStore((s) => (sessionId ? s.cliAgentBySession[sessionId] : undefined)) ?? session?.cliProviderId ?? "claude";
+  // An agent typed into a Terminal tab is the tab's chat provider while it runs.
+  const chatAgent = cliAgent === "terminal" ? session?.chatProviderId : cliAgent;
   const owningHostId = session?.hostId ?? activeHostId;
   const capabilities = usePerchStore((s) => (owningHostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[owningHostId]));
   const manifests = usePerchStore((s) => s.agentManifestsByHost[owningHostId]);
   const fetchAgentManifests = usePerchStore((s) => s.fetchAgentManifests);
   const canListManifests = connected && Boolean(capabilities?.includes("agent.manifest.list"));
   useEffect(() => { if (canListManifests) fetchAgentManifests(owningHostId); }, [canListManifests, owningHostId, fetchAgentManifests]);
-  const nativeUiAvailable = Boolean(capabilities?.includes("agent.ui.get") && manifests?.manifests.some((entry) => entry.id === cliAgent && entry.nativeUi));
+  const nativeUiAvailable = Boolean(capabilities?.includes("agent.ui.get") && manifests?.manifests.some((entry) => entry.id === chatAgent && entry.nativeUi));
   // Capabilities and manifests arrive after `connected`; do not flash a
   // terminal (and its PTY attach) while the answer is still pending.
   const nativeUiPending = !nativeUiAvailable && canListManifests && manifests?.state !== "ready" && manifests?.state !== "error";
@@ -49,7 +51,7 @@ export function AgentPane({ sessionId: sessionIdProp }: { sessionId?: string } =
       ) : !ready ? (
         <CliStartPanel />
       ) : chatMode === "ui" && nativeUiAvailable ? (
-        <NativeCliChat key={`${sessionId}-${cliAgent}`} sessionId={sessionId} providerId={cliAgent} />
+        <NativeCliChat key={`${sessionId}-${chatAgent}`} sessionId={sessionId} providerId={chatAgent!} terminalProviderId={cliAgent} />
       ) : chatMode === "ui" && nativeUiPending ? (
         <div className="p-4 text-[12px] text-subtext-0" role="status">Checking agent…</div>
       ) : (

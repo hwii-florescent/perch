@@ -25,6 +25,7 @@ pub mod claude;
 pub mod codex;
 pub mod dialog;
 pub mod opencode;
+pub mod typed;
 
 fn clip(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
@@ -196,6 +197,10 @@ impl NativeBridge {
     /// report none over the bridge.
     pub fn slash_commands(&self) -> Vec<CommandEntry> {
         self.slash.lock().unwrap().clone()
+    }
+    /// The most recent snapshot, if one has arrived; never waits.
+    pub fn latest(&self) -> Option<NativeUiSnapshot> {
+        self.snapshot.borrow().clone()
     }
     pub async fn snapshot(&self) -> anyhow::Result<NativeUiSnapshot> {
         let mut receiver = self.snapshot.clone();
