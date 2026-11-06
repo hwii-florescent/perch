@@ -913,7 +913,8 @@ impl Default for ProviderRegistry {
 
 /// Resolve an executable without invoking a shell or the `which` command.
 /// `search_path` is injectable for deterministic tests and isolated hosts;
-/// `None` uses the current process's PATH.
+/// `None` uses the current process's PATH. Perch's private command shims are
+/// skipped: only an underlying executable can establish availability.
 pub fn resolve_executable(
     executable: &str,
     search_path: Option<&OsStr>,
@@ -930,8 +931,8 @@ pub fn resolve_executable(
         .ok_or(ExecutableError::MissingPath)?;
     for directory in std::env::split_paths(&path_value) {
         let candidate = directory.join(executable);
-        if is_executable_file(&candidate) {
-            return Ok(fs::canonicalize(&candidate).unwrap_or(candidate));
+        if let Ok(path) = executable_candidate(&candidate) {
+            return Ok(path);
         }
     }
     Err(ExecutableError::NotFound(executable.to_string()))
@@ -941,7 +942,11 @@ fn executable_candidate(candidate: &Path) -> Result<PathBuf, ExecutableError> {
     if !is_executable_file(candidate) {
         return Err(ExecutableError::NotFound(candidate.display().to_string()));
     }
-    Ok(fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf()))
+    let resolved = fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf());
+    if crate::shell_integration::is_command_shim(&resolved) {
+        return Err(ExecutableError::NotFound(candidate.display().to_string()));
+    }
+    Ok(resolved)
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -2935,6 +2940,47 @@ mod tests {
             registry.resolve_executable("extra", Some(directory.path().as_os_str())),
             Ok(fs::canonicalize(executable_path).unwrap())
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn perch_shell_shims_are_not_installed_harnesses() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = TempDirectory::new();
+        let wrapper = directory.path().join("agent.shell");
+        let shims = wrapper.join("bin");
+        let installed = directory.path().join("installed");
+        let links = directory.path().join("links");
+        for path in [&shims, &installed, &links] {
+            fs::create_dir_all(path).unwrap();
+        }
+        // Existing Perch shells already carry this marker; no migration needed.
+        fs::write(wrapper.join("bash-launch"), "").unwrap();
+        for provider in crate::native_ui::PROVIDERS {
+            let shim = shims.join(provider);
+            let real = installed.join(provider);
+            for path in [&shim, &real] {
+                fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let alias = links.join(provider);
+            symlink(&shim, &alias).unwrap();
+            for path in [&shims, &links] {
+                assert!(resolve_executable(provider, Some(path.as_os_str())).is_err());
+                let search = std::env::join_paths([path, &installed]).unwrap();
+                assert_eq!(
+                    resolve_executable(provider, Some(&search)).unwrap(),
+                    fs::canonicalize(&real).unwrap()
+                );
+            }
+            assert!(resolve_executable(shim.to_str().unwrap(), None).is_err());
+            assert!(resolve_executable(alias.to_str().unwrap(), None).is_err());
+            assert_eq!(
+                resolve_executable(provider, Some(installed.as_os_str())).unwrap(),
+                fs::canonicalize(&real).unwrap()
+            );
+        }
     }
 
     #[test]

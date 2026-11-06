@@ -3,6 +3,8 @@ import { CATALOG_ACTION, CATALOG_TOGGLE, MUTED } from "./ui/settings";
 import { cn } from "../lib/cn";
 import type { AgentManifestSummary } from "@perch/shared";
 import { usePerchStore } from "../store";
+import { openExternal } from "../links";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const FIELD = "min-h-[44px] min-w-0 max-w-full rounded-ui bg-surface-0 px-[0.65rem] [border:none] py-2 text-fg [font:inherit] focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:2px]";
 
@@ -12,11 +14,15 @@ export function AgentCatalog() {
   const connected = usePerchStore((s) => s.connected);
   const [hostId, setHostId] = useState(activeHostId);
   const [query, setQuery] = useState("");
+  const [installPrompt, setInstallPrompt] = useState<AgentManifestSummary | null>(null);
   const catalog = usePerchStore((s) => s.agentManifestsByHost[hostId]);
   const configurable = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("agent.provider.configure") ?? false);
   const discoverable = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("agent.manifest.list") ?? false);
   const fetch = usePerchStore((s) => s.fetchAgentManifests);
   useEffect(() => { if (connected && discoverable) fetch(hostId); }, [fetch, hostId, connected, discoverable]);
+  useEffect(() => { setInstallPrompt(null); }, [hostId, connected, configurable]);
+  const hostName = hostId === "local" ? "this host" : hosts.find((host) => host.id === hostId)?.name ?? hostId;
+  const installUrl = installPrompt?.homepageUrl?.startsWith("https://") ? installPrompt.homepageUrl : null;
   const busy = !connected || catalog?.state === "loading";
   const entries = (catalog?.manifests ?? []).filter((entry) =>
     entry.supportedModes.includes("cli") && entry.capabilities.includes("interactiveTerminal"));
@@ -32,7 +38,10 @@ export function AgentCatalog() {
       <div className="mt-3 flex flex-wrap items-center gap-2 [@media(min-width:620px)]:mt-0 [@media(min-width:620px)]:justify-end">
         {configurable && <div className="flex items-center gap-0 rounded-ui p-[2px]" role="group" aria-label={`${entry.displayName} availability`}>
           {[true, false].map((value) => <button type="button" className={cn(CATALOG_TOGGLE, "aria-pressed:bg-surface-1 aria-pressed:text-fg")} key={String(value)} aria-pressed={enabled === value} disabled={busy}
-            onClick={() => fetch(hostId, { providerId: entry.id, enabled: value })}>{value ? "Enabled" : "Disabled"}</button>)}
+            onClick={() => {
+              if (value && !entry.available) setInstallPrompt(entry);
+              else fetch(hostId, { providerId: entry.id, enabled: value });
+            }}>{value ? "Enabled" : "Disabled"}</button>)}
         </div>}
         {configurable && entry.available && enabled && !entry.isDefault && <button type="button" className={CATALOG_ACTION} disabled={busy}
           onClick={() => fetch(hostId, { providerId: entry.id, isDefault: true })}>Set default</button>}
@@ -64,5 +73,17 @@ export function AgentCatalog() {
         </section>;
       })}
     </>}
+    {installPrompt && connected && configurable && <ConfirmDialog
+      message={`${installPrompt.displayName} isn’t installed on ${hostName}.\n\n${installUrl ? "Enable it and open its setup instructions?" : "Enable it anyway?"} Install it on ${hostName}, then choose Refresh. It will appear in the agent picker only after Perch detects it.`}
+      confirmLabel={installUrl ? "Enable & open setup" : "Enable anyway"}
+      busy={busy}
+      onCancel={() => setInstallPrompt(null)}
+      onConfirm={() => {
+        if (busy) return;
+        if (installUrl) openExternal(installUrl);
+        fetch(hostId, { providerId: installPrompt.id, enabled: true });
+        setInstallPrompt(null);
+      }}
+    />}
   </div>;
 }

@@ -137,6 +137,12 @@ Switching/quitting is different from explicit close:
 
 ## Agent observations and attention
 
+CLI harness availability requires a real executable on the owning host; Perch’s
+private shell wrappers (including symlinks to them) never count as installations.
+Enabling a missing harness in Settings asks for confirmation and offers its setup
+instructions when available. This does not run an installer or make the harness
+launchable: after installing it on that host, Refresh must detect it first.
+
 `agent_fleet::AgentLifecycleRegistry` is the lifecycle authority, persisted by
 `agent_persistence.rs`. Native bridges, configured markers, OSC titles and
 fallback output heuristics have different confidence. The transition bridge

@@ -42,6 +42,16 @@ pub(crate) fn pty_key(key: &AgentKey) -> String {
 /// Every generated wrapper directory has this file, including those written before the recursion fix,
 /// so another Perch shell can tell an inherited wrapper `ZDOTDIR` from the user's own.
 const MARKER: &str = "bash-launch";
+
+/// A private command wrapper is not evidence that its underlying CLI exists.
+/// Call with a canonical path so symlinks to wrappers are recognized too.
+pub(crate) fn is_command_shim(path: &Path) -> bool {
+    path.parent().is_some_and(|bin| {
+        bin.file_name().is_some_and(|name| name == "bin")
+            && bin.parent().is_some_and(|dir| dir.join(MARKER).is_file())
+    })
+}
+
 fn directory(key: &AgentKey) -> anyhow::Result<PathBuf> {
     Ok(native_ui::paths(key)?.socket.with_extension("shell"))
 }

@@ -40,10 +40,15 @@ test("configured providers retain identity and isolation across desktop and mobi
   const providers = path.join(fixture, "providers.json");
   const coreLog = path.join(fixture, "core.log");
   fs.writeFileSync(hosts, JSON.stringify({ hosts: [] }));
+  const shimDirectory = path.join(fixture, "agent.shell");
+  const shim = path.join(shimDirectory, "bin", "opencode");
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.writeFileSync(path.join(shimDirectory, "bash-launch"), "");
+  fs.writeFileSync(shim, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   fs.writeFileSync(providers, JSON.stringify({ version: 1, providers: [
     manifest("fixture-alpha", "Alpha CLI"),
     manifest("fixture-beta", "Beta CLI with a deliberately long provider name"),
-    manifest("fixture-missing", "Unavailable fixture", "/nonexistent/perch-fixture-command"),
+    manifest("fixture-missing", "Unavailable fixture", shim),
   ] }));
   const log = fs.openSync(coreLog, "a");
   let core: ChildProcess | undefined;
@@ -86,11 +91,25 @@ test("configured providers retain identity and isolation across desktop and mobi
       await expect(current.locator(".agent-catalog__row")).toHaveCount(40);
       await expect(current.getByRole("region", { name: "Available to install", exact: true }).getByTestId("agent-catalog-fixture-missing")).toBeVisible();
       await expect(current.getByTestId("agent-catalog-opencode").getByRole("link")).toHaveAttribute("href", /^https:\/\//);
+      const missing = current.getByTestId("agent-catalog-fixture-missing");
+      await missing.getByRole("button", { name: "Disabled", exact: true }).click();
+      await expect(missing.getByRole("button", { name: "Disabled", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await missing.getByRole("button", { name: "Enabled", exact: true }).click();
+      await expect(current.getByRole("dialog", { name: "Confirm", exact: true })).toContainText("Unavailable fixture isn’t installed on this host");
+      await current.screenshot({ path: path.join(shots, `harness-install-prompt-${current === page ? "desktop" : "mobile"}-${testInfo.project.name}.png`) });
+      expect(await current.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await current.getByTestId("confirm-cancel").click();
+      await expect(missing.getByRole("button", { name: "Disabled", exact: true })).toHaveAttribute("aria-pressed", "true");
     }
+    await page.getByTestId("agent-catalog-fixture-missing").getByRole("button", { name: "Enabled", exact: true }).click();
+    await page.getByTestId("confirm-accept").click();
+    await expect(phone.getByTestId("agent-catalog-fixture-missing").getByRole("button", { name: "Enabled", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("region", { name: "Installed agents", exact: true }).getByTestId("agent-catalog-fixture-missing")).toHaveCount(0);
     const desktopBeta = page.getByTestId("agent-catalog-fixture-beta");
     const phoneBeta = phone.getByTestId("agent-catalog-fixture-beta");
     await desktopBeta.getByRole("button", { name: "Disabled", exact: true }).click();
     await expect(phoneBeta.getByRole("button", { name: "Disabled", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await phone.getByTestId("settings-back").click();
     await phone.getByRole("button", { name: "Close settings", exact: true }).click();
     await expect(phone.getByTestId("cli-start-agent-fixture-beta")).toHaveCount(0);
     await desktopBeta.getByRole("button", { name: "Enabled", exact: true }).click();
@@ -107,7 +126,10 @@ test("configured providers retain identity and isolation across desktop and mobi
     await expect(phone.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
     await phone.screenshot({ path: path.join(shots, `agent-catalog-mobile-${testInfo.project.name}.png`) });
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const current of [page, phone]) await current.getByRole("button", { name: "Close settings", exact: true }).click();
+    for (const current of [page, phone]) {
+      if (current === phone) await current.getByTestId("settings-back").click();
+      await current.getByRole("button", { name: "Close settings", exact: true }).click();
+    }
     await page.reload({ waitUntil: "networkidle" });
     await expect(page.locator('[data-testid^="cli-start-agent-"]').first()).toHaveAttribute("data-testid", "cli-start-agent-fixture-beta");
     expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -138,7 +160,7 @@ test("configured providers retain identity and isolation across desktop and mobi
     await expect(desktopTerminal.locator(".xterm-rows")).toContainText("reply_fixture-alpha_alpha_message");
     await expect(mobileTerminal.locator(".xterm-rows")).toContainText("reply_fixture-beta_beta_message");
     await expect(page.getByTestId("chat-tab-agent-badge")).toContainText("fixture-alpha");
-    await expect(page.locator(".workspace-project").filter({ hasText: path.basename(fixture) }).getByText("alpha_message", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Birdhouses and nests", exact: true }).getByRole("button", { name: "alpha_message", exact: true })).toBeVisible();
     await expect(desktopTerminal.locator(".xterm-rows")).not.toContainText("beta_message");
     await expect(mobileTerminal.locator(".xterm-rows")).not.toContainText("alpha_message");
     await phone.reload({ waitUntil: "networkidle" });
