@@ -208,6 +208,14 @@ struct View {
 }
 impl View {
     fn turn_error(&mut self, turn: &Value) {
+        // `TurnStatus` is completed | interrupted | failed | inProgress (`codex app-server
+        // generate-json-schema`, 0.166): a stopped turn leaves Orca's quiet status row.
+        if turn["status"] == "interrupted" {
+            self.put(super::interrupted_row(format!(
+                "{}:interrupted",
+                turn["id"].as_str().unwrap_or_default()
+            )));
+        }
         if let Some(error) = turn["error"]["message"].as_str() {
             let mut row = message(
                 &format!("{}:error", turn["id"].as_str().unwrap_or_default()),
@@ -884,6 +892,16 @@ mod tests {
         );
         view.event(&json!({"method":"thread/tokenUsage/updated","params":{"threadId":"native","tokenUsage":{"last":{"totalTokens":0},"modelContextWindow":272000}}}));
         assert!(view.snapshot.context.is_none());
+        view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"stopped","status":"interrupted"}}}));
+        let stopped = view.snapshot.messages.last().unwrap();
+        assert_eq!(
+            (
+                stopped.id.as_str(),
+                stopped.role.as_str(),
+                stopped.text.as_str()
+            ),
+            ("stopped:interrupted", "system", "Conversation interrupted")
+        );
         view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"turn","status":"failed","error":{"message":"native failure"}}}}));
         assert!(!view.snapshot.running && !view.snapshot.blocked);
         assert_eq!(

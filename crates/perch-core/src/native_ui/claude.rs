@@ -6,6 +6,10 @@
 //! (commit 308b5000, MIT; see THIRD_PARTY_NOTICES.md): an older Claude rejects a whole
 //! `--settings` file that names a hook event it does not know, so each event is only
 //! registered once the detected CLI version has reached its floor.
+//!
+//! The interruption row (`interrupted`) follows Orca's `src/main/native-chat/
+//! transcript-line-decoders-claude.ts` and `transcript-turn-markers.ts` (same commit): Claude's
+//! injected "[Request interrupted by user]" user row becomes a `system` status row.
 use super::*;
 use crate::protocol::{
     NativeUiContext, NativeUiEditHunk, NativeUiEditPatch, NativeUiMessage, NativeUiTool,
@@ -256,6 +260,27 @@ fn edit_patch(row: &Value) -> Option<NativeUiEditPatch> {
     })
 }
 
+/// Claude's injected "[Request interrupted by user…]" user row. Orca keys on the row's
+/// `interruptedMessageId` (`transcript-turn-markers.ts`); 2.1.318 transcripts also hold such rows
+/// without it (two of five seen), so the two exact texts count too.
+fn interrupted(row: &Value) -> bool {
+    row["type"] == "user"
+        && (row["interruptedMessageId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+            || matches!(
+                text(&row["message"]["content"]).trim(),
+                "[Request interrupted by user]" | "[Request interrupted by user for tool use]"
+            ))
+}
+
+/// The turn ended in a stop: Claude's last row says so, whatever the hooks last reported.
+fn ends_interrupted(history: &[NativeUiMessage]) -> bool {
+    history.last().is_some_and(|message| {
+        message.role == "system" && message.text == super::INTERRUPTED_STATUS_TEXT
+    })
+}
+
 fn messages(row: &Value) -> Vec<NativeUiMessage> {
     if row["isSidechain"] == true || row["isMeta"] == true {
         return vec![];
@@ -263,6 +288,11 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
     let role = row["type"].as_str().unwrap_or_default();
     if !matches!(role, "user" | "assistant") {
         return vec![];
+    }
+    if interrupted(row) {
+        return vec![super::interrupted_row(
+            row["uuid"].as_str().unwrap_or_default().to_string(),
+        )];
     }
     let raw = &row["message"];
     let mut message = NativeUiMessage {
@@ -618,7 +648,7 @@ pub(super) async fn observe(
                     if event["hook_event_name"] == "PostModelSwitch" { model = event["to_model"].as_str().map(|model| clip(model, 256)); }
                     else if let Some(state) = turn_state(event) { (running, blocked) = state; }
                 }
-                if history.0.last().is_some_and(|message| message.role == "user" && message.text.starts_with("[Request interrupted by user")) { (running, blocked) = (false, false); }
+                if ends_interrupted(&history.0) { (running, blocked) = (false, false); }
                 // The hook says a human is needed; the screen says which choices. The dialog may
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
@@ -644,7 +674,46 @@ pub(super) async fn observe(
 
 #[cfg(test)]
 mod tests {
-    use super::{empty_prompt, prompt_row};
+    use super::{empty_prompt, ends_interrupted, messages, prompt_row};
+    use serde_json::json;
+
+    // Shapes from Claude 2.1.318 transcripts (Orca's `transcript-interruption-message.test.ts` case).
+    fn interrupt_row(text: &str, marker: bool) -> serde_json::Value {
+        let mut row = json!({
+            "type": "user", "uuid": "interrupt-row", "timestamp": "2026-07-16T23:46:01.000Z",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]}
+        });
+        if marker {
+            row["interruptedMessageId"] = json!("assistant-request-1");
+        }
+        row
+    }
+
+    #[test]
+    fn claude_interruption_boilerplate_is_one_quiet_status_row() {
+        for (text, marker) in [
+            ("[Request interrupted by user]", true),
+            ("[Request interrupted by user for tool use]", true),
+            ("[Request interrupted by user for tool use]", false),
+        ] {
+            let rows = messages(&interrupt_row(text, marker));
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "interrupt-row");
+            assert_eq!(rows[0].role, "system");
+            assert_eq!(rows[0].text, "Conversation interrupted");
+            assert!(ends_interrupted(&rows));
+        }
+    }
+
+    #[test]
+    fn an_ordinary_user_message_that_quotes_the_boilerplate_stays_a_prompt() {
+        let rows = messages(&interrupt_row(
+            "why does it say [Request interrupted by user]?",
+            false,
+        ));
+        assert_eq!(rows[0].role, "user");
+        assert!(!ends_interrupted(&rows));
+    }
 
     /// Captured from a Claude started in a Terminal tab: the prompt is row 7 but the cursor was reported on 8.
     #[test]

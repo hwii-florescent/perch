@@ -78,6 +78,8 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, turn, fi
     const link = files.get(href);
     if (link) useFileTabs.getState().open(linkWorkspaceId, link.path);
   };
+  // A stopped turn: a quiet line between the turns, not a bubble (the core words it; `system` rows carry no prompt or answer).
+  if (message.role === "system") return <div className={cn(HINT, "text-center py-1")} data-native-role="system" data-testid="native-cli-status-row" data-native-turn={turn} data-block-id={message.id}>{message.text}</div>;
   return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
     {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}

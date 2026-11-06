@@ -130,6 +130,16 @@ screen, its wrapped form and a plan containing a markdown rule; live: `native-co
 `omp-plan-review-prompt.ts` and extension channel; no OMP screen captured), Pi, Codex plans, and a
 plan that wraps or scrolls past the screen (only the visible part is shown).
 
+Row 8 (interrupted row) landed 2026-11-06: Claude's injected "[Request interrupted by user…]"
+user row (the `interruptedMessageId` marker Orca keys on, or, because 2 of 5 rows seen in 2.1.318
+transcripts lack it, the two exact texts) becomes a `system` message "Conversation interrupted"
+(`native_ui/claude.rs`, `INTERRUPTED_STATUS_TEXT` in `mod.rs`); Codex's `turn/completed` with
+`status: "interrupted"` (the `TurnStatus` enum in the 0.166 app-server schema) leaves the same row.
+The web draws it as a quiet centred line (`native-cli-status-row`), not a bubble, so recall and copy
+never see it. No Continue button, as planned. Unit tests port Orca's two cases (Claude marker; the Codex
+one as the app-server status). Live: `native-composer.spec.ts` claude "interrupted row" (stop a
+`sleep 60`). Not done: Pi/OMP/OpenCode rows, usage-limit and auto-continue notices.
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.

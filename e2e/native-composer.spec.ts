@@ -338,7 +338,20 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(box).toHaveValue("half a thought", { timeout: 30_000 });
       await box.fill("");
     });
-    // 9. A plan review, last because the `/plan` command leaves user rows of its own (which would change what Up
+    // 9. Stopping a turn leaves one quiet "Conversation interrupted" row, not a user bubble holding Claude's
+    // boilerplate, and the chat settles to Ready.
+    if (provider === "claude") await check("interrupted row", async () => {
+      await box.fill("Run the shell command `sleep 60` and then reply with only the word done.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      const stop = ui.getByRole("button", { name: "Cancel turn" });
+      await expect(stop).toBeEnabled({ timeout: 90_000 });
+      await expect(ui.getByTestId("native-cli-run").last()).toContainText(/sleep/, { timeout: 60_000 });
+      await stop.click();
+      await expect(ui.getByTestId("native-cli-status-row").last()).toHaveText("Conversation interrupted", { timeout: 30_000 });
+      await expect(ui.locator('span[role="status"]')).toHaveText("Ready", { timeout: 30_000 });
+      await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Request interrupted" })).toHaveCount(0);
+    });
+    // 10. A plan review, last because the `/plan` command leaves user rows of its own (which would change what Up
     // recalls). Claude's turn ends in its "ready to execute" dialog, shown as a card with the plan and the two
     // choices that need no typed feedback. Approving by hand lets the turn finish.
     if (provider === "claude") await check("plan review", async () => {

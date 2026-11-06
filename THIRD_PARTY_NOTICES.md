@@ -73,6 +73,9 @@ Each module's `//!` header names the files it follows:
   patch-files,cards}.ts`, `native-chat-unified-patch.ts`, `native-chat-begin-patch.ts`,
   `native-chat-diff.ts` (the parts they use), and `src/main/native-chat/
   transcript-line-decoders-claude.ts` (`structuredPatch`, in `native_ui/claude.rs`).
+- Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
+  (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
+  `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.
 - `native_ui/turn_diffs.rs`: `src/shared/native-chat/tools/native-chat-turn-diffs.ts`.
 - `native_ui/file_links.rs`: `src/shared/native-chat/native-chat-href-routing.ts` and
   `src/shared/file-links/{file-link-location,explicit-file-link-target,

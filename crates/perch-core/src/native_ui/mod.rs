@@ -32,6 +32,19 @@ pub mod transcript;
 pub mod turn_diffs;
 pub mod typed;
 
+/// The quiet status row a stopped turn leaves (Orca `NATIVE_CHAT_INTERRUPTED_STATUS_TEXT`): role
+/// `system`, so it is neither a prompt nor an answer and is never recalled or copied as one.
+pub(crate) const INTERRUPTED_STATUS_TEXT: &str = "Conversation interrupted";
+
+pub(crate) fn interrupted_row(id: String) -> crate::protocol::NativeUiMessage {
+    crate::protocol::NativeUiMessage {
+        id,
+        role: "system".into(),
+        text: INTERRUPTED_STATUS_TEXT.into(),
+        ..Default::default()
+    }
+}
+
 fn clip(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
