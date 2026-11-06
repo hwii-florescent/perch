@@ -1327,7 +1327,10 @@ const STATES = [
   // a refused lease, a send in flight, and the scroll behaviour (stick to the bottom, pill, back to the bottom).
   { name: "25-native-viewer", fresh: true, run: async (page) => {
     await nativePage(page, { owner: true });
-    if ((await page.locator("article[data-native-role]").count()) !== 4) throw new Error("25: the transcript does not show its 4 messages");
+    // Three messages the user reads; the thinking and the tool calls and result fold into two runs between them.
+    if ((await page.locator("article[data-native-role]").count()) !== 3) throw new Error("25: the transcript does not show its 3 messages");
+    if ((await page.getByTestId("native-cli-run").count()) !== 2) throw new Error("25: the thinking and tool calls are not folded into 2 runs");
+    if (((await page.getByTestId("native-cli-run").last().locator("summary").first().textContent()) ?? "").trim() !== "2 tool calls: Bash, Edit") throw new Error("25: the run summary does not name its tools");
     if ((await page.getByRole("button", { name: "Take control" }).count()) !== 1) throw new Error("25: no Take control button");
     if (!(await page.getByTestId("native-cli-composer").isDisabled())) throw new Error("25: the composer is enabled while another view types");
     await page.getByText("Another view is typing in this agent").waitFor();
@@ -1363,11 +1366,12 @@ const STATES = [
   } },
   { name: "25e-native-rows-expanded", fresh: true, run: async (page) => {
     await nativePage(page, { owner: true });
-    await page.locator("article[data-native-role] details").evaluateAll((els) => els.forEach((el) => { el.open = true; }));
+    // Outer details first so the inner ones exist to open: 2 runs, then thinking, 2 tool calls and 1 tool result.
+    for (let pass = 0; pass < 2; pass++) await page.locator("[data-testid=native-cli-chat] details").evaluateAll((els) => els.forEach((el) => { el.open = true; }));
     await sleep(300);
-    const n = await page.locator("article[data-native-role] details[open]").count();
-    if (n !== 4) throw new Error(`25e: ${n} rows are open, wanted 4 (thinking, 2 tool calls, 1 tool result)`);
-    const wraps = await page.locator("article[data-native-role] details pre").evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth));
+    const n = await page.locator("[data-testid=native-cli-chat] details[open]").count();
+    if (n !== 6) throw new Error(`25e: ${n} rows are open, wanted 6 (2 runs, thinking, 2 tool calls, 1 tool result)`);
+    const wraps = await page.locator("[data-testid=native-cli-chat] details pre").evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth));
     if (!wraps) throw new Error("25e: a long unbroken line overflows its pre instead of wrapping");
     await nativeClean(page, "25e");
   } },

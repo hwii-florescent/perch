@@ -166,12 +166,12 @@ is opt-in per agent until the user changes it.
 Today `NativeCliChat.tsx` (124 lines) renders hook/transcript snapshots and types
 into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
 
-- **Transport per provider.** Codex: the existing private app-server
-  (`native_ui/codex.rs`). Claude: a structured stream-json session of the
-  unmodified `claude` binary under the user's own login, as Orca does; Perch never
-  sees or stores credentials. Others and remote hosts: today's terminal-backed
-  view. Choose Chat or Terminal per agent; move a conversation between them by
-  resuming it, one writer at a time (never two processes on one conversation).
+- **Transport (decided 2026-11-05): attach to the user's real TUI.** UI mode
+  reads and drives the same PTY process as Terminal (Claude hooks, Codex private
+  app-server, Pi/OMP extension), so switching is instant and lossless and
+  extension dialogs keep working. A headless stream-json/RPC chat (T3 Code's
+  design, switch by resuming) is a possible later mode for Claude and Codex only;
+  Perch never sees or stores credentials either way.
 - **Composer.** Enter queues as reorderable cards while a turn runs; Steer sends
   into the turn where supported; Stop; Rewind to a message (idle only); `/compact`;
   one slash/skill picker; `@file`; image paste; prompt recall. Model/effort are
@@ -180,7 +180,7 @@ into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
   settled from the transcript; never resend a steer or an unproven message.
 - **Approvals and questions in the UI.** Claude permission prompt tool and
   `AskUserQuestion`; Codex `requestApproval`. Number keys answer choices; answered
-  cards stay as receipts. Phone policy decided before phones can approve.
+  cards stay as receipts. Phones answer exactly like desktop (decided 2026-11-05).
 - **Transcript.** Collapsed tool/thinking runs, inline diff cards, per-turn
   changed files (reuse `agent_change_snapshots`), context-use ring, message rail,
   find, a background-task strip, and subagent child rows (step 2).
@@ -216,8 +216,8 @@ owns Pi in RPC mode, which this attach-to-the-TUI design does not have.
 Live-checked: Claude `AskUserQuestion`, Codex command approval, OMP `ask`, Pi
 `ask_user_question` (when installed). Perch launches Claude and Codex with
 approvals bypassed, so only questions appear by default. OMP tool approvals and
-plan reviews are not yet shaped. Phone approval policy is still undecided:
-phones are not blocked from answering yet.
+plan reviews are not yet shaped. Phones answer like desktop (decided
+2026-11-05); they need the input lease like any other client.
 Not yet: queue cards, Steer, Rewind, `/compact` shortcut, prompt recall,
 transcript features, Claude stream-json (not needed for approvals now).
 

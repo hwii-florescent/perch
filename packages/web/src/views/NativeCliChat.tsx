@@ -6,12 +6,14 @@ import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
 import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
-import { CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, WORKED_FOR, messageClass } from "../components/ui/chat";
+import { CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
 import { MenuList, menuOptionId } from "./nativeChat/MenuList";
 import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
+import { RunRow } from "./nativeChat/RunRow";
+import { toBlocks } from "./nativeChat/transcript";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
@@ -33,10 +35,7 @@ const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?
 const NativeMessage = memo(function NativeMessage({ message, streaming }: { message: NativeUiMessage; streaming: boolean }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
   return <article className={messageClass(message.role === "user" ? "user" : "assistant")} data-native-role={message.role}>
-    {message.thinking && <details className={cn("message__worked-for", WORKED_FOR)}><summary>Thinking</summary><pre>{message.thinking}</pre></details>}
-    {message.tools.map((tool, index) => <details className={cn("message__worked-for", WORKED_FOR)} key={`${index}-${tool.name}`}><summary>{tool.name}</summary><pre>{tool.input}</pre></details>)}
-    {message.role === "toolResult" ? <details className={cn("message__worked-for", WORKED_FOR)}><summary>{message.toolName ?? "Tool"} result</summary><pre>{message.text}</pre></details>
-      : message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
+    {message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
   </article>;
@@ -212,6 +211,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
   // The snapshot is what this view renders; the lifecycle's blocked state (from title evidence) can lag it.
   const waiting = snapshot?.blocked === true;
+  const blocks = useMemo(() => toBlocks(snapshot?.messages ?? []), [snapshot?.messages]);
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
     <div className="terminal__toolbar flex-wrap">
@@ -223,7 +223,9 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
-        {snapshot?.messages.map((message, index) => <NativeMessage key={message.id} message={message} streaming={snapshot.running && index === snapshot.messages.length - 1} />)}
+        {blocks.map((block, index) => block.kind === "run"
+          ? <RunRow key={block.id} steps={block.steps} live={!!snapshot?.running && index === blocks.length - 1} />
+          : <NativeMessage key={block.message.id} message={block.message} streaming={!!snapshot?.running && index === blocks.length - 1} />)}
         <Receipts items={receipts} />
         {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />
           : waiting && <WaitingNotice />}

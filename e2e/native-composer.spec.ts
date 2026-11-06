@@ -230,11 +230,21 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       const child = core;
       await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); });
     }
-    // A halted cleanup keeps the fixture for manual review; do not let it hide the test's own failure.
-    await cleanupFixtureRuntime(root, fixture).catch((error) => testInfo.annotations.push({ type: "cleanup", description: String(error).slice(0, 400) }));
+    // Cleanup refuses a runtime whose agent left a detached process group. That daemon and its agent belong
+    // to this fixture alone, so stop them here rather than leave a paid CLI running after the test.
+    await cleanupFixtureRuntime(root, fixture).catch((error) => {
+      testInfo.annotations.push({ type: "cleanup", description: String(error).slice(0, 400) });
+      const daemonDir = `--dir ${fs.realpathSync(fixture)}/daemon`;
+      const owned = execFileSync("ps", ["-axo", "pid,command"], { encoding: "utf8" }).split("\n").filter((line) => line.includes(daemonDir));
+      for (const line of owned) {
+        const pid = Number(line.trim().split(/\s+/)[0]);
+        try { process.kill(-pid, "SIGTERM"); process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+      }
+    });
     if (sessionId) fs.rmSync(path.join(os.homedir(), ".perch/uploads", sessionId), { recursive: true, force: true });
     fs.closeSync(log);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").split("\n").filter((line) => /commands|WARN|ERROR|DEBUGSCREEN/.test(line)).join("\n"), contentType: "text/plain" });
-    fs.rmSync(fixture, { recursive: true, force: true });
+    // The daemon may still be writing into its directory as it stops.
+    fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   }
 });
