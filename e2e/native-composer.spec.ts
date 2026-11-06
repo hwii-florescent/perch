@@ -238,6 +238,8 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       execFileSync("git", ["-c", "user.name=perch", "-c", "user.email=perch@example.invalid", "commit", "--allow-empty", "-m", "init", "-q"], { cwd: fixture });
       await box.fill("Create a file named changed.txt containing exactly: hello perch. Do nothing else, then reply done.");
       await ui.getByRole("button", { name: "Send", exact: true }).click();
+      // The projection's live line (a Codex approval hides it; its card is the answer to "what now").
+      await expect(ui.getByTestId("native-cli-working").or(ui.getByTestId("native-cli-request"))).toBeVisible({ timeout: 60_000 });
       const changed = ui.getByTestId("native-cli-changed-files");
       await expect(async () => {
         const card = ui.getByTestId("native-cli-request-option-1");
@@ -247,6 +249,22 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(changed).toContainText("changed.txt");
       await changed.locator("summary", { hasText: "changed.txt" }).click();
       await expect(changed.getByTestId("native-cli-turn-diff")).toContainText("hello perch");
+      await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+      // The core's projection of that turn: one run whose call names the file, settled and paired with
+      // its output, in the turn the prompt opened; and nothing left on the live line.
+      const run = ui.getByTestId("native-cli-run").last();
+      const step = run.locator("[data-native-step]").filter({ hasText: /changed\.txt/ }).first();
+      await expect(step).toHaveAttribute("data-native-step", "completed");
+      console.log(`[${provider}] run: ${await run.locator(":scope > summary").textContent()} | ${(await run.locator("[data-native-step] > summary").evaluateAll((nodes) => nodes.map((node) => node.textContent))).join(" | ")}`);
+      await expect(run.getByTestId("native-cli-run-failed")).toHaveCount(0);
+      const prompt = ui.locator('[data-native-role="user"]').last();
+      await expect(run).toHaveAttribute("data-native-turn", (await prompt.getAttribute("data-block-id"))!);
+      await expect(ui.getByTestId("native-cli-working")).toHaveCount(0);
+      // Find asks the core, which looks inside runs.
+      await ui.press("Control+f");
+      await ui.getByLabel("Find in chat").fill("hello perch");
+      await expect(ui.getByTestId("native-cli-find-count")).toHaveText(/^1 of \d+$/, { timeout: 10_000 });
+      await ui.getByLabel("Close find").click();
     });
     // 6. After real turns the provider has reported how full the context is (OpenCode has no source).
     await check("context ring", async () => {

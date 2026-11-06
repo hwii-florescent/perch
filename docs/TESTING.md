@@ -58,6 +58,13 @@ Useful existing coverage (not a claim of a fresh passing run):
   limit, quote-setting persistence, and configured-host SCP success/failure
   cleanup using local SSH/SCP stand-ins (no network hosts or paid turns).
   This is not certification against a real SSH/SFTP server.
+- Native chat e2e (`native-composer.config.ts`: `native-composer`, `native-terminal`,
+  `native-slash-send`): do not run it from a shell inside a Perch terminal. Its PATH starts with
+  that Perch's command shims, the fixture core inherits them, the picker's `claude` becomes a
+  shim-launched agent of the *outer* Perch and the UI never connects (`data-native-pid` unset).
+  Strip `perch-native-*.shell/bin` from `PATH` and unset `PERCH_SHELL`, `TERM_PROGRAM` and
+  `PERCH_SKIP_RELAY` first. A cold OMP or Codex bridge also fails to connect now and then; rerun
+  that provider alone.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

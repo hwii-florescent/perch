@@ -711,14 +711,29 @@ pub struct AgentManifestSummary {
     pub native_ui: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeUiTool {
     pub name: String,
     pub input: String,
+    /// The provider's id for this call; its result names it in `NativeUiMessage::tool_call_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// What the provider says about the call. Absent when it says nothing: the projection then
+    /// reads the paired result and whether the turn still runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<NativeUiToolState>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeUiToolState {
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeUiMessage {
     pub id: String,
@@ -732,6 +747,12 @@ pub struct NativeUiMessage {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// On a `toolResult`: the `NativeUiTool::id` it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// On a `toolResult`: the tool reported failure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -757,6 +778,10 @@ pub struct NativeUiSnapshot {
     pub context: Option<NativeUiContext>,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
+    /// What the chat draws, derived from `messages` when the core sends the snapshot to a viewer
+    /// (`native_ui::transcript`). Absent from bridges and from older cores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<Box<crate::native_ui::transcript::NativeUiTranscript>>,
 }
 
 /// Context use from the last model response. Never a cost or a quota.
@@ -1132,6 +1157,14 @@ pub enum ClientMessage {
         request_id: String,
         session_id: String,
         provider_id: String,
+    },
+    /// Which transcript blocks contain `query`, case-insensitively, in order.
+    #[serde(rename = "agent.ui.find", rename_all = "camelCase")]
+    AgentUiFind {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        query: String,
     },
     #[serde(rename = "agent.ui.prompt", rename_all = "camelCase")]
     AgentUiPrompt {
@@ -1964,6 +1997,13 @@ pub enum ServerMessage {
         session_id: String,
         provider_id: String,
         snapshot: NativeUiSnapshot,
+    },
+    #[serde(rename = "agent.ui.found", rename_all = "camelCase")]
+    AgentUiFound {
+        request_id: String,
+        session_id: String,
+        /// Ids of the blocks that match, in transcript order.
+        blocks: Vec<String>,
     },
     #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
     AgentUiResult {

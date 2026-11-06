@@ -161,7 +161,7 @@ fn observe_runtime(
                     request_id: None,
                     session_id: key.session_id.clone(),
                     provider_id: provider.clone(),
-                    snapshot,
+                    snapshot: with_transcript(snapshot),
                 }));
         }),
     )
@@ -244,6 +244,58 @@ pub(super) fn live_commands(
         .map_or_else(Vec::new, |bridge| bridge.slash_commands())
 }
 
+/// The snapshot as viewers receive it: the bridge's raw messages plus what the chat draws.
+/// ponytail: the projection repeats tool inputs and outputs, so a snapshot can be about twice the
+/// bridge's 192 KB message cap (each step body is capped at 4000 chars). Drop `messages` text the
+/// projection carries once no older web can be talking to this core.
+fn with_transcript(
+    mut snapshot: crate::protocol::NativeUiSnapshot,
+) -> crate::protocol::NativeUiSnapshot {
+    snapshot.transcript = Some(Box::new(crate::native_ui::transcript::project(&snapshot)));
+    snapshot
+}
+
+/// Blocks of the session's latest snapshot that contain `query`. Answers from what the bridge
+/// last reported, so it never starts or waits on a bridge.
+pub(super) fn find(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+    query: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    let latest = resolve(state, &session_id, &provider_id).and_then(|target| {
+        state
+            .app
+            .native_ui
+            .get(&target.bridge)
+            .and_then(|bridge| bridge.latest())
+            .ok_or_else(|| anyhow::anyhow!("Native UI is starting. Retry shortly."))
+    });
+    match latest {
+        Ok(snapshot) => {
+            let transcript = crate::native_ui::transcript::project(&snapshot);
+            let blocks = crate::native_ui::transcript::find(&snapshot, &transcript, &query);
+            let _ = state.out_tx.send(ServerMessage::AgentUiFound {
+                request_id,
+                session_id,
+                blocks,
+            });
+        }
+        Err(error) => fail(
+            &state.out_tx,
+            request_id,
+            "native_ui_unavailable",
+            error.to_string(),
+            true,
+        ),
+    }
+}
+
 pub(super) fn get(
     state: &Arc<ConnState>,
     raw: &str,
@@ -281,7 +333,7 @@ pub(super) fn get(
     let tx = state.out_tx.clone();
     tokio::spawn(async move {
         match bridge.snapshot().await {
-            Ok(snapshot) => { let _ = tx.send(ServerMessage::AgentUiSnapshot { request_id: Some(request_id), session_id, provider_id, snapshot }); }
+            Ok(snapshot) => { let _ = tx.send(ServerMessage::AgentUiSnapshot { request_id: Some(request_id), session_id, provider_id, snapshot: with_transcript(snapshot) }); }
             Err(error) => fail(&tx, request_id, "native_ui_unavailable", format!("{error}. Open CLI view to finish any startup prompts, then reconnect UI. A CLI opened before this update needs an explicit restart to load its web connection."), true),
         }
     });

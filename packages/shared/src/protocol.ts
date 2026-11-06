@@ -56,6 +56,10 @@ export interface ContextPreviewResultMessage {
 export interface NativeUiTool {
   name: string;
   input: string;
+  /** The provider's id for this call; its result names it in `toolCallId`. */
+  id?: string;
+  /** What the provider says about the call; absent when it says nothing. */
+  state?: "running" | "completed" | "failed";
 }
 export interface NativeUiMessage {
   id: string;
@@ -66,6 +70,28 @@ export interface NativeUiMessage {
   toolName?: string;
   model?: string;
   error?: string;
+  /** On a `toolResult`: the `NativeUiTool.id` it answers. */
+  toolCallId?: string;
+  /** On a `toolResult`: the tool reported failure. */
+  isError?: boolean;
+}
+
+/** What the chat draws, derived in Rust from `NativeUiSnapshot.messages` (`native_ui/transcript.rs`). */
+export interface NativeUiTranscript {
+  blocks: NativeUiBlock[];
+  /** The live activity line while a turn runs and nothing waits on the person. */
+  working?: string;
+}
+export type NativeUiBlock =
+  /** `id` is the `NativeUiMessage` it draws. */
+  | { kind: "message"; id: string; turn: string; live?: boolean }
+  | { kind: "run"; id: string; turn: string; live?: boolean; summary: string; calls: number; failed: number; steps: NativeUiStep[] };
+export interface NativeUiStep {
+  id: string;
+  kind: "thinking" | "tool" | "result";
+  label: string;
+  body: string;
+  tool?: { category: string; state: "running" | "completed" | "failed" | "unfinished"; output?: string };
 }
 export interface NativeUiSnapshot {
   version: number;
@@ -84,6 +110,8 @@ export interface NativeUiSnapshot {
   context?: NativeUiContext;
   messages: NativeUiMessage[];
   truncated: boolean;
+  /** Absent from older cores. */
+  transcript?: NativeUiTranscript;
 }
 
 /** Context use from the last model response. Never a cost or a quota. */
@@ -114,6 +142,20 @@ export interface AgentUiGetMessage {
   requestId: string;
   sessionId: string;
   providerId: string;
+}
+export interface AgentUiFindMessage {
+  type: "agent.ui.find";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+  query: string;
+}
+export interface AgentUiFoundMessage {
+  type: "agent.ui.found";
+  requestId: string;
+  sessionId: string;
+  /** Ids of the blocks that match, in transcript order. */
+  blocks: string[];
 }
 export interface AgentUiPromptMessage {
   type: "agent.ui.prompt";
@@ -1900,6 +1942,7 @@ export type ClientMessage =
   | AgentManifestListMessage
   | AgentProviderConfigureMessage
   | AgentUiGetMessage
+  | AgentUiFindMessage
   | AgentUiPromptMessage
   | AgentUiAnswerMessage
   | AgentUiCancelMessage
@@ -2634,6 +2677,7 @@ export type ServerMessage =
   | AgentManifestListResponseMessage
   | AgentUiSnapshotMessage
   | AgentUiResultMessage
+  | AgentUiFoundMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

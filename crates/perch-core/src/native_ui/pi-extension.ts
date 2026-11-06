@@ -41,7 +41,8 @@ export default function (pi: any) {
     return text.length <= limit ? text : `${text.slice(0, limit)}\n[truncated in web view]`;
   }
   function json(value: unknown): string {
-    try { return clip(JSON.stringify(value), 8 * 1024); } catch { return "[unavailable]"; }
+    // Long strings (a file's contents) are shortened first, so the size limit rarely cuts the object itself.
+    try { return clip(JSON.stringify(value, (_key, item) => typeof item === "string" && item.length > 300 ? `${item.slice(0, 300)}…` : item), 8 * 1024); } catch { return "[unavailable]"; }
   }
   function message(raw: any, fallbackId: string) {
     if (!raw || !["user", "assistant", "toolResult", "custom"].includes(raw.role)) return null;
@@ -53,7 +54,7 @@ export default function (pi: any) {
     const tools = content.filter((block: any) => block.type === "toolCall").slice(0, 32).map((block: any) => {
       const input = clip(json(block.arguments), Math.min(2048, toolBudget));
       toolBudget = Math.max(0, toolBudget - input.length);
-      return { name: clip(block.name, 128), input };
+      return { name: clip(block.name, 128), input, ...(block.id ? { id: clip(String(block.id), 256) } : {}) };
     });
     // Image/audio payloads never cross this bridge as base64.
     const attachments = content.filter((block: any) => block.type === "image" || block.type === "audio").length;
@@ -62,6 +63,8 @@ export default function (pi: any) {
       role: raw.role, text: clip(text) + (attachments ? `\n[${attachments} attachment(s) in CLI]` : ""),
       thinking: clip(thinking, 8 * 1024), tools,
       ...(raw.toolName ? { toolName: clip(raw.toolName, 128) } : {}),
+      ...(raw.toolCallId ? { toolCallId: clip(String(raw.toolCallId), 256) } : {}),
+      ...(raw.role === "toolResult" && raw.isError ? { isError: true } : {}),
       ...(raw.model ? { model: clip(raw.model, 256) } : {}),
       ...(raw.errorMessage ? { error: clip(raw.errorMessage, 4 * 1024) } : {}),
     };

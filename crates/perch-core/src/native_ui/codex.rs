@@ -1,6 +1,6 @@
 //! The native Codex TUI and Perch join one private native app-server.
 use super::*;
-use crate::protocol::{NativeUiMessage, NativeUiTool};
+use crate::protocol::{NativeUiMessage, NativeUiTool, NativeUiToolState};
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio_tungstenite::{
@@ -69,12 +69,7 @@ fn message(id: &str, role: &str) -> NativeUiMessage {
     NativeUiMessage {
         id: clip(id, 256),
         role: role.into(),
-        text: String::new(),
-        thinking: String::new(),
-        tools: vec![],
-        tool_name: None,
-        model: None,
-        error: None,
+        ..Default::default()
     }
 }
 fn content(value: &Value) -> String {
@@ -130,9 +125,17 @@ fn normalize(item: &Value) -> Vec<NativeUiMessage> {
                     item["arguments"].to_string(),
                 ),
             };
+            let state = match item["status"].as_str() {
+                Some("inProgress") => Some(NativeUiToolState::Running),
+                Some("completed") => Some(NativeUiToolState::Completed),
+                Some("failed" | "declined") => Some(NativeUiToolState::Failed),
+                _ => None,
+            };
             row.tools.push(NativeUiTool {
                 name: clip(name, 128),
                 input: clip(&input, 8 * 1024),
+                id: Some(clip(id, 256)),
+                state,
             });
             let output = if item["type"] == "commandExecution" {
                 content(&item["aggregatedOutput"])
@@ -145,10 +148,9 @@ fn normalize(item: &Value) -> Vec<NativeUiMessage> {
                 let mut tool = message(&format!("{id}:output"), "toolResult");
                 tool.text = output;
                 tool.tool_name = Some(clip(name, 128));
+                tool.tool_call_id = Some(clip(id, 256));
+                tool.is_error = state == Some(NativeUiToolState::Failed);
                 result.push(tool);
-            }
-            if matches!(item["status"].as_str(), Some("failed" | "declined")) {
-                row.error = Some("Tool did not complete successfully".into());
             }
         }
         "functionCallOutput" => {
@@ -421,6 +423,7 @@ async fn connection(
             context: None,
             messages: vec![],
             truncated: false,
+            transcript: None,
         },
         turn: None,
         message_bytes: 0,
@@ -738,6 +741,7 @@ mod tests {
                 context: None,
                 messages: vec![],
                 truncated: false,
+                transcript: None,
             },
             message_bytes: 0,
             turn: Some("turn".into()),

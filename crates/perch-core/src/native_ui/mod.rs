@@ -25,6 +25,7 @@ pub mod claude;
 pub mod codex;
 pub mod dialog;
 pub mod opencode;
+pub mod transcript;
 pub mod typed;
 
 fn clip(text: &str, limit: usize) -> String {
@@ -33,6 +34,28 @@ fn clip(text: &str, limit: usize) -> String {
         end -= 1;
     }
     text[..end].to_string()
+}
+
+/// A tool's input as JSON text with each long string shortened (a file's whole contents, a patch),
+/// so a size limit applied afterwards rarely cuts the object itself and its path stays readable.
+pub(crate) fn bounded_json(value: &serde_json::Value) -> String {
+    fn shorten(value: &serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match value {
+            Value::String(text) if text.len() > 300 => {
+                Value::String(format!("{}…", clip(text, 300)))
+            }
+            Value::Array(items) => Value::Array(items.iter().map(shorten).collect()),
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .map(|(key, value)| (key.clone(), shorten(value)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+    shorten(value).to_string()
 }
 
 const MAX_FRAME: usize = 256 * 1024;

@@ -131,11 +131,8 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
         id: row["uuid"].as_str().unwrap_or_default().to_string(),
         role: role.into(),
         text: text(&raw["content"]),
-        thinking: String::new(),
-        tools: vec![],
-        tool_name: None,
         model: raw["model"].as_str().map(|model| clip(model, 256)),
-        error: None,
+        ..Default::default()
     };
     let mut result = vec![];
     let mut tool_budget = 8 * 1024usize;
@@ -147,22 +144,23 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                     (8 * 1024usize).saturating_sub(message.thinking.len()),
                 )),
                 "tool_use" if message.tools.len() < 32 => {
-                    let input = clip(&block["input"].to_string(), tool_budget.min(2048));
+                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(2048));
                     tool_budget -= input.len();
                     message.tools.push(NativeUiTool {
                         name: clip(block["name"].as_str().unwrap_or("Tool"), 128),
                         input,
+                        id: block["id"].as_str().map(|id| clip(id, 256)),
+                        state: None,
                     });
                 }
                 "tool_result" => result.push(NativeUiMessage {
                     id: format!("{}:tool:{index}", message.id),
                     role: "toolResult".into(),
                     text: text(&block["content"]),
-                    thinking: String::new(),
-                    tools: vec![],
-                    tool_name: None,
-                    model: None,
                     error: (block["is_error"] == true).then(|| "Tool reported an error".into()),
+                    tool_call_id: block["tool_use_id"].as_str().map(|id| clip(id, 256)),
+                    is_error: block["is_error"] == true,
+                    ..Default::default()
                 }),
                 "image" | "document" => message.text.push_str("\n[attachment in CLI]"),
                 _ => {}
@@ -455,7 +453,7 @@ pub(super) async fn observe(
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
                 let request = if blocked { super::dialog::read(key) } else { None };
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1 };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, transcript: None };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;

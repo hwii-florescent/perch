@@ -29,11 +29,13 @@ export function normalize(info, parts) {
       row.thinking += clip(part.text, 8 * 1024 - Buffer.byteLength(row.thinking));
     } else if (part.type === "tool" && row.tools.length < 32) {
       const name = clip(part.tool, 128);
-      const input = clip(JSON.stringify(part.state?.input ?? {}), Math.min(2048, 8 * 1024 - toolBytes));
+      const input = clip(JSON.stringify(part.state?.input ?? {}, (_key, item) => typeof item === "string" && item.length > 300 ? `${item.slice(0, 300)}…` : item), Math.min(2048, 8 * 1024 - toolBytes));
       toolBytes += Buffer.byteLength(input);
-      row.tools.push({ name, input });
+      const status = part.state?.status;
+      const callId = clip(part.callID ?? part.id, 256);
+      row.tools.push({ name, input, id: callId, ...(status ? { state: status === "error" ? "failed" : status === "completed" ? "completed" : "running" } : {}) });
       const output = clip(part.state?.output ?? part.state?.error, 2048);
-      if (output) results.push({ id: clip(part.id, 256), role: "toolResult", text: output, thinking: "", tools: [], toolName: name });
+      if (output) results.push({ id: clip(part.id, 256), role: "toolResult", text: output, thinking: "", tools: [], toolName: name, toolCallId: callId, ...(status === "error" ? { isError: true } : {}) });
     }
   }
   if (info.error) row.error = clip(info.error.data?.message ?? info.error.name, 4096);

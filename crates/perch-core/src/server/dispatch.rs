@@ -54,6 +54,12 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session_id,
             provider_id,
         } => native_ui::get(state, raw_text, request_id, session_id, provider_id),
+        ClientMessage::AgentUiFind {
+            request_id,
+            session_id,
+            provider_id,
+            query,
+        } => native_ui::find(state, raw_text, request_id, session_id, provider_id, query),
         ClientMessage::AgentUiPrompt {
             request_id,
             session_id,

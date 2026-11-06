@@ -1,8 +1,8 @@
 import type { ClientMessage, NativeUiSnapshot, ServerMessage } from "@perch/shared";
 import { socket } from "./ws";
 
-type Reply = Extract<ServerMessage, { type: "agent.ui.snapshot" | "agent.ui.result" }>;
-type Request = Extract<ClientMessage, { type: "agent.ui.get" | "agent.ui.prompt" | "agent.ui.cancel" | "agent.ui.answer" }>;
+type Reply = Extract<ServerMessage, { type: "agent.ui.snapshot" | "agent.ui.result" | "agent.ui.found" }>;
+type Request = Extract<ClientMessage, { type: "agent.ui.get" | "agent.ui.find" | "agent.ui.prompt" | "agent.ui.cancel" | "agent.ui.answer" }>;
 const listeners = new Map<string, Set<(snapshot: NativeUiSnapshot) => void>>();
 const pending = new Map<string, { request: Request; resolve: (reply: Reply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 const retired = new Set<string>();
@@ -36,7 +36,7 @@ export function requestNativeUi(request: Request): Promise<Reply> {
 export function handleNativeUiMessage(message: ServerMessage): boolean {
   const id = "requestId" in message ? message.requestId : undefined;
   const item = id ? pending.get(id) : undefined;
-  if (message.type !== "agent.ui.snapshot" && message.type !== "agent.ui.result" && !(message.type === "error" && (item || (id && retired.has(id))))) return false;
+  if (message.type !== "agent.ui.snapshot" && message.type !== "agent.ui.result" && message.type !== "agent.ui.found" && !(message.type === "error" && (item || (id && retired.has(id))))) return false;
   if (item && id) {
     pending.delete(id); retire(id); clearTimeout(item.timer);
     if (message.type === "error") item.reject(new NativeUiError(message.message, message.code === "native_ui_delivery_unconfirmed"));

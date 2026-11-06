@@ -11,9 +11,9 @@ How to use: pick a row, read the named Orca file, port the logic to Rust (`crate
 `//!` header, unit test) and keep React thin. Status: ✅ done · 🟡 partial · ⬜ missing ·
 ❓ Orca file not read yet (name only), read it before building.
 
-Rule from AGENTS.md: domain logic lives in Rust. Today `nativeChat/transcript.ts`
-(`toBlocks`, `findBlocks`) and the changed-files logic are in the web package; they move to
-the Rust projection below when it exists.
+Rule from AGENTS.md: domain logic lives in Rust. The transcript is projected by
+`crates/perch-core/src/native_ui/transcript.rs`; `nativeChat/transcript.ts` only picks the
+blocks off the snapshot (and shows an older core's messages unfolded).
 
 ## Engine (Rust) — what Orca keeps in `shared/native-chat`
 
@@ -24,10 +24,10 @@ the Rust projection below when it exists.
 | Skill discovery by scanning skill folders (shared roots, own, other agent's) | `shared/skills`, `native-chat-skill-visibility.ts`, `use-native-chat-skills.ts` | 🟡 names come from each CLI itself (more accurate than guessing roots); Claude gives no skill descriptions, so those rows have none; remote hosts: Claude/Codex probes only |
 | Send classification: chat / command / unknown token; slash drafts get no user bubble | `native-chat-slash-commands.ts` (`classifyNativeChatSend`) | ✅ Rust `native_ui/typed.rs` `route()` (read in Orca: `classifyNativeChatSend`, `typeAgentTuiCommand`). Probed live first: a built-in sent as a message fired no Claude `UserPromptSubmit` (UI stuck "unconfirmed"), and on Codex `/status` and Pi `/session` it reached the model as prose and started a turn that ran shell tools. Now a built-in (any `/word` on Codex, whose skills are `$name`) is typed into the CLI's terminal, one PTY write per key (Claude: its confirmed paste path), refused while a turn runs, a dialog/draft is open, or a pager/overlay is up; skills, extension and project commands and unknown tokens stay messages. The reply carries `command: true`: no user bubble, a "Ran /x in the CLI" notice, output stays in CLI view. Live-checked on all four (`e2e/native-slash-send.spec.ts`). Ceilings (`ponytail:` in code): draft check reads the cursor row, overlay check knows two shapes (OMP titled box, Codex pager) |
 | Command envelopes, host-answered commands (`/context`, `/clear`) | `native-chat-command-envelope.ts`, `use-native-chat-local-command-answer.ts` ❓ | ⬜ |
-| Tool pairing (call ↔ result), folding, run header/sentence/outcome, tool identity, line labels, file targets | `tools/native-chat-tool-*.ts` ❓ | 🟡 runs fold; no call↔result pairing, no per-tool lines or outcomes |
+| Tool pairing (call ↔ result), folding, run header/sentence/outcome, tool identity, line labels, file targets | `tools/native-chat-tool-pairs.ts`, `-tool-icon.ts` (categories), `-tool-line-label.ts`, `-tool-summary.ts`, `-tool-run-sentence.ts`, `-tool-activity.ts`, `-tool-preview-prefix.ts` | ✅ Rust `native_ui/transcript.rs`: results pair with their call by id (unnamed ones with the oldest unanswered call; orphans keep a row); each call is a row with Orca's verb and target ("Edited changed.txt", "Ran cargo test", "Tried to read x"); state running / completed / failed / unfinished from the provider (Codex `status`, OpenCode `state.status`), then the result's error flag, then whether the turn runs; the run header is a sentence in the right tense ("Read 2 files and ran 3 commands"; a lone settled command reads as itself) with an "n failed" mark. Providers now send call ids and result links (`NativeUiTool.id/state`, `NativeUiMessage.toolCallId/isError`), and long input strings are shortened before the size cap so a path survives (Claude, Codex, Pi/OMP, OpenCode). Ceilings: no MCP identity, browser-command category, web-search result lists, exit code or duration (the bridges do not carry them); an input with nothing to name shows only the tool's name |
 | Edit cards from tool input (`begin_patch`, edits, unified patch, LCS diff) | `tools/native-chat-edit-*.ts`, `native-chat-unified-patch.ts` ❓ | ⬜ (we show git diff of the last turn instead) |
 | Turn diffs and per-turn rollup | `tools/native-chat-turn-diffs.ts`, `NativeChatTurnDiffRollup.tsx` | 🟡 last complete turn only, via git |
-| Work runs, trailing run, live line, working suppression, terminal-turn resolution | `native-chat-work-run.ts`, `transcript/native-chat-live-line.ts`, `native-chat-terminal-turn.ts` ❓ | 🟡 |
+| Work runs, trailing run, live line, working suppression, terminal-turn resolution | `native-chat-work-run.ts`, `transcript/native-chat-live-line.ts`, `native-chat-terminal-turn.ts` | 🟡 runs, turn membership (`turn` = the user message that opened it) and the live line ("Running npm test", "Thinking", "Working…"; hidden while a person is needed) are Rust. Not ported: Stop-in-progress line, elapsed timer (bridges carry no per-message timestamps), Orca's lead/thought run rules (ours: consecutive thinking and calls) |
 | Reasoning rows and ordering | `transcript/native-chat-reasoning-row.ts` | 🟡 folded into runs |
 | Subagent sections/groups/summary | `transcript/native-chat-subagent-*.ts`, `NativeChatSubagentRun.tsx` | ⬜ (ROADMAP step 2) |
 | Task list (TodoWrite style) parsed from frames, docked | `input/native-chat-task-list*.ts`, `NativeChatDockedTaskList.tsx` | ⬜ |
@@ -53,9 +53,12 @@ Next slices, in this order. For each: read the named Orca files first (mark ❓ 
 probe the real CLIs before claiming a gap, build it in Rust with a unit test, run the relevant
 live e2e, update this file, commit.
 
-1. **Rust transcript projection.** Move `toBlocks`/`findBlocks` and the changed-files logic out
-   of `nativeChat/transcript.ts` into `crates/perch-core`; then tool pairing (call ↔ result),
-   per-tool lines and outcomes, turn membership, working line (rows under "Engine").
+1. ~~Rust transcript projection.~~ Done, live-checked on Claude, Codex, Pi and OMP
+   (`native-composer.spec.ts` changed-files step: live line, a settled call paired with its
+   output, its turn, no failures, find through the core). Left over: the changed-files card still
+   asks git for the newest turn (`useLastTurnChanges`; `transcript.ts` held none of it, the web
+   keeps a one-line predicate), per-turn diffs and edit cards (rows above), tool icons, file
+   links, question calls (`AskUserQuestion`, OMP `ask`) as their own transcript rows.
 2. **Composer.** Queued-message cards and Steer, prompt recall, draft persistence across reload,
    pick up a draft typed in the terminal (replaces the "empty prompt only" refusal).
 3. **Provider notices.** Usage limit (we hit it in e2e and show nothing), retry, interrupted
@@ -82,14 +85,14 @@ Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect a
 | Virtualized message list, row height estimate, windowing, older-history pagination and autoload | `NativeChatMessageList.tsx`, `native-chat-row-height-estimate.ts`, `native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts` | ⬜ (bridge caps 129 messages, no paging) |
 | Autoscroll, jump to latest, reader scroll, reveal latest | `native-chat-autoscroll.ts`, `NativeChatJumpToLatest.tsx` | 🟡 pill + follow |
 | User message fold, prompt collapse/pill | `NativeChatUserMessageFold.tsx`, `NativeChatPromptCollapse.tsx` | ⬜ |
-| Message grouping, timestamps, turn activity line, elapsed timer, working status | `native-chat-message-grouping.ts`, `NativeChatMessageTimestamp.tsx`, `NativeChatTurnActivityLine.tsx`, `NativeChatWorkingStatus.tsx` | ⬜ |
-| Tool lines with icons, outputs, file targets, call counts; expandable runs | `NativeChatToolRun.tsx`, `NativeChatToolLine.tsx`, `NativeChatToolOutput.tsx`, `NativeChatToolIcon.tsx` | 🟡 text rows |
+| Message grouping, timestamps, turn activity line, elapsed timer, working status | `native-chat-message-grouping.ts`, `NativeChatMessageTimestamp.tsx`, `NativeChatTurnActivityLine.tsx`, `NativeChatWorkingStatus.tsx` | 🟡 activity line (text from the core, no spinner); no grouping, timestamps or timer |
+| Tool lines with icons, outputs, file targets, call counts; expandable runs | `NativeChatToolRun.tsx`, `NativeChatToolLine.tsx`, `NativeChatToolOutput.tsx`, `NativeChatToolIcon.tsx` | 🟡 verb + target rows, each opening to its input and paired output, failures in red; no icons, file links or highlighted commands |
 | Diff card and diff view | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | 🟡 plain `<pre>` |
 | Markdown: highlighted code blocks with copy, images, paced streaming | `NativeChatMarkdown.tsx`, `NativeChatCodeBlock.tsx`, `NativeChatPacedMarkdown.tsx` | 🟡 markdown yes; no copy button, no pacing |
 | File links with existence check and open-in-pane; file reference pills | `native-chat-file-link*.ts`, `NativeChatFileReferencePill.tsx` | ⬜ |
 | Web/GitHub link peek and click behaviour | `NativeChatLinkPeek.tsx`, `NativeChatGitHubLinkPeek.tsx` | ⬜ |
 | Message actions: copy, quote selection, context menu | `NativeChatCopyButton.tsx`, `NativeChatSelectionQuote.tsx`, `use-native-chat-context-menu.tsx` | ⬜ |
-| Find (with match navigation) and message rail | `NativeChatFindBar.tsx`, `NativeChatMessageRail.tsx` | ✅ basic |
+| Find (with match navigation) and message rail | `NativeChatFindBar.tsx`, `NativeChatMessageRail.tsx` | ✅ basic; the core decides what matches (`agent.ui.find`, looks inside runs) |
 | Font size / appearance settings | `use-native-chat-font-size.ts`, `native-chat-appearance*.ts` | ⬜ |
 | Empty state, loading cue, session gate, retained transcript while reconnecting | `NativeChatEmptyState.tsx`, `NativeChatSessionGate.tsx`, `use-native-chat-retained-session.ts` | 🟡 |
 | Inline visuals (Orca-specific) | `NativeChatInlineVisual.tsx` | not pursued |

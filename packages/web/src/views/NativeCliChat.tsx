@@ -17,7 +17,8 @@ import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { ContextRing } from "./nativeChat/ContextRing";
-import { blockId, findBlocks, toBlocks } from "./nativeChat/transcript";
+import { blocksOf } from "./nativeChat/transcript";
+import { useFindHits } from "./nativeChat/useFindHits";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
@@ -36,14 +37,14 @@ type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "
 // Answered prompts stay under the transcript as receipts, bounded like drafts.
 const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
-const NativeMessage = memo(function NativeMessage({ message, streaming, find }: { message: NativeUiMessage; streaming: boolean; find?: FindMark }) {
+const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
-  return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-block-id={message.id}>
+  return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
     {message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
   </article>;
-}, (before, after) => before.streaming === after.streaming && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
+}, (before, after) => before.streaming === after.streaming && before.turn === after.turn && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
 
 /** `providerId` is the agent being shown; `terminalProviderId` is what owns the PTY and leases when
  * that differs: an agent typed into a Terminal tab runs under the tab's own `terminal` runtime. */
@@ -224,11 +225,15 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   // The snapshot is what this view renders; the lifecycle's blocked state (from title evidence) can lag it.
   const waiting = snapshot?.blocked === true;
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
-  const blocks = useMemo(() => toBlocks(snapshot?.messages ?? []), [snapshot?.messages]);
-  const hits = useMemo(() => (find === null ? [] : findBlocks(blocks, find)), [blocks, find]);
+  const blocks = useMemo(() => blocksOf(snapshot), [snapshot]);
+  const messages = useMemo(() => new Map((snapshot?.messages ?? []).map((message) => [message.id, message])), [snapshot?.messages]);
+  const hits = useFindHits(sessionId, providerId, find, snapshot?.revision, !!snapshot?.transcript);
   const current = hits.length ? hits[((findIndex % hits.length) + hits.length) % hits.length] : undefined;
   const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
-  const prompts = useMemo(() => blocks.flatMap((block) => (block.kind === "message" && block.message.role === "user" ? [{ id: block.message.id, text: block.message.text }] : [])), [blocks]);
+  const prompts = useMemo(() => blocks.flatMap((block) => {
+    const message = block.kind === "message" ? messages.get(block.id) : undefined;
+    return message?.role === "user" ? [{ id: message.id, text: message.text }] : [];
+  }), [blocks, messages]);
   const jump = (id: string) => {
     atBottom.current = false;
     list.current?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
@@ -250,9 +255,12 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
-        {blocks.map((block, index) => block.kind === "run"
-          ? <RunRow key={block.id} id={block.id} steps={block.steps} live={!!snapshot?.running && index === blocks.length - 1} find={mark(blockId(block))} />
-          : <NativeMessage key={block.message.id} message={block.message} streaming={!!snapshot?.running && index === blocks.length - 1} find={mark(blockId(block))} />)}
+        {blocks.map((block) => {
+          if (block.kind === "run") return <RunRow key={block.id} run={block} find={mark(block.id)} />;
+          const message = messages.get(block.id);
+          return message && <NativeMessage key={block.id} message={message} streaming={!!block.live} turn={block.turn} find={mark(block.id)} />;
+        })}
+        {snapshot?.transcript?.working && <div className={cn(HINT, "px-1")} aria-live="polite" data-testid="native-cli-working">{snapshot.transcript.working}</div>}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}
         <Receipts items={receipts} />
         {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />
