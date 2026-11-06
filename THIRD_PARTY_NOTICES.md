@@ -75,6 +75,11 @@ Each module's `//!` header names the files it follows:
   transcript-line-decoders-claude.ts` (`structuredPatch`, in `native_ui/claude.rs`).
 - `native_ui/command_envelope.rs`: `src/shared/native-chat/native-chat-command-envelope.ts`,
   `src/shared/harness-injected-user-turns.ts`, `src/shared/claude-bash-input.ts` and their tests.
+- `native_ui/session_options.rs`: `src/shared/model-id-label.ts` (and its test), the effort and
+  permission-mode wording of `src/shared/native-chat/input/native-chat-session-option-labels.ts` and
+  `src/renderer/src/components/native-chat/native-chat-permission-mode-labels.ts`, Claude's mode
+  names from `src/main/claude/structured/claude-structured-init-proof.ts` and Codex's policies from
+  `src/shared/codex-permission-policy.ts`.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.

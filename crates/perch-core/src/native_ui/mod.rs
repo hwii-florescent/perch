@@ -28,6 +28,7 @@ pub mod dialog;
 pub mod edits;
 pub mod file_links;
 pub mod opencode;
+pub mod session_options;
 pub mod tasks;
 pub mod transcript;
 pub mod turn_diffs;
@@ -256,7 +257,7 @@ fn write_private(path: &std::path::Path, source: &str) -> anyhow::Result<()> {
 enum NativeEvent {
     Snapshot {
         #[serde(flatten)]
-        snapshot: NativeUiSnapshot,
+        snapshot: Box<NativeUiSnapshot>,
     },
     Ack {
         #[serde(rename = "requestId")]
@@ -488,6 +489,7 @@ impl NativeUiRegistry {
                                 NativeEvent::Snapshot { mut snapshot } => {
                                     if snapshot.version != 1 || (snapshot.provider_session_id.is_empty() && key.agent_id != "opencode") || snapshot.messages.len() > 129 { break; }
                                     if snapshot.blocked { snapshot.request = dialog::read(&key); }
+                                    let snapshot = *snapshot;
                                     last = Some(snapshot.clone());
                                     on_snapshot(snapshot.clone());
                                     let _ = snapshot_tx.send(Some(snapshot));
@@ -591,6 +593,7 @@ mod tests {
             truncated,
             can_load_older,
             transcript: None,
+            ..Default::default()
         }
     }
 

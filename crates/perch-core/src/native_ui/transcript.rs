@@ -1008,6 +1008,7 @@ mod tests {
             truncated: false,
             can_load_older: false,
             transcript: None,
+            ..Default::default()
         }
     }
     fn run(transcript: &NativeUiTranscript, index: usize) -> (&str, &[NativeUiStep]) {

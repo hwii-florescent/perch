@@ -303,9 +303,15 @@ impl View {
                 self.dirty = true;
             }
             "thread/settings/updated" => {
-                self.snapshot.model = params["threadSettings"]["model"]
-                    .as_str()
-                    .map(|model| clip(model, 256));
+                let settings = &params["threadSettings"];
+                self.snapshot.model = settings["model"].as_str().map(|model| clip(model, 256));
+                self.snapshot.effort = settings["effort"].as_str().map(|effort| clip(effort, 64));
+                self.snapshot.permission_mode = super::session_options::codex_permission_mode(
+                    &settings["approvalPolicy"],
+                    &settings["sandboxPolicy"],
+                    &settings["approvalsReviewer"],
+                )
+                .map(str::to_string);
                 self.dirty = true;
             }
             "item/started" | "item/completed" => {
@@ -455,6 +461,7 @@ async fn connection(
             truncated: false,
             can_load_older: false,
             transcript: None,
+            ..Default::default()
         },
         turn: None,
         message_bytes: 0,
@@ -550,6 +557,15 @@ async fn connection(
                 "native Codex identity changed"
             );
             view.snapshot.model = joined["model"].as_str().map(|model| clip(model, 256));
+            view.snapshot.effort = joined["reasoningEffort"]
+                .as_str()
+                .map(|effort| clip(effort, 64));
+            view.snapshot.permission_mode = super::session_options::codex_permission_mode(
+                &joined["approvalPolicy"],
+                &joined["sandbox"],
+                &joined["approvalsReviewer"],
+            )
+            .map(str::to_string);
             ensure!(
                 joined["initialTurnsPage"].is_object(),
                 "Codex did not return native history"
@@ -862,6 +878,7 @@ mod tests {
                 truncated: false,
                 can_load_older: false,
                 transcript: None,
+                ..Default::default()
             },
             message_bytes: 0,
             turn: Some("turn".into()),
@@ -892,6 +909,11 @@ mod tests {
         );
         view.event(&json!({"method":"thread/tokenUsage/updated","params":{"threadId":"native","tokenUsage":{"last":{"totalTokens":0},"modelContextWindow":272000}}}));
         assert!(view.snapshot.context.is_none());
+        // Read-back of the thread's own settings, not a guess from how Perch launched it.
+        view.event(&json!({"method":"thread/settings/updated","params":{"threadId":"native","threadSettings":{"model":"gpt-5.6-luna","effort":"low","approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"},"approvalsReviewer":"user"}}}));
+        assert_eq!(view.snapshot.model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(view.snapshot.effort.as_deref(), Some("low"));
+        assert_eq!(view.snapshot.permission_mode.as_deref(), Some("ask"));
         view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"stopped","status":"interrupted"}}}));
         let stopped = view.snapshot.messages.last().unwrap();
         assert_eq!(

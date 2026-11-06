@@ -792,7 +792,7 @@ pub struct NativeUiEditHunk {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeUiSnapshot {
     pub version: u32,
@@ -802,6 +802,14 @@ pub struct NativeUiSnapshot {
     pub provider_session_id: String,
     pub cwd: String,
     pub model: Option<String>,
+    /// The reasoning effort the provider reports for the session, as it writes it (`high`).
+    /// Codex only; Claude's hooks and transcript do not carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// The permission mode the provider reports: `ask`, `accept-edits`, `auto`, `full-access` or
+    /// `plan` (`native_ui/session_options.rs`). Claude (its last hook event) and Codex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
     pub running: bool,
     /// The turn is paused on a human: a permission prompt or a question.
     /// Implies `running`. Absent from older peers and bridges.
@@ -823,6 +831,26 @@ pub struct NativeUiSnapshot {
     /// (`native_ui::transcript`). Absent from bridges and from older cores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Box<crate::native_ui::transcript::NativeUiTranscript>>,
+    /// The model, effort and mode worded for the toolbar, read-only, derived from the fields above
+    /// when the core sends the snapshot to a viewer. Absent from bridges and from older cores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<NativeUiOptions>,
+}
+
+/// What the toolbar says about a session's options; display text, never an instruction to change
+/// anything.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiOptions {
+    /// "Haiku 4.5".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// "High".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// "Accept edits".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
 }
 
 /// What a request for an older page came to (Orca `NativeChatOlderPageResult`, less `superseded`:

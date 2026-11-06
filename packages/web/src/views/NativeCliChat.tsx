@@ -26,6 +26,7 @@ import { useOlderHistory } from "./nativeChat/useOlderHistory";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
+import { OptionLabels } from "./nativeChat/OptionLabels";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
@@ -315,7 +316,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); setFind((value) => value ?? ""); } }}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
-      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model}>{snapshot.model}</span>}
+      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>}
+      <OptionLabels options={snapshot?.options} />
       {snapshot?.context && <span className={snapshot.model ? undefined : "ml-auto"}><ContextRing context={snapshot.context} /></span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>

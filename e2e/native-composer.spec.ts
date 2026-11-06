@@ -147,7 +147,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(box).toBeEnabled();
     // Fail before any paid turn if the cheap-model pin did not take.
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
 
     // 1. `@file`: pick the mention from the menu, the agent reads the file it names.
     await check("@file", async () => {
@@ -313,6 +313,13 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       const ring = ui.getByTestId("native-cli-context");
       await expect(ring).toBeVisible({ timeout: 15_000 });
       expect(Number(await ring.getAttribute("data-percent"))).toBeGreaterThan(0);
+    });
+    // 6b. The toolbar reads the model and permission mode back from the CLI. Perch starts Claude with approvals
+    // bypassed and its prompt hooks name the mode; Claude reports no effort, so none is shown.
+    if (provider === "claude") await check("toolbar options", async () => {
+      await expect(ui.locator(".native-cli-chat__model")).toHaveText("Haiku 4.5");
+      await expect(ui.getByTestId("native-cli-permission-mode")).toHaveText("Full access");
+      await expect(ui.getByTestId("native-cli-effort")).toHaveCount(0);
     });
     // 7. Text half-typed on the CLI's own line is picked up when the chat opens, and the next send replaces it:
     // the transcript's message is exactly the composer's text, not the terminal draft with it appended.

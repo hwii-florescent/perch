@@ -220,7 +220,7 @@ test("a paired phone switches Chat/UI ↔ CLI and sends a review packet from the
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 40_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled({ timeout: 20_000 });
     // Stop here, before any real turn, if the cheap-model pin did not take.
-    await expect(ui.locator(".native-cli-chat__model")).toContainText("haiku");
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", /haiku/);
     const nativePid = await ui.getAttribute("data-native-pid");
     expect(nativePid).toBeTruthy();
     await phone.screenshot({ path: testInfo.outputPath("phone-ui-mode.png"), fullPage: true });

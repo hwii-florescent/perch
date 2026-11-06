@@ -153,6 +153,23 @@ Not ported: Orca's `surfaceNativeChatCommandOutputs` (a reporting command's answ
 stays hidden), the host-answered commands, and any non-Claude provider (Codex/Pi/OMP write no envelopes).
 Live: the `native-composer.spec.ts` claude "command menu" check asserts the `/perchping` row.
 
+Row 10 (model, effort, mode labels and read-back) landed 2026-11-06 **read-only**: `native_ui/
+session_options.rs` (Orca's `labelFromModelId` with its test, the effort and mode wording, Claude's and
+Codex's mode mapping), `NativeUiSnapshot.effort`/`permissionMode` (raw reports, optional),
+`NativeUiSnapshot.options` (worded in the core when a snapshot goes to a viewer), `nativeChat/
+OptionLabels.tsx`. The toolbar shows "Haiku 4.5" (the raw id stays in `data-model` and the title) and,
+when reported, effort and mode as plain text. **What each provider reports (probed 2026-11-06):**
+Claude 2.1.319 `UserPromptSubmit` hook input carries `permission_mode` (`acceptEdits` seen live;
+`SessionStart` has none, so the mode is as of the latest prompt/tool hook) and nothing names effort
+(the `SessionStart` input has only `model`; the banner reads "Haiku 4.5 · Claude Max" and effort
+appears only in a user's own status line), so Claude shows no effort and Orca's banner reader
+(`claude-terminal-session-options.ts`) was not ported. Codex 0.166's `thread/settings/updated` and
+`thread/resume` carry `model`, `effort`/`reasoningEffort`, `approvalPolicy`, `sandbox(Policy)` and
+`approvalsReviewer`; the mode is one of Orca's three policies or nothing (unit-tested; no live Codex
+run). Pi/OMP/OpenCode: model only. **Pending the owner's yes (PARITY, DECISIONS "no model chrome over a
+live session"): the pickers and typed `/model`, `/effort`, mode-cycle commands that change a running
+session.** Nothing here writes to a session.
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.

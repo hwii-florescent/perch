@@ -199,6 +199,7 @@ fn read_event(path: &Path) -> anyhow::Result<(u32, Value)> {
                     | "hook_event_name"
                     | "model"
                     | "to_model"
+                    | "permission_mode"
                     | "prompt"
                     | "tool_name"
                     | "tool_use_id"
@@ -672,9 +673,12 @@ pub(super) async fn observe(
                 if !changed && pending.is_empty() && !was_blocked { continue; }
                 let (mut running, mut blocked) = (false, false);
                 let mut model = start["model"].as_str().map(|model| clip(model, 256));
+                // SessionStart carries no mode; the prompt and tool hooks do, so it is as of the latest of them.
+                let mut permission_mode = None;
                 let mut ordered: Vec<_> = events.values().filter(|(_, event_pid, event)| event_pid == pid && event["session_id"] == session).collect();
                 ordered.sort_by(|left, right| left.0.cmp(&right.0));
                 for (_, _, event) in ordered {
+                    if let Some(mode) = event["permission_mode"].as_str().and_then(super::session_options::claude_permission_mode) { permission_mode = Some(mode.to_string()); }
                     if event["hook_event_name"] == "PostModelSwitch" { model = event["to_model"].as_str().map(|model| clip(model, 256)); }
                     else if let Some(state) = turn_state(event) { (running, blocked) = state; }
                 }
@@ -683,7 +687,7 @@ pub(super) async fn observe(
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
                 let request = if blocked { super::dialog::read(key) } else { None };
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, can_load_older: history.1 && shown < MAX_WINDOW, transcript: None };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, effort: None, permission_mode, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, can_load_older: history.1 && shown < MAX_WINDOW, transcript: None, options: None };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;
@@ -989,6 +993,25 @@ mod tests {
             "unlisted fields stay dropped"
         );
         assert_eq!(turn_state(&event), Some((true, true)));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Claude 2.1.319's UserPromptSubmit hook input names the mode (`acceptEdits`, seen live);
+    /// SessionStart does not.
+    #[test]
+    fn a_prompt_hook_keeps_the_permission_mode_the_toolbar_reads_back() {
+        let dir = std::env::temp_dir().join(format!("perch-hook-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("UserPromptSubmit.event");
+        let body = serde_json::json!({"session_id": "s", "hook_event_name": "UserPromptSubmit", "permission_mode": "acceptEdits", "prompt": "hi"});
+        fs::write(&path, format!("4242\n{body}")).unwrap();
+        let (_, event) = read_event(&path).unwrap();
+        assert_eq!(
+            event["permission_mode"]
+                .as_str()
+                .and_then(super::super::session_options::claude_permission_mode),
+            Some("accept-edits")
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

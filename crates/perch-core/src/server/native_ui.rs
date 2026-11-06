@@ -244,7 +244,8 @@ pub(super) fn live_commands(
         .map_or_else(Vec::new, |bridge| bridge.slash_commands())
 }
 
-/// The snapshot as viewers receive it: the bridge's raw messages plus what the chat draws.
+/// The snapshot as viewers receive it: the bridge's raw messages plus what the chat draws and the
+/// toolbar's read-only option labels.
 /// ponytail: the projection repeats tool inputs and outputs, so a snapshot can be about twice the
 /// bridge's 192 KB message cap (each step body is capped at 4000 chars). Drop `messages` text the
 /// projection carries once no older web can be talking to this core.
@@ -252,6 +253,7 @@ fn with_transcript(
     mut snapshot: crate::protocol::NativeUiSnapshot,
 ) -> crate::protocol::NativeUiSnapshot {
     snapshot.transcript = Some(Box::new(crate::native_ui::transcript::project(&snapshot)));
+    snapshot.options = crate::native_ui::session_options::options_of(&snapshot);
     snapshot
 }
 

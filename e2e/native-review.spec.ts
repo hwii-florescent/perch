@@ -88,7 +88,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await setChatMode(page, "ui");
     const ui = page.getByTestId("native-cli-chat");
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
     const pid = await ui.getAttribute("data-native-pid");
     expect(nativeKey!.workspaceId).toBe(workspaceId);
     await ui.getByTestId("native-cli-composer").fill("Reply READY only. Do not use tools or modify files.");

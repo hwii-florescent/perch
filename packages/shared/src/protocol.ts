@@ -172,6 +172,10 @@ export interface NativeUiSnapshot {
   providerSessionId: string;
   cwd: string;
   model: string | null;
+  /** The reasoning effort the provider reports, as it writes it (`high`). Codex only. */
+  effort?: string;
+  /** `ask`, `accept-edits`, `auto`, `full-access` or `plan`: Claude's last hook event, Codex's thread settings. */
+  permissionMode?: string;
   running: boolean;
   /** The turn is paused on a human: a permission prompt or a question. Implies `running`. */
   blocked?: boolean;
@@ -185,6 +189,18 @@ export interface NativeUiSnapshot {
   canLoadOlder?: boolean;
   /** Absent from older cores. */
   transcript?: NativeUiTranscript;
+  /** The model, effort and mode worded for the toolbar, read-only. Absent from older cores. */
+  options?: NativeUiOptions;
+}
+
+/** Display text for the toolbar (`native_ui/session_options.rs`); never an instruction to change anything. */
+export interface NativeUiOptions {
+  /** "Haiku 4.5". */
+  model?: string;
+  /** "High". */
+  effort?: string;
+  /** "Accept edits". */
+  permissionMode?: string;
 }
 
 /** Context use from the last model response. Never a cost or a quota. */

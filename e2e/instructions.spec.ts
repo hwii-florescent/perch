@@ -136,7 +136,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(box).toBeEnabled();
     // Fail before the paid turn if the cheap-model pin did not take.
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
 
     // What was passed: the flags name a private file (Claude, Pi, OMP) or the app-server's argument (Codex),
     // and never replace the base prompt or hide the repository's own instructions.
