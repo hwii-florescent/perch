@@ -37,7 +37,15 @@ pub(crate) struct PreparedCommand {
 /// login-shell PATH `boot.rs` works to adopt, and anything the user exported
 /// for their CLI (an API key, `ANTHROPIC_MODEL`, `CODEX_HOME`), silently never
 /// arrives. Inheriting worked only when perch happened to start the server.
-pub(crate) fn prepare(argv: Vec<String>, policy: &EnvironmentPolicy) -> Result<PreparedCommand> {
+///
+/// `scoped` is set last, after every policy rule: the agent's own identity, which no manifest
+/// rule or inherited value may override. An identity this core itself inherited (it was started
+/// from an agent's shell) is never handed on.
+pub(crate) fn prepare(
+    argv: Vec<String>,
+    policy: &EnvironmentPolicy,
+    scoped: &[(String, String)],
+) -> Result<PreparedCommand> {
     // Elsewhere there is no tmux and no bootstrap: the child inherits directly.
     #[cfg(not(unix))]
     if *policy == EnvironmentPolicy::default() {
@@ -60,7 +68,7 @@ pub(crate) fn prepare(argv: Vec<String>, policy: &EnvironmentPolicy) -> Result<P
             );
         }
     }
-    prepare_with_parent(argv, policy, parent)
+    prepare_with_parent(argv, policy, parent, scoped)
 }
 
 fn quote(value: &str) -> String {
@@ -76,6 +84,7 @@ fn prepare_with_parent(
     argv: Vec<String>,
     policy: &EnvironmentPolicy,
     parent: BTreeMap<String, String>,
+    scoped: &[(String, String)],
 ) -> Result<PreparedCommand> {
     anyhow::ensure!(!argv.is_empty(), "provider command is empty");
     // A name this shell cannot export (bash's exported functions arrive as
@@ -102,6 +111,9 @@ fn prepare_with_parent(
     for name in &policy.unset {
         environment.remove(name);
     }
+    environment.remove(perchd::agent_cli::SESSION_ENV);
+    environment.remove(perchd::agent_cli::TOKEN_ENV);
+    environment.extend(scoped.iter().cloned());
     let mut script = String::from("#!/bin/sh\n/bin/rm -f -- \"$0\"\n");
     for (name, value) in environment {
         anyhow::ensure!(
@@ -191,7 +203,7 @@ mod tests {
         .into_iter()
         .collect();
         let prepared = prepare_with_parent(vec!["/bin/sh".into(), "-c".into(),
-            "printf '%s|%s|%s|%s' \"$ALLOWED\" \"${REMOVED-unset}\" \"${OUTSIDE-unset}\" \"$VALUE\"".into()], &policy, parent).unwrap();
+            "printf '%s|%s|%s|%s' \"$ALLOWED\" \"${REMOVED-unset}\" \"${OUTSIDE-unset}\" \"$VALUE\"".into()], &policy, parent, &[]).unwrap();
         assert!(!prepared
             .argv
             .iter()
@@ -250,6 +262,7 @@ mod tests {
             ],
             &EnvironmentPolicy::default(),
             parent,
+            &[],
         )
         .unwrap();
         assert_eq!(prepared.argv[0], "/bin/sh", "must not clear the child env");
@@ -269,12 +282,55 @@ mod tests {
         );
     }
 
+    /// The identity is set last. A value this core inherited (it was started from an agent's
+    /// shell) or a manifest rule never reaches the child in its place, and without a launch
+    /// identity the child gets none at all.
+    #[test]
+    fn only_the_launchs_own_identity_reaches_the_child() {
+        let parent: BTreeMap<String, String> = [
+            ("PERCH_TOKEN".to_string(), "inherited".to_string()),
+            ("PERCH_SESSION".to_string(), "inherited".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let policy = EnvironmentPolicy {
+            set: [("PERCH_TOKEN".to_string(), "from-manifest".to_string())]
+                .into_iter()
+                .collect(),
+            ..EnvironmentPolicy::default()
+        };
+        let probe = vec![
+            "/bin/sh".to_string(),
+            "-c".into(),
+            "printf '%s|%s' \"${PERCH_SESSION-unset}\" \"${PERCH_TOKEN-unset}\"".into(),
+        ];
+        let run = |scoped: &[(String, String)]| {
+            let prepared =
+                prepare_with_parent(probe.clone(), &policy, parent.clone(), scoped).unwrap();
+            let script = fs::read_to_string(&prepared.bootstrap.as_ref().unwrap().0).unwrap();
+            assert!(!prepared.argv.iter().any(|arg| arg.contains("launch-token")));
+            assert!(script.contains("launch-token") == !scoped.is_empty());
+            let output = Command::new(&prepared.argv[0])
+                .args(&prepared.argv[1..])
+                .output()
+                .unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        assert_eq!(run(&[]), "unset|unset");
+        let scoped = [
+            ("PERCH_SESSION".to_string(), "s1".to_string()),
+            ("PERCH_TOKEN".to_string(), "launch-token".to_string()),
+        ];
+        assert_eq!(run(&scoped), "s1|launch-token");
+    }
+
     #[test]
     fn unused_bootstrap_is_removed_with_its_runtime_guard() {
         let prepared = prepare_with_parent(
             vec!["/bin/true".into()],
             &EnvironmentPolicy::default(),
             BTreeMap::new(),
+            &[],
         )
         .unwrap();
         let path = prepared.bootstrap.as_ref().unwrap().0.clone();

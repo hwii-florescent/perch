@@ -244,35 +244,70 @@ names from the rollout's `session_meta.source.subagent.thread_spawn`
 Check: Rust tests for roster routing (main events unchanged), transcript/meta parsing;
 e2e on Claude haiku with one native subagent and one TodoWrite turn.
 
-## Slice 3: identity and authority (*own* design; Orca ids are not credentials)
+## Slice 3 landed (2026-11-06): identity and authority (*own* design; Orca ids are not credentials)
 
-- **Incarnation:** new `agent_identity.rs`: one row per launch (`session_id`,
-  `incarnation`, `parent`, `run_id`, `token_hash`, `revoked_at`). Reuse perchd's
-  per-runtime incarnation where it exists.
-- **Token:** random 32 bytes, SHA-256 stored like `devices.rs` `hash_token`. Mint in
-  `agent_runtime.rs` before `provider_environment::prepare` (a clone of
-  `manifest.environment.set`), never in perchd's `terminal_env`.
-- **Auth:** a scoped-agent branch in `server/mod.rs` `authorize_request` **before** the
-  loopback exemption. A request carrying an agent token gets only agent operations on
-  its own run, even from loopback. Today any local process has full authority. Narrowing
-  that for non-agent clients is a separate decision; record it, don't change it here.
-- **Discovery:** 0600 file `<perch dir>/core.json` with the address. Desktop ports change
-  per launch, so the CLI reads the file each call.
-- **Leaks:** unset the token in `in_shell` (`agent_runtime.rs`) before the post-exit
-  login shell, and revoke it on exit, stop or incarnation change. Never log it.
-- **Binary:** `crates/perchd/src/bin/perch.rs` → subcommands. Move `ps`, `list`,
-  `cleanup`, `release`, `serve`, `connect` under `perch daemon`, keeping the old verbs as
-  aliases. Then `perch whoami`, `perch guide`, `perch report`.
-- **`perch guide`:** our own text, kept in the binary so it matches its version.
-  Orca's preamble (`src/main/runtime/orchestration/preamble.ts`) and guide headings
-  (`src/cli/bundled-skill-guides.ts`, Recipe / Never / When you are woken / Safety) are
-  MIT and may be adapted. Keep: ask, report a blocker or finish, nothing else; return to
-  idle after reporting; no outside channels; a direct user instruction wins. Add: only
-  person-started turns may spawn, children cannot spawn, reports are claims, messages
-  never approve.
-- Check: tests for cross-run refusal, stale incarnation refusal, a token from loopback
-  getting no general authority, no token in the post-exit shell, alias verbs; live `perch
-  whoami` from all four providers.
+What later slices build on:
+
+- **Identity.** `agent_identity.rs` (pure: token mint and hash, the pointer text, the `perch`
+  binary lookup, the `IdentityStore` trait), `db/agent_identity.rs` (table `agent_identities`:
+  `incarnation`, `workspace_id`, `session_id`, `provider_id`, `token_hash`, `created_at`,
+  `revoked_at`, `report`, `reported_at`). One row per *new* local launch of a Claude, Codex, Pi,
+  OMP or Terminal session; issuing revokes the session's earlier rows. **Deviations from the
+  plan:** no `parent`/`run_id` columns (the incarnation is the run id; the parent link is the
+  session record's, slice 4); perchd's own incarnation is not reused (it is per PTY runtime, not
+  per Perch launch); the token is two OS-random UUIDs (244 random bits), not raw bytes.
+- **A reattach never mints.** `agent_runtime::launch_identity` issues only when perchd confirms the
+  terminal is absent (`session_state == Exited`) and the attach may start a process; an existing
+  process keeps the environment it started with, so minting for it would revoke its own token.
+  Unknown is not absent.
+- **Environment.** `PERCH_SESSION` and `PERCH_TOKEN`, set last by `provider_environment::prepare`
+  (new `scoped` argument): no manifest rule or inherited value overrides them, and an identity the
+  core itself inherited (started from an agent's shell) is removed from every child and from the
+  core's own environment at boot. `in_shell` unsets both after the agent exits, before the
+  person's login shell. **Not verified live:** the post-exit shell (unit-tested with a stand-in
+  shell script).
+- **Revocation.** On a confirmed exit (the exit listener's `!alive` branch, so also stop and
+  hibernate), on the next launch of the session, when the session is deleted, and at boot for any
+  run perchd confirms gone (by incarnation, so it cannot hit a launch that started meanwhile). A
+  lost connection is not an exit.
+- **Transport (decided by the supervisor).** `POST {base}agent/whoami` and `agent/report`,
+  `Authorization: Bearer <token>`, JSON body naming `session`. `server/agent.rs`: only agent tokens
+  (no device cookie, no loopback exemption), only local (no proxy header, no `Origin`), token and
+  named session must match (cross-run refusal). `authorize_request` refuses a request that carries
+  an agent token anywhere else (header, `?token=`, cookie), even from loopback. The CLI reads
+  `<daemon dir>/core.json` (0600: `pid`, `port`, `basePath`; the daemon dir honours `PERCHD_DIR`,
+  so isolated probes stay isolated) on every call and refuses a file whose pid is gone. The token
+  is never in argv, output, logs or errors.
+- **Still open, by instruction:** a local process *without* a token keeps full authority over every
+  other route (the loopback exemption is unchanged). The slice's check "loopback no longer gives
+  agents full authority" is therefore met only for token holders: they get less than anonymous
+  local callers, which an agent can always become by omitting the token. Narrowing local access is a
+  separate owner decision; see ROADMAP.
+- **`perch` on the agent's PATH (decided by the supervisor).** The real binary is `perch` beside the
+  core (`perchd/src/bin/perch.rs`; `binary_beside` also finds it from a test binary's `deps/`).
+  `shell_integration::prepare` writes `bin/perch` into the session's private shim directory, which
+  every launch already puts first on its PATH, as a two-line script that `exec`s the real binary by
+  absolute path (never by PATH search, so it cannot run itself). No binary beside the core: no
+  shim, **no identity and no pointer either**, and an `info` line says why; an old shim is removed.
+  Tested for the typed-agent shim (all four providers read the pointer) and the shim itself; picker
+  launch, wake/resume and the Codex app-server-backed TUI all go through `with_instructions` and
+  `shell_integration::prepare` in one place. **Packaged builds must ship `perch` beside the core**
+  (ARCHITECTURE); that is a packaging follow-up, not done.
+- **The pointer** (`POINTER`, about 250 characters) is appended at each launch to whatever the
+  session pinned, for Claude, Codex, Pi, OMP (file or Codex's `developer_instructions` argv) and for
+  the shim of a Terminal session. It is **not stored in the pin** (a constant that depends on whether
+  the binary exists now); the stored pin, its hash and the Instructions dialog are unchanged.
+- **Binary.** `perch whoami [--json]`, `perch report <text>` (or stdin; at most 4,000 characters;
+  the latest report is kept on the run and nothing reads it yet), `perch guide` (own text, in the
+  binary). `perch daemon <verb>` runs the daemon verbs; the bare `ps`, `list`, `cleanup`, `release`,
+  `serve`, `connect` remain aliases. **Slice 4 must decide** what `perch list` means: it is still
+  the daemon's session list, and the plan wants it to list sub-sessions.
+- **Live check:** `e2e/instructions.spec.ts` (one extra `perch whoami` turn per provider, haiku and
+  luna): the reply names the session, the session has exactly one live identity row, and no
+  `perch_agent_` string reaches the chat, `ps` or the core log.
+- The guide text still describes only `whoami`, `report` and `guide`; each later slice adds its
+  verbs and the rules that go with them (only person-started turns may spawn, children cannot
+  spawn, messages never approve).
 
 ## Slice 4: spawn, list, stop, reports
 

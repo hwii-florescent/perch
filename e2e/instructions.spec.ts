@@ -158,6 +158,14 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
     } else if (provider === "omp") {
       expect(ours).toContain(`--add-dir=${referenceFolder}`);
     }
+    // The pointer to `perch guide` is pinned launch text beside the Instructions, never a flag of its own.
+    const launchText = provider === "codex" ? ours! : fs.readFileSync(ours!.match(/(\/\S*instructions\.(?:claude|pi|omp)\.md)/)![1], "utf8");
+    expect(launchText).toContain("perch guide");
+    // The launch was issued exactly one live identity, whose token is stored only as a hash.
+    const identityRows = () => execFileSync("sqlite3", ["-readonly", path.join(fixture, "history.sqlite"), `select session_id || '|' || provider_id from agent_identities where revoked_at is null`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    const identities = identityRows();
+    expect(identities.map((row) => row.split("|")[1])).toEqual([provider]);
+    const [sessionId] = identities[0].split("|");
     for (const line of ours ? [ours] : []) {
       expect(line).not.toContain("--system-prompt ");
       expect(line).not.toContain("--no-context-files");
@@ -182,13 +190,25 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
     await expect(assistant.getByTestId("copy-message")).toHaveAttribute("aria-label", "Copied");
     expect((await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(reply.trim());
 
+    // The agent's own shell reaches Perch as that agent: `perch whoami` names this session.
+    await box.fill("Run the shell command `perch whoami` and reply with exactly the value on its session line and nothing else.");
+    await ui.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 60_000 });
+    await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+    const identified = await ui.locator('[data-native-role="assistant"]').last().innerText();
+    await testInfo.attach("whoami-reply", { body: identified, contentType: "text/plain" });
+    expect(identified).toContain(sessionId);
+    // The secret never leaves its environment: not in the chat, the process list or the core's log.
+    const everywhere = [await ui.innerText(), execFileSync("ps", ["-axo", "command"], { encoding: "utf8" }), fs.readFileSync(path.join(fixture, "core.log"), "utf8")].join("\n");
+    expect(everywhere).not.toContain("perch_agent_");
+
     if (provider === "claude") {
       // A link naming a file in the workspace becomes a pill that opens it; one naming nothing stays inert.
       fs.mkdirSync(path.join(fixture, "src"));
       fs.writeFileSync(path.join(fixture, "src/main.rs"), "fn pill_target() {}\n");
       await box.fill("Reply with exactly this text and nothing else, using no tools: See [main](src/main.rs:1) and [gone](src/gone.rs).");
       await ui.getByRole("button", { name: "Send", exact: true }).click();
-      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 60_000 });
+      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(3, { timeout: 60_000 });
       await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
       const linked = ui.locator('[data-native-role="assistant"]').last();
       const pill = linked.locator('a[data-file-path="src/main.rs"]');

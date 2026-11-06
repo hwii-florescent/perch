@@ -451,11 +451,18 @@ UI rows from step 0 continue between slices.
 2. **UI rows sub-sessions need:** status with nested child rows, subagent rows from
    SubagentStart/Stop hooks, docked task list. Check: unit tests on the Rust projection;
    e2e with a native Claude subagent and a TodoWrite turn.
-3. **Identity and authority:** session incarnation, scoped hashed token, discovery file,
-   the merged `perch` binary with `whoami`, `guide`, `report`. Check: tests that a token
-   cannot act outside its run, a stale incarnation is refused, loopback no longer gives
-   agents full authority, and the post-exit shell has no token; live `perch whoami` from
-   all four providers.
+3. **Identity and authority. Done 2026-11-06** (details in the worker guide): session
+   incarnation, scoped hashed token in `PERCH_TOKEN`, discovery file `core.json`, the merged
+   `perch` binary with `whoami`, `guide`, `report` and `perch daemon …` (old verbs still
+   work), the pointer appended to every launch. Tests: a token cannot act outside its run
+   or on any other route, a stale incarnation is refused, the post-exit shell has no
+   token; live `perch whoami` from all four providers. **Open for the owner:** a local
+   process *without* a token still has full authority over every other route (the loopback
+   exemption is unchanged, as the plan said to record rather than change it), so an agent
+   can drop its token and be as powerful as before; narrowing that is a separate decision.
+   **Packaging follow-up:** a packaged build must ship `perch` beside the core, or agents
+   get no identity and no pointer. Slice 4 must also decide what `perch list` means (today
+   the daemon's session list).
 4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
    person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
    duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed
