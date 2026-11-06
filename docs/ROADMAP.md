@@ -419,8 +419,9 @@ The ten questions these settle (as posed 2026-11-05; answers above):
 10. Codex app-server and Claude structured sessions: re-check provider terms each release;
     Anthropic paused, not dropped, SDK subscription changes.
 
-**Slices, in order.** One at a time; each ends with its check passing, docs updated and
-a local commit. Live turns only on `claude-haiku-4-5` or `gpt-5.6-luna`. Claude-desktop
+**Slices, in order.** Where the code comes from (Orca ports, Claude behaviour specs),
+target modules and checks per slice: [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md).
+One at a time; each ends with its check passing, docs updated and a local commit. Live turns only on `claude-haiku-4-5` or `gpt-5.6-luna`. Claude-desktop
 UI rows from step 0 continue between slices.
 
 0. **Feasibility spike.** Zero tokens first: the pointer text reaches each model
