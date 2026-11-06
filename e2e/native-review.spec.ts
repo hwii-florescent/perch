@@ -10,6 +10,7 @@ import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { startFromPanel } from "./projects";
+import { localStorageState } from "./localAuth";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: phone review respects control and reaches the native CLI exactly once`, async ({ page, context, browser }, testInfo) => {
   test.setTimeout(180_000);
@@ -105,7 +106,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await addComment(page, "review_first", `First note ${token}`);
     await addComment(page, "review_second", `Second note ${token}`);
 
-    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: localStorageState() });
     phoneContext.setDefaultTimeout(15_000);
     phoneContext.setDefaultNavigationTimeout(20_000);
     await phoneContext.addInitScript((id) => { if (location.protocol !== "http:" || window !== window.top) return; localStorage.setItem("perch.onboarding.seen", "1"); localStorage.setItem("perch.sessionId", id); }, nativeKey!.sessionId);

@@ -11,6 +11,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::wire::*;
@@ -307,6 +308,7 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
     std::env::set_var("PERCH_SETTINGS", &settings_path);
     let db_path = root.join("history.sqlite");
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let local_ui = crate::local_ui::LocalUi::in_process();
     let server = tokio::spawn(crate::server::run(
         crate::server::ServerOptions {
             port: 0,
@@ -319,6 +321,7 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
             ready_tx: Some(ready_tx),
             // The LAN listener stays off: the relay alone must let a phone in.
             phone_access_port: None,
+            local_ui: local_ui.clone(),
         },
         Arc::new(crate::db::HistoryDb::open(&db_path).unwrap()),
         root.display().to_string(),
@@ -327,7 +330,12 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
         .await
         .unwrap()
         .unwrap();
-    let (mut desktop, _) = tokio_tungstenite::connect_async(loopback(address, "/ws"))
+    let mut desktop_request = loopback(address, "/ws").into_client_request().unwrap();
+    desktop_request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", local_ui.token()).parse().unwrap(),
+    );
+    let (mut desktop, _) = tokio_tungstenite::connect_async(desktop_request)
         .await
         .unwrap();
 
@@ -424,6 +432,13 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()["paired"],
         false
+    );
+    // Not even the real local UI token, which is good only for a caller on this machine.
+    let (_, _, body) = phone.http(6, get_pair(Some(local_ui.token())), &[]).await;
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["paired"],
+        false,
+        "a relay guest cannot use the local UI token"
     );
     let (status, _, _) = phone
         .http(

@@ -23,6 +23,7 @@ import { test, expect, type Page, type Locator } from "@playwright/test";
 import * as fs from "fs";
 import { execSync } from "child_process";
 import { startChat } from "./projects";
+import { withLocalToken } from "./localAuth";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -66,7 +67,7 @@ function setupFixtures(): void {
 
 function openWs(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(withLocalToken(url));
     ws.onopen = () => resolve(ws);
     ws.onerror = (ev) => reject(new Error(`WebSocket error connecting to ${url}: ${String(ev)}`));
   });
@@ -116,7 +117,7 @@ async function upsertNavHost(): Promise<void> {
           sshHost: "",
           remotePort: 7800,
           enabled: true,
-          directUrl: "ws://127.0.0.1:7800/ws",
+          directUrl: withLocalToken("ws://127.0.0.1:7800/ws"),
         },
       }),
     );

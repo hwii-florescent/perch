@@ -6,6 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { localStorageState } from "./localAuth";
 
 // Real desktop/mobile views with a fake native IPC seam: never request consent,
 // open System Settings, run an agent or send a real OS notification.
@@ -30,7 +31,7 @@ test("notification permission, banner status and explicit actions on desktop and
     }, { timeout: 20_000 }).toBe(true);
     const shots = path.join(repo, ".impeccable/review"); fs.mkdirSync(shots, { recursive: true });
     for (const [size, viewport] of [["desktop", { width: 1400, height: 900 }], ["mobile", { width: 390, height: 844 }]] as const) {
-      const context = await browser.newContext({ viewport });
+      const context = await browser.newContext({ viewport, storageState: localStorageState() });
       try {
         await context.addInitScript(() => {
           if (location.origin === "null") return;

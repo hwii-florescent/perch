@@ -13,6 +13,10 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
   presents a token: a paired device, the core's own local UI (a per-launch token handed
   to its desktop webview and headless dev/e2e clients), or an agent (only `/agent/*`).
   An agent omitting its token gets nothing. `PERCH_REQUIRE_PAIRING` becomes moot.
+  *Built 2026-11-06* (details and threat model in [ARCHITECTURE](ARCHITECTURE.md)): the desktop
+  keeps its token in memory; a federation hub presents a remote core's token as a header
+  (read over SSH); `PERCH_LOCAL_TOKEN` is a launcher/test hook only. Not a boundary against a
+  same-user process that deliberately reads the user's files or environments.
 - **`perch list` lists the caller's run** (lead and children). The daemon list is only
   `perch daemon list`; `ps`, `cleanup` and `release` keep their bare aliases.
 - **Packaging now:** desktop and headless packages ship `perch` beside the core, with a

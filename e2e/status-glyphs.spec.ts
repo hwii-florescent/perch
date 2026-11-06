@@ -7,6 +7,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { startChat } from "./projects";
+import { localStorageState } from "./localAuth";
 
 const SLOW_PROMPT = "Run the shell command `sleep 8`, then reply with exactly: pong";
 
@@ -54,8 +55,8 @@ test.describe("Status glyph system", () => {
   });
 
   test("G3. an unseen completion shows the done dot until viewed", async ({ browser }) => {
-    const ctx1 = await browser.newContext();
-    const ctx2 = await browser.newContext();
+    const ctx1 = await browser.newContext({ storageState: localStorageState() });
+    const ctx2 = await browser.newContext({ storageState: localStorageState() });
     try {
       const page1 = await ctx1.newPage();
       await open(page1);

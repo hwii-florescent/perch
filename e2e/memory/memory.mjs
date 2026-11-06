@@ -30,6 +30,7 @@ import { spawn, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { localStorageState } from "../localAuth.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = 7792;
@@ -104,7 +105,7 @@ const MOCK = () => {
 
 /** A page on perch with the mocked sessions, `memory-0` shown. */
 async function open(browser, { webgl, noWebgl2 = false }) {
-  const page = await (await browser.newContext({ viewport: { width: 1512, height: 949 }, deviceScaleFactor: 2, serviceWorkers: "block" })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1512, height: 949 }, deviceScaleFactor: 2, serviceWorkers: "block", storageState: localStorageState() })).newPage();
   page.on("pageerror", (error) => check(false, `page error: ${error.message}`));
   await page.addInitScript(({ webgl, noWebgl2 }) => {
     localStorage.setItem("perch.onboarding.seen", "1");

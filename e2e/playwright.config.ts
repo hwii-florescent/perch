@@ -4,6 +4,7 @@ import * as os from "os";
 import { CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import * as fs from "node:fs";
 import { fixtureRuntimeEnv } from "./fixtureRuntime";
+import { LOCAL_TOKEN, localCookie } from "./localAuth";
 
 // One fresh scope per run, inherited by workers. Never delete another run's
 // database or kill its daemon to obtain clean state.
@@ -42,8 +43,9 @@ export default defineConfig({
     // own X1/X2/X3/X5 tests) never see it; wave2.spec.ts's X4 test (which
     // specifically exercises the onboarding flow) overrides this back to an
     // empty storageState for just that one test via `test.use(...)`.
+    // The suite's browsers are the cores' own UI: signed in with the run's local token.
     storageState: {
-      cookies: [],
+      cookies: [localCookie()],
       origins: [
         {
           origin: "http://127.0.0.1:7799",
@@ -74,6 +76,7 @@ export default defineConfig({
       timeout: 60000,
       env: {
         ...fixtureRuntimeEnv(hub),
+        PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
         PERCH_NO_LOGIN_PATH: "1",
         // Keep credentials available, but never share Perch state.
         HOME: os.homedir(),
@@ -91,6 +94,7 @@ export default defineConfig({
       timeout: 60000,
       env: {
         ...fixtureRuntimeEnv(remote),
+        PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
         PERCH_NO_LOGIN_PATH: "1",
         HOME: os.homedir(),
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,

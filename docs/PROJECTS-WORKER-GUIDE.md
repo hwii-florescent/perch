@@ -278,11 +278,10 @@ What later slices build on:
   `<daemon dir>/core.json` (0600: `pid`, `port`, `basePath`; the daemon dir honours `PERCHD_DIR`,
   so isolated probes stay isolated) on every call and refuses a file whose pid is gone. The token
   is never in argv, output, logs or errors.
-- **Still open, by instruction:** a local process *without* a token keeps full authority over every
-  other route (the loopback exemption is unchanged). The slice's check "loopback no longer gives
-  agents full authority" is therefore met only for token holders: they get less than anonymous
-  local callers, which an agent can always become by omitting the token. Narrowing local access is a
-  separate owner decision; see ROADMAP.
+- **Closed by slice 3a (below):** the loopback exemption is gone, so an agent that omits its token
+  gets nothing. What remains is the same-user limit written into ARCHITECTURE: an unsandboxed agent
+  that goes looking in the user's files or another process's environment can still find
+  credentials; that needs an OS sandbox, not another token.
 - **`perch` on the agent's PATH (decided by the supervisor).** The real binary is `perch` beside the
   core (`perchd/src/bin/perch.rs`; `binary_beside` also finds it from a test binary's `deps/`).
   `shell_integration::prepare` writes `bin/perch` into the session's private shim directory, which
@@ -310,30 +309,33 @@ What later slices build on:
   verbs and the rules that go with them (only person-started turns may spawn, children cannot
   spawn, messages never approve).
 
-## Slice 3a: no tokenless local authority (owner, 2026-11-06; before slice 4)
+## Slice 3a landed (2026-11-06): no tokenless local authority
 
-*Own* design. Today `authorize_request` (`server/mod.rs`) exempts loopback requests with no
-proxy headers, so any local process, including an agent that omits its token, has full
-authority. Change: every request presents a token.
+What later slices build on (the rule and the threat model are in ARCHITECTURE):
 
-- **Local UI token.** At boot the core mints a random per-launch token (never stored on disk
-  except as below, never logged). The desktop app (`crates/perch-desktop`, in-process core)
-  hands it to its own webview (e.g. as the `perch_device`-style cookie set on the first
-  navigation, or an initialization script); trace how the desktop webview loads the UI first.
-  Headless/dev: `npm run dev`, `target/debug/perch-core` and the e2e harness need a way in:
-  the core writes the local UI token into the 0600 `core.json` (same dir as the `perch` CLI
-  reads) and prints a one-time local URL with it; the e2e helpers read it from there. Paired
-  devices keep their existing tokens and cookie.
-- **Rule.** Every HTTP and WS route requires a device token, the local UI token, or (only on
-  `/agent/*`) an agent token. Remove the loopback exemption; `PERCH_REQUIRE_PAIRING` becomes
-  a no-op (keep accepting it). Pairing and `/pair` stay reachable as today.
-- **Who else calls the core locally:** grep for every loopback client (perchd, shims, hook
-  scripts, relay host, `perch` CLI, iOS dev, scripts in `e2e/`, `scripts/`), and give each
-  the token path it needs. Hooks write files (no HTTP), so they are unaffected; verify.
-- **Tests:** a booted-core test that a tokenless loopback request is refused on WS and every
-  HTTP route, that the local UI token works, that an agent token works only on `/agent/*`;
-  desktop dev launch and the e2e suite still connect. Update ARCHITECTURE, TESTING and the
-  Slice 3 "Still open" note above.
+- `local_ui.rs` (`LocalUi`: token, single-use sign-in code, launcher-token check),
+  `server::authorize_request` / `local_login` / `presented_tokens`, `server/local_authority.rs`
+  (booted-core tests), `CoreAddress.local_token` (`perchd/agent_cli.rs`, never in `Debug`).
+  Slice 4's new routes must call `authorize_request` (or be `/agent/*`); there is no
+  "local, so allowed" path to add.
+- **Callers traced.** The desktop webview (`perch-desktop/src/main.rs`: `LocalUi::in_process`,
+  first navigation is the `local-login` link); the PWA's service worker would have answered that
+  navigation with the app shell, so `/local-login` is in `navigateFallbackDenylist`. Hooks write
+  files and never call the core; perchd and the shims never call it; the `perch` CLI uses agent
+  tokens only; the relay host and the LAN listener were already non-local (they need a device
+  token; a relay guest presenting the local token is refused, tested). The hub's connection to a
+  federated core had no credential and relied on the remote's loopback exemption: see ARCHITECTURE
+  (header on the upgrade; SSH hosts read the remote `core.json`; `directUrl` carries its own
+  `?token=`, hidden from logs). Unit-tested in `hub.rs` and against a booted core
+  (`server/local_authority.rs`); `e2e/federation.spec.ts`, `nav.spec.ts`, `remote-git.spec.ts`
+  and `remote-workspace.spec.ts` use it through `directUrl`. **Not verified live over a real SSH
+  host** (no host to use): the `cat core.json` command and its parse are unit-tested only.
+- **E2E.** `e2e/localAuth.ts` (see TESTING): configs and `browser.newContext()` sites carry the
+  cookie, Node clients the header or `?token=`.
+- **Not done / limits.** A federated *desktop-app* core cannot be reached over SSH (it publishes no
+  token). `directUrl` values are shown to every client in the host list, token included; only
+  logs hide them. The pairing screen of a tokenless local browser says "open Settings → Devices"
+  (a headless dev core has no such window); the printed `local-login` link is the way in.
 
 ## Slice 3b: ship `perch` in packages (owner, 2026-11-06)
 

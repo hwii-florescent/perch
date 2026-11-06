@@ -95,6 +95,7 @@ fn whoami_finds_the_core_through_the_file_on_every_call() {
                 pid: me,
                 port,
                 base_path: "/".into(),
+                local_token: None,
             },
         )
         .unwrap();
@@ -126,6 +127,7 @@ fn a_dead_or_missing_core_is_an_error_not_a_guess() {
             pid: 2_147_483_646,
             port: 1,
             base_path: "/".into(),
+            local_token: None,
         },
     )
     .unwrap();
@@ -150,6 +152,7 @@ fn report_sends_its_text_and_refuses_empty_or_oversized_ones_locally() {
             pid: std::process::id(),
             port,
             base_path: "/".into(),
+            local_token: None,
         },
     )
     .unwrap();

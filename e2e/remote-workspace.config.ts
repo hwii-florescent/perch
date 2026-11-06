@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "node:path";
+import { LOCAL_TOKEN, localCookie } from "./localAuth";
 
 // Dedicated headless, unpaid federation checks. Never share the installed
 // app's DB, hosts, settings or daemon (nor the main e2e suite's state).
@@ -20,7 +21,7 @@ export default defineConfig({
     baseURL: hubUrl,
     headless: true,
     storageState: {
-      cookies: [],
+      cookies: [localCookie()],
       origins: [{
         origin: hubUrl,
         localStorage: [{ name: "perch.onboarding.seen", value: "1" }],
@@ -35,6 +36,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120000,
     env: {
+      PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
       PERCH_DB: `${scratch}/${port}/history.sqlite`,
       PERCH_HOSTS: `${scratch}/${port}/hosts.json`,
       PERCH_SETTINGS: `${scratch}/${port}/settings.json`,

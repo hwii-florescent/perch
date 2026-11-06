@@ -29,6 +29,9 @@ pub fn scrub_nested_agent_env() {
         // An agent identity from the shell this core was started in is that agent's, not ours.
         perchd::agent_cli::SESSION_ENV,
         perchd::agent_cli::TOKEN_ENV,
+        // A launcher's local UI token is read once by `LocalUi::standalone` before this runs;
+        // anything still set (a desktop launch) must not reach a child.
+        crate::local_ui::TOKEN_ENV,
     ];
     let mut removed = Vec::new();
     for var in vars {
@@ -278,10 +281,14 @@ fn web_dist_from_exe_dir(exe_dir: &Path) -> Option<PathBuf> {
 ///   `axum::serve` blocks).  The Tauri shell uses this to learn the
 ///   actual port when port 0 is requested.  The headless binary passes
 ///   `None`.
+/// * `local_ui`   — the core's local UI credential: `LocalUi::in_process()` for
+///   the desktop shell (which also keeps a handle to sign its webview in),
+///   `LocalUi::standalone()` for the headless binary.
 pub async fn boot(
     args: CliArgs,
     web_dist_dir: PathBuf,
     ready_tx: Option<tokio::sync::oneshot::Sender<SocketAddr>>,
+    local_ui: Arc<crate::local_ui::LocalUi>,
 ) -> Result<()> {
     // Open the db at the override path (--db-path / PERCH_DB) or default.
     let db = Arc::new(if let Some(p) = args.db_path.clone() {
@@ -321,6 +328,7 @@ pub async fn boot(
             providers_path: args.providers_path,
             ready_tx,
             phone_access_port: None,
+            local_ui,
         },
         db,
         default_cwd,

@@ -26,6 +26,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { choose } from "./select";
+import { withLocalToken } from "./localAuth";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -52,7 +53,7 @@ const BROKEN_SSH_HOST = "e2e-unreachable-host.invalid";
 /** Open a raw WebSocket to the given URL and return it once OPEN. */
 function openWs(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(withLocalToken(url));
     ws.onopen = () => resolve(ws);
     ws.onerror = (ev) => reject(new Error(`WebSocket error connecting to ${url}: ${String(ev)}`));
   });
@@ -186,7 +187,8 @@ async function upsertRemoteHost(): Promise<void> {
         sshHost: "",
         remotePort: 7800,
         enabled: true,
-        directUrl: "ws://127.0.0.1:7800/ws",
+        // The remote core is another local-only core: the hub presents its token from the URL.
+        directUrl: withLocalToken("ws://127.0.0.1:7800/ws"),
       },
     });
 

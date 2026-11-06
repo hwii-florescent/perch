@@ -2,7 +2,7 @@
 //! `perch` command (`perchd::agent_cli`). Own design, slice 3.
 //!
 //! The rules are the reverse of every other route's: these accept *only* an agent token (no
-//! device cookie, no loopback exemption) and only from this machine without a proxy or a
+//! device token, no local UI token) and only from this machine without a proxy or a
 //! browser Origin, and `authorize_request` refuses an agent token everywhere else. A token
 //! authorises the run it was issued to and nothing more: the caller must also name that
 //! session, so a token lifted into another session's shell is refused.
@@ -32,10 +32,7 @@ fn authorize(
     headers: &HeaderMap,
     body: &Value,
 ) -> Result<AgentIdentity, (StatusCode, &'static str)> {
-    if headers.contains_key(axum::http::header::ORIGIN)
-        || !local_request(peer, headers)
-        || std::env::var("PERCH_REQUIRE_PAIRING").as_deref() == Ok("1")
-    {
+    if headers.contains_key(axum::http::header::ORIGIN) || !local_request(peer, headers) {
         return Err((
             StatusCode::FORBIDDEN,
             "agent requests are accepted only from this computer",
@@ -138,7 +135,7 @@ pub(super) fn carries_agent_token(headers: &HeaderMap, params: &HashMap<String, 
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::agent_fleet::AgentKey;
     use crate::agent_identity::IdentityStore;
@@ -183,7 +180,7 @@ mod tests {
     }
 
     /// One request on a booted core: the status line's code and the JSON body.
-    async fn request(
+    pub(in crate::server) async fn request(
         address: SocketAddr,
         method: &str,
         path: &str,
@@ -220,6 +217,7 @@ mod tests {
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let local_ui = crate::local_ui::LocalUi::in_process();
         let server = tokio::spawn(run(
             ServerOptions {
                 port: 0,
@@ -231,6 +229,7 @@ mod tests {
                 devices_path: Some(root.join("devices.json")),
                 ready_tx: Some(ready_tx),
                 phone_access_port: None,
+                local_ui: local_ui.clone(),
             },
             db.clone(),
             root.display().to_string(),
@@ -308,10 +307,21 @@ mod tests {
             );
         }
 
-        // The token is not general authority, even from loopback: other routes refuse it, while
-        // the same loopback caller without it keeps today's local access.
+        // The token is not general authority, even from loopback: other routes refuse it. A
+        // loopback caller with no token has none either; only the local UI token opens them.
         let (_, anonymous) = request(address, "GET", "/pair", &[], "").await;
-        assert_eq!(anonymous["paired"], true);
+        assert_eq!(anonymous["paired"], false);
+        let (_, local) = request(
+            address,
+            "GET",
+            "/pair",
+            &[("Authorization", &auth(local_ui.token()))],
+            "",
+        )
+        .await;
+        assert_eq!(local["paired"], true);
+        // And the local UI token opens no agent route.
+        assert_eq!(whoami(auth(local_ui.token()), "alpha").await.0, 401);
         let (_, agent) = request(
             address,
             "GET",
@@ -406,12 +416,28 @@ mod tests {
     #[test]
     fn a_core_publishes_its_address_and_withdraws_it() {
         let dir = std::env::temp_dir().join(format!("perch-core-file-{}", Uuid::new_v4()));
-        let published = CoreFile::publish_in(dir.clone(), 4711, "/base/").unwrap();
+        let published = CoreFile::publish_in(dir.clone(), 4711, "/base/", None).unwrap();
         let address = perchd::agent_cli::read_core_file(&dir).unwrap();
         assert_eq!(
             (address.pid, address.port, address.base_path.as_str()),
             (std::process::id(), 4711, "/base/")
         );
+        assert_eq!(
+            address.local_token, None,
+            "a desktop core publishes no token"
+        );
+        drop(published);
+        // A headless core publishes its local token in the same private file, and its debug
+        // form never shows it.
+        let published =
+            CoreFile::publish_in(dir.clone(), 4711, "/base/", Some("t".repeat(40).as_str()));
+        let address = perchd::agent_cli::read_core_file(&dir).unwrap();
+        assert_eq!(
+            address.local_token.as_deref(),
+            Some("t".repeat(40).as_str())
+        );
+        assert!(!format!("{address:?}").contains(&"t".repeat(40)));
+        let published = published.unwrap();
         drop(published);
         assert!(perchd::agent_cli::read_core_file(&dir).is_err());
         let _ = std::fs::remove_dir_all(dir);

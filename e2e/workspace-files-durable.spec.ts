@@ -15,6 +15,7 @@ import * as path from "node:path";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 import { MOD, expectDoc } from "./editor";
 import { optionStates } from "./select";
+import { withLocalToken } from "./localAuth";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -71,7 +72,7 @@ function removeFixture(): void {
 
 function readDurableBuffer(workspaceId: string, filePath: string): Promise<DurableBuffer> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(withLocalToken(WS_URL));
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;

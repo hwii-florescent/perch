@@ -9,6 +9,7 @@ import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 import { startFromPanel } from "./projects";
+import { localStorageState } from "./localAuth";
 
 test("installed OMP and Pi run in separate persistent panes", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -27,7 +28,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   fs.writeFileSync(providers, '{"version":1,"providers":[]}');
   const log = fs.openSync(path.join(fixture, "core.log"), "a");
   let core: ChildProcess | undefined;
-  const secondContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const secondContext = await browser.newContext({ viewport: { width: 1400, height: 900 }, storageState: localStorageState() });
   const second = await secondContext.newPage();
   const keys = new Map<string, { workspaceId: string; sessionId: string; agentId: string }>();
   const shellIds = new Set<string>();

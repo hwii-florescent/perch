@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { setChatMode } from "./chatMode";
 import { startFromPanel } from "./projects";
 import * as path from "node:path";
+import { localStorageState } from "./localAuth";
 
 test("agent runtime survives view changes and control transfers between desktop and phone", async ({ page, context, browser }, testInfo) => {
   const errors: string[] = [];
@@ -23,7 +24,7 @@ test("agent runtime survives view changes and control transfers between desktop 
     await desktop.locator(".xterm-helper-textarea").pressSequentially(marker, { delay: 15 });
     await expect(desktop.locator(".xterm-rows")).toContainText(marker);
     const sessionId = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
-    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: localStorageState() });
     await phoneContext.addInitScript((sessionId) => {
       localStorage.setItem("perch.onboarding.seen", "1");
       if (sessionId) localStorage.setItem("perch.sessionId", sessionId);

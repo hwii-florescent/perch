@@ -39,6 +39,19 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
   `gpt-5.6-luna`; use aliases, not dated snapshot IDs. Set
   `ANTHROPIC_MODEL=claude-haiku-4-5` for probe cores and verify the actual
   CLI banner before the first prompt.
+- **Every core needs a token, loopback included** (slice 3a). `e2e/localAuth.ts` makes one
+  random `PERCH_LOCAL_TOKEN` per run (the core reads it once and removes it from its own and
+  every agent's environment): the configs put it in the browsers' `perch_local` cookie
+  (`storageState: localStorageState()`; any `browser.newContext()` that opens a core needs the
+  same), spec-spawned cores inherit it, Node `fetch` sends `localHeaders()` and Node WebSockets
+  use `withLocalToken(url)`. A federation host's `directUrl` carries `withLocalToken(...)`. A
+  context for a *paired phone* gets no cookie. For a hand-run headless core without the env
+  variable, read `localToken` from `<PERCHD_DIR>/core.json` (0600, same-user readable) or open
+  the one-use `local-login?code=` link it prints to a terminal. `PERCH_REQUIRE_PAIRING` does
+  nothing now. iOS-simulator probes against a loopback core need pairing like any phone.
+- Known base failures (not regressions, same on a clean checkout): `federation.spec.ts` E2,
+  `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
+  `remote-workspace.spec.ts` RW4.
 - Add new specs to the intended config's `testMatch`. Main config enumerates
   specs; a new filename alone is not enough.
 - Runs start with clean test state; create your own project/chat via
@@ -249,7 +262,7 @@ process-group confirmation, history preservation and connect-only behavior.
   `TEST_RUNNER_PERCH_ADDRESS` and `TEST_RUNNER_PERCH_CODE` are set: a fresh
   code from `device.pair.start` (keep that socket open meanwhile) and either
   the core at a non-loopback address (this Mac's LAN IP and port; loopback
-  skips pairing) or a whole relay link (`http://127.0.0.1:<port>/#r=…` from
+  no longer skips pairing: nothing is tokenless) or a whole relay link (`http://127.0.0.1:<port>/#r=…` from
   a `wrangler dev` relay set up as in `e2e/relay.check.mjs`). Use isolated
   state and uninstall the app first. 2026-11-04: passed on Wi-Fi and through
   a local relay (iOS 27 simulator); Tailscale and the QR camera need a device.

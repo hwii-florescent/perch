@@ -9,6 +9,7 @@ import { once } from "node:events";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime.ts";
+import { withLocalToken } from "./localAuth.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "perch-fixture-check-"));
@@ -43,7 +44,7 @@ try {
     try { await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1000) }); return true; } catch { return false; }
   });
   console.log("fixture core ready");
-  socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  socket = new WebSocket(withLocalToken(`ws://127.0.0.1:${port}/ws`));
   const messages = [];
   socket.addEventListener("message", (event) => messages.push(JSON.parse(String(event.data))));
   await once(socket, "open", { signal: AbortSignal.timeout(5000) });

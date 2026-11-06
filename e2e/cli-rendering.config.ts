@@ -15,6 +15,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
 import * as os from "os";
+import { LOCAL_TOKEN, localStorageState } from "./localAuth";
 
 export default defineConfig({
   testDir: ".",
@@ -26,6 +27,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:7799",
     viewport: { width: 1400, height: 900 },
+    storageState: localStorageState(),
   },
   projects: [
     // WebKit first: it is the engine the shipped desktop app uses, so a
@@ -45,6 +47,7 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 90000,
       env: {
+        PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
         HOME: os.homedir(),
         PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
       },

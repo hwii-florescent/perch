@@ -373,7 +373,7 @@ version; the slices below replace their implied order.
   Re-validated at delivery (incarnation, scope, cancellation); survives a restart
   without duplicating.
 - **Credentials:** a token per session incarnation, stored hashed (like device tokens),
-  allowed only operations on its own run, checked before the loopback exemption; the
+  allowed only operations on its own run, checked before any other credential; the
   core address comes from a 0600 discovery file. Unset in the post-exit login shell,
   revoked when the agent exits; a child never inherits its parent's. That agent's
   subprocesses can read it: scope, not secrecy, is the protection.
@@ -456,13 +456,17 @@ UI rows from step 0 continue between slices.
    `perch` binary with `whoami`, `guide`, `report` and `perch daemon …` (old verbs still
    work), the pointer appended to every launch. Tests: a token cannot act outside its run
    or on any other route, a stale incarnation is refused, the post-exit shell has no
-   token; live `perch whoami` from all four providers. **Open for the owner:** a local
-   process *without* a token still has full authority over every other route (the loopback
-   exemption is unchanged, as the plan said to record rather than change it), so an agent
-   can drop its token and be as powerful as before; narrowing that is a separate decision.
-   **Packaging follow-up:** a packaged build must ship `perch` beside the core, or agents
-   get no identity and no pointer. Slice 4 must also decide what `perch list` means (today
-   the daemon's session list).
+   token; live `perch whoami` from all four providers.
+   **3a. Done 2026-11-06 — no tokenless local authority:** every route needs a device token,
+   the core's local UI token (the desktop keeps it in memory and signs its webview in with a
+   one-use code; headless/dev cores publish it in the 0600 `core.json`) or, on `/agent/*`
+   only, an agent token; `PERCH_REQUIRE_PAIRING` is a no-op. Federation sends the remote's
+   token as a header (SSH hosts read the remote `core.json`). Limit, written in ARCHITECTURE:
+   not a boundary against a same-user process that reads the user's files or another
+   process's environment (needs an OS sandbox); a federated desktop-app core is unreachable
+   over SSH. **3b. Packaging follow-up (next):** desktop and headless packages must ship `perch`
+   beside the core, or agents get no identity and no pointer. Slice 4 makes `perch list` the
+   caller's run (decided); the daemon list becomes `perch daemon list`.
 4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
    person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
    duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed

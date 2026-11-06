@@ -204,10 +204,36 @@ workspace ownership remains the target; nothing remote may fall back locally.
 Desktop serves loopback by default. Enabling Phone access opens a second
 network listener and enables paired tokens; disabling it closes remote access
 and device sockets. Headless core is always network-enabled. Proxy headers or
-a non-loopback Host are remote even from a loopback socket and require pairing.
-A proxy rewriting Host to loopback with no identifying headers is
-indistinguishable from local: set `PERCH_REQUIRE_PAIRING=1` behind one.
-Real Tailscale Serve has not been verified. See `server/phone_access.rs`.
+a non-loopback Host are remote even from a loopback socket. Real Tailscale Serve
+has not been verified. See `server/phone_access.rs`.
+
+**Nobody is tokenless, loopback included** (`local_ui.rs`, `server::authorize_request`; slice 3a).
+Every data route (`/ws`, `workspace-file`, `clipboard-image`, `upload`) needs a paired device's
+token or the core's own **local UI token**, accepted only from this machine (loopback peer,
+loopback Host, no proxy header, no foreign `Origin`); `/agent/*` needs an agent token and nothing
+else. `/pair` stays open by design, and the static app shell stays public so a phone can load the
+pairing screen. The desktop mints its token in memory and never writes it to a file or an
+environment variable: its webview signs in by redeeming a single-use, ten-minute code at
+`GET {base}local-login` (the core answers with an `HttpOnly`, `SameSite=Strict` `perch_local`
+cookie and a redirect, and the code never appears in a log). A headless or development core
+(`LocalUi::standalone`) writes the token into the 0600 `core.json` as `localToken` and, when its
+stdout is a terminal, prints a one-use `local-login` link; a launcher or test may choose the
+token in `PERCH_LOCAL_TOKEN` (32 to 256 cookie-safe characters; read once, removed from the
+core's environment and from every child's). `PERCH_REQUIRE_PAIRING` is accepted and does nothing:
+it existed to cover proxies that rewrite Host to loopback, which now still need a token they
+cannot have. **Threat model:** this stops agents and other local processes from getting core
+authority by default or by ordinary tool use, and stops other OS users and the network
+entirely. It is **not** a boundary against an unsandboxed process of the same user that
+deliberately reads that user's files (`core.json` of a headless core, `devices.json`,
+`~/.perch/history.sqlite`) or another process's initial environment (`ps eww`); that needs an OS
+sandbox. Federation: the hub presents a remote core's local token as a bearer header on the
+WebSocket upgrade. For an SSH host it reads the remote `core.json` over the SSH it already
+runs, on every (re)connect, and uses it only when the file names the forwarded port; a
+`directUrl` host carries whatever `?token=` its user wrote (hidden from logs). **Version skew:**
+a newer remote refuses an older hub (401, shown as a host error); a newer hub talking to an
+older remote works, since that remote still exempts loopback. A remote **desktop** core
+publishes no token, so the hub cannot reach it over SSH: run headless `perch-core` there, or
+pair.
 
 The relay (`relay/`, `crates/perch-core/src/relay/`, `packages/web/src/relay/`)
 is a third way in. The core dials out to a user-deployed Worker and serves each
@@ -224,10 +250,10 @@ OMP or Terminal session gets an incarnation and a bearer token (`PERCH_TOKEN`, w
 `PERCH_SESSION`); the core stores only its SHA-256 (`agent_identity.rs`, `db/agent_identity.rs`).
 The token opens `/agent/*` (`server/agent.rs`) for its own session and nothing else:
 `authorize_request` refuses it on every other route, loopback included, and `/agent/*` takes
-no device cookie and no unauthenticated loopback caller. A reattach never mints (the process
+no device or local UI token. A reattach never mints (the process
 keeps its environment); a confirmed exit, a newer launch, session deletion and a boot-time
-check against perchd end a run's token, and the post-exit login shell has none. A local process
-that sends no token still has the loopback exemption's full authority, unchanged. The `perch`
+check against perchd end a run's token, and the post-exit login shell has none. An agent that
+omits its token gets nothing from any route. The `perch`
 command finds the core through `<daemon dir>/core.json` (0600, read on every call). It reaches
 the agent through a `perch` entry in the session's private shim directory that `exec`s the real
 binary by absolute path; **a packaged build must ship `perch` beside the core**, or agents get

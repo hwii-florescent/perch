@@ -85,6 +85,8 @@ mod browser_history;
 mod browser_suggest;
 mod context_bridge;
 mod instructions;
+#[cfg(test)]
+mod local_authority;
 mod native_ui;
 mod recover;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
@@ -223,6 +225,9 @@ pub struct ServerOptions {
     /// Start phone access on this port at boot whatever the saved setting says
     /// (tests; `0` = any free port). `None` follows the setting.
     pub phone_access_port: Option<u16>,
+    /// This core's local UI credential (`crate::local_ui`): `LocalUi::in_process()` for the
+    /// desktop app, `LocalUi::standalone()` for a headless or development core.
+    pub local_ui: Arc<crate::local_ui::LocalUi>,
 }
 
 /// Fired on the broadcast channel whenever a session's running status changes
@@ -311,6 +316,8 @@ struct AppState {
     /// `0.0.0.0`, so anything off the loopback interface must present a token
     /// this store issued — see `authorize_request`.
     devices: Arc<crate::devices::DeviceStore>,
+    /// The local UI token: what a caller on this machine presents instead of a device token.
+    local_ui: Arc<crate::local_ui::LocalUi>,
     /// The LAN listener phones connect through (desktop app); see `phone_access.rs`.
     phone: Arc<phone_access::PhoneAccess>,
     /// The relay phones reach this host through from any network (`relay/`).
@@ -545,6 +552,7 @@ pub async fn run(
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         devices,
+        local_ui: options.local_ui.clone(),
         phone: phone.clone(),
         relay: relay.clone(),
         agent_terminals,
@@ -704,6 +712,7 @@ pub async fn run(
     }
     let relay_saved = state.settings.get().relay_url;
     let state_for_relay = state.clone();
+    let state_for_login = state.clone();
     let pair_path = format!("{base_path}pair");
     let mut router = Router::new()
         .route(&ws_path, get(ws_upgrade))
@@ -719,6 +728,7 @@ pub async fn run(
             post(uploads::attachment_upload).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route(&pair_path, get(pair_status).post(pair_claim))
+        .route(&format!("{base_path}local-login"), get(local_login))
         .route(
             &format!("{base_path}agent/whoami"),
             post(agent::whoami).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
@@ -769,7 +779,23 @@ pub async fn run(
     );
     // Tell the `perch` command where this core is. A desktop core takes a new port at
     // every launch, so the command reads this file on each call.
-    let _core_file = CoreFile::publish(bound_addr.port(), &base_path);
+    let _core_file = CoreFile::publish(
+        bound_addr.port(),
+        &base_path,
+        state_for_login.local_ui.token_for_core_file(),
+    );
+    // A person running a headless core in a terminal needs a way into the UI. The code is
+    // single-use and expires; the token itself is never printed.
+    if state_for_login.local_ui.token_for_core_file().is_some()
+        && std::io::IsTerminal::is_terminal(&std::io::stdout())
+    {
+        println!(
+            "perch: open http://127.0.0.1:{}{base_path}local-login?code={} to use the UI \
+             (valid once, for ten minutes)",
+            bound_addr.port(),
+            state_for_login.local_ui.issue_login_code(),
+        );
+    }
     // Notify the Tauri shell (or any other caller) of the actual bound address
     // before we hand control to axum::serve.
     if let Some(tx) = options.ready_tx {
@@ -813,15 +839,21 @@ fn revoke_ended_agent_identities(db: &HistoryDb) {
 struct CoreFile(PathBuf);
 
 impl CoreFile {
-    fn publish(port: u16, base_path: &str) -> Option<Self> {
-        Self::publish_in(crate::daemon::dir(), port, base_path)
+    fn publish(port: u16, base_path: &str, local_token: Option<&str>) -> Option<Self> {
+        Self::publish_in(crate::daemon::dir(), port, base_path, local_token)
     }
 
-    fn publish_in(dir: PathBuf, port: u16, base_path: &str) -> Option<Self> {
+    fn publish_in(
+        dir: PathBuf,
+        port: u16,
+        base_path: &str,
+        local_token: Option<&str>,
+    ) -> Option<Self> {
         let address = perchd::agent_cli::CoreAddress {
             pid: std::process::id(),
             port,
             base_path: base_path.to_string(),
+            local_token: local_token.map(str::to_string),
         };
         match perchd::agent_cli::write_core_file(&dir, &address) {
             Ok(()) => Some(Self(dir)),
@@ -1585,8 +1617,25 @@ fn local_request(peer: &SocketAddr, headers: &HeaderMap) -> bool {
         })
 }
 
-/// Resolve authorization to a paired device identity, or a trusted local
-/// client (None). Retain the identity for the lifetime of a WebSocket.
+/// Every token a request presents, wherever it put it: `?token=`, a bearer header, or the
+/// `perch_device` (paired device) and `perch_local` (this core's UI) cookies.
+fn presented_tokens(headers: &HeaderMap, params: &HashMap<String, String>) -> Vec<String> {
+    params
+        .get("token")
+        .cloned()
+        .into_iter()
+        .chain(agent::bearer(headers).map(str::to_string))
+        .chain(cookie_value(headers, "perch_device"))
+        .chain(cookie_value(headers, "perch_local"))
+        .collect()
+}
+
+/// Resolve authorization to a paired device identity, or this core's own local UI (None).
+/// Retain the identity for the lifetime of a WebSocket.
+///
+/// Nothing is open: a caller on this machine needs the local UI token (`crate::local_ui`),
+/// valid only from here, exactly like a phone needs its device token. An agent's token opens
+/// `/agent/*` and nothing else.
 fn authorize_request(
     state: &AppState,
     peer: &SocketAddr,
@@ -1596,22 +1645,69 @@ fn authorize_request(
     if !same_origin(headers) {
         return Err(StatusCode::FORBIDDEN);
     }
-    // An agent's token opens `/agent/*` and nothing else, loopback or not.
     if agent::carries_agent_token(headers, params) {
         return Err(StatusCode::FORBIDDEN);
     }
-    let require_everywhere = std::env::var("PERCH_REQUIRE_PAIRING").as_deref() == Ok("1");
-    if local_request(peer, headers) && !require_everywhere {
+    let tokens = presented_tokens(headers, params);
+    if local_request(peer, headers) && tokens.iter().any(|token| state.local_ui.matches(token)) {
         return Ok(None);
     }
-    let token = params
-        .get("token")
-        .cloned()
-        .or_else(|| cookie_value(headers, "perch_device"));
-    token
-        .and_then(|token| state.devices.authenticate(&token, wall_clock_millis()))
+    tokens
+        .iter()
+        .find_map(|token| state.devices.authenticate(token, wall_clock_millis()))
         .map(|device| Some(device.id))
         .ok_or(StatusCode::UNAUTHORIZED)
+}
+
+/// `GET {base}local-login?code=` — how this core's own web view (and a person who started a
+/// headless core) receives the local UI token: a single-use code from `LocalUi::issue_login_code`
+/// is spent for an `HttpOnly` cookie, and the page redirects to the app. Local callers only; the
+/// token itself never appears in a URL.
+async fn local_login(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let refuse = |status: StatusCode| {
+        (
+            status,
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            "this local sign-in link is not valid, or has already been used",
+        )
+            .into_response()
+    };
+    if !same_origin(&headers) || !local_request(&peer, &headers) {
+        return refuse(StatusCode::FORBIDDEN);
+    }
+    let valid = params
+        .get("code")
+        .is_some_and(|code| state.local_ui.redeem_login_code(code));
+    if !valid {
+        return refuse(StatusCode::FORBIDDEN);
+    }
+    let Ok(cookie) = axum::http::HeaderValue::from_str(&format!(
+        "perch_local={}; Path=/; HttpOnly; SameSite=Strict",
+        state.local_ui.token()
+    )) else {
+        return refuse(StatusCode::INTERNAL_SERVER_ERROR);
+    };
+    // `./` is the app root whatever the base path, because this route sits directly under it.
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (axum::http::header::SET_COOKIE, cookie),
+            (
+                axum::http::header::LOCATION,
+                axum::http::HeaderValue::from_static("./"),
+            ),
+            (
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            ),
+        ],
+    )
+        .into_response()
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -3343,6 +3439,7 @@ mod boot_smoke_tests {
         // Paired devices only work while Phone access is on (the desktop shell
         // keeps it off by default), so start this host with it on.
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let local_ui = crate::local_ui::LocalUi::in_process();
         let server = tokio::spawn(run(
             ServerOptions {
                 port: 0,
@@ -3354,6 +3451,7 @@ mod boot_smoke_tests {
                 devices_path: Some(devices_path.clone()),
                 ready_tx: Some(ready_tx),
                 phone_access_port: Some(0),
+                local_ui: local_ui.clone(),
             },
             Arc::new(HistoryDb::open(&db_path).unwrap()),
             root.display().to_string(),
@@ -3393,7 +3491,12 @@ mod boot_smoke_tests {
         let (mut phone, _) = tokio_tungstenite::connect_async(rebound.clone())
             .await
             .unwrap();
-        let (mut host, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let mut local = url.clone().into_client_request().unwrap();
+        local.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", local_ui.token()).parse().unwrap(),
+        );
+        let (mut host, _) = tokio_tungstenite::connect_async(local).await.unwrap();
         host.send(WsMessage::Text(
             serde_json::json!({
                 "type": "device.revoke", "requestId": "revoke", "deviceId": paired.record.id,
@@ -3446,6 +3549,7 @@ mod boot_smoke_tests {
                 devices_path: Some(hosts_path.with_file_name("smoke-devices.json")),
                 ready_tx: Some(ready_tx),
                 phone_access_port: None,
+                local_ui: crate::local_ui::LocalUi::in_process(),
             },
             db,
             std::env::temp_dir().display().to_string(),
