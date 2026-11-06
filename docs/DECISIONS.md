@@ -7,6 +7,41 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-06 — Claude desktop as the UI target; Projects and sub-sessions settled (owner)
+
+Settles the open items of the 2026-11-05 direction below. Details and slice order in
+[ROADMAP](ROADMAP.md) ("Perch's version of Claude Projects and sub-sessions");
+research in [evidence](evidence/claude-projects-subsessions-2026-11-06.md).
+
+- **UI target is Claude desktop's Code tab, not Orca parity.** The attached TUI stays
+  the transport for every provider; build what works over it first (status and nested
+  rows, per-turn changes, subagent rows, task list, typed pickers with read-back, plan
+  box, compact). A Claude-only stream-json mode is a later addition for queue cards,
+  rewind with file restore and streaming.
+- **No new noun.** "Project" stays the Birdhouse. Shared context is **Instructions** on
+  a Birdhouse or Nest; children are chats nested under their lead.
+- **Shared context:** Instructions (16,000 characters) and reference folders, pinned
+  per launch with provenance, plus a per-run notes folder that is never injected. No
+  agent-written memory in the first cut.
+- **Lead:** an ordinary session the user picks. Children may be started only during a
+  turn a person opened; children cannot spawn (depth 1).
+- **Agent entry:** a short appended pointer (at most 300 characters) in Perch-launched
+  sessions and a lazy `perch guide`, not an installed skill. This narrows "CLI plus a
+  skill" (2026-11-05): Codex has no per-session skill path.
+- **One `perch` binary:** agent commands at top level; perchd's connect-only verbs move
+  under `perch daemon` and keep aliases.
+- **Overview:** nested child rows plus a family strip in the lead's chat; no tab, no
+  decision gates.
+- **Messages:** durable core queue, delivered only at idle, never steering; sender
+  envelope, 2,000-character bodies with longer ones as notes-folder files, a leading `/`
+  neutralised, never an approval.
+- **Limits before dispatch:** 4 concurrent children, 8 descendants, depth 1, 50 messages
+  per run, 10 automatic lead wakes per human message.
+- **Credentials:** per-incarnation token, hashed, scoped to its run, checked before the
+  loopback exemption, removed from the post-exit shell and revoked at exit.
+- **Phone:** same as desktop for messaging, stopping and answering children; spawning on
+  the local core only.
+
 ## 2026-11-05 — File drops also work in ordinary shells
 
 Owner correction: dropping files must not depend on the saved launch provider.

@@ -1,5 +1,11 @@
 # Native UI parity with Orca
 
+**Target changed 2026-11-06:** UI mode now aims at Claude desktop's Code tab
+([decision](DECISIONS.md), ranked gaps in [ROADMAP](ROADMAP.md) step 0,
+[evidence](evidence/claude-projects-subsessions-2026-11-06.md)). The rows below stay the
+code reference for terminal-backed features; rows marked "structured only" are the
+candidates for the later Claude stream-json mode.
+
 Checklist for UI mode (Chat view over the user's real CLI). Source of truth is Orca's
 terminal-backed ("bridge") chat, `src/renderer/src/components/native-chat/*` and the pure
 logic in `src/shared/native-chat/*` (clone at `/tmp/orca-src`, commit `308b5000`).

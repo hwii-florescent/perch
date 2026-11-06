@@ -161,11 +161,22 @@ Owner direction 2026-11-05 ([decision](DECISIONS.md),
 each later step builds on it. Terminal stays the default for every agent; Chat
 is opt-in per agent until the user changes it.
 
-### 0. Native UI mode at Orca's level (first)
+### 0. Native UI mode at Claude desktop's level (first)
+
+**Target changed 2026-11-06 ([decision](DECISIONS.md)): Claude desktop's Code tab, not
+Orca parity.** The transport stays the attached TUI for every provider. The desktop's
+competence is mostly product design that works over it; a Claude-only stream-json
+mode comes later, only for what needs it (queue cards with Send now, rewind with file
+restore, streaming, context breakdown). Ranked gaps that work over the PTY
+([evidence](evidence/claude-projects-subsessions-2026-11-06.md)): status and nested
+child rows; per-turn changes card; subagent rows (SubagentStart/Stop hooks plus
+sidechain transcripts); docked task list (TodoWrite/TaskCreate); permission-mode and
+model/effort pickers sent as typed commands with a read-back; plan box; `/compact` and
+compaction markers; fork (`--resume --fork-session`).
 
 **Working list: [NATIVE-UI-PARITY.md](NATIVE-UI-PARITY.md)**, a row-by-row
-checklist against Orca's terminal-backed chat with Orca source files named. Pick
-rows from it; the bullets below are the summary.
+checklist with Orca source files named (Orca stays the code reference for the
+terminal-backed rows). Pick rows from it; the bullets below are the summary.
 
 Today `NativeCliChat.tsx` (124 lines) renders hook/transcript snapshots and types
 into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
@@ -242,7 +253,7 @@ child work, the same SubagentStart/SubagentStop source step 2 needs, so it lands
 there), queue cards, Steer, Rewind, `/compact` shortcut, prompt recall, Claude
 stream-json (not needed for approvals now).
 
-### 1. Projects: Birdhouse instructions and files
+### 1. Instructions: Birdhouse and Nest instructions and files
 
 Claude-classic-Projects style, stored **privately by Perch** per Birdhouse (and
 Quickchat), not in the repo: shared instructions plus reference files/folders that
@@ -252,10 +263,10 @@ flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
 
 | Agent | Instructions (appended, never replacing the default prompt) | Reference folders |
 |---|---|---|
-| Claude | `--append-system-prompt-file <file>` | `--add-dir` |
+| Claude | `--append-system-prompt <text>` (2.1.319 `--help`; `--append-system-prompt-file` is only in the binary now, verify before use) | `--add-dir` |
 | Pi | `--append-system-prompt <file>` (text or file contents) | none: list paths in the instructions |
 | OMP | `--append-system-prompt=<file>` | `--add-dir=` |
-| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt); pass it to the shared app-server too | `--add-dir` |
+| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt); pass it to the shared app-server too (`codex.rs` launches `app-server --listen` with no flags today) | `--add-dir` (adds no skills; checked with `codex debug prompt-input`) |
 
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
@@ -282,8 +293,9 @@ subagents, that a lead and the user can see, message and stop.
   and reports. Children are ordinary Perch sessions shown under their parent.
 - **Child session from here.** User-started, optionally seeded through the
   Context Bridge (explicit send).
-- **Agents take part through a `perch` CLI plus one skill, not an MCP server**
-  (no tool schemas in every context). Sketch: `perch spawn --agent --model
+- **Agents take part through a `perch` CLI, not an MCP server** (no tool schemas in
+  every context). They learn about it from a short appended pointer, not a skill
+  (decided 2026-11-06; see the plan below). Sketch: `perch spawn --agent --model
   --worktree --task`, `perch send`, `perch report --outcome --files`, `perch wait`,
   `perch tasks`. Authority is a per-session token in the launched environment,
   checked by the core; it only reaches its own run.
@@ -299,7 +311,7 @@ subagents, that a lead and the user can see, message and stop.
 Start: `crates/perch-core/src/native_ui/`, `agent_fleet.rs`,
 `server/agent_history.rs`, `context_bridge.rs`, `packages/web/src/views/NativeCliChat.tsx`.
 
-#### Perch's version of Claude Projects and sub-sessions (design notes, 2026-11, owner direction)
+#### Perch's version of Claude Projects and sub-sessions (decided 2026-11-06)
 
 Anthropic's Claude Code Projects (public beta, claude.ai/code and the desktop app, not
 the CLI; read from `code.claude.com/docs/en/claude-projects`) is a coordinator
@@ -310,19 +322,67 @@ and what needs you sit around it. Its sub-sessions (desktop) let one session lis
 message and archive others. Both live on Anthropic's side; Perch cannot drive them without
 account credentials, and neither crosses providers. Perch builds its own version on its
 own sessions, so Claude, Codex, Pi and OMP can work together. Steps 1 to 3 above are this
-version; the order below replaces their implied order.
+version; the slices below replace their implied order.
 
-**Decided**
+**Decided** (2026-11-05, settled 2026-11-06: [decision](DECISIONS.md),
+[evidence](evidence/claude-projects-subsessions-2026-11-06.md))
 
-- Same Nest by default; a child gets its own worktree only when asked
-  (`perch spawn --worktree`). No automatic worktree per thread in the first cut.
-- Built on ordinary Perch sessions and the `perch` CLI plus a skill, not structured/RPC
-  chat. Structured chat would not run a Projects thread either (those live in Anthropic's
-  cloud); it stays a possible later mode for what only it gives (history, timestamps,
-  rewind, queue cards).
-- Perch hosts no model: no Perch-run coordinator, scheduler, kanban or planner.
+- **No new noun.** "Project" stays the repository (Birdhouse). Shared context is
+  **Instructions** on a Birdhouse or Nest; children are chats nested under their lead.
+- **Coordinator: an ordinary lead session the user picks**, any provider. Perch never
+  splits, assigns, retries or summarises work and hosts no model (no coordinator chat,
+  scheduler, kanban or planner).
+- **Built on ordinary Perch sessions** and the attached TUI, not structured/RPC chat.
+- **Shared context, first cut:** Instructions (16,000-character cap, Anthropic's
+  limit) plus reference folders, a snapshot pinned per launch with its provenance; a
+  per-run notes folder of plain files that agents read on demand and that is never
+  injected. No agent-written memory.
+- **Agent entry: an appended pointer, not a skill.** Each Perch-launched session gets
+  at most 300 characters through the same append flags as Instructions ("You are in
+  Perch session X; run `perch guide` for coordination"); `perch guide` serves the full,
+  version-matched text lazily. Only Perch sessions pay; nothing is installed into user
+  skill folders. Codex has no per-session skill path, so a skill would need a global
+  install. A skill may come later as an opt-in for agents started outside Perch.
+- **One `perch` binary.** Agent commands at top level (`whoami`, `guide`, `spawn`,
+  `list`, `send`, `inbox`, `report`, `stop`); perchd's current connect-only verbs move
+  under `perch daemon …` and stay as aliases.
+- **Who may spawn:** only during a turn a person opened (typed in Chat or Terminal),
+  never a turn opened by a delivered message; checked by the core from the prompt
+  ledger and provider events. Children cannot spawn (depth 1). Same rule as Claude
+  desktop's side sessions.
+- **Same Nest by default**; a child gets a worktree only with `perch spawn --worktree`.
+- **Reports are claims, not proof.** Separate records for lifecycle (perchd/provider
+  events), "needs you" (pending approval or question, never a model claim), delivery
+  receipts, and the agent's own `perch report`. A Stop-hook last message (first 400
+  characters) is a labelled fallback. Unknown or disconnected state stays unknown.
+- **Messages:** a durable core queue; delivered only when the receiver is idle, through
+  its own queue where it has one (Pi follow-up, Codex `turn/start` at idle) or, for
+  Claude, an input-lease take plus verified-empty prompt in one step. Never steers a
+  running turn. The envelope names the sender and origin; bodies up to 2,000
+  characters, longer ones go to the notes folder with a pointer; a leading `/` is
+  neutralised so a message cannot run a command. A message never approves anything.
+  Re-validated at delivery (incarnation, scope, cancellation); survives a restart
+  without duplicating.
+- **Credentials:** a token per session incarnation, stored hashed (like device tokens),
+  allowed only operations on its own run, checked before the loopback exemption; the
+  core address comes from a 0600 discovery file. Unset in the post-exit login shell,
+  revoked when the agent exits; a child never inherits its parent's. That agent's
+  subprocesses can read it: scope, not secrecy, is the protection.
+- **Limits, enforced in the core before dispatch:** 4 concurrent children, 8
+  descendants per run, depth 1, 50 messages per run, 10 automatic wakes of the lead per
+  human message.
+- **Overview, first cut:** children nest under their lead in the sidebar (By status
+  still shows Needs you), and the lead's chat has a compact family strip (state, waiting
+  on you, last report). No tab or drawer, no decision gates: a lead asks in its own chat.
+- **Phone:** the same as desktop for viewing, messaging, stopping and answering a child
+  (with the input lease). Spawning runs only on the local core; remote runs wait for
+  owned remote runtimes (alpha item 1).
+- **Provider terms:** recheck each release; allow the Codex app-server only on checked
+  versions. A later Claude stream-json mode uses the user's own CLI and login, like the
+  desktop app.
 
-**Open: decide before the step that needs it**
+The ten questions these settle (as posed 2026-11-05; answers above):
+
 
 1. **Who coordinates.** A normal session of any provider the user picks as lead
    (leaning yes; Perch never assigns, retries or summarises work), or a Perch-run
@@ -359,23 +419,50 @@ version; the order below replaces their implied order.
 10. Codex app-server and Claude structured sessions: re-check provider terms each release;
     Anthropic paused, not dropped, SDK subscription changes.
 
-**Order** (changed after review)
+**Slices, in order.** One at a time; each ends with its check passing, docs updated and
+a local commit. Live turns only on `claude-haiku-4-5` or `gpt-5.6-luna`. Claude-desktop
+UI rows from step 0 continue between slices.
 
-1. **Feasibility spike, zero tokens first.** An installed skill is discovered by Claude,
-   Codex, Pi and OMP, and an agent can call an authenticated `perch whoami` and
-   `perch report`. Help output proves a flag exists, not that the text reaches the model or
-   that a skill is found, so check the effect.
-2. **Project injection**, shippable alone: each launch pins a snapshot of its instructions
-   and files and records where they came from. Not coupled to orchestration.
-3. **Explicit `perch spawn` / `list` / `report`** with bounded concurrency and total
-   descendants; thread rows under the parent.
-4. **Messaging** (`send`, `wait`) only after restart, cancellation, duplicate-request and
-   lease-contention behaviour is written down.
-5. **Overview, shared memory** after the lifecycle underneath is reliable.
+0. **Feasibility spike.** Zero tokens first: the pointer text reaches each model
+   (Codex: `codex debug prompt-input` with `-c developer_instructions=…`; Claude: the
+   `/context` screen in tmux without sending; Pi/OMP: the bridge's system prompt or
+   command list), and whether a hidden `--append-system-prompt-file` still works. Then
+   one cheap turn per provider asking it to run a stub `perch whoami` that prints its
+   scope: proves the variable reaches the agent's shell tool (Codex
+   `shell_environment_policy` and sandbox). Output: a table in the evidence file; no
+   product code kept.
+1. **Instructions injection**, shippable alone. Store per Birdhouse/Nest, pin a snapshot
+   per launch, record provenance; apply on wake/resume, the shell shim and the Codex
+   app-server. Check: Rust unit tests for argv per provider and the snapshot; a live
+   haiku/luna turn per provider quoting a marker from the instructions; repo
+   `AGENTS.md`/`CLAUDE.md` still load.
+2. **UI rows sub-sessions need:** status with nested child rows, subagent rows from
+   SubagentStart/Stop hooks, docked task list. Check: unit tests on the Rust projection;
+   e2e with a native Claude subagent and a TodoWrite turn.
+3. **Identity and authority:** session incarnation, scoped hashed token, discovery file,
+   the merged `perch` binary with `whoami`, `guide`, `report`. Check: tests that a token
+   cannot act outside its run, a stale incarnation is refused, loopback no longer gives
+   agents full authority, and the post-exit shell has no token; live `perch whoami` from
+   all four providers.
+4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
+   person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
+   duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed
+   before cleanup; live, a haiku lead spawns a luna child and reads its report.
+5. **Messaging** (`send`, `inbox`) with the durable queue and wake cap; write restart,
+   cancellation, duplicate and lease-contention behaviour down first. Check: queue
+   recovery after restart without duplicates; busy, approval-blocked and
+   person-typing prompts never receive bytes; Claude lease plus verify is one step.
+6. **Family strip and notes folder.** Check: e2e with a lead and two children showing
+   working / waiting on you / reported.
 
-Validation beyond the happy path: token isolation, cross-scope refusal, duplicate spawn and
-send, queue recovery after restart, stale credentials, busy and approval-blocked prompts,
-and a person typing at the same time.
+Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
+
+**Probe live first** (cheapest evidence that could change the plan): Codex's agent shell
+sees `PERCH_*` variables under its default sandbox and env policy; Claude honours a hidden
+`--append-system-prompt-file` (else pass text); Pi `--append-system-prompt` and OMP
+`--append-system-prompt=` reach the model; Pi and OMP follow-up queueing through the
+bridge while a turn runs; Codex `turn/start` while busy (expected to fail, so delivery
+waits for idle).
 
 ## Later, bounded additions
 
