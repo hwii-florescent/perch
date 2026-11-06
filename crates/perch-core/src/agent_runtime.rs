@@ -295,7 +295,10 @@ impl AgentRuntimeAdapter {
             ]
             .contains(&name)
             {
-                names.insert(name.to_string(), manifest.id);
+                // Variants share an executable (claude-agent-teams runs `claude`):
+                // the earlier catalog entry keeps the name, or a plain Claude launch
+                // would read as its variant and lose its native bridge.
+                names.entry(name.to_string()).or_insert(manifest.id);
             }
         }
         // Re-read active handles after awaiting ps: a closed/replaced runtime

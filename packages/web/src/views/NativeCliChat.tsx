@@ -12,6 +12,8 @@ import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
 import { MenuList, menuOptionId } from "./nativeChat/MenuList";
 import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
+import { ChangedFiles } from "./nativeChat/ChangedFiles";
+import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { RunRow } from "./nativeChat/RunRow";
 import { toBlocks } from "./nativeChat/transcript";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
@@ -55,6 +57,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const nextCaret = useRef<number | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
+  const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
   const [controlling, setControlling] = useState(false);
@@ -211,6 +214,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const sendable = sendState({ draft: text, attachments: images.length, uploading: uploading > 0, connected, ready: !!snapshot, controlling, exited, working: !!snapshot?.running, sending: outbox?.phase === "sending", stopping });
   // The snapshot is what this view renders; the lifecycle's blocked state (from title evidence) can lag it.
   const waiting = snapshot?.blocked === true;
+  const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
   const blocks = useMemo(() => toBlocks(snapshot?.messages ?? []), [snapshot?.messages]);
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
@@ -226,6 +230,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
         {blocks.map((block, index) => block.kind === "run"
           ? <RunRow key={block.id} steps={block.steps} live={!!snapshot?.running && index === blocks.length - 1} />
           : <NativeMessage key={block.message.id} message={block.message} streaming={!!snapshot?.running && index === blocks.length - 1} />)}
+        {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}
         <Receipts items={receipts} />
         {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />
           : waiting && <WaitingNotice />}

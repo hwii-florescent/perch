@@ -213,6 +213,26 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       if (provider === "codex") expect(fs.existsSync(path.join(fixture, "approved.txt"))).toBe(true);
       else expect((await ui.locator('[data-native-role="assistant"]').last().innerText()).toLowerCase()).toContain("blue");
     });
+    // 5. The files the agent changed in its turn, with the diff one click away. Codex runs here in a read-only
+    // sandbox that asks first, so its approval card is answered along the way.
+    await check("changed files", async () => {
+      // A repository only now: agents ask to trust a new Git folder at launch, which this run does not exercise.
+      // Perch's own state lives in the same directory in this fixture; it is not the agent's work.
+      fs.writeFileSync(path.join(fixture, ".gitignore"), "history.sqlite*\ndaemon/\n*.log\nhosts.json\nproviders.json\nsettings.json\nbin/\n");
+      execFileSync("git", ["init", "-q"], { cwd: fixture });
+      execFileSync("git", ["-c", "user.name=perch", "-c", "user.email=perch@example.invalid", "commit", "--allow-empty", "-m", "init", "-q"], { cwd: fixture });
+      await box.fill("Create a file named changed.txt containing exactly: hello perch. Do nothing else, then reply done.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      const changed = ui.getByTestId("native-cli-changed-files");
+      await expect(async () => {
+        const card = ui.getByTestId("native-cli-request-option-1");
+        if (await card.count()) await card.click();
+        await expect(changed).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 150_000, intervals: [1_000] });
+      await expect(changed).toContainText("changed.txt");
+      await changed.locator("summary", { hasText: "changed.txt" }).click();
+      await expect(changed.getByTestId("native-cli-turn-diff")).toContainText("hello perch");
+    });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);
   } catch (error) {
@@ -220,7 +240,9 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     fs.mkdirSync(path.join(root, ".impeccable/review"), { recursive: true });
     await page.screenshot({ path: path.join(root, `.impeccable/review/native-composer-${provider}-failure.png`) }).catch(() => {});
     await testInfo.attach("visible-state", { body: await page.locator("body").innerText().catch(() => "unavailable"), contentType: "text/plain" });
-    await testInfo.attach("terminal", { body: await cli.locator(".xterm-rows").innerText().catch(() => "unavailable (CLI view is not mounted)"), contentType: "text/plain" });
+    // The Terminal view shows what the CLI itself is waiting on.
+    await setChatMode(page, "cli").catch(() => {});
+    await testInfo.attach("terminal", { body: await cli.locator(".xterm-rows").innerText({ timeout: 8_000 }).catch(() => "unavailable (CLI view is not mounted)"), contentType: "text/plain" });
     await testInfo.attach("snapshots", { body: snapshots.slice(-40).join("\n"), contentType: "text/plain" });
     fs.writeFileSync(`/tmp/nc-${provider}-snapshots.txt`, snapshots.join("\n") + "\n" + failures.join("\n---\n"));
     await testInfo.attach("prompts", { body: JSON.stringify(prompts, null, 2), contentType: "application/json" });
@@ -243,7 +265,8 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     });
     if (sessionId) fs.rmSync(path.join(os.homedir(), ".perch/uploads", sessionId), { recursive: true, force: true });
     fs.closeSync(log);
-    await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").split("\n").filter((line) => /commands|WARN|ERROR|DEBUGSCREEN/.test(line)).join("\n"), contentType: "text/plain" });
+    fs.copyFileSync(path.join(fixture, "core.log"), `/tmp/nc-core-${provider}.log`);
+    await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").split("\n").filter((line) => /commands|WARN|ERROR|DBG/.test(line)).join("\n"), contentType: "text/plain" });
     // The daemon may still be writing into its directory as it stops.
     fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   }
