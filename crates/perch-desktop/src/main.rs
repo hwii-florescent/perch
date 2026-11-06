@@ -196,10 +196,12 @@ fn main() {
     let url: tauri::WebviewUrl =
         tauri::WebviewUrl::External(url_str.parse().expect("invalid server URL"));
 
-    tauri::Builder::default()
-        // Replaces the web view's `window.Notification` with native OS
-        // notifications; the UI's existing toast code needs no change.
-        .plugin(tauri_plugin_notification::init())
+    let builder = tauri::Builder::default();
+    // macOS uses real UserNotifications permission/delivery IPC instead of the
+    // plugin’s unconditional desktop grant and legacy notification shim.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
+    builder
         // Native folder picker for "Add project" on the local host.
         .plugin(tauri_plugin_dialog::init())
         // Close Tab uses the effective Settings > Keyboard binding in every webview.
@@ -214,6 +216,9 @@ fn main() {
             open_in_default_app,
             reveal_in_finder,
             notify::notify_session,
+            notify::notification_status,
+            notify::notification_request_permission,
+            notify::notification_open_settings,
             permissions::permissions_status,
             permissions::permissions_allow,
             permissions::permissions_verify,
@@ -230,7 +235,12 @@ fn main() {
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
-            app.set_menu(menu::app_menu(app.handle())?)?;
+            {
+                app.set_menu(menu::app_menu(app.handle())?)?;
+                if let Err(error) = notify::init(app.handle()) {
+                    tracing::warn!("Native notifications unavailable: {error}");
+                }
+            }
 
             let mut builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("perch")

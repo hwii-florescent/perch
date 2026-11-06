@@ -26,8 +26,9 @@ objc2 = "0.6"
 block2 = "0.6"
 # Use Tauri's already-transitive parser: its menu constructors silently ignore invalid keys.
 muda = { version = "0.19", default-features = false }
-# Already transitive (the notification plugin); notify.rs waits for a notification click with it.
-mac-notification-sys = "0.6"
+# Already transitive through Tauri; use Apple’s current authorization/delivery API.
+objc2-foundation = "0.3"
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings", "UNNotification", "UNNotificationRequest", "UNNotificationContent", "UNNotificationResponse", "UNNotificationTrigger"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

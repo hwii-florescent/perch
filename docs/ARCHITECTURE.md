@@ -154,6 +154,16 @@ never resolves, a question. Silence is not completion; uncertainty stays
 labelled. Failures and finished/exited events are distinct. Remote event relay,
 per-user read state and notification deep links remain deferred.
 
+Desktop macOS system alerts use `UNUserNotificationCenter`, not the notification
+plugin’s unconditional desktop permission grant. Settings → Notifications reads
+real authorization and banner settings, requests consent only on explicit opt-in,
+and offers System Settings, Refresh and a test alert. Sending never asks for
+permission; rejected sends fall back to an in-app toast. Sound is independent.
+The retained native delegate presents foreground alerts for other sessions and
+opens the session on click; the focused, viewed session stays quiet. Usage/test
+alerts only raise Perch. Unbundled developer runs cannot impersonate Terminal.
+Focus and notification summaries can still hide an OS-accepted banner.
+
 There is one global view setting, `chatMode`: `ui` or `cli` (default `cli`;
 a legacy `hosted` value reads as `ui`). `AgentPane` routes every session by it:
 Terminal (`AgentCliTerminal`) by default, or the native chat view

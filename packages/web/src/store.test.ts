@@ -462,6 +462,44 @@ describe("usage.alert", () => {
   });
 });
 
+describe("desktop notification delivery", () => {
+  it("keeps sound independent and preserves newer toasts when native sends fail asynchronously", async () => {
+    const before = usePerchStore.getState();
+    const rejects: ((error: Error) => void)[] = [];
+    const invoke = vi.fn((_command: string) => new Promise((_, reject) => rejects.push(reject)));
+    const sound = await import("./sound");
+    const tone = vi.spyOn(sound, "playDoneTone").mockImplementation(() => {});
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+    try {
+      usePerchStore.setState({ sessions: [session({ status: "running" })], sessionId: "id", toasts: [], settings: { theme: "perch", soundEnabled: true, toastDelivery: "system" } as never });
+      handleServerMessage({ type: "session.updated", session: session() });
+      expect(tone).toHaveBeenCalledTimes(1);
+      handleServerMessage({ type: "usage.alert", kind: "reset", title: "Usage reset", body: "Ready again" });
+      usePerchStore.setState({ toasts: [{ id: "newer", sessionId: "other", title: "Newer alert" }] });
+      expect(invoke.mock.calls).toHaveLength(2);
+      for (const reject of rejects) reject(new Error("macOS rejected the notification"));
+      await vi.waitFor(() => expect(usePerchStore.getState().toasts).toHaveLength(3));
+      expect(usePerchStore.getState().toasts.map((toast) => toast.title)).toEqual(["Newer alert", "t", "Usage reset"]);
+      expect(invoke.mock.calls.every(([command]) => command === "notify_session")).toBe(true);
+    } finally {
+      vi.restoreAllMocks(); vi.unstubAllGlobals();
+      usePerchStore.setState(before);
+    }
+  });
+
+  it("never requests notification consent just because settings arrived", () => {
+    const before = usePerchStore.getState();
+    const invoke = vi.fn();
+    vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+    try {
+      handleServerMessage({ type: "settings.current", settings: { theme: "perch", toastDelivery: "system" } as never });
+      expect(invoke).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); usePerchStore.setState(before); }
+  });
+});
+
 describe("deleteSession (tab close)", () => {
   it("worktree deletion refuses a local draft before debounce, including force", async () => {
     const { useWorkspaceFilesStore } = await import("./filesystemStore");

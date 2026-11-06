@@ -10,7 +10,7 @@ import { emitTerminalData } from "../terminalBus";
 import { handleWorkspaceTerminalMessage } from "../workspaceTerminals";
 import { applyTheme } from "../themes";
 import { playBlockedTone, playDoneTone } from "../sound";
-import { ensureNotificationPermission, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, USAGE_NOTIFICATION_ID, windowFocused } from "../notifications";
+import { hasNativeNotifications, OPEN_SESSION_EVENT, planNotification, sendSystemNotification, USAGE_NOTIFICATION_ID, windowFocused } from "../notifications";
 import { ownsAgentRuntimeRequest, ownsGitReviewRequest, ownsSurfaceRequest, registerAgentRuntimeRequest, retireAgentRuntimeRequest } from "../requestOwnership";
 import {
   ACTIVE_PROJECT_ID_STORAGE_KEY,
@@ -2112,22 +2112,18 @@ export function handleServerMessage(msg: ServerMessage): void {
           focused,
           delivery: state.settings?.toastDelivery ?? "app",
           permission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+          native: hasNativeNotifications(),
         });
         if (channel === "system") {
-          try {
-            // Click opens the session: same action as the in-app Toast's onClick
-            // (components/Toast.tsx); the desktop shell raises OPEN_SESSION_EVENT.
-            sendSystemNotification(
-              becameBlocked ? "Session needs attention" : "Session finished",
-              msg.session.title || "(untitled session)",
-              msg.session.id,
-              () => usePerchStore.getState().switchSession(msg.session.id),
-            );
-          } catch {
-            toasts = [...toasts, toast];
-          }
+          // Native authorization/enqueue can fail asynchronously. Preserve the
+          // alert as a toast, without overwriting newer alerts in the meantime.
+          void sendSystemNotification(
+            becameBlocked ? "Session needs attention" : "Session finished",
+            msg.session.title || "(untitled session)",
+            msg.session.id,
+            () => usePerchStore.getState().switchSession(msg.session.id),
+          ).catch(() => usePerchStore.setState((current) => ({ toasts: [...current.toasts, toast] })));
         } else if (channel === "toast") {
-          if (!focused) ensureNotificationPermission();
           toasts = [...toasts, toast];
         }
         // The moment a brand-new session gets its DB row (Fix 3's lazy insert
@@ -2438,9 +2434,6 @@ export function handleServerMessage(msg: ServerMessage): void {
     case "settings.current": {
       usePerchStore.setState({ settings: msg.settings });
       applyTheme(msg.settings.theme);
-      // Desktop: ask for OS permission up front so the first unfocused alert
-      // can show (browsers need a user gesture; Settings asks there).
-      if (msg.settings.toastDelivery !== "off" && "__TAURI_INTERNALS__" in window) ensureNotificationPermission();
       break;
     }
     case "hosts.list":
@@ -2536,16 +2529,13 @@ export function handleServerMessage(msg: ServerMessage): void {
         focused,
         delivery: state.settings?.toastDelivery ?? "app",
         permission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+        native: hasNativeNotifications(),
       });
       const toast = { id: newId(), sessionId: USAGE_NOTIFICATION_ID, title: msg.title, text: msg.body ? `${msg.title} · ${msg.body}` : msg.title };
       if (channel === "system") {
-        try {
-          sendSystemNotification(msg.title, msg.body, USAGE_NOTIFICATION_ID, () => undefined);
-        } catch {
-          usePerchStore.setState({ toasts: [...state.toasts, toast] });
-        }
+        void sendSystemNotification(msg.title, msg.body, USAGE_NOTIFICATION_ID, () => undefined)
+          .catch(() => usePerchStore.setState((current) => ({ toasts: [...current.toasts, toast] })));
       } else if (channel === "toast") {
-        if (!focused) ensureNotificationPermission();
         usePerchStore.setState({ toasts: [...state.toasts, toast] });
       }
       break;

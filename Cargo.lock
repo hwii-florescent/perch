@@ -2627,6 +2627,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.1",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]
@@ -2772,9 +2774,10 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "block2",
- "mac-notification-sys",
  "muda",
  "objc2",
+ "objc2-foundation",
+ "objc2-user-notifications",
  "perch-core",
  "serde_json",
  "tauri",

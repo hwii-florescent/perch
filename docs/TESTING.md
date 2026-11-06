@@ -75,6 +75,47 @@ Useful existing coverage (not a claim of a fresh passing run):
   [real Linux resource probe](evidence/remote-workspace-2026-10-23.md) is
   additional evidence, not runtime/D3 certification.
 
+## Notification regression (macOS)
+
+`npm run test -w @perch/web -- src/notifications.test.ts src/store.test.ts src/components/SettingsPage.test.tsx`
+checks native permission routing, explicit-only consent, browser fallbacks,
+asynchronous delivery failure and independent sound. After `npm run build`,
+`cd e2e && npx playwright test -c provider-config.config.ts notifications.spec.ts`
+checks desktop/mobile Settings in Chromium and WebKit with a fake IPC seam:
+no real permission prompts, System Settings launch, notifications or paid turns.
+
+The read-only native probe needs its own bundle identity (unbundled execution
+is deliberately refused). From the repository root:
+
+```sh
+cargo build -p perch-desktop --example notification_probe
+python3 - <<'PY'
+import pathlib, tempfile, shutil, plistlib, subprocess
+with tempfile.TemporaryDirectory(prefix="perch-notification-probe-") as root:
+    app = pathlib.Path(root) / "Perch Notification Probe.app"
+    contents = app / "Contents"
+    binary = contents / "MacOS" / "notification_probe"
+    binary.parent.mkdir(parents=True)
+    shutil.copy2("target/debug/examples/notification_probe", binary)
+    with (contents / "Info.plist").open("wb") as out:
+        plistlib.dump({"CFBundleIdentifier": "dev.perch.notification-probe",
+                      "CFBundleName": "Perch Notification Probe",
+                      "CFBundleExecutable": "notification_probe",
+                      "CFBundlePackageType": "APPL", "LSUIElement": True}, out)
+    subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=35)
+PY
+```
+
+This exercises the production delegate, real native settings callback and
+rejection of unauthorized sends, with no window, core, daemon, live consent or
+alert. It does **not** prove banner presentation, click navigation or the
+installed app’s permission state. For that, rebuild the bundled app, use Settings
+→ Notifications → Allow notifications / Send test, then verify a banner and
+click-to-open with another session selected. Do not automate changes to the
+installed app’s permissions. Focus and notification summaries require manual
+inspection; authorization alone does not certify visible banners.
+
 ## Native shortcut regression (macOS)
 
 `cargo run -p perch-desktop --example close_shortcut_probe` uses the production

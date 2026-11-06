@@ -4,7 +4,7 @@
  * server. Sections are grouped into the left-hand tabs; each is a card of rows.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
 import type { BrowserSearchEngine, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
@@ -13,6 +13,7 @@ import { ModeSwitch } from "./ModeSwitch";
 import { MacPermissions, macPermissionsAvailable } from "./MacPermissions";
 import { socket } from "../ws";
 import { BROWSER_SEARCH_ENGINES } from "../links";
+import { getNotificationSettings, hasNativeNotifications, openNotificationSettings, requestNotificationPermission, sendSystemNotification, USAGE_NOTIFICATION_ID, type NotificationSettings } from "../notifications";
 import { clearHistory } from "../browserHistory";
 import { AgentCatalog } from "./AgentCatalog";
 import { useAgentChoices } from "./AgentPicker";
@@ -428,6 +429,63 @@ function NotificationsSection() {
   const [toastDelivery, setToastDelivery] = useState<"off" | "app" | "system">(
     (settings?.toastDelivery as "off" | "app" | "system" | undefined) ?? "app"
   );
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
+  const [notificationPending, setNotificationPending] = useState(false);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const active = useRef(false);
+  const native = hasNativeNotifications();
+
+  const notificationAction = useCallback(async (action: "refresh" | "request" | "settings" | "test") => {
+    if (active.current) return;
+    active.current = true;
+    setNotificationPending(true);
+    setNotificationError(null);
+    setTestResult(null);
+    try {
+      if (action === "settings") await openNotificationSettings();
+      else {
+        if (action === "test") {
+          await sendSystemNotification("Perch test notification", "System notifications are working. Click to return to Perch.", USAGE_NOTIFICATION_ID, () => {});
+        }
+        const next = await (action === "request" ? requestNotificationPermission() : getNotificationSettings());
+        if (mounted.current) {
+          setNotificationSettings(next);
+          if (action === "test") setTestResult("Test submitted. If no banner appears, check your notification style and Focus settings.");
+        }
+      }
+    } catch (error) {
+      if (mounted.current) {
+        if (action === "refresh" || action === "request") setNotificationSettings(null);
+        setNotificationError(String(error));
+      }
+    } finally {
+      active.current = false;
+      if (mounted.current) setNotificationPending(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    const refresh = () => { void notificationAction("refresh"); };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { mounted.current = false; window.removeEventListener("focus", refresh); };
+  }, [notificationAction]);
+
+  const permission = notificationSettings?.permission;
+  const permissionText = permission === "granted"
+    ? native && (!notificationSettings?.alerts || notificationSettings.alertStyle === "none")
+      ? "Allowed, but macOS banners are off. In System Settings → Notifications → perch, choose Banners or Alerts."
+      : "Allowed. System notifications can be sent from this app."
+    : permission === "denied" ? native
+      ? "Blocked by macOS. Enable Allow Notifications for perch in System Settings."
+      : "Blocked by your browser. Change this site's notification permission in browser settings."
+    : permission === "default" ? "Not requested. Allow notifications to receive system alerts."
+    : permission === "provisional" ? "Quiet delivery only. Allow notifications to request banners and alerts."
+    : permission === "unsupported" ? "System notifications are not supported in this browser. In-app alerts still work."
+    : notificationPending ? "Checking notification permission…" : "Notification permission could not be verified. Try Refresh.";
 
   useEffect(() => {
     if (!settings) return;
@@ -442,13 +500,9 @@ function NotificationsSection() {
 
   const handleToastDeliveryChange = (value: "off" | "app" | "system") => {
     setToastDelivery(value);
-    if (value === "system" && typeof Notification !== "undefined" && Notification.permission === "default") {
-      // Ask up front, at the moment the user opts in — not silently later
-      // when the first toast would have fired.
-      Notification.requestPermission().finally(() => updateSettings({ toastDelivery: value }));
-      return;
-    }
     updateSettings({ toastDelivery: value });
+    // User opt-in only: opening Settings or finishing a turn never asks.
+    if (value === "system") void notificationAction("request");
   };
 
   return (
@@ -458,14 +512,13 @@ function NotificationsSection() {
         <Switch label="Play a sound when a session finishes or needs attention" testId="settings-sound-enabled" checked={soundEnabled} onChange={handleSoundEnabledChange} />
       </SettingRow>
       <SettingRow
-        title="Toast delivery"
-        description={toastDelivery === "system" && typeof Notification !== "undefined" && Notification.permission === "denied"
-          ? "System notifications are blocked in your browser settings — falling back to in-app toasts."
-          : undefined}
+        title="Notification delivery"
+        description="In-app alerts also try system notifications while Perch is unfocused. Off disables visual alerts, not sound."
       >
         <select
           className={SELECT}
           data-testid="settings-toast-delivery"
+          aria-label="Notification delivery"
           value={toastDelivery}
           onChange={(e) => handleToastDeliveryChange(e.target.value as "off" | "app" | "system")}
         >
@@ -474,6 +527,19 @@ function NotificationsSection() {
           <option value="system">System notifications</option>
         </select>
       </SettingRow>
+      <SettingRow title="Notification permission" description={<span role="status" data-testid="notification-permission-status">{permissionText}</span>}>
+        {(permission === "default" || permission === "provisional") ? (
+          <button type="button" className={BTN_PRIMARY} disabled={notificationPending} onClick={() => { void notificationAction("request"); }}>Allow notifications</button>
+        ) : native && (
+          <button type="button" className={GHOST_BUTTON} disabled={notificationPending} onClick={() => { void notificationAction("settings"); }}>Open macOS Settings</button>
+        )}
+      </SettingRow>
+      <SettingRow title="Test notification" description={testResult ?? "Send a system notification without running an agent or changing delivery preferences."}>
+        <button type="button" className={GHOST_BUTTON} disabled={notificationPending || (permission !== "granted" && permission !== "provisional")} onClick={() => { void notificationAction("test"); }}>Send test</button>
+        <button type="button" className={GHOST_BUTTON} disabled={notificationPending} onClick={() => { void notificationAction("refresh"); }}>Refresh</button>
+      </SettingRow>
+      {native && <p className={`${MUTED} pb-4`}>Sound is independent of macOS notification permission. Focus and notification summaries can delay or hide banners even when permission is allowed.</p>}
+      {notificationError && <p className="m-0 pb-4 text-[0.8rem] text-red" role="alert">Notification action failed: {notificationError}</p>}
     </SettingsGroup>
     <SettingsGroup title="Usage">
       <SettingRow title="Plan limit alert" description="Notify when a plan window crosses this share.">
