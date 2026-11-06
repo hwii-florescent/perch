@@ -59,11 +59,12 @@ live e2e, update this file, commit.
    asks git for the newest turn (`useLastTurnChanges`; `transcript.ts` held none of it, the web
    keeps a one-line predicate), per-turn diffs and edit cards (rows above), tool icons, file
    links, question calls (`AskUserQuestion`, OMP `ask`) as their own transcript rows.
-2. **Composer.** Prompt recall and draft persistence across reload: done, live-checked on
-   Claude, Codex, Pi and OMP (`native-composer.spec.ts` "recall and draft"). Queue cards and
-   Steer: not applicable to the terminal-backed chat (see the Composer table). Still open: pick
-   up a draft typed in the terminal (replaces the "empty prompt only" refusal); needs a live
-   probe of each CLI's input line first.
+2. ~~Composer.~~ Done, live-checked on Claude, Codex, Pi and OMP (`native-composer.spec.ts`
+   "terminal draft pickup" and "recall and draft"): prompt recall, draft persistence across
+   reload, and picking up a draft typed in the terminal. Queue cards and Steer: not applicable to
+   the terminal-backed chat (see the Composer table). Left over: multi-line or wrapped terminal
+   drafts stay in the terminal (the empty-prompt refusal still applies to them), and staged
+   files are not persisted.
 3. **Provider notices.** Usage limit (we hit it in e2e and show nothing), retry, interrupted
    continue.
 4. **Host-answered commands.** `/context` answer and "Ran /x" markers interleaved in the
@@ -114,7 +115,7 @@ Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect a
 | Quick commands menu | `use-native-chat-quick-commands-menu.tsx` | ⬜ |
 | Goal chip, permission picker, option pickers, context ring in actions row | `NativeChatComposerActions.tsx` | 🟡 ring only |
 | Dictation | `use-native-chat-dictation.ts` | not pursued |
-| Pick up a draft typed in the terminal | `use-native-chat-terminal-draft-pickup.ts`, `readTerminalDraft` | ⬜ (we only send into an empty prompt) |
+| Pick up a draft typed in the terminal | `use-native-chat-terminal-draft-pickup.ts`, `readTerminalDraft` | ✅ Rust `native_ui/typed.rs` `read_draft` reads the CLI's input line from its screen, probed first with real CLIs in tmux (Claude, Pi, OMP draw it between two rules; Codex leads it with `›`; OMP titles the rule above it after a turn). Opening the chat once it is idle and ours reads it (`agent.ui.draft`) and the composer shows it; the next send carries `replaces`, and the core clears the line (Ctrl-U, which empties all four CLIs) only if it still holds exactly that, verifies it is empty, then sends, so the message replaces the draft instead of being appended (Claude previously refused). Fail-closed: a draft that wraps or has several lines, an overlay, a dialog or an unknown CLI is `Unreadable`, never picked up or cleared. Ceilings (`ponytail:`): Codex draws no rules, so a multi-line draft with the cursor on its first row reads as that row; a CLI's greyed suggestion text on an empty line would read as a draft |
 | Composer notices (delivery, host outage, mobile hold) | `NativeChatComposerNotices.tsx`, `use-native-chat-host-outage-notice.ts` | 🟡 |
 
 ## Pane and navigation

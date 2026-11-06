@@ -157,6 +157,20 @@ export interface AgentUiFoundMessage {
   /** Ids of the blocks that match, in transcript order. */
   blocks: string[];
 }
+/** The text half-typed on the CLI's own input line, if readable whole; answered by `agent.ui.drafted`. */
+export interface AgentUiDraftMessage {
+  type: "agent.ui.draft";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+}
+export interface AgentUiDraftedMessage {
+  type: "agent.ui.drafted";
+  requestId: string;
+  sessionId: string;
+  /** Absent when the line is empty or cannot be read whole. */
+  text?: string;
+}
 export interface AgentUiPromptMessage {
   type: "agent.ui.prompt";
   requestId: string;
@@ -165,6 +179,8 @@ export interface AgentUiPromptMessage {
   operationId: string;
   generation: number;
   text: string;
+  /** The terminal draft this composer picked up: the core clears the CLI's line (if it still holds exactly this) before sending. */
+  replaces?: string;
 }
 export interface AgentUiAnswerMessage {
   type: "agent.ui.answer";
@@ -1943,6 +1959,7 @@ export type ClientMessage =
   | AgentProviderConfigureMessage
   | AgentUiGetMessage
   | AgentUiFindMessage
+  | AgentUiDraftMessage
   | AgentUiPromptMessage
   | AgentUiAnswerMessage
   | AgentUiCancelMessage
@@ -2678,6 +2695,7 @@ export type ServerMessage =
   | AgentUiSnapshotMessage
   | AgentUiResultMessage
   | AgentUiFoundMessage
+  | AgentUiDraftedMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

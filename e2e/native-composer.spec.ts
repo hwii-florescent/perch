@@ -272,12 +272,28 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(ring).toBeVisible({ timeout: 15_000 });
       expect(Number(await ring.getAttribute("data-percent"))).toBeGreaterThan(0);
     });
-    // 7. Composer: Up recalls the prompts sent from the transcript (newest first), Down walks back to empty,
+    // 7. Text half-typed on the CLI's own line is picked up when the chat opens, and the next send replaces it:
+    // the transcript's message is exactly the composer's text, not the terminal draft with it appended.
+    await check("terminal draft pickup", async () => {
+      await setChatMode(page, "cli");
+      await cli.locator(".xterm-helper-textarea").pressSequentially("half typed in terminal", { delay: 10 });
+      await expect(cli.locator(".xterm-rows")).toContainText("half typed in terminal", { timeout: 10_000 });
+      await setChatMode(page, "ui");
+      await expect(box).toHaveValue("half typed in terminal", { timeout: 30_000 });
+      await box.fill("Reply with only the word ok.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(ui.locator('[data-native-role="user"]').last()).toHaveText("Reply with only the word ok.", { timeout: 60_000 });
+      await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+      await setChatMode(page, "cli");
+      expect(await cli.locator(".xterm-rows").innerText()).not.toContain("half typed in terminal");
+      await setChatMode(page, "ui");
+    });
+    // 8. Composer: Up recalls the prompts sent from the transcript (newest first), Down walks back to empty,
     // and a half-typed draft survives a reload.
     await check("recall and draft", async () => {
       await box.fill("");
       await box.press("ArrowUp");
-      await expect(box).toHaveValue(/Create a file named changed\.txt/);
+      await expect(box).toHaveValue("Reply with only the word ok.");
       await box.press("ArrowDown");
       await expect(box).toHaveValue("");
       await box.fill("half a thought");

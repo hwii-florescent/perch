@@ -7,7 +7,7 @@ import { socket } from "../ws";
 import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
 import { PlusIcon } from "../components/ui/icons";
-import { loadDraftText, saveDraftText, sentPrompts, stepRecall, type RecallPosition } from "./nativeChat/composerDraft";
+import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft, type RecallPosition } from "./nativeChat/composerDraft";
 import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
@@ -63,6 +63,9 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   imagesRef.current = images;
   const nextCaret = useRef<number | null>(null);
   const recall = useRef<RecallPosition | null>(null);
+  // What was typed on the CLI's own line when this chat was opened: the next send replaces it (the core clears it first).
+  const pickedUp = useRef<string | null>(null);
+  const pickupChecked = useRef<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
@@ -133,6 +136,20 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     el.style.height = `${el.scrollHeight}px`;
     if (nextCaret.current !== null) { el.setSelectionRange(nextCaret.current, nextCaret.current); nextCaret.current = null; }
   }, [text]);
+  // Once per chat opened, when the CLI is idle and ours to type into: a later read could catch a half-typed
+  // line of this very composer's own send. Only a readable, one-line draft is picked up.
+  const idle = controlling && !!snapshot && !snapshot.running && !snapshot.blocked;
+  useEffect(() => {
+    if (!idle || pickupChecked.current === draftKey) return;
+    pickupChecked.current = draftKey;
+    pickedUp.current = null;
+    requestNativeUi({ type: "agent.ui.draft", requestId: newId(), sessionId, providerId }).then((reply) => {
+      if (reply.type !== "agent.ui.drafted" || !reply.text) return;
+      pickedUp.current = reply.text;
+      const merged = withTerminalDraft(textRef.current, reply.text);
+      if (merged !== textRef.current) updateDraft(merged);
+    }).catch(() => { /* nothing to pick up */ });
+  }, [idle, draftKey, sessionId, providerId]);
   // A new operation id on every edit: a draft that changed is a different message.
   function updateDraft(value: string, nextImages = imagesRef.current) {
     if (new TextEncoder().encode(value).length > 64 * 1024) return;
@@ -182,13 +199,13 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     setOutbox(sent);
     const settled = () => { if (drafts.get(draftKey)?.operationId === draft.operationId) { drafts.delete(draftKey); saveDraftText(draftKey, ""); setText(""); setImages([]); } };
     try {
-      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt });
+      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: draft.operationId, text: prompt, ...(pickedUp.current ? { replaces: pickedUp.current } : {}) });
       if (reply.type !== "agent.ui.result" || !reply.accepted) throw new Error("The CLI did not accept this action.");
-      settled();
+      settled(); pickedUp.current = null;
       if (reply.command) { setOutbox(null); setRanCommand(draft.text.trim()); }
       else setOutbox({ ...sent, phase: "delivered" });
     } catch (reason) {
-      if (reason instanceof NativeUiError && reason.uncertain) { settled(); setOutbox({ ...sent, phase: "unconfirmed" }); }
+      if (reason instanceof NativeUiError && reason.uncertain) { settled(); pickedUp.current = null; setOutbox({ ...sent, phase: "unconfirmed" }); }
       else { setOutbox(null); }
       setError((reason as Error).message);
     }

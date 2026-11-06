@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadDraftText, saveDraftText, sentPrompts, stepRecall } from "./composerDraft";
+import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft } from "./composerDraft";
 
 const messages = [
   { id: "a", role: "user", text: "one" },
@@ -32,6 +32,15 @@ describe("prompt recall", () => {
   it("finds its place by text when the echo's id was replaced", () => {
     const echoed = { id: "echo", recalled: "one" };
     expect(stepRecall({ direction: "forward", prompts, position: echoed, draft: "one" })!.draft).toBe("two");
+  });
+});
+
+describe("terminal draft pickup", () => {
+  it("seeds an empty composer, appends to a typed one, and never adds the same line twice", () => {
+    expect(withTerminalDraft("", "fix the bug")).toBe("fix the bug");
+    expect(withTerminalDraft("also", "fix the bug")).toBe("also\nfix the bug");
+    expect(withTerminalDraft("also\nfix the bug", "fix the bug")).toBe("also\nfix the bug");
+    expect(withTerminalDraft("fix the bug now", "fix the bug")).toBe("fix the bug now\nfix the bug");
   });
 });
 

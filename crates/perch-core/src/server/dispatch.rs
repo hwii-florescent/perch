@@ -60,6 +60,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             provider_id,
             query,
         } => native_ui::find(state, raw_text, request_id, session_id, provider_id, query),
+        ClientMessage::AgentUiDraft {
+            request_id,
+            session_id,
+            provider_id,
+        } => native_ui::draft(state, raw_text, request_id, session_id, provider_id),
         ClientMessage::AgentUiPrompt {
             request_id,
             session_id,
@@ -67,6 +72,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             operation_id,
             generation,
             text,
+            replaces,
         } => native_ui::control(
             state,
             raw_text,
@@ -74,7 +80,7 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session_id,
             provider_id,
             generation,
-            Some((operation_id, text)),
+            Some((operation_id, text, replaces)),
         ),
         ClientMessage::AgentUiAnswer {
             request_id,

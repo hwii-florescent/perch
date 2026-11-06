@@ -35,6 +35,13 @@ export function stepRecall(input: { direction: "back" | "forward"; prompts: read
   return direction === "forward" ? { position: null, draft: "" } : null;
 }
 
+/** The composer text with what was typed on the CLI's own line added, once: a composer that already holds the
+ * line (whole lines, so a short draft that is only a word of it still gets it) is left as it is. */
+export function withTerminalDraft(draft: string, seed: string): string {
+  if (`\n${draft}\n`.includes(`\n${seed}\n`)) return draft;
+  return draft ? `${draft}\n${seed}` : seed;
+}
+
 const KEY = "perch.nativeDrafts";
 const MAX = 50;
 const TTL_MS = 7 * 24 * 3_600_000;

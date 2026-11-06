@@ -59,6 +59,68 @@ pub fn input_is_empty(screen: &str, cursor_row: usize, cursor_col: usize) -> boo
         .all(|ch| ch.is_whitespace() || matches!(ch, '›' | '❯' | '>' | '│' | '┃' | '▌'))
 }
 
+/// What the CLI's input box holds, read from its screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Draft {
+    Empty,
+    Text(String),
+    /// An input box this reader does not recognise, or a draft it cannot read whole (several lines,
+    /// soft-wrapped, an overlay over it). Never cleared and never picked up.
+    Unreadable,
+}
+
+/// A horizontal rule, which OMP titles with a status (`─── 🛡️ SENT: Read x ─`), so only its start counts.
+fn is_rule(row: &str) -> bool {
+    row.trim_start().starts_with("───")
+}
+
+/// The text on the input line of `agent`'s TUI, one line only. Probed live (tmux, no tokens): Claude, Pi
+/// and OMP draw the line between two horizontal rules (Claude and OMP lead it with `❯`, Pi has no marker),
+/// Codex leads it with `›` and draws no rules. A draft that wraps or has several lines puts the next row
+/// somewhere other than a rule, so it reads as [`Draft::Unreadable`] rather than as its first line.
+/// Claude's cursor is not a reliable guide (see `claude::prompt_row`), so its box is found by its rules.
+// ponytail: Codex has no rules, so a multi-line draft with the cursor on its first row reads as that row.
+// The upgrade is a per-CLI editor API.
+pub fn read_draft(agent: &str, screen: &str, cursor_row: usize, cursor_col: usize) -> Draft {
+    let rows: Vec<&str> = screen.lines().collect();
+    let boxed = |i: usize| {
+        i >= 1 && rows.get(i + 1).is_some_and(|next| is_rule(next)) && is_rule(rows[i - 1])
+    };
+    let row = match agent {
+        "claude" => (1..rows.len().saturating_sub(1))
+            .rev()
+            .find(|&i| rows[i].trim_start().starts_with('❯') && boxed(i)),
+        "pi" | "omp" => Some(cursor_row).filter(|&i| i < rows.len() && boxed(i)),
+        "codex" => Some(cursor_row).filter(|&i| {
+            rows.get(i)
+                .is_some_and(|row| row.trim_start().starts_with('›'))
+        }),
+        _ => None,
+    };
+    let Some(row) = row.map(|i| rows[i]) else {
+        return Draft::Unreadable;
+    };
+    let line = row.trim_start();
+    let line = line.strip_prefix(['❯', '›']).unwrap_or(line);
+    // Text before the cursor is what was typed; a placeholder or hint is drawn after it. Claude's cursor is
+    // not trusted, and it draws no placeholder text on the line.
+    let typed: String = if agent == "claude" {
+        line.to_string()
+    } else {
+        let before: String = row.chars().take(cursor_col).collect();
+        let before = before.trim_start();
+        before
+            .strip_prefix(['❯', '›'])
+            .unwrap_or(before)
+            .to_string()
+    };
+    if typed.trim().is_empty() {
+        Draft::Empty
+    } else {
+        Draft::Text(line.trim().to_string())
+    }
+}
+
 /// A pager or a boxed overlay is open (Codex's `/diff` pager ends in `q close`; OMP's `/hotkeys` draws a
 /// titled box from the top row). Keys typed now would go to it, not the prompt. The alternate-screen
 /// flag is no signal: Codex and Pi draw their normal UI there.
@@ -126,6 +188,60 @@ pub fn type_command(text: &str, write: &dyn Fn(&str) -> anyhow::Result<()>) -> a
         std::thread::sleep(KEY_INTERVAL);
     }
     write("\r")
+}
+
+/// The input line of the CLI running as `key`, read from its terminal. An overlay over it is unreadable.
+fn current_draft(key: &crate::agent_fleet::AgentKey) -> anyhow::Result<Draft> {
+    let screen = crate::daemon::client()
+        .context("CLI terminal is unavailable")?
+        .snapshot(&crate::shell_integration::pty_key(key))
+        .context("CLI terminal is unavailable")?;
+    Ok(if overlay_open(&screen.text) {
+        Draft::Unreadable
+    } else {
+        read_draft(
+            &key.agent_id,
+            &screen.text,
+            screen.cursor_row as usize,
+            screen.cursor_col as usize,
+        )
+    })
+}
+
+/// What the composer may pick up: the text of a readable, non-empty draft.
+pub fn pickup(key: &crate::agent_fleet::AgentKey) -> anyhow::Result<Option<String>> {
+    Ok(match current_draft(key)? {
+        Draft::Text(text) => Some(text),
+        _ => None,
+    })
+}
+
+/// Clear the line the composer picked up (`expected`) so the message sent from the composer replaces it. Run
+/// under the input lease. Ctrl-U clears the line on all four CLIs (probed live). It only fires when the line
+/// still holds exactly `expected`; a line that is already empty (sent or cleared in the terminal) is fine, and
+/// anything else is refused rather than overwritten. The clear is verified before anything is sent.
+pub fn clear_pickup(
+    key: &crate::agent_fleet::AgentKey,
+    expected: &str,
+    latest: Option<&crate::protocol::NativeUiSnapshot>,
+    write: &dyn Fn(&str) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    ensure!(
+        latest.is_some_and(|latest| !latest.blocked),
+        "The CLI is waiting for you. Answer it first."
+    );
+    match current_draft(key)? {
+        Draft::Empty => return Ok(()),
+        Draft::Text(text) if text == expected => {}
+        _ => bail!("The CLI's input line changed since it was picked up. Check it in CLI view."),
+    }
+    write("\u{15}")?;
+    std::thread::sleep(Duration::from_millis(150));
+    ensure!(
+        current_draft(key)? == Draft::Empty,
+        "The CLI's input line could not be cleared. Clear it in CLI view first."
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -215,5 +331,60 @@ mod tests {
         })
         .unwrap();
         assert_eq!(*writes.borrow(), ["/", "h", "é", "\r"]);
+    }
+
+    #[test]
+    fn the_draft_is_read_from_each_clis_input_line() {
+        let rule = "──────────";
+        let text = |s: &str| Draft::Text(s.into());
+        // Screens as probed live with `first line` typed (and Ctrl-U after it).
+        let claude = format!("x\n{rule}\n❯ first line\n{rule}\n  status");
+        assert_eq!(read_draft("claude", &claude, 0, 0), text("first line"));
+        // Claude's cursor is parked elsewhere; its box is found by the rules.
+        assert_eq!(read_draft("claude", &claude, 4, 9), text("first line"));
+        assert_eq!(
+            read_draft("claude", &format!("{rule}\n❯ \n{rule}\n"), 1, 2),
+            Draft::Empty
+        );
+        let pi = format!("{rule}\n\n{rule}\nfirst line\n{rule}\n/tmp");
+        assert_eq!(read_draft("pi", &pi, 3, 10), text("first line"));
+        assert_eq!(
+            read_draft("pi", &format!("{rule}\n\n{rule}\n\n{rule}"), 3, 0),
+            Draft::Empty
+        );
+        let omp = format!("{rule}\n❯ first line\n{rule}\n π · status");
+        assert_eq!(read_draft("omp", &omp, 1, 12), text("first line"));
+        // Seen live after a turn: OMP titles the rule above its input.
+        let titled =
+            format!("{rule}── 🛡️ SENT: Read sentinel.txt contents ─\n❯ half typed\n{rule}");
+        assert_eq!(read_draft("omp", &titled, 1, 12), text("half typed"));
+        // A hint drawn after the cursor is not a draft.
+        let omp_empty =
+            format!("{rule}\n❯                       ⇧⇥ to change thinking effort\n{rule}");
+        assert_eq!(read_draft("omp", &omp_empty, 1, 2), Draft::Empty);
+        assert_eq!(
+            read_draft("codex", "menu\n› first line\n\n  GPT", 1, 12),
+            text("first line")
+        );
+        assert_eq!(
+            read_draft("codex", "menu\n› Ask Codex to do anything\n", 1, 2),
+            Draft::Empty
+        );
+    }
+
+    #[test]
+    fn a_draft_that_wraps_or_has_no_known_box_is_unreadable_not_truncated() {
+        let rule = "──────────";
+        // The second row of a longer draft sits where the closing rule should be.
+        let wrapped = format!("{rule}\n❯ a long draft that\n  wrapped\n{rule}");
+        assert_eq!(read_draft("claude", &wrapped, 2, 9), Draft::Unreadable);
+        assert_eq!(read_draft("omp", &wrapped, 2, 9), Draft::Unreadable);
+        // Codex's continuation rows carry no marker.
+        assert_eq!(
+            read_draft("codex", "› first\n  second", 1, 8),
+            Draft::Unreadable
+        );
+        assert_eq!(read_draft("opencode", "> x", 0, 3), Draft::Unreadable);
+        assert_eq!(read_draft("pi", "just text", 5, 0), Draft::Unreadable);
     }
 }

@@ -1166,6 +1166,13 @@ pub enum ClientMessage {
         provider_id: String,
         query: String,
     },
+    /// The text half-typed on the CLI's own input line, if it can be read whole (`agent.ui.drafted`).
+    #[serde(rename = "agent.ui.draft", rename_all = "camelCase")]
+    AgentUiDraft {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+    },
     #[serde(rename = "agent.ui.prompt", rename_all = "camelCase")]
     AgentUiPrompt {
         request_id: String,
@@ -1174,6 +1181,10 @@ pub enum ClientMessage {
         operation_id: String,
         generation: u64,
         text: String,
+        /// The terminal draft this composer picked up. The core clears the CLI's input line (only if it
+        /// still holds exactly this) before sending, so the message replaces it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces: Option<String>,
     },
     #[serde(rename = "agent.ui.answer", rename_all = "camelCase")]
     AgentUiAnswer {
@@ -2004,6 +2015,14 @@ pub enum ServerMessage {
         session_id: String,
         /// Ids of the blocks that match, in transcript order.
         blocks: Vec<String>,
+    },
+    #[serde(rename = "agent.ui.drafted", rename_all = "camelCase")]
+    AgentUiDrafted {
+        request_id: String,
+        session_id: String,
+        /// Absent when the input line is empty or cannot be read whole.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
     AgentUiResult {

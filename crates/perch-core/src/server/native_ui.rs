@@ -296,6 +296,37 @@ pub(super) fn find(
     }
 }
 
+/// The text half-typed on the CLI's own input line, for the composer to pick up. Read-only: no lease, no keys.
+pub(super) fn draft(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    match resolve(state, &session_id, &provider_id)
+        .and_then(|target| crate::native_ui::typed::pickup(&target.key))
+    {
+        Ok(text) => {
+            let _ = state.out_tx.send(ServerMessage::AgentUiDrafted {
+                request_id,
+                session_id,
+                text,
+            });
+        }
+        Err(error) => fail(
+            &state.out_tx,
+            request_id,
+            "native_ui_unavailable",
+            error.to_string(),
+            true,
+        ),
+    }
+}
+
 pub(super) fn get(
     state: &Arc<ConnState>,
     raw: &str,
@@ -347,12 +378,12 @@ pub(super) fn control(
     session_id: String,
     provider_id: String,
     generation: u64,
-    prompt: Option<(String, String)>,
+    prompt: Option<(String, String, Option<String>)>,
 ) {
     if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
         return;
     }
-    let operation_id = prompt.as_ref().map(|(id, _)| id.clone());
+    let operation_id = prompt.as_ref().map(|(id, _, _)| id.clone());
     let command = std::cell::Cell::new(false);
     let prepared =
         (|| -> anyhow::Result<Option<tokio::sync::oneshot::Receiver<Result<bool, String>>>> {
@@ -385,11 +416,16 @@ pub(super) fn control(
                 .get(&bridge_key)
                 .ok_or_else(|| anyhow::anyhow!("native CLI UI is unavailable"))?;
             state.app.agent_runtime.dispatch_native_control(&key, &lease, |write| {
-            if let Some((operation, text)) = &prompt {
+            if let Some((operation, text, replaces)) = &prompt {
                 anyhow::ensure!(!operation.is_empty() && operation.len() <= 128 && !text.trim().is_empty() && text.len() <= 64 * 1024, "invalid prompt");
                 let digest = format!("{:x}", Sha256::digest(format!("{provider_id}\0{text}").as_bytes()));
                 let (existing, _) = state.app.db.reserve_prompt_operation(operation, &session_id, Some(&key.workspace_id), &digest, text, Some(&provider_id), None)?;
                 if existing.state == "delivered" { return Ok(None); }
+                // The composer showed what was typed on the CLI's own line: this message replaces it. Cleared
+                // only if it is still exactly that, and verified, before any byte of the message is written.
+                if let Some(picked) = replaces {
+                    crate::native_ui::typed::clear_pickup(&bridge_key, picked, bridge.latest().as_ref(), write)?;
+                }
                 // A built-in slash command is a TUI control, not a message: it runs in the terminal, has no
                 // turn and nothing to confirm, and must never reach the model as prose.
                 if crate::native_ui::typed::route(&provider_id, text, bridge.slash_commands()) == crate::native_ui::typed::Route::Terminal {
