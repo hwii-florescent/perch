@@ -218,8 +218,17 @@ Live-checked: Claude `AskUserQuestion`, Codex command approval, OMP `ask`, Pi
 approvals bypassed, so only questions appear by default. OMP tool approvals and
 plan reviews are not yet shaped. Phones answer like desktop (decided
 2026-11-05); they need the input lease like any other client.
-Not yet: queue cards, Steer, Rewind, `/compact` shortcut, prompt recall,
-transcript features, Claude stream-json (not needed for approvals now).
+Transcript: runs of thinking, tool calls and results fold into one expandable row
+(open while the agent works); the last complete turn's changed files list under the
+transcript with a lazy inline diff (`useLastTurnChanges`, `git.status` `lastAgentTurn`
+plus `git.diff` compare); Cmd/Ctrl+F finds across messages and run contents; a
+prompt rail jumps between user messages. Also fixed: a plain Claude launch read as
+`claude-agent-teams` (same executable, last catalog entry won), which dropped its
+native bridge.
+Not yet: context-use ring (needs token usage per provider: Claude transcript
+`usage`, Codex token events; model limits are not reported) and the background-task
+strip (needs a source), queue cards, Steer, Rewind, `/compact` shortcut, prompt
+recall, Claude stream-json (not needed for approvals now).
 
 ### 1. Projects: Birdhouse instructions and files
 
