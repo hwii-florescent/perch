@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 1 | Copy button | `shared/native-chat/transcript/native-chat-message-copy-text.ts` (15) → `transcript.rs` | `NativeChatCopyButton.tsx` | `native-chat-message-copy-text.test.ts` | yes |
 | 2 | File links and pills | `renderer/.../native-chat-file-link.ts` (215), `-file-link-existence.ts` (296), `native-chat-markdown-file-destinations.ts` → new `native_ui/file_links.rs`, existence through the confined fs service | `NativeChatFileReferencePill.tsx`, `use-native-chat-file-link-existence.tsx` | `native-chat-file-link{,-existence}.test.ts` | yes |
 | 3 | Docked task list | `shared/native-chat/input/native-chat-task-list.ts` (171), `-frames.ts`, `-history.ts` → `native_ui/tasks.rs` | `NativeChatDockedTaskList.tsx` | `native-chat-task-list{,-history,-state}.test.ts` | tool input (verify Claude `TodoWrite` input survives the transcript reader). `TaskCreate`/`TaskUpdate` are *own* (Orca parses only `todowrite`/`update_plan`) |
 | 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
@@ -69,6 +68,11 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 | 8 | Interrupted row | status text from `transcript-line-decoders-claude.ts:90`, `transcript-turn-lifecycle.ts` | row only, no Continue button | `transcript-interruption-message.test.ts` | transcript |
 | 9 | Command envelope | `shared/native-chat/native-chat-command-envelope.ts` (50) → `typed.rs` | none | `native-chat-command-envelope.spec.ts` | Claude transcript `<command-name>` |
 | 10 | Model/effort/mode labels | `shared/native-chat/input/native-chat-session-option-labels.ts`, `native-chat-permission-mode-labels.ts`; read-back from `SessionStart.model`/`PostModelSwitch`; Orca's banner reader `claude-terminal-session-options.ts` only as a fallback | `NativeChatPermissionModePicker.tsx`, `NativeChatModelCombobox.tsx` | `native-chat-session-option-*.test.ts`, `claude-terminal-session-options.test.ts` | typed commands through `typed.rs`. Showing pickers over a live session needs an owner yes (PARITY) |
+
+Row 1 (copy button) landed 2026-11-06 in web only (`nativeChat/CopyButton.tsx`): Orca's
+`native-chat-message-copy-text.ts` only strips text Perch's messages never carry (visual
+directive lines, the subagent-group twin, a stopped label), so there is no Rust function.
+Revisit it with row 2 of slice 2 if subagent groups put twin text into messages.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background

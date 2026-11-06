@@ -9,7 +9,7 @@ export const CHAT_LIST = "min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2";
 export const CHAT_COLUMN = "mx-auto flex w-full max-w-[46rem] flex-col";
 export const SCROLL_PILL = "absolute right-4 bottom-3 z-5 flex cursor-pointer items-center gap-[0.4rem] rounded-ui [border:none] bg-accent px-3 py-[0.35rem] text-[0.8rem] font-semibold text-panel-bg [font-family:inherit] [box-shadow:0_4px_14px_rgba(0,0,0,0.35)] hover:[filter:brightness(1.08)]";
 
-const MESSAGE = "relative max-w-[85%] text-[0.95rem] leading-[1.55] [word-break:break-word]";
+const MESSAGE = "group relative max-w-[85%] text-[0.95rem] leading-[1.55] [word-break:break-word]";
 const MESSAGE_USER = "self-end whitespace-pre-wrap rounded-soft bg-surface-1 px-3.5 py-2 text-fg";
 // Assistant text is full width, unboxed and at full contrast: it is what you came to read.
 const MESSAGE_ASSISTANT = "max-w-full self-stretch p-0 text-fg [background:none] [border:none]";
@@ -17,6 +17,11 @@ const MESSAGE_ASSISTANT = "max-w-full self-stretch p-0 text-fg [background:none]
 export const messageClass = (role: string, extra?: string) =>
   cn("message", `message--${role}`, MESSAGE, role === "user" ? MESSAGE_USER : MESSAGE_ASSISTANT, extra);
 export const MESSAGE_ERROR = "mt-[0.35rem] text-red";
+/** The Copy button appears on hover or keyboard focus of its message (`message` has `group`); a person's
+ * bubble puts it to the left, the assistant's full-width text puts it underneath. */
+const MESSAGE_COPY = "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100";
+export const MESSAGE_COPY_USER = `absolute top-1.5 -left-8 ${MESSAGE_COPY}`;
+export const MESSAGE_COPY_ASSISTANT = `mt-1 ${MESSAGE_COPY}`;
 export const MESSAGE_MARKDOWN = "whitespace-normal";
 /** A quiet disclosure line: no box, a drawn chevron (as `Chevron`) before the label, a hover fill. */
 export const WORKED_FOR =

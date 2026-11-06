@@ -101,7 +101,7 @@ Known flakes, not regressions: OMP and Codex bridges sometimes fail to connect a
 | Markdown: highlighted code blocks with copy, images, paced streaming | `NativeChatMarkdown.tsx`, `NativeChatCodeBlock.tsx`, `NativeChatPacedMarkdown.tsx` | 🟡 markdown yes; no copy button, no pacing |
 | File links with existence check and open-in-pane; file reference pills | `native-chat-file-link*.ts`, `NativeChatFileReferencePill.tsx` | ⬜ |
 | Web/GitHub link peek and click behaviour | `NativeChatLinkPeek.tsx`, `NativeChatGitHubLinkPeek.tsx` | ⬜ |
-| Message actions: copy, quote selection, context menu | `NativeChatCopyButton.tsx`, `NativeChatSelectionQuote.tsx`, `use-native-chat-context-menu.tsx` | ⬜ |
+| Message actions: copy, quote selection, context menu | `NativeChatCopyButton.tsx`, `NativeChatSelectionQuote.tsx`, `use-native-chat-context-menu.tsx` | 🟡 copy button on each finished message (hover or focus; copies the message's markdown, no Rust: Perch has no visual-directive or subagent-twin text to strip); no quote selection, no context menu |
 | Find (with match navigation) and message rail | `NativeChatFindBar.tsx`, `NativeChatMessageRail.tsx` | ✅ basic; the core decides what matches (`agent.ui.find`, looks inside runs) |
 | Font size / appearance settings | `use-native-chat-font-size.ts`, `native-chat-appearance*.ts` | ⬜ |
 | Empty state, loading cue, session gate, retained transcript while reconnecting | `NativeChatEmptyState.tsx`, `NativeChatSessionGate.tsx`, `use-native-chat-retained-session.ts` | 🟡 |

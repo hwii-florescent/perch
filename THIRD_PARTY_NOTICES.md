@@ -66,6 +66,8 @@ Each module's `//!` header names the files it follows:
 - `native_ui/transcript.rs`: `src/shared/native-chat/` transcript and tool logic.
 - `native_ui/claude.rs` hook version floors and `--version` parsing:
   `src/main/claude/claude-hook-event-versions.ts`, `claude-managed-hook-events.ts`.
+- `packages/web/src/views/nativeChat/CopyButton.tsx`: behaviour and labels of
+  `src/renderer/src/components/native-chat/NativeChatCopyButton.tsx`.
 
 ## PDF.js
 

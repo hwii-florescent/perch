@@ -174,6 +174,14 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
     expect(reply).toContain(instructionWord);
     expect(reply).toContain(repoWord);
 
+    // The message's Copy button puts its text on the clipboard.
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
+    const assistant = ui.locator('[data-native-role="assistant"]').last();
+    await assistant.hover();
+    await assistant.getByTestId("copy-message").click();
+    await expect(assistant.getByTestId("copy-message")).toHaveAttribute("aria-label", "Copied");
+    expect((await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(reply.trim());
+
     // A later edit reaches new sessions only: this one keeps what it started with.
     const edited = await request(page, { type: "instructions.set", scope: "project", id: project.id, text: "Changed after launch.", folders: [] }, "instructions.state");
     expect(edited.revision).toBe(2);

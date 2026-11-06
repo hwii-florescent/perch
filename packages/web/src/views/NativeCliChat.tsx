@@ -8,7 +8,7 @@ import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
 import { PlusIcon } from "../components/ui/icons";
 import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft, type RecallPosition } from "./nativeChat/composerDraft";
-import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
+import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_COPY_ASSISTANT, MESSAGE_COPY_USER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
@@ -18,6 +18,7 @@ import { ChangedFiles } from "./nativeChat/ChangedFiles";
 import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
+import { CopyButton } from "./nativeChat/CopyButton";
 import { ContextRing } from "./nativeChat/ContextRing";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
@@ -45,6 +46,7 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, turn, fi
     {message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
+    {message.text && !streaming && <CopyButton text={message.text} className={message.role === "user" ? MESSAGE_COPY_USER : MESSAGE_COPY_ASSISTANT} />}
   </article>;
 }, (before, after) => before.streaming === after.streaming && before.turn === after.turn && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
 
