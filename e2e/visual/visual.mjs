@@ -1375,6 +1375,22 @@ const STATES = [
     if (!wraps) throw new Error("25e: a long unbroken line overflows its pre instead of wrapping");
     await nativeClean(page, "25e");
   } },
+  { name: "25e2-native-find", fresh: true, run: async (page) => {
+    await nativePage(page, { owner: true });
+    await page.locator("[data-testid=native-cli-chat] .message--user").click();
+    await page.keyboard.press("Control+f");
+    await page.getByLabel("Find in chat").fill("test");
+    await page.getByTestId("native-cli-find-count").getByText("1 of 3").waitFor({ timeout: 5000 });
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.getByTestId("native-cli-find-count").getByText("3 of 3").waitFor({ timeout: 5000 });
+    if ((await page.locator("[data-testid=native-cli-run][open]").count()) < 1) throw new Error("25e2: the matching tool run did not open");
+    await page.getByLabel("Find in chat").fill("zzz");
+    await page.getByText("No matches").waitFor({ timeout: 5000 });
+    await page.keyboard.press("Escape");
+    if ((await page.getByTestId("native-cli-find").count()) !== 0) throw new Error("25e2: Esc did not close find");
+    await nativeClean(page, "25e2");
+  } },
   { name: "25f-native-lease-refused", fresh: true, run: async (page) => {
     await nativePage(page, { owner: true, denyControl: true });
     await page.getByRole("button", { name: "Take control" }).click();

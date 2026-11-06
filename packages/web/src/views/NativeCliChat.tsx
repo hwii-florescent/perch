@@ -14,8 +14,9 @@ import { MenuList, menuOptionId } from "./nativeChat/MenuList";
 import { Attachments, type ComposerImage } from "./nativeChat/Attachments";
 import { ChangedFiles } from "./nativeChat/ChangedFiles";
 import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
-import { RunRow } from "./nativeChat/RunRow";
-import { toBlocks } from "./nativeChat/transcript";
+import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
+import { FindBar, MessageRail } from "./nativeChat/FindBar";
+import { blockId, findBlocks, toBlocks } from "./nativeChat/transcript";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
 import { cn } from "../lib/cn";
@@ -34,14 +35,14 @@ type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "
 // Answered prompts stay under the transcript as receipts, bounded like drafts.
 const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
-const NativeMessage = memo(function NativeMessage({ message, streaming }: { message: NativeUiMessage; streaming: boolean }) {
+const NativeMessage = memo(function NativeMessage({ message, streaming, find }: { message: NativeUiMessage; streaming: boolean; find?: FindMark }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
-  return <article className={messageClass(message.role === "user" ? "user" : "assistant")} data-native-role={message.role}>
+  return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-block-id={message.id}>
     {message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
   </article>;
-}, (before, after) => before.streaming === after.streaming && JSON.stringify(before.message) === JSON.stringify(after.message));
+}, (before, after) => before.streaming === after.streaming && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
 
 export function NativeCliChat({ sessionId, providerId }: { sessionId: string; providerId: string }) {
   const connected = usePerchStore((state) => state.connected);
@@ -77,6 +78,8 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const list = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const [showBottom, setShowBottom] = useState(false);
+  const [find, setFind] = useState<string | null>(null);
+  const [findIndex, setFindIndex] = useState(0);
   useEffect(() => {
     if (!connected) { setControlling(false); return; }
     let disposed = false;
@@ -216,20 +219,33 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
   const waiting = snapshot?.blocked === true;
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
   const blocks = useMemo(() => toBlocks(snapshot?.messages ?? []), [snapshot?.messages]);
+  const hits = useMemo(() => (find === null ? [] : findBlocks(blocks, find)), [blocks, find]);
+  const current = hits.length ? hits[((findIndex % hits.length) + hits.length) % hits.length] : undefined;
+  const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
+  const prompts = useMemo(() => blocks.flatMap((block) => (block.kind === "message" && block.message.role === "user" ? [{ id: block.message.id, text: block.message.text }] : [])), [blocks]);
+  const jump = (id: string) => {
+    atBottom.current = false;
+    list.current?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
+  };
+  useEffect(() => { if (current) jump(current); }, [current, findIndex]);
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
-  return <div className="native-cli-chat flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId}>
+  return <div className="native-cli-chat outline-none flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId} tabIndex={-1}
+    onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); setFind((value) => value ?? ""); } }}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
       {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model}>{snapshot.model}</span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
+    {find !== null && <FindBar query={find} onQuery={(value) => { setFind(value); setFindIndex(0); }} count={hits.length} index={hits.length ? ((findIndex % hits.length) + hits.length) % hits.length : 0}
+      onStep={(delta) => setFindIndex((value) => value + delta)} onClose={() => { setFind(null); field.current?.focus(); }} />}
     <div className={cn("chat__list-container", CHAT_LIST_CONTAINER)}>
+      <MessageRail prompts={prompts} onJump={jump} />
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block, index) => block.kind === "run"
-          ? <RunRow key={block.id} steps={block.steps} live={!!snapshot?.running && index === blocks.length - 1} />
-          : <NativeMessage key={block.message.id} message={block.message} streaming={!!snapshot?.running && index === blocks.length - 1} />)}
+          ? <RunRow key={block.id} id={block.id} steps={block.steps} live={!!snapshot?.running && index === blocks.length - 1} find={mark(blockId(block))} />
+          : <NativeMessage key={block.message.id} message={block.message} streaming={!!snapshot?.running && index === blocks.length - 1} find={mark(blockId(block))} />)}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}
         <Receipts items={receipts} />
         {snapshot?.request ? <RequestCard request={snapshot.request} canAnswer={controlling && connected} answering={answering} onAnswer={(key) => void answer(key)} keepFocus={text.length > 0} />

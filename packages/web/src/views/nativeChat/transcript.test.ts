@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { NativeUiMessage } from "@perch/shared";
-import { summarizeRun, toBlocks } from "./transcript";
+import { findBlocks, summarizeRun, toBlocks } from "./transcript";
 
 const message = (id: string, role: string, extra: Partial<NativeUiMessage> = {}): NativeUiMessage => ({ id, role, text: "", thinking: "", tools: [], ...extra });
+
+describe("findBlocks", () => {
+  it("matches messages and the contents of collapsed runs, ignoring case", () => {
+    const blocks = toBlocks([
+      message("u", "user", { text: "Fix the Parser" }),
+      message("a1", "assistant", { tools: [{ name: "bash", input: "grep parser src" }] }),
+      message("a2", "assistant", { text: "done" }),
+    ]);
+    expect(findBlocks(blocks, "PARSER")).toEqual(["u", "a1:tool:0"]);
+    expect(findBlocks(blocks, "  ")).toEqual([]);
+    expect(findBlocks(blocks, "nothing")).toEqual([]);
+  });
+});
 
 describe("toBlocks", () => {
   it("folds a turn's tool calls and results into one run between the prompt and the answer", () => {

@@ -35,6 +35,19 @@ export function toBlocks(messages: readonly NativeUiMessage[]): Block[] {
   return blocks;
 }
 
+export const blockId = (block: Block) => (block.kind === "run" ? block.id : block.message.id);
+
+/** Ids of the blocks whose text contains `query` (case-insensitive), in transcript order. */
+export function findBlocks(blocks: readonly Block[], query: string): string[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  return blocks
+    .filter((block) => (block.kind === "run"
+      ? block.steps.map((step) => `${step.label}\n${step.body}`).join("\n")
+      : `${block.message.text}\n${block.message.error ?? ""}`).toLowerCase().includes(needle))
+    .map(blockId);
+}
+
 /** "3 tool calls: read, bash +1", or "Thinking" when no tool ran. */
 export function summarizeRun(steps: readonly Step[]): string {
   const tools = steps.filter((step) => step.kind === "tool");
