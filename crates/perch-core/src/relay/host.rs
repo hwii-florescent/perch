@@ -60,7 +60,10 @@ type Out = mpsc::Sender<Message>;
 /// one may end inside a UTF-8 character; the phone joins them before decoding.
 pub(super) fn text_frames(text: &str) -> Vec<(u8, &[u8])> {
     let bytes = text.as_bytes();
-    let mut pieces: Vec<_> = bytes.chunks(CHUNK).map(|piece| (WS_TEXT_PART, piece)).collect();
+    let mut pieces: Vec<_> = bytes
+        .chunks(CHUNK)
+        .map(|piece| (WS_TEXT_PART, piece))
+        .collect();
     match pieces.last_mut() {
         Some(last) => last.0 = WS_TEXT,
         None => pieces.push((WS_TEXT, bytes)),
