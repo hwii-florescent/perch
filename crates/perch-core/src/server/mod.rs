@@ -2236,6 +2236,7 @@ fn foundation_capabilities() -> Vec<String> {
         "fs.content",
         "fs.read",
         "fs.preview",
+        "fs.links",
         "fs.write",
         "fs.buffer.list",
         "fs.buffer.get",

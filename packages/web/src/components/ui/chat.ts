@@ -23,6 +23,8 @@ const MESSAGE_COPY = "opacity-0 transition-opacity group-hover:opacity-100 focus
 export const MESSAGE_COPY_USER = `absolute top-1.5 -left-8 ${MESSAGE_COPY}`;
 export const MESSAGE_COPY_ASSISTANT = `mt-1 ${MESSAGE_COPY}`;
 export const MESSAGE_MARKDOWN = "whitespace-normal";
+/** A link in an assistant message that names an existing file in the workspace: a pill that opens it. */
+export const MESSAGE_FILE_LINK = "cursor-pointer rounded-ui bg-surface-1 px-1 font-mono text-[0.9em] text-fg no-underline hover:text-accent";
 /** A quiet disclosure line: no box, a drawn chevron (as `Chevron`) before the label, a hover fill. */
 export const WORKED_FOR =
   "text-[0.83rem] text-subtext-0 " +

@@ -480,6 +480,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             path,
         } => fs::spawn_fs_preview(state, request_id, workspace_id, path),
+        ClientMessage::FsLinks {
+            request_id,
+            workspace_id,
+            hrefs,
+        } => fs::spawn_fs_links(state, request_id, workspace_id, hrefs),
         ClientMessage::FsWrite {
             request_id,
             workspace_id,

@@ -91,6 +91,7 @@ fn capability(kind: &str) -> Option<&str> {
         | "fs.search"
         | "fs.read"
         | "fs.preview"
+        | "fs.links"
         | "fs.write"
         | "fs.buffer.list"
         | "fs.buffer.get"
@@ -299,6 +300,7 @@ impl HubManager {
                 | C::FsSearch { .. }
                 | C::FsRead { .. }
                 | C::FsPreview { .. }
+                | C::FsLinks { .. }
                 | C::FsWrite { .. }
                 | C::FsBufferList { .. }
                 | C::FsBufferGet { .. }

@@ -1517,6 +1517,15 @@ export interface FsPreviewMessage {
   path: string;
 }
 
+/** Which of a chat message's link targets (`hrefs`, as written) name an existing regular file inside
+ * the workspace (capability `fs.links`). Answered with `fs.links.result`. */
+export interface FsLinksMessage {
+  type: "fs.links";
+  requestId: string;
+  workspaceId: string;
+  hrefs: string[];
+}
+
 /** Save bounded text only when `expectedVersion` still names the bytes the
  * editor opened. Omitting it is create-only and cannot clobber an existing file. */
 export interface FsWriteMessage {
@@ -2013,6 +2022,7 @@ export type ClientMessage =
   | FsMutateMessage
   | FsReadMessage
   | FsPreviewMessage
+  | FsLinksMessage
   | FsWriteMessage
   | FsBufferListMessage
   | FsBufferGetMessage
@@ -2515,6 +2525,24 @@ export interface FsReadResultMessage {
   version: string;
 }
 
+/** A chat link target that names an existing file in the workspace. */
+export interface FsLink {
+  /** The target exactly as the message wrote it. */
+  href: string;
+  /** The file's workspace-relative path. */
+  path: string;
+  line?: number;
+  column?: number;
+}
+
+/** Reply to `fs.links`: only the targets that resolved to an existing file in the workspace. */
+export interface FsLinksResultMessage {
+  type: "fs.links.result";
+  requestId: string;
+  workspaceId: string;
+  links: FsLink[];
+}
+
 export interface FsPreviewResultMessage {
   type: "fs.preview.result";
   requestId: string;
@@ -2780,6 +2808,7 @@ export type ServerMessage =
   | FsMutateResultMessage
   | FsReadResultMessage
   | FsPreviewResultMessage
+  | FsLinksResultMessage
   | FsWriteResultMessage
   | FsBufferListResultMessage
   | FsBufferResultMessage

@@ -95,6 +95,7 @@ const RELAYED_CAPABILITIES: &[&str] = &[
     "fs.search",
     "fs.read",
     "fs.preview",
+    "fs.links",
     "fs.write",
     "fs.buffer.",
     "fs.mutate",
@@ -1573,6 +1574,7 @@ impl HubManager {
             | ServerMessage::FsMutateResult { .. }
             | ServerMessage::FsReadResult { .. }
             | ServerMessage::FsPreviewResult { .. }
+            | ServerMessage::FsLinksResult { .. }
             | ServerMessage::FsWriteResult { .. }
             | ServerMessage::FsBufferListResult { .. }
             | ServerMessage::FsBufferResult { .. }

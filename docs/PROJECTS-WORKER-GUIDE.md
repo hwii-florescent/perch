@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 2 | File links and pills | `renderer/.../native-chat-file-link.ts` (215), `-file-link-existence.ts` (296), `native-chat-markdown-file-destinations.ts` → new `native_ui/file_links.rs`, existence through the confined fs service | `NativeChatFileReferencePill.tsx`, `use-native-chat-file-link-existence.tsx` | `native-chat-file-link{,-existence}.test.ts` | yes |
 | 3 | Docked task list | `shared/native-chat/input/native-chat-task-list.ts` (171), `-frames.ts`, `-history.ts` → `native_ui/tasks.rs` | `NativeChatDockedTaskList.tsx` | `native-chat-task-list{,-history,-state}.test.ts` | tool input (verify Claude `TodoWrite` input survives the transcript reader). `TaskCreate`/`TaskUpdate` are *own* (Orca parses only `todowrite`/`update_plan`) |
 | 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
 | 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
@@ -73,6 +72,14 @@ Row 1 (copy button) landed 2026-11-06 in web only (`nativeChat/CopyButton.tsx`):
 `native-chat-message-copy-text.ts` only strips text Perch's messages never carry (visual
 directive lines, the subagent-group twin, a stopped label), so there is no Rust function.
 Revisit it with row 2 of slice 2 if subagent groups put twin text into messages.
+
+Row 2 (file links) landed 2026-11-06: `native_ui/file_links.rs` (Orca's href routing,
+location parsing and path normalization, Unix only, with their tests), `fs.links` /
+`fs.links.result` (capability `fs.links`, relayed to remote hosts like the other `fs.*`
+requests), `nativeChat/fileLinks.ts` and the pill in `NativeMessage`. Orca's existence cache
+(`native-chat-file-link-existence.ts`, renderer state tied to its runtime hosts) and the
+markdown `file:` rewrite were not ported: the core answers per message once the turn
+ends, and DOMPurify strips `file:` hrefs. Open gaps: opening at the line, inline-code paths.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background

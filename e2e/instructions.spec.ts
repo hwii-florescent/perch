@@ -182,6 +182,26 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: Inst
     await expect(assistant.getByTestId("copy-message")).toHaveAttribute("aria-label", "Copied");
     expect((await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(reply.trim());
 
+    if (provider === "claude") {
+      // A link naming a file in the workspace becomes a pill that opens it; one naming nothing stays inert.
+      fs.mkdirSync(path.join(fixture, "src"));
+      fs.writeFileSync(path.join(fixture, "src/main.rs"), "fn pill_target() {}\n");
+      await box.fill("Reply with exactly this text and nothing else, using no tools: See [main](src/main.rs:1) and [gone](src/gone.rs).");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect(ui.locator('[data-native-role="user"]')).toHaveCount(2, { timeout: 60_000 });
+      await expect(ui.getByRole("status")).toHaveText("Ready", { timeout: 150_000 });
+      const linked = ui.locator('[data-native-role="assistant"]').last();
+      const pill = linked.locator('a[data-file-path="src/main.rs"]');
+      await expect(pill).toBeVisible({ timeout: 15_000 });
+      await expect(pill).toHaveAttribute("title", "src/main.rs:1");
+      await expect(linked.locator('a[href="src/gone.rs"]')).not.toHaveAttribute("data-file-path", /.+/);
+      const before = page.url();
+      await linked.locator('a[href="src/gone.rs"]').click();
+      expect(page.url()).toBe(before);
+      await pill.click();
+      await expect(page.locator(".cm-content")).toContainText("fn pill_target", { timeout: 15_000 });
+    }
+
     // A later edit reaches new sessions only: this one keeps what it started with.
     const edited = await request(page, { type: "instructions.set", scope: "project", id: project.id, text: "Changed after launch.", folders: [] }, "instructions.state");
     expect(edited.revision).toBe(2);
