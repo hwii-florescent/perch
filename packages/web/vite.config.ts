@@ -58,8 +58,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,png,webp}"],
         // Serve the app shell for any navigation that doesn't hit a real
-        // asset, and never intercept the WS endpoint.
-        navigateFallbackDenylist: [/\/ws$/, /\/workspace-file$/],
+        // asset, and never intercept the WS endpoint or the local sign-in redirect
+        // (`/local-login?code=` must reach the core, not be answered with the app shell).
+        navigateFallbackDenylist: [/\/ws$/, /\/workspace-file$/, /\/local-login/],
       },
     }),
   ],

@@ -113,6 +113,8 @@ fn prepare_with_parent(
     }
     environment.remove(perchd::agent_cli::SESSION_ENV);
     environment.remove(perchd::agent_cli::TOKEN_ENV);
+    // The core's own launcher-chosen UI credential (`local_ui`) is never an agent's.
+    environment.remove(crate::local_ui::TOKEN_ENV);
     environment.extend(scoped.iter().cloned());
     let mut script = String::from("#!/bin/sh\n/bin/rm -f -- \"$0\"\n");
     for (name, value) in environment {
@@ -322,6 +324,31 @@ mod tests {
             ("PERCH_TOKEN".to_string(), "launch-token".to_string()),
         ];
         assert_eq!(run(&scoped), "s1|launch-token");
+    }
+
+    #[test]
+    fn the_cores_local_ui_token_never_reaches_a_child() {
+        let parent: BTreeMap<String, String> = [(
+            crate::local_ui::TOKEN_ENV.to_string(),
+            "launcher-chosen".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        let policy = EnvironmentPolicy {
+            set: [(
+                crate::local_ui::TOKEN_ENV.to_string(),
+                "from-manifest".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            ..EnvironmentPolicy::default()
+        };
+        for policy in [&EnvironmentPolicy::default(), &policy] {
+            let prepared =
+                prepare_with_parent(vec!["/bin/true".into()], policy, parent.clone(), &[]).unwrap();
+            let script = fs::read_to_string(&prepared.bootstrap.as_ref().unwrap().0).unwrap();
+            assert!(!script.contains(crate::local_ui::TOKEN_ENV), "{script}");
+        }
     }
 
     #[test]

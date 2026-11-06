@@ -265,7 +265,7 @@ Use these IDs in tests and release evidence. Prefer existing tests/helpers and e
 | AT-19 | Disk-full/history write failure | Visible degradation; no false persistence claim. |
 | AT-20 | Unicode, alternate screen, resize and replay | Supported terminal corpus remains correct; no replay side effects. |
 | AT-21 | Unrelated web origin, revoked device, wrong scope | Denied without exposing data or mutation authority. |
-| AT-22 | Clean packaged install and upgrade with live execution | CLI discovery works; compatible daemon adopted, no silent execution interruption. |
+| AT-22 | Clean packaged install and upgrade with live execution | CLI discovery works (the package carries `perch` beside the app executable; `e2e/packaged-perch.check.mjs`); compatible daemon adopted, no silent execution interruption. |
 | AT-23 | Keyboard-only and 200% UI zoom | Open/switch/split/save/attention/close remain usable; visible focus and correct restoration. |
 | AT-24 | Browser-reserved and terminal keys | Browser keeps reserved keys; PTY receives native input except documented app/leader shortcuts. |
 

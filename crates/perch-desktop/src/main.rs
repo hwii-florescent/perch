@@ -161,10 +161,15 @@ fn main() {
     // Channel: core fires ready_tx with the bound SocketAddr right after bind.
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<std::net::SocketAddr>();
 
+    // This app's webview is the core's only local client, so its credential stays in memory:
+    // never a file, never an environment variable (`LocalUi::in_process`).
+    let local_ui = perch_core::local_ui::LocalUi::in_process();
+
     // Spawn the core server on the background runtime.
     let web_dist_dir_clone = web_dist_dir.clone();
+    let boot_local_ui = local_ui.clone();
     runtime.spawn(async move {
-        if let Err(e) = boot(args, web_dist_dir_clone, Some(ready_tx)).await {
+        if let Err(e) = boot(args, web_dist_dir_clone, Some(ready_tx), boot_local_ui).await {
             tracing::error!("[perch-desktop] core exited with error: {e:#}");
         }
     });
@@ -193,8 +198,11 @@ fn main() {
     // automated verification never steals user focus or flashes a window.
     let test_mode = std::env::var("PERCH_DESKTOP_TEST").as_deref() == Ok("1");
 
+    // The webview signs in with a single-use code, which the core exchanges for an HttpOnly
+    // cookie before redirecting to the app; the code is never printed.
+    let sign_in_url = format!("{url_str}local-login?code={}", local_ui.issue_login_code());
     let url: tauri::WebviewUrl =
-        tauri::WebviewUrl::External(url_str.parse().expect("invalid server URL"));
+        tauri::WebviewUrl::External(sign_in_url.parse().expect("invalid server URL"));
 
     let builder = tauri::Builder::default();
     // macOS uses real UserNotifications permission/delivery IPC instead of the

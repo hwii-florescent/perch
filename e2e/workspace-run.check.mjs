@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { fixtureRuntimeEnv } from "./fixtureRuntime.ts";
+import { withLocalToken } from "./localAuth.ts";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-run-check-"));
 const project = path.join(dir, "project"); fs.mkdirSync(project);
@@ -29,7 +30,7 @@ async function until(check) {
 const send = (message) => socket.send(JSON.stringify(message));
 try {
   await until(async () => { try { await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(500) }); return true; } catch { return false; } });
-  socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  socket = new WebSocket(withLocalToken(`ws://127.0.0.1:${port}/ws`));
   socket.addEventListener("message", (event) => messages.push(JSON.parse(String(event.data))));
   await once(socket, "open", { signal: AbortSignal.timeout(5000) });
   send({ type: "project.create", requestId: "project", path: project });

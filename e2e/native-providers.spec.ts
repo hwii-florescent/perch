@@ -6,9 +6,11 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { fixtureHome } from "./fixtureHome";
 import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 import { startFromPanel } from "./projects";
+import { localStorageState } from "./localAuth";
 
 test("installed OMP and Pi run in separate persistent panes", async ({ page, context, browser }, testInfo) => {
   const root = path.resolve(__dirname, "..");
@@ -27,7 +29,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
   fs.writeFileSync(providers, '{"version":1,"providers":[]}');
   const log = fs.openSync(path.join(fixture, "core.log"), "a");
   let core: ChildProcess | undefined;
-  const secondContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const secondContext = await browser.newContext({ viewport: { width: 1400, height: 900 }, storageState: localStorageState() });
   const second = await secondContext.newPage();
   const keys = new Map<string, { workspaceId: string; sessionId: string; agentId: string }>();
   const shellIds = new Set<string>();
@@ -171,7 +173,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
     await shell.locator(".xterm-helper-textarea").press("Enter");
     // Scratchpad shells start in HOME, not its hidden bookkeeping folder.
-    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${os.homedir()}`);
+    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${fixtureHome()}`);
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });

@@ -14,6 +14,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { choose, expectChoice } from "./select";
+import { withLocalToken } from "./localAuth";
 
 const BASE_URL = "http://127.0.0.1:7799";
 const WS_URL = "ws://127.0.0.1:7799/ws";
@@ -31,7 +32,7 @@ const UNREACHABLE_SSH_HOST = "e2e-direct-unreachable.invalid";
 
 function openWs(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(withLocalToken(url));
     ws.onopen = () => resolve(ws);
     ws.onerror = () => reject(new Error(`WebSocket error connecting to ${url}`));
   });

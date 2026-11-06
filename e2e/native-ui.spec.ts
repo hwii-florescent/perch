@@ -8,6 +8,7 @@ import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { setChatMode } from "./chatMode";
 import { addProject, startFromPanel } from "./projects";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
+import { localStorageState } from "./localAuth";
 
 for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${provider}: UI and CLI share native turns across a core crash`, async ({ page, context, browser }, testInfo) => {
   test.setTimeout(240_000);
@@ -163,7 +164,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     expect(actions).toHaveLength(provider === "opencode" ? 3 : provider === "claude" ? 2 : 1); // Rejected draft/shell attempts remain unsent; the CLI turn bypasses the composer.
     expect(new Set(snapshots.map((value) => value.pid)).size).toBe(1);
     expect(unexpectedErrors()).toEqual([]);
-    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: localStorageState() });
     await phoneContext.addInitScript((sessionId) => {
       if (location.protocol !== "http:" || window !== window.top) return;
       localStorage.setItem("perch.onboarding.seen", "1");

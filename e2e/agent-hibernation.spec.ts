@@ -25,6 +25,7 @@ import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { spawn, type ChildProcess } from "node:child_process";
 import { startFromPanel } from "./projects";
+import { localStorageState } from "./localAuth";
 
 interface AgentStatusFrame {
   state: string;
@@ -129,7 +130,7 @@ test("an unwatched idle CLI agent hibernates and resumes the same session", asyn
     //    rather than from the process log — in its own context, because a page
     //    sharing this one's localStorage would reopen the very session under
     //    test and become the viewer that (correctly) blocks hibernation.
-    const observerContext = await browser.newContext();
+    const observerContext = await browser.newContext({ storageState: localStorageState() });
     await observerContext.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
     const observer = await observerContext.newPage();
     watchFrames(observer);

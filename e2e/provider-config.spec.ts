@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { startFromPanel } from "./projects";
+import { localStorageState } from "./localAuth";
 
 function manifest(id: string, name: string, executable = "/bin/sh") {
   return {
@@ -52,7 +53,7 @@ test("configured providers retain identity and isolation across desktop and mobi
   ] }));
   const log = fs.openSync(coreLog, "a");
   let core: ChildProcess | undefined;
-  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: localStorageState() });
   const phone = await phoneContext.newPage();
   const errors: string[] = [];
   const keys = new Map<string, { workspaceId: string; sessionId: string; agentId: string }>();

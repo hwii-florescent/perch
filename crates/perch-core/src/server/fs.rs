@@ -1278,7 +1278,8 @@ pub(super) fn handle_fs_browse(
                 continue;
             }
             let full_path = entry.path();
-            let is_git_repo = full_path.join(".git").exists();
+            let is_git_repo = !is_macos_protected_home_folder(&home, &full_path)
+                && full_path.join(".git").exists();
             entries.push(FsEntry {
                 name,
                 path: full_path.to_string_lossy().to_string(),
@@ -1295,6 +1296,78 @@ pub(super) fn handle_fs_browse(
         home,
         entries,
     });
+}
+
+/// Folders directly under the home directory that macOS guards with a privacy prompt. Listing
+/// the home folder must not look inside them (the `.git` probe), or one browse of `~` asks the
+/// user for Documents, Desktop, Downloads, Photos and Music access they never chose to give.
+/// Opening one of them is the user's choice and still lists normally.
+fn is_macos_protected_home_folder(home: &str, path: &Path) -> bool {
+    const PROTECTED: [&str; 7] = [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Library",
+        "Movies",
+        "Music",
+        "Pictures",
+    ];
+    cfg!(target_os = "macos")
+        && !home.is_empty()
+        && path.parent() == Some(Path::new(home))
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| PROTECTED.contains(&name))
+}
+
+#[cfg(test)]
+mod browse_privacy_tests {
+    use super::is_macos_protected_home_folder;
+    use std::path::Path;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn browsing_home_does_not_probe_inside_privacy_protected_folders() {
+        let home = "/Users/someone";
+        for name in [
+            "Desktop",
+            "Documents",
+            "Downloads",
+            "Library",
+            "Movies",
+            "Music",
+            "Pictures",
+        ] {
+            assert!(
+                is_macos_protected_home_folder(home, &Path::new(home).join(name)),
+                "{name}"
+            );
+        }
+        // Projects, nested folders of the same name and other roots are ordinary.
+        assert!(!is_macos_protected_home_folder(
+            home,
+            Path::new("/Users/someone/Github")
+        ));
+        assert!(!is_macos_protected_home_folder(
+            home,
+            Path::new("/Users/someone/Github/Documents")
+        ));
+        assert!(!is_macos_protected_home_folder(
+            home,
+            Path::new("/Users/other/Documents")
+        ));
+        assert!(!is_macos_protected_home_folder("", Path::new("/Documents")));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn other_platforms_probe_every_folder() {
+        assert!(!is_macos_protected_home_folder(
+            "/home/a",
+            Path::new("/home/a/Documents")
+        ));
+    }
 }
 
 #[cfg(test)]

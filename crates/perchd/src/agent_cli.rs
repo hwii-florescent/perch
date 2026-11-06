@@ -27,12 +27,31 @@ const RESPONSE_LIMIT: u64 = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Where a running core listens. Written by the core once it is bound.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoreAddress {
     pub pid: u32,
     pub port: u16,
     pub base_path: String,
+    /// The core's local UI token, present only for a headless or development core so that a
+    /// person or a test harness can open the UI. A desktop core never writes it. `perch`
+    /// itself does not use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_token: Option<String>,
+}
+
+impl std::fmt::Debug for CoreAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreAddress")
+            .field("pid", &self.pid)
+            .field("port", &self.port)
+            .field("base_path", &self.base_path)
+            .field(
+                "local_token",
+                &self.local_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// Publish this core's address, replacing the previous file atomically with mode 0600.
@@ -283,6 +302,7 @@ mod tests {
             pid: std::process::id(),
             port: 4321,
             base_path: "/".into(),
+            local_token: None,
         };
         write_core_file(&dir, &address).unwrap();
         let mode = std::fs::metadata(dir.join(CORE_FILE))
@@ -316,6 +336,7 @@ mod tests {
                 pid: 2_147_483_646,
                 port: 1,
                 base_path: "/".into(),
+                local_token: None,
             },
         )
         .unwrap();
@@ -346,6 +367,7 @@ mod tests {
             pid: 1,
             port: listener.local_addr().unwrap().port(),
             base_path: "/x/".into(),
+            local_token: None,
         };
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();

@@ -25,7 +25,13 @@
       "signingIdentity": "-",
       "entitlements": "Entitlements.plist",
       "infoPlist": "Info.plist",
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "files": { "MacOS/perch": "../../target/release/perch" }
+    },
+    "linux": {
+      "deb": { "files": { "/usr/bin/perch": "../../target/release/perch" } },
+      "rpm": { "files": { "/usr/bin/perch": "../../target/release/perch" } },
+      "appimage": { "files": { "usr/bin/perch": "../../target/release/perch" } }
     },
     "category": "DeveloperTool",
     "shortDescription": "Agent-babysitting IDE for Claude Code and Codex"

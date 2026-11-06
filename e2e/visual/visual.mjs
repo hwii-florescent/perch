@@ -28,6 +28,7 @@ import { spawn, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { localStorageState } from "../localAuth.ts";
 
 /** Perch's own dropdown (components/ui/select.tsx): open the trigger, click the option by value or { index }. */
 async function choose(trigger, value) {
@@ -1736,7 +1737,7 @@ async function snapEngine(engine, dist, outDir, only) {
     browser = await ENGINES[engine].launch();
     const ctx = {};
     const mk = async (fresh, tauri = false, unpaired = false) => {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce" });
+      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: "dark", reducedMotion: "reduce", storageState: localStorageState() });
       if (!fresh) await context.addInitScript(() => { try { localStorage.setItem("perch.onboarding.seen", "1"); } catch { /* sandboxed preview frame */ } });
       // The macOS app: App.tsx pads the brand for the traffic lights when this global exists.
       // The pairing gate: the host answers GET /pair with paired:false; a code is rejected with a message.

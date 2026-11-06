@@ -11,6 +11,7 @@ import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime.ts";
+import { withLocalToken } from "./localAuth.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "perch-shell-status-"));
@@ -105,7 +106,7 @@ function startCore() {
 let server = startCore();
 const messages = [], summaries = new Map();
 async function connect() {
-  socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  socket = new WebSocket(withLocalToken(`ws://127.0.0.1:${port}/ws`));
   socket.addEventListener("message", event => {
     try {
       const message = JSON.parse(String(event.data));

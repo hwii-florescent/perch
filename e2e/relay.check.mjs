@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { fixtureRuntimeEnv } from "./fixtureRuntime.ts";
+import { withLocalToken, localStorageState } from "./localAuth.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-relay-check-"));
@@ -61,7 +62,7 @@ try {
   await until(up(relayOrigin), "the relay");
 
   const messages = [];
-  socket = new WebSocket(`ws://127.0.0.1:${corePort}/ws`);
+  socket = new WebSocket(withLocalToken(`ws://127.0.0.1:${corePort}/ws`));
   socket.addEventListener("message", (event) => messages.push(JSON.parse(String(event.data))));
   await once(socket, "open", { signal: AbortSignal.timeout(5000) });
   const send = (message) => socket.send(JSON.stringify(message));
@@ -170,7 +171,7 @@ try {
 
   // The desktop controls a shell; the phone opens it through the relay, fits the PTY to itself and types.
   {
-  const desktop = await browser.newPage({ viewport: { width: 1272, height: 820 } });
+  const desktop = await browser.newPage({ viewport: { width: 1272, height: 820 }, storageState: localStorageState() });
   await desktop.goto(`http://127.0.0.1:${corePort}/`);
   await desktop.getByTestId("onboarding-dismiss").click({ timeout: 5000 }).catch(() => {});
   await desktop.getByTestId("new-session-local").click();
@@ -238,7 +239,7 @@ try {
   await inApp();
 
   // The desktop's Settings → Devices shows the relay, its state, and a pairing QR.
-  const desktop = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const desktop = await browser.newPage({ viewport: { width: 1280, height: 800 }, storageState: localStorageState() });
   await desktop.goto(`http://127.0.0.1:${corePort}`);
   await desktop.getByTestId("onboarding-dismiss").click({ timeout: 20_000 }).catch(() => {});
   await desktop.waitForFunction(() => window.usePerchStore !== undefined);
@@ -281,7 +282,7 @@ try {
   await lostPhone.screenshot({ path: "/tmp/perch-connection-desktop.png" });
   await lostPhone.close();
   // A build that names a relay offers it behind one switch: on connects, off disconnects.
-  const again = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const again = await browser.newPage({ viewport: { width: 1280, height: 800 }, storageState: localStorageState() });
   await again.goto(`http://127.0.0.1:${corePort}`);
   await again.getByTestId("onboarding-dismiss").click({ timeout: 20_000 }).catch(() => {});
   await again.waitForFunction(() => window.usePerchStore !== undefined);

@@ -10,6 +10,7 @@ import * as os from "os";
 import * as path from "path";
 import { addProject, startChat } from "./projects";
 import { execFileSync } from "node:child_process";
+import { localStorageState } from "./localAuth";
 
 async function open(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
@@ -298,7 +299,7 @@ test.describe("Perch sidebar", () => {
   });
 
   test("2e. By status is the default Organize view, grouped by what each chat needs; a saved choice wins", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } }); // no saved choice (the config pins By project)
+    const ctx = await browser.newContext({ storageState: localStorageState() }); // no saved choice (the config pins By project)
     try {
       const page = await ctx.newPage();
       await open(page);
@@ -352,8 +353,8 @@ test.describe("Perch sidebar", () => {
 
   test("2c. Chats reorder by drag, Move and tab drag; the core keeps one order for every viewer", async ({ browser }) => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "perch-sidebar-order-")));
-    const ctx1 = await browser.newContext();
-    const ctx2 = await browser.newContext();
+    const ctx1 = await browser.newContext({ storageState: localStorageState() });
+    const ctx2 = await browser.newContext({ storageState: localStorageState() });
     try {
       const page1 = await ctx1.newPage();
       const page2 = await ctx2.newPage();
@@ -437,8 +438,8 @@ test.describe("Perch sidebar", () => {
   });
 
   test("5. a new session appears live on another connection", async ({ browser }) => {
-    const ctx1 = await browser.newContext();
-    const ctx2 = await browser.newContext();
+    const ctx1 = await browser.newContext({ storageState: localStorageState() });
+    const ctx2 = await browser.newContext({ storageState: localStorageState() });
     try {
       const page1 = await ctx1.newPage();
       const page2 = await ctx2.newPage();

@@ -38,6 +38,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: npm ci && npm run build
+      # `perch` ships beside the app's executable (bundle.*.files in
+      # tauri.conf.json); without it agents get no Perch identity.
+      - run: cargo build --release -p perchd --bin perch
       - name: Bundle
         working-directory: crates/perch-desktop
         run: npx --yes @tauri-apps/cli@2 build

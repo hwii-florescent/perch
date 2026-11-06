@@ -18,6 +18,10 @@ async fn serve() -> anyhow::Result<()> {
         )
         .init();
 
+    // The local UI credential (a launcher may choose it in PERCH_LOCAL_TOKEN): read first, and
+    // removed from the environment before any child can inherit it.
+    let local_ui = perch_core::local_ui::LocalUi::standalone();
+
     // PATH/env fixups must all happen before any subprocess spawning.
     // Scrub Claude Code nesting markers so spawned agents/terminals don't
     // inherit them and print transcript-saving warnings.
@@ -52,5 +56,5 @@ async fn serve() -> anyhow::Result<()> {
     let web_dist_dir = resolve_web_dist_dir();
 
     // Headless binary always passes None for ready_tx.
-    boot(args, web_dist_dir, None).await
+    boot(args, web_dist_dir, None, local_ui).await
 }

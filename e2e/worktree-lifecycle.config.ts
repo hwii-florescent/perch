@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 import * as os from "os";
 import * as path from "path";
+import { LOCAL_TOKEN, localCookie } from "./localAuth";
+import { REAL_HOME, fixtureHome } from "./fixtureHome";
 
 // Worktree lifecycle (phase 3) against its own core on :7796 with scratch
 // state, so it never shares the main suite's :7799 hub. Reuses a core that is
@@ -20,7 +22,7 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     screenshot: "on",
     storageState: {
-      cookies: [],
+      cookies: [localCookie()],
       origins: [{ origin: `http://127.0.0.1:${PORT}`, localStorage: [{ name: "perch.onboarding.seen", value: "1" }] }],
     },
   },
@@ -35,8 +37,11 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 120_000,
     env: {
-      HOME: os.homedir(),
-      PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+      PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
+      HOME: fixtureHome(),
+      CARGO_HOME: `${REAL_HOME}/.cargo`,
+      RUSTUP_HOME: `${REAL_HOME}/.rustup`,
+      PATH: `${REAL_HOME}/.cargo/bin:${process.env.PATH ?? ""}`,
       PERCH_DB: path.join(STATE, "history.sqlite"),
       PERCH_HOSTS: path.join(STATE, "hosts.json"),
       PERCHD_DIR: path.join(STATE, "perchd"),

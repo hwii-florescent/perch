@@ -455,7 +455,7 @@ mod proxy_tests {
         // A LAN peer is remote even when it claims a loopback Host.
         assert!(!local_request(&lan, &headers(&own)));
         // Known limit: a proxy that rewrites Host to loopback and adds no header
-        // at all looks exactly like a local client. `PERCH_REQUIRE_PAIRING=1`
-        // demands a token from everyone for such a setup.
+        // at all looks exactly like a local client, but it still needs a token:
+        // the local UI token is something only this machine's own UI holds.
     }
 }

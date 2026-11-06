@@ -6,6 +6,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { startChat, startFromPanel } from "./projects";
+import { LOCAL_TOKEN, localHeaders, localStorageState, withLocalToken } from "./localAuth";
+
+// This core's own UI is the only caller: every request here carries its local token.
+const fetch = (input: string, init: RequestInit = {}) => globalThis.fetch(input, { ...init, headers: { ...localHeaders(), ...init.headers } });
 
 async function drop(target: Locator, names: string[], type = "drop", bytes = 0) {
   return target.evaluate((element, { names, type, bytes }) => {
@@ -69,12 +73,12 @@ test("external files reach agent and shell prompts through native paste, without
     if (message.type === "terminal.input") input.push(message);
   }));
   await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
-  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: localStorageState() });
   try {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--providers-path", providers], {
       cwd: root, env: {
-        ...process.env, HOME: fixture, PERCH_NO_LOGIN_PATH: "1", PATH: `${bin}:${process.env.PATH}`,
-        ...fixtureRuntimeEnv(fixture),
+        ...process.env, PERCH_NO_LOGIN_PATH: "1", PATH: `${bin}:${process.env.PATH}`,
+        ...fixtureRuntimeEnv(fixture), HOME: fixture,
       }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {
@@ -159,7 +163,7 @@ test("external files reach agent and shell prompts through native paste, without
       const socket = net.createConnection(port, "127.0.0.1");
       socket.setTimeout(5000, () => { socket.destroy(); reject(new Error("oversized upload was not rejected")); });
       socket.on("error", reject);
-      socket.on("connect", () => socket.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nContent-Length: 1073741825\r\n\r\n"));
+      socket.on("connect", () => socket.write("POST /upload HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nAuthorization: Bearer " + LOCAL_TOKEN + "\r\nContent-Length: 1073741825\r\n\r\n"));
       socket.once("data", (data) => { resolve(data.toString()); socket.destroy(); });
     });
     expect(oversized).toContain("413");
@@ -167,7 +171,7 @@ test("external files reach agent and shell prompts through native paste, without
 
     // Exercise configured-host ownership, explicit SCP intent, success and
     // partial-transfer cleanup through the real endpoint and subprocess flow.
-    const ws = new WebSocket(`${url.replace("http", "ws")}/ws`);
+    const ws = new WebSocket(withLocalToken(`${url.replace("http", "ws")}/ws`));
     const messages: { type: string; sessionId?: string }[] = [];
     ws.addEventListener("message", (event) => messages.push(JSON.parse(String(event.data))));
     await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("fixture socket failed")); });

@@ -45,6 +45,7 @@
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { startChat } from "./projects";
+import { localStorageState } from "./localAuth";
 
 const BASE_URL = "http://127.0.0.1:7799";
 
@@ -214,7 +215,7 @@ test.describe("Wave 2 functionality gaps", () => {
     // playwright.config.ts (which every other test — in this file and the
     // rest of the e2e suite — relies on to avoid the modal blocking
     // interaction) back to a truly empty profile, just for this test.
-    test.use({ storageState: { cookies: [], origins: [] } });
+    test.use({ storageState: localStorageState() });
 
     test("X4. onboarding shows on first visit; dismiss persists across reload", async ({ page }) => {
       await page.goto(BASE_URL, { waitUntil: "networkidle" });

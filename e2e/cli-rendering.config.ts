@@ -14,7 +14,8 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
-import * as os from "os";
+import { LOCAL_TOKEN, localStorageState } from "./localAuth";
+import { REAL_HOME, fixtureHome } from "./fixtureHome";
 
 export default defineConfig({
   testDir: ".",
@@ -26,6 +27,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:7799",
     viewport: { width: 1400, height: 900 },
+    storageState: localStorageState(),
   },
   projects: [
     // WebKit first: it is the engine the shipped desktop app uses, so a
@@ -45,8 +47,12 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 90000,
       env: {
-        HOME: os.homedir(),
-        PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+        PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
+        // Real agents start in $HOME: give them the private fixture home (fixtureHome.ts).
+        HOME: fixtureHome(),
+        CARGO_HOME: `${REAL_HOME}/.cargo`,
+        RUSTUP_HOME: `${REAL_HOME}/.rustup`,
+        PATH: `${REAL_HOME}/.cargo/bin:${process.env.PATH ?? ""}`,
       },
     },
   ],

@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
+import { fixtureHome } from "./fixtureHome";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 
 async function freePort(): Promise<number> {
@@ -45,7 +46,7 @@ test("Phone access opens the LAN for a QR-paired phone and closes it again", asy
       ["--port", "0", "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--devices-path", path.join(fixture, "devices.json"), "--cwd", fixture],
       {
         cwd: root,
-        env: { ...process.env, PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", PERCH_SETTINGS: path.join(fixture, "settings.json"), PERCH_PHONE_PORT: String(phonePort), PERCHD_DIR: path.join(fixture, "d") },
+        env: { ...process.env, HOME: fixtureHome(), PERCH_NO_LOGIN_PATH: "1", RUST_LOG: "info", PERCH_SETTINGS: path.join(fixture, "settings.json"), PERCH_PHONE_PORT: String(phonePort), PERCHD_DIR: path.join(fixture, "d") },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

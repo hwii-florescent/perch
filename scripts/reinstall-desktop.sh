@@ -17,6 +17,8 @@ EXE="$APP/Contents/MacOS/perch-desktop"
 BUILT=target/release/bundle/macos/perch.app
 
 npm run build
+# The bundle ships `perch` beside the app executable (bundle.macOS.files in tauri.conf.json).
+cargo build --release -p perchd --bin perch
 (cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build --bundles app)
 
 # macOS ties Full Disk Access and the other grants to the app's signing identity, and the

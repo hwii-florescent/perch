@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { localHeaders, withLocalToken } from "./localAuth";
 
 const HUB = "ws://127.0.0.1:7794/ws";
 const REMOTE = "ws://127.0.0.1:7795/ws";
@@ -22,7 +23,7 @@ function git(...args: string[]) {
 
 async function request(message: Message, until?: (reply: Message) => boolean, url = HUB): Promise<Message> {
   const matches = until ?? ((reply: Message) => reply.requestId === message.requestId);
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(withLocalToken(url));
   try {
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Timed out: ${message.type}`)), 15000);
@@ -44,7 +45,7 @@ async function request(message: Message, until?: (reply: Message) => boolean, ur
 }
 
 async function configure(id: string, enabled = true) {
-  return request({ type: "hosts.upsert", host: { id, name: id, sshHost: "", remotePort: 7795, enabled, directUrl: REMOTE } },
+  return request({ type: "hosts.upsert", host: { id, name: id, sshHost: "", remotePort: 7795, enabled, directUrl: withLocalToken(REMOTE) } },
     (reply) => reply.type === "host.info" && reply.hostId === id && reply.state === (enabled ? "connected" : "disabled"));
 }
 
@@ -125,7 +126,7 @@ test.describe("Managed remote workspace", () => {
     const url = new URL("http://127.0.0.1:7794/workspace-file");
     url.searchParams.set("workspaceId", workspaceId);
     url.searchParams.set("path", "hello.txt");
-    expect((await fetch(url)).status).toBe(501);
+    expect((await fetch(url, { headers: localHeaders() })).status).toBe(501);
   });
 
   test("RW3. Canonical surfaces and opaque per-viewer presentation belong to the remote", async () => {

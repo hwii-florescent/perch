@@ -23,6 +23,8 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { withLocalToken } from "./localAuth";
+import { fixtureHome } from "./fixtureHome";
 
 const HUB_PORT = process.env.PERCH_E2E_HUB_PORT ?? "7799";
 const REMOTE_PORT = Number(process.env.PERCH_E2E_REMOTE_PORT ?? "7800");
@@ -35,7 +37,7 @@ const FIXTURE_NAME = `perch-e2e-remote-git-${Date.now().toString(36)}`;
 let FIXTURE = path.join(os.tmpdir(), FIXTURE_NAME);
 let REMOTE_PROJECT_ID = "";
 let REMOTE_WORKSPACE_ID = "";
-const WORKTREES_ROOT = path.join(os.homedir(), ".perch", "worktrees", FIXTURE_NAME);
+const WORKTREES_ROOT = path.join(fixtureHome(), ".perch", "worktrees", FIXTURE_NAME);
 
 function sh(cmd: string, cwd = FIXTURE): string {
   // stdin closed + bounded: see workspace-git.spec.ts on git hooks reading stdin.
@@ -47,7 +49,7 @@ type Message = Record<string, unknown> & { type: string };
 /** Send `messages` on a fresh hub connection; resolve with the first reply
  * matching `until`. */
 async function hubRequest(messages: object[], until: (m: Message) => boolean, timeout = 20000, url = HUB_WS): Promise<Message> {
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(withLocalToken(url));
   try {
     return await new Promise<Message>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("hub request timed out")), timeout);
@@ -87,7 +89,7 @@ test.describe("Remote host git and worktrees", () => {
     sh('git config user.name "perch e2e" && git config user.email e2e@perch.test');
     sh("git commit -q --allow-empty -m init");
     const info = await hubRequest(
-      [{ type: "hosts.upsert", host: { id: HOST_ID, name: HOST_NAME, sshHost: "", remotePort: REMOTE_PORT, enabled: true, directUrl: REMOTE_WS } }],
+      [{ type: "hosts.upsert", host: { id: HOST_ID, name: HOST_NAME, sshHost: "", remotePort: REMOTE_PORT, enabled: true, directUrl: withLocalToken(REMOTE_WS) } }],
       (m) => m.type === "host.info" && m.hostId === HOST_ID && m.state === "connected",
     );
     capabilities = (info.capabilities as string[] | undefined) ?? [];

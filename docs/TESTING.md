@@ -39,6 +39,37 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
   `gpt-5.6-luna`; use aliases, not dated snapshot IDs. Set
   `ANTHROPIC_MODEL=claude-haiku-4-5` for probe cores and verify the actual
   CLI banner before the first prompt.
+- **Every core needs a token, loopback included** (slice 3a). `e2e/localAuth.ts` makes one
+  random `PERCH_LOCAL_TOKEN` per run (the core reads it once and removes it from its own and
+  every agent's environment): the configs put it in the browsers' `perch_local` cookie
+  (`storageState: localStorageState()`; any `browser.newContext()` that opens a core needs the
+  same), spec-spawned cores inherit it, Node `fetch` sends `localHeaders()` and Node WebSockets
+  use `withLocalToken(url)`. A federation host's `directUrl` carries `withLocalToken(...)`. A
+  context for a *paired phone* gets no cookie. For a hand-run headless core without the env
+  variable, read `localToken` from `<PERCHD_DIR>/core.json` (0600, same-user readable) or open
+  the one-use `local-login?code=` link it prints to a terminal. `PERCH_REQUIRE_PAIRING` does
+  nothing now. iOS-simulator probes against a loopback core need pairing like any phone.
+- **Fixture cores run under a private `$HOME`** (`e2e/fixtureHome.ts`). "Chats" sessions start
+  in `$HOME`, and a real agent started there walks it; on macOS that reaches Desktop,
+  Documents, Downloads, Pictures and Music and the OS asks for access in the name of the test
+  `perch-core` (a new identity on every rebuild). `fixtureRuntimeEnv()` therefore sets `HOME` to
+  one temp dir per run holding symlinks to what agents and shells need (`.claude`, `.codex`,
+  `.pi`, `.omp`, `.local`, toolchains, `.config`, shell startup files, `Library/Keychains` so
+  logins keep working) and never to a protected folder or `~/.perch`; it is deleted when the
+  runner exits. Test code runs under the real home: use `fixtureHome()` for where the *core's*
+  `$HOME` is (the Chats cwd, `.perch/worktrees`, `.perch/uploads`) and `REAL_HOME` for the
+  user's. A spec that spawns a core must take its env from `fixtureRuntimeEnv(...)` (a `HOME`
+  override goes after it); a config that copies it into `process.env` must drop `HOME`. A new
+  spec or config must never start an agent under the real home. To check a change, run a
+  real-Claude spec such as `cli-sync.spec.ts` and read the TCC log for the test binary:
+  `log show --last 5m --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "AUTHREQ_PROMPTING"'`
+  should list nothing for your worktree's `target/debug/perch-core`. `device-pairing.spec.ts`
+  and `workspace-recovery.spec.ts` fail with and without it (below).
+- Known base failures (not regressions, same on a clean checkout): `federation.spec.ts` E2,
+  `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
+  `remote-workspace.spec.ts` RW4, `workspace-recovery.spec.ts` (its core's sidebar opens By status,
+  so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check; its
+  earlier "working" check also races the process snapshot).
 - Add new specs to the intended config's `testMatch`. Main config enumerates
   specs; a new filename alone is not enough.
 - Runs start with clean test state; create your own project/chat via
@@ -189,6 +220,17 @@ target/debug/perch cleanup                  # confirms the exact preview
 `-p perchd --bin perch` too): a core with no `perch` beside it gives agents no identity and no
 pointer, by design.
 
+**Packaged `perch`** (`e2e/packaged-perch.check.mjs`, zero tokens, no browser): after
+`cargo build --release -p perchd --bin perch && cargo build -p perch-core` and a local bundle
+(`cd crates/perch-desktop && npx --yes @tauri-apps/cli@2 build --bundles app`), run
+`node --experimental-strip-types e2e/packaged-perch.check.mjs [perch.app|dir]`. It requires an
+executable `perch` beside the package's own executable, checks `perch whoami` and `guide` outside a
+session, then puts that `perch` next to a headless `perch-core` (the lookup the app makes beside
+its own executable), starts a terminal session under private state and requires `perch whoami`
+in it to name the session without echoing the token. The desktop app embeds its core and has no
+headless mode, so the check does not launch the app; open the built app once for a visual pass
+(`codesign --verify --deep --strict` on the bundle also passes with `perch` inside it).
+
 These commands connect only; they never start a missing daemon. Older daemons
 can be listed, but cleanup refuses without `released-cleanup.v1`. Do not restart
 the installed daemon to enable it: upgrade during a planned session shutdown.
@@ -249,7 +291,7 @@ process-group confirmation, history preservation and connect-only behavior.
   `TEST_RUNNER_PERCH_ADDRESS` and `TEST_RUNNER_PERCH_CODE` are set: a fresh
   code from `device.pair.start` (keep that socket open meanwhile) and either
   the core at a non-loopback address (this Mac's LAN IP and port; loopback
-  skips pairing) or a whole relay link (`http://127.0.0.1:<port>/#r=…` from
+  no longer skips pairing: nothing is tokenless) or a whole relay link (`http://127.0.0.1:<port>/#r=…` from
   a `wrangler dev` relay set up as in `e2e/relay.check.mjs`). Use isolated
   state and uninstall the app first. 2026-11-04: passed on Wi-Fi and through
   a local relay (iOS 27 simulator); Tailscale and the QR camera need a device.

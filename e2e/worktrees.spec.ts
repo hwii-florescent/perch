@@ -32,6 +32,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { pickProject } from "./projects";
+import { fixtureHome } from "./fixtureHome";
 
 const BASE_URL = process.env.PERCH_E2E_BASE ?? "http://127.0.0.1:7799";
 
@@ -42,7 +43,7 @@ const FIXTURE_NAME = "perch-e2e-worktree-fixture";
  * the sidebar group and the git listing would disagree. */
 let FIXTURE = path.join(os.tmpdir(), FIXTURE_NAME);
 /** Where `worktree.create` puts checkouts by default for this repo. */
-const WORKTREES_ROOT = path.join(os.homedir(), ".perch", "worktrees", FIXTURE_NAME);
+const WORKTREES_ROOT = path.join(fixtureHome(), ".perch", "worktrees", FIXTURE_NAME);
 
 function sh(cmd: string, cwd: string): void {
   execSync(cmd, {

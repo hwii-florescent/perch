@@ -487,8 +487,11 @@ impl HubManager {
             self.set_host_state(&host_id, &host_name, HostState::Connecting);
             tracing::info!("[hub] {host_id}: connecting…");
 
-            // Resolve the WS URL to connect to.
-            let ws_url = if let Some(direct) = &host.direct_url {
+            // Resolve the WS URL to connect to, and the credential the remote core wants.
+            // A `directUrl` carries whatever the user put in it (a `?token=`, redacted from
+            // every log line); an SSH host's token is read from the remote on every attempt,
+            // because a core takes a new port and token at each launch.
+            let (ws_url, remote_token) = if let Some(direct) = &host.direct_url {
                 // Self-connection guard for direct_url.
                 if is_self_url(direct, own_port) {
                     let err = "refusing to connect to self".to_string();
@@ -496,7 +499,7 @@ impl HubManager {
                     self.set_host_state(&host_id, &host_name, HostState::Error(err));
                     return; // permanent error — don't retry
                 }
-                direct.clone()
+                (direct.clone(), None)
             } else {
                 // SSH tunnel path: health-check → tunnel (agent-fwd + symlink)
                 //   → auto-start (if needed) → health-poll via local port → connect.
@@ -504,7 +507,13 @@ impl HubManager {
                     .setup_ssh_tunnel(&host, own_port, &mut shutdown_rx)
                     .await
                 {
-                    Some(url) => url,
+                    Some(url) => {
+                        let token = tokio::select! {
+                            token = remote_local_token(&host.ssh_host, host.remote_port) => token,
+                            _ = shutdown_rx.changed() => { return; }
+                        };
+                        (url, token)
+                    }
                     None => {
                         // setup_ssh_tunnel already set state or shutdown was requested.
                         if *shutdown_rx.borrow() {
@@ -523,16 +532,19 @@ impl HubManager {
                 }
             };
 
-            // Attempt WS connection.
-            let connect_result = tokio::select! {
-                r = tokio_tungstenite::connect_async(&ws_url) => r,
-                _ = shutdown_rx.changed() => { return; }
+            // Attempt WS connection. The credential travels in a header, never the URL.
+            let connect_result = match socket_request(&ws_url, remote_token.as_deref()) {
+                Ok(request) => tokio::select! {
+                    r = tokio_tungstenite::connect_async(request) => r,
+                    _ = shutdown_rx.changed() => { return; }
+                },
+                Err(e) => Err(*e),
             };
 
             let (ws_stream, _) = match connect_result {
                 Ok(r) => r,
                 Err(e) => {
-                    let err = format!("ws connect failed: {e}");
+                    let err = connect_failure(&e);
                     tracing::warn!("[hub] {host_id}: {err}");
                     self.set_host_state(&host_id, &host_name, HostState::Error(err));
                     let sleep = tokio::time::sleep(std::time::Duration::from_millis(backoff_ms));
@@ -545,7 +557,7 @@ impl HubManager {
                 }
             };
 
-            tracing::info!("[hub] {host_id}: WS connected to {ws_url}");
+            tracing::info!("[hub] {host_id}: WS connected to {}", redact_url(&ws_url));
             // Reset backoff on successful connect.
             backoff_ms = MIN_BACKOFF_MS;
 
@@ -1893,6 +1905,85 @@ fn build_host_info(host_id: &str, name: &str, state: &HostState) -> ServerMessag
 
 /// Return `true` if the given URL resolves to this instance's own port on
 /// 127.0.0.1 or localhost — prevents the hub from connecting to itself.
+/// The one-line command that prints a remote core's discovery file (`core.json`, 0600). The
+/// directory is the daemon's: `PERCHD_DIR`, else `~/.perch/daemon`.
+const REMOTE_CORE_FILE_COMMAND: &str = r#"cat "${PERCHD_DIR:-$HOME/.perch/daemon}/core.json""#;
+
+/// The local UI token a headless remote core published, if its file names the port the tunnel
+/// forwards to. A desktop-app core publishes none (it keeps the token in memory), and an older
+/// core never did: both yield `None`, and the connection is then made without a credential.
+fn local_token_from_core_file(text: &str, remote_port: u16) -> Option<String> {
+    let file: serde_json::Value = serde_json::from_str(text).ok()?;
+    (file["port"].as_u64() == Some(u64::from(remote_port)))
+        .then(|| file["localToken"].as_str())
+        .flatten()
+        .filter(|token| crate::local_ui::valid_launcher_token(token))
+        .map(str::to_string)
+}
+
+/// Read the remote core's local UI token over the SSH the hub already uses. The output is
+/// parsed and dropped: it is never logged.
+async fn remote_local_token(ssh_host: &str, remote_port: u16) -> Option<String> {
+    let text = crate::ssh::run_remote(ssh_host, REMOTE_CORE_FILE_COMMAND, 15, "read core token")
+        .await
+        .ok()?;
+    local_token_from_core_file(&text, remote_port)
+}
+
+/// The WebSocket upgrade for a remote core. A token is sent as a bearer header; a `directUrl`'s
+/// own `?token=` stays in the URL because the user put it there.
+pub(crate) fn socket_request(
+    url: &str,
+    bearer: Option<&str>,
+) -> Result<
+    tokio_tungstenite::tungstenite::handshake::client::Request,
+    Box<tokio_tungstenite::tungstenite::Error>,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = url.into_client_request().map_err(Box::new)?;
+    if let Some(token) = bearer {
+        let value = format!("Bearer {token}")
+            .parse()
+            .map_err(|_| Box::new(tokio_tungstenite::tungstenite::Error::Utf8))?;
+        request.headers_mut().insert(
+            tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+            value,
+        );
+    }
+    Ok(request)
+}
+
+/// `url` with the value of any `token` query parameter hidden, for logs and messages.
+fn redact_url(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let query = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some(("token", _)) => "token=<hidden>",
+            _ => pair,
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{base}?{query}")
+}
+
+/// Why a socket to a remote core failed, in words that help: a 401 or 403 means the remote
+/// wants a credential this machine could not supply.
+pub(crate) fn connect_failure(error: &tokio_tungstenite::tungstenite::Error) -> String {
+    use tokio_tungstenite::tungstenite::Error;
+    match error {
+        Error::Http(response) if matches!(response.status().as_u16(), 401 | 403) => format!(
+            "ws connect failed: the remote Perch refused this machine ({}). Its core must publish \
+             a local sign-in (a headless perch-core does; the desktop app keeps it in memory), \
+             or the host's directUrl must carry ?token=",
+            response.status().as_u16()
+        ),
+        other => format!("ws connect failed: {other}"),
+    }
+}
+
 fn is_self_url(url: &str, own_port: u16) -> bool {
     // Parse just the host:port part.
     let url = url.trim_start_matches("ws://").trim_start_matches("wss://");
@@ -1915,7 +2006,71 @@ fn is_self_url(url: &str, own_port: u16) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::relayed_capabilities;
+    use super::{
+        connect_failure, local_token_from_core_file, redact_url, relayed_capabilities,
+        socket_request,
+    };
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn the_remote_token_is_read_only_from_a_file_naming_the_forwarded_port() {
+        let file = |port: u16, token: &str| {
+            format!(r#"{{"pid":7,"port":{port},"basePath":"/","localToken":"{token}"}}"#)
+        };
+        assert_eq!(
+            local_token_from_core_file(&file(7788, TOKEN), 7788).as_deref(),
+            Some(TOKEN)
+        );
+        // Another core's file (a different port), a token of the wrong shape and a desktop
+        // core (no token) all give no credential.
+        assert_eq!(local_token_from_core_file(&file(7789, TOKEN), 7788), None);
+        assert_eq!(local_token_from_core_file(&file(7788, "short"), 7788), None);
+        assert_eq!(
+            local_token_from_core_file(r#"{"pid":7,"port":7788,"basePath":"/"}"#, 7788),
+            None
+        );
+        assert_eq!(local_token_from_core_file("cat: no such file", 7788), None);
+    }
+
+    #[test]
+    fn the_token_goes_in_a_header_and_never_in_the_url() {
+        let request = socket_request("ws://127.0.0.1:41000/ws", Some(TOKEN)).unwrap();
+        assert_eq!(
+            request.headers()["authorization"].to_str().unwrap(),
+            format!("Bearer {TOKEN}")
+        );
+        assert!(!request.uri().to_string().contains(TOKEN));
+        let bare = socket_request("ws://127.0.0.1:41000/ws", None).unwrap();
+        assert!(bare.headers().get("authorization").is_none());
+        // A directUrl's own query token is left where the user put it.
+        let direct =
+            socket_request(&format!("ws://127.0.0.1:7800/ws?token={TOKEN}"), None).unwrap();
+        assert!(direct.uri().to_string().contains(TOKEN));
+    }
+
+    #[test]
+    fn a_query_token_is_hidden_from_logs() {
+        assert_eq!(
+            redact_url(&format!("ws://h:1/ws?token={TOKEN}")),
+            "ws://h:1/ws?token=<hidden>"
+        );
+        assert_eq!(
+            redact_url(&format!("ws://h:1/ws?a=1&token={TOKEN}&b=2")),
+            "ws://h:1/ws?a=1&token=<hidden>&b=2"
+        );
+        assert_eq!(redact_url("ws://h:1/ws"), "ws://h:1/ws");
+    }
+
+    #[test]
+    fn a_refusal_explains_the_missing_credential() {
+        use tokio_tungstenite::tungstenite::{http, Error};
+        let refused = http::Response::builder().status(401).body(None).unwrap();
+        let message = connect_failure(&Error::Http(refused));
+        assert!(message.contains("refused this machine (401)"), "{message}");
+        let other = http::Response::builder().status(500).body(None).unwrap();
+        assert!(connect_failure(&Error::Http(other)).starts_with("ws connect failed: HTTP error"));
+    }
 
     #[test]
     fn only_relayed_capability_families_reach_browsers() {
