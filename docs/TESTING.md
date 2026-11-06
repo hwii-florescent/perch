@@ -183,6 +183,12 @@ target/debug/perch cleanup                  # confirms the exact preview
 # Noninteractive execution requires explicit --yes.
 ```
 
+`perch daemon ps` and `perch daemon cleanup` are the same commands under their new home.
+`perch whoami`, `report` and `guide` are for agents; the e2e that exercises them
+(`instructions.spec.ts`) needs `perch` built beside the core (`cargo build --workspace`, or
+`-p perchd --bin perch` too): a core with no `perch` beside it gives agents no identity and no
+pointer, by design.
+
 These commands connect only; they never start a missing daemon. Older daemons
 can be listed, but cleanup refuses without `released-cleanup.v1`. Do not restart
 the installed daemon to enable it: upgrade during a planned session shutdown.

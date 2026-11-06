@@ -136,7 +136,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     const piUi = page.locator('[data-testid="native-cli-chat"][data-provider="pi"]');
     for (const ui of [ompUi, piUi]) {
       await expect(ui).toBeVisible();
-      await expect(ui.locator(".native-cli-chat__model")).toContainText(CHEAP_CODEX_MODEL);
+      await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", CHEAP_CODEX_MODEL);
       await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
     }
     const pids = [await ompUi.getAttribute("data-native-pid"), await piUi.getAttribute("data-native-pid")];

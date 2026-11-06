@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::agent_persistence::SqliteConnectionAdapter;
 use crate::review::{ReviewComment, ReviewPacket};
 
+mod agent_identity;
 mod attention;
 pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod browser_history;
@@ -366,7 +367,22 @@ impl HistoryDb {
                 sources TEXT NOT NULL DEFAULT '[]',
                 hash TEXT,
                 pinned_at INTEGER NOT NULL
-            );",
+            );
+            -- One row per launch of a local agent session: the SHA-256 of its token and
+            -- when it ended (`agent_identity.rs`). The token itself is never stored.
+            CREATE TABLE IF NOT EXISTS agent_identities (
+                incarnation TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                revoked_at INTEGER,
+                report TEXT,
+                reported_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS agent_identities_session
+                ON agent_identities(session_id);",
         )?;
 
         let mut existing_columns = std::collections::HashSet::new();

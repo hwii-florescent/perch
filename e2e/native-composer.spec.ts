@@ -147,7 +147,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(box).toBeEnabled();
     // Fail before any paid turn if the cheap-model pin did not take.
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
 
     // 1. `@file`: pick the mention from the menu, the agent reads the file it names.
     await check("@file", async () => {
@@ -198,6 +198,11 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         await box.press("Enter");
         await expect(box).toHaveValue(`${sigil}perchping `);
         expect(await sendAndWait()).toContain("PERCH_PING_OK");
+        // Claude records the skill as a command envelope; the transcript shows what the person typed.
+        if (provider === "claude") {
+          await expect(ui.locator('[data-native-role="user"]').last()).toHaveText("/perchping");
+          await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "<command-" })).toHaveCount(0);
+        }
       }
     });
     // 4. Questions and approvals, answered from the card: Claude's AskUserQuestion (number key), a Codex
@@ -266,6 +271,28 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(ui.getByTestId("native-cli-find-count")).toHaveText(/^1 of \d+$/, { timeout: 10_000 });
       await ui.getByLabel("Close find").click();
     });
+    // An edit card: the file the agent edited, with its rows. Claude only: it is the provider whose call and
+    // result Perch reads as an edit in every run (Codex file changes and Pi/OMP edits get no card).
+    if (provider === "claude") await check("edit card", async () => {
+      await box.fill("Edit changed.txt so that it reads exactly: hello cards (replace the old text). Do nothing else, then reply done.");
+      await sendAndWait();
+      const run = ui.getByTestId("native-cli-run").last();
+      await run.locator(":scope > summary").click();
+      const card = run.getByTestId("native-cli-diff-card").last();
+      await expect(card).toContainText("Edited");
+      await expect(card).toContainText("changed.txt");
+      await card.getByRole("button", { expanded: false }).click();
+      const rows = card.getByTestId("native-cli-diff-rows");
+      await expect(rows).toContainText("hello perch");
+      await expect(rows).toContainText("hello cards");
+      // The turn that created the file keeps a rollup from its own edit calls; the newest turn has Git's card instead.
+      const rollup = ui.getByTestId("native-cli-turn-rollup");
+      await expect(rollup).toHaveCount(1);
+      await expect(rollup).toContainText("1 changed file");
+      await expect(rollup).toContainText("+1");
+      await rollup.getByRole("button", { name: /changed\.txt/ }).click();
+      await expect(rollup.getByTestId("native-cli-diff-card")).toContainText("Added");
+    });
     // The agent's own to-do list is docked above the composer. Claude 2.1.319 keeps it with TaskCreate and
     // TaskUpdate calls (it offers no TodoWrite); Codex's plan updates do not reach the bridge as calls.
     if (provider === "claude") await check("task list", async () => {
@@ -281,11 +308,30 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await run.locator(":scope > summary").click();
       await expect(run).toContainText("Added Read the notes");
     });
+    // 5c. A native subagent: Claude records it beside the session, and the chat draws one roster row for the turn
+    // that started it, settling from "Kicked off" to "Ran 1 subagent, completed".
+    if (provider === "claude") await check("subagent roster", async () => {
+      await box.fill('Use the Agent tool exactly once to start a subagent with the description "count words" whose prompt is: reply with only the number 3. Then reply with only the number it returned.');
+      await sendAndWait();
+      const roster = ui.getByTestId("native-cli-subagents").last();
+      await expect(roster).toBeVisible({ timeout: 30_000 });
+      await expect(roster.getByTestId("native-cli-subagents-verdict")).toHaveText(/^completed/, { timeout: 90_000 });
+      await expect(roster).toContainText("Ran 1 subagent");
+      await roster.getByRole("button").click();
+      await expect(roster.getByTestId("native-cli-subagent")).toContainText("count words");
+    });
     // 6. After real turns the provider has reported how full the context is (OpenCode has no source).
     await check("context ring", async () => {
       const ring = ui.getByTestId("native-cli-context");
       await expect(ring).toBeVisible({ timeout: 15_000 });
       expect(Number(await ring.getAttribute("data-percent"))).toBeGreaterThan(0);
+    });
+    // 6b. The toolbar reads the model and permission mode back from the CLI. Perch starts Claude with approvals
+    // bypassed and its prompt hooks name the mode; Claude reports no effort, so none is shown.
+    if (provider === "claude") await check("toolbar options", async () => {
+      await expect(ui.locator(".native-cli-chat__model")).toHaveText("Haiku 4.5");
+      await expect(ui.getByTestId("native-cli-permission-mode")).toHaveText("Full access");
+      await expect(ui.getByTestId("native-cli-effort")).toHaveCount(0);
     });
     // 7. Text half-typed on the CLI's own line is picked up when the chat opens, and the next send replaces it:
     // the transcript's message is exactly the composer's text, not the terminal draft with it appended.
@@ -315,6 +361,45 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await page.reload({ waitUntil: "networkidle" });
       await expect(box).toHaveValue("half a thought", { timeout: 30_000 });
       await box.fill("");
+    });
+    // 9. Stopping a turn leaves one quiet "Conversation interrupted" row, not a user bubble holding Claude's
+    // boilerplate, and the chat settles to Ready.
+    if (provider === "claude") await check("interrupted row", async () => {
+      await box.fill("Run the shell command `sleep 60` and then reply with only the word done.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      const stop = ui.getByRole("button", { name: "Cancel turn" });
+      await expect(stop).toBeEnabled({ timeout: 90_000 });
+      await expect(ui.getByTestId("native-cli-run").last()).toContainText(/sleep/, { timeout: 60_000 });
+      await stop.click();
+      await expect(ui.getByTestId("native-cli-status-row").last()).toHaveText("Conversation interrupted", { timeout: 30_000 });
+      await expect(ui.locator('span[role="status"]')).toHaveText("Ready", { timeout: 30_000 });
+      await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Request interrupted" })).toHaveCount(0);
+    });
+    // 10. A plan review, last because the `/plan` command leaves user rows of its own (which would change what Up
+    // recalls). Claude's turn ends in its "ready to execute" dialog, shown as a card with the plan and the two
+    // choices that need no typed feedback. Approving by hand lets the turn finish.
+    if (provider === "claude") await check("plan review", async () => {
+      await box.fill("/plan Create a file named planned.txt containing exactly: hello plan. Keep the plan to one line, then call the ExitPlanMode tool to ask for my approval.");
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      // `/plan` is Claude's own command: it is typed into the CLI, and its rows in the transcript are hidden.
+      await expect(ui.getByTestId("native-cli-command-ran")).toContainText("/plan", { timeout: 30_000 });
+      await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "command-" })).toHaveCount(0);
+      const card = ui.getByTestId("native-cli-request");
+      await expect(card).toBeVisible({ timeout: 120_000 });
+      await expect(card.getByTestId("native-cli-request-detail")).toContainText(/planned\.txt/);
+      // Option 1 is worded by the session's permission mode (this one runs with bypass permissions).
+      await expect(card.getByTestId("native-cli-request-option-1")).toContainText(/^1Yes, /);
+      await expect(card.getByTestId("native-cli-request-option-2")).toContainText("manually approve");
+      await expect(card.getByTestId("native-cli-request-option-3")).toHaveCount(0);
+      await card.getByTestId("native-cli-request-option-2").click();
+      // Manual approval asks again before the write; the command's own notice is also a status, so name the span.
+      await expect(async () => {
+        // Never the plan card again: its option 1 would pick the other approval.
+        const next = ui.locator('[data-testid="native-cli-request"]:not([aria-label*="ready to execute"]) [data-testid="native-cli-request-option-1"]');
+        if (await next.count()) await next.click();
+        await expect(ui.locator('span[role="status"]')).toHaveText("Ready", { timeout: 2_000 });
+      }).toPass({ timeout: 150_000, intervals: [1_000] });
+      expect(fs.readFileSync(path.join(fixture, "planned.txt"), "utf8")).toContain("hello plan");
     });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);

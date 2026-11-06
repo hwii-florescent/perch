@@ -32,6 +32,14 @@ pub struct NativeUiTranscript {
     /// the composer; absent when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tasks: Option<super::tasks::TaskList>,
+    /// What each turn's landed edits changed, once per file (`native_ui/turn_diffs.rs`); a turn
+    /// without a landed edit has none. Each is drawn after the block named in `after`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turn_diffs: Vec<super::turn_diffs::NativeUiTurnDiff>,
+    /// The subagents each spawning turn started, one roster per turn (`native_ui/subagents.rs`),
+    /// drawn after the block named in `after`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<super::subagents::NativeUiSubagentGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,6 +98,10 @@ pub struct NativeUiToolLine {
     /// The result this call owns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// What a landed file edit changed (`native_ui/edits.rs`), one card per file. Absent for a
+    /// call that is not an edit, has not landed, or whose cards were dropped for size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<Vec<super::edits::EditFile>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -650,6 +662,10 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
     let mut blocks: Vec<NativeUiBlock> = vec![];
     let mut turn = String::new();
     let mut task_history = super::tasks::History::default();
+    // Each landed edit call: its turn, its step and the files it changed.
+    let mut landed: Vec<(String, String, Vec<super::turn_diffs::Landed>)> = vec![];
+    // Each tool call that has a provider id: (id, its turn, its step), which place a subagent's roster.
+    let mut calls: Vec<(String, String, String)> = vec![];
     // The steps of the run being built, and the categories of its calls.
     let work = |blocks: &mut Vec<NativeUiBlock>, turn: &str, step: NativeUiStep| {
         if let Some(NativeUiBlock::Run { steps, .. }) = blocks.last_mut() {
@@ -723,6 +739,32 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                     {
                         body = changes;
                     }
+                    if let Some(id) = &tool.id {
+                        calls.push((
+                            id.clone(),
+                            turn.clone(),
+                            format!("{}:tool:{position}", message.id),
+                        ));
+                    }
+                    let edit = super::edits::files_from_tool_pair(
+                        &tool.name,
+                        &tool.input,
+                        tool.state,
+                        result
+                            .map(|result| super::edits::EditResult {
+                                output: &result.text,
+                                is_error: result.is_error,
+                                edit_patch: result.edit_patch.as_ref(),
+                            })
+                            .as_ref(),
+                    );
+                    if let Some(files) = &edit {
+                        landed.push((
+                            turn.clone(),
+                            format!("{}:tool:{position}", message.id),
+                            files.iter().map(Into::into).collect(),
+                        ));
+                    }
                     work(
                         &mut blocks,
                         &turn,
@@ -735,6 +777,7 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                                 category,
                                 state,
                                 output: result.map(|result| result.text.clone()),
+                                edit,
                             }),
                         },
                     );
@@ -780,11 +823,95 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
             }
         }
     }
+    // Counted from the cards before the size cap takes any away.
+    let mut turn_diffs = super::turn_diffs::rollups(
+        landed
+            .iter()
+            .map(|(turn, step, files)| (turn.as_str(), step.as_str(), files.as_slice())),
+    );
+    for diff in &mut turn_diffs {
+        diff.after = blocks
+            .iter()
+            .rev()
+            .find_map(|block| match block {
+                NativeUiBlock::Message { id, turn, .. } | NativeUiBlock::Run { id, turn, .. }
+                    if *turn == diff.turn =>
+                {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+    }
+    cap_edit_cards(&mut blocks);
+    let subagents = subagent_groups(snapshot, &blocks, &calls);
     let working = (running && !snapshot.blocked).then(|| working_line(snapshot, &blocks));
     NativeUiTranscript {
         blocks,
         working,
         tasks: task_history.docked(),
+        turn_diffs,
+        subagents,
+    }
+}
+
+/// Place each child's roster after the block that holds its spawn call.
+fn subagent_groups(
+    snapshot: &NativeUiSnapshot,
+    blocks: &[NativeUiBlock],
+    calls: &[(String, String, String)],
+) -> Vec<super::subagents::NativeUiSubagentGroup> {
+    if snapshot.subagents.is_empty() {
+        return vec![];
+    }
+    let block_of = |step: &str| {
+        blocks
+            .iter()
+            .enumerate()
+            .find_map(|(index, block)| match block {
+                NativeUiBlock::Run { id, steps, .. } if steps.iter().any(|s| s.id == step) => {
+                    Some((index, id.as_str()))
+                }
+                _ => None,
+            })
+    };
+    let sites: Vec<super::subagents::SpawnSite> = calls
+        .iter()
+        .filter_map(|(call, turn, step)| {
+            let (index, block) = block_of(step)?;
+            Some(super::subagents::SpawnSite {
+                call_id: call,
+                turn,
+                block,
+                index,
+            })
+        })
+        .collect();
+    let last = blocks.last().map(|block| match block {
+        NativeUiBlock::Message { id, .. } | NativeUiBlock::Run { id, .. } => id.as_str(),
+    });
+    super::subagents::groups(&snapshot.subagents, &sites, last)
+}
+
+/// The transcript goes out with every snapshot, so the cards of the whole history share one row
+/// budget: the newest edits keep theirs and older ones fall back to their plain row.
+const MAX_CARD_ROWS: usize = 4_000;
+
+fn cap_edit_cards(blocks: &mut [NativeUiBlock]) {
+    let mut rows = 0;
+    for block in blocks.iter_mut().rev() {
+        let NativeUiBlock::Run { steps, .. } = block else {
+            continue;
+        };
+        for tool in steps.iter_mut().rev().filter_map(|step| step.tool.as_mut()) {
+            let Some(files) = &tool.edit else {
+                continue;
+            };
+            rows += files.iter().map(|file| file.lines.len()).sum::<usize>();
+            if rows > MAX_CARD_ROWS {
+                tool.edit = None;
+            }
+        }
     }
 }
 
@@ -918,6 +1045,71 @@ mod tests {
             ..message(id, "toolResult")
         }
     }
+    #[test]
+    fn a_roster_is_drawn_after_the_block_holding_its_spawn_call_and_one_row_per_turn() {
+        let mut snap = snapshot(
+            vec![
+                message("u1", "user"),
+                assistant(
+                    "a1",
+                    vec![call("Agent", r#"{"description":"audit"}"#, Some("c1"))],
+                ),
+                result("r1", Some("c1"), "Async agent launched", false),
+                assistant(
+                    "a2",
+                    vec![call("Agent", r#"{"description":"review"}"#, Some("c2"))],
+                ),
+                result("r2", Some("c2"), "Async agent launched", false),
+                NativeUiMessage {
+                    text: "waiting".into(),
+                    ..message("a3", "assistant")
+                },
+            ],
+            false,
+        );
+        let child =
+            |id: &str, label: &str, state: &str, call: &str| crate::protocol::NativeUiSubagent {
+                id: id.into(),
+                label: label.into(),
+                state: state.into(),
+                tool_use_id: Some(call.into()),
+                ..Default::default()
+            };
+        snap.subagents = vec![
+            child("x", "audit", "working", "c1"),
+            child("y", "review", "completed", "c2"),
+            child("z", "lost one", "working", "gone"),
+        ];
+        let transcript = project(&snap);
+        let rows = &transcript.subagents;
+        assert_eq!(rows.len(), 2);
+        // Both calls belong to the turn of u1: one row, after the block of the later call.
+        assert_eq!(rows[0].turn, "u1");
+        assert_eq!(
+            rows[0]
+                .agents
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["x", "y"]
+        );
+        let run = transcript.blocks.iter().find_map(|block| match block {
+            NativeUiBlock::Run { id, steps, .. }
+                if steps.iter().any(|step| step.id == "a2:tool:0") =>
+            {
+                Some(id.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(Some(rows[0].after.clone()), run);
+        assert_eq!(rows[0].header.headline, "Kicked off 2 subagents");
+        // The child whose spawn call is not in the history gets a row after the last block.
+        assert_eq!((rows[1].turn.as_str(), rows[1].after.as_str()), ("", "a3"));
+        assert!(project(&snapshot(vec![message("u", "user")], false))
+            .subagents
+            .is_empty());
+    }
+
     fn snapshot(messages: Vec<NativeUiMessage>, running: bool) -> NativeUiSnapshot {
         NativeUiSnapshot {
             version: 1,
@@ -932,7 +1124,9 @@ mod tests {
             context: None,
             messages,
             truncated: false,
+            can_load_older: false,
             transcript: None,
+            ..Default::default()
         }
     }
     fn run(transcript: &NativeUiTranscript, index: usize) -> (&str, &[NativeUiStep]) {
@@ -1177,6 +1371,110 @@ mod tests {
         let clipped = r#"{"content":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","file_path":"/repo/notes/out.md","old"#;
         let label = super::line(&call("Write", clipped, None), LineState::Completed).label;
         assert_eq!(label, "Edited out.md");
+    }
+
+    #[test]
+    fn a_landed_edit_carries_its_card_and_a_rejected_one_does_not() {
+        let edit = r#"{"file_path":"/repo/a.ts","old_string":"was","new_string":"now"}"#;
+        let mut landed = result("r1", Some("1"), "updated", false);
+        landed.edit_patch = Some(crate::protocol::NativeUiEditPatch {
+            file_path: Some("/repo/a.ts".into()),
+            hunks: vec![crate::protocol::NativeUiEditHunk {
+                old_start: 7,
+                old_lines: 1,
+                new_start: 7,
+                new_lines: 1,
+                lines: vec!["-was".into(), "+now".into()],
+            }],
+        });
+        let transcript = project(&snapshot(
+            vec![
+                assistant("a1", vec![call("Edit", edit, Some("1"))]),
+                landed,
+                assistant("a2", vec![call("Edit", edit, Some("2"))]),
+                result("r2", Some("2"), "not found", true),
+                assistant("a3", vec![call("Edit", edit, Some("3"))]),
+            ],
+            false,
+        ));
+        let (_, steps) = run(&transcript, 0);
+        let cards = |index: usize| steps[index].tool.as_ref().unwrap().edit.as_ref();
+        // The resolved hunks win over the snippet pair and carry real positions.
+        let first = &cards(0).unwrap()[0];
+        assert!(first.line_numbers_known);
+        assert_eq!(first.lines[0].old_line_number, Some(7));
+        assert_eq!((first.added, first.removed), (1, 1));
+        // A rejected call and one nobody answered keep their plain rows.
+        assert!(cards(1).is_none() && cards(2).is_none());
+        assert_eq!(steps[1].tool.as_ref().unwrap().state, LineState::Failed);
+    }
+
+    #[test]
+    fn each_turn_rolls_up_its_landed_edits_after_its_last_block() {
+        let edit = |path: &str| {
+            format!(r#"{{"file_path":"{path}","old_string":"a","new_string":"b\nc"}}"#)
+        };
+        let mut first = message("u1", "user");
+        first.text = "fix".into();
+        let mut second = message("u2", "user");
+        second.text = "again".into();
+        let mut done = message("done", "assistant");
+        done.text = "done".into();
+        let transcript = project(&snapshot(
+            vec![
+                // Before any prompt: no known turn, so not rolled up.
+                assistant("x", vec![call("Edit", &edit("/r/orphan.ts"), Some("0"))]),
+                result("r0", Some("0"), "ok", false),
+                first,
+                assistant("a1", vec![call("Edit", &edit("/r/a.ts"), Some("1"))]),
+                result("r1", Some("1"), "ok", false),
+                assistant("a2", vec![call("Edit", &edit("/r/a.ts"), Some("2"))]),
+                result("r2", Some("2"), "ok", false),
+                assistant("a3", vec![call("Edit", &edit("/r/rejected.ts"), Some("3"))]),
+                result("r3", Some("3"), "nope", true),
+                done,
+                second,
+                assistant("a4", vec![call("Edit", &edit("/r/b.ts"), Some("4"))]),
+                result("r4", Some("4"), "ok", false),
+            ],
+            false,
+        ));
+        let diffs = &transcript.turn_diffs;
+        assert_eq!(diffs.len(), 2);
+        assert_eq!(diffs[0].turn, "u1");
+        assert_eq!(diffs[0].after, "done");
+        assert_eq!(diffs[0].files.len(), 1);
+        assert_eq!(diffs[0].files[0].path, "/r/a.ts");
+        assert_eq!((diffs[0].added, diffs[0].removed), (4, 2));
+        assert_eq!(diffs[0].files[0].edits.len(), 2);
+        // A turn that ends in a run is drawn after that run.
+        assert_eq!(diffs[1].turn, "u2");
+        assert_eq!(diffs[1].after, "a4:tool:0");
+        assert!(project(&snapshot(vec![], false)).turn_diffs.is_empty());
+    }
+
+    #[test]
+    fn only_the_newest_edit_cards_keep_their_rows_when_the_history_is_large() {
+        let write = |rows: usize| {
+            serde_json::json!({"file_path": "/repo/a.ts", "content": "x\n".repeat(rows)})
+                .to_string()
+        };
+        // A card holds at most MAX_EDIT_LINES rows, so three of them pass the shared budget.
+        let big = write(1_900);
+        let transcript = project(&snapshot(
+            vec![
+                assistant("a1", vec![call("Write", &big, Some("1"))]),
+                result("r1", Some("1"), "ok", false),
+                assistant("a2", vec![call("Write", &big, Some("2"))]),
+                result("r2", Some("2"), "ok", false),
+                assistant("a3", vec![call("Write", &big, Some("3"))]),
+                result("r3", Some("3"), "ok", false),
+            ],
+            false,
+        ));
+        let (_, steps) = run(&transcript, 0);
+        let kept = |index: usize| steps[index].tool.as_ref().unwrap().edit.is_some();
+        assert!(!kept(0) && kept(1) && kept(2));
     }
 
     #[test]

@@ -106,16 +106,20 @@ pub(crate) fn snapshot_matches(agent: &ShellAgent, pid: u32) -> bool {
 /// Add integration only to new local runtime launches. Existing daemon
 /// attachments keep their original environment and processes unchanged. `pinned` is the
 /// Instructions snapshot of the shell's session: every agent typed into it starts with it.
+/// `cli` is the real `perch` binary: given one, the private shim directory (already first on
+/// the PATH of everything launched here) gets a `perch` entry that runs it by absolute path.
 pub(crate) fn prepare(
     key: &AgentKey,
     command: Vec<String>,
     pinned: Option<&crate::instructions::Pinned>,
+    cli: Option<&Path>,
 ) -> anyhow::Result<Vec<String>> {
     prepare_with(
         key,
         command,
         &std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
         pinned,
+        cli,
     )
 }
 
@@ -124,6 +128,7 @@ fn prepare_with(
     command: Vec<String>,
     real_shell: &str,
     pinned: Option<&crate::instructions::Pinned>,
+    cli: Option<&Path>,
 ) -> anyhow::Result<Vec<String>> {
     #[cfg(not(unix))]
     return Ok(command);
@@ -245,6 +250,19 @@ exec {exec} "$@"
             );
             write(&bin.join(provider), &script, 0o700)?;
         }
+        // Not a provider shim: no PATH search, no recursion guard. The binary is named by
+        // absolute path, so this entry can never run itself. Without a binary any entry from
+        // an earlier launch is removed rather than left pointing at nothing.
+        match cli {
+            Some(cli) => write(
+                &bin.join("perch"),
+                &format!("#!/bin/sh\nexec {} \"$@\"\n", quoted(cli)),
+                0o700,
+            )?,
+            None => {
+                let _ = fs::remove_file(bin.join("perch"));
+            }
+        }
         let shell = dir.join("shell");
         // zsh sources each original startup file with the user's ZDOTDIR, then
         // restores the private shim directory for the next startup stage.
@@ -351,7 +369,7 @@ mod tests {
         let new_key =
             || AgentKey::new("zdot", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
         let inner = new_key();
-        prepare_with(&inner, vec!["true".into()], ZSH, None).unwrap();
+        prepare_with(&inner, vec!["true".into()], ZSH, None, None).unwrap();
         let run = |outer: &AgentKey, flags: &str, inherited_user: Option<&Path>| {
             let mut command = Command::new(directory(&inner).unwrap().join("shell"));
             command
@@ -368,7 +386,7 @@ mod tests {
         };
         for legacy in [false, true] {
             let outer = new_key();
-            prepare_with(&outer, vec!["true".into()], ZSH, None).unwrap();
+            prepare_with(&outer, vec!["true".into()], ZSH, None, None).unwrap();
             if legacy {
                 // Wrappers from before the fix: same files, but their startup files had no guard.
                 for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
@@ -429,7 +447,7 @@ mod tests {
             fs::create_dir_all(dir).unwrap();
         }
         let key = AgentKey::new("hist", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
-        prepare_with(&key, vec!["true".into()], ZSH, None).unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH, None, None).unwrap();
         let histfile = |zshrc: &str, zdotdir: &Path| {
             fs::write(user.join(".zshrc"), zshrc).unwrap();
             let output = Command::new(directory(&key).unwrap().join("shell"))
@@ -482,7 +500,7 @@ mod tests {
         fs::write(user.join(".zshrc"), "HISTSIZE=100; SAVEHIST=100\n").unwrap();
         fs::write(user.join(".zsh_history"), "echo from-iterm\n").unwrap();
         let key = AgentKey::new("share", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
-        prepare_with(&key, vec!["true".into()], ZSH, None).unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH, None, None).unwrap();
         let run = |program: PathBuf, script: &str| {
             let output = Command::new(program)
                 .args(["-ic", script])
@@ -537,6 +555,7 @@ mod tests {
                 "a b".into(),
                 "literal '$()".into(),
             ],
+            None,
             None,
         )
         .unwrap();
@@ -597,6 +616,7 @@ mod tests {
                     "a b".into(),
                 ],
                 None,
+                None,
             )
             .unwrap();
             let output = run(&command);
@@ -621,6 +641,7 @@ mod tests {
                 "-c".into(),
                 "exec codex --model 'my model' 'literal $()'".into(),
             ],
+            None,
             None,
         )
         .unwrap();
@@ -661,6 +682,7 @@ mod tests {
                     "-c".into(),
                     format!("exec {provider} {args} 'a b'"),
                 ],
+                None,
                 None,
             )
             .unwrap();
@@ -724,6 +746,54 @@ mod tests {
         }
     }
 
+    /// The shim directory is first on the PATH of everything launched in the shell, so a
+    /// `perch` entry there makes the command available to every provider, typed or picked. It
+    /// runs the real binary by absolute path (never by searching, so it cannot run itself), and
+    /// is gone again when a later launch has no binary.
+    #[test]
+    fn the_perch_command_is_on_the_shim_path_only_with_a_real_binary() {
+        let key =
+            AgentKey::new("shell-perch", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        let dir = directory(&key).unwrap();
+        let real = std::env::temp_dir().join(format!("perch-real-cli-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&real).unwrap();
+        let cli = real.join("perch real");
+        write(&cli, "#!/bin/sh\nprintf 'real perch:%s' \"$*\"\n", 0o700).unwrap();
+        // The wrapper puts the shim directory on PATH; `command -v` must find our entry first,
+        // ahead of a decoy `perch` further along.
+        let decoy = real.join("decoy");
+        fs::create_dir_all(&decoy).unwrap();
+        write(&decoy.join("perch"), "#!/bin/sh\nprintf decoy\n", 0o700).unwrap();
+        let ask = |script: &str, cli: Option<&Path>| {
+            let command = prepare(
+                &key,
+                vec!["/bin/sh".into(), "-c".into(), script.into()],
+                None,
+                cli,
+            )
+            .unwrap();
+            let output = Command::new(&command[0])
+                .args(&command[1..])
+                .env("PATH", format!("{}:/usr/bin:/bin", decoy.display()))
+                .output()
+                .unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        assert_eq!(
+            ask("perch whoami --json", Some(&cli)),
+            "real perch:whoami --json"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("bin/perch")).unwrap(),
+            format!("#!/bin/sh\nexec '{}' \"$@\"\n", cli.display())
+        );
+        // No binary on a later launch: the old entry is removed and the decoy shows through.
+        assert_eq!(ask("perch", None), "decoy");
+        assert!(!dir.join("bin/perch").exists());
+        let _ = fs::remove_dir_all(&real);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// An agent typed into a shell starts with that shell session's pinned Instructions, ahead
     /// of the arguments the person typed, which stay untouched.
     #[test]
@@ -759,6 +829,7 @@ mod tests {
                     "a b".into(),
                 ],
                 Some(&pin),
+                None,
             )
             .unwrap()
         };
@@ -834,6 +905,26 @@ mod tests {
         assert!(fs::read_to_string(file("pi"))
             .unwrap()
             .contains(&format!("- {folder}")));
+        // The Perch pointer rides in the same pin, for every provider that takes one, and a
+        // shell whose session pinned nothing still gets it.
+        for pinned in [
+            crate::agent_identity::with_pointer(Some(&pin)),
+            crate::agent_identity::with_pointer(None),
+        ] {
+            prepare(&key, vec!["true".into()], Some(&pinned), None).unwrap();
+            for provider in ["claude", "omp", "pi"] {
+                let text = fs::read_to_string(file(provider)).unwrap();
+                assert!(
+                    text.contains(crate::agent_identity::POINTER),
+                    "{provider}: {text}"
+                );
+            }
+            // Codex takes it as the app-server's developer instructions.
+            let codex = fs::read_to_string(dir.join("bin/codex")).unwrap();
+            assert!(codex.contains("perch guide"), "codex shim: {codex}");
+        }
+        // Put the shims back as the plain pin made them for the assertions that follow.
+        ask("claude");
         // Codex: the instructions go to the app-server the shim's launcher starts (checked in
         // codex.rs against the launcher itself); here, the shim hands them over before the
         // typed arguments, and a person's own subcommand still comes last.
@@ -853,8 +944,10 @@ mod tests {
         assert!(!shim.contains("--add-dir"), "{shim}");
         // No pin, no change: the earlier test's expectations hold for every provider.
         assert_eq!(
-            prepare(&key, vec!["true".into()], None).unwrap().len(),
-            prepare(&key, vec!["true".into()], Some(&pin))
+            prepare(&key, vec!["true".into()], None, None)
+                .unwrap()
+                .len(),
+            prepare(&key, vec!["true".into()], Some(&pin), None)
                 .unwrap()
                 .len()
         );

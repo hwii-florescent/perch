@@ -6,8 +6,14 @@
 //! (commit 308b5000, MIT; see THIRD_PARTY_NOTICES.md): an older Claude rejects a whole
 //! `--settings` file that names a hook event it does not know, so each event is only
 //! registered once the detected CLI version has reached its floor.
+//!
+//! The interruption row (`interrupted`) follows Orca's `src/main/native-chat/
+//! transcript-line-decoders-claude.ts` and `transcript-turn-markers.ts` (same commit): Claude's
+//! injected "[Request interrupted by user]" user row becomes a `system` status row.
 use super::*;
-use crate::protocol::{NativeUiContext, NativeUiMessage, NativeUiTool};
+use crate::protocol::{
+    NativeUiContext, NativeUiEditHunk, NativeUiEditPatch, NativeUiMessage, NativeUiTool,
+};
 use serde_json::Value;
 use std::{
     fs,
@@ -131,6 +137,190 @@ fn stamp(path: &Path) -> String {
         .map(|time| time.as_nanos().to_string())
         .unwrap_or_default()
 }
+/// Claude keeps each subagent beside the session's transcript: `<session>/subagents/agent-<id>.meta.json`
+/// (description, type, the spawn call's id, `finished`) and `agent-<id>.jsonl` (its own messages).
+/// Undocumented, read best effort (probed on 2.1.319, 2026-11-06); a file that does not read as
+/// expected is skipped, never guessed at.
+fn subagents_dir(transcript: &Path) -> Option<PathBuf> {
+    Some(
+        transcript
+            .parent()?
+            .join(transcript.file_stem()?)
+            .join("subagents"),
+    )
+}
+
+const MAX_SUBAGENTS: usize = 32;
+/// An unfinished child whose files have been still this long reads as lost contact, not as working.
+const SUBAGENT_STALE: Duration = Duration::from_secs(10 * 60);
+
+fn subagent_meta_files(dir: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return vec![];
+    };
+    let mut files: Vec<(String, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let id = name.strip_prefix("agent-")?.strip_suffix(".meta.json")?;
+            let safe = !id.is_empty()
+                && id.len() <= 64
+                && id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+            (safe && entry.file_type().ok()?.is_file()).then(|| (id.to_string(), entry.path()))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// Changes when a child appears, its meta file is rewritten (`finished` flips) or its transcript
+/// grows: Claude marks a child finished before its last rows are written (seen live), so the
+/// roster is read again once they land.
+fn roster_stamp(dir: &Path) -> String {
+    subagent_meta_files(dir)
+        .iter()
+        .map(|(id, path)| {
+            format!(
+                "{id}:{}:{}",
+                stamp(path),
+                stamp(&dir.join(format!("agent-{id}.jsonl")))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// "2026-11-06T21:22:20.679Z" as milliseconds since the epoch (UTC only, as Claude writes it).
+fn iso_ms(text: &str) -> Option<i64> {
+    let (date, time) = text.strip_suffix('Z')?.split_once('T')?;
+    let mut ymd = date.split('-').map(|part| part.parse::<i64>().ok());
+    let (year, month, day) = (ymd.next()??, ymd.next()??, ymd.next()??);
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
+    let mut hms = clock.split(':').map(|part| part.parse::<i64>().ok());
+    let (hour, minute, second) = (hms.next()??, hms.next()??, hms.next()??);
+    let millis: i64 = format!("{fraction:0<3}")[..3].parse().ok()?;
+    // Days from 1970-01-01 (Howard Hinnant's civil-date algorithm).
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis)
+}
+
+/// The first line's time and, from the tail, the last line's time and whether the child's last
+/// reply ended its turn.
+/// A child's transcript holds rows of tens of kilobytes (the request it sent), so the tail that
+/// reaches its last reply is a megabyte; it is only read once the child is marked finished.
+const SUBAGENT_TAIL: u64 = 1024 * 1024;
+
+fn subagent_transcript(path: &Path, finished: bool) -> (Option<i64>, Option<i64>, bool) {
+    let Ok(mut file) = fs::File::open(path) else {
+        return (None, None, false);
+    };
+    let time_of = |line: &[u8]| {
+        serde_json::from_slice::<Value>(line)
+            .ok()
+            .and_then(|row| iso_ms(row["timestamp"].as_str()?))
+    };
+    let mut head = Vec::new();
+    let _ = (&mut file).take(16 * 1024).read_to_end(&mut head);
+    let started = head.split(|byte| *byte == b'\n').next().and_then(time_of);
+    if !finished {
+        return (started, None, false);
+    }
+    let length = file.metadata().map_or(0, |meta| meta.len());
+    let offset = length.saturating_sub(SUBAGENT_TAIL);
+    let mut tail = Vec::new();
+    if file.seek(SeekFrom::Start(offset)).is_ok() {
+        let _ = (&mut file).take(SUBAGENT_TAIL).read_to_end(&mut tail);
+    }
+    let rows: Vec<Value> = tail
+        .split(|byte| *byte == b'\n')
+        .skip(usize::from(offset != 0))
+        .filter_map(|line| serde_json::from_slice(line).ok())
+        .collect();
+    let settled = rows
+        .iter()
+        .rev()
+        .find_map(|row| iso_ms(row["timestamp"].as_str()?));
+    let ended = rows
+        .iter()
+        .rev()
+        .find(|row| row["type"] == "assistant")
+        .is_some_and(|row| row["message"]["stop_reason"] == "end_turn");
+    (started, settled, ended)
+}
+
+/// The children Claude recorded for this session, oldest first. `finished` is Claude's own mark that
+/// the child ended: it counts as completed only when its last reply ended its turn, otherwise
+/// its outcome is unknown. An unfinished child is working unless its files have been still for ten
+/// minutes (lost contact is not exit, and not progress either).
+fn subagent_roster(transcript: &Path, now: SystemTime) -> Vec<crate::protocol::NativeUiSubagent> {
+    let Some(dir) = subagents_dir(transcript) else {
+        return vec![];
+    };
+    let mut roster: Vec<crate::protocol::NativeUiSubagent> = subagent_meta_files(&dir)
+        .into_iter()
+        .filter_map(|(id, meta_path)| {
+            let meta_file = fs::File::open(&meta_path).ok()?;
+            let mut bytes = Vec::new();
+            meta_file.take(16 * 1024).read_to_end(&mut bytes).ok()?;
+            let meta: Value = serde_json::from_slice(&bytes).ok()?;
+            let transcript_path = dir.join(format!("agent-{id}.jsonl"));
+            let finished = meta["finished"] == true;
+            let (started_at, settled_at, ended) = subagent_transcript(&transcript_path, finished);
+            let touched = [&meta_path, &transcript_path]
+                .iter()
+                .filter_map(|path| fs::metadata(path).and_then(|meta| meta.modified()).ok())
+                .max();
+            let state = match (finished, ended) {
+                (true, true) => "completed",
+                (true, false) => "unverifiable",
+                (false, _)
+                    if touched.is_some_and(|time| {
+                        now.duration_since(time)
+                            .is_ok_and(|age| age > SUBAGENT_STALE)
+                    }) =>
+                {
+                    "unverifiable"
+                }
+                (false, _) => "working",
+            };
+            let agent_type = meta["agentType"]
+                .as_str()
+                .filter(|kind| !kind.is_empty())
+                .map(|kind| clip(kind, 128));
+            let label = meta["description"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| clip(text.trim(), 160))
+                .or_else(|| agent_type.clone())
+                .unwrap_or_else(|| "subagent".into());
+            Some(crate::protocol::NativeUiSubagent {
+                id,
+                label,
+                agent_type,
+                tool_use_id: meta["toolUseId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(|id| clip(id, 256)),
+                state: state.into(),
+                started_at,
+                settled_at: (state != "working").then_some(settled_at).flatten(),
+            })
+        })
+        .collect();
+    roster.sort_by(|left, right| (left.started_at, &left.id).cmp(&(right.started_at, &right.id)));
+    if roster.len() > MAX_SUBAGENTS {
+        roster.drain(..roster.len() - MAX_SUBAGENTS);
+    }
+    roster
+}
+
 pub(super) fn prompt_stamp(config: &Path) -> String {
     stamp(&event_path(config, "UserPromptSubmit"))
 }
@@ -193,6 +383,7 @@ fn read_event(path: &Path) -> anyhow::Result<(u32, Value)> {
                     | "hook_event_name"
                     | "model"
                     | "to_model"
+                    | "permission_mode"
                     | "prompt"
                     | "tool_name"
                     | "tool_use_id"
@@ -220,6 +411,84 @@ fn text(value: &Value) -> String {
     result
 }
 
+const MAX_PATCH_HUNKS: usize = 40;
+const MAX_PATCH_HUNK_LINES: usize = 400;
+
+/// The hunks Claude resolved for a file edit (`toolUseResult.structuredPatch`), bounded as Orca
+/// bounds them (`transcript-line-decoders-claude.ts`): they carry true file line numbers, which
+/// the snippet pair in the call cannot.
+fn edit_patch(row: &Value) -> Option<NativeUiEditPatch> {
+    let result = &row["toolUseResult"];
+    let hunks: Vec<NativeUiEditHunk> = result["structuredPatch"]
+        .as_array()?
+        .iter()
+        .take(MAX_PATCH_HUNKS)
+        .filter_map(|hunk| {
+            Some(NativeUiEditHunk {
+                old_start: u32::try_from(hunk["oldStart"].as_u64()?).ok()?,
+                new_start: u32::try_from(hunk["newStart"].as_u64()?).ok()?,
+                old_lines: hunk["oldLines"].as_u64().unwrap_or(0) as u32,
+                new_lines: hunk["newLines"].as_u64().unwrap_or(0) as u32,
+                lines: hunk["lines"]
+                    .as_array()?
+                    .iter()
+                    .take(MAX_PATCH_HUNK_LINES)
+                    .filter_map(Value::as_str)
+                    .map(|line| clip(line, 2048))
+                    .collect(),
+            })
+        })
+        .collect();
+    (!hunks.is_empty()).then(|| NativeUiEditPatch {
+        file_path: result["filePath"].as_str().map(|path| clip(path, 1024)),
+        hunks,
+    })
+}
+
+/// Claude's injected "[Request interrupted by user…]" user row. Orca keys on the row's
+/// `interruptedMessageId` (`transcript-turn-markers.ts`); 2.1.318 transcripts also hold such rows
+/// without it (two of five seen), so the two exact texts count too.
+fn interrupted(row: &Value) -> bool {
+    row["type"] == "user"
+        && (row["interruptedMessageId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+            || matches!(
+                text(&row["message"]["content"]).trim(),
+                "[Request interrupted by user]" | "[Request interrupted by user for tool use]"
+            ))
+}
+
+/// The turn ended in a stop: Claude's last row says so, whatever the hooks last reported.
+fn ends_interrupted(history: &[NativeUiMessage]) -> bool {
+    history.last().is_some_and(|message| {
+        message.role == "system" && message.text == super::INTERRUPTED_STATUS_TEXT
+    })
+}
+
+/// Names of Claude's own commands: a `<command-name>` envelope for one is hidden, any other (a
+/// skill, a plugin command) is shown as the person typed it.
+fn is_builtin_command(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            super::catalog::builtins("claude")
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect()
+        })
+        .contains(name)
+}
+
+/// A user row made only of text (a string, or text blocks), the only kind harness tags come in.
+fn text_only(content: &Value) -> bool {
+    content.is_string()
+        || content
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().all(|block| block["type"] == "text"))
+}
+
 fn messages(row: &Value) -> Vec<NativeUiMessage> {
     if row["isSidechain"] == true || row["isMeta"] == true {
         return vec![];
@@ -227,6 +496,11 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
     let role = row["type"].as_str().unwrap_or_default();
     if !matches!(role, "user" | "assistant") {
         return vec![];
+    }
+    if interrupted(row) {
+        return vec![super::interrupted_row(
+            row["uuid"].as_str().unwrap_or_default().to_string(),
+        )];
     }
     let raw = &row["message"];
     let mut message = NativeUiMessage {
@@ -236,8 +510,18 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
         model: raw["model"].as_str().map(|model| clip(model, 256)),
         ..Default::default()
     };
+    if role == "user" && text_only(&raw["content"]) {
+        match super::command_envelope::classify(&message.text, &is_builtin_command) {
+            super::command_envelope::UserTurn::Keep => {}
+            super::command_envelope::UserTurn::Hidden => return vec![],
+            super::command_envelope::UserTurn::Shown(text) => message.text = text,
+        }
+    }
     let mut result = vec![];
     let mut tool_budget = 8 * 1024usize;
+    // An edit's input is the change itself, so it has its own room.
+    let mut edit_budget = 48 * 1024usize;
+    let mut edit_patch = edit_patch(row);
     if let Some(blocks) = raw["content"].as_array() {
         for (index, block) in blocks.iter().enumerate() {
             match block["type"].as_str().unwrap_or_default() {
@@ -247,10 +531,20 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                 )),
                 "tool_use" if message.tools.len() < 32 => {
                     let name = clip(block["name"].as_str().unwrap_or("Tool"), 128);
-                    // A clipped to-do list does not parse, so it gets room for a long one.
-                    let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
-                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
-                    tool_budget -= input.len();
+                    let input = if super::edits::is_edit_tool_name(&name) {
+                        let input = clip(
+                            &bounded_edit_json(&block["input"]),
+                            edit_budget.min(24 * 1024),
+                        );
+                        edit_budget -= input.len();
+                        input
+                    } else {
+                        // A clipped to-do list does not parse, so it gets room for a long one.
+                        let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
+                        let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
+                        tool_budget -= input.len();
+                        input
+                    };
                     message.tools.push(NativeUiTool {
                         name,
                         input,
@@ -265,6 +559,8 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                     error: (block["is_error"] == true).then(|| "Tool reported an error".into()),
                     tool_call_id: block["tool_use_id"].as_str().map(|id| clip(id, 256)),
                     is_error: block["is_error"] == true,
+                    // Claude puts the resolved hunks on the row, one edit per row.
+                    edit_patch: edit_patch.take(),
                     ..Default::default()
                 }),
                 "image" | "document" => message.text.push_str("\n[attachment in CLI]"),
@@ -316,7 +612,19 @@ fn context(row: &Value) -> Option<NativeUiContext> {
 
 type History = (Vec<NativeUiMessage>, bool, Option<NativeUiContext>);
 
-fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
+/// What a snapshot of a session carries by default, and how far a person can page back (Orca
+/// `native-chat-pagination.ts`: a page is added to the window and the transcript is read again).
+/// Each 128 messages of window also allow another 192 KiB of messages and 2 MiB of file tail.
+/// ponytail: the tail is parsed again on every change to the transcript, so the window stops at
+/// 528 messages (10 MiB) rather than growing without bound; the CLI view has the rest.
+pub(super) const WINDOW: usize = 128;
+pub(super) const PAGE: usize = 200;
+pub(super) const MAX_WINDOW: usize = WINDOW + 2 * PAGE;
+
+fn transcript(path: &Path, session: &str, window: usize) -> anyhow::Result<History> {
+    let scale = window.div_ceil(WINDOW);
+    let max_tail = MAX_TAIL * scale as u64;
+    let max_bytes = 192 * 1024 * scale;
     ensure!(
         path.file_name().and_then(|name| name.to_str()) == Some(&format!("{session}.jsonl")),
         "native transcript identity mismatch"
@@ -327,10 +635,10 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
         metadata.is_file(),
         "native transcript must be a regular file"
     );
-    let offset = metadata.len().saturating_sub(MAX_TAIL);
+    let offset = metadata.len().saturating_sub(max_tail);
     file.seek(SeekFrom::Start(offset))?;
     let mut bytes = Vec::new();
-    file.take(MAX_TAIL).read_to_end(&mut bytes)?;
+    file.take(max_tail).read_to_end(&mut bytes)?;
     let mut nodes = HashMap::new();
     let mut leaf = String::new();
     for (index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
@@ -371,13 +679,13 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
         }
         for message in row.into_iter().rev() {
             size += serde_json::to_vec(&message)?.len();
-            if history.len() >= 128 || size > 192 * 1024 {
+            if history.len() >= window || size > max_bytes {
                 truncated = true;
                 break;
             }
             history.push(message);
         }
-        if truncated && (history.len() >= 128 || size > 192 * 1024) {
+        if truncated && (history.len() >= window || size > max_bytes) {
             break;
         }
         leaf = parent;
@@ -507,6 +815,7 @@ pub(super) async fn observe(
     on_snapshot: Arc<dyn Fn(NativeUiSnapshot) + Send + Sync>,
     snapshots: watch::Sender<Option<NativeUiSnapshot>>,
     mut commands: mpsc::Receiver<super::Command>,
+    window: Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let Ok(paths) = paths(key) else {
         return;
@@ -514,6 +823,8 @@ pub(super) async fn observe(
     let mut events = HashMap::<String, (String, u32, Value)>::new();
     let mut history_key = String::new();
     let mut history: History = (Vec::new(), false, None);
+    let mut roster = Vec::<crate::protocol::NativeUiSubagent>::new();
+    let mut roster_key = String::new();
     let mut last = String::new();
     let mut revision = 0;
     let mut was_blocked = false;
@@ -539,26 +850,32 @@ pub(super) async fn observe(
                 let Some((_, pid, start)) = events.get("SessionStart") else { continue; };
                 let Some(session) = start["session_id"].as_str().filter(|id| uuid::Uuid::parse_str(id).is_ok()) else { continue; };
                 let Some(path) = start["transcript_path"].as_str().map(Path::new) else { continue; };
-                let next_history = format!("{session}:{}", stamp(path));
+                let shown = window.load(std::sync::atomic::Ordering::Relaxed);
+                let next_history = format!("{session}:{}:{shown}", stamp(path));
                 if next_history != history_key {
-                    if let Ok(next) = transcript(path, session) { history = next; history_key = next_history; changed = true; }
+                    if let Ok(next) = transcript(path, session, shown) { history = next; history_key = next_history; changed = true; }
                     else if history_key.split(':').next() != Some(session) { history = (vec![], false, None); }
                 }
+                let next_roster_key = subagents_dir(path).map(|dir| roster_stamp(&dir)).unwrap_or_default();
+                if next_roster_key != roster_key { roster = subagent_roster(path, SystemTime::now()); roster_key = next_roster_key; changed = true; }
                 if !changed && pending.is_empty() && !was_blocked { continue; }
                 let (mut running, mut blocked) = (false, false);
                 let mut model = start["model"].as_str().map(|model| clip(model, 256));
+                // SessionStart carries no mode; the prompt and tool hooks do, so it is as of the latest of them.
+                let mut permission_mode = None;
                 let mut ordered: Vec<_> = events.values().filter(|(_, event_pid, event)| event_pid == pid && event["session_id"] == session).collect();
                 ordered.sort_by(|left, right| left.0.cmp(&right.0));
                 for (_, _, event) in ordered {
+                    if let Some(mode) = event["permission_mode"].as_str().and_then(super::session_options::claude_permission_mode) { permission_mode = Some(mode.to_string()); }
                     if event["hook_event_name"] == "PostModelSwitch" { model = event["to_model"].as_str().map(|model| clip(model, 256)); }
                     else if let Some(state) = turn_state(event) { (running, blocked) = state; }
                 }
-                if history.0.last().is_some_and(|message| message.role == "user" && message.text.starts_with("[Request interrupted by user")) { (running, blocked) = (false, false); }
+                if ends_interrupted(&history.0) { (running, blocked) = (false, false); }
                 // The hook says a human is needed; the screen says which choices. The dialog may
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
                 let request = if blocked { super::dialog::read(key) } else { None };
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, transcript: None };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, effort: None, permission_mode, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1, can_load_older: history.1 && shown < MAX_WINDOW, transcript: None, options: None, subagents: roster.clone() };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;
@@ -579,7 +896,229 @@ pub(super) async fn observe(
 
 #[cfg(test)]
 mod tests {
-    use super::{empty_prompt, prompt_row};
+    use super::{
+        empty_prompt, ends_interrupted, iso_ms, messages, prompt_row, roster_stamp, subagent_roster,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn claude_timestamps_read_as_epoch_milliseconds() {
+        assert_eq!(iso_ms("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(iso_ms("2026-11-06T21:22:20.679Z"), Some(1_794_000_140_679));
+        // Leap day and a short fraction.
+        assert_eq!(iso_ms("2024-02-29T00:00:01.5Z"), Some(1_709_164_801_500));
+        assert_eq!(iso_ms("2026-11-06 21:22:20"), None);
+    }
+
+    /// A child's rows: (type, timestamp, stop_reason).
+    type ChildRows<'a> = &'a [(&'a str, &'a str, Option<&'a str>)];
+
+    /// Shapes written by Claude 2.1.319 for one background `Agent` call (probed 2026-11-06).
+    fn session_with_children(
+        children: &[(&str, serde_json::Value, ChildRows)],
+    ) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("perch-subagents-{}", uuid::Uuid::new_v4()));
+        let session = "aa4ebb17-b406-482d-887d-77e4da113b53";
+        let dir = root.join(session).join("subagents");
+        fs::create_dir_all(&dir).unwrap();
+        for (id, meta, rows) in children {
+            fs::write(dir.join(format!("agent-{id}.meta.json")), meta.to_string()).unwrap();
+            let lines: Vec<String> = rows
+                .iter()
+                .map(|(kind, time, stop)| {
+                    json!({"type": kind, "timestamp": time, "message": {"stop_reason": stop}})
+                        .to_string()
+                })
+                .collect();
+            fs::write(dir.join(format!("agent-{id}.jsonl")), lines.join("\n")).unwrap();
+        }
+        let transcript = root.join(format!("{session}.jsonl"));
+        fs::write(&transcript, "").unwrap();
+        transcript
+    }
+
+    // Seen live: the child's last reply sat before a row of ~85 KB, so a short tail never reached it.
+    #[test]
+    fn a_finished_childs_last_reply_is_found_behind_a_large_row() {
+        let meta = json!({"description": "big", "finished": true});
+        let rows: &[(&str, &str, Option<&str>)] = &[
+            ("user", "2026-11-06T21:30:45.000Z", None),
+            ("assistant", "2026-11-06T21:30:46.935Z", Some("end_turn")),
+        ];
+        let transcript = session_with_children(&[("big", meta, rows)]);
+        let path = transcript
+            .parent()
+            .unwrap()
+            .join("aa4ebb17-b406-482d-887d-77e4da113b53/subagents/agent-big.jsonl");
+        let mut body = fs::read_to_string(&path).unwrap();
+        body.push('\n');
+        body.push_str(
+            &json!({"type": "api-request", "timestamp": "2026-11-06T21:30:47.000Z", "blob": "x".repeat(85_000)})
+                .to_string(),
+        );
+        fs::write(&path, body).unwrap();
+        let roster = subagent_roster(&transcript, SystemTime::now());
+        assert_eq!(roster[0].state, "completed");
+        assert!(roster[0].settled_at.is_some());
+        let _ = fs::remove_dir_all(transcript.parent().unwrap());
+    }
+
+    #[test]
+    fn a_finished_child_that_ended_its_turn_is_completed_with_its_run_time() {
+        let meta = json!({"agentType": "general-purpose", "description": "count words", "toolUseId": "toolu_01", "finished": true});
+        let rows: &[(&str, &str, Option<&str>)] = &[
+            ("user", "2026-11-06T21:22:20.679Z", None),
+            ("assistant", "2026-11-06T21:22:22.075Z", Some("end_turn")),
+            ("attachment", "2026-11-06T21:22:22.114Z", None),
+        ];
+        let transcript = session_with_children(&[("a3465b65339b5c3d5", meta, rows)]);
+        let roster = subagent_roster(&transcript, SystemTime::now());
+        assert_eq!(roster.len(), 1);
+        let child = &roster[0];
+        assert_eq!(
+            (
+                child.id.as_str(),
+                child.label.as_str(),
+                child.state.as_str()
+            ),
+            ("a3465b65339b5c3d5", "count words", "completed")
+        );
+        assert_eq!(child.agent_type.as_deref(), Some("general-purpose"));
+        assert_eq!(child.tool_use_id.as_deref(), Some("toolu_01"));
+        assert_eq!(
+            child
+                .settled_at
+                .zip(child.started_at)
+                .map(|(end, start)| end - start),
+            Some(1_435)
+        );
+        let _ = fs::remove_dir_all(transcript.parent().unwrap());
+    }
+
+    #[test]
+    fn an_unfinished_child_works_a_finished_one_with_no_stated_end_is_unknown_and_a_stale_one_is_lost(
+    ) {
+        let working = json!({"description": "still going", "finished": false});
+        let unknown = json!({"description": "cut off", "finished": true});
+        let rows: &[(&str, &str, Option<&str>)] = &[
+            ("user", "2026-11-06T21:22:20.679Z", None),
+            ("assistant", "2026-11-06T21:22:21.000Z", Some("tool_use")),
+        ];
+        let transcript = session_with_children(&[("a1", working, rows), ("a2", unknown, rows)]);
+        let states = |now: SystemTime| {
+            subagent_roster(&transcript, now)
+                .into_iter()
+                .map(|child| (child.id, child.state, child.settled_at.is_some()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            states(SystemTime::now()),
+            [
+                ("a1".into(), "working".into(), false),
+                ("a2".into(), "unverifiable".into(), true)
+            ]
+        );
+        // Nothing touched for a quarter of an hour: contact is lost, which is not an exit.
+        let later = SystemTime::now() + Duration::from_secs(15 * 60);
+        assert_eq!(states(later)[0].1, "unverifiable");
+        // The stamp changes when a meta file does, so the observer re-reads.
+        let dir = transcript
+            .parent()
+            .unwrap()
+            .join("aa4ebb17-b406-482d-887d-77e4da113b53/subagents");
+        let before = roster_stamp(&dir);
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(
+            dir.join("agent-a1.meta.json"),
+            json!({"finished": true}).to_string(),
+        )
+        .unwrap();
+        assert_ne!(roster_stamp(&dir), before);
+        let _ = fs::remove_dir_all(transcript.parent().unwrap());
+    }
+
+    #[test]
+    fn an_unreadable_or_oddly_named_child_file_is_skipped() {
+        let transcript = session_with_children(&[("ok", json!({"finished": false}), &[])]);
+        let dir = transcript
+            .parent()
+            .unwrap()
+            .join("aa4ebb17-b406-482d-887d-77e4da113b53/subagents");
+        fs::write(dir.join("agent-bad.meta.json"), "{not json").unwrap();
+        fs::write(dir.join("agent-a b.meta.json"), "{}").unwrap();
+        let ids: Vec<_> = subagent_roster(&transcript, SystemTime::now())
+            .into_iter()
+            .map(|child| child.id)
+            .collect();
+        assert_eq!(ids, ["ok"]);
+        let _ = fs::remove_dir_all(transcript.parent().unwrap());
+    }
+
+    // Shapes from Claude 2.1.318 transcripts (Orca's `transcript-interruption-message.test.ts` case).
+    fn interrupt_row(text: &str, marker: bool) -> serde_json::Value {
+        let mut row = json!({
+            "type": "user", "uuid": "interrupt-row", "timestamp": "2026-07-16T23:46:01.000Z",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]}
+        });
+        if marker {
+            row["interruptedMessageId"] = json!("assistant-request-1");
+        }
+        row
+    }
+
+    #[test]
+    fn claude_interruption_boilerplate_is_one_quiet_status_row() {
+        for (text, marker) in [
+            ("[Request interrupted by user]", true),
+            ("[Request interrupted by user for tool use]", true),
+            ("[Request interrupted by user for tool use]", false),
+        ] {
+            let rows = messages(&interrupt_row(text, marker));
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "interrupt-row");
+            assert_eq!(rows[0].role, "system");
+            assert_eq!(rows[0].text, "Conversation interrupted");
+            assert!(ends_interrupted(&rows));
+        }
+    }
+
+    fn user_row(content: serde_json::Value) -> serde_json::Value {
+        json!({"type": "user", "uuid": "u", "message": {"role": "user", "content": content}})
+    }
+
+    #[test]
+    fn command_envelopes_show_a_skill_hide_a_builtin_and_hide_local_output() {
+        let skill = messages(&user_row(json!(
+            "<command-message>perchping</command-message>\n<command-name>/perchping</command-name>\n<command-args>now</command-args>"
+        )));
+        assert_eq!(skill[0].text, "/perchping now");
+        // `plan` is one of Claude's own commands; its output row is machinery too.
+        let plan = "<command-name>/plan</command-name>\n    <command-message>plan</command-message>\n    <command-args>x</command-args>";
+        assert!(messages(&user_row(json!(plan))).is_empty());
+        assert!(messages(&user_row(json!([{"type": "text", "text": plan}]))).is_empty());
+        assert!(messages(&user_row(json!(
+            "<local-command-stdout>Enabled plan mode</local-command-stdout>"
+        )))
+        .is_empty());
+        assert_eq!(
+            messages(&user_row(json!("<bash-input>ls</bash-input>")))[0].text,
+            "!ls"
+        );
+        assert_eq!(
+            messages(&user_row(json!("fix the bug")))[0].text,
+            "fix the bug"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_user_message_that_quotes_the_boilerplate_stays_a_prompt() {
+        let rows = messages(&interrupt_row(
+            "why does it say [Request interrupted by user]?",
+            false,
+        ));
+        assert_eq!(rows[0].role, "user");
+        assert!(!ends_interrupted(&rows));
+    }
 
     /// Captured from a Claude started in a Terminal tab: the prompt is row 7 but the cursor was reported on 8.
     #[test]
@@ -800,6 +1339,25 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Claude 2.1.319's UserPromptSubmit hook input names the mode (`acceptEdits`, seen live);
+    /// SessionStart does not.
+    #[test]
+    fn a_prompt_hook_keeps_the_permission_mode_the_toolbar_reads_back() {
+        let dir = std::env::temp_dir().join(format!("perch-hook-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("UserPromptSubmit.event");
+        let body = serde_json::json!({"session_id": "s", "hook_event_name": "UserPromptSubmit", "permission_mode": "acceptEdits", "prompt": "hi"});
+        fs::write(&path, format!("4242\n{body}")).unwrap();
+        let (_, event) = read_event(&path).unwrap();
+        assert_eq!(
+            event["permission_mode"]
+                .as_str()
+                .and_then(super::super::session_options::claude_permission_mode),
+            Some("accept-edits")
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn native_messages_hide_metadata_and_bound_content_and_prompt_guard_preserves_drafts() {
         assert!(empty_prompt("❯\u{a0}\n"));
@@ -824,6 +1382,148 @@ mod tests {
         );
         assert_eq!(tool[0].role, "toolResult");
         assert_eq!(tool[0].text, "sentinel");
+    }
+
+    /// A transcript of `count` chained messages, written as Claude does (one JSON row each).
+    fn write_transcript(count: usize, text: &str) -> (Removed, std::path::PathBuf, String) {
+        let session = uuid::Uuid::new_v4().to_string();
+        let dir = std::env::temp_dir().join(format!("perch-claude-transcript-{session}"));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{session}.jsonl"));
+        let mut rows = String::new();
+        for n in 0..count {
+            let parent = if n == 0 {
+                Value::Null
+            } else {
+                format!("m{}", n - 1).into()
+            };
+            let (kind, role) = if n % 2 == 0 {
+                ("user", "user")
+            } else {
+                ("assistant", "assistant")
+            };
+            rows += &serde_json::json!({"type": kind, "uuid": format!("m{n}"), "parentUuid": parent, "sessionId": session,
+                "message": {"role": role, "content": format!("{text} {n}")}}).to_string();
+            rows.push('\n');
+        }
+        fs::write(&path, rows).unwrap();
+        (Removed(dir), path, session)
+    }
+
+    /// Deletes the directory when the test ends, passing or not.
+    struct Removed(std::path::PathBuf);
+    impl Drop for Removed {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_larger_window_reads_further_back_until_the_file_is_exhausted() {
+        let (_dir, path, session) = write_transcript(500, "hello");
+        let (first, truncated, _) = transcript(&path, &session, WINDOW).unwrap();
+        assert_eq!(first.len(), 128);
+        assert!(truncated);
+        assert_eq!(first.last().unwrap().text, "hello 499");
+        let (more, truncated, _) = transcript(&path, &session, WINDOW + PAGE).unwrap();
+        assert_eq!(more.len(), 328);
+        assert!(truncated);
+        // The older page is prepended: the newest messages are the same ones.
+        let ids =
+            |rows: &[NativeUiMessage]| rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&more[more.len() - 128..]), ids(&first));
+        let (all, truncated, _) = transcript(&path, &session, MAX_WINDOW).unwrap();
+        assert_eq!(all.len(), 500);
+        assert!(!truncated, "the whole file fits, so nothing older exists");
+    }
+
+    /// The whole path with no CLI: hook files and a transcript on disk, the real observer, and
+    /// the bridge's page request. No model turn is involved.
+    #[tokio::test]
+    async fn paging_through_the_real_observer_reads_further_back_and_stops_at_the_start() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (_dir, path, session) = write_transcript(300, "hello");
+        let key = AgentKey::new("native-test", uuid::Uuid::new_v4().to_string(), "claude").unwrap();
+        let paths = paths(&key).unwrap();
+        let start = event_path(&paths.extension, "SessionStart");
+        let event = serde_json::json!({"session_id": session, "transcript_path": path, "cwd": "/",
+            "hook_event_name": "SessionStart", "model": "claude-haiku-4-5"});
+        fs::write(&start, format!("{}\n{event}", std::process::id())).unwrap();
+        let alive = Arc::new(AtomicBool::new(true));
+        let registry = Arc::new(super::super::NativeUiRegistry::default());
+        let watched = alive.clone();
+        registry
+            .start(
+                key.clone(),
+                None,
+                Arc::new(move || watched.load(Ordering::Relaxed)),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+        let bridge = registry.get(&key).unwrap();
+        let first = bridge.snapshot().await.unwrap();
+        assert_eq!(first.messages.len(), 128);
+        assert!(first.truncated && first.can_load_older);
+        assert_eq!(first.messages.last().unwrap().text, "hello 299");
+        assert_eq!(
+            bridge.load_older().await,
+            crate::protocol::OlderPageOutcome::Applied
+        );
+        let all = bridge.latest().unwrap();
+        assert_eq!(all.messages.len(), 300);
+        assert!(!all.truncated && !all.can_load_older);
+        assert_eq!(all.messages.first().unwrap().text, "hello 0");
+        assert_eq!(
+            bridge.load_older().await,
+            crate::protocol::OlderPageOutcome::Exhausted
+        );
+        alive.store(false, Ordering::Relaxed);
+        let _ = fs::remove_file(start);
+    }
+
+    #[test]
+    fn a_larger_window_also_lifts_the_byte_budget() {
+        // 1 KiB per message: 128 of them are past 192 KiB's worth only when about 190 fit.
+        let (_dir, path, session) = write_transcript(400, &"x".repeat(2048));
+        let (small, truncated, _) = transcript(&path, &session, WINDOW).unwrap();
+        assert!(truncated && small.len() < 128, "{} messages", small.len());
+        let (large, _, _) = transcript(&path, &session, WINDOW + PAGE).unwrap();
+        assert!(large.len() > small.len());
+    }
+
+    #[test]
+    fn an_edit_keeps_its_text_and_its_resolved_hunks_ride_on_the_result() {
+        let content = "line of the new file\n".repeat(100);
+        let call = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"Write","input":{"file_path":"/r/a.txt","content":content}}]}});
+        let tool = &messages(&call)[0].tools[0];
+        // Past the 300 characters other tools keep, and whole: nothing says it was cut.
+        let input: Value = serde_json::from_str(&tool.input).unwrap();
+        assert_eq!(input["content"].as_str().unwrap(), content);
+        assert!(input.get(crate::native_ui::edits::CLIPPED_KEY).is_none());
+        let huge = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"Write","input":{"file_path":"/r/a.txt","content":"y".repeat(20_000)}}]}});
+        let cut: Value = serde_json::from_str(&messages(&huge)[0].tools[0].input).unwrap();
+        assert_eq!(cut[crate::native_ui::edits::CLIPPED_KEY], true);
+
+        let row = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]},
+            "toolUseResult":{"filePath":"/r/a.txt","structuredPatch":[
+                {"oldStart":3,"oldLines":2,"newStart":3,"newLines":2,"lines":[" a","-b","+c"]},
+                {"oldStart":"bad","lines":[]}]}});
+        let patch = messages(&row)[0].edit_patch.clone().unwrap();
+        assert_eq!(patch.file_path.as_deref(), Some("/r/a.txt"));
+        assert_eq!(patch.hunks.len(), 1);
+        assert_eq!(patch.hunks[0].lines, [" a", "-b", "+c"]);
+        // A result with no patch (a failed edit's text), or an empty one, carries none.
+        let plain = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]},
+            "toolUseResult":"Error: nope"});
+        assert!(messages(&plain)[0].edit_patch.is_none());
+        let empty = serde_json::json!({"type":"user","uuid":"u",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"1","content":"x"}]},
+            "toolUseResult":{"structuredPatch":[]}});
+        assert!(messages(&empty)[0].edit_patch.is_none());
     }
 
     #[test]

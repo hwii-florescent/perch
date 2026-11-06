@@ -244,7 +244,8 @@ pub(super) fn live_commands(
         .map_or_else(Vec::new, |bridge| bridge.slash_commands())
 }
 
-/// The snapshot as viewers receive it: the bridge's raw messages plus what the chat draws.
+/// The snapshot as viewers receive it: the bridge's raw messages plus what the chat draws and the
+/// toolbar's read-only option labels.
 /// ponytail: the projection repeats tool inputs and outputs, so a snapshot can be about twice the
 /// bridge's 192 KB message cap (each step body is capped at 4000 chars). Drop `messages` text the
 /// projection carries once no older web can be talking to this core.
@@ -252,6 +253,7 @@ fn with_transcript(
     mut snapshot: crate::protocol::NativeUiSnapshot,
 ) -> crate::protocol::NativeUiSnapshot {
     snapshot.transcript = Some(Box::new(crate::native_ui::transcript::project(&snapshot)));
+    snapshot.options = crate::native_ui::session_options::options_of(&snapshot);
     snapshot
 }
 
@@ -325,6 +327,49 @@ pub(super) fn draft(
             true,
         ),
     }
+}
+
+/// One page further back. The longer snapshot reaches viewers the usual way; the reply says whether
+/// the page changed anything.
+pub(super) fn older(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    let bridge = resolve(state, &session_id, &provider_id).and_then(|target| {
+        state
+            .app
+            .native_ui
+            .get(&target.bridge)
+            .ok_or_else(|| anyhow::anyhow!("Native UI is starting. Retry shortly."))
+    });
+    let bridge = match bridge {
+        Ok(bridge) => bridge,
+        Err(error) => {
+            fail(
+                &state.out_tx,
+                request_id,
+                "native_ui_unavailable",
+                error.to_string(),
+                true,
+            );
+            return;
+        }
+    };
+    let tx = state.out_tx.clone();
+    tokio::spawn(async move {
+        let outcome = bridge.load_older().await;
+        let _ = tx.send(ServerMessage::AgentUiOlderResult {
+            request_id,
+            session_id,
+            outcome,
+        });
+    });
 }
 
 pub(super) fn get(

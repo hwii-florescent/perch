@@ -69,11 +69,35 @@ Each module's `//!` header names the files it follows:
 - `native_ui/tasks.rs`: `src/shared/native-chat/input/native-chat-task-list{,-history}.ts` and
   `src/renderer/src/components/native-chat/native-chat-task-list-state.ts` (the
   `TaskCreate`/`TaskUpdate` reading is Perch's own).
+- `native_ui/edits.rs`: `src/shared/native-chat/tools/native-chat-edit-{normalize,model,lcs,
+  patch-files,cards}.ts`, `native-chat-unified-patch.ts`, `native-chat-begin-patch.ts`,
+  `native-chat-diff.ts` (the parts they use), and `src/main/native-chat/
+  transcript-line-decoders-claude.ts` (`structuredPatch`, in `native_ui/claude.rs`).
+- `native_ui/subagents.rs`: `src/shared/native-chat/transcript/native-chat-subagent-{summary,
+  group-header,items}.ts` and their tests; `packages/web/src/views/nativeChat/SubagentRoster.tsx`:
+  layout and words of `NativeChatSubagentRun.tsx`.
+- `native_ui/command_envelope.rs`: `src/shared/native-chat/native-chat-command-envelope.ts`,
+  `src/shared/harness-injected-user-turns.ts`, `src/shared/claude-bash-input.ts` and their tests.
+- `native_ui/session_options.rs`: `src/shared/model-id-label.ts` (and its test), the effort and
+  permission-mode wording of `src/shared/native-chat/input/native-chat-session-option-labels.ts` and
+  `src/renderer/src/components/native-chat/native-chat-permission-mode-labels.ts`, Claude's mode
+  names from `src/main/claude/structured/claude-structured-init-proof.ts` and Codex's policies from
+  `src/shared/codex-permission-policy.ts`.
+- Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
+  (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
+  `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.
+- `native_ui/turn_diffs.rs`: `src/shared/native-chat/tools/native-chat-turn-diffs.ts`.
 - `native_ui/file_links.rs`: `src/shared/native-chat/native-chat-href-routing.ts` and
   `src/shared/file-links/{file-link-location,explicit-file-link-target,
   file-link-path-normalization,file-uri-path}.ts`.
 - `packages/web/src/views/nativeChat/CopyButton.tsx`: behaviour and labels of
   `src/renderer/src/components/native-chat/NativeChatCopyButton.tsx`.
+- `packages/web/src/views/nativeChat/DiffCard.tsx`, `editRows.ts`: layout and copy text of
+  `NativeChatDiffCard.tsx` and `native-chat-edit-cards.ts` (`nativeChatEditFilePatchText`);
+  `TurnDiffRollup.tsx`: `NativeChatTurnDiffRollup.tsx`.
+- `packages/web/src/views/nativeChat/useOlderHistory.ts`, `OlderHistoryRow.tsx`:
+  `use-native-chat-older-history-autoload.ts`, `NativeChatOlderHistoryRow.tsx`; the page
+  and outcome names in `native_ui/mod.rs` and `protocol.rs` follow `native-chat-pagination.ts`.
 
 ## PDF.js
 

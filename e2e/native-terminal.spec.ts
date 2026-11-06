@@ -64,7 +64,7 @@ for (const provider of ["pi", "claude"]) test(`${provider}: typed in a Terminal 
     await cli.locator(".xterm-helper-textarea").press("Enter");
     await expect(ui).toHaveAttribute("data-provider", provider, { timeout: 60_000 });
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 30_000 });
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(provider === "claude" ? CHEAP_CLAUDE_MODEL : CHEAP_CODEX_MODEL);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", provider === "claude" ? CHEAP_CLAUDE_MODEL : CHEAP_CODEX_MODEL);
     const box = ui.getByTestId("native-cli-composer");
     await expect(box).toBeEnabled();
     await box.fill(`Reply with exactly ${token} and nothing else.`);

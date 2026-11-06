@@ -767,9 +767,32 @@ pub struct NativeUiMessage {
     /// On a `toolResult`: the tool reported failure.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_error: bool,
+    /// On a `toolResult` of a file edit: the hunks the provider resolved (Claude's
+    /// `structuredPatch`), which carry true file line numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_patch: Option<NativeUiEditPatch>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiEditPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    pub hunks: Vec<NativeUiEditHunk>,
+}
+
+/// One unified-diff hunk; `lines` keep their leading `+`, `-` or space.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiEditHunk {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeUiSnapshot {
     pub version: u32,
@@ -779,6 +802,14 @@ pub struct NativeUiSnapshot {
     pub provider_session_id: String,
     pub cwd: String,
     pub model: Option<String>,
+    /// The reasoning effort the provider reports for the session, as it writes it (`high`).
+    /// Codex only; Claude's hooks and transcript do not carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// The permission mode the provider reports: `ask`, `accept-edits`, `auto`, `full-access` or
+    /// `plan` (`native_ui/session_options.rs`). Claude (its last hook event) and Codex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
     pub running: bool,
     /// The turn is paused on a human: a permission prompt or a question.
     /// Implies `running`. Absent from older peers and bridges.
@@ -792,10 +823,75 @@ pub struct NativeUiSnapshot {
     pub context: Option<NativeUiContext>,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
+    /// Older messages than `messages` hold can be loaded (`agent.ui.older`): `truncated`, and the
+    /// provider's bridge can read further back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub can_load_older: bool,
     /// What the chat draws, derived from `messages` when the core sends the snapshot to a viewer
     /// (`native_ui::transcript`). Absent from bridges and from older cores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Box<crate::native_ui::transcript::NativeUiTranscript>>,
+    /// The model, effort and mode worded for the toolbar, read-only, derived from the fields above
+    /// when the core sends the snapshot to a viewer. Absent from bridges and from older cores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<NativeUiOptions>,
+    /// The subagents the session started, as the provider's own files report them (Claude:
+    /// `<session>/subagents/*.meta.json`). Raw; the transcript groups and words them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<NativeUiSubagent>,
+}
+
+/// One subagent a lead session started.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiSubagent {
+    /// The provider's id for the child.
+    pub id: String,
+    /// What the lead called it: its description, else its type.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// The id of the lead's spawn call, which places the row in the transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    /// `working`, `completed` or `unverifiable`; anything else reads as `unverifiable`.
+    pub state: String,
+    /// Milliseconds since the epoch, from the child's own transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<i64>,
+}
+
+/// What the toolbar says about a session's options; display text, never an instruction to change
+/// anything.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiOptions {
+    /// "Haiku 4.5".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// "High".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// "Accept edits".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+}
+
+/// What a request for an older page came to (Orca `NativeChatOlderPageResult`, less `superseded`:
+/// one core keeps one window per session).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OlderPageOutcome {
+    /// More history is now loaded.
+    Applied,
+    /// Nothing older exists, or Perch will not load more of it.
+    Exhausted,
+    /// The read finished with no more messages than before.
+    Unchanged,
+    /// The read did not finish.
+    Failed,
 }
 
 /// Context use from the last model response. Never a cost or a quota.
@@ -1205,6 +1301,14 @@ pub enum ClientMessage {
     /// The text half-typed on the CLI's own input line, if it can be read whole (`agent.ui.drafted`).
     #[serde(rename = "agent.ui.draft", rename_all = "camelCase")]
     AgentUiDraft {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+    },
+    /// Read one page further back in the conversation; the longer snapshot follows as usual and
+    /// `agent.ui.older.result` says what happened.
+    #[serde(rename = "agent.ui.older", rename_all = "camelCase")]
+    AgentUiOlder {
         request_id: String,
         session_id: String,
         provider_id: String,
@@ -2083,6 +2187,12 @@ pub enum ServerMessage {
         /// Absent when the input line is empty or cannot be read whole.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+    #[serde(rename = "agent.ui.older.result", rename_all = "camelCase")]
+    AgentUiOlderResult {
+        request_id: String,
+        session_id: String,
+        outcome: OlderPageOutcome,
     },
     #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
     AgentUiResult {

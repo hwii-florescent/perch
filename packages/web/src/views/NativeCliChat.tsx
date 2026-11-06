@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot } from "@perch/shared";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot, NativeUiSubagentGroup, NativeUiTurnDiff } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
@@ -20,9 +20,14 @@ import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
+import { TurnDiffRollup } from "./nativeChat/TurnDiffRollup";
+import { OlderHistoryRow } from "./nativeChat/OlderHistoryRow";
+import { useOlderHistory } from "./nativeChat/useOlderHistory";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
+import { OptionLabels } from "./nativeChat/OptionLabels";
+import { SubagentRoster } from "./nativeChat/SubagentRoster";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
@@ -75,6 +80,8 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, turn, fi
     const link = files.get(href);
     if (link) useFileTabs.getState().open(linkWorkspaceId, link.path);
   };
+  // A stopped turn: a quiet line between the turns, not a bubble (the core words it; `system` rows carry no prompt or answer).
+  if (message.role === "system") return <div className={cn(HINT, "text-center py-1")} data-native-role="system" data-testid="native-cli-status-row" data-native-turn={turn} data-block-id={message.id}>{message.text}</div>;
   return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
     {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
@@ -284,7 +291,21 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const waiting = snapshot?.blocked === true;
   const lastTurn = useLastTurnChanges(workspaceId, sessionId, hostId, !!snapshot && !snapshot.running && snapshot.messages.length > 0);
   const blocks = useMemo(() => blocksOf(snapshot), [snapshot]);
+  const older = useOlderHistory({ sessionId, providerId, available: !!snapshot?.canLoadOlder, list, revision: snapshot?.revision });
   const messages = useMemo(() => new Map((snapshot?.messages ?? []).map((message) => [message.id, message])), [snapshot?.messages]);
+  // Each rollup is drawn after its turn's last block; a turn's cards are the run steps' own.
+  const rollups = useMemo(() => {
+    const steps = new Map(blocks.flatMap((block) => block.kind === "run" ? block.steps.map((step) => [step.id, step] as const) : []));
+    const after = new Map<string, NativeUiTurnDiff[]>();
+    for (const diff of snapshot?.transcript?.turnDiffs ?? []) after.set(diff.after, [...(after.get(diff.after) ?? []), diff]);
+    return { after, card: (step: string, fileIndex: number) => steps.get(step)?.tool?.edit?.[fileIndex] };
+  }, [blocks, snapshot]);
+  // A roster of subagents is drawn after the block holding its spawn call.
+  const rosters = useMemo(() => {
+    const after = new Map<string, NativeUiSubagentGroup[]>();
+    for (const group of snapshot?.transcript?.subagents ?? []) after.set(group.after, [...(after.get(group.after) ?? []), group]);
+    return after;
+  }, [snapshot]);
   const hits = useFindHits(sessionId, providerId, find, snapshot?.revision, !!snapshot?.transcript);
   const current = hits.length ? hits[((findIndex % hits.length) + hits.length) % hits.length] : undefined;
   const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
@@ -302,7 +323,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); setFind((value) => value ?? ""); } }}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
-      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model}>{snapshot.model}</span>}
+      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>}
+      <OptionLabels options={snapshot?.options} />
       {snapshot?.context && <span className={snapshot.model ? undefined : "ml-auto"}><ContextRing context={snapshot.context} /></span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
@@ -312,12 +334,16 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <MessageRail prompts={prompts} onJump={jump} />
       <div className={cn("chat__list", CHAT_LIST)} ref={list} onScroll={() => { if (list.current) { atBottom.current = list.current.scrollHeight - list.current.scrollTop - list.current.clientHeight < 64; setShowBottom(!atBottom.current); } }}>
         <div className={cn(CHAT_COLUMN, "gap-3")}>
-        {snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
+        {snapshot?.canLoadOlder ? <OlderHistoryRow older={older} />
+          : snapshot?.truncated && <p className={HINT}>Showing recent messages. The complete conversation remains in the CLI.</p>}
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block) => {
-          if (block.kind === "run") return <RunRow key={block.id} run={block} find={mark(block.id)} />;
-          const message = messages.get(block.id);
-          return message && <NativeMessage key={block.id} message={message} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
+          const row = block.kind === "run" ? <RunRow key={block.id} run={block} find={mark(block.id)} />
+            : messages.get(block.id) && <NativeMessage key={block.id} message={messages.get(block.id)!} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
+          // Git's changed-files card speaks for the newest turn once it has settled; the rollup is for the others and for no Git.
+          const diffs = rollups.after.get(block.id)?.filter((diff) => !(lastTurn && diff.turn === blocks[blocks.length - 1]?.turn));
+          const groups = rosters.get(block.id);
+          return diffs?.length || groups?.length ? <Fragment key={block.id}>{row}{groups?.map((group) => <SubagentRoster key={`${group.turn}:subagents`} group={group} />)}{diffs?.map((diff) => <TurnDiffRollup key={`${diff.turn}:rollup`} diff={diff} cards={rollups.card} />)}</Fragment> : row;
         })}
         {snapshot?.transcript?.working && <div className={cn(HINT, "px-1")} aria-live="polite" data-testid="native-cli-working">{snapshot.transcript.working}</div>}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}

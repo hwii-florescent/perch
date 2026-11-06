@@ -83,7 +83,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await expect(ui).toHaveAttribute("data-native-pid", /\d+/, { timeout: 25_000 });
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
     // Fail here, before any real turn, if the cheap-model pin did not take.
-    await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
     const pid = await ui.getAttribute("data-native-pid");
     let nativeId = await ui.getAttribute("data-native-session");
     if (provider === "opencode") expect(nativeId).toBe("");
@@ -179,7 +179,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await mobile.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(mobile.getByTestId("native-cli-composer")).toBeEnabled();
     await expect(ui.getByTestId("native-cli-composer")).toBeDisabled();
-    await expect(mobile.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+    await expect(mobile.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
     await mobile.getByTestId("native-cli-composer").fill("Reply with that same token once more, and nothing else.");
     await mobile.getByRole("button", { name: "Send", exact: true }).click();
     await expect(mobile.locator('[data-native-role="user"]')).toHaveCount(3);
@@ -215,7 +215,7 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
       await expect(ui).toHaveAttribute("data-native-pid", pid!);
       expect(fs.realpathSync(snapshots.at(-1)!.cwd)).toBe(fs.realpathSync(fixture));
       await expect(ui.locator('[data-native-role="user"]')).toHaveCount(0);
-      await expect(ui.locator(".native-cli-chat__model")).toHaveText(expectedModel);
+      await expect(ui.locator(".native-cli-chat__model")).toHaveAttribute("data-model", expectedModel);
       await ui.getByTestId("native-cli-composer").fill(firstPrompt);
       await ui.getByRole("button", { name: "Send", exact: true }).click();
       await expect(ui.locator('[data-native-role="assistant"]').last()).toContainText(token, { timeout: 90_000 });

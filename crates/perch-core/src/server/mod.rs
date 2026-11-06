@@ -77,6 +77,7 @@ mod workspace;
 mod worktree_jobs;
 #[cfg(test)]
 use workspace::effective_focus;
+mod agent;
 mod agent_history;
 mod agents;
 mod attention;
@@ -584,6 +585,10 @@ pub async fn run(
             }
         }))?;
 
+    // Every new local agent launch is issued an identity through the database, and its
+    // confirmed exit ends it (`agent_identity.rs`).
+    state.agent_runtime.set_identity_store(state.db.clone())?;
+
     // Every launch reads its session's Instructions pin through the database; a session the
     // database does not know has nothing to inject.
     let instructions_db = state.db.clone();
@@ -672,6 +677,13 @@ pub async fn run(
         tokio::task::spawn_blocking(move || recover::recover_agents(&state));
     }
 
+    // A run that ended while no core was watching still holds a valid token: end it once
+    // perchd confirms the process is gone. Unknown is not gone.
+    {
+        let db = state.db.clone();
+        tokio::task::spawn_blocking(move || revoke_ended_agent_identities(&db));
+    }
+
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
@@ -707,6 +719,14 @@ pub async fn run(
             post(uploads::attachment_upload).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route(&pair_path, get(pair_status).post(pair_claim))
+        .route(
+            &format!("{base_path}agent/whoami"),
+            post(agent::whoami).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/report"),
+            post(agent::report).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
 
@@ -747,6 +767,9 @@ pub async fn run(
         "[perch] listening on port {} (base path {base_path}, ws at {ws_path})",
         bound_addr.port()
     );
+    // Tell the `perch` command where this core is. A desktop core takes a new port at
+    // every launch, so the command reads this file on each call.
+    let _core_file = CoreFile::publish(bound_addr.port(), &base_path);
     // Notify the Tauri shell (or any other caller) of the actual bound address
     // before we hand control to axum::serve.
     if let Some(tx) = options.ready_tx {
@@ -760,6 +783,60 @@ pub async fn run(
     )
     .await?;
     Ok(())
+}
+
+/// Revoke the token of every run whose process perchd confirms has exited.
+fn revoke_ended_agent_identities(db: &HistoryDb) {
+    let Ok(active) = db.active_agent_identities() else {
+        return;
+    };
+    for identity in active {
+        let Ok(key) = AgentKey::new(
+            &identity.workspace_id,
+            &identity.session_id,
+            &identity.provider_id,
+        ) else {
+            continue;
+        };
+        if crate::daemon::session_state(&crate::agent_runtime::terminal_key(&key))
+            == crate::daemon::RuntimeState::Exited
+        {
+            if let Err(error) = db.revoke_agent_incarnation(&identity.incarnation) {
+                tracing::warn!(%error, "could not revoke an ended run's agent token");
+            }
+        }
+    }
+}
+
+/// The published core address (`perchd::agent_cli::CORE_FILE`), removed again when this core
+/// stops, unless a newer core has replaced it.
+struct CoreFile(PathBuf);
+
+impl CoreFile {
+    fn publish(port: u16, base_path: &str) -> Option<Self> {
+        Self::publish_in(crate::daemon::dir(), port, base_path)
+    }
+
+    fn publish_in(dir: PathBuf, port: u16, base_path: &str) -> Option<Self> {
+        let address = perchd::agent_cli::CoreAddress {
+            pid: std::process::id(),
+            port,
+            base_path: base_path.to_string(),
+        };
+        match perchd::agent_cli::write_core_file(&dir, &address) {
+            Ok(()) => Some(Self(dir)),
+            Err(error) => {
+                tracing::warn!(%error, "could not publish the core address; `perch` will not find this core");
+                None
+            }
+        }
+    }
+}
+
+impl Drop for CoreFile {
+    fn drop(&mut self) {
+        perchd::agent_cli::remove_core_file(&self.0, std::process::id());
+    }
 }
 
 /// Background task (Phase 6): every 5s, recompute the git branch +
@@ -1517,6 +1594,10 @@ fn authorize_request(
     params: &HashMap<String, String>,
 ) -> Result<Option<String>, StatusCode> {
     if !same_origin(headers) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    // An agent's token opens `/agent/*` and nothing else, loopback or not.
+    if agent::carries_agent_token(headers, params) {
         return Err(StatusCode::FORBIDDEN);
     }
     let require_everywhere = std::env::var("PERCH_REQUIRE_PAIRING").as_deref() == Ok("1");

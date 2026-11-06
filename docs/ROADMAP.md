@@ -230,7 +230,8 @@ no choices) and answers OMP plan reviews through an extension channel; T3 Code
 owns Pi in RPC mode, which this attach-to-the-TUI design does not have.
 Live-checked: Claude `AskUserQuestion`, Codex command approval, OMP `ask`, Pi
 `ask_user_question` (when installed). Perch launches Claude and Codex with
-approvals bypassed, so only questions appear by default. OMP tool approvals and
+approvals bypassed, so only questions appear by default. Claude's plan review
+(ExitPlanMode) is a card with the plan (live-checked 2026-11-06); OMP tool approvals and
 plan reviews are not yet shaped. Phones answer like desktop (decided
 2026-11-05); they need the input lease like any other client.
 Transcript: runs of thinking, tool calls and results fold into one expandable row
@@ -268,12 +269,20 @@ flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
 | OMP | `--append-system-prompt=<file>` | `--add-dir=` |
 | Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt), passed to the shared app-server that builds each thread | none: the TUI refuses `--add-dir` with `--remote` (0.166), so list paths in the instructions |
 
+Codex's Instructions text travels in argv (`-c developer_instructions=…`), so a local `ps`
+can read it. Accepted: Instructions are shared context, not secrets (never put a credential
+in them).
+
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
 `CLAUDE.md`/`AGENTS.md` and Claude memory beside it, read-only. No hosted
 knowledge search. Remote Birdhouses keep theirs on the owning core.
 
 ### 2. Observe native subagents and teams
+
+Done for Claude's native subagents as roster rows (2026-11-06, details in the
+[worker guide](PROJECTS-WORKER-GUIDE.md) slice 2): read from Claude's per-session `subagents/`
+files, not from hooks. Still open below: a read-only child transcript, Codex, Pi/OMP, teams.
 
 Child rows under a session, with status, description, model and a read-only
 transcript: Claude `SubagentStart`/`SubagentStop` hooks plus
@@ -442,11 +451,18 @@ UI rows from step 0 continue between slices.
 2. **UI rows sub-sessions need:** status with nested child rows, subagent rows from
    SubagentStart/Stop hooks, docked task list. Check: unit tests on the Rust projection;
    e2e with a native Claude subagent and a TodoWrite turn.
-3. **Identity and authority:** session incarnation, scoped hashed token, discovery file,
-   the merged `perch` binary with `whoami`, `guide`, `report`. Check: tests that a token
-   cannot act outside its run, a stale incarnation is refused, loopback no longer gives
-   agents full authority, and the post-exit shell has no token; live `perch whoami` from
-   all four providers.
+3. **Identity and authority. Done 2026-11-06** (details in the worker guide): session
+   incarnation, scoped hashed token in `PERCH_TOKEN`, discovery file `core.json`, the merged
+   `perch` binary with `whoami`, `guide`, `report` and `perch daemon …` (old verbs still
+   work), the pointer appended to every launch. Tests: a token cannot act outside its run
+   or on any other route, a stale incarnation is refused, the post-exit shell has no
+   token; live `perch whoami` from all four providers. **Open for the owner:** a local
+   process *without* a token still has full authority over every other route (the loopback
+   exemption is unchanged, as the plan said to record rather than change it), so an agent
+   can drop its token and be as powerful as before; narrowing that is a separate decision.
+   **Packaging follow-up:** a packaged build must ship `perch` beside the core, or agents
+   get no identity and no pointer. Slice 4 must also decide what `perch list` means (today
+   the daemon's session list).
 4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
    person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
    duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed

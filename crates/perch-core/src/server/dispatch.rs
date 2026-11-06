@@ -65,6 +65,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             session_id,
             provider_id,
         } => native_ui::draft(state, raw_text, request_id, session_id, provider_id),
+        ClientMessage::AgentUiOlder {
+            request_id,
+            session_id,
+            provider_id,
+        } => native_ui::older(state, raw_text, request_id, session_id, provider_id),
         ClientMessage::AgentUiPrompt {
             request_id,
             session_id,

@@ -74,6 +74,20 @@ export interface NativeUiMessage {
   toolCallId?: string;
   /** On a `toolResult`: the tool reported failure. */
   isError?: boolean;
+  /** On a `toolResult` of a file edit: the provider's resolved hunks (Claude's `structuredPatch`). */
+  editPatch?: NativeUiEditPatch;
+}
+export interface NativeUiEditPatch {
+  filePath?: string;
+  hunks: NativeUiEditHunk[];
+}
+/** One unified-diff hunk; `lines` keep their leading `+`, `-` or space. */
+export interface NativeUiEditHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
 }
 
 /** What the chat draws, derived in Rust from `NativeUiSnapshot.messages` (`native_ui/transcript.rs`). */
@@ -83,6 +97,53 @@ export interface NativeUiTranscript {
   working?: string;
   /** The agent's own to-do list as of its latest plan call, docked above the composer; absent without one. */
   tasks?: NativeUiTaskList;
+  /** What each turn's landed edits changed, once per file; drawn after the block named in `after`. */
+  turnDiffs?: NativeUiTurnDiff[];
+  /** The subagents each spawning turn started, one roster per turn, drawn after the block named in `after`. */
+  subagents?: NativeUiSubagentGroup[];
+}
+/** One spawning turn's roster (`native_ui/subagents.rs`). */
+export interface NativeUiSubagentGroup {
+  /** The user message that opened the spawning turn; empty when its spawn call is not in the loaded history. */
+  turn: string;
+  /** The block this is drawn after. */
+  after: string;
+  working: boolean;
+  /** "Kicked off 2 subagents" while any child works, else "Ran 2 subagents". */
+  headline: string;
+  verdictState: string;
+  verdict: string;
+  /** An adverse outcome already recorded while siblings still work. */
+  alertState?: string;
+  alert?: string;
+  /** How long the settled group ran. */
+  durationMs?: number;
+  agents: NativeUiSubagentRow[];
+}
+export interface NativeUiSubagentRow {
+  id: string;
+  label: string;
+  state: string;
+  stateLabel: string;
+  agentType?: string;
+}
+export interface NativeUiTurnDiff {
+  /** The user message that opened the turn. */
+  turn: string;
+  /** The block this is drawn after: the last one of the turn. */
+  after: string;
+  files: NativeUiTurnDiffFile[];
+  added: number;
+  removed: number;
+  truncated?: boolean;
+}
+export interface NativeUiTurnDiffFile {
+  path: string;
+  added: number;
+  removed: number;
+  truncated?: boolean;
+  /** In the order the edits ran: the step that holds each card, and which of its cards. */
+  edits: { step: string; fileIndex: number }[];
 }
 export interface NativeUiTaskList {
   tasks: NativeUiTask[];
@@ -103,7 +164,32 @@ export interface NativeUiStep {
   kind: "thinking" | "tool" | "result";
   label: string;
   body: string;
-  tool?: { category: string; state: "running" | "completed" | "failed" | "unfinished"; output?: string };
+  tool?: {
+    category: string;
+    state: "running" | "completed" | "failed" | "unfinished";
+    output?: string;
+    /** What a landed file edit changed, one card per file (`native_ui/edits.rs`). */
+    edit?: NativeUiEditFile[];
+  };
+}
+export interface NativeUiEditFile {
+  path: string;
+  /** Set only when the change moved the file. */
+  oldPath?: string;
+  changeKind: "added" | "deleted" | "edited" | "renamed";
+  lines: NativeUiEditLine[];
+  added: number;
+  removed: number;
+  /** False when positions are snippet-relative: the rows then carry no numbers. */
+  lineNumbersKnown: boolean;
+  truncated?: boolean;
+}
+/** A removed row has no `newLineNumber`, an added one no `oldLineNumber`; a gap carries neither nor text. */
+export interface NativeUiEditLine {
+  kind: "context" | "add" | "del" | "gap";
+  text: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
 }
 export interface NativeUiSnapshot {
   version: number;
@@ -113,6 +199,10 @@ export interface NativeUiSnapshot {
   providerSessionId: string;
   cwd: string;
   model: string | null;
+  /** The reasoning effort the provider reports, as it writes it (`high`). Codex only. */
+  effort?: string;
+  /** `ask`, `accept-edits`, `auto`, `full-access` or `plan`: Claude's last hook event, Codex's thread settings. */
+  permissionMode?: string;
   running: boolean;
   /** The turn is paused on a human: a permission prompt or a question. Implies `running`. */
   blocked?: boolean;
@@ -122,8 +212,36 @@ export interface NativeUiSnapshot {
   context?: NativeUiContext;
   messages: NativeUiMessage[];
   truncated: boolean;
+  /** Older messages than `messages` hold can be loaded (`agent.ui.older`). Absent from older cores. */
+  canLoadOlder?: boolean;
   /** Absent from older cores. */
   transcript?: NativeUiTranscript;
+  /** The model, effort and mode worded for the toolbar, read-only. Absent from older cores. */
+  options?: NativeUiOptions;
+  /** The subagents the session started (raw; the transcript groups and words them). Claude only. */
+  subagents?: NativeUiSubagent[];
+}
+
+export interface NativeUiSubagent {
+  id: string;
+  label: string;
+  agentType?: string;
+  /** The lead's spawn call, which places the row in the transcript. */
+  toolUseId?: string;
+  /** `working`, `completed` or `unverifiable`. */
+  state: string;
+  startedAt?: number;
+  settledAt?: number;
+}
+
+/** Display text for the toolbar (`native_ui/session_options.rs`); never an instruction to change anything. */
+export interface NativeUiOptions {
+  /** "Haiku 4.5". */
+  model?: string;
+  /** "High". */
+  effort?: string;
+  /** "Accept edits". */
+  permissionMode?: string;
 }
 
 /** Context use from the last model response. Never a cost or a quota. */
@@ -175,6 +293,20 @@ export interface AgentUiDraftMessage {
   requestId: string;
   sessionId: string;
   providerId: string;
+}
+/** Read one page further back; the longer snapshot follows as usual and `agent.ui.older.result` says what happened. */
+export interface AgentUiOlderMessage {
+  type: "agent.ui.older";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+}
+export interface AgentUiOlderResultMessage {
+  type: "agent.ui.older.result";
+  requestId: string;
+  sessionId: string;
+  /** `applied`: more is loaded. `exhausted`: nothing older, or Perch will not load more. `unchanged`: the read added nothing. `failed`: it did not finish. */
+  outcome: "applied" | "exhausted" | "unchanged" | "failed";
 }
 export interface AgentUiDraftedMessage {
   type: "agent.ui.drafted";
@@ -2004,6 +2136,7 @@ export type ClientMessage =
   | AgentUiGetMessage
   | AgentUiFindMessage
   | AgentUiDraftMessage
+  | AgentUiOlderMessage
   | AgentUiPromptMessage
   | AgentUiAnswerMessage
   | AgentUiCancelMessage
@@ -2774,6 +2907,7 @@ export type ServerMessage =
   | AgentUiResultMessage
   | AgentUiFoundMessage
   | AgentUiDraftedMessage
+  | AgentUiOlderResultMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

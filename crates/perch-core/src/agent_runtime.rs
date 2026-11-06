@@ -42,11 +42,14 @@ const RUNTIME_VIEWER: &str = "__perch_runtime__";
 /// live pid) nobody could have quit it from a pane, so the wrapper drops
 /// `marker` and the next core resumes the agent. Agents like pi catch SIGTERM
 /// and exit 0, so the exit status can't tell a kill from a quit.
+///
+/// The agent's Perch identity is unset once the agent is gone: the shell that follows is
+/// the person's, and must not hold a credential for a run that has ended.
 fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
     [
         "/bin/sh",
         "-c",
-        "trap : INT; m=$1; c=$2; shift 2; \"$@\"; up=; \
+        "trap : INT; m=$1; c=$2; shift 2; \"$@\"; unset PERCH_TOKEN PERCH_SESSION; up=; \
          for p in \"$c\"/*; do kill -0 \"${p##*/}\" 2>/dev/null && up=1; done; \
          [ \"$up\" ] || { mkdir -p \"${m%/*}\" && : > \"$m\"; }; \
          exec \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -l",
@@ -65,6 +68,7 @@ pub type TurnBoundaryListener = Arc<dyn Fn(&AgentKey, bool) -> anyhow::Result<()
 /// Add a session's pinned Instructions to a provider's command line, writing its private
 /// Instructions file. Returns the command and, for Codex, the arguments for its shared
 /// app-server. A provider without Instructions support is returned unchanged.
+/// `pinned` is what the session launches with, the Perch pointer included when it has one.
 fn with_instructions(
     key: &AgentKey,
     provider_id: &str,
@@ -258,6 +262,13 @@ pub struct AgentRuntimeAdapter {
     cwds: Mutex<HashMap<String, Vec<String>>>,
     turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
     instructions: std::sync::OnceLock<InstructionsResolver>,
+    identities: std::sync::OnceLock<Arc<dyn crate::agent_identity::IdentityStore>>,
+}
+
+/// A launch's Perch identity (`agent_identity.rs`) and the `perch` binary it runs.
+struct LaunchIdentity {
+    environment: Vec<(String, String)>,
+    cli: PathBuf,
 }
 
 impl AgentRuntimeAdapter {
@@ -278,7 +289,48 @@ impl AgentRuntimeAdapter {
             cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
             instructions: std::sync::OnceLock::new(),
+            identities: std::sync::OnceLock::new(),
         }
+    }
+
+    pub fn set_identity_store(
+        &self,
+        store: Arc<dyn crate::agent_identity::IdentityStore>,
+    ) -> anyhow::Result<()> {
+        self.identities
+            .set(store)
+            .map_err(|_| anyhow::anyhow!("identity store already installed"))
+    }
+
+    /// The identity a *new* local launch of `key` carries. None, and nothing minted, when no
+    /// store is installed, the provider takes no pointer, no `perch` binary ships beside the
+    /// core, or the process may already exist: a reattach reuses the environment the process
+    /// started with, so minting here would revoke the token it holds.
+    fn launch_identity(
+        &self,
+        key: &AgentKey,
+        provider_id: &str,
+        existing_only: bool,
+    ) -> anyhow::Result<Option<LaunchIdentity>> {
+        let Some(store) = self.identities.get() else {
+            return Ok(None);
+        };
+        if existing_only
+            || !(provider_id == crate::agent_fleet::TERMINAL_PROVIDER
+                || crate::instructions::supported(provider_id))
+            || crate::daemon::session_state(&terminal_key(key))
+                != crate::daemon::RuntimeState::Exited
+        {
+            return Ok(None);
+        }
+        let Some(cli) = crate::agent_identity::cli_binary() else {
+            return Ok(None);
+        };
+        let issued = store.issue(key)?;
+        Ok(Some(LaunchIdentity {
+            environment: crate::agent_identity::launch_environment(&key.session_id, &issued),
+            cli,
+        }))
     }
 
     pub fn set_instructions_resolver(&self, resolver: InstructionsResolver) -> anyhow::Result<()> {
@@ -914,6 +966,8 @@ impl AgentRuntimeAdapter {
             }
         };
 
+        let existing_only = snapshot.state == AgentState::Exited
+            || (snapshot.state == AgentState::Reconnecting && snapshot.reason != "wake requested");
         let prepared = match (|| {
             // The pin is read here, once per launch, and covers wake and resume: it is
             // the session's snapshot, never the current Instructions. A failure refuses
@@ -926,6 +980,13 @@ impl AgentRuntimeAdapter {
                     resolve(&key)?
                 }
                 _ => None,
+            };
+            // The Perch pointer joins what the session pinned, for this launch only; the
+            // stored pin is unchanged. It is given only with an identity to go with it.
+            let identity = self.launch_identity(&key, &provider_id, existing_only)?;
+            let pinned = match identity {
+                Some(_) => Some(crate::agent_identity::with_pointer(pinned.as_ref())),
+                None => pinned,
             };
             let (command, server_args) =
                 with_instructions(&key, &provider_id, command, pinned.as_ref())?;
@@ -953,8 +1014,15 @@ impl AgentRuntimeAdapter {
                 pinned
                     .as_ref()
                     .filter(|_| provider_id == crate::agent_fleet::TERMINAL_PROVIDER),
+                identity.as_ref().map(|identity| identity.cli.as_path()),
             )?;
-            crate::provider_environment::prepare(command, &manifest.environment)
+            crate::provider_environment::prepare(
+                command,
+                &manifest.environment,
+                identity
+                    .as_ref()
+                    .map_or(&[][..], |identity| &identity.environment),
+            )
         })() {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -1044,6 +1112,7 @@ impl AgentRuntimeAdapter {
         let lifecycle = self.lifecycle.clone();
         let event_key = key.clone();
         let turn_boundary = self.turn_boundary.clone();
+        let identities = self.identities.get().cloned();
         let wrapped_on_exit: TerminalExitListener = Arc::new(move |terminal_id, code| {
             let intentional_stop = event_suppress.load(Ordering::Acquire);
             let identity = event_identity_slot.lock().unwrap().clone();
@@ -1084,6 +1153,12 @@ impl AgentRuntimeAdapter {
                 let _ = lifecycle.signal(&event_key, signal, now_millis());
             }
             if !alive {
+                // Only a confirmed exit ends the run's identity; a lost connection is not one.
+                if let Some(identities) = identities.as_ref() {
+                    if let Err(error) = identities.revoke_session(&event_key) {
+                        tracing::error!(%error, "could not revoke the ended run's agent token");
+                    }
+                }
                 let mut active = active.lock().unwrap();
                 if active.get(&event_key).is_some_and(|runtime| {
                     runtime.handle.terminal
@@ -1103,8 +1178,6 @@ impl AgentRuntimeAdapter {
         // marker; a fast provider must not be put back into Working afterward.
         self.lifecycle
             .signal(&key, ProviderSignal::Started, now_millis())?;
-        let existing_only = snapshot.state == AgentState::Exited
-            || (snapshot.state == AgentState::Reconnecting && snapshot.reason != "wake requested");
         let outcome = match self.terminals.attach_inner(
             &terminal_key(&key),
             RUNTIME_VIEWER,
@@ -1874,6 +1947,44 @@ mod tests {
         std::fs::remove_file(dir.join("agent-exit/k")).unwrap();
         run(&dir.join("missing"));
         assert!(dir.join("agent-exit/k").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The agent sees its Perch identity; the login shell that follows it does not.
+    #[test]
+    fn the_post_exit_shell_holds_no_agent_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("perch-in-shell-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let shell = dir.join("shell");
+        std::fs::write(
+            &shell,
+            "#!/bin/sh\nprintf 'after:%s:%s' \"${PERCH_SESSION-unset}\" \"${PERCH_TOKEN-unset}\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let argv = super::in_shell(
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf 'agent:%s:%s|' \"$PERCH_SESSION\" \"$PERCH_TOKEN\"".into(),
+            ],
+            &dir.join("agent-exit/k"),
+            &dir.join("cores"),
+        );
+        let output = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("SHELL", &shell)
+            .env_remove("PERCH_SHELL")
+            .env("PERCH_SESSION", "s1")
+            .env("PERCH_TOKEN", "t1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "agent:s1:t1|after:unset:unset"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

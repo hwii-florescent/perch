@@ -219,6 +219,20 @@ are carried. The relay's address is the `relayUrl` setting, changed only from
 the computer itself. `relay.json` beside `devices.json` holds its identity.
 `wire.rs` and `wire.ts` must change together (`wire.fixture.json`).
 
+Agents are a fourth caller, and the narrowest. Each new local launch of a Claude, Codex, Pi,
+OMP or Terminal session gets an incarnation and a bearer token (`PERCH_TOKEN`, with
+`PERCH_SESSION`); the core stores only its SHA-256 (`agent_identity.rs`, `db/agent_identity.rs`).
+The token opens `/agent/*` (`server/agent.rs`) for its own session and nothing else:
+`authorize_request` refuses it on every other route, loopback included, and `/agent/*` takes
+no device cookie and no unauthenticated loopback caller. A reattach never mints (the process
+keeps its environment); a confirmed exit, a newer launch, session deletion and a boot-time
+check against perchd end a run's token, and the post-exit login shell has none. A local process
+that sends no token still has the loopback exemption's full authority, unchanged. The `perch`
+command finds the core through `<daemon dir>/core.json` (0600, read on every call). It reaches
+the agent through a `perch` entry in the session's private shim directory that `exec`s the real
+binary by absolute path; **a packaged build must ship `perch` beside the core**, or agents get
+neither identity nor pointer.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

@@ -26,6 +26,9 @@ pub fn scrub_nested_agent_env() {
         "CLAUDECODE",
         "CLAUDE_CODE_ENTRYPOINT",
         "CLAUDE_CODE_SSE_PORT",
+        // An agent identity from the shell this core was started in is that agent's, not ours.
+        perchd::agent_cli::SESSION_ENV,
+        perchd::agent_cli::TOKEN_ENV,
     ];
     let mut removed = Vec::new();
     for var in vars {

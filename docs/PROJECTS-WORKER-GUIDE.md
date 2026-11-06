@@ -59,9 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
-| 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
-| 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
 | 7 | Plan review | `shared/omp-plan-review-prompt.ts` (91, pure) → a shape in `native_ui/dialog.rs`; `main/pi/omp-plan-review-source.ts` → `pi-extension.ts` event | `NativeChatInteractiveCard.tsx` | `agent-status-omp-plan-review.test.ts` | probe Claude ExitPlanMode live: may already be a numbered dialog |
 | 8 | Interrupted row | status text from `transcript-line-decoders-claude.ts:90`, `transcript-turn-lifecycle.ts` | row only, no Continue button | `transcript-interruption-message.test.ts` | transcript |
 | 9 | Command envelope | `shared/native-chat/native-chat-command-envelope.ts` (50) → `typed.rs` | none | `native-chat-command-envelope.spec.ts` | Claude transcript `<command-name>` |
@@ -89,6 +86,89 @@ step body of an accepted plan call, `nativeChat/DockedTasks.tsx`. **Probe result
 as Perch's own, keyed by task number. `TodoWrite` input is now kept to 6 KiB (a clipped list
 does not parse). Not done: Codex `turn/plan/updated` (the bridge does not surface it), the
 frame projection, Pi/OMP lists.
+
+Row 4 (edit cards) landed 2026-11-06: `native_ui/edits.rs` (Orca's normalizer, LCS, unified
+patch and begin_patch, with the normalize tests; Perch's own tests for LCS, the prefix/suffix
+fallback and the clipped-input flag), `NativeUiMessage.edit_patch` (Claude's
+`toolUseResult.structuredPatch`, 40 hunks of 400 lines), `NativeUiToolLine.edit`,
+`nativeChat/DiffCard.tsx`. Claude edit inputs are now kept up to 12 KiB per string (the
+generic 300) and a string still cut sets `_perchClipped`, which the card turns into
+"Diff truncated"; the history shares 4,000 card rows. Not ported: Orca's journal `Diff` tool
+and bounded-text markers. Codex's `file changes` input (the bridge sends the `changes` array
+itself) is read as `apply_patch`'s `changes`; unit-tested only. Row 5 builds on the cards
+(`EditFile`).
+
+Row 5 (per-turn diff rollup) landed 2026-11-06: `native_ui/turn_diffs.rs` (Orca's merge,
+rename folding and totals, with the cases of its test that do not need the journal `Diff`
+item), `NativeUiTranscript.turn_diffs` (each names the block it follows and its edits by
+step id, so card rows are not sent twice), `nativeChat/TurnDiffRollup.tsx`. Git's
+changed-files card (`useLastTurnChanges`) stays the truth for the newest settled turn and
+replaces the rollup there; the rollup serves older turns and workspaces without Git. Not
+ported: Orca's reveal target (scroll to the card), subagent sections.
+
+Row 6 (older-history paging) landed 2026-11-06 for **Claude only**: `NativeBridge::load_older`
+raises a per-session window (`claude::WINDOW` 128 messages, `PAGE` 200, `MAX_WINDOW` 528; each
+128 also allows another 192 KiB and 2 MiB of file tail), `agent.ui.older` and
+`agent.ui.older.result` (`applied`/`exhausted`/`unchanged`/`failed`, Orca's names less
+`superseded`), `NativeUiSnapshot.can_load_older`, `nativeChat/useOlderHistory.ts` and
+`OlderHistoryRow.tsx`. Checked in-process with the real observer on hook files and a 300-row
+transcript, and with browser unit tests; **no live paid run** (a real transcript past 128
+messages needs about 65 turns or writing into `~/.claude`). Open: the window ceiling exists
+because the tail is parsed again on every transcript change (an incremental reader would lift
+it); Codex can page with `thread/turns/list` and its cursor; Pi, OMP and OpenCode would need
+a window command in their extension or plugin.
+
+Row 7 (plan review) landed 2026-11-06 for **Claude only**, by the answer that needed no new
+machinery: Claude 2.1.319's ExitPlanMode already draws a numbered dialog, so `native_ui/dialog.rs`
+learned its shape (the plan between two `╌` rules, a solid rule, the question, `ctrl+g to edit…`
+footer) and the existing request card shows the plan as its detail with the choices that take no
+typed text ("Tell Claude what to change" is dropped like the other typed choices). The question wraps
+at 80 columns, so the parser joins its lines (found by the live run, not the first capture); option 1's
+wording follows the session's permission mode, the digits stay the answer. Unit tests use the captured
+screen, its wrapped form and a plan containing a markdown rule; live: `native-composer.spec.ts` claude
+"plan review" (`/plan`, card, approve by hand). Not done: OMP's plan review (Orca's
+`omp-plan-review-prompt.ts` and extension channel; no OMP screen captured), Pi, Codex plans, and a
+plan that wraps or scrolls past the screen (only the visible part is shown).
+
+Row 8 (interrupted row) landed 2026-11-06: Claude's injected "[Request interrupted by user…]"
+user row (the `interruptedMessageId` marker Orca keys on, or, because 2 of 5 rows seen in 2.1.318
+transcripts lack it, the two exact texts) becomes a `system` message "Conversation interrupted"
+(`native_ui/claude.rs`, `INTERRUPTED_STATUS_TEXT` in `mod.rs`); Codex's `turn/completed` with
+`status: "interrupted"` (the `TurnStatus` enum in the 0.166 app-server schema) leaves the same row.
+The web draws it as a quiet centred line (`native-cli-status-row`), not a bubble, so recall and copy
+never see it. No Continue button, as planned. Unit tests port Orca's two cases (Claude marker; the Codex
+one as the app-server status). Live: `native-composer.spec.ts` claude "interrupted row" (stop a
+`sleep 60`). Not done: Pi/OMP/OpenCode rows, usage-limit and auto-continue notices.
+
+Row 9 (command envelope) landed 2026-11-06 for **Claude's transcript**: `native_ui/command_envelope.rs`
+(Orca's envelope parser, its catalog-versus-skill split, the harness-injected-turn predicate and
+`<bash-input>`, with their tests), applied in `native_ui/claude.rs` `messages()`. Seen in real 2.1.318
+transcripts: a skill is one user row `<command-message>x</command-message><command-name>/x</command-name>`
+(shown now as `/x args`, so the reply has its prompt and the sent text matches its transcript echo), a
+built-in such as `/plan` is an envelope row plus a `<local-command-stdout>` row (both hidden; the
+composer's "Ran /x in the CLI" notice remains), `!ls` shows as typed. Before this, those rows showed as
+raw tags and a `/plan` output became the newest recalled prompt. The built-in names come from
+`slash_commands.json` (Claude's captured menu), so a command newer than the capture shows as `/name`.
+Not ported: Orca's `surfaceNativeChatCommandOutputs` (a reporting command's answer, e.g. `/context`,
+stays hidden), the host-answered commands, and any non-Claude provider (Codex/Pi/OMP write no envelopes).
+Live: the `native-composer.spec.ts` claude "command menu" check asserts the `/perchping` row.
+
+Row 10 (model, effort, mode labels and read-back) landed 2026-11-06 **read-only**: `native_ui/
+session_options.rs` (Orca's `labelFromModelId` with its test, the effort and mode wording, Claude's and
+Codex's mode mapping), `NativeUiSnapshot.effort`/`permissionMode` (raw reports, optional),
+`NativeUiSnapshot.options` (worded in the core when a snapshot goes to a viewer), `nativeChat/
+OptionLabels.tsx`. The toolbar shows "Haiku 4.5" (the raw id stays in `data-model` and the title) and,
+when reported, effort and mode as plain text. **What each provider reports (probed 2026-11-06):**
+Claude 2.1.319 `UserPromptSubmit` hook input carries `permission_mode` (`acceptEdits` seen live;
+`SessionStart` has none, so the mode is as of the latest prompt/tool hook) and nothing names effort
+(the `SessionStart` input has only `model`; the banner reads "Haiku 4.5 · Claude Max" and effort
+appears only in a user's own status line), so Claude shows no effort and Orca's banner reader
+(`claude-terminal-session-options.ts`) was not ported. Codex 0.166's `thread/settings/updated` and
+`thread/resume` carry `model`, `effort`/`reasoningEffort`, `approvalPolicy`, `sandbox(Policy)` and
+`approvalsReviewer`; the mode is one of Orca's three policies or nothing (unit-tested; no live Codex
+run). Pi/OMP/OpenCode: model only. **Pending the owner's yes (PARITY, DECISIONS "no model chrome over a
+live session"): the pickers and typed `/model`, `/effort`, mode-cycle commands that change a running
+session.** Nothing here writes to a session.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
@@ -119,6 +199,9 @@ What later slices build on:
 - **Codex has no per-thread folder flag through the shared app-server**: the TUI refuses
   `--add-dir` with `--remote` (0.166), so Codex's reference folders are listed in the
   `developer_instructions` text, like Pi's.
+- **Codex's Instructions text travels in argv** (`-c developer_instructions=<text>`), so any
+  local process can read it with `ps`. Accepted: Instructions are not secrets. Never put a
+  credential in them.
 - Not done: showing the repo's own `CLAUDE.md`/`AGENTS.md` and Claude memory beside the
   Instructions; remote Birdhouses (the dialog is local only; their core would own them).
 - Live check: `e2e/instructions.spec.ts` (in `native-composer.config.ts`), one turn per
@@ -126,23 +209,27 @@ What later slices build on:
 
 ## Slice 2: rows sub-sessions need
 
-**Claude subagents (port Orca's feed, MIT):**
-- Add to `EVENTS`, version-gated: `SubagentStart` (2.0.43), `SubagentStop`,
-  `TeammateIdle` (2.1.33), `PostCompact` (2.1.76), `Elicitation`/`ElicitationResult`.
-  Orca list: `src/main/claude/claude-managed-hook-events.ts`.
-- `read_event` today rejects every event with `agent_id`. Route those to a child
-  roster keyed by `agent_id` instead (fields `agent_id`, `agent_type`,
-  `transcript_path`; Stop/SubagentStop `background_tasks[]`; `is_interrupt`). Orca:
-  `shared/agent-hook-listener/providers/claude-lifecycle-events.ts`, `claude-events.ts`,
-  `claude-subagent-roster.ts`.
-- Child transcript `<parent stem>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json`
-  (`description`, `agentType`); Orca `ai-vault/scanners/claude/session-scanner-claude-subagents.ts`.
-  Read-only, best effort, undocumented format.
-- Rows: Orca `shared/native-chat/transcript/native-chat-subagent-{items,summary,group-header}.ts`
-  and `renderer/.../native-chat-subagent-{sections,section-slots,live-frontier}.ts` →
-  `native_ui/subagents.rs`; component `NativeChatSubagentRun.tsx`. Tests:
-  `native-chat-subagent-items.test.ts`, `-summary.test.ts`,
-  `native-chat-subagent-sections.test.ts`.
+**Claude subagents: landed 2026-11-06 (roster rows).** `native_ui/subagents.rs` (Orca's state
+vocabulary and precedence, header words, elapsed-clock anchor and sibling ordinals, with the cases
+of `native-chat-subagent-{summary,items}.test.ts` that do not need Orca's journal rows),
+`claude.rs` `subagent_roster` (reads `<session>/subagents/agent-<id>.meta.json` and `.jsonl`),
+`NativeUiSnapshot.subagents` (raw) and `NativeUiTranscript.subagents` (one roster per spawning turn,
+`after` the block holding the spawn call, matched by the meta file's `toolUseId`),
+`nativeChat/SubagentRoster.tsx`. **Probed live (2.1.319, haiku):** an `Agent` call runs the child in
+the background ("Backgrounded agent"); hooks `SubagentStart` (`agent_id`, `agent_type`) and
+`SubagentStop` (plus `agent_transcript_path`, `last_assistant_message`, `background_tasks[]`) fire;
+the meta file holds `agentType`, `description`, `toolUseId`, `finished`, `pickedEffortModel`.
+**Deviation from the plan above:** the roster is read from those files, not from the hooks: Perch's
+hook files keep only the latest event per name, so concurrent children would overwrite each other,
+and the meta file carries Claude's own `finished` mark. So `SubagentStart/Stop` were not added to
+`EVENTS`, and `read_event` still drops events carrying `agent_id`. A child is `completed` only when
+`finished` and its last reply ended its turn (`end_turn`), `unverifiable` when finished without that,
+or when unfinished and its files have been still for 10 minutes; Claude writes `finished` before the
+child's last rows, so the roster is re-read as the child's transcript grows (found by the live run),
+and its tail window is 1 MiB because a child's rows can be 85 KB. There is no `failed`/`stopped`
+state: nothing in those files says it. Not done: per-child transcript view, token totals, a live
+elapsed clock (a settled run shows its length), nested helpers, `TeammateIdle`/`PostCompact`/
+`Elicitation` events, agent teams, the background-task strip.
 
 **Codex:** keep `primary()`; add a child roster from threads with `parentThreadId`;
 names from the rollout's `session_meta.source.subagent.thread_spawn`
@@ -157,35 +244,70 @@ names from the rollout's `session_meta.source.subagent.thread_spawn`
 Check: Rust tests for roster routing (main events unchanged), transcript/meta parsing;
 e2e on Claude haiku with one native subagent and one TodoWrite turn.
 
-## Slice 3: identity and authority (*own* design; Orca ids are not credentials)
+## Slice 3 landed (2026-11-06): identity and authority (*own* design; Orca ids are not credentials)
 
-- **Incarnation:** new `agent_identity.rs`: one row per launch (`session_id`,
-  `incarnation`, `parent`, `run_id`, `token_hash`, `revoked_at`). Reuse perchd's
-  per-runtime incarnation where it exists.
-- **Token:** random 32 bytes, SHA-256 stored like `devices.rs` `hash_token`. Mint in
-  `agent_runtime.rs` before `provider_environment::prepare` (a clone of
-  `manifest.environment.set`), never in perchd's `terminal_env`.
-- **Auth:** a scoped-agent branch in `server/mod.rs` `authorize_request` **before** the
-  loopback exemption. A request carrying an agent token gets only agent operations on
-  its own run, even from loopback. Today any local process has full authority. Narrowing
-  that for non-agent clients is a separate decision; record it, don't change it here.
-- **Discovery:** 0600 file `<perch dir>/core.json` with the address. Desktop ports change
-  per launch, so the CLI reads the file each call.
-- **Leaks:** unset the token in `in_shell` (`agent_runtime.rs`) before the post-exit
-  login shell, and revoke it on exit, stop or incarnation change. Never log it.
-- **Binary:** `crates/perchd/src/bin/perch.rs` → subcommands. Move `ps`, `list`,
-  `cleanup`, `release`, `serve`, `connect` under `perch daemon`, keeping the old verbs as
-  aliases. Then `perch whoami`, `perch guide`, `perch report`.
-- **`perch guide`:** our own text, kept in the binary so it matches its version.
-  Orca's preamble (`src/main/runtime/orchestration/preamble.ts`) and guide headings
-  (`src/cli/bundled-skill-guides.ts`, Recipe / Never / When you are woken / Safety) are
-  MIT and may be adapted. Keep: ask, report a blocker or finish, nothing else; return to
-  idle after reporting; no outside channels; a direct user instruction wins. Add: only
-  person-started turns may spawn, children cannot spawn, reports are claims, messages
-  never approve.
-- Check: tests for cross-run refusal, stale incarnation refusal, a token from loopback
-  getting no general authority, no token in the post-exit shell, alias verbs; live `perch
-  whoami` from all four providers.
+What later slices build on:
+
+- **Identity.** `agent_identity.rs` (pure: token mint and hash, the pointer text, the `perch`
+  binary lookup, the `IdentityStore` trait), `db/agent_identity.rs` (table `agent_identities`:
+  `incarnation`, `workspace_id`, `session_id`, `provider_id`, `token_hash`, `created_at`,
+  `revoked_at`, `report`, `reported_at`). One row per *new* local launch of a Claude, Codex, Pi,
+  OMP or Terminal session; issuing revokes the session's earlier rows. **Deviations from the
+  plan:** no `parent`/`run_id` columns (the incarnation is the run id; the parent link is the
+  session record's, slice 4); perchd's own incarnation is not reused (it is per PTY runtime, not
+  per Perch launch); the token is two OS-random UUIDs (244 random bits), not raw bytes.
+- **A reattach never mints.** `agent_runtime::launch_identity` issues only when perchd confirms the
+  terminal is absent (`session_state == Exited`) and the attach may start a process; an existing
+  process keeps the environment it started with, so minting for it would revoke its own token.
+  Unknown is not absent.
+- **Environment.** `PERCH_SESSION` and `PERCH_TOKEN`, set last by `provider_environment::prepare`
+  (new `scoped` argument): no manifest rule or inherited value overrides them, and an identity the
+  core itself inherited (started from an agent's shell) is removed from every child and from the
+  core's own environment at boot. `in_shell` unsets both after the agent exits, before the
+  person's login shell. **Not verified live:** the post-exit shell (unit-tested with a stand-in
+  shell script).
+- **Revocation.** On a confirmed exit (the exit listener's `!alive` branch, so also stop and
+  hibernate), on the next launch of the session, when the session is deleted, and at boot for any
+  run perchd confirms gone (by incarnation, so it cannot hit a launch that started meanwhile). A
+  lost connection is not an exit.
+- **Transport (decided by the supervisor).** `POST {base}agent/whoami` and `agent/report`,
+  `Authorization: Bearer <token>`, JSON body naming `session`. `server/agent.rs`: only agent tokens
+  (no device cookie, no loopback exemption), only local (no proxy header, no `Origin`), token and
+  named session must match (cross-run refusal). `authorize_request` refuses a request that carries
+  an agent token anywhere else (header, `?token=`, cookie), even from loopback. The CLI reads
+  `<daemon dir>/core.json` (0600: `pid`, `port`, `basePath`; the daemon dir honours `PERCHD_DIR`,
+  so isolated probes stay isolated) on every call and refuses a file whose pid is gone. The token
+  is never in argv, output, logs or errors.
+- **Still open, by instruction:** a local process *without* a token keeps full authority over every
+  other route (the loopback exemption is unchanged). The slice's check "loopback no longer gives
+  agents full authority" is therefore met only for token holders: they get less than anonymous
+  local callers, which an agent can always become by omitting the token. Narrowing local access is a
+  separate owner decision; see ROADMAP.
+- **`perch` on the agent's PATH (decided by the supervisor).** The real binary is `perch` beside the
+  core (`perchd/src/bin/perch.rs`; `binary_beside` also finds it from a test binary's `deps/`).
+  `shell_integration::prepare` writes `bin/perch` into the session's private shim directory, which
+  every launch already puts first on its PATH, as a two-line script that `exec`s the real binary by
+  absolute path (never by PATH search, so it cannot run itself). No binary beside the core: no
+  shim, **no identity and no pointer either**, and an `info` line says why; an old shim is removed.
+  Tested for the typed-agent shim (all four providers read the pointer) and the shim itself; picker
+  launch, wake/resume and the Codex app-server-backed TUI all go through `with_instructions` and
+  `shell_integration::prepare` in one place. **Packaged builds must ship `perch` beside the core**
+  (ARCHITECTURE); that is a packaging follow-up, not done.
+- **The pointer** (`POINTER`, about 250 characters) is appended at each launch to whatever the
+  session pinned, for Claude, Codex, Pi, OMP (file or Codex's `developer_instructions` argv) and for
+  the shim of a Terminal session. It is **not stored in the pin** (a constant that depends on whether
+  the binary exists now); the stored pin, its hash and the Instructions dialog are unchanged.
+- **Binary.** `perch whoami [--json]`, `perch report <text>` (or stdin; at most 4,000 characters;
+  the latest report is kept on the run and nothing reads it yet), `perch guide` (own text, in the
+  binary). `perch daemon <verb>` runs the daemon verbs; the bare `ps`, `list`, `cleanup`, `release`,
+  `serve`, `connect` remain aliases. **Slice 4 must decide** what `perch list` means: it is still
+  the daemon's session list, and the plan wants it to list sub-sessions.
+- **Live check:** `e2e/instructions.spec.ts` (one extra `perch whoami` turn per provider, haiku and
+  luna): the reply names the session, the session has exactly one live identity row, and no
+  `perch_agent_` string reaches the chat, `ps` or the core log.
+- The guide text still describes only `whoami`, `report` and `guide`; each later slice adds its
+  verbs and the rules that go with them (only person-started turns may spawn, children cannot
+  spawn, messages never approve).
 
 ## Slice 4: spawn, list, stop, reports
 

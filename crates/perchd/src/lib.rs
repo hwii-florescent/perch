@@ -1,5 +1,6 @@
 //! perchd — the perch terminal daemon. See `docs/ARCHITECTURE.md` §3.
 
+pub mod agent_cli;
 mod cleanup_cli;
 pub mod client;
 pub mod permissions;
@@ -98,7 +99,7 @@ pub fn cli_main(args: &[String], exe_prefix: Vec<String>) -> i32 {
         }
         _ => {
             eprintln!(
-                "usage: perchd serve|connect|version [--dir DIR] [--idle-exit SECS|--no-idle-exit]\n       perch ps [--dir DIR] [--json]\n       perch cleanup [--dir DIR] [--dry-run|--yes] [--json]"
+                "usage: perchd serve|connect|version [--dir DIR] [--idle-exit SECS|--no-idle-exit]\n       perch daemon ps [--dir DIR] [--json]\n       perch daemon cleanup [--dir DIR] [--dry-run|--yes] [--json]\n       perch whoami|report|guide  (inside a Perch agent session)"
             );
             2
         }
