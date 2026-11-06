@@ -369,8 +369,8 @@ file rows; the left Birdhouse/Nest/session hierarchy and Git actions stay.
 - File/folder icons recognize filename/extension conventions (including package
   manifests, libraries and config files); they do not analyze dependencies or
   infer package ownership. Search results and Git rows reuse the same icons.
-  Desktop explorer text matches the organizer's 12px scale with compact 18px
-  rows, including narrow drawers. Phone viewports (≤700px), not drawer width,
+  Desktop explorer matches VS Code's 13px text and 22px rows, with 8px
+  indentation per level, including narrow drawers. Phone viewports (≤700px), not drawer width,
   enable tree targets of at least 44px. Collapsing a folder keeps the cursor
   highlight for keyboard navigation; it does not select/open a file. Birdhouse hover/selection
   uses the same neutral `surface-1` fill as session rows.

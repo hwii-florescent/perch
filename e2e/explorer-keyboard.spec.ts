@@ -67,8 +67,9 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
       await page.setViewportSize({ width, height: 824 });
       expect((await page.getByTestId("workspace-files-view").boundingBox())!.width).toBeLessThan(460);
       for (const file of ["src", "src/App.tsx", "package.json"]) {
-        await expect(row(file)).toHaveCSS("min-height", "18px");
-        expect((await row(file).boundingBox())!.height).toBe(18);
+        await expect(row(file)).toHaveCSS("min-height", "22px");
+        await expect(row(file)).toHaveCSS("font-size", "13px");
+        expect((await row(file).boundingBox())!.height).toBe(22);
       }
     }
     await page.setViewportSize({ width: 1240, height: 824 });
@@ -96,8 +97,8 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
       await birdhouse.hover();
       await expect(birdhouse).toHaveCSS("background-color", surface);
       await page.mouse.move(0, 0);
-      expect(await row("src/App.tsx").evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBe(12);
-      expect((await row("src/App.tsx").boundingBox())!.height).toBeLessThanOrEqual(22);
+      await expect(row("src/App.tsx")).toHaveCSS("font-size", "13px");
+      expect((await row("src/App.tsx").boundingBox())!.height).toBe(22);
       await expect(row("src/dual.ts").getByTestId("file-git-marker")).toHaveText("M/M");
       if (["perch", "catppuccin", "catppuccin-latte"].includes(theme)) await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`explorer-${theme}.png`) });
     }

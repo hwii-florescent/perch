@@ -50,11 +50,11 @@ const CODE = "text-overlay-1 [font:inherit]";
 const PRE = "m-0 overflow-auto bg-surface-0 p-[0.55rem] text-fg whitespace-pre-wrap [font:inherit] [overflow-wrap:anywhere]";
 const BANNER = "shrink-0 bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
 
-// VS Code's explorer metrics (explorerviewlet.css, tree.css), tighter: 18px rows (VS Code: 22), an 8px indent per level, a 16px twistie cell
-// holding a 10px chevron. Text stays 12px like the project organizer (VS Code uses 13px).
+// Match VS Code's explorer balance: 22px rows, 13px text, an 8px indent per level,
+// and a 16px twistie cell holding a 10px chevron.
 // Only phone viewports get 44px targets: a narrow desktop drawer must stay compact.
-const ROW_FONT = "text-[length:calc(12px*var(--zoom,1))]";
-const ROW_MIN_H = "min-h-[calc(18px*var(--zoom,1))]";
+const ROW_FONT = "text-[length:calc(13px*var(--zoom,1))]";
+const ROW_MIN_H = "min-h-[calc(22px*var(--zoom,1))]";
 const HEADER_ICON = cn(GHOST_BUTTON, "grid size-6 place-items-center p-0");
 
 function HeaderIcon({ label, onClick, active, children }: { label: string; onClick: () => void; active?: boolean; children: React.ReactNode }) {
