@@ -561,7 +561,10 @@ impl ProviderManifest {
             display_name: "Terminal".into(),
             launch: LaunchSpec {
                 executable: "/bin/sh".into(),
-                prefix_args: vec!["-c".into(), "exec \"${SHELL:-/bin/sh}\" -l".into()],
+                prefix_args: vec![
+                    "-c".into(),
+                    "exec \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -l".into(),
+                ],
                 prompt: PromptTransport::Stdin,
                 suffix_args: Vec::new(),
                 resume_prefix_args: Vec::new(),

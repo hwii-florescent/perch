@@ -28,6 +28,7 @@ pub mod relay;
 pub mod review;
 pub mod server;
 pub mod settings;
+mod shell_integration;
 pub mod source_control;
 pub mod ssh;
 pub mod status;

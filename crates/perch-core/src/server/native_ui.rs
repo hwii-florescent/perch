@@ -5,22 +5,59 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
+    observe_runtime(app, key.clone(), key, None)
+}
+
+pub(super) fn observe_shell(
+    app: &AppState,
+    key: AgentKey,
+    agent: crate::shell_integration::ShellAgent,
+) -> anyhow::Result<()> {
+    observe_runtime(app, key, agent.key.clone(), Some(agent))
+}
+
+fn observe_runtime(
+    app: &AppState,
+    key: AgentKey,
+    bridge_key: AgentKey,
+    shell: Option<crate::shell_integration::ShellAgent>,
+) -> anyhow::Result<()> {
     let runtime = app.agent_runtime.clone();
     let alive_key = key.clone();
     let event_app = app.clone();
     let event_key = key.clone();
-    let provider_session_id = app
-        .agent_runtime
-        .runtime(&key)
-        .and_then(|runtime| runtime.provider_session_id);
+    let provider = bridge_key.agent_id.clone();
+    let alive_shell = shell.clone();
+    let provider_session_id = if shell.is_some() {
+        None
+    } else {
+        app.agent_runtime
+            .runtime(&key)
+            .and_then(|runtime| runtime.provider_session_id)
+    };
     app.native_ui.start(
-        key,
+        bridge_key,
         provider_session_id,
-        Arc::new(move || runtime.runtime(&alive_key).is_some()),
+        Arc::new(move || {
+            alive_shell.as_ref().map_or_else(
+                || runtime.native_owner_is_current(&alive_key),
+                |agent| runtime.shell_agent_is_current(&alive_key, agent),
+            )
+        }),
         Arc::new(move |snapshot| {
             let app = &event_app;
             let key = &event_key;
             let _operation = app.agent_operation_lock.lock().unwrap();
+            if let Some(agent) = &shell {
+                if !app.agent_runtime.shell_agent_is_current(key, agent)
+                    || !crate::shell_integration::snapshot_matches(agent, snapshot.pid)
+                {
+                    return;
+                }
+                app.agent_runtime.set_native_status(key);
+            } else if !app.agent_runtime.native_owner_is_current(key) {
+                return;
+            }
             // A deleted session has nothing left to publish. A *failed* read is
             // not a deletion: treating it as one would silently drop the live
             // transcript of a session that still exists.
@@ -32,8 +69,21 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             // snapshot itself: the web view renders only what it receives, so
             // one swallowed frame leaves the transcript frozen mid-stream on
             // "Working" while the CLI has already answered.
-            if let Err(error) = app.agent_runtime.observe_native_turn(key, snapshot.running) {
-                tracing::error!(%error, "could not persist completed native turn");
+            let starts_turn = match app.agent_runtime.observe_native_turn(key, snapshot.running) {
+                Ok(started) => started,
+                Err(error) => {
+                    tracing::error!(%error, "could not persist completed native turn");
+                    false
+                }
+            };
+            // Started/output may already have made the lifecycle Working. A
+            // real native turn still needs its explicit event for the sidebar.
+            if starts_turn {
+                let _ = app.agent_runtime.signal(
+                    key,
+                    crate::agent_fleet::ProviderSignal::TurnStarted,
+                    now_millis(),
+                );
             }
             let old = app.agent_runtime.snapshot(key).ok();
             let state = if snapshot.blocked {
@@ -47,7 +97,8 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             };
             // OpenCode's home view has no conversation yet. Keep the last real
             // continuation until the TUI itself creates/selects another session.
-            let session_changed = !snapshot.provider_session_id.is_empty()
+            let session_changed = shell.is_none()
+                && !snapshot.provider_session_id.is_empty()
                 && old.as_ref().is_none_or(|old| {
                     old.provider_session_id.as_deref() != Some(&snapshot.provider_session_id)
                 });
@@ -68,7 +119,7 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
             }
             // Also establish native authority after resuming an already-known
             // identity; terminal repaints must not override these events.
-            if !snapshot.provider_session_id.is_empty() {
+            if shell.is_none() && !snapshot.provider_session_id.is_empty() {
                 let _ = app
                     .agent_runtime
                     .record_provider_session_id(key, snapshot.provider_session_id.clone());
@@ -109,7 +160,7 @@ pub(super) fn observe(app: &AppState, key: AgentKey) -> anyhow::Result<()> {
                 .send(Arc::new(ServerMessage::AgentUiSnapshot {
                     request_id: None,
                     session_id: key.session_id.clone(),
-                    provider_id: key.agent_id.clone(),
+                    provider_id: provider.clone(),
                     snapshot,
                 }));
         }),

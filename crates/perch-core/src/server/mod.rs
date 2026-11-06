@@ -431,6 +431,14 @@ pub async fn run(
         let agent_activity_events_tx = agent_activity_events_tx.clone();
         let agent_activity_state = agent_activity_state.clone();
         move |session_id: &str| {
+            // Managed entries use hashed runtime keys, not sidebar session
+            // IDs. Their lifecycle bridge owns status; legacy attaches alone
+            // use this output/quiet fallback.
+            if session_id.strip_prefix("agent-").is_some_and(|hash| {
+                hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }) {
+                return;
+            }
             if agent_activity_state
                 .get()
                 .is_some_and(|app| app.agent_runtime.has_native_status(session_id))
@@ -1180,19 +1188,18 @@ fn spawn_agent_lifecycle_task(state: AppState) {
         let mut seen = HashMap::new();
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            if state
-                .connected_clients
-                .load(std::sync::atomic::Ordering::Relaxed)
-                > 0
-            {
-                match state.agent_runtime.refresh_current_providers().await {
-                    Ok(changed) => {
-                        for session_id in changed {
-                            notify_session_updated(&state, &session_id);
+            match state.agent_runtime.refresh_current_providers().await {
+                Ok(changed) => {
+                    for session_id in changed {
+                        notify_session_updated(&state, &session_id);
+                    }
+                    for (key, agent) in state.agent_runtime.shell_agents() {
+                        if let Err(error) = native_ui::observe_shell(&state, key, agent) {
+                            tracing::debug!(%error, "could not observe terminal-started agent");
                         }
                     }
-                    Err(error) => tracing::debug!(%error, "could not observe foreground agents"),
                 }
+                Err(error) => tracing::debug!(%error, "could not observe foreground agents"),
             }
             let _operation = state.agent_operation_lock.lock().unwrap();
             let snapshots = state.agent_runtime.lifecycle().list();

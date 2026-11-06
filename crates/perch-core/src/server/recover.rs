@@ -1,4 +1,5 @@
-//! Boot-time recovery of agents that kept running in perchd while no core did.
+//! Boot-time recovery of agents and agent-bearing shells that kept running
+//! in perchd while no core did.
 //!
 //! Without this, an agent's status, native-UI observation and turn tracking
 //! start only when a view opens its session, so a sidebar full of agents that
@@ -16,9 +17,7 @@ use crate::agent_runtime::terminal_key;
 
 pub(super) fn recover_agents(app: &AppState) {
     for snapshot in app.agent_runtime.lifecycle().list() {
-        if snapshot.provider_id == crate::agent_fleet::TERMINAL_PROVIDER
-            || snapshot.state == AgentState::Sleeping
-        {
+        if snapshot.state == AgentState::Sleeping {
             continue;
         }
         if let Err(error) = recover_one(app, &snapshot) {

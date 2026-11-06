@@ -32,8 +32,10 @@ fn clip(text: &str, limit: usize) -> String {
 const MAX_FRAME: usize = 256 * 1024;
 const MAX_BRIDGES: usize = 128;
 
+pub(crate) const PROVIDERS: &[&str] = &["claude", "codex", "pi", "omp", "opencode"];
+
 pub fn supported(provider: &str) -> bool {
-    cfg!(unix) && matches!(provider, "pi" | "omp" | "claude" | "codex" | "opencode")
+    cfg!(unix) && PROVIDERS.contains(&provider)
 }
 
 pub struct NativePaths {
@@ -308,6 +310,9 @@ impl NativeUiRegistry {
                 let mut last: Option<NativeUiSnapshot> = None;
                 let mut dialog_tick = tokio::time::interval(Duration::from_millis(100));
                 loop {
+                    if !alive() {
+                        break;
+                    }
                     pending.retain(|_, reply| !reply.is_closed());
                     tokio::select! {
                         _ = dialog_tick.tick(), if last.as_ref().is_some_and(|s| s.blocked) => {

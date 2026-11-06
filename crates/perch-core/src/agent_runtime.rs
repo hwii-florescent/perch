@@ -49,7 +49,7 @@ fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
         "trap : INT; m=$1; c=$2; shift 2; \"$@\"; up=; \
          for p in \"$c\"/*; do kill -0 \"${p##*/}\" 2>/dev/null && up=1; done; \
          [ \"$up\" ] || { mkdir -p \"${m%/*}\" && : > \"$m\"; }; \
-         exec \"${SHELL:-/bin/sh}\" -l",
+         exec \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -l",
         "perch-agent",
         &marker.display().to_string(),
         &cores.display().to_string(),
@@ -103,6 +103,10 @@ struct ActiveRuntime {
     /// status (below native, above output heuristics); see `agent_title`.
     title_status: Arc<AtomicBool>,
     native_running: bool,
+    shell_agent: Option<crate::shell_integration::ShellAgent>,
+    observed_provider: String,
+    title_tracker: Arc<Mutex<crate::agent_title::TitleTracker>>,
+    output_detection: Arc<Mutex<(crate::agent_fleet::StatusDetection, String)>>,
     replay: Arc<Mutex<TerminalReplay>>,
     _bootstrap: Option<crate::provider_environment::BootstrapFile>,
 }
@@ -296,7 +300,63 @@ impl AgentRuntimeAdapter {
         }
         // Re-read active handles after awaiting ps: a closed/replaced runtime
         // must not acquire the identity of the process it used to own.
-        let active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap();
+        for (key, runtime) in active.iter_mut() {
+            let Some(root) = runtime
+                .handle
+                .terminal
+                .process_id
+                .filter(|_| runtime.handle.terminal.daemon_session.is_some())
+            else {
+                continue;
+            };
+            if let Some(provider) = foreground_provider(root, &processes, &names) {
+                if provider != runtime.observed_provider {
+                    runtime.observed_provider = provider.clone();
+                    *runtime.title_tracker.lock().unwrap() =
+                        crate::agent_title::TitleTracker::default();
+                    runtime.title_status.store(false, Ordering::Release);
+                    if let Some(manifest) = self.providers.get(&provider) {
+                        *runtime.output_detection.lock().unwrap() =
+                            (manifest.status_detection, String::new());
+                    }
+                    runtime.native_status.store(false, Ordering::Release);
+                    runtime.native_running = false;
+                    if provider == crate::agent_fleet::TERMINAL_PROVIDER
+                        && self.lifecycle.get(key).is_ok_and(|snapshot| {
+                            matches!(
+                                snapshot.state,
+                                AgentState::Working | AgentState::Blocked | AgentState::Done
+                            )
+                        })
+                    {
+                        self.lifecycle.transition(
+                            key,
+                            AgentState::Idle,
+                            "agent returned to shell",
+                            now_millis(),
+                        )?;
+                    }
+                }
+            }
+            let launched = crate::shell_integration::launched(key)?
+                .filter(|agent| process_descends_from(agent.pid, root, &processes));
+            if runtime.shell_agent != launched {
+                if runtime.shell_agent.is_some() {
+                    // A successful process snapshot confirmed that invocation
+                    // ended or was replaced. This is not a silence timeout.
+                    runtime.native_status.store(false, Ordering::Release);
+                    runtime.native_running = false;
+                    self.lifecycle.transition(
+                        key,
+                        AgentState::Idle,
+                        "terminal agent invocation ended",
+                        now_millis(),
+                    )?;
+                }
+                runtime.shell_agent = launched;
+            }
+        }
         let next: HashMap<_, _> = active
             .values()
             .filter_map(|runtime| {
@@ -335,7 +395,14 @@ impl AgentRuntimeAdapter {
 
     /// Only a native running-to-ready edge completes a native turn. Startup
     /// dialogs and replayed ready snapshots do not complete pending input.
-    pub fn observe_native_turn(&self, key: &AgentKey, running: bool) -> anyhow::Result<()> {
+    pub fn observe_native_turn(&self, key: &AgentKey, running: bool) -> anyhow::Result<bool> {
+        let started = running
+            && self
+                .active
+                .lock()
+                .unwrap()
+                .get(key)
+                .is_some_and(|runtime| !runtime.native_running);
         let completed = self
             .active
             .lock()
@@ -352,7 +419,7 @@ impl AgentRuntimeAdapter {
         if completed {
             self.record_turn_boundary(key, false)?;
         }
-        Ok(())
+        Ok(started)
     }
 
     pub fn lifecycle(&self) -> &Arc<AgentLifecycleRegistry> {
@@ -405,6 +472,44 @@ impl AgentRuntimeAdapter {
         self.active.lock().unwrap().iter().any(|(key, runtime)| {
             key.session_id == session_id && runtime.title_status.load(Ordering::Acquire)
         })
+    }
+
+    pub(crate) fn native_owner_is_current(&self, key: &AgentKey) -> bool {
+        self.active.lock().unwrap().get(key).is_some_and(|runtime| {
+            runtime.shell_agent.is_none() && runtime.observed_provider == runtime.handle.provider_id
+        })
+    }
+
+    pub(crate) fn shell_agents(&self) -> Vec<(AgentKey, crate::shell_integration::ShellAgent)> {
+        self.active
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(key, runtime)| Some((key.clone(), runtime.shell_agent.clone()?)))
+            .collect()
+    }
+
+    pub(crate) fn shell_agent_is_current(
+        &self,
+        key: &AgentKey,
+        agent: &crate::shell_integration::ShellAgent,
+    ) -> bool {
+        self.active
+            .lock()
+            .unwrap()
+            .get(key)
+            .is_some_and(|runtime| runtime.shell_agent.as_ref() == Some(agent))
+            && crate::shell_integration::launched(key)
+                .ok()
+                .flatten()
+                .as_ref()
+                == Some(agent)
+    }
+
+    pub(crate) fn set_native_status(&self, key: &AgentKey) {
+        if let Some(runtime) = self.active.lock().unwrap().get(key) {
+            runtime.native_status.store(true, Ordering::Release);
+        }
     }
 
     pub fn runtime_cwd(&self, key: &AgentKey) -> Option<PathBuf> {
@@ -519,7 +624,7 @@ impl AgentRuntimeAdapter {
             // never typed/pasted into an agent or an already-running shell.
             return Ok(vec![
                 "/bin/sh".into(), "-c".into(),
-                "trap : INT; printf '\\033]133;C\\007'; \"${SHELL:-/bin/sh}\" -c \"$1\"; s=$?; printf '\\033]133;D;%s\\007\\n[exit %s]\\n' \"$s\" \"$s\"; exec \"${SHELL:-/bin/sh}\" -l".into(),
+                "trap : INT; printf '\\033]133;C\\007'; \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -c \"$1\"; s=$?; printf '\\033]133;D;%s\\007\\n[exit %s]\\n' \"$s\" \"$s\"; exec \"${PERCH_SHELL:-${SHELL:-/bin/sh}}\" -l".into(),
                 "perch-run".into(), extra_args[0].clone(),
             ]);
         }
@@ -719,6 +824,7 @@ impl AgentRuntimeAdapter {
                     &crate::daemon::cores_dir(),
                 )
             };
+            let command = crate::shell_integration::prepare(&key, command)?;
             crate::provider_environment::prepare(command, &manifest.environment)
         })() {
             Ok(prepared) => prepared,
@@ -744,11 +850,15 @@ impl AgentRuntimeAdapter {
         let data_native_status = native_status.clone();
         let title_status = Arc::new(AtomicBool::new(false));
         let data_title_status = title_status.clone();
-        let title = Mutex::new(crate::agent_title::TitleTracker::default());
+        let title_tracker = Arc::new(Mutex::new(crate::agent_title::TitleTracker::default()));
+        let title = title_tracker.clone();
         let replay = Arc::new(Mutex::new(TerminalReplay::new(cols, rows)));
         let replay_for_output = replay.clone();
-        let status_detection = manifest.status_detection.clone();
-        let status_tail = Mutex::new(String::new());
+        let output_detection = Arc::new(Mutex::new((
+            manifest.status_detection.clone(),
+            String::new(),
+        )));
+        let data_output_detection = output_detection.clone();
         let turn_boundary = self.turn_boundary.clone();
         let wrapped_on_data: TerminalDataListener = Arc::new(move |_, text| {
             replay_for_output.lock().unwrap().push(&text);
@@ -767,11 +877,11 @@ impl AgentRuntimeAdapter {
                 };
                 // Configured markers, then the OSC title, then "any output
                 // means working". The title parser sees every chunk either way.
-                let marker = output_status_signal(
-                    &status_detection,
-                    &mut status_tail.lock().unwrap(),
-                    &text,
-                );
+                let marker = {
+                    let mut detection = data_output_detection.lock().unwrap();
+                    let (patterns, tail) = &mut *detection;
+                    output_status_signal(patterns, tail, &text)
+                };
                 let title_change = title.lock().unwrap().feed(&text);
                 if let Some(signal) = marker {
                     emit(signal);
@@ -934,6 +1044,10 @@ impl AgentRuntimeAdapter {
                     native_status,
                     title_status,
                     native_running: false,
+                    shell_agent: None,
+                    observed_provider: handle.provider_id.clone(),
+                    title_tracker,
+                    output_detection,
                     replay: replay.clone(),
                     _bootstrap: prepared.bootstrap,
                 },
@@ -1494,6 +1608,24 @@ fn process_snapshot(text: &str) -> HashMap<u32, ForegroundProcess<'_>> {
             ))
         })
         .collect()
+}
+
+fn process_descends_from(
+    pid: u32,
+    root: u32,
+    processes: &HashMap<u32, ForegroundProcess<'_>>,
+) -> bool {
+    let mut ancestor = pid;
+    for _ in 0..processes.len() {
+        if ancestor == root {
+            return processes.contains_key(&root);
+        }
+        let Some(process) = processes.get(&ancestor) else {
+            return false;
+        };
+        ancestor = process.parent;
+    }
+    false
 }
 
 fn foreground_provider(
