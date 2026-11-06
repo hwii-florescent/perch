@@ -365,6 +365,11 @@ impl HistoryDb {
                 result?;
             }
         }
+        conn.execute(
+            "DELETE FROM instructions WHERE (scope = 'project' AND scope_id = ?1)
+                OR (scope = 'workspace' AND scope_id IN (SELECT id FROM workspaces WHERE project_id = ?1))",
+            params![id],
+        )?;
         conn.execute("DELETE FROM workspaces WHERE project_id = ?1", params![id])?;
         conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
         Ok(())

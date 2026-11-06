@@ -21,6 +21,8 @@ import { Select } from "./ui/select";
 import { cn } from "../lib/cn";
 import { WorktreeMenu } from "./WorktreeMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { InstructionsDialog } from "./InstructionsDialog";
+import { instructionsAvailable, type InstructionsScope } from "../instructions";
 import { DirectoryBrowser } from "./DirectoryBrowser";
 import { NewSessionPopover } from "../Sidebar";
 import type { SessionSummary, WorktreeJob } from "@perch/shared";
@@ -355,6 +357,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   const removeWorkspaceProject = usePerchStore((state) => state.removeWorkspaceProject);
   const requestWorktreeMenu = usePerchStore((state) => state.requestWorktreeMenu);
   const [removingProject, setRemovingProject] = useState<WorkspaceProject | null>(null);
+  const [instructionsFor, setInstructionsFor] = useState<{ scope: InstructionsScope; id: string; name: string } | null>(null);
   const renameWorkspaceProject = usePerchStore((state) => state.renameWorkspaceProject);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
@@ -450,11 +453,17 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     };
   }
 
+  /** Instructions live on the core that owns the folder; a remote birdhouse keeps its own there. */
+  function instructionsItem(project: WorkspaceProject, scope: InstructionsScope, id: string, name: string, testId: string): MenuItem[] {
+    return project.hostId === "local" && instructionsAvailable() ? [{ label: "Instructions…", testId, onSelect: () => setInstructionsFor({ scope, id, name }) }] : [];
+  }
+
   function projectMenu(project: WorkspaceProject): MenuItem[] {
     const projectSessions = sessionsForProject(project.id);
     return [
       { label: "Rename", testId: `workspace-project-rename-${project.id}`, onSelect: () => setRenamingProjectId(project.id) },
       { label: "Copy path", testId: `workspace-project-copy-${project.id}`, onSelect: () => copyText(project.path) },
+      ...instructionsItem(project, "project", project.id, project.name || basename(project.path), `workspace-project-instructions-${project.id}`),
       ...moveItems("project", project.id, visibleProjects.filter((other) => other.favorite === project.favorite).map((other) => other.id)),
       ...(projectSessions.length > 0
         ? [{ label: "Close all sessions", testId: `workspace-project-close-all-${project.id}`, onSelect: () => { for (const session of projectSessions) deleteSession(session.id); } }]
@@ -506,6 +515,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
       { label: "Copy path", testId: `workspace-copy-${workspace.id}`, onSelect: () => copyText(workspace.path) },
       ...(workspace.branch ? [{ label: "Copy branch name", testId: `workspace-copy-branch-${workspace.id}`, onSelect: () => copyText(workspace.branch!) }] : []),
       { label: workspace.pinned ? "Unpin" : "Pin", testId: `workspace-pin-${workspace.id}`, onSelect: () => pinWorkspace(workspace.id, !workspace.pinned) },
+      ...instructionsItem(project, "workspace", workspace.id, workspace.name || basename(workspace.path), `workspace-instructions-${workspace.id}`),
       "divider",
       { label: "Files", testId: `workspace-menu-files-${workspace.id}`, onSelect: () => open("files") },
       ...(workspace.branch || project.repoPath ? [{ label: "Git", testId: `workspace-menu-git-${workspace.id}`, onSelect: () => open("git") }] : []),
@@ -1247,6 +1257,9 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
           }}
           onCancel={() => setRemovingProject(null)}
         />
+      )}
+      {instructionsFor && (
+        <InstructionsDialog {...instructionsFor} onClose={() => setInstructionsFor(null)} />
       )}
     </section>
   );

@@ -95,6 +95,7 @@ const RELAYED_CAPABILITIES: &[&str] = &[
     "fs.search",
     "fs.read",
     "fs.preview",
+    "fs.links",
     "fs.write",
     "fs.buffer.",
     "fs.mutate",
@@ -1573,6 +1574,7 @@ impl HubManager {
             | ServerMessage::FsMutateResult { .. }
             | ServerMessage::FsReadResult { .. }
             | ServerMessage::FsPreviewResult { .. }
+            | ServerMessage::FsLinksResult { .. }
             | ServerMessage::FsWriteResult { .. }
             | ServerMessage::FsBufferListResult { .. }
             | ServerMessage::FsBufferResult { .. }
@@ -1581,6 +1583,7 @@ impl HubManager {
             | ServerMessage::AttentionSnapshot { .. }
             | ServerMessage::BrowserHistoryResult { .. }
             | ServerMessage::BrowserSuggestResult { .. }
+            | ServerMessage::InstructionsState { .. }
             | ServerMessage::FsError { .. } => {
                 // Settings/pairing/attention remain host-private. Workspace
                 // replies/events were consumed by workspace's qualified relay

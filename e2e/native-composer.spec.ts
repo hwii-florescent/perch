@@ -266,6 +266,21 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(ui.getByTestId("native-cli-find-count")).toHaveText(/^1 of \d+$/, { timeout: 10_000 });
       await ui.getByLabel("Close find").click();
     });
+    // The agent's own to-do list is docked above the composer. Claude 2.1.319 keeps it with TaskCreate and
+    // TaskUpdate calls (it offers no TodoWrite); Codex's plan updates do not reach the bridge as calls.
+    if (provider === "claude") await check("task list", async () => {
+      await box.fill("Use your task-tracking tools to record two tasks: 'Read the notes' as completed and 'Write the summary' as in_progress. Then reply with only the word ok.");
+      await sendAndWait();
+      const tasks = ui.getByTestId("native-cli-tasks");
+      await expect(tasks).toBeVisible({ timeout: 15_000 });
+      await expect(tasks).toContainText("1 of 2 completed");
+      await expect(tasks.getByRole("listitem")).toHaveCount(2);
+      await expect(tasks.getByRole("listitem").first()).toContainText("Read the notes");
+      // The call itself reads as what it changed, not as raw input.
+      const run = ui.getByTestId("native-cli-run").last();
+      await run.locator(":scope > summary").click();
+      await expect(run).toContainText("Added Read the notes");
+    });
     // 6. After real turns the provider has reported how full the context is (OpenCode has no source).
     await check("context ring", async () => {
       const ring = ui.getByTestId("native-cli-context");

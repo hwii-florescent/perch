@@ -81,6 +81,18 @@ export interface NativeUiTranscript {
   blocks: NativeUiBlock[];
   /** The live activity line while a turn runs and nothing waits on the person. */
   working?: string;
+  /** The agent's own to-do list as of its latest plan call, docked above the composer; absent without one. */
+  tasks?: NativeUiTaskList;
+}
+export interface NativeUiTaskList {
+  tasks: NativeUiTask[];
+  explanation?: string;
+}
+export interface NativeUiTask {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  /** Present-tense phrasing; shown only while the task is in progress. */
+  activeForm?: string;
 }
 export type NativeUiBlock =
   /** `id` is the `NativeUiMessage` it draws. */
@@ -1176,6 +1188,27 @@ export interface BrowserSuggestMessage {
   query: string;
 }
 
+/** Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on this core
+ * (capability `instructions.v1`). Answered with `instructions.state`. */
+export interface InstructionsGetMessage {
+  type: "instructions.get";
+  requestId: string;
+  scope: string;
+  id: string;
+}
+
+/** Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions there
+ * launch with them; running sessions keep what they started with. Answered with
+ * `instructions.state`, which carries `error` and the unchanged content when refused. */
+export interface InstructionsSetMessage {
+  type: "instructions.set";
+  requestId: string;
+  scope: string;
+  id: string;
+  text: string;
+  folders?: string[];
+}
+
 /** Forget one page. */
 export interface BrowserHistoryRemoveMessage {
   type: "browser.history.remove";
@@ -1494,6 +1527,15 @@ export interface FsPreviewMessage {
   requestId: string;
   workspaceId: string;
   path: string;
+}
+
+/** Which of a chat message's link targets (`hrefs`, as written) name an existing regular file inside
+ * the workspace (capability `fs.links`). Answered with `fs.links.result`. */
+export interface FsLinksMessage {
+  type: "fs.links";
+  requestId: string;
+  workspaceId: string;
+  hrefs: string[];
 }
 
 /** Save bounded text only when `expectedVersion` still names the bytes the
@@ -1935,6 +1977,8 @@ export type ClientMessage =
   | BrowserHistoryRecordMessage
   | BrowserHistorySearchMessage
   | BrowserSuggestMessage
+  | InstructionsGetMessage
+  | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
   | AttentionUpdateMessage
@@ -1990,6 +2034,7 @@ export type ClientMessage =
   | FsMutateMessage
   | FsReadMessage
   | FsPreviewMessage
+  | FsLinksMessage
   | FsWriteMessage
   | FsBufferListMessage
   | FsBufferGetMessage
@@ -2171,6 +2216,20 @@ export interface BrowserSuggestResultMessage {
   type: "browser.suggest.result";
   requestId: string;
   suggestions: string[];
+}
+
+/** Reply to `instructions.get` and `instructions.set`: what is stored for the scope.
+ * `revision` is 0 until something was saved; `error` explains a refused request. */
+export interface InstructionsStateMessage {
+  type: "instructions.state";
+  requestId: string;
+  scope: string;
+  id: string;
+  text: string;
+  folders: string[];
+  revision: number;
+  maxChars: number;
+  error?: string;
 }
 
 /** Reply to `browser.history.search`, best match first. */
@@ -2478,6 +2537,24 @@ export interface FsReadResultMessage {
   version: string;
 }
 
+/** A chat link target that names an existing file in the workspace. */
+export interface FsLink {
+  /** The target exactly as the message wrote it. */
+  href: string;
+  /** The file's workspace-relative path. */
+  path: string;
+  line?: number;
+  column?: number;
+}
+
+/** Reply to `fs.links`: only the targets that resolved to an existing file in the workspace. */
+export interface FsLinksResultMessage {
+  type: "fs.links.result";
+  requestId: string;
+  workspaceId: string;
+  links: FsLink[];
+}
+
 export interface FsPreviewResultMessage {
   type: "fs.preview.result";
   requestId: string;
@@ -2688,6 +2765,7 @@ export type ServerMessage =
   | AttentionSnapshotMessage
   | BrowserHistoryResultMessage
   | BrowserSuggestResultMessage
+  | InstructionsStateMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage
@@ -2742,6 +2820,7 @@ export type ServerMessage =
   | FsMutateResultMessage
   | FsReadResultMessage
   | FsPreviewResultMessage
+  | FsLinksResultMessage
   | FsWriteResultMessage
   | FsBufferListResultMessage
   | FsBufferResultMessage

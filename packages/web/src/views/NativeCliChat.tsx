@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentLifecycleStatus, NativeUiMessage, NativeUiSnapshot } from "@perch/shared";
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { AgentLifecycleStatus, FsLink, NativeUiMessage, NativeUiSnapshot } from "@perch/shared";
 import { usePerchStore } from "../store";
 import { openAgentTerminal, agentInputGeneration } from "../agentTerminals";
 import { NativeUiError, requestNativeUi, subscribeNativeUi } from "../nativeUi";
@@ -8,7 +8,7 @@ import { renderMarkdown } from "../markdown";
 import { newId } from "../ids";
 import { PlusIcon } from "../components/ui/icons";
 import { loadDraftText, saveDraftText, sentPrompts, stepRecall, withTerminalDraft, type RecallPosition } from "./nativeChat/composerDraft";
-import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_ERROR, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
+import { CHAT_COLUMN, CHAT_INPUT, CHAT_LIST, CHAT_LIST_CONTAINER, MESSAGE_COPY_ASSISTANT, MESSAGE_COPY_USER, MESSAGE_ERROR, MESSAGE_FILE_LINK, MESSAGE_MARKDOWN, NATIVE_TEXTAREA, SCROLL_PILL, SEND_BUTTON_GO, SEND_BUTTON_STOP, messageClass } from "../components/ui/chat";
 import { sendState } from "./nativeChat/sendState";
 import { withAttachmentPaths } from "./nativeChat/menuTokens";
 import { useComposerMenu } from "./nativeChat/useComposerMenu";
@@ -18,6 +18,10 @@ import { ChangedFiles } from "./nativeChat/ChangedFiles";
 import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
+import { CopyButton } from "./nativeChat/CopyButton";
+import { DockedTasks } from "./nativeChat/DockedTasks";
+import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
+import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
@@ -39,14 +43,45 @@ type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "
 // Answered prompts stay under the transcript as receipts, bounded like drafts.
 const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
-const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark }) {
+const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find, fileLinkScope }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark; fileLinkScope?: { workspaceId: string; hostId: string } }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
+  const body = useRef<HTMLDivElement>(null);
+  const { workspaceId: linkWorkspaceId, hostId: linkHostId } = fileLinkScope ?? {};
+  // Links that name a file in the workspace become pills that open it; the core decides which do.
+  const [files, setFiles] = useState<ReadonlyMap<string, FsLink>>(new Map());
+  useEffect(() => {
+    if (!linkWorkspaceId || !linkHostId || streaming) return;
+    const targets = linkTargets(html);
+    if (!targets.length) return;
+    let current = true;
+    requestFileLinks(linkWorkspaceId, linkHostId, targets).then((links) => { if (current) setFiles(new Map(links.map((link) => [link.href, link]))); }, () => {});
+    return () => { current = false; };
+  }, [html, linkWorkspaceId, linkHostId, streaming]);
+  useEffect(() => {
+    for (const anchor of Array.from(body.current?.querySelectorAll("a[href]") ?? [])) {
+      const link = files.get(anchor.getAttribute("href")!.trim());
+      if (!link) continue;
+      anchor.classList.add(...MESSAGE_FILE_LINK.split(" "));
+      anchor.setAttribute("data-file-path", link.path);
+      anchor.setAttribute("title", link.line ? `${link.path}:${link.line}` : link.path);
+    }
+  }, [html, files]);
+  const openFileLink = (event: MouseEvent<HTMLDivElement>) => {
+    const anchor = (event.target as Element).closest?.("a[href]");
+    const href = anchor?.getAttribute("href")?.trim() ?? "";
+    if (!linkWorkspaceId || !couldBeFile(href)) return;
+    // A relative link must never navigate the app itself; a file that is not there does nothing.
+    event.preventDefault();
+    const link = files.get(href);
+    if (link) useFileTabs.getState().open(linkWorkspaceId, link.path);
+  };
   return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
-    {message.role === "assistant" ? <div className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
+    {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
+    {message.text && !streaming && <CopyButton text={message.text} className={message.role === "user" ? MESSAGE_COPY_USER : MESSAGE_COPY_ASSISTANT} />}
   </article>;
-}, (before, after) => before.streaming === after.streaming && before.turn === after.turn && before.find === after.find && JSON.stringify(before.message) === JSON.stringify(after.message));
+}, (before, after) => before.streaming === after.streaming && before.turn === after.turn && before.find === after.find && before.fileLinkScope?.workspaceId === after.fileLinkScope?.workspaceId && before.fileLinkScope?.hostId === after.fileLinkScope?.hostId && JSON.stringify(before.message) === JSON.stringify(after.message));
 
 /** `providerId` is the agent being shown; `terminalProviderId` is what owns the PTY and leases when
  * that differs: an agent typed into a Terminal tab runs under the tab's own `terminal` runtime. */
@@ -69,6 +104,8 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const picker = useRef<HTMLInputElement>(null);
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
+  const canLinkFiles = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("fs.links") === true);
+  const fileLinkScope = useMemo(() => canLinkFiles && workspaceId ? { workspaceId, hostId } : undefined, [canLinkFiles, workspaceId, hostId]);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
   const [controlling, setControlling] = useState(false);
@@ -280,7 +317,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
         {blocks.map((block) => {
           if (block.kind === "run") return <RunRow key={block.id} run={block} find={mark(block.id)} />;
           const message = messages.get(block.id);
-          return message && <NativeMessage key={block.id} message={message} streaming={!!block.live} turn={block.turn} find={mark(block.id)} />;
+          return message && <NativeMessage key={block.id} message={message} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
         })}
         {snapshot?.transcript?.working && <div className={cn(HINT, "px-1")} aria-live="polite" data-testid="native-cli-working">{snapshot.transcript.working}</div>}
         {lastTurn && workspaceId && <ChangedFiles turn={lastTurn} workspaceId={workspaceId} hostId={hostId} />}
@@ -302,6 +339,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     {ranCommand && !error && <div className={cn(HINT, "flex flex-wrap items-center gap-2 px-3 py-1")} role="status" data-testid="native-cli-command-ran">Ran <code>{ranCommand}</code> in the CLI. Its output is in CLI view.
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
+    {snapshot?.transcript?.tasks && <DockedTasks list={snapshot.transcript.tasks} />}
     <div className="shrink-0 px-4 pt-1 pb-3">
     <form className={cn("chat__input relative", CHAT_COLUMN, CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}

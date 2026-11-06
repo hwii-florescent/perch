@@ -653,6 +653,80 @@ pub(super) fn spawn_fs_preview(
     );
 }
 
+/// A message names a handful of files; more than this are left as plain links.
+const MAX_LINK_HREFS: usize = 64;
+const MAX_LINK_HREF_CHARS: usize = 2048;
+
+/// The targets in `hrefs` that name an existing regular file inside `service`'s workspace, with
+/// their workspace-relative paths. A target that points outside, at a folder, through a symlink the
+/// service refuses, or at nothing is left out, so the chat keeps it as written.
+fn existing_links(service: &FileService, hrefs: &[String]) -> Vec<crate::protocol::FsLink> {
+    let root = service.root();
+    let home = std::env::var("HOME").ok();
+    let mut links = Vec::new();
+    for href in hrefs
+        .iter()
+        .filter(|href| href.len() <= MAX_LINK_HREF_CHARS)
+        .take(MAX_LINK_HREFS)
+    {
+        let Some(resolved) = crate::native_ui::file_links::resolve_link(
+            href,
+            &root.to_string_lossy(),
+            home.as_deref(),
+        ) else {
+            continue;
+        };
+        let absolute = Path::new(&resolved.path);
+        // A link written through a symlinked spelling of the root still names this workspace.
+        let relative = absolute
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .or_else(|_| {
+                std::fs::canonicalize(absolute)
+                    .ok()
+                    .and_then(|real| real.strip_prefix(root).map(Path::to_path_buf).ok())
+                    .ok_or(())
+            });
+        let Ok(relative) = relative else {
+            continue;
+        };
+        if relative.as_os_str().is_empty() || service.stat_file(&relative).is_err() {
+            continue;
+        }
+        links.push(crate::protocol::FsLink {
+            href: href.clone(),
+            path: relative.to_string_lossy().into_owned(),
+            line: resolved.line,
+            column: resolved.column,
+        });
+    }
+    links
+}
+
+pub(super) fn spawn_fs_links(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    hrefs: Vec<String>,
+) {
+    spawn_fs_task(
+        state,
+        request_id,
+        workspace_id,
+        move |app, workspace_id| {
+            Ok(existing_links(
+                &workspace_file_service(app, workspace_id)?,
+                &hrefs,
+            ))
+        },
+        |request_id, workspace_id, links| ServerMessage::FsLinksResult {
+            request_id,
+            workspace_id,
+            links,
+        },
+    );
+}
+
 struct FsWriteExecution {
     result: WriteResult,
     buffer_revision: Option<u64>,
@@ -1221,6 +1295,58 @@ pub(super) fn handle_fs_browse(
         home,
         entries,
     });
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::existing_links;
+    use crate::filesystem::FileService;
+
+    #[test]
+    fn only_existing_files_inside_the_workspace_become_links() {
+        let base = std::env::temp_dir().join(format!("perch-links-{}", uuid::Uuid::new_v4()));
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(base.join("outside.md"), "x").unwrap();
+        std::os::unix::fs::symlink(base.join("outside.md"), root.join("escape.md")).unwrap();
+        let service = FileService::new(&root).unwrap();
+        let real_root = service.root().to_string_lossy().into_owned();
+        let hrefs: Vec<String> = [
+            "src/main.rs:3:2".to_string(),
+            "src/main.rs#L9".to_string(),
+            format!("file://{real_root}/src/main.rs"),
+            "src/missing.rs".to_string(),
+            "src".to_string(),
+            "../outside.md".to_string(),
+            "escape.md".to_string(),
+            "https://example.com/src/main.rs".to_string(),
+            "#top".to_string(),
+        ]
+        .into();
+
+        let links = existing_links(&service, &hrefs);
+        let found: Vec<_> = links
+            .iter()
+            .map(|link| {
+                (
+                    link.href.as_str(),
+                    link.path.as_str(),
+                    link.line,
+                    link.column,
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("src/main.rs:3:2", "src/main.rs", Some(3), Some(2)),
+                ("src/main.rs#L9", "src/main.rs", Some(9), None),
+                (hrefs[2].as_str(), "src/main.rs", None, None),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(base);
+    }
 }
 
 #[cfg(test)]

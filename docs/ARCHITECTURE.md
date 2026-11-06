@@ -123,6 +123,13 @@ a truncated preview over the original or bypass confinement for a new viewer.
 Context Bridge's bounded copy/explicit delivery rules live in
 [CONTEXT-BRIDGE](CONTEXT-BRIDGE.md); direct send is currently Claude-only.
 
+Instructions (`instructions.rs`, `db/instructions.rs`) are private text and reference
+folders on a Birdhouse or Nest, capped at 16,000 characters combined. A session pins
+its composed snapshot (with source revisions and a hash) at first launch; wake and
+resume reuse the pin, never the current text. Launch paths reach providers only
+through append flags (`agent_runtime::with_instructions`, the shell shim, the Codex
+app-server launcher); a failed lookup refuses the launch.
+
 Switching/quitting is different from explicit close:
 - A global session close stops and deletes it; a watcher only dismisses its
   observation. Keep execution discoverable and confirm stop before forgetting it.

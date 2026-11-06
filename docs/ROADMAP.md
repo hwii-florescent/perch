@@ -263,10 +263,10 @@ flags (from each installed CLI's `--help`, 2026-11-05; recheck per version):
 
 | Agent | Instructions (appended, never replacing the default prompt) | Reference folders |
 |---|---|---|
-| Claude | `--append-system-prompt <text>` (2.1.319 `--help`; `--append-system-prompt-file` is only in the binary now, verify before use) | `--add-dir` |
+| Claude | `--append-system-prompt-file <file>` (checked live 2026-11-06; 2.1.319 `--help` names it under `--bare`, and `--append-system-prompt <text>` works too; Claude also pins the prompt on resume, `--system-prompt-snapshot`) | `--add-dir` |
 | Pi | `--append-system-prompt <file>` (text or file contents) | none: list paths in the instructions |
 | OMP | `--append-system-prompt=<file>` | `--add-dir=` |
-| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt); pass it to the shared app-server too (`codex.rs` launches `app-server --listen` with no flags today) | `--add-dir` (adds no skills; checked with `codex debug prompt-input`) |
+| Codex | `-c developer_instructions=…` (not `model_instructions_file`, which replaces the base prompt), passed to the shared app-server that builds each thread | none: the TUI refuses `--add-dir` with `--remote` (0.166), so list paths in the instructions |
 
 Only appended flags; never `--system-prompt` or `--no-context-files`, so repo
 `AGENTS.md`/`CLAUDE.md` keep loading. Show the repo's own
@@ -424,15 +424,17 @@ target modules and checks per slice: [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUI
 One at a time; each ends with its check passing, docs updated and a local commit. Live turns only on `claude-haiku-4-5` or `gpt-5.6-luna`. Claude-desktop
 UI rows from step 0 continue between slices.
 
-0. **Feasibility spike.** Zero tokens first: the pointer text reaches each model
-   (Codex: `codex debug prompt-input` with `-c developer_instructions=…`; Claude: the
-   `/context` screen in tmux without sending; Pi/OMP: the bridge's system prompt or
-   command list), and whether a hidden `--append-system-prompt-file` still works. Then
-   one cheap turn per provider asking it to run a stub `perch whoami` that prints its
-   scope: proves the variable reaches the agent's shell tool (Codex
-   `shell_environment_policy` and sandbox). Output: a table in the evidence file; no
-   product code kept.
-1. **Instructions injection**, shippable alone. Store per Birdhouse/Nest, pin a snapshot
+0. **Feasibility spike. Done 2026-11-06** (table in the
+   [evidence](evidence/claude-projects-subsessions-2026-11-06.md)). The pointer reaches
+   all four models (Claude and Pi by text or file, OMP by file, Codex by
+   `-c developer_instructions` on the TUI and the app-server); every `PERCH_*` name,
+   `_TOKEN` included, reaches the agent's shell tool (Claude 2.1.319 did not scrub);
+   Pi/OMP follow-ups queue until the turn ends; Codex does **not** refuse a busy
+   `turn/start`, it joins the running turn, so idle delivery is the core's check alone.
+   Nothing contradicted the plan.
+1. **Instructions injection. Done 2026-11-06** (local Birdhouses and Nests; remote ones
+   and the read-only view of the repo's own `CLAUDE.md`/`AGENTS.md` are not done).
+   Store per Birdhouse/Nest, pin a snapshot
    per launch, record provenance; apply on wake/resume, the shell shim and the Codex
    app-server. Check: Rust unit tests for argv per provider and the snapshot; a live
    haiku/luna turn per provider quoting a marker from the instructions; repo
@@ -458,12 +460,8 @@ UI rows from step 0 continue between slices.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 
-**Probe live first** (cheapest evidence that could change the plan): Codex's agent shell
-sees `PERCH_*` variables under its default sandbox and env policy; Claude honours a hidden
-`--append-system-prompt-file` (else pass text); Pi `--append-system-prompt` and OMP
-`--append-system-prompt=` reach the model; Pi and OMP follow-up queueing through the
-bridge while a turn runs; Codex `turn/start` while busy (expected to fail, so delivery
-waits for idle).
+**Probed live first (2026-11-06):** see slice 0 above and the evidence table; nothing
+there changed the plan.
 
 ## Later, bounded additions
 

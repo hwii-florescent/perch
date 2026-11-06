@@ -20,6 +20,7 @@ mod attention;
 pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod browser_history;
 pub use browser_history::BrowserHistoryRow;
+mod instructions;
 mod workspace_order;
 pub use workspace_order::{ORDER_PROJECTS, ORDER_SESSIONS};
 mod prompts;
@@ -345,7 +346,27 @@ impl HistoryDb {
             CREATE INDEX IF NOT EXISTS agent_change_snapshots_workspace
                 ON agent_change_snapshots(workspace_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS agent_change_snapshots_session
-                ON agent_change_snapshots(session_id, created_at DESC);",
+                ON agent_change_snapshots(session_id, created_at DESC);
+            -- Instructions per Birdhouse ('project') or Nest ('workspace'), and the
+            -- snapshot each session pinned at its first launch (`instructions.rs`).
+            -- A pin with NULL text records that the session started with nothing.
+            CREATE TABLE IF NOT EXISTS instructions (
+                scope TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                folders TEXT NOT NULL DEFAULT '[]',
+                revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (scope, scope_id)
+            );
+            CREATE TABLE IF NOT EXISTS session_instructions (
+                session_id TEXT PRIMARY KEY,
+                text TEXT,
+                folders TEXT NOT NULL DEFAULT '[]',
+                sources TEXT NOT NULL DEFAULT '[]',
+                hash TEXT,
+                pinned_at INTEGER NOT NULL
+            );",
         )?;
 
         let mut existing_columns = std::collections::HashSet::new();

@@ -192,6 +192,18 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::BrowserSuggest { request_id, query } => {
             super::browser_suggest::handle_suggest(state, request_id, query)
         }
+        ClientMessage::InstructionsGet {
+            request_id,
+            scope,
+            id,
+        } => super::instructions::handle_get(state, request_id, scope, id),
+        ClientMessage::InstructionsSet {
+            request_id,
+            scope,
+            id,
+            text,
+            folders,
+        } => super::instructions::handle_set(state, request_id, scope, id, text, folders),
         ClientMessage::BrowserHistoryRemove { ref url } => {
             super::browser_history::handle_remove(state, url)
         }
@@ -468,6 +480,11 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             workspace_id,
             path,
         } => fs::spawn_fs_preview(state, request_id, workspace_id, path),
+        ClientMessage::FsLinks {
+            request_id,
+            workspace_id,
+            hrefs,
+        } => fs::spawn_fs_links(state, request_id, workspace_id, hrefs),
         ClientMessage::FsWrite {
             request_id,
             workspace_id,

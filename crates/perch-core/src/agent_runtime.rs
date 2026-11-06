@@ -62,6 +62,34 @@ fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
 
 pub type TurnBoundaryListener = Arc<dyn Fn(&AgentKey, bool) -> anyhow::Result<()> + Send + Sync>;
 
+/// Add a session's pinned Instructions to a provider's command line, writing its private
+/// Instructions file. Returns the command and, for Codex, the arguments for its shared
+/// app-server. A provider without Instructions support is returned unchanged.
+fn with_instructions(
+    key: &AgentKey,
+    provider_id: &str,
+    mut command: Vec<String>,
+    pinned: Option<&crate::instructions::Pinned>,
+) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let Some(pin) = pinned.filter(|_| crate::instructions::supported(provider_id)) else {
+        return Ok((command, Vec::new()));
+    };
+    let file = crate::native_ui::write_instructions_file(key, provider_id, pin)?;
+    let args = crate::instructions::launch_args(provider_id, pin, &file);
+    if provider_id == "codex" {
+        // Root flags go before the `resume` subcommand.
+        command.splice(1..1, args.cli);
+    } else {
+        command.extend(args.cli);
+    }
+    Ok((command, args.codex_server))
+}
+
+/// The Instructions snapshot a session launches with: pinned the first time, then returned
+/// unchanged. `None` when it has nothing to inject (`db/instructions.rs`).
+pub type InstructionsResolver =
+    Arc<dyn Fn(&AgentKey) -> anyhow::Result<Option<crate::instructions::Pinned>> + Send + Sync>;
+
 /// All logical scopes participate in process identity. Length prefixes prevent
 /// delimiter collisions, and the digest is safe as an exact tmux target.
 pub fn terminal_key(key: &AgentKey) -> String {
@@ -229,6 +257,7 @@ pub struct AgentRuntimeAdapter {
     /// oldest first; the last is current. Display and Files/Git scoping only.
     cwds: Mutex<HashMap<String, Vec<String>>>,
     turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
+    instructions: std::sync::OnceLock<InstructionsResolver>,
 }
 
 impl AgentRuntimeAdapter {
@@ -248,7 +277,14 @@ impl AgentRuntimeAdapter {
             shell_chats: Mutex::new(HashMap::new()),
             cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
+            instructions: std::sync::OnceLock::new(),
         }
+    }
+
+    pub fn set_instructions_resolver(&self, resolver: InstructionsResolver) -> anyhow::Result<()> {
+        self.instructions
+            .set(resolver)
+            .map_err(|_| anyhow::anyhow!("Instructions resolver already installed"))
     }
 
     pub fn providers(&self) -> &Arc<ProviderRegistry> {
@@ -879,9 +915,23 @@ impl AgentRuntimeAdapter {
         };
 
         let prepared = match (|| {
+            // The pin is read here, once per launch, and covers wake and resume: it is
+            // the session's snapshot, never the current Instructions. A failure refuses
+            // the launch rather than starting an agent without what was meant for it.
+            let pinned = match self.instructions.get() {
+                Some(resolve)
+                    if provider_id == crate::agent_fleet::TERMINAL_PROVIDER
+                        || crate::instructions::supported(&provider_id) =>
+                {
+                    resolve(&key)?
+                }
+                _ => None,
+            };
+            let (command, server_args) =
+                with_instructions(&key, &provider_id, command, pinned.as_ref())?;
             let command = match provider_id.as_str() {
                 "codex" if crate::native_ui::supported(&provider_id) => {
-                    crate::native_ui::codex::launch(&key, command)?
+                    crate::native_ui::codex::launch(&key, command, &server_args)?
                 }
                 "opencode" if crate::native_ui::supported(&provider_id) => {
                     crate::native_ui::opencode::launch(&key, command)?
@@ -897,7 +947,13 @@ impl AgentRuntimeAdapter {
                     &crate::daemon::cores_dir(),
                 )
             };
-            let command = crate::shell_integration::prepare(&key, command)?;
+            let command = crate::shell_integration::prepare(
+                &key,
+                command,
+                pinned
+                    .as_ref()
+                    .filter(|_| provider_id == crate::agent_fleet::TERMINAL_PROVIDER),
+            )?;
             crate::provider_environment::prepare(command, &manifest.environment)
         })() {
             Ok(prepared) => prepared,
@@ -1938,6 +1994,128 @@ mod tests {
         let mut manifest = fixture_manifest();
         manifest.status_detection = invalid;
         assert!(ProviderRegistry::empty().register(manifest).is_err());
+    }
+
+    /// Picker launches, wake and resume all go through `with_instructions` with the session's
+    /// pin, so the same pin must give the same arguments and the same private file each time.
+    #[test]
+    fn a_pin_adds_the_same_append_flags_to_every_launch_of_a_session() {
+        use crate::instructions::{compose, Instructions, Source};
+        use std::os::unix::fs::PermissionsExt;
+        let folder = std::env::temp_dir()
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_string();
+        let pin = compose(&[(
+            Source {
+                scope: "project".into(),
+                id: "p".into(),
+                revision: 1,
+            },
+            Instructions {
+                text: "Marker rule\nsecond line".into(),
+                folders: vec![folder.clone()],
+            },
+        )])
+        .unwrap();
+        let session = format!("instr-{}", uuid::Uuid::new_v4());
+        let command = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| word.to_string())
+                .collect::<Vec<_>>()
+        };
+
+        let claude = AgentKey::new("w", &session, "claude").unwrap();
+        let (first, server) = with_instructions(
+            &claude,
+            "claude",
+            command(&["claude", "--resume", "id"]),
+            Some(&pin),
+        )
+        .unwrap();
+        let file = crate::native_ui::paths(&claude)
+            .unwrap()
+            .extension
+            .with_extension("instructions.claude.md");
+        assert_eq!(
+            first,
+            command(&[
+                "claude",
+                "--resume",
+                "id",
+                "--append-system-prompt-file",
+                file.to_str().unwrap(),
+                &format!("--add-dir={folder}")
+            ])
+        );
+        assert!(server.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "Marker rule\nsecond line"
+        );
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // A wake is the same call with the same pin: same arguments, same bytes.
+        let (wake, _) = with_instructions(
+            &claude,
+            "claude",
+            command(&["claude", "--resume", "id"]),
+            Some(&pin),
+        )
+        .unwrap();
+        assert_eq!(wake, first);
+
+        let codex = AgentKey::new("w", &session, "codex").unwrap();
+        let (argv, server) = with_instructions(
+            &codex,
+            "codex",
+            command(&["codex", "resume", "thread"]),
+            Some(&pin),
+        )
+        .unwrap();
+        // The TUI gets nothing (it refuses --add-dir against the shared app-server); the
+        // folders ride in the text the app-server hands to the thread.
+        assert_eq!(argv, command(&["codex", "resume", "thread"]));
+        assert_eq!(
+            server,
+            command(&[
+                "-c",
+                &format!(
+                    "developer_instructions=\"Marker rule\\nsecond line\\n\\nReference folders you may read:\\n- {folder}\""
+                )
+            ])
+        );
+
+        for (provider, flag) in [("pi", "--append-system-prompt"), ("omp", "")] {
+            let key = AgentKey::new("w", &session, provider).unwrap();
+            let (argv, _) =
+                with_instructions(&key, provider, command(&[provider]), Some(&pin)).unwrap();
+            assert!(
+                argv.iter()
+                    .any(|arg| arg.starts_with("--append-system-prompt") || arg == flag),
+                "{argv:?}"
+            );
+        }
+
+        // Nothing pinned, or a provider without support: the command is untouched.
+        let (argv, server) =
+            with_instructions(&claude, "claude", command(&["claude"]), None).unwrap();
+        assert_eq!((argv, server), (command(&["claude"]), vec![]));
+        let other = AgentKey::new("w", &session, "opencode").unwrap();
+        let (argv, _) =
+            with_instructions(&other, "opencode", command(&["opencode"]), Some(&pin)).unwrap();
+        assert_eq!(argv, command(&["opencode"]));
+        for provider in ["claude", "pi", "omp"] {
+            let _ = std::fs::remove_file(
+                crate::native_ui::paths(&AgentKey::new("w", &session, provider).unwrap())
+                    .unwrap()
+                    .extension
+                    .with_extension(format!("instructions.{provider}.md")),
+            );
+        }
     }
 
     fn key() -> AgentKey {

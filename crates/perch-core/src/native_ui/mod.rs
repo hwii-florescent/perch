@@ -24,7 +24,9 @@ pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod dialog;
+pub mod file_links;
 pub mod opencode;
+pub mod tasks;
 pub mod transcript;
 pub mod typed;
 
@@ -148,7 +150,7 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
             &serde_json::to_string(&paths.socket)?,
         )
     } else if provider == "claude" {
-        claude::settings(&paths.extension, fresh)?
+        claude::settings(&paths.extension, fresh, claude::cli_version().as_deref())?
     } else {
         include_str!("pi-extension.ts")
             .replace(
@@ -162,6 +164,21 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
     };
     write_private(&paths.extension, &source)?;
     Ok(paths)
+}
+
+/// Write what `provider` reads from its Instructions file, privately (0600, replaced
+/// atomically), and return its path. Written from the session's pin on every launch, so wake and
+/// resume pass the same bytes as the first launch.
+pub(crate) fn write_instructions_file(
+    key: &AgentKey,
+    provider: &str,
+    pinned: &crate::instructions::Pinned,
+) -> anyhow::Result<PathBuf> {
+    let path = paths(key)?
+        .extension
+        .with_extension(format!("instructions.{provider}.md"));
+    write_private(&path, &pinned.file_text(provider))?;
+    Ok(path)
 }
 
 fn write_private(path: &std::path::Path, source: &str) -> anyhow::Result<()> {

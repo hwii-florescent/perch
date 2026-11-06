@@ -398,6 +398,20 @@ pub struct FileBuffer {
     pub updated_at: i64,
 }
 
+/// A chat link target that names an existing file in the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsLink {
+    /// The target exactly as the message wrote it.
+    pub href: String,
+    /// The file's workspace-relative path.
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+}
+
 /// Metadata-only listing form for durable editor tabs. Clients fetch the full
 /// bounded content through `fs.buffer.get` when they need to render a tab.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -952,6 +966,28 @@ pub enum ClientMessage {
     #[serde(rename = "browser.suggest", rename_all = "camelCase")]
     BrowserSuggest { request_id: String, query: String },
 
+    /// Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on
+    /// this core (capability `instructions.v1`). Answered with `instructions.state`.
+    #[serde(rename = "instructions.get", rename_all = "camelCase")]
+    InstructionsGet {
+        request_id: String,
+        scope: String,
+        id: String,
+    },
+
+    /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
+    /// there launch with them; running sessions keep what they started with. Answered with
+    /// `instructions.state`, which carries `error` and the unchanged content when refused.
+    #[serde(rename = "instructions.set", rename_all = "camelCase")]
+    InstructionsSet {
+        request_id: String,
+        scope: String,
+        id: String,
+        text: String,
+        #[serde(default)]
+        folders: Vec<String>,
+    },
+
     /// Forget one page.
     #[serde(rename = "browser.history.remove")]
     BrowserHistoryRemove { url: String },
@@ -1377,6 +1413,15 @@ pub enum ClientMessage {
         request_id: String,
         workspace_id: String,
         path: String,
+    },
+
+    /// Which of a chat message's link targets (`hrefs`, as written) name an existing regular
+    /// file inside the workspace (capability `fs.links`). Answered with `fs.links.result`.
+    #[serde(rename = "fs.links", rename_all = "camelCase")]
+    FsLinks {
+        request_id: String,
+        workspace_id: String,
+        hrefs: Vec<String>,
     },
 
     /// Atomically save bounded text with optimistic version checking. An
@@ -1903,6 +1948,21 @@ pub enum ServerMessage {
     BrowserSuggestResult {
         request_id: String,
         suggestions: Vec<String>,
+    },
+
+    /// Reply to `instructions.get` and `instructions.set`: what is stored for the scope.
+    /// `revision` is 0 until something was saved; `error` explains a refused request.
+    #[serde(rename = "instructions.state", rename_all = "camelCase")]
+    InstructionsState {
+        request_id: String,
+        scope: String,
+        id: String,
+        text: String,
+        folders: Vec<String>,
+        revision: u64,
+        max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 
     /// Reply to `browser.history.search`, best match first.
@@ -2438,6 +2498,14 @@ pub enum ServerMessage {
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+
+    /// Reply to `fs.links`: only the targets that resolved to an existing file in the workspace.
+    #[serde(rename = "fs.links.result", rename_all = "camelCase")]
+    FsLinksResult {
+        request_id: String,
+        workspace_id: String,
+        links: Vec<FsLink>,
     },
 
     /// Reply to a successful `fs.mutate`.

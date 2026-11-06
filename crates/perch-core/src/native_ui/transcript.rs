@@ -28,6 +28,10 @@ pub struct NativeUiTranscript {
     /// "Running npm test", "Thinking" or "Working…".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working: Option<String>,
+    /// The agent's own to-do list as of its latest plan call (`native_ui/tasks.rs`), docked above
+    /// the composer; absent when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tasks: Option<super::tasks::TaskList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -645,6 +649,7 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
     let (answered, absorbed) = pair(messages);
     let mut blocks: Vec<NativeUiBlock> = vec![];
     let mut turn = String::new();
+    let mut task_history = super::tasks::History::default();
     // The steps of the run being built, and the categories of its calls.
     let work = |blocks: &mut Vec<NativeUiBlock>, turn: &str, step: NativeUiStep| {
         if let Some(NativeUiBlock::Run { steps, .. }) = blocks.last_mut() {
@@ -701,9 +706,23 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                     let state = line_state(tool, result, running);
                     let Line {
                         label,
-                        body,
+                        mut body,
                         category,
                     } = line(tool, state);
+                    // A plan call that was accepted reads as what it changed.
+                    let rejected = state == LineState::Failed || result.is_some_and(|r| r.is_error);
+                    if let Some(changes) = (!rejected)
+                        .then(|| {
+                            task_history.accept(
+                                &tool.name,
+                                &tool.input,
+                                result.map(|result| result.text.as_str()),
+                            )
+                        })
+                        .flatten()
+                    {
+                        body = changes;
+                    }
                     work(
                         &mut blocks,
                         &turn,
@@ -762,7 +781,11 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
         }
     }
     let working = (running && !snapshot.blocked).then(|| working_line(snapshot, &blocks));
-    NativeUiTranscript { blocks, working }
+    NativeUiTranscript {
+        blocks,
+        working,
+        tasks: task_history.docked(),
+    }
 }
 
 fn run_summary(steps: &[NativeUiStep], categories: &[ToolCategory], live: bool) -> String {
@@ -1154,6 +1177,43 @@ mod tests {
         let clipped = r#"{"content":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","file_path":"/repo/notes/out.md","old"#;
         let label = super::line(&call("Write", clipped, None), LineState::Completed).label;
         assert_eq!(label, "Edited out.md");
+    }
+
+    #[test]
+    fn plan_calls_read_as_their_changes_and_the_latest_list_is_docked() {
+        let todos = |content: &str, status: &str| {
+            format!(r#"{{"todos":[{{"content":"{content}","status":"{status}"}}]}}"#)
+        };
+        let snap = snapshot(
+            vec![
+                assistant(
+                    "a1",
+                    vec![call("TodoWrite", &todos("Test", "pending"), Some("1"))],
+                ),
+                result("r1", Some("1"), "ok", false),
+                assistant(
+                    "a2",
+                    vec![call("TodoWrite", &todos("Test", "completed"), Some("2"))],
+                ),
+                result("r2", Some("2"), "ok", false),
+                // Rejected: neither a change nor the docked list.
+                assistant(
+                    "a3",
+                    vec![call("TodoWrite", &todos("Other", "pending"), Some("3"))],
+                ),
+                result("r3", Some("3"), "denied", true),
+            ],
+            false,
+        );
+        let transcript = project(&snap);
+        let (_, steps) = run(&transcript, 0);
+        assert_eq!(steps[0].body, "Added Test");
+        assert_eq!(steps[1].body, "Completed Test");
+        assert!(steps[2].body.contains("Other") && steps[2].body.starts_with('{'));
+        let docked = transcript.tasks.unwrap();
+        assert_eq!(docked.tasks.len(), 1);
+        assert_eq!(docked.tasks[0].content, "Test");
+        assert!(project(&snapshot(vec![], false)).tasks.is_none());
     }
 
     #[test]

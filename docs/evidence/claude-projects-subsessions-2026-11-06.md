@@ -114,3 +114,33 @@ shim and Codex app-server (`codex app-server --listen`, no flags) get no extra a
 Codex sends `turn/start` even while a turn runs (`turn/steer` unused); Pi has a native
 follow-up queue; Claude only a PTY paste; Claude hook `EVENTS` omit SubagentStart/Stop
 and drop `last_assistant_message`.
+
+## Slice 0 feasibility spike (2026-11-06)
+
+Claude 2.1.319, codex-cli 0.166.0, Pi 1.5.0, OMP 18.16.0, macOS. Run in a scratch
+directory with a stub `perch` on `PATH` that prints `PERCH_SESSION` and, per name, only
+*set* or *unset* (never a value). Banners checked first (Claude: Haiku 4.5). Live turns
+only on `claude-haiku-4-5` and `gpt-5.6-luna`, one per row. Codex used a throwaway
+`CODEX_HOME` (auth copied in, deleted after); Pi used a private agent dir with the real
+auth symlinked and `--no-session -ne`; OMP ran `--no-session --no-extensions`. No product
+code kept; no Perch core in the loop (the launch seam is what slice 1 and 3 add).
+
+| # | Question | Provider | Result |
+|---|---|---|---|
+| 1a | Pointer reaches the model | Codex TUI flag | `codex -c developer_instructions='…' debug prompt-input x` shows it as the first block of the `developer` message (no model call); absent without the flag |
+| 1b | | Codex shared app-server | `codex app-server -c developer_instructions=… --listen stdio://` accepts the flag (listed in its `--help`); one luna turn on a thread started with no per-thread override quoted the line verbatim. `thread/start` also takes `developerInstructions`/`config` per thread, an alternative seam. Zero-token check not possible: `thread/start` reports `instructionSources: []` either way |
+| 1c | | Claude | `--append-system-prompt "$(cat f)"` and `--append-system-prompt-file f` both raised `/context` "System prompt" from 7.6k to 8k tokens for a 1.9 kB file (no prompt sent, no Enter on a prompt). The file flag is no longer hidden: 2.1.319 `--help` names it under `--bare`. One haiku turn quoted the pointer verbatim from a file-loaded prompt |
+| 1d | | Pi | `--append-system-prompt <text>` and `<file path>` both quoted by one luna turn each (one earlier combined prompt answered NONE: model compliance, the repeat quoted it) |
+| 1e | | OMP | `--append-system-prompt=<file>` quoted verbatim by one luna turn |
+| 2 | Scope variable reaches the agent's shell tool | all four | `PERCH_SESSION` and every credential-shaped name (`PERCH_TOKEN`, `PERCH_AUTH_TOKEN`, `PERCH_SESSION_AUTH`, `PERCH_SECRET`, `PERCH_API_KEY`, `PERCH_SCOPE`, `PERCH_CAP`) reached `perch whoami` run by Claude (haiku, bypass permissions), Codex (luna, default sandbox and env policy, through `/bin/zsh -lc`), Pi and OMP. **Claude 2.1.319 did not scrub the `_TOKEN`/`_KEY` names** that Orca reports scrubbing from 2.1.310; keep `PERCH_TOKEN`, but `perch whoami` must name a missing variable as a possible provider scrub, and the scrub may depend on a mode or setting not exercised here (permission prompts, sandboxing) |
+| 3a | Queue while busy | Pi | RPC `follow_up` during a running `bash` call (same queue as the bridge's `deliverAs: "followUp"`): the turn finished (FIRST_DONE), then the note ran as its own turn (SECOND_DONE) |
+| 3b | | OMP | Identical to Pi |
+| 3c | | Codex | **Not refused.** `turn/start` on a running thread returns a new in-progress turn id and the text joins the running turn (the reply merged both asks: "SECOND_DONE STEERED"); `turn/steer` is accepted too. So the core's own idle check is the only guard: slice 5 delivers to Codex only when the snapshot says idle, never relying on a refusal |
+| 4 | New: Claude pins its own prompt | Claude | 2.1.319 adds `--system-prompt-snapshot <on\|off>` (default on): the first request's prompt, `--append-system-prompt` included, is recorded and resent as-is on resume even if the next launch passes different text, until compaction. Perch still pins the file and records provenance, but a wake cannot change what Claude sends |
+| 5 | Fix-first: did the `tool_name` defect matter live? | Claude | `e2e/native-composer.spec.ts -g claude` (request-card step, `AskUserQuestion`) passes with and without the `read_event` fix: the question still blocks through another path (very likely `PermissionRequest`, which fires for the dialog). The defect was latent, not user-visible; the fix is kept |
+
+**What changes in the next slices:** nothing contradicts the plan. Slice 1 may use the
+Claude file flag (the 16,000-character text stays out of `argv`), Pi/OMP a file and Codex
+`-c developer_instructions=<text>` (no file form exists short of `model_instructions_file`,
+which replaces the base prompt). Slice 5 must not assume Codex refuses a busy send.
+Caveats: single runs, and the Codex shell ran under the default read-only sandbox only.

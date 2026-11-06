@@ -44,16 +44,12 @@ their slice.
 
 ## Fix first (found while mapping; small, blocking)
 
-- **Suspected: `native_ui/claude.rs` `read_event` drops `tool_name`.** It keeps only
-  seven fields, and the poll loop passes its result to `turn_state`, which tests
-  `tool_name == "AskUserQuestion"` (statically traced, not yet reproduced); the unit test
-  builds events by hand and passes. Confirm with a fixture test first. Keep `tool_name` and `tool_use_id`; add a test that goes
-  through `read_event` from a written event file. Then check live whether Claude
-  questions were detected only through another path.
-- **Hook version floors.** Orca records that unknown hook names can make an older Claude
-  reject the whole `--settings` file (`src/main/claude/claude-hook-event-versions.ts`);
-  reproduce once with an old CLI or treat it as Orca's claim. Gate each
-  event in `EVENTS` on the detected CLI version; port that table (MIT).
+Landed (2026-11-06): `read_event` kept seven fields and dropped `tool_name`, so a
+question hook never blocked the turn (reproduced with a hook-file fixture test, fixed);
+hook events are registered per detected CLI version (Orca's floors, ported; the
+"older Claude rejects the settings file" claim stays Orca's, not reproduced here;
+`PostModelSwitch`'s floor is unmeasured). Still open: a live check that an
+`AskUserQuestion` blocks over the real CLI (see the slice 0 table).
 
 ## Step 0 UI rows (between slices; Orca code exists)
 
@@ -63,9 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 1 | Copy button | `shared/native-chat/transcript/native-chat-message-copy-text.ts` (15) → `transcript.rs` | `NativeChatCopyButton.tsx` | `native-chat-message-copy-text.test.ts` | yes |
-| 2 | File links and pills | `renderer/.../native-chat-file-link.ts` (215), `-file-link-existence.ts` (296), `native-chat-markdown-file-destinations.ts` → new `native_ui/file_links.rs`, existence through the confined fs service | `NativeChatFileReferencePill.tsx`, `use-native-chat-file-link-existence.tsx` | `native-chat-file-link{,-existence}.test.ts` | yes |
-| 3 | Docked task list | `shared/native-chat/input/native-chat-task-list.ts` (171), `-frames.ts`, `-history.ts` → `native_ui/tasks.rs` | `NativeChatDockedTaskList.tsx` | `native-chat-task-list{,-history,-state}.test.ts` | tool input (verify Claude `TodoWrite` input survives the transcript reader). `TaskCreate`/`TaskUpdate` are *own* (Orca parses only `todowrite`/`update_plan`) |
 | 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
 | 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
 | 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
@@ -74,49 +67,62 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 | 9 | Command envelope | `shared/native-chat/native-chat-command-envelope.ts` (50) → `typed.rs` | none | `native-chat-command-envelope.spec.ts` | Claude transcript `<command-name>` |
 | 10 | Model/effort/mode labels | `shared/native-chat/input/native-chat-session-option-labels.ts`, `native-chat-permission-mode-labels.ts`; read-back from `SessionStart.model`/`PostModelSwitch`; Orca's banner reader `claude-terminal-session-options.ts` only as a fallback | `NativeChatPermissionModePicker.tsx`, `NativeChatModelCombobox.tsx` | `native-chat-session-option-*.test.ts`, `claude-terminal-session-options.test.ts` | typed commands through `typed.rs`. Showing pickers over a live session needs an owner yes (PARITY) |
 
+Row 1 (copy button) landed 2026-11-06 in web only (`nativeChat/CopyButton.tsx`): Orca's
+`native-chat-message-copy-text.ts` only strips text Perch's messages never carry (visual
+directive lines, the subagent-group twin, a stopped label), so there is no Rust function.
+Revisit it with row 2 of slice 2 if subagent groups put twin text into messages.
+
+Row 2 (file links) landed 2026-11-06: `native_ui/file_links.rs` (Orca's href routing,
+location parsing and path normalization, Unix only, with their tests), `fs.links` /
+`fs.links.result` (capability `fs.links`, relayed to remote hosts like the other `fs.*`
+requests), `nativeChat/fileLinks.ts` and the pill in `NativeMessage`. Orca's existence cache
+(`native-chat-file-link-existence.ts`, renderer state tied to its runtime hosts) and the
+markdown `file:` rewrite were not ported: the core answers per message once the turn
+ends, and DOMPurify strips `file:` hrefs. Open gaps: opening at the line, inline-code paths.
+
+Row 3 (docked task list) landed 2026-11-06: `native_ui/tasks.rs` (Orca's normalizer, diff,
+sentences and per-tool predecessor rule, with their tests), `NativeUiTranscript.tasks`, the
+step body of an accepted plan call, `nativeChat/DockedTasks.tsx`. **Probe result: Claude
+2.1.319 has no `TodoWrite`**; haiku given "use your task tools" called `ToolSearch`, then
+`TaskCreate` (input `subject`, `description`; result "Task #N created successfully: …") and
+`TaskUpdate` (input `taskId`, `status`; result "Updated task #N status"). Those are read
+as Perch's own, keyed by task number. `TodoWrite` input is now kept to 6 KiB (a clipped list
+does not parse). Not done: Codex `turn/plan/updated` (the bridge does not surface it), the
+frame projection, Pi/OMP lists.
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.
 
-## Slice 0: feasibility spike (*own*, zero tokens first)
+## Slice 0 results (landed 2026-11-06)
 
-Deliverable: a table appended to the evidence file. No product code kept.
+Table in the [evidence file](evidence/claude-projects-subsessions-2026-11-06.md). Nothing
+contradicted the plan. What later slices must use: Claude `--append-system-prompt-file`
+works (and Claude pins its own prompt on resume, `--system-prompt-snapshot`); Pi and OMP
+take a file; Codex takes `-c developer_instructions=<text>` on the app-server; every
+`PERCH_*` name, `_TOKEN` included, reached the shell tool of all four; Pi/OMP follow-ups
+queue until the turn ends; **Codex does not refuse a busy `turn/start`** (it joins the
+running turn), so idle delivery is the core's check alone.
 
-1. **Pointer reaches the model.** Text: `You are in Perch session <id>. Run "perch guide" before coordinating with other sessions.`
-   - Codex: `codex -c developer_instructions='<text>' debug prompt-input x` and grep the
-     output (no model call). Repeat with `-c` passed to `codex app-server` (Perch's
-     shared server), since the TUI flag may not reach it.
-   - Claude: launch in tmux with `--append-system-prompt '<text>'`, open `/context`,
-     capture the screen, never press Enter on a prompt. Repeat with the hidden
-     `--append-system-prompt-file`; if it is gone, slice 1 passes text.
-   - Pi: `--append-system-prompt`; OMP: `--append-system-prompt=`. Read the system
-     prompt through the bridge if exposed, else one cheap turn ("quote the line that
-     starts with You are in Perch").
-2. **Token reaches the agent's shell.** A stub script `perch` on PATH that prints
-   `PERCH_SESSION` and whether `PERCH_TOKEN` is set (never its value). One cheap turn per
-   provider: "run `perch whoami` and paste the output". Watch for Codex
-   `shell_environment_policy`/sandbox and Claude 2.1.310+ subprocess env scrubbing of
-   names ending in `_TOKEN`/`_KEY` (Orca works around it with neutral aliases,
-   `shared/agent-hook-listener/transport/agent-hook-scrub-safe-env.ts`). If scrubbed,
-   pick a neutral name such as `PERCH_SESSION_AUTH`.
-3. **Queues.** Pi/OMP: send through the bridge while a turn runs and record follow-up
-   behaviour. Codex: `turn/start` while busy (expect refusal → deliver at idle only).
+## Slice 1 landed (2026-11-06): Instructions injection
 
-## Slice 1: Instructions injection (*own*: Orca injects nothing at launch)
+What later slices build on:
 
-- **Store:** new table for Birdhouse/Nest Instructions text (≤16,000 chars) and
-  reference folder list; edit UI in Birdhouse/Nest settings (reuse `components/ui/`).
-- **Pin per launch:** write the text to a 0600 file under the private native dir
-  (`native_ui::paths`), record `(source, revision, hash)` on the session; wake and
-  resume reuse the pinned file, never the current text.
-- **Argv seam:** `server/terminal.rs` `open_agent_terminal` extra args (after
-  `--settings`/`--extension`); also the shell shim (`shell_integration.rs`) and the
-  Codex app-server launcher (`native_ui/codex.rs` `LAUNCHER`). Flags: ROADMAP step 1
-  table, corrected by slice 0. Never `--system-prompt` or `--no-context-files`.
-- **Pointer** (slice 3 onward) is appended in the same place.
-- **Tests:** Rust argv per provider and per path (picker, shim, wake, Codex
-  app-server); snapshot pinning; 16k refusal. Live: a haiku/luna turn per provider
-  quotes a marker from the Instructions, and repo `AGENTS.md`/`CLAUDE.md` still load.
+- `instructions.rs` (pure: caps, `compose`, `Pinned`, `launch_args`), `db/instructions.rs`
+  (tables `instructions`, `session_instructions`), `server/instructions.rs`
+  (`instructions.get`/`set`/`state`, capability `instructions.v1`, local targets only).
+- **The seam for the slice 3 pointer** is `agent_runtime::with_instructions`, which every
+  launch path goes through (picker, wake/resume, Codex app-server) and
+  `shell_integration::prepare_with` for agents typed into a shell. Append the pointer to
+  the pin's text there; it must be pinned with the rest, and a session with no
+  Instructions then still needs a pin row (today it keeps an empty one).
+- **Codex has no per-thread folder flag through the shared app-server**: the TUI refuses
+  `--add-dir` with `--remote` (0.166), so Codex's reference folders are listed in the
+  `developer_instructions` text, like Pi's.
+- Not done: showing the repo's own `CLAUDE.md`/`AGENTS.md` and Claude memory beside the
+  Instructions; remote Birdhouses (the dialog is local only; their core would own them).
+- Live check: `e2e/instructions.spec.ts` (in `native-composer.config.ts`), one turn per
+  provider quoting a marker from the Instructions and from the repo's own file.
 
 ## Slice 2: rows sub-sessions need
 

@@ -104,12 +104,18 @@ pub(crate) fn snapshot_matches(agent: &ShellAgent, pid: u32) -> bool {
 }
 
 /// Add integration only to new local runtime launches. Existing daemon
-/// attachments keep their original environment and processes unchanged.
-pub(crate) fn prepare(key: &AgentKey, command: Vec<String>) -> anyhow::Result<Vec<String>> {
+/// attachments keep their original environment and processes unchanged. `pinned` is the
+/// Instructions snapshot of the shell's session: every agent typed into it starts with it.
+pub(crate) fn prepare(
+    key: &AgentKey,
+    command: Vec<String>,
+    pinned: Option<&crate::instructions::Pinned>,
+) -> anyhow::Result<Vec<String>> {
     prepare_with(
         key,
         command,
         &std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+        pinned,
     )
 }
 
@@ -117,6 +123,7 @@ fn prepare_with(
     key: &AgentKey,
     command: Vec<String>,
     real_shell: &str,
+    pinned: Option<&crate::instructions::Pinned>,
 ) -> anyhow::Result<Vec<String>> {
     #[cfg(not(unix))]
     return Ok(command);
@@ -143,21 +150,38 @@ fn prepare_with(
         for provider in PROVIDERS {
             let bridge = bridge_key(key, provider)?;
             let paths = native_ui::prepare(&bridge, provider, false)?;
+            // The Instructions file is the shell session's, shared by every shim in it.
+            let instructions = match pinned.filter(|_| crate::instructions::supported(provider)) {
+                Some(pin) => {
+                    let file = native_ui::write_instructions_file(key, provider, pin)?;
+                    crate::instructions::launch_args(provider, pin, &file)
+                }
+                None => Default::default(),
+            };
             let args = match *provider {
-                "codex" => native_ui::codex::launch(&bridge, vec!["__PERCH_EXECUTABLE__".into()])?,
+                "codex" => {
+                    // Root flags go before any subcommand the person types.
+                    let mut command = vec!["__PERCH_EXECUTABLE__".to_string()];
+                    command.extend(instructions.cli);
+                    native_ui::codex::launch(&bridge, command, &instructions.codex_server)?
+                }
                 "opencode" => {
                     native_ui::opencode::launch(&bridge, vec!["__PERCH_EXECUTABLE__".into()])?
                 }
-                _ => vec![
-                    "__PERCH_EXECUTABLE__".into(),
-                    if *provider == "claude" {
-                        "--settings"
-                    } else {
-                        "--extension"
-                    }
-                    .into(),
-                    paths.extension.to_string_lossy().into_owned(),
-                ],
+                _ => {
+                    let mut args = vec![
+                        "__PERCH_EXECUTABLE__".to_string(),
+                        if *provider == "claude" {
+                            "--settings"
+                        } else {
+                            "--extension"
+                        }
+                        .into(),
+                        paths.extension.to_string_lossy().into_owned(),
+                    ];
+                    args.extend(instructions.cli);
+                    args
+                }
             };
             let exec = args
                 .iter()
@@ -327,7 +351,7 @@ mod tests {
         let new_key =
             || AgentKey::new("zdot", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
         let inner = new_key();
-        prepare_with(&inner, vec!["true".into()], ZSH).unwrap();
+        prepare_with(&inner, vec!["true".into()], ZSH, None).unwrap();
         let run = |outer: &AgentKey, flags: &str, inherited_user: Option<&Path>| {
             let mut command = Command::new(directory(&inner).unwrap().join("shell"));
             command
@@ -344,7 +368,7 @@ mod tests {
         };
         for legacy in [false, true] {
             let outer = new_key();
-            prepare_with(&outer, vec!["true".into()], ZSH).unwrap();
+            prepare_with(&outer, vec!["true".into()], ZSH, None).unwrap();
             if legacy {
                 // Wrappers from before the fix: same files, but their startup files had no guard.
                 for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
@@ -405,7 +429,7 @@ mod tests {
             fs::create_dir_all(dir).unwrap();
         }
         let key = AgentKey::new("hist", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
-        prepare_with(&key, vec!["true".into()], ZSH).unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH, None).unwrap();
         let histfile = |zshrc: &str, zdotdir: &Path| {
             fs::write(user.join(".zshrc"), zshrc).unwrap();
             let output = Command::new(directory(&key).unwrap().join("shell"))
@@ -458,7 +482,7 @@ mod tests {
         fs::write(user.join(".zshrc"), "HISTSIZE=100; SAVEHIST=100\n").unwrap();
         fs::write(user.join(".zsh_history"), "echo from-iterm\n").unwrap();
         let key = AgentKey::new("share", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
-        prepare_with(&key, vec!["true".into()], ZSH).unwrap();
+        prepare_with(&key, vec!["true".into()], ZSH, None).unwrap();
         let run = |program: PathBuf, script: &str| {
             let output = Command::new(program)
                 .args(["-ic", script])
@@ -513,6 +537,7 @@ mod tests {
                 "a b".into(),
                 "literal '$()".into(),
             ],
+            None,
         )
         .unwrap();
         let fake = dir.join("real");
@@ -571,6 +596,7 @@ mod tests {
                     "check".into(),
                     "a b".into(),
                 ],
+                None,
             )
             .unwrap();
             let output = run(&command);
@@ -595,6 +621,7 @@ mod tests {
                 "-c".into(),
                 "exec codex --model 'my model' 'literal $()'".into(),
             ],
+            None,
         )
         .unwrap();
         let codex_paths = native_ui::paths(&bridge_key(&key, "codex").unwrap()).unwrap();
@@ -634,6 +661,7 @@ mod tests {
                     "-c".into(),
                     format!("exec {provider} {args} 'a b'"),
                 ],
+                None,
             )
             .unwrap();
             assert_eq!(run(&command), format!("{}\na b\n", args.replace(' ', "\n")));
@@ -693,6 +721,148 @@ mod tests {
             let paths = native_ui::paths(&bridge_key(&key, provider).unwrap()).unwrap();
             let _ = fs::remove_file(&paths.extension);
             let _ = fs::remove_file(paths.extension.with_extension("tui.json"));
+        }
+    }
+
+    /// An agent typed into a shell starts with that shell session's pinned Instructions, ahead
+    /// of the arguments the person typed, which stay untouched.
+    #[test]
+    fn typed_agents_start_with_their_sessions_instructions() {
+        use crate::instructions::{compose, Instructions, Source};
+        let key =
+            AgentKey::new("shell-instr", uuid::Uuid::new_v4().to_string(), "terminal").unwrap();
+        let dir = directory(&key).unwrap();
+        let folder = std::env::temp_dir()
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_string();
+        let pin = compose(&[(
+            Source {
+                scope: "project".into(),
+                id: "p".into(),
+                revision: 1,
+            },
+            Instructions {
+                text: "Typed-agent marker".into(),
+                folders: vec![folder.clone()],
+            },
+        )])
+        .unwrap();
+        let ask = |provider: &str| {
+            prepare(
+                &key,
+                vec![
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    format!("exec {provider} \"$@\""),
+                    "check".into(),
+                    "a b".into(),
+                ],
+                Some(&pin),
+            )
+            .unwrap()
+        };
+        let command = ask("claude");
+        let fake = dir.join("real");
+        fs::create_dir(&fake).unwrap();
+        for provider in PROVIDERS {
+            write(
+                &fake.join(provider),
+                "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+                0o700,
+            )
+            .unwrap();
+        }
+        let path = format!("{}:/usr/bin:/bin", fake.display());
+        let run = |argv: &[String]| {
+            let output = Command::new(&argv[0])
+                .args(&argv[1..])
+                .env("PATH", &path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let file = |provider: &str| {
+            native_ui::paths(&key)
+                .unwrap()
+                .extension
+                .with_extension(format!("instructions.{provider}.md"))
+        };
+        let claude_settings = native_ui::paths(&bridge_key(&key, "claude").unwrap())
+            .unwrap()
+            .extension;
+        assert_eq!(
+            run(&command),
+            format!(
+                "--settings\n{}\n--append-system-prompt-file\n{}\n--add-dir={folder}\na b\n",
+                claude_settings.display(),
+                file("claude").display()
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(file("claude")).unwrap(),
+            "Typed-agent marker"
+        );
+        let omp_extension = native_ui::paths(&bridge_key(&key, "omp").unwrap())
+            .unwrap()
+            .extension;
+        assert_eq!(
+            run(&ask("omp")),
+            format!(
+                "--extension\n{}\n--append-system-prompt={}\n--add-dir={folder}\na b\n",
+                omp_extension.display(),
+                file("omp").display()
+            )
+        );
+        let pi_extension = native_ui::paths(&bridge_key(&key, "pi").unwrap())
+            .unwrap()
+            .extension;
+        assert_eq!(
+            run(&ask("pi")),
+            format!(
+                "--extension\n{}\n--append-system-prompt\n{}\na b\n",
+                pi_extension.display(),
+                file("pi").display()
+            )
+        );
+        // Pi's file carries the folders as text, since it has no flag for them.
+        assert!(fs::read_to_string(file("pi"))
+            .unwrap()
+            .contains(&format!("- {folder}")));
+        // Codex: the instructions go to the app-server the shim's launcher starts (checked in
+        // codex.rs against the launcher itself); here, the shim hands them over before the
+        // typed arguments, and a person's own subcommand still comes last.
+        let shim = fs::read_to_string(dir.join("bin").join("codex")).unwrap();
+        let wanted = [
+            "'2'".to_string(),
+            "'-c'".to_string(),
+            format!(
+                "'developer_instructions=\"Typed-agent marker\\n\\nReference folders you may read:\\n- {folder}\"'"
+            ),
+        ];
+        let at: Vec<_> = wanted.iter().map(|part| shim.find(part)).collect();
+        assert!(
+            at.iter().all(Option::is_some) && at.windows(2).all(|pair| pair[0] < pair[1]),
+            "{shim}"
+        );
+        assert!(!shim.contains("--add-dir"), "{shim}");
+        // No pin, no change: the earlier test's expectations hold for every provider.
+        assert_eq!(
+            prepare(&key, vec!["true".into()], None).unwrap().len(),
+            prepare(&key, vec!["true".into()], Some(&pin))
+                .unwrap()
+                .len()
+        );
+        fs::remove_dir_all(&dir).unwrap();
+        for provider in PROVIDERS {
+            let paths = native_ui::paths(&bridge_key(&key, provider).unwrap()).unwrap();
+            let _ = fs::remove_file(&paths.extension);
+            let _ = fs::remove_file(file(provider));
         }
     }
 }

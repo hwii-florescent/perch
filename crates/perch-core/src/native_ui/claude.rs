@@ -1,5 +1,11 @@
 //! Observe Claude's native hooks/transcript and type only into a verified empty
 //! native prompt. Claude owns its loop, tools, configuration, and conversation.
+//!
+//! The hook event version floors and the `--version` parsing are ported from Orca's
+//! `src/main/claude/claude-hook-event-versions.ts` and `claude-managed-hook-events.ts`
+//! (commit 308b5000, MIT; see THIRD_PARTY_NOTICES.md): an older Claude rejects a whole
+//! `--settings` file that names a hook event it does not know, so each event is only
+//! registered once the detected CLI version has reached its floor.
 use super::*;
 use crate::protocol::{NativeUiContext, NativeUiMessage, NativeUiTool};
 use serde_json::Value;
@@ -10,18 +16,108 @@ use std::{
     time::SystemTime,
 };
 
-const EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "PermissionRequest",
-    "Stop",
-    "StopFailure",
-    "SessionEnd",
-    "PostModelSwitch",
+/// Hook events and the first Claude version that accepts each in `--settings`
+/// (Orca `CLAUDE_HOOK_EVENT_FIRST_VERSIONS`). SessionEnd is gated at 2.1.261 where
+/// Orca measured delivery, though the schema has taken it since 1.0.85.
+/// `PostModelSwitch` is not in Orca's table; its floor is unmeasured, so it uses the
+/// newest measured one (ponytail: replace with a measured floor).
+const EVENT_FLOORS: &[(&str, &str)] = &[
+    ("SessionStart", "1.0.62"),
+    ("UserPromptSubmit", "1.0.53"),
+    ("PreToolUse", "1.0.23"),
+    ("PostToolUse", "1.0.23"),
+    ("PostToolUseFailure", "2.0.56"),
+    ("PermissionRequest", "2.0.45"),
+    ("Stop", "1.0.31"),
+    ("StopFailure", "2.1.78"),
+    ("SessionEnd", "2.1.261"),
+    ("PostModelSwitch", "2.1.78"),
 ];
+/// Orca `UNRESOLVED_CLAUDE_VERSION`: when the version cannot be read, register only
+/// what every Claude that has hooks accepts.
+const UNRESOLVED_VERSION: &str = "1.0.64";
+
+fn events() -> impl Iterator<Item = &'static str> {
+    EVENT_FLOORS.iter().map(|(name, _)| *name)
+}
+
+/// `x.y.z` from Claude's own `x.y.z (Claude Code)` line, never from a launcher's
+/// version (Orca `parseClaudeCliVersionOutput`). A prerelease or build suffix is kept
+/// out of the numbers compared.
+pub(super) fn parse_version_output(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let version = line.trim().strip_suffix("(Claude Code)")?.trim_end();
+        let core = version.split(['-', '+']).next()?;
+        (core.split('.').count() == 3
+            && core
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())))
+        .then(|| version.to_string())
+    })
+}
+
+fn numbers(version: &str) -> Option<[u64; 3]> {
+    let mut parts = version.split(['-', '+']).next()?.split('.');
+    let result = [
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ];
+    parts.next().is_none().then_some(result)
+}
+
+fn reaches(version: Option<&str>, floor: &str) -> bool {
+    let have = version
+        .and_then(numbers)
+        .or_else(|| numbers(UNRESOLVED_VERSION));
+    have >= numbers(floor)
+}
+
+/// The hook events a Claude of this version may be told about.
+fn events_for(version: Option<&str>) -> Vec<&'static str> {
+    EVENT_FLOORS
+        .iter()
+        .filter(|(_, floor)| reaches(version, floor))
+        .map(|(name, _)| *name)
+        .collect()
+}
+
+/// The installed Claude's version, probed with a bounded `--version` and cached for
+/// five minutes. `None` when it cannot be read (Orca then keeps the old-CLI floor).
+pub(super) fn cli_version() -> Option<String> {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    type Probed = Option<(Instant, Option<String>)>;
+    static CACHE: OnceLock<Mutex<Probed>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((at, version)) = cache.lock().unwrap().as_ref() {
+        if at.elapsed() < Duration::from_secs(300) {
+            return version.clone();
+        }
+    }
+    let version = crate::agent_catalog::resolve_executable("claude", "claude")
+        .ok()
+        .and_then(|path| {
+            let (send, receive) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let output = std::process::Command::new(path)
+                    .arg("--version")
+                    .stdin(std::process::Stdio::null())
+                    .output();
+                let _ = send.send(output);
+            });
+            let output = receive.recv_timeout(Duration::from_secs(5)).ok()?.ok()?;
+            output.status.success().then(|| {
+                parse_version_output(&format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                ))
+            })?
+        });
+    *cache.lock().unwrap() = Some((Instant::now(), version.clone()));
+    version
+}
 const MAX_TAIL: u64 = 2 * 1024 * 1024;
 
 fn event_path(config: &Path, event: &str) -> PathBuf {
@@ -39,9 +135,13 @@ pub(super) fn prompt_stamp(config: &Path) -> String {
     stamp(&event_path(config, "UserPromptSubmit"))
 }
 
-pub(super) fn settings(config: &Path, fresh: bool) -> anyhow::Result<String> {
+pub(super) fn settings(
+    config: &Path,
+    fresh: bool,
+    version: Option<&str>,
+) -> anyhow::Result<String> {
     let mut hooks = serde_json::Map::new();
-    for event in EVENTS {
+    for event in events_for(version) {
         let path = event_path(config, event);
         if fresh && path.exists() {
             fs::remove_file(&path)?;
@@ -94,6 +194,8 @@ fn read_event(path: &Path) -> anyhow::Result<(u32, Value)> {
                     | "model"
                     | "to_model"
                     | "prompt"
+                    | "tool_name"
+                    | "tool_use_id"
             )
         });
     }
@@ -144,10 +246,13 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                     (8 * 1024usize).saturating_sub(message.thinking.len()),
                 )),
                 "tool_use" if message.tools.len() < 32 => {
-                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(2048));
+                    let name = clip(block["name"].as_str().unwrap_or("Tool"), 128);
+                    // A clipped to-do list does not parse, so it gets room for a long one.
+                    let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
+                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
                     tool_budget -= input.len();
                     message.tools.push(NativeUiTool {
-                        name: clip(block["name"].as_str().unwrap_or("Tool"), 128),
+                        name,
                         input,
                         id: block["id"].as_str().map(|id| clip(id, 256)),
                         state: None,
@@ -424,10 +529,10 @@ pub(super) async fn observe(
             }
             _ = tick.tick() => {
                 let mut changed = false;
-                for event in EVENTS {
+                for event in self::events() {
                     let path = event_path(&paths.extension, event);
                     let current = stamp(&path);
-                    if !current.is_empty() && events.get(*event).is_none_or(|(old, _, _)| old != &current) {
+                    if !current.is_empty() && events.get(event).is_none_or(|(old, _, _)| old != &current) {
                         if let Ok((pid, value)) = read_event(&path) { events.insert(event.to_string(), (current, pid, value)); changed = true; }
                     }
                 }
@@ -608,6 +713,93 @@ mod tests {
         assert_eq!(replay(&[("PostModelSwitch", "")]), None);
     }
 
+    /// Cases from Orca's `claude-hook-event-versions.test.ts` (identified version output).
+    #[test]
+    fn only_claudes_own_version_line_names_the_version() {
+        for (output, expected) in [
+            ("2.1.310 (Claude Code)\n", Some("2.1.310")),
+            ("1.0.23 (Claude Code)", Some("1.0.23")),
+            ("launcher 11.17.0\n1.0.64 (Claude Code)", Some("1.0.64")),
+            ("launcher 0.1.0\n2.1.310 (Claude Code)", Some("2.1.310")),
+            (
+                "2.1.94-rc.1+build.2 (Claude Code)",
+                Some("2.1.94-rc.1+build.2"),
+            ),
+            ("11.17.0\n", None),
+            ("2.30.0", None),
+            ("2.1.310\nwrapper for (Claude Code)", None),
+            ("2.1.310\n(Claude Code)", None),
+            ("2.1 (Claude Code)", None),
+        ] {
+            assert_eq!(
+                parse_version_output(output).as_deref(),
+                expected,
+                "{output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_event_is_registered_only_once_the_cli_has_reached_its_floor() {
+        let all: Vec<_> = events().collect();
+        assert_eq!(events_for(Some("2.1.319")), all);
+        // Measured delivery of SessionEnd starts at 2.1.261.
+        assert!(!events_for(Some("2.1.260")).contains(&"SessionEnd"));
+        assert!(events_for(Some("2.1.261")).contains(&"SessionEnd"));
+        // An unreadable version gets only the events every hook-capable Claude knows.
+        let old = [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+        ];
+        assert_eq!(events_for(None), old);
+        assert_eq!(events_for(Some("1.0.64")), old);
+        assert_eq!(events_for(Some("not a version")), old);
+        assert!(events_for(Some("2.0.45")).contains(&"PermissionRequest"));
+        assert!(!events_for(Some("2.0.44")).contains(&"PermissionRequest"));
+    }
+
+    #[test]
+    fn settings_name_no_event_the_cli_would_reject() {
+        let config = std::env::temp_dir().join("perch-settings-floor.json");
+        let hooks: Value =
+            serde_json::from_str(&settings(&config, false, Some("1.0.64")).unwrap()).unwrap();
+        let names: Vec<_> = hooks["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(names.len(), 5);
+        assert!(!names.contains(&"PermissionRequest".to_string()));
+    }
+
+    /// Hook files are what the poll loop really sees: the PID line, then the
+    /// event JSON. `read_event` must keep what `turn_state` reads, or a
+    /// question would never block.
+    #[test]
+    fn a_question_event_read_from_its_hook_file_still_blocks() {
+        let dir = std::env::temp_dir().join(format!("perch-hook-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("PreToolUse.event");
+        let body = serde_json::json!({
+            "session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+            "tool_use_id": "toolu_1", "tool_input": {"secret": "dropped"}, "cwd": "/w"
+        });
+        fs::write(&path, format!("4242\n{body}")).unwrap();
+        let (pid, event) = read_event(&path).unwrap();
+        assert_eq!(pid, 4242);
+        assert_eq!(event["tool_use_id"], "toolu_1");
+        assert!(
+            event.get("tool_input").is_none(),
+            "unlisted fields stay dropped"
+        );
+        assert_eq!(turn_state(&event), Some((true, true)));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn native_messages_hide_metadata_and_bound_content_and_prompt_guard_preserves_drafts() {
         assert!(empty_prompt("❯\u{a0}\n"));
@@ -632,5 +824,21 @@ mod tests {
         );
         assert_eq!(tool[0].role, "toolResult");
         assert_eq!(tool[0].text, "sentinel");
+    }
+
+    #[test]
+    fn a_long_todo_list_keeps_parseable_input() {
+        let todos: Vec<_> = (0..30)
+            .map(|n| serde_json::json!({"content": format!("Task number {n} with a fairly descriptive name"), "status": "pending", "activeForm": format!("Doing task number {n} with a fairly descriptive name")}))
+            .collect();
+        let row = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"TodoWrite","input":{"todos": todos}},
+            {"type":"tool_use","id":"2","name":"Bash","input":{"command":"x".repeat(5000)}}]}});
+        let tools = messages(&row).remove(0).tools;
+        assert!(tools[0].input.len() > 2048);
+        let list = crate::native_ui::tasks::normalize(&tools[0].name, &tools[0].input).unwrap();
+        assert_eq!(list.tasks.len(), 30);
+        // Other tools keep their smaller cap.
+        assert!(tools[1].input.len() <= 2048);
     }
 }
