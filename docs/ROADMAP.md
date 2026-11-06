@@ -163,6 +163,10 @@ is opt-in per agent until the user changes it.
 
 ### 0. Native UI mode at Orca's level (first)
 
+**Working list: [NATIVE-UI-PARITY.md](NATIVE-UI-PARITY.md)**, a row-by-row
+checklist against Orca's terminal-backed chat with Orca source files named. Pick
+rows from it; the bullets below are the summary.
+
 Today `NativeCliChat.tsx` (124 lines) renders hook/transcript snapshots and types
 into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
 
