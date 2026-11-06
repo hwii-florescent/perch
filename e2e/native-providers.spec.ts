@@ -6,6 +6,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { fixtureHome } from "./fixtureHome";
 import { setChatMode } from "./chatMode";
 import { cheapModelEnv, CHEAP_CODEX_MODEL } from "./cheapModel";
 import { startFromPanel } from "./projects";
@@ -172,7 +173,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
     await shell.locator(".xterm-helper-textarea").press("Enter");
     // Scratchpad shells start in HOME, not its hidden bookkeeping folder.
-    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${os.homedir()}`);
+    await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${fixtureHome()}`);
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);
     await page.screenshot({ path: path.join(shots, `native-omp-pi-split-${testInfo.project.name}.png`) });

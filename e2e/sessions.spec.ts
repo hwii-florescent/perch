@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { addProject, startChat } from "./projects";
+import { fixtureHome } from "./fixtureHome";
 
 /** Set Settings → "Empty workspace opens" through the real modal. */
 async function setEmptyWorkspaceAgent(page: Page, agent: string): Promise<void> {
@@ -54,8 +55,8 @@ test.describe("Session lifecycle", () => {
     const checkCwd = async () => {
       const marker = `scratchpad_cwd_${crypto.randomUUID()}:`;
       await terminal.locator(".xterm-helper-textarea").pressSequentially(`printf '${marker}%s\\n' "$PWD"\n`);
-      // The fixture core explicitly uses this process's home (playwright.config.ts).
-      await expect(terminal.locator(".xterm-rows")).toContainText(`${marker}${os.homedir()}`);
+      // The fixture core's HOME is the run's private fixture home (fixtureHome.ts).
+      await expect(terminal.locator(".xterm-rows")).toContainText(`${marker}${fixtureHome()}`);
     };
     await checkCwd();
 
@@ -69,7 +70,7 @@ test.describe("Session lifecycle", () => {
     const reopened = await page.evaluate(() => localStorage.getItem("perch.sessionId"));
     expect(reopened).not.toBe(id);
     await expect(chats.getByTestId(`workspace-session-${reopened}`)).toBeVisible();
-    await expect(page.getByTestId("project-list").getByTitle(os.homedir(), { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("project-list").getByTitle(fixtureHome(), { exact: true })).toHaveCount(0);
   });
 
   test("S4. × and exiting the terminal delete the session", async ({ page }) => {

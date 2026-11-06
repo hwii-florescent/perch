@@ -4,6 +4,7 @@ import * as os from "os";
 import { CHEAP_CLAUDE_MODEL } from "./cheapModel";
 import * as fs from "node:fs";
 import { fixtureRuntimeEnv } from "./fixtureRuntime";
+import { REAL_HOME } from "./fixtureHome";
 import { LOCAL_TOKEN, localCookie } from "./localAuth";
 
 // One fresh scope per run, inherited by workers. Never delete another run's
@@ -12,7 +13,9 @@ const state = process.env.PERCH_E2E_STATE ??= fs.mkdtempSync(path.join(os.tmpdir
 const hub = path.join(state, "hub"), remote = path.join(state, "remote");
 fs.mkdirSync(hub, { recursive: true });
 fs.mkdirSync(remote, { recursive: true });
-Object.assign(process.env, fixtureRuntimeEnv(hub));
+// Workers keep the real HOME (browsers, npx); only cores get the fixture home.
+const { HOME: _fixtureHome, ...hubEnv } = fixtureRuntimeEnv(hub);
+Object.assign(process.env, hubEnv);
 // Every core this config starts (including spec-owned spawns) inherits Haiku.
 process.env.ANTHROPIC_MODEL = CHEAP_CLAUDE_MODEL;
 
@@ -78,10 +81,12 @@ export default defineConfig({
         ...fixtureRuntimeEnv(hub),
         PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
         PERCH_NO_LOGIN_PATH: "1",
-        // Keep credentials available, but never share Perch state.
-        HOME: os.homedir(),
+        // HOME is the fixture home (fixtureRuntimeEnv): credentials stay reachable through its
+        // symlinks, Perch state does not. The webServer's cargo still uses the real toolchain.
+        CARGO_HOME: `${REAL_HOME}/.cargo`,
+        RUSTUP_HOME: `${REAL_HOME}/.rustup`,
         // Include ~/.cargo/bin so cargo/rustc are on PATH for the webServer command.
-        PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+        PATH: `${REAL_HOME}/.cargo/bin:${process.env.PATH ?? ""}`,
       },
     },
     {
@@ -96,8 +101,9 @@ export default defineConfig({
         ...fixtureRuntimeEnv(remote),
         PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
         PERCH_NO_LOGIN_PATH: "1",
-        HOME: os.homedir(),
-        PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+        CARGO_HOME: `${REAL_HOME}/.cargo`,
+        RUSTUP_HOME: `${REAL_HOME}/.rustup`,
+        PATH: `${REAL_HOME}/.cargo/bin:${process.env.PATH ?? ""}`,
       },
     },
   ],

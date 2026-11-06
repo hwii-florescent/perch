@@ -15,6 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { fixtureHome } from "./fixtureHome";
 import { setChatMode } from "./chatMode";
 import { addProject, startFromPanel } from "./projects";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
@@ -431,7 +432,7 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
         try { process.kill(-pid, "SIGTERM"); process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
       }
     });
-    if (sessionId) fs.rmSync(path.join(os.homedir(), ".perch/uploads", sessionId), { recursive: true, force: true });
+    if (sessionId) fs.rmSync(path.join(fixtureHome(), ".perch/uploads", sessionId), { recursive: true, force: true });
     fs.closeSync(log);
     fs.copyFileSync(path.join(fixture, "core.log"), `/tmp/nc-core-${provider}.log`);
     await testInfo.attach("core.log", { body: fs.readFileSync(path.join(fixture, "core.log"), "utf8").split("\n").filter((line) => /commands|WARN|ERROR|DBG/.test(line)).join("\n"), contentType: "text/plain" });

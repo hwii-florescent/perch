@@ -49,9 +49,27 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
   variable, read `localToken` from `<PERCHD_DIR>/core.json` (0600, same-user readable) or open
   the one-use `local-login?code=` link it prints to a terminal. `PERCH_REQUIRE_PAIRING` does
   nothing now. iOS-simulator probes against a loopback core need pairing like any phone.
+- **Fixture cores run under a private `$HOME`** (`e2e/fixtureHome.ts`). "Chats" sessions start
+  in `$HOME`, and a real agent started there walks it; on macOS that reaches Desktop,
+  Documents, Downloads, Pictures and Music and the OS asks for access in the name of the test
+  `perch-core` (a new identity on every rebuild). `fixtureRuntimeEnv()` therefore sets `HOME` to
+  one temp dir per run holding symlinks to what agents and shells need (`.claude`, `.codex`,
+  `.pi`, `.omp`, `.local`, toolchains, `.config`, shell startup files, `Library/Keychains` so
+  logins keep working) and never to a protected folder or `~/.perch`; it is deleted when the
+  runner exits. Test code runs under the real home: use `fixtureHome()` for where the *core's*
+  `$HOME` is (the Chats cwd, `.perch/worktrees`, `.perch/uploads`) and `REAL_HOME` for the
+  user's. A spec that spawns a core must take its env from `fixtureRuntimeEnv(...)` (a `HOME`
+  override goes after it); a config that copies it into `process.env` must drop `HOME`. A new
+  spec or config must never start an agent under the real home. To check a change, run a
+  real-Claude spec such as `cli-sync.spec.ts` and read the TCC log for the test binary:
+  `log show --last 5m --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "AUTHREQ_PROMPTING"'`
+  should list nothing for your worktree's `target/debug/perch-core`. `device-pairing.spec.ts`
+  and `workspace-recovery.spec.ts` fail with and without it (below).
 - Known base failures (not regressions, same on a clean checkout): `federation.spec.ts` E2,
   `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
-  `remote-workspace.spec.ts` RW4.
+  `remote-workspace.spec.ts` RW4, `workspace-recovery.spec.ts` (its core's sidebar opens By status,
+  so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check; its
+  earlier "working" check also races the process snapshot).
 - Add new specs to the intended config's `testMatch`. Main config enumerates
   specs; a new filename alone is not enough.
 - Runs start with clean test state; create your own project/chat via

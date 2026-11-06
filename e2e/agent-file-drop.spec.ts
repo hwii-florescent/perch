@@ -77,8 +77,8 @@ test("external files reach agent and shell prompts through native paste, without
   try {
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--providers-path", providers], {
       cwd: root, env: {
-        ...process.env, HOME: fixture, PERCH_NO_LOGIN_PATH: "1", PATH: `${bin}:${process.env.PATH}`,
-        ...fixtureRuntimeEnv(fixture),
+        ...process.env, PERCH_NO_LOGIN_PATH: "1", PATH: `${bin}:${process.env.PATH}`,
+        ...fixtureRuntimeEnv(fixture), HOME: fixture,
       }, stdio: ["ignore", log, log],
     });
     await expect.poll(async () => {

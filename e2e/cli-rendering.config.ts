@@ -14,8 +14,8 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 import * as path from "path";
-import * as os from "os";
 import { LOCAL_TOKEN, localStorageState } from "./localAuth";
+import { REAL_HOME, fixtureHome } from "./fixtureHome";
 
 export default defineConfig({
   testDir: ".",
@@ -48,8 +48,11 @@ export default defineConfig({
       timeout: 90000,
       env: {
         PERCH_LOCAL_TOKEN: LOCAL_TOKEN,
-        HOME: os.homedir(),
-        PATH: `${os.homedir()}/.cargo/bin:${process.env.PATH ?? ""}`,
+        // Real agents start in $HOME: give them the private fixture home (fixtureHome.ts).
+        HOME: fixtureHome(),
+        CARGO_HOME: `${REAL_HOME}/.cargo`,
+        RUSTUP_HOME: `${REAL_HOME}/.rustup`,
+        PATH: `${REAL_HOME}/.cargo/bin:${process.env.PATH ?? ""}`,
       },
     },
   ],

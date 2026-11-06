@@ -6,7 +6,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { setTimeout } from "node:timers/promises";
+// The `.ts` suffix: fixtureServer.ts loads this file under plain Node, which needs it.
+import { fixtureHome } from "./fixtureHome.ts";
 
+/** Environment that confines a fixture core to private state: its database, daemon and settings
+ * under `fixture`, and `HOME` set to the run's fixture home (fixtureHome.ts). Callers that copy it into
+ * their own `process.env` must leave `HOME` out: the test runner needs the real one. */
 export function fixtureRuntimeEnv(fixture: string) {
   const root = fs.realpathSync(fixture);
   const relative = path.relative(fs.realpathSync(os.tmpdir()), root);
@@ -20,6 +25,7 @@ export function fixtureRuntimeEnv(fixture: string) {
     PERCHD_DIR: path.join(root, "daemon"),
     PERCHD_IDLE_EXIT_SECS: "1",
     PERCH_CLEANUP_OWNER: `fixture:${root}`,
+    HOME: fixtureHome(),
   };
 }
 

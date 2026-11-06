@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
+import { fixtureHome } from "./fixtureHome";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { firstWorkspaceId, openWorkspaceTool } from "./workspaceTools";
 
@@ -285,7 +286,7 @@ test("mixed workspaces, sessions, terminal, draft conflict and comments recover 
     } catch {
       /* fixture may already be gone */
     }
-    fs.rmSync(path.join(os.homedir(), ".perch", "worktrees", path.basename(repo)), { recursive: true, force: true });
+    fs.rmSync(path.join(fixtureHome(), ".perch", "worktrees", path.basename(repo)), { recursive: true, force: true });
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
