@@ -51,7 +51,8 @@ const PRE = "m-0 overflow-auto bg-surface-0 p-[0.55rem] text-fg whitespace-pre-w
 const BANNER = "shrink-0 bg-[color-mix(in_srgb,var(--yellow)_8%,transparent)] text-[0.66rem] text-yellow";
 
 // VS Code's explorer metrics (explorerviewlet.css, tree.css), tighter: 18px rows (VS Code: 22), an 8px indent per level, a 16px twistie cell
-// holding a 10px chevron. Text stays 12px like the project organizer (VS Code uses 13px); the narrow/phone tree keeps 44px touch targets.
+// holding a 10px chevron. Text stays 12px like the project organizer (VS Code uses 13px).
+// Only phone viewports get 44px targets: a narrow desktop drawer must stay compact.
 const ROW_FONT = "text-[length:calc(12px*var(--zoom,1))]";
 const ROW_MIN_H = "min-h-[calc(18px*var(--zoom,1))]";
 const HEADER_ICON = cn(GHOST_BUTTON, "grid size-6 place-items-center p-0");
@@ -127,7 +128,7 @@ function FileTree({
             <button
               type="button"
               className={cn(
-                cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-1 rounded-ui pr-3 text-left [border:0] [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg [@container(max-width:460px)]:min-h-11",
+                cn(ROW_MIN_H, ROW_FONT), "flex w-full cursor-pointer items-center gap-1 rounded-ui py-0 pr-3 text-left leading-none [border:0] [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg max-[700px]:min-h-11",
                 selected || cursor === entry.path ? "bg-surface-1 text-fg" : "bg-transparent text-subtext-0",
                 cursor === entry.path && CURSOR_RING,
               )}

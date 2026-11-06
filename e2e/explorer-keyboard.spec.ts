@@ -47,6 +47,8 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
     fs.writeFileSync(path.join(root, "lib/new.ts"), "export const added = true;\n"); git("add", "lib/new.ts");
     fs.rmSync(path.join(root, "src/deleted.ts")); git("mv", "src/old.ts", "lib/renamed.ts");
     fs.mkdirSync(path.join(root, "node_modules")); fs.writeFileSync(path.join(root, "node_modules/ignored.js"), "ignored\n");
+    // A normal desktop drawer is narrower than 460px; that must not enable phone density.
+    await page.addInitScript(() => localStorage.setItem("perch.layout.toolsWidth", "300"));
     await page.setViewportSize({ width: 1240, height: 824 });
     await page.goto("/"); await addProject(page, root);
     const workspaceId = await firstWorkspaceId(page.locator(".workspace-project").filter({ hasText: path.basename(root) }));
@@ -61,6 +63,15 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
     await expect(row("node_modules").getByTestId("file-git-marker")).toHaveCount(0);
     await expect(row("package.json").locator('[data-file-icon="package"]')).toBeVisible();
     await expect(row("pnpm-lock.yaml").locator('[data-file-icon="config"]')).toBeVisible();
+    for (const width of [1240, 900, 701]) {
+      await page.setViewportSize({ width, height: 824 });
+      expect((await page.getByTestId("workspace-files-view").boundingBox())!.width).toBeLessThan(460);
+      for (const file of ["src", "src/App.tsx", "package.json"]) {
+        await expect(row(file)).toHaveCSS("min-height", "18px");
+        expect((await row(file).boundingBox())!.height).toBe(18);
+      }
+    }
+    await page.setViewportSize({ width: 1240, height: 824 });
     await page.evaluate(() => window.usePerchStore.setState({ usage: [{ provider: "claude", windows: [{ label: "5h", usedPercent: 42, windowMinutes: 300 }, { label: "7d", usedPercent: 19, windowMinutes: 10080 }] }, { provider: "codex", windows: [{ label: "5h", usedPercent: 8, windowMinutes: 300 }] }] }));
     await expect(page.getByTestId("needs-you-toggle")).toHaveCount(0);
     for (const theme of THEME_NAMES) {
@@ -125,6 +136,19 @@ test("single click previews, the keyboard walks the tree, Enter and Keep Open ma
     await addProject(page, root);
     const workspaceId = await firstWorkspaceId(page.locator(".workspace-project").filter({ hasText: path.basename(root) }));
     await openWorkspaceTool(page, workspaceId, "files");
+
+    // Collapse preserves the folder cursor, not a file selection. The next arrow starts there.
+    const folder = page.getByTestId("workspace-file-entry-dir");
+    await folder.click();
+    await expect(folder).toHaveAttribute("aria-expanded", "true");
+    await folder.click();
+    await page.mouse.move(0, 0);
+    await expect(folder).toHaveAttribute("aria-expanded", "false");
+    await expect(folder).toHaveAttribute("aria-selected", "false");
+    await expect(folder).toHaveClass(/bg-surface-1/);
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("workspace-file-entry-a.txt")).toHaveClass(/bg-surface-1/);
+    await expect(tab(page, "a.txt")).toHaveCount(0);
 
     // A click previews; the next click replaces it.
     await page.getByTestId("workspace-file-entry-a.txt").click();
