@@ -233,6 +233,12 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await changed.locator("summary", { hasText: "changed.txt" }).click();
       await expect(changed.getByTestId("native-cli-turn-diff")).toContainText("hello perch");
     });
+    // 6. After real turns the provider has reported how full the context is (OpenCode has no source).
+    await check("context ring", async () => {
+      const ring = ui.getByTestId("native-cli-context");
+      await expect(ring).toBeVisible({ timeout: 15_000 });
+      expect(Number(await ring.getAttribute("data-percent"))).toBeGreaterThan(0);
+    });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);
   } catch (error) {

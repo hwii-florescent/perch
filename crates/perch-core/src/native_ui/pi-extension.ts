@@ -106,12 +106,17 @@ export default function (pi: any) {
       recent.unshift(messages[index]);
     }
     const running = !ctx.isIdle() || ctx.hasPendingMessages();
+    // Unknown right after compaction (tokens is null) and on hosts without the call.
+    let usage;
+    try { usage = ctx.getContextUsage?.(); } catch { usage = undefined; }
+    const context = usage && usage.tokens > 0 && usage.contextWindow > 0 ? { usedTokens: usage.tokens, windowTokens: usage.contextWindow } : undefined;
     return {
       type: "snapshot", version: 1, revision: ++revision, pid: process.pid,
       providerSessionId: ctx.sessionManager.getSessionFile() ?? ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd, model: ctx.model?.id ?? null,
       running,
       blocked: running && (asking.size > 0 || approvals > 0 || uiPrompts > 0),
+      context,
       messages: recent, truncated: historyTruncated || messages.length > recent.length,
     };
   }

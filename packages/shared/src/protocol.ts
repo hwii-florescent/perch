@@ -80,8 +80,18 @@ export interface NativeUiSnapshot {
   blocked?: boolean;
   /** The numbered choices the CLI is waiting on, when its screen shows them. */
   request?: NativeUiRequest;
+  /** How full the model's context is, when the provider reports it. */
+  context?: NativeUiContext;
   messages: NativeUiMessage[];
   truncated: boolean;
+}
+
+/** Context use from the last model response. Never a cost or a quota. */
+export interface NativeUiContext {
+  usedTokens: number;
+  windowTokens: number;
+  /** The window size is a guess from the model name (Claude does not report it). */
+  estimated?: boolean;
 }
 
 /** A permission prompt or question, answered by `agent.ui.answer` with an option key. */

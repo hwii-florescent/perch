@@ -16,6 +16,7 @@ import { ChangedFiles } from "./nativeChat/ChangedFiles";
 import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
+import { ContextRing } from "./nativeChat/ContextRing";
 import { blockId, findBlocks, toBlocks } from "./nativeChat/transcript";
 import { Receipts, RequestCard, WaitingNotice, type Receipt } from "./nativeChat/RequestCard";
 import { uploadAttachment } from "../attachments";
@@ -234,6 +235,7 @@ export function NativeCliChat({ sessionId, providerId }: { sessionId: string; pr
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
       {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model}>{snapshot.model}</span>}
+      {snapshot?.context && <span className={snapshot.model ? undefined : "ml-auto"}><ContextRing context={snapshot.context} /></span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>
     {find !== null && <FindBar query={find} onQuery={(value) => { setFind(value); setFindIndex(0); }} count={hits.length} index={hits.length ? ((findIndex % hits.length) + hits.length) % hits.length : 0}

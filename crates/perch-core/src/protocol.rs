@@ -734,8 +734,22 @@ pub struct NativeUiSnapshot {
     /// The numbered choices the CLI is waiting on, when its screen shows them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<NativeUiRequest>,
+    /// How full the model's context is, when the provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<NativeUiContext>,
     pub messages: Vec<NativeUiMessage>,
     pub truncated: bool,
+}
+
+/// Context use from the last model response. Never a cost or a quota.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiContext {
+    pub used_tokens: u64,
+    pub window_tokens: u64,
+    /// The window size is a guess from the model name (Claude does not report it).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub estimated: bool,
 }
 
 /// A permission prompt or question, answered by `agent.ui.answer` with an option key.

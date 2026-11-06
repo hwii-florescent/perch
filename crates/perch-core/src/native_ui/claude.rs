@@ -1,7 +1,7 @@
 //! Observe Claude's native hooks/transcript and type only into a verified empty
 //! native prompt. Claude owns its loop, tools, configuration, and conversation.
 use super::*;
-use crate::protocol::{NativeUiMessage, NativeUiTool};
+use crate::protocol::{NativeUiContext, NativeUiMessage, NativeUiTool};
 use serde_json::Value;
 use std::{
     fs,
@@ -175,7 +175,45 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
     result
 }
 
-fn transcript(path: &Path, session: &str) -> anyhow::Result<(Vec<NativeUiMessage>, bool)> {
+/// Tokens the last model response read and wrote (what the next request starts from).
+fn used_tokens(row: &Value) -> u64 {
+    let usage = &row["message"]["usage"];
+    [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens",
+    ]
+    .iter()
+    .map(|field| usage[field].as_u64().unwrap_or(0))
+    .sum()
+}
+
+/// Claude does not report its window. Only `[1m]` names it, and a session past 200k must have it.
+/// ponytail: a 1M model run without the suffix reads as 200k until it passes 200k; use the
+/// statusLine `context_window` feed if that proves common.
+fn context(row: &Value) -> Option<NativeUiContext> {
+    let used = used_tokens(row);
+    let model = row["message"]["model"].as_str();
+    if used == 0 {
+        return None;
+    }
+    let window =
+        if used > 200_000 || model.is_some_and(|model| model.to_lowercase().ends_with("[1m]")) {
+            1_000_000
+        } else {
+            200_000
+        };
+    Some(NativeUiContext {
+        used_tokens: used,
+        window_tokens: window,
+        estimated: true,
+    })
+}
+
+type History = (Vec<NativeUiMessage>, bool, Option<NativeUiContext>);
+
+fn transcript(path: &Path, session: &str) -> anyhow::Result<History> {
     ensure!(
         path.file_name().and_then(|name| name.to_str()) == Some(&format!("{session}.jsonl")),
         "native transcript identity mismatch"
@@ -209,6 +247,9 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<(Vec<NativeUiMessage
                 (
                     row["parentUuid"].as_str().unwrap_or_default().to_string(),
                     messages(&row),
+                    (row["type"] == "assistant")
+                        .then(|| context(&row))
+                        .flatten(),
                 ),
             );
         } else if let Some(id) = row["leafUuid"].as_str() {
@@ -218,8 +259,13 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<(Vec<NativeUiMessage
     let mut history = Vec::new();
     let mut size = 0;
     let mut truncated = offset != 0;
+    let mut usage = None;
     // Removal also prevents a malformed parent cycle from looping forever.
-    while let Some((parent, row)) = nodes.remove(&leaf) {
+    while let Some((parent, row, row_usage)) = nodes.remove(&leaf) {
+        // The newest response on this branch; a /clear or rewind starts a new branch.
+        if usage.is_none() {
+            usage = row_usage;
+        }
         for message in row.into_iter().rev() {
             size += serde_json::to_vec(&message)?.len();
             if history.len() >= 128 || size > 192 * 1024 {
@@ -234,7 +280,7 @@ fn transcript(path: &Path, session: &str) -> anyhow::Result<(Vec<NativeUiMessage
         leaf = parent;
     }
     history.reverse();
-    Ok((history, truncated))
+    Ok((history, truncated, usage))
 }
 
 fn empty_prompt(line: &str) -> bool {
@@ -353,7 +399,7 @@ pub(super) async fn observe(
     };
     let mut events = HashMap::<String, (String, u32, Value)>::new();
     let mut history_key = String::new();
-    let mut history = (Vec::new(), false);
+    let mut history: History = (Vec::new(), false, None);
     let mut last = String::new();
     let mut revision = 0;
     let mut was_blocked = false;
@@ -382,7 +428,7 @@ pub(super) async fn observe(
                 let next_history = format!("{session}:{}", stamp(path));
                 if next_history != history_key {
                     if let Ok(next) = transcript(path, session) { history = next; history_key = next_history; changed = true; }
-                    else if history_key.split(':').next() != Some(session) { history = (vec![], false); }
+                    else if history_key.split(':').next() != Some(session) { history = (vec![], false, None); }
                 }
                 if !changed && pending.is_empty() && !was_blocked { continue; }
                 let (mut running, mut blocked) = (false, false);
@@ -398,7 +444,7 @@ pub(super) async fn observe(
                 // draw after the hook fires, so keep reading while blocked.
                 was_blocked = blocked;
                 let request = if blocked { super::dialog::read(key) } else { None };
-                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, messages: history.0.clone(), truncated: history.1 };
+                let mut snapshot = NativeUiSnapshot { version: 1, revision: 0, pid: *pid, provider_session_id: session.into(), cwd: clip(start["cwd"].as_str().unwrap_or_default(), 4096), model, running, blocked, request, context: history.2.clone(), messages: history.0.clone(), truncated: history.1 };
                 let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
                 if serialized != last {
                     last = serialized; revision += 1; snapshot.revision = revision;
@@ -430,6 +476,31 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn context_sums_the_last_response_and_guesses_the_window_from_the_model() {
+        let row = |model: &str, input: u64, cache: u64| serde_json::json!({"type":"assistant","message":{"model":model,"usage":{"input_tokens":input,"cache_read_input_tokens":cache,"output_tokens":10}}});
+        let small = context(&row("claude-haiku-4-5", 100, 900)).unwrap();
+        assert_eq!(
+            (small.used_tokens, small.window_tokens, small.estimated),
+            (1010, 200_000, true)
+        );
+        assert_eq!(
+            context(&row("claude-opus-4-7[1m]", 100, 900))
+                .unwrap()
+                .window_tokens,
+            1_000_000
+        );
+        // Past 200k the window can only be the large one.
+        assert_eq!(
+            context(&row("claude-opus-4-7", 100, 250_000))
+                .unwrap()
+                .window_tokens,
+            1_000_000
+        );
+        // Synthetic responses report zero usage.
+        assert!(context(&serde_json::json!({"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0}}})).is_none());
+    }
+
     /// The exact payload Claude Code wrote for a prompt perch had sent as a
     /// bracketed paste, captured from `UserPromptSubmit` on the installed CLI.
     /// Equality against it is false, which is what silently turned every

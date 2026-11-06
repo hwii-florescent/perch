@@ -225,10 +225,18 @@ plus `git.diff` compare); Cmd/Ctrl+F finds across messages and run contents; a
 prompt rail jumps between user messages. Also fixed: a plain Claude launch read as
 `claude-agent-teams` (same executable, last catalog entry won), which dropped its
 native bridge.
-Not yet: context-use ring (needs token usage per provider: Claude transcript
-`usage`, Codex token events; model limits are not reported) and the background-task
-strip (needs a source), queue cards, Steer, Rewind, `/compact` shortcut, prompt
-recall, Claude stream-json (not needed for approvals now).
+Context ring (toolbar, amber from 70%, red from 90%, tooltip with tokens) for
+Claude, Codex, Pi and OMP via `NativeUiSnapshot.context`: Codex reports it
+(`thread/tokenUsage/updated`, `last.totalTokens` over `modelContextWindow`), Pi and
+OMP report it through `ctx.getContextUsage()`, Claude gives only per-response usage
+in its transcript, so its window is a guess (200k, 1M for `[1m]` or past 200k) and
+the tooltip says "about". OpenCode has no source yet. Live-checked on Claude; the
+Pi/OMP/Codex paths are unit-tested and wait on a run when their accounts are
+under the usage limit.
+Not yet: background-task strip (Orca feeds it from Claude hooks and structured
+child work, the same SubagentStart/SubagentStop source step 2 needs, so it lands
+there), queue cards, Steer, Rewind, `/compact` shortcut, prompt recall, Claude
+stream-json (not needed for approvals now).
 
 ### 1. Projects: Birdhouse instructions and files
 

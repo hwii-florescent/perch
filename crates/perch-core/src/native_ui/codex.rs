@@ -250,6 +250,26 @@ impl View {
                 self.snapshot.blocked = waiting_on_human(&params["status"]);
                 self.dirty = true;
             }
+            // `last` is the newest request (context, also after compaction); `total` is cumulative spend.
+            "thread/tokenUsage/updated" => {
+                let usage = &params["tokenUsage"];
+                self.snapshot.context = usage["last"]["totalTokens"]
+                    .as_u64()
+                    .filter(|used| *used > 0)
+                    .zip(
+                        usage["modelContextWindow"]
+                            .as_u64()
+                            .filter(|window| *window > 0),
+                    )
+                    .map(
+                        |(used_tokens, window_tokens)| crate::protocol::NativeUiContext {
+                            used_tokens,
+                            window_tokens,
+                            estimated: false,
+                        },
+                    );
+                self.dirty = true;
+            }
             "thread/settings/updated" => {
                 self.snapshot.model = params["threadSettings"]["model"]
                     .as_str()
@@ -398,6 +418,7 @@ async fn connection(
             running: false,
             blocked: false,
             request: None,
+            context: None,
             messages: vec![],
             truncated: false,
         },
@@ -714,6 +735,7 @@ mod tests {
                 running: true,
                 blocked: false,
                 request: None,
+                context: None,
                 messages: vec![],
                 truncated: false,
             },
@@ -734,6 +756,18 @@ mod tests {
         assert!(view.snapshot.running && !view.snapshot.blocked);
         view.event(&json!({"method":"thread/status/changed","params":{"threadId":"native","status":{"type":"active","activeFlags":["waitingOnUserInput"]}}}));
         assert!(view.snapshot.blocked);
+        view.event(&json!({"method":"thread/tokenUsage/updated","params":{"threadId":"native","tokenUsage":{"total":{"totalTokens":900000},"last":{"totalTokens":42000},"modelContextWindow":272000}}}));
+        let context = view.snapshot.context.clone().unwrap();
+        assert_eq!(
+            (
+                context.used_tokens,
+                context.window_tokens,
+                context.estimated
+            ),
+            (42_000, 272_000, false)
+        );
+        view.event(&json!({"method":"thread/tokenUsage/updated","params":{"threadId":"native","tokenUsage":{"last":{"totalTokens":0},"modelContextWindow":272000}}}));
+        assert!(view.snapshot.context.is_none());
         view.event(&json!({"method":"turn/completed","params":{"threadId":"native","turn":{"id":"turn","status":"failed","error":{"message":"native failure"}}}}));
         assert!(!view.snapshot.running && !view.snapshot.blocked);
         assert_eq!(

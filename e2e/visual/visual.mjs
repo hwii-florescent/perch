@@ -1391,6 +1391,14 @@ const STATES = [
     if ((await page.getByTestId("native-cli-find").count()) !== 0) throw new Error("25e2: Esc did not close find");
     await nativeClean(page, "25e2");
   } },
+  { name: "25e3-native-context-ring", fresh: true, run: async (page) => {
+    await nativePage(page, { snapshot: nativeSnapshot({ context: { usedTokens: 190000, windowTokens: 200000, estimated: true } }), owner: true });
+    const ring = page.getByTestId("native-cli-context");
+    await ring.waitFor();
+    if ((await ring.getAttribute("data-percent")) !== "95") throw new Error("25e3: the ring does not read 95%");
+    if (!/about 200k/.test((await ring.getAttribute("aria-label")) ?? "")) throw new Error("25e3: a guessed window is not labelled");
+    await nativeClean(page, "25e3");
+  } },
   { name: "25f-native-lease-refused", fresh: true, run: async (page) => {
     await nativePage(page, { owner: true, denyControl: true });
     await page.getByRole("button", { name: "Take control" }).click();
