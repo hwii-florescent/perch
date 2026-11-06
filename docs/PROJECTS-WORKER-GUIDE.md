@@ -44,16 +44,12 @@ their slice.
 
 ## Fix first (found while mapping; small, blocking)
 
-- **Suspected: `native_ui/claude.rs` `read_event` drops `tool_name`.** It keeps only
-  seven fields, and the poll loop passes its result to `turn_state`, which tests
-  `tool_name == "AskUserQuestion"` (statically traced, not yet reproduced); the unit test
-  builds events by hand and passes. Confirm with a fixture test first. Keep `tool_name` and `tool_use_id`; add a test that goes
-  through `read_event` from a written event file. Then check live whether Claude
-  questions were detected only through another path.
-- **Hook version floors.** Orca records that unknown hook names can make an older Claude
-  reject the whole `--settings` file (`src/main/claude/claude-hook-event-versions.ts`);
-  reproduce once with an old CLI or treat it as Orca's claim. Gate each
-  event in `EVENTS` on the detected CLI version; port that table (MIT).
+Landed (2026-11-06): `read_event` kept seven fields and dropped `tool_name`, so a
+question hook never blocked the turn (reproduced with a hook-file fixture test, fixed);
+hook events are registered per detected CLI version (Orca's floors, ported; the
+"older Claude rejects the settings file" claim stays Orca's, not reproduced here;
+`PostModelSwitch`'s floor is unmeasured). Still open: a live check that an
+`AskUserQuestion` blocks over the real CLI (see the slice 0 table).
 
 ## Step 0 UI rows (between slices; Orca code exists)
 

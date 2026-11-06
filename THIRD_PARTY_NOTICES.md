@@ -56,6 +56,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Orca native chat, hooks and orchestration ports
+
+Rust ports in `crates/perch-core/src/native_ui/` and its siblings translate logic and
+tests from [stablyai/orca](https://github.com/stablyai/orca), commit
+`308b5000`, distributed under the MIT notice above (Copyright (c) 2026 Lovecast Inc.).
+Each module's `//!` header names the files it follows:
+
+- `native_ui/transcript.rs`: `src/shared/native-chat/` transcript and tool logic.
+- `native_ui/claude.rs` hook version floors and `--version` parsing:
+  `src/main/claude/claude-hook-event-versions.ts`, `claude-managed-hook-events.ts`.
+
 ## PDF.js
 
 PDF previews use [Mozilla PDF.js](https://github.com/mozilla/pdf.js), distributed

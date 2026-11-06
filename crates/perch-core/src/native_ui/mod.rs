@@ -148,7 +148,7 @@ pub fn prepare(key: &AgentKey, provider: &str, fresh: bool) -> anyhow::Result<Na
             &serde_json::to_string(&paths.socket)?,
         )
     } else if provider == "claude" {
-        claude::settings(&paths.extension, fresh)?
+        claude::settings(&paths.extension, fresh, claude::cli_version().as_deref())?
     } else {
         include_str!("pi-extension.ts")
             .replace(
