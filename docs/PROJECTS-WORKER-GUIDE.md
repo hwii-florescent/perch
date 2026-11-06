@@ -300,14 +300,60 @@ What later slices build on:
 - **Binary.** `perch whoami [--json]`, `perch report <text>` (or stdin; at most 4,000 characters;
   the latest report is kept on the run and nothing reads it yet), `perch guide` (own text, in the
   binary). `perch daemon <verb>` runs the daemon verbs; the bare `ps`, `list`, `cleanup`, `release`,
-  `serve`, `connect` remain aliases. **Slice 4 must decide** what `perch list` means: it is still
-  the daemon's session list, and the plan wants it to list sub-sessions.
+  `serve`, `connect` remain aliases. **Decided (owner, 2026-11-06):** `perch list` lists the
+  caller's run in slice 4; the bare `list` alias and `serve`/`connect` aliases go, the daemon list
+  is `perch daemon list`; `ps`, `cleanup`, `release` keep their bare aliases.
 - **Live check:** `e2e/instructions.spec.ts` (one extra `perch whoami` turn per provider, haiku and
   luna): the reply names the session, the session has exactly one live identity row, and no
   `perch_agent_` string reaches the chat, `ps` or the core log.
 - The guide text still describes only `whoami`, `report` and `guide`; each later slice adds its
   verbs and the rules that go with them (only person-started turns may spawn, children cannot
   spawn, messages never approve).
+
+## Slice 3a: no tokenless local authority (owner, 2026-11-06; before slice 4)
+
+*Own* design. Today `authorize_request` (`server/mod.rs`) exempts loopback requests with no
+proxy headers, so any local process, including an agent that omits its token, has full
+authority. Change: every request presents a token.
+
+- **Local UI token.** At boot the core mints a random per-launch token (never stored on disk
+  except as below, never logged). The desktop app (`crates/perch-desktop`, in-process core)
+  hands it to its own webview (e.g. as the `perch_device`-style cookie set on the first
+  navigation, or an initialization script); trace how the desktop webview loads the UI first.
+  Headless/dev: `npm run dev`, `target/debug/perch-core` and the e2e harness need a way in:
+  the core writes the local UI token into the 0600 `core.json` (same dir as the `perch` CLI
+  reads) and prints a one-time local URL with it; the e2e helpers read it from there. Paired
+  devices keep their existing tokens and cookie.
+- **Rule.** Every HTTP and WS route requires a device token, the local UI token, or (only on
+  `/agent/*`) an agent token. Remove the loopback exemption; `PERCH_REQUIRE_PAIRING` becomes
+  a no-op (keep accepting it). Pairing and `/pair` stay reachable as today.
+- **Who else calls the core locally:** grep for every loopback client (perchd, shims, hook
+  scripts, relay host, `perch` CLI, iOS dev, scripts in `e2e/`, `scripts/`), and give each
+  the token path it needs. Hooks write files (no HTTP), so they are unaffected; verify.
+- **Tests:** a booted-core test that a tokenless loopback request is refused on WS and every
+  HTTP route, that the local UI token works, that an agent token works only on `/agent/*`;
+  desktop dev launch and the e2e suite still connect. Update ARCHITECTURE, TESTING and the
+  Slice 3 "Still open" note above.
+
+## Slice 3b: ship `perch` in packages (owner, 2026-11-06)
+
+Bundle the `perch` binary beside the core in the desktop app bundle and the headless package
+(see `packaging/`, Tauri bundle config in `crates/perch-desktop`), so `binary_beside` finds it.
+Check: build the package locally, launch it isolated, open one agent session and confirm a
+`perch whoami` turn (or, zero-token, that the shim exists and `perch whoami` run in the session's
+environment succeeds). Document in TESTING/PUBLIC-ALPHA.
+
+## Row 10b: live model/effort/mode pickers (owner yes, 2026-11-06)
+
+Port Orca's pickers: `NativeChatSessionOptionPickers.tsx`, `NativeChatModelCombobox.tsx`,
+`NativeChatPermissionModePicker.tsx` (components), and the logic in
+`shared/native-chat/input/native-chat-session-option-{commands,apply,state}.ts` and
+`native-chat-pty-session-options.ts` to Rust (`native_ui/`), with their tests. Apply only at an
+idle, verified-empty prompt under the input lease by typing the CLI's own command
+(`/model`, `/effort`, permission-mode cycle, per provider; probe each CLI's command first);
+the UI shows the new value only after read-back (`PostModelSwitch`, `SessionStart.model`,
+Codex app-server events, screen); refused while a turn runs, a dialog is open or a draft is in
+the prompt. Providers without a confirmable read-back show no picker for that option.
 
 ## Slice 4: spawn, list, stop, reports
 

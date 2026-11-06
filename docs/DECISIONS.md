@@ -7,6 +7,21 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-06 — Local authority, `perch list`, packaging, live pickers (owner)
+
+- **No more tokenless loopback authority**, before slice 4. Every client of the core
+  presents a token: a paired device, the core's own local UI (a per-launch token handed
+  to its desktop webview and headless dev/e2e clients), or an agent (only `/agent/*`).
+  An agent omitting its token gets nothing. `PERCH_REQUIRE_PAIRING` becomes moot.
+- **`perch list` lists the caller's run** (lead and children). The daemon list is only
+  `perch daemon list`; `ps`, `cleanup` and `release` keep their bare aliases.
+- **Packaging now:** desktop and headless packages ship `perch` beside the core, with a
+  check that a packaged launch can run `perch whoami`.
+- **Live model/effort/permission-mode pickers: yes.** Port Orca's picker components;
+  apply by typing the CLI's own command only at an idle, verified prompt under the input
+  lease, and show the change only once read back. This replaces "no model chrome over a
+  live session" (2026-11-05).
+
 ## 2026-11-06 — Claude desktop as the UI target; Projects and sub-sessions settled (owner)
 
 Settles the open items of the 2026-11-05 direction below. Details and slice order in
