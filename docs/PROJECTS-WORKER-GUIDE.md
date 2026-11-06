@@ -118,6 +118,18 @@ because the tail is parsed again on every transcript change (an incremental read
 it); Codex can page with `thread/turns/list` and its cursor; Pi, OMP and OpenCode would need
 a window command in their extension or plugin.
 
+Row 7 (plan review) landed 2026-11-06 for **Claude only**, by the answer that needed no new
+machinery: Claude 2.1.319's ExitPlanMode already draws a numbered dialog, so `native_ui/dialog.rs`
+learned its shape (the plan between two `╌` rules, a solid rule, the question, `ctrl+g to edit…`
+footer) and the existing request card shows the plan as its detail with the choices that take no
+typed text ("Tell Claude what to change" is dropped like the other typed choices). The question wraps
+at 80 columns, so the parser joins its lines (found by the live run, not the first capture); option 1's
+wording follows the session's permission mode, the digits stay the answer. Unit tests use the captured
+screen, its wrapped form and a plan containing a markdown rule; live: `native-composer.spec.ts` claude
+"plan review" (`/plan`, card, approve by hand). Not done: OMP's plan review (Orca's
+`omp-plan-review-prompt.ts` and extension channel; no OMP screen captured), Pi, Codex plans, and a
+plan that wraps or scrolls past the screen (only the visible part is shown).
+
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
 task strip. They come back with the later Claude stream-json mode.

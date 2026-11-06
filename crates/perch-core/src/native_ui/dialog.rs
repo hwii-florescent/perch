@@ -19,6 +19,7 @@ use crate::protocol::{NativeUiRequest, NativeUiRequestOption};
 use sha2::{Digest, Sha256};
 
 const MAX_DETAIL: usize = 2000;
+const MAX_PLAN: usize = 8000;
 const MAX_LOOKBACK: usize = 14;
 const ARROW_DOWN: &str = "\u{1b}[B";
 const ARROW_UP: &str = "\u{1b}[A";
@@ -64,6 +65,7 @@ fn typed_choice(label: &str) -> bool {
     label.starts_with("type something")
         || label.starts_with("chat about this")
         || label.starts_with("other (type")
+        || label.starts_with("tell claude what to change")
 }
 
 fn option_line(line: &str) -> Option<(usize, &str)> {
@@ -91,7 +93,68 @@ fn radio_line(line: &str) -> Option<(bool, &str)> {
 
 fn footer(line: &str) -> bool {
     let line = line.trim().to_ascii_lowercase();
-    line.starts_with("esc to") || line.starts_with("enter to") || line.starts_with("press enter")
+    line.starts_with("esc to")
+        || line.starts_with("enter to")
+        || line.starts_with("press enter")
+        // Claude's plan review ends with the plan file's path instead.
+        || line.starts_with("ctrl+g to ")
+}
+
+/// Claude's plan review: a plan framed by two dashed (`╌`) rules, a solid rule, then the
+/// question, which wraps onto a second line in a narrow terminal. Returns the question and the
+/// plan. Read from the screen like every other dialog; the transcript's ExitPlanMode input would
+/// be more complete but is not tied to this prompt.
+fn plan_review(lines: &[&str], start: usize) -> Option<(String, String)> {
+    let plan_rule = |line: &str| !line.trim().is_empty() && line.trim().chars().all(|c| c == '╌');
+    let mut at = start;
+    let mut looked = 0;
+    while at > 0 && !solid_rule(lines[at - 1]) {
+        at -= 1;
+        looked += 1;
+        if looked > MAX_LOOKBACK {
+            return None;
+        }
+    }
+    let question = lines[at..start]
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    at = at.checked_sub(1)?;
+    while at > 0 && lines[at - 1].trim().is_empty() {
+        at -= 1;
+    }
+    if at == 0 || !plan_rule(lines[at - 1]) {
+        return None;
+    }
+    let end = at - 1;
+    let begin = lines[..end].iter().rposition(|line| plan_rule(line))? + 1;
+    let body: Vec<&str> = lines[begin..end].to_vec();
+    let indent = body
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    let text = body
+        .iter()
+        .map(|line| line.get(indent..).unwrap_or(line.trim_start()).trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = text.trim();
+    (!question.is_empty() && !text.is_empty()).then(|| (question, text.to_string()))
+}
+
+fn clip_detail(mut detail: String, max: usize) -> String {
+    if detail.len() > max {
+        let mut cut = max;
+        while !detail.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        detail.truncate(cut);
+    }
+    detail
 }
 
 /// OMP: `⏎ select · n note · ↑/↓ move · ⎋ cancel`.
@@ -215,6 +278,10 @@ pub fn parse_dialog(screen: &str) -> Option<Dialog> {
         .flatten()
         .max_by_key(|(start, _, _)| *start)?;
 
+    if let Some((question, plan)) = plan_review(&lines, start) {
+        return finish(question, clip_detail(plan, MAX_PLAN), options, keys);
+    }
+
     let mut title = None;
     let mut above = Vec::new();
     let mut blanks = 0;
@@ -270,19 +337,20 @@ pub fn parse_dialog(screen: &str) -> Option<Dialog> {
         .map(|line| line.len() - line.trim_start().len())
         .min()
         .unwrap_or(0);
-    let mut detail = detail
+    let detail = detail
         .iter()
         .map(|line| &line[indent..])
         .collect::<Vec<_>>()
         .join("\n");
-    if detail.len() > MAX_DETAIL {
-        let mut cut = MAX_DETAIL;
-        while !detail.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        detail.truncate(cut);
-    }
+    finish(title, clip_detail(detail, MAX_DETAIL), options, keys)
+}
 
+fn finish(
+    title: String,
+    detail: String,
+    options: Vec<NativeUiRequestOption>,
+    keys: Keys,
+) -> Option<Dialog> {
     let options: Vec<_> = options
         .into_iter()
         .filter(|option| !typed_choice(&option.label))
@@ -473,6 +541,98 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
         let moved = parse_dialog(&moved).unwrap();
         assert_eq!(moved.request.id, dialog.request.id);
         assert_eq!(moved.writes("1").unwrap(), ["\u{1b}[A", "\r"]);
+    }
+
+    // Captured from Claude Code 2.1.319 on 2026-11-06 (`--permission-mode plan`, after ExitPlanMode).
+    const CLAUDE_PLAN_REVIEW: &str = "
+⏺ Updated plan
+  ⎿  /plan to preview
+
+────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Create hello.txt
+
+ Create a new file hello.txt in the primary working directory containing the text \"hi\".
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+────────────────────────────────────────────────────────────────────────────────
+ Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+ ❯ 1. Yes, auto-accept edits
+   2. Yes, manually approve edits
+   3. Tell Claude what to change
+      shift+tab to approve with this feedback
+
+ ctrl+g to edit in VS Code · ~/.claude/plans/plan-a-one-step-change-reflective-newell.md
+";
+
+    #[test]
+    fn reads_a_claude_plan_review_with_its_plan_and_without_the_feedback_choice() {
+        let dialog = parse_dialog(CLAUDE_PLAN_REVIEW).unwrap();
+        assert_eq!(
+            dialog.request.title,
+            "Claude has written up a plan and is ready to execute. Would you like to proceed?"
+        );
+        assert_eq!(
+            dialog.request.detail,
+            "Create hello.txt\n\nCreate a new file hello.txt in the primary working directory containing the text \"hi\"."
+        );
+        let labels: Vec<_> = dialog
+            .request
+            .options
+            .iter()
+            .map(|o| o.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            ["Yes, auto-accept edits", "Yes, manually approve edits"]
+        );
+        assert_eq!(dialog.writes("2").unwrap(), ["2"]);
+        assert!(dialog.writes("3").is_none());
+    }
+
+    // The same dialog in an 80-column terminal, as the chat's e2e saw it: the question wraps.
+    #[test]
+    fn a_plan_review_with_a_wrapped_question_keeps_the_question_whole() {
+        let wrapped = CLAUDE_PLAN_REVIEW.replace(
+            " Claude has written up a plan and is ready to execute. Would you like to proceed?",
+            " Claude has written up a plan and is ready to execute. Would you like to\n proceed?",
+        );
+        let dialog = parse_dialog(&wrapped).unwrap();
+        assert_eq!(
+            dialog.request.title,
+            "Claude has written up a plan and is ready to execute. Would you like to proceed?"
+        );
+        assert!(dialog.request.detail.starts_with("Create hello.txt"));
+        assert_eq!(dialog.request.options.len(), 2);
+    }
+
+    #[test]
+    fn a_markdown_rule_in_the_plan_does_not_cut_it_short() {
+        let plan = CLAUDE_PLAN_REVIEW
+            .replace("Create hello.txt\n", "Create hello.txt\n---\nSecond part\n");
+        let dialog = parse_dialog(&plan).unwrap();
+        assert!(dialog
+            .request
+            .detail
+            .starts_with("Create hello.txt\n---\nSecond part"));
+    }
+
+    #[test]
+    fn a_different_plan_is_a_different_prompt() {
+        let other = CLAUDE_PLAN_REVIEW.replace("Create hello.txt", "Delete everything");
+        assert_ne!(
+            parse(&other).unwrap().id,
+            parse(CLAUDE_PLAN_REVIEW).unwrap().id
+        );
+    }
+
+    #[test]
+    fn a_permission_prompt_does_not_borrow_text_above_its_frame_as_a_plan() {
+        assert!(!parse(CLAUDE_PERMISSION).unwrap().detail.contains("Waiting"));
     }
 
     #[test]

@@ -230,7 +230,8 @@ no choices) and answers OMP plan reviews through an extension channel; T3 Code
 owns Pi in RPC mode, which this attach-to-the-TUI design does not have.
 Live-checked: Claude `AskUserQuestion`, Codex command approval, OMP `ask`, Pi
 `ask_user_question` (when installed). Perch launches Claude and Codex with
-approvals bypassed, so only questions appear by default. OMP tool approvals and
+approvals bypassed, so only questions appear by default. Claude's plan review
+(ExitPlanMode) is a card with the plan (live-checked 2026-11-06); OMP tool approvals and
 plan reviews are not yet shaped. Phones answer like desktop (decided
 2026-11-05); they need the input lease like any other client.
 Transcript: runs of thinking, tool calls and results fold into one expandable row

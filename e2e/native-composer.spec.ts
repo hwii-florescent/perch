@@ -338,6 +338,31 @@ for (const provider of ["claude", "codex", "omp", "pi"]) test(`${provider}: @fil
       await expect(box).toHaveValue("half a thought", { timeout: 30_000 });
       await box.fill("");
     });
+    // 9. A plan review, last because the `/plan` command leaves user rows of its own (which would change what Up
+    // recalls). Claude's turn ends in its "ready to execute" dialog, shown as a card with the plan and the two
+    // choices that need no typed feedback. Approving by hand lets the turn finish.
+    if (provider === "claude") await check("plan review", async () => {
+      await box.fill("/plan Create a file named planned.txt containing exactly: hello plan. Keep the plan to one line, then call the ExitPlanMode tool to ask for my approval.");
+      const before = await ui.locator('[data-native-role="user"]').count();
+      await ui.getByRole("button", { name: "Send", exact: true }).click();
+      await expect.poll(() => ui.locator('[data-native-role="user"]').count(), { timeout: 30_000 }).toBeGreaterThan(before);
+      const card = ui.getByTestId("native-cli-request");
+      await expect(card).toBeVisible({ timeout: 120_000 });
+      await expect(card.getByTestId("native-cli-request-detail")).toContainText(/planned\.txt/);
+      // Option 1 is worded by the session's permission mode (this one runs with bypass permissions).
+      await expect(card.getByTestId("native-cli-request-option-1")).toContainText(/^1Yes, /);
+      await expect(card.getByTestId("native-cli-request-option-2")).toContainText("manually approve");
+      await expect(card.getByTestId("native-cli-request-option-3")).toHaveCount(0);
+      await card.getByTestId("native-cli-request-option-2").click();
+      // Manual approval asks again before the write; the command's own notice is also a status, so name the span.
+      await expect(async () => {
+        // Never the plan card again: its option 1 would pick the other approval.
+        const next = ui.locator('[data-testid="native-cli-request"]:not([aria-label*="ready to execute"]) [data-testid="native-cli-request-option-1"]');
+        if (await next.count()) await next.click();
+        await expect(ui.locator('span[role="status"]')).toHaveText("Ready", { timeout: 2_000 });
+      }).toPass({ timeout: 150_000, intervals: [1_000] });
+      expect(fs.readFileSync(path.join(fixture, "planned.txt"), "utf8")).toContain("hello plan");
+    });
     expect(failures).toEqual([]);
     expect(errors).toEqual([]);
   } catch (error) {
