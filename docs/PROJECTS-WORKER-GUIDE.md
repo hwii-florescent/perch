@@ -59,7 +59,6 @@ terminal-backed view (`renderer/src/components/native-chat/NativeChatResolvedVie
 
 | Order | Feature | Orca logic → Perch | Orca view | Orca tests to port | Data Perch has |
 |---|---|---|---|---|---|
-| 3 | Docked task list | `shared/native-chat/input/native-chat-task-list.ts` (171), `-frames.ts`, `-history.ts` → `native_ui/tasks.rs` | `NativeChatDockedTaskList.tsx` | `native-chat-task-list{,-history,-state}.test.ts` | tool input (verify Claude `TodoWrite` input survives the transcript reader). `TaskCreate`/`TaskUpdate` are *own* (Orca parses only `todowrite`/`update_plan`) |
 | 4 | Edit cards | `shared/native-chat/tools/native-chat-edit-{cards,normalize,model,patch-files,lcs}.ts`, `-unified-patch.ts`, `-begin-patch.ts` → `native_ui/edits.rs` | `NativeChatDiffCard.tsx`, `NativeChatDiffView.tsx` | `native-chat-edit-normalize.test.ts`, `native-chat-diff.test.ts`; LCS, unified patch and begin_patch have **no Orca tests: write them** | Claude `toolUseResult.structuredPatch` (Orca `main/native-chat/transcript-line-decoders-claude.ts:27`): not read by `claude.rs` yet |
 | 5 | Per-turn diff rollup | `shared/native-chat/tools/native-chat-turn-diffs.ts` (162) | `NativeChatTurnDiffRollup.tsx` | `native-chat-turn-diffs.test.ts` | depends on 4; git stays the truth (`useLastTurnChanges`) |
 | 6 | Older-history paging | `renderer/.../native-chat-pagination.ts`, `use-native-chat-older-history-autoload.ts`; cursor in Rust | `NativeChatOlderHistoryRow.tsx` | `NativeChatMessageList.older-history.test.tsx` | bridge caps at 129 messages |
@@ -80,6 +79,16 @@ requests), `nativeChat/fileLinks.ts` and the pill in `NativeMessage`. Orca's exi
 (`native-chat-file-link-existence.ts`, renderer state tied to its runtime hosts) and the
 markdown `file:` rewrite were not ported: the core answers per message once the turn
 ends, and DOMPurify strips `file:` hrefs. Open gaps: opening at the line, inline-code paths.
+
+Row 3 (docked task list) landed 2026-11-06: `native_ui/tasks.rs` (Orca's normalizer, diff,
+sentences and per-tool predecessor rule, with their tests), `NativeUiTranscript.tasks`, the
+step body of an accepted plan call, `nativeChat/DockedTasks.tsx`. **Probe result: Claude
+2.1.319 has no `TodoWrite`**; haiku given "use your task tools" called `ToolSearch`, then
+`TaskCreate` (input `subject`, `description`; result "Task #N created successfully: …") and
+`TaskUpdate` (input `taskId`, `status`; result "Updated task #N status"). Those are read
+as Perch's own, keyed by task number. `TodoWrite` input is now kept to 6 KiB (a clipped list
+does not parse). Not done: Codex `turn/plan/updated` (the bridge does not surface it), the
+frame projection, Pi/OMP lists.
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background

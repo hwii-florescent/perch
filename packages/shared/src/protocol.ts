@@ -81,6 +81,18 @@ export interface NativeUiTranscript {
   blocks: NativeUiBlock[];
   /** The live activity line while a turn runs and nothing waits on the person. */
   working?: string;
+  /** The agent's own to-do list as of its latest plan call, docked above the composer; absent without one. */
+  tasks?: NativeUiTaskList;
+}
+export interface NativeUiTaskList {
+  tasks: NativeUiTask[];
+  explanation?: string;
+}
+export interface NativeUiTask {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  /** Present-tense phrasing; shown only while the task is in progress. */
+  activeForm?: string;
 }
 export type NativeUiBlock =
   /** `id` is the `NativeUiMessage` it draws. */

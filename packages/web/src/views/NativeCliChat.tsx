@@ -19,6 +19,7 @@ import { useLastTurnChanges } from "./nativeChat/useLastTurnChanges";
 import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
+import { DockedTasks } from "./nativeChat/DockedTasks";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
@@ -338,6 +339,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     {ranCommand && !error && <div className={cn(HINT, "flex flex-wrap items-center gap-2 px-3 py-1")} role="status" data-testid="native-cli-command-ran">Ran <code>{ranCommand}</code> in the CLI. Its output is in CLI view.
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
+    {snapshot?.transcript?.tasks && <DockedTasks list={snapshot.transcript.tasks} />}
     <div className="shrink-0 px-4 pt-1 pb-3">
     <form className={cn("chat__input relative", CHAT_COLUMN, CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}

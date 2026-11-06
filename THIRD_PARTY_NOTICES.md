@@ -66,6 +66,9 @@ Each module's `//!` header names the files it follows:
 - `native_ui/transcript.rs`: `src/shared/native-chat/` transcript and tool logic.
 - `native_ui/claude.rs` hook version floors and `--version` parsing:
   `src/main/claude/claude-hook-event-versions.ts`, `claude-managed-hook-events.ts`.
+- `native_ui/tasks.rs`: `src/shared/native-chat/input/native-chat-task-list{,-history}.ts` and
+  `src/renderer/src/components/native-chat/native-chat-task-list-state.ts` (the
+  `TaskCreate`/`TaskUpdate` reading is Perch's own).
 - `native_ui/file_links.rs`: `src/shared/native-chat/native-chat-href-routing.ts` and
   `src/shared/file-links/{file-link-location,explicit-file-link-target,
   file-link-path-normalization,file-uri-path}.ts`.

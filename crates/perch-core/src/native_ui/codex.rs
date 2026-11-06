@@ -689,8 +689,11 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        for _ in 0..200 {
-            if out.join("server").is_file() && out.join("tui").is_file() {
+        // A child's file exists before its text does, so wait for text (and the pid file).
+        let written =
+            |path: &std::path::Path| std::fs::metadata(path).is_ok_and(|meta| meta.len() > 0);
+        for _ in 0..1000 {
+            if written(&out.join("server")) && written(&out.join("tui")) && written(&server_pid) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));

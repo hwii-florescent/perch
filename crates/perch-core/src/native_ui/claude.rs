@@ -246,10 +246,13 @@ fn messages(row: &Value) -> Vec<NativeUiMessage> {
                     (8 * 1024usize).saturating_sub(message.thinking.len()),
                 )),
                 "tool_use" if message.tools.len() < 32 => {
-                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(2048));
+                    let name = clip(block["name"].as_str().unwrap_or("Tool"), 128);
+                    // A clipped to-do list does not parse, so it gets room for a long one.
+                    let cap = if name == "TodoWrite" { 6 * 1024 } else { 2048 };
+                    let input = clip(&bounded_json(&block["input"]), tool_budget.min(cap));
                     tool_budget -= input.len();
                     message.tools.push(NativeUiTool {
-                        name: clip(block["name"].as_str().unwrap_or("Tool"), 128),
+                        name,
                         input,
                         id: block["id"].as_str().map(|id| clip(id, 256)),
                         state: None,
@@ -821,5 +824,21 @@ mod tests {
         );
         assert_eq!(tool[0].role, "toolResult");
         assert_eq!(tool[0].text, "sentinel");
+    }
+
+    #[test]
+    fn a_long_todo_list_keeps_parseable_input() {
+        let todos: Vec<_> = (0..30)
+            .map(|n| serde_json::json!({"content": format!("Task number {n} with a fairly descriptive name"), "status": "pending", "activeForm": format!("Doing task number {n} with a fairly descriptive name")}))
+            .collect();
+        let row = serde_json::json!({"type":"assistant","uuid":"m","message":{"content":[
+            {"type":"tool_use","id":"1","name":"TodoWrite","input":{"todos": todos}},
+            {"type":"tool_use","id":"2","name":"Bash","input":{"command":"x".repeat(5000)}}]}});
+        let tools = messages(&row).remove(0).tools;
+        assert!(tools[0].input.len() > 2048);
+        let list = crate::native_ui::tasks::normalize(&tools[0].name, &tools[0].input).unwrap();
+        assert_eq!(list.tasks.len(), 30);
+        // Other tools keep their smaller cap.
+        assert!(tools[1].input.len() <= 2048);
     }
 }

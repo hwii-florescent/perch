@@ -26,6 +26,7 @@ pub mod codex;
 pub mod dialog;
 pub mod file_links;
 pub mod opencode;
+pub mod tasks;
 pub mod transcript;
 pub mod typed;
 
