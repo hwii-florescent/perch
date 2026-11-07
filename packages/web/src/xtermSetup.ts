@@ -334,7 +334,9 @@ export function createPerchTerminal(
   // URLs a user is expected to open (docs, PR links, etc.), and interposing a
   // confirm() on every click would be friction with no real protection (the
   // same URL is right there in the scrollback either way).
-  term.options.linkHandler = { activate: (event, uri) => openTerminalLink(event, uri) };
+  // xterm drops an OSC 8 link whose scheme is not http(s) unless this is set; agents link local files
+  // (file:// URLs, or a bare /path) and openTerminalLink decides what is safe to open.
+  term.options.linkHandler = { allowNonHttpProtocols: true, activate: (event, uri) => openTerminalLink(event, uri) };
   term.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(event, uri)));
 
   // OSC 52 clipboard write. `vim "+y`, tmux copy-mode and many TUIs emit this

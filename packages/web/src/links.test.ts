@@ -98,10 +98,13 @@ describe("terminal links", () => {
       links.openTerminalLink({ metaKey: false, ctrlKey: false }, href);
       expect(tabs.getState().tabs).toEqual([{ workspaceId: "w1", path: href, kind: "browser" }]);
       expect(invoke).not.toHaveBeenCalled();
+      links.openTerminalLink({ metaKey: false, ctrlKey: false }, "/tmp/perch-separator-study/tray.png");
+      expect(tabs.getState().tabs.at(-1)?.path).toBe("file:///tmp/perch-separator-study/tray.png");
+      links.openTerminalLink({ metaKey: false, ctrlKey: false }, "//evil.example/x");
       links.openTerminalLink({ metaKey: true, ctrlKey: false }, "file:///tmp/a%20b.png");
       expect(invoke).toHaveBeenCalledWith("open_in_default_app", { path: "/tmp/a b.png" });
       links.openTerminalLink({ metaKey: false, ctrlKey: false }, "file://evil.example/x");
-      expect(tabs.getState().tabs).toHaveLength(1);
+      expect(tabs.getState().tabs).toHaveLength(2);
       delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     });
   });

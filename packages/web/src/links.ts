@@ -26,7 +26,8 @@ export function webUrl(uri: string): string | null {
 /** A local `file:` URL (host empty or localhost) as an agent prints it, or null. Only the desktop
  * app's native browser can show one, so callers gate on `tauriInvoke`. */
 export function fileUrl(uri: string): string | null {
-  const url = parseUrl(uri);
+  // Agents also link a bare absolute path (`/tmp/index.html`) as written in their markdown.
+  const url = parseUrl(/^\/(?!\/)/.test(uri) ? `file://${uri}` : uri);
   return url?.protocol === "file:" && (url.hostname === "" || url.hostname === "localhost") ? url.href : null;
 }
 
