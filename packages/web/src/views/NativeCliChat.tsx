@@ -25,6 +25,9 @@ import { OlderHistoryRow } from "./nativeChat/OlderHistoryRow";
 import { useOlderHistory } from "./nativeChat/useOlderHistory";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
+import { openTerminalLink, tauriInvoke, webUrl } from "../links";
+import { workspaceRecord } from "../terminalScope";
+import { joinPath } from "../fileOps";
 import { ContextRing } from "./nativeChat/ContextRing";
 import { OptionLabels } from "./nativeChat/OptionLabels";
 import { SubagentRoster } from "./nativeChat/SubagentRoster";
@@ -48,12 +51,13 @@ type Outbox = { operationId: string; text: string; draft: Pick<Draft, "text" | "
 // Answered prompts stay under the transcript as receipts, bounded like drafts.
 const receiptsBySession = new Map<string, Receipt[]>();
 const sentCount = (snapshot: NativeUiSnapshot | null, text: string) => snapshot?.messages.filter((message) => message.role === "user" && message.text.trim() === text.trim()).length ?? 0;
-const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find, fileLinkScope }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark; fileLinkScope?: { workspaceId: string; hostId: string } }) {
+export const NativeMessage = memo(function NativeMessage({ message, streaming, turn, find, fileLinkScope }: { message: NativeUiMessage; streaming: boolean; turn: string; find?: FindMark; fileLinkScope?: { workspaceId: string; hostId: string } }) {
   const html = useMemo(() => message.role === "assistant" ? renderMarkdown(message.text, streaming) : "", [message.role, message.text, streaming]);
   const body = useRef<HTMLDivElement>(null);
   const { workspaceId: linkWorkspaceId, hostId: linkHostId } = fileLinkScope ?? {};
   // Links that name a file in the workspace become pills that open it; the core decides which do.
   const [files, setFiles] = useState<ReadonlyMap<string, FsLink>>(new Map());
+  const [linkError, setLinkError] = useState<string | null>(null);
   useEffect(() => {
     if (!linkWorkspaceId || !linkHostId || streaming) return;
     const targets = linkTargets(html);
@@ -73,18 +77,31 @@ const NativeMessage = memo(function NativeMessage({ message, streaming, turn, fi
   }, [html, files]);
   const openFileLink = (event: MouseEvent<HTMLDivElement>) => {
     const anchor = (event.target as Element).closest?.("a[href]");
-    const href = anchor?.getAttribute("href")?.trim() ?? "";
-    if (!linkWorkspaceId || !couldBeFile(href)) return;
-    // A relative link must never navigate the app itself; a file that is not there does nothing.
+    if (!anchor) return;
+    // Never navigate the app itself, even before file resolution or for an unsupported scheme.
     event.preventDefault();
+    setLinkError(null);
+    const href = anchor.getAttribute("href")?.trim() ?? "";
+    if (webUrl(href)) { openTerminalLink(event.nativeEvent, href); return; }
+    if (!linkWorkspaceId || !couldBeFile(href)) return;
     const link = files.get(href);
-    if (link) useFileTabs.getState().open(linkWorkspaceId, link.path);
+    if (!link) return;
+    if (event.metaKey || event.ctrlKey) {
+      const workspace = workspaceRecord(usePerchStore.getState(), linkWorkspaceId);
+      if (!tauriInvoke || workspace?.hostId !== "local") {
+        setLinkError("Open in the default app is only available for local files in the desktop app.");
+        return;
+      }
+      void tauriInvoke("open_in_default_app", { path: joinPath(workspace.path.replace(/\/+$/, ""), link.path) })
+        .catch((error: unknown) => setLinkError(error instanceof Error ? error.message : String(error)));
+    } else useFileTabs.getState().open(linkWorkspaceId, link.path);
   };
   // A stopped turn: a quiet line between the turns, not a bubble (the core words it; `system` rows carry no prompt or answer).
   if (message.role === "system") return <div className={cn(HINT, "text-center py-1")} data-native-role="system" data-testid="native-cli-status-row" data-native-turn={turn} data-block-id={message.id}>{message.text}</div>;
   return <article className={messageClass(message.role === "user" ? "user" : "assistant", FIND_MARK[find ?? "none"])} data-native-role={message.role} data-native-turn={turn} data-block-id={message.id}>
     {message.role === "assistant" ? <div ref={body} onClick={openFileLink} className={cn("message__markdown", MESSAGE_MARKDOWN)} dangerouslySetInnerHTML={{ __html: html }} />
       : <div className="message__text">{message.text}</div>}
+    {linkError && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{linkError}</div>}
     {message.error && <div className={cn("message__error", MESSAGE_ERROR)} role="alert">{message.error}</div>}
     {message.text && !streaming && <CopyButton text={message.text} className={message.role === "user" ? MESSAGE_COPY_USER : MESSAGE_COPY_ASSISTANT} />}
   </article>;
