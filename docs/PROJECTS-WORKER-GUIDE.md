@@ -524,6 +524,37 @@ the web only calls capability-gated core messages and shows receipts.
   menu and disabled reasons; one live e2e with a haiku lead and haiku child covering Message,
   Steer (or its disabled reason), Interrupt and Stop; Codex/Pi live only if no usage limit.
 
+## Slice 8: cheap-model reporter (owner, 2026-11-07)
+
+DECISIONS 2026-11-07 "Cheap-model reporter". *Own* design (Claude desktop's own report is the
+child's recap or last message; do not copy its text).
+
+- **Trigger:** a child's turn end as Perch already sees it (Claude Stop hook, Codex
+  `turn/completed`, Pi/OMP `agent_end`), once per turn; not for the lead.
+- **Input:** a bounded slice of that turn from the transcript Perch already projects
+  (`native_ui/transcript.rs`): the final assistant text, one line per tool run (the run
+  sentence), changed files from `agent_change_snapshots`, and any pending question; cap the
+  input (e.g. 12k characters), never whole transcripts or file contents.
+- **Runner:** the provider's own CLI in one-shot mode under the user's login, cwd = the
+  child's Nest, no tools: Claude `claude -p --model haiku` with tools disabled and no
+  session persistence (probe the exact flags); Codex `codex exec` with `-m gpt-5.6-luna`, read-only
+  sandbox, no shell (probe flags; `codex debug prompt-input` for zero-token shape checks).
+  Pi/OMP children use Claude or Codex if installed. Model per provider in settings; a
+  setting turns the reporter off. Never runs a model the user has not installed/logged into.
+- **Output:** JSON `{status, text}` (text at most 400 characters), validated; on failure fall
+  back to the 400-character last-message report. Stored as a report with `source = "summary"`
+  and `model`; precedence: the child's own `perch report` (same turn) > summary > last message.
+- **Delivery:** the queued note to the lead and the family strip use it, labelled "Summary by
+  <model>".
+- **Guards:** one in flight per child; skipped when the run is over its message limit or the
+  child was stopped; timeouts; counted in the spend estimate (usage popover); never blocks
+  the child.
+- **`perch guide`:** stop asking children to report; `perch report` stays optional for a child
+  that wants to say something specific.
+- **Check:** Rust unit tests for slice building, caps, precedence and output validation
+  (captured outputs); one live run: a haiku lead spawns a haiku child, the child finishes
+  without `perch report`, and the lead's note carries a summary by haiku.
+
 ## Slice 6 landed (2026-11-07): family strip and notes folder
 
 The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pieces are:

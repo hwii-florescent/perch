@@ -7,6 +7,18 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-07 — Cheap-model reporter for sub-sessions (owner)
+
+The expensive child model does not write reports. When a child's turn ends, Perch asks a
+cheap model through the user's own CLI login (default Haiku for Claude children, gpt-5.6-luna
+for Codex; Pi/OMP children use whichever is available; configurable, can be off) to summarise
+a bounded slice of that turn into at most 400 characters plus a status (done, blocked, needs
+you, failed), labelled with the model that wrote it. A child's own `perch report` still wins
+when given; `perch guide` no longer asks for one. One call per child turn, capped input,
+skipped over run limits, counted in spend estimates. A summary is a claim, not proof. Within
+the 2026-11-05 allowance ("reporters default to Haiku 5.5"): Perch still never plans,
+assigns or retries work.
+
 ## 2026-11-07 — Family strip actions: Message, Stop, Steer, Interrupt (owner)
 
 - Each child row in the lead's family strip gets **Message**, **Stop**, **Steer** and
