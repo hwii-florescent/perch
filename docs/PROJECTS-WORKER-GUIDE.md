@@ -166,9 +166,9 @@ appears only in a user's own status line), so Claude shows no effort and Orca's 
 (`claude-terminal-session-options.ts`) was not ported. Codex 0.166's `thread/settings/updated` and
 `thread/resume` carry `model`, `effort`/`reasoningEffort`, `approvalPolicy`, `sandbox(Policy)` and
 `approvalsReviewer`; the mode is one of Orca's three policies or nothing (unit-tested; no live Codex
-run). Pi/OMP/OpenCode: model only. **Pending the owner's yes (PARITY, DECISIONS "no model chrome over a
-live session"): the pickers and typed `/model`, `/effort`, mode-cycle commands that change a running
-session.** Nothing here writes to a session.
+run). Pi/OMP/OpenCode: model only. Nothing in this row writes to a session; the owner said yes to
+live pickers the same day, see "Row 10b landed" below (Claude's footer also shows the effort that
+the hooks do not carry).
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
@@ -348,17 +348,64 @@ exists in the repo (the release job ships only the desktop installers and the st
 there was nothing to put it in; the Linux bundles were not built here; the app itself was not
 launched (it has no headless mode).
 
-## Row 10b: live model/effort/mode pickers (owner yes, 2026-11-06)
+## Row 10b landed (2026-11-06): live pickers for **Claude**
 
-Port Orca's pickers: `NativeChatSessionOptionPickers.tsx`, `NativeChatModelCombobox.tsx`,
-`NativeChatPermissionModePicker.tsx` (components), and the logic in
-`shared/native-chat/input/native-chat-session-option-{commands,apply,state}.ts` and
-`native-chat-pty-session-options.ts` to Rust (`native_ui/`), with their tests. Apply only at an
-idle, verified-empty prompt under the input lease by typing the CLI's own command
-(`/model`, `/effort`, permission-mode cycle, per provider; probe each CLI's command first);
-the UI shows the new value only after read-back (`PostModelSwitch`, `SessionStart.model`,
-Codex app-server events, screen); refused while a turn runs, a dialog is open or a draft is in
-the prompt. Providers without a confirmable read-back show no picker for that option.
+Owner yes, 2026-11-06. `native_ui/option_pickers.rs` (Orca's Claude catalog: model aliases, effort
+ladder, the `/model <v>` and `/effort <v>` templates, the picker rules that keep the running model
+as a row and drop a one-choice effort, the guard that a value is a listed choice and never prose, and
+`matchNativeChatCatalogModelId`; Orca's tracked-"dispatched" state and caption are **not** ported:
+the picker shows only a value read back), `NativeUiOptions.pickers` (each `{id, label, current,
+choices, settable, note}`, built when a snapshot goes to a viewer), `agent.ui.option` and
+`agent.ui.option.result` (capability `agent.ui.options`; `outcome` `applied` or `unconfirmed`, a
+refusal is an `error` with code `native_ui_option_failed`), `server/native_ui.rs` `option`/`apply_option`,
+`nativeChat/OptionLabels.tsx` (`PickerSelect` on `components/ui/select.tsx`: Orca's combobox and
+permission picker play the same role; none of their code is copied).
+
+**Probed 2026-11-06 (Claude 2.1.319, Codex 0.166, tmux, no tokens, isolated config dirs and a dummy
+API key):**
+- Claude `/model <alias|id>` and `/effort <level>` take effect at once and answer `Set model to Haiku 5.5
+  and saved as your default for new sessions` / `Set effort level to high (saved as your default for new
+  sessions): …`. **Both write the user's own settings** (`model`, `modelSettings.<model>.effortLevel`);
+  that is Claude's behaviour for its own command, so each picker carries the note "Claude also saves the
+  pick as your default for new sessions" (the `/model` dialog offers `s` for session-only, but it is a
+  list to navigate, not a command). The alias `haiku` is Haiku **5.5**; only the id `claude-haiku-4-5`
+  is 4.5, so the model picker lists four aliases plus the running model's id.
+- Permission mode has no command: Shift+Tab (`ESC [ Z`) steps a cycle that depends on how Claude was
+  started (`manual → accept edits → plan → auto → manual`; with `--dangerously-skip-permissions`, which
+  Perch uses: `bypass → auto → manual → accept edits → plan → bypass`). The footer names the mode
+  (`⏸ manual mode on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`, `⏵⏵ bypass permissions
+  on`), so the core steps one key at a time, re-reads the footer after each, stops at the target, and
+  gives up when the starting mode comes round again (a mode this session was not started with is not
+  in the cycle).
+- Read-back: the model by the `PostModelSwitch` hook (`to_model`; **it does fire** in 2.1.319, so the
+  hook-reported model is current) or Claude's "Set model to" line; the mode by the footer; the effort by
+  the `● high · /effort` indicator **or**, when a short notice ("auto mode unavailable for this model",
+  "Image in clipboard") holds its slot, by the newest `Set effort level to …` line still on screen, voided by
+  a `Set model to` line after it. After a model switch Claude draws no effort until one is set, so there
+  is no effort picker then (seen live: it comes back once the person runs `/effort` in CLI view and the
+  chat is reopened). Haiku 4.5 has none ("Effort not supported").
+- Refused (nothing written) while a turn runs, a question or permission prompt is open, the prompt
+  holds a draft (`claude::prepare_input`'s empty-prompt check) or the input lease is not this client's
+  at the current generation; the lease is looked up again before every write, so another viewer
+  taking input ends a change half way. One change at a time per core. A change the CLI never showed in
+  8 s is `unconfirmed`, never assumed.
+- **Found, not fixed:** a fresh Claude draws a placeholder in an empty prompt (`❯ Try "fix lint errors"`)
+  unless `promptSuggestionEnabled` is false (the user's own settings have it). `empty_prompt` reads that
+  as a draft, so *every* send from the chat (not only pickers) is refused until the setting is off or the
+  person types once. The fix needs a way to tell a placeholder from typed text (the screen text is the
+  same; colour is not in the snapshot).
+
+**Not done, and why (an owner call each):**
+- **Codex.** `/model` is a two-step TUI list (model, then "Select Reasoning Level"; `enter` saves a
+  default, `s` is session-only) whose rows are the account's own models, so the choices need the
+  app-server's `model/list`; `/permissions` is a numbered list, and "Full Access" is followed by an
+  "Enable full access?" confirmation (`Yes, continue anyway`). Reading back works (`thread/settings/updated`,
+  the footer `GPT-6-Luna medium`), but auto-confirming a risk dialog was not approved and no live
+  Codex apply was run. No Codex picker.
+- **Pi and OMP.** `/model` only opens a TUI list; Orca applies an OMP model through its own extension
+  command (`/orca-model`), which Perch's extension does not have. Their effort and mode have no
+  read-back. No picker.
+- **Fast mode** (Orca's `/fast` toggle): no baseline to read back.
 
 ## Slice 4: spawn, list, stop, reports
 

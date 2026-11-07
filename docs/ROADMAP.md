@@ -189,8 +189,9 @@ into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
   Perch never sees or stores credentials either way.
 - **Composer.** Enter queues as reorderable cards while a turn runs; Steer sends
   into the turn where supported; Stop; Rewind to a message (idle only); `/compact`;
-  one slash/skill picker; `@file`; image paste; prompt recall. Model/effort are
-  chosen before the session starts, not changed mid-session.
+  one slash/skill picker; `@file`; image paste; prompt recall. Claude's model, effort and
+  permission-mode pickers type the CLI's own command at an idle, verified prompt and show only what the
+  CLI reads back (landed 2026-11-06; Codex, Pi and OMP have none yet, see the worker guide, Row 10b).
 - **Send states.** Sending / Not sent (Retry) / unconfirmed after a restart,
   settled from the transcript; never resend a steer or an unproven message.
 - **Approvals and questions in the UI.** Claude permission prompt tool and

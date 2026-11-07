@@ -26,7 +26,7 @@ import { useOlderHistory } from "./nativeChat/useOlderHistory";
 import { couldBeFile, linkTargets, requestFileLinks } from "./nativeChat/fileLinks";
 import { useFileTabs } from "../fileTabs";
 import { ContextRing } from "./nativeChat/ContextRing";
-import { OptionLabels } from "./nativeChat/OptionLabels";
+import { ModelPicker, OptionLabels, type OptionChange } from "./nativeChat/OptionLabels";
 import { SubagentRoster } from "./nativeChat/SubagentRoster";
 import { blocksOf } from "./nativeChat/transcript";
 import { useFindHits } from "./nativeChat/useFindHits";
@@ -112,6 +112,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const hostId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.hostId ?? state.activeHostId);
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
   const canLinkFiles = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("fs.links") === true);
+  const canChangeOptions = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("agent.ui.options") === true);
   const fileLinkScope = useMemo(() => canLinkFiles && workspaceId ? { workspaceId, hostId } : undefined, [canLinkFiles, workspaceId, hostId]);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
@@ -120,6 +121,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const [stopping, setStopping] = useState(false);
   const [outbox, setOutbox] = useState<Outbox | null>(null);
   const [answering, setAnswering] = useState(false);
+  const [changing, setChanging] = useState(false);
   const [receipts, setReceipts] = useState<Receipt[]>(() => receiptsBySession.get(draftKey) ?? []);
   const latest = useRef<NativeUiSnapshot | null>(null);
   latest.current = snapshot;
@@ -268,6 +270,19 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     } catch (reason) { setError((reason as Error).message); }
     finally { setAnswering(false); }
   }
+  // The core types the CLI's own command (or steps its mode cycle) and answers with what the CLI then showed.
+  // The picker keeps the value read back before until a snapshot says otherwise.
+  async function changeOption(option: string, value: string) {
+    const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
+    if (generation === undefined || changing || !connected) return;
+    setChanging(true); setError(null);
+    try {
+      const reply = await requestNativeUi({ type: "agent.ui.option", requestId: newId(), sessionId, providerId, generation, option, value });
+      if (reply.type !== "agent.ui.option.result") throw new Error("The CLI did not answer.");
+      if (reply.outcome === "unconfirmed") setError("Sent, but the CLI did not show the change. Check it in CLI view.");
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setChanging(false); }
+  }
   async function stop() {
     const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
     if (generation === undefined || stopping || !connected) return;
@@ -318,13 +333,16 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
     list.current?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
   };
   useEffect(() => { if (current) jump(current); }, [current, findIndex]);
+  const optionChange: OptionChange | undefined = canChangeOptions ? { enabled: controlling && connected && !exited, busy: changing, apply: (option, value) => void changeOption(option, value) } : undefined;
   const label = !connected ? "Reconnecting…" : exited ? "CLI exited" : !snapshot ? "Connecting to CLI…" : waiting ? "Waiting for you" : snapshot.running ? "Working" : "Ready";
   return <div className="native-cli-chat outline-none flex min-h-0 min-w-0 flex-1 flex-col [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]" data-testid="native-cli-chat" data-provider={providerId} data-native-pid={snapshot?.pid} data-native-session={snapshot?.providerSessionId} tabIndex={-1}
     onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); setFind((value) => value ?? ""); } }}>
     <div className="terminal__toolbar flex-wrap">
       <span role="status">{label}</span>
-      {snapshot?.model && <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>}
-      <OptionLabels options={snapshot?.options} />
+      {snapshot?.model && (optionChange && snapshot.options?.pickers?.some((picker) => picker.id === "model")
+        ? <span className="native-cli-chat__model ml-auto" data-model={snapshot.model}><ModelPicker options={snapshot.options} change={optionChange} /></span>
+        : <span className="native-cli-chat__model ml-auto max-w-[45%] overflow-hidden text-ellipsis" title={snapshot.model} data-model={snapshot.model}>{snapshot.options?.model ?? snapshot.model}</span>)}
+      <OptionLabels options={snapshot?.options} change={optionChange} />
       {snapshot?.context && <span className={snapshot.model ? undefined : "ml-auto"}><ContextRing context={snapshot.context} /></span>}
       {!controlling && <button type="button" disabled={!status || !connected || pending || exited} onClick={() => void takeControl()}>Take control</button>}
     </div>

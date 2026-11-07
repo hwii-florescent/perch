@@ -104,6 +104,23 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             prompt_id,
             key,
         ),
+        ClientMessage::AgentUiOption {
+            request_id,
+            session_id,
+            provider_id,
+            generation,
+            option,
+            value,
+        } => native_ui::option(
+            state,
+            raw_text,
+            request_id,
+            session_id,
+            provider_id,
+            generation,
+            option,
+            value,
+        ),
         ClientMessage::AgentUiCancel {
             request_id,
             session_id,

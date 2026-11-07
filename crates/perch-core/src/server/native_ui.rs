@@ -1,6 +1,7 @@
 //! Web UI transport for the same native interactive CLI session.
 use super::*;
 use crate::agent_fleet::AgentState;
+use anyhow::Context as _;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
@@ -28,6 +29,7 @@ fn observe_runtime(
     let event_key = key.clone();
     let provider = bridge_key.agent_id.clone();
     let alive_shell = shell.clone();
+    let screen_key = bridge_key.clone();
     let provider_session_id = if shell.is_some() {
         None
     } else {
@@ -161,7 +163,7 @@ fn observe_runtime(
                     request_id: None,
                     session_id: key.session_id.clone(),
                     provider_id: provider.clone(),
-                    snapshot: with_transcript(snapshot),
+                    snapshot: with_transcript(snapshot, &screen_key),
                 }));
         }),
     )
@@ -251,10 +253,46 @@ pub(super) fn live_commands(
 /// projection carries once no older web can be talking to this core.
 fn with_transcript(
     mut snapshot: crate::protocol::NativeUiSnapshot,
+    bridge: &AgentKey,
 ) -> crate::protocol::NativeUiSnapshot {
     snapshot.transcript = Some(Box::new(crate::native_ui::transcript::project(&snapshot)));
-    snapshot.options = crate::native_ui::session_options::options_of(&snapshot);
+    let options = crate::native_ui::session_options::options_of(&snapshot);
+    let screen = pickers_screen(bridge, &snapshot);
+    snapshot.options = crate::native_ui::option_pickers::with_pickers(
+        &bridge.agent_id,
+        &snapshot,
+        options,
+        screen.as_deref(),
+    );
     snapshot
+}
+
+/// The CLI's screen, for the pickers' read-back, and only for a CLI that has pickers. While a turn or a
+/// prompt owns the keys the pickers are locked and the screen is not read again: the last one read
+/// stands in, so the controls do not come and go with every turn.
+fn pickers_screen(
+    bridge: &AgentKey,
+    snapshot: &crate::protocol::NativeUiSnapshot,
+) -> Option<String> {
+    static LAST: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+    if bridge.agent_id != "claude" {
+        return None;
+    }
+    let pty = crate::shell_integration::pty_key(bridge);
+    if snapshot.running || snapshot.blocked {
+        return LAST.lock().unwrap().get(&pty).cloned();
+    }
+    let text = crate::daemon::client()
+        .ok()?
+        .snapshot(&pty)
+        .ok()
+        .map(|screen| screen.text)?;
+    let mut last = LAST.lock().unwrap();
+    if last.len() > 256 {
+        last.clear();
+    }
+    last.insert(pty, text.clone());
+    Some(text)
 }
 
 /// Blocks of the session's latest snapshot that contain `query`. Answers from what the bridge
@@ -391,10 +429,11 @@ pub(super) fn get(
             .app
             .native_ui
             .get(&target.bridge)
+            .map(|bridge| (bridge, target.bridge.clone()))
             .ok_or_else(|| anyhow::anyhow!("Native UI is starting. Retry shortly."))
     });
-    let bridge = match result {
-        Ok(bridge) => bridge,
+    let (bridge, bridge_key) = match result {
+        Ok(found) => found,
         Err(error) => {
             fail(
                 &state.out_tx,
@@ -409,7 +448,7 @@ pub(super) fn get(
     let tx = state.out_tx.clone();
     tokio::spawn(async move {
         match bridge.snapshot().await {
-            Ok(snapshot) => { let _ = tx.send(ServerMessage::AgentUiSnapshot { request_id: Some(request_id), session_id, provider_id, snapshot: with_transcript(snapshot) }); }
+            Ok(snapshot) => { let snapshot = with_transcript(snapshot, &bridge_key); let _ = tx.send(ServerMessage::AgentUiSnapshot { request_id: Some(request_id), session_id, provider_id, snapshot }); }
             Err(error) => fail(&tx, request_id, "native_ui_unavailable", format!("{error}. Open CLI view to finish any startup prompts, then reconnect UI. A CLI opened before this update needs an explicit restart to load its web connection."), true),
         }
     });
@@ -617,6 +656,240 @@ pub(super) fn answer(
             error.to_string(),
             false,
         ),
+    }
+}
+
+/// Change the model, effort or permission mode of the running CLI from the chat (`agent.ui.option`).
+/// Only at an idle, verified-empty prompt under the input lease; the CLI's own command or key is the
+/// write, and the answer is whatever the CLI then shows: a change it never showed is `unconfirmed`,
+/// never assumed. Runs on a blocking thread because it waits for the read-back between writes.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn option(
+    state: &Arc<ConnState>,
+    raw: &str,
+    request_id: String,
+    session_id: String,
+    provider_id: String,
+    generation: u64,
+    option: String,
+    value: String,
+) {
+    if route_to_remote_host_or_fail(state, &session_id, &request_id, raw) {
+        return;
+    }
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let applied = apply_option(
+            &state,
+            &session_id,
+            &provider_id,
+            generation,
+            &option,
+            &value,
+        );
+        match applied {
+            Ok((outcome, value)) => {
+                let _ = state.out_tx.send(ServerMessage::AgentUiOptionResult {
+                    request_id,
+                    session_id,
+                    option,
+                    outcome,
+                    value,
+                });
+            }
+            Err(error) => fail(
+                &state.out_tx,
+                request_id,
+                "native_ui_option_failed",
+                error.to_string(),
+                false,
+            ),
+        }
+    });
+}
+
+/// How long the CLI gets to show a change, and how often the screen and hooks are read meanwhile.
+const OPTION_READ_BACK: Duration = Duration::from_secs(8);
+const OPTION_POLL: Duration = Duration::from_millis(250);
+
+fn apply_option(
+    state: &Arc<ConnState>,
+    session_id: &str,
+    provider_id: &str,
+    generation: u64,
+    option: &str,
+    value: &str,
+) -> anyhow::Result<(crate::protocol::OptionOutcome, Option<String>)> {
+    use crate::native_ui::option_pickers as pickers;
+    use crate::protocol::OptionOutcome;
+    // One change at a time: a second click would type over the first one's read-back.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _serial = ONE_AT_A_TIME.lock().unwrap();
+    anyhow::ensure!(
+        provider_id == "claude",
+        "This CLI has no picker for that option"
+    );
+    anyhow::ensure!(
+        pickers::valid_choice(option, value),
+        "That is not a choice this picker offers"
+    );
+    let Target {
+        key,
+        bridge: bridge_key,
+        ..
+    } = resolve(state, session_id, provider_id)?;
+    let bridge = state
+        .app
+        .native_ui
+        .get(&bridge_key)
+        .ok_or_else(|| anyhow::anyhow!("native CLI UI is unavailable"))?;
+    let lease_key = agents::lifecycle_control_key(&key, ControlChannel::Input);
+    // The lease is looked up again for every write: another viewer taking input ends this change.
+    type PtyWrite<'a> = &'a dyn Fn(&str) -> anyhow::Result<()>;
+    let write_once = |action: &dyn Fn(PtyWrite) -> anyhow::Result<()>| -> anyhow::Result<()> {
+        let lease = state
+            .agent_input_leases
+            .lock()
+            .unwrap()
+            .get(&lease_key)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Take control of this agent before changing it"))?;
+        anyhow::ensure!(
+            lease.generation == generation,
+            "Input control changed; take control again"
+        );
+        state
+            .app
+            .agent_runtime
+            .dispatch_native_control(&key, &lease, |write| action(write))
+    };
+    let screen = || -> anyhow::Result<String> {
+        Ok(crate::daemon::client()
+            .context("CLI terminal is unavailable")?
+            .snapshot(&crate::shell_integration::pty_key(&bridge_key))
+            .context("CLI terminal is unavailable")?
+            .text)
+    };
+    let idle = || -> anyhow::Result<crate::protocol::NativeUiSnapshot> {
+        let latest = bridge
+            .latest()
+            .ok_or_else(|| anyhow::anyhow!("The CLI has not reported its state yet"))?;
+        anyhow::ensure!(
+            !latest.blocked,
+            "The CLI is waiting for you. Answer it first."
+        );
+        anyhow::ensure!(
+            !latest.running,
+            "A turn is running. Wait for it to finish before changing this."
+        );
+        Ok(latest)
+    };
+    let before = idle()?;
+    let before_screen = screen()?;
+    let footer = pickers::claude_footer(&before_screen);
+
+    if option == pickers::MODE {
+        if footer.mode == Some(value) {
+            return Ok((OptionOutcome::Applied, Some(value.to_string())));
+        }
+        let start = footer.mode.ok_or_else(|| {
+            anyhow::anyhow!("The permission mode is not on screen. Check CLI view.")
+        })?;
+        for _ in 0..pickers::CLAUDE_MODE_STEPS {
+            idle()?;
+            write_once(&|write| {
+                // Verifies the empty prompt and that the pane is this Claude; the bytes it returns are for a
+                // prompt and are not used.
+                crate::native_ui::claude::prepare_input(&bridge_key, Some("x"))?;
+                write(pickers::CLAUDE_MODE_STEP)
+            })?;
+            std::thread::sleep(OPTION_POLL);
+            let shown = pickers::claude_footer(&screen()?).mode.ok_or_else(|| {
+                anyhow::anyhow!("The permission mode went off screen. Check CLI view.")
+            })?;
+            if shown == value {
+                publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+                return Ok((OptionOutcome::Applied, Some(shown.to_string())));
+            }
+            if shown == start {
+                break;
+            }
+        }
+        publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+        anyhow::bail!("This session's mode cycle does not include that mode");
+    }
+
+    if option == pickers::EFFORT && footer.effort == Some(value) {
+        return Ok((OptionOutcome::Applied, Some(value.to_string())));
+    }
+    if option == pickers::MODEL && before.model.as_deref() == Some(value) {
+        return Ok((OptionOutcome::Applied, Some(value.to_string())));
+    }
+    let command = pickers::claude_command(option, value)
+        .ok_or_else(|| anyhow::anyhow!("That is not a choice this picker offers"))?;
+    let notices_before = if option == pickers::MODEL {
+        pickers::model_notices(&before_screen, value)
+    } else {
+        pickers::effort_notices(&before_screen, value)
+    };
+    write_once(&|write| {
+        crate::native_ui::typed::prepare(&bridge_key, &command, bridge.latest().as_ref())?;
+        let input = crate::native_ui::claude::prepare_input(&bridge_key, Some(&command))?
+            .ok_or_else(|| anyhow::anyhow!("CLI prompt is unavailable"))?;
+        crate::native_ui::claude::write_input(&input, write)
+    })?;
+    let started = std::time::Instant::now();
+    let mut confirmed_by_screen = false;
+    while started.elapsed() < OPTION_READ_BACK {
+        std::thread::sleep(OPTION_POLL);
+        let shown = screen()?;
+        let reported = bridge.latest().and_then(|latest| latest.model);
+        let read_back = if option == pickers::MODEL {
+            // The CLI's hook names the model it now runs; its own "Set model to" line says the same.
+            let hook = reported.as_deref().filter(|reported| {
+                pickers::model_satisfies(reported, value)
+                    && (before.model.as_deref() != Some(reported)
+                        || pickers::model_notices(&shown, value) > notices_before)
+            });
+            confirmed_by_screen = pickers::model_notices(&shown, value) > notices_before;
+            hook.map(str::to_string)
+        } else {
+            let footer = pickers::claude_footer(&shown).effort;
+            let said = pickers::effort_notices(&shown, value) > notices_before;
+            (footer == Some(value) || said).then(|| value.to_string())
+        };
+        if let Some(read_back) = read_back {
+            publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+            return Ok((OptionOutcome::Applied, Some(read_back)));
+        }
+    }
+    publish_latest(state, session_id, provider_id, &bridge_key, &bridge);
+    // The CLI said it set the model but no hook named it: still applied, as far as the screen shows.
+    if confirmed_by_screen {
+        return Ok((OptionOutcome::Applied, Some(value.to_string())));
+    }
+    Ok((OptionOutcome::Unconfirmed, None))
+}
+
+/// Send viewers a snapshot made now, so a change shows without waiting for the next hook.
+fn publish_latest(
+    state: &Arc<ConnState>,
+    session_id: &str,
+    provider_id: &str,
+    bridge_key: &AgentKey,
+    bridge: &crate::native_ui::NativeBridge,
+) {
+    if let Some(snapshot) = bridge.latest() {
+        let _ = state
+            .app
+            .hub
+            .hub_events_tx
+            .send(Arc::new(ServerMessage::AgentUiSnapshot {
+                request_id: None,
+                session_id: session_id.to_string(),
+                provider_id: provider_id.to_string(),
+                snapshot: with_transcript(snapshot, bridge_key),
+            }));
     }
 }
 

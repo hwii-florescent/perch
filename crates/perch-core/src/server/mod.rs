@@ -2387,6 +2387,7 @@ fn foundation_capabilities() -> Vec<String> {
         "agent.ui.get",
         "agent.ui.prompt",
         "agent.ui.cancel",
+        "agent.ui.options",
         "agent.terminal.open",
         "agent.terminal.release",
         "agent.lifecycle.get",

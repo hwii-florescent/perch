@@ -242,6 +242,26 @@ export interface NativeUiOptions {
   effort?: string;
   /** "Accept edits". */
   permissionMode?: string;
+  /** What the chat may change in the running CLI, each with the value last read back from it. */
+  pickers?: NativeUiPicker[];
+}
+
+/** One option the chat can change: `model`, `effort` or `mode` (`native_ui/option_pickers.rs`). */
+export interface NativeUiPicker {
+  id: string;
+  label: string;
+  /** The choice value the CLI was last seen running with, never what was merely sent. */
+  current?: string;
+  choices: NativeUiPickerChoice[];
+  /** False while a turn runs or the CLI waits on a person. */
+  settable: boolean;
+  /** A consequence worth knowing before choosing. */
+  note?: string;
+}
+export interface NativeUiPickerChoice {
+  value: string;
+  label: string;
+  description?: string;
 }
 
 /** Context use from the last model response. Never a cost or a quota. */
@@ -307,6 +327,28 @@ export interface AgentUiOlderResultMessage {
   sessionId: string;
   /** `applied`: more is loaded. `exhausted`: nothing older, or Perch will not load more. `unchanged`: the read added nothing. `failed`: it did not finish. */
   outcome: "applied" | "exhausted" | "unchanged" | "failed";
+}
+/** Change one option of the running CLI (capability `agent.ui.options`): typed or keyed at an idle, verified-empty prompt under the input lease. */
+export interface AgentUiOptionMessage {
+  type: "agent.ui.option";
+  requestId: string;
+  sessionId: string;
+  providerId: string;
+  generation: number;
+  /** `NativeUiPicker.id`. */
+  option: string;
+  /** A `NativeUiPickerChoice.value`. */
+  value: string;
+}
+export interface AgentUiOptionResultMessage {
+  type: "agent.ui.option.result";
+  requestId: string;
+  sessionId: string;
+  option: string;
+  /** `unconfirmed`: the CLI never showed the change; the picker keeps the value read back before. */
+  outcome: "applied" | "unconfirmed";
+  /** The value read back from the CLI. */
+  value?: string;
 }
 export interface AgentUiDraftedMessage {
   type: "agent.ui.drafted";
@@ -2137,6 +2179,7 @@ export type ClientMessage =
   | AgentUiFindMessage
   | AgentUiDraftMessage
   | AgentUiOlderMessage
+  | AgentUiOptionMessage
   | AgentUiPromptMessage
   | AgentUiAnswerMessage
   | AgentUiCancelMessage
@@ -2908,6 +2951,7 @@ export type ServerMessage =
   | AgentUiFoundMessage
   | AgentUiDraftedMessage
   | AgentUiOlderResultMessage
+  | AgentUiOptionResultMessage
   | AgentLifecycleMessage
   | AgentLifecycleChangedMessage
   | AgentControlMessage

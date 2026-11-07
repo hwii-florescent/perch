@@ -83,6 +83,13 @@ Each module's `//!` header names the files it follows:
   `src/renderer/src/components/native-chat/native-chat-permission-mode-labels.ts`, Claude's mode
   names from `src/main/claude/structured/claude-structured-init-proof.ts` and Codex's policies from
   `src/shared/codex-permission-policy.ts`.
+- `native_ui/option_pickers.rs`: the Claude catalog of `src/shared/agent-session/options/
+  agent-session-option-catalog-claude-codex.ts` (aliases, effort ladder, command templates),
+  `src/shared/native-chat/input/native-chat-session-option-{snapshot,commands,state}.ts`
+  (picker rules, `parseBuiltSessionOptionCommand`, `matchNativeChatCatalogModelId`) and the mode
+  descriptions of `native-chat-permission-mode-labels.ts`. `packages/web/src/views/nativeChat/
+  OptionLabels.tsx` takes the roles of `NativeChatModelCombobox.tsx` and
+  `NativeChatPermissionModePicker.tsx` on Perch's own `Select`; no component code is copied.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.
