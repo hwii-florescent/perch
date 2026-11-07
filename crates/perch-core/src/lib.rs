@@ -1,6 +1,7 @@
 pub mod agent_catalog;
 pub mod agent_fleet;
 pub mod agent_identity;
+pub mod agent_mail;
 pub mod agent_persistence;
 pub mod agent_runtime;
 pub mod agent_title;

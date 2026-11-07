@@ -126,7 +126,9 @@ pub struct NativePaths {
     pub socket: PathBuf,
 }
 
-pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
+/// Perch's private directory for native bridges: owned by this user, mode 0700, resolved past
+/// the `/tmp` link.
+fn private_root() -> anyhow::Result<PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
@@ -152,7 +154,39 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
         // that (a link to `/private/tmp`), so the literal path would fail
         // every native codex launch. Both spellings name the same inode, so a
         // session started before this still reconnects.
-        let root = std::fs::canonicalize(&root)?;
+        Ok(std::fs::canonicalize(&root)?)
+    }
+    #[cfg(not(unix))]
+    {
+        bail!("native CLI UI requires a Unix host")
+    }
+}
+
+/// A run's notes folder: plain files the agents of the run read on demand (a message too long
+/// for a prompt is one). Private to this user, never injected into a session. `run_id` is its
+/// lead's session id.
+pub fn notes_dir(run_id: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    ensure!(
+        !run_id.is_empty()
+            && run_id.len() <= 128
+            && run_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')),
+        "a run id is letters, digits, - and _"
+    );
+    let dir = private_root()?.join("notes").join(run_id);
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+    Ok(dir)
+}
+
+pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
+    #[cfg(unix)]
+    {
+        let root = private_root()?;
         let hash = terminal_key(key);
         let name = &hash[6..38];
         Ok(NativePaths {

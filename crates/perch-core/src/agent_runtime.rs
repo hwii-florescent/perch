@@ -64,6 +64,7 @@ fn in_shell(argv: Vec<String>, marker: &Path, cores: &Path) -> Vec<String> {
 }
 
 pub type TurnBoundaryListener = Arc<dyn Fn(&AgentKey, bool) -> anyhow::Result<()> + Send + Sync>;
+pub type PersonTurnListener = Arc<dyn Fn(&AgentKey) + Send + Sync>;
 
 /// Add a session's pinned Instructions to a provider's command line, writing its private
 /// Instructions file. Returns the command and, for Codex, the arguments for its shared
@@ -264,6 +265,10 @@ pub struct AgentRuntimeAdapter {
     /// Who opened the turn each session is in, as Perch saw it open (`sub_sessions.rs`). In
     /// memory on purpose: after a restart a turn's origin is unknown, and unknown is refused.
     turn_origins: Mutex<HashMap<String, crate::sub_sessions::TurnOrigin>>,
+    /// Told whenever a person opens a turn (`note_person_input`): a lead's automatic wakes start again.
+    person_turn: std::sync::OnceLock<PersonTurnListener>,
+    /// Told once a process's exit is confirmed (never for a lost connection or an intentional stop).
+    exit_listener: std::sync::OnceLock<PersonTurnListener>,
     instructions: std::sync::OnceLock<InstructionsResolver>,
     identities: std::sync::OnceLock<Arc<dyn crate::agent_identity::IdentityStore>>,
 }
@@ -292,9 +297,23 @@ impl AgentRuntimeAdapter {
             cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
             turn_origins: Mutex::new(HashMap::new()),
+            person_turn: std::sync::OnceLock::new(),
+            exit_listener: std::sync::OnceLock::new(),
             instructions: std::sync::OnceLock::new(),
             identities: std::sync::OnceLock::new(),
         }
+    }
+
+    pub fn set_person_turn_listener(&self, listener: PersonTurnListener) -> anyhow::Result<()> {
+        self.person_turn
+            .set(listener)
+            .map_err(|_| anyhow::anyhow!("person turn listener already installed"))
+    }
+
+    pub fn set_exit_listener(&self, listener: PersonTurnListener) -> anyhow::Result<()> {
+        self.exit_listener
+            .set(listener)
+            .map_err(|_| anyhow::anyhow!("exit listener already installed"))
     }
 
     pub fn set_identity_store(
@@ -561,6 +580,17 @@ impl AgentRuntimeAdapter {
             .map_or(Ok(()), |record| record(key, before))
     }
 
+    /// The change record of a turn Perch opens for an agent (a delivered message) starts, and the
+    /// turn is marked `Agent`. Unlike [`Self::record_turn_boundary`] it never counts as a person
+    /// speaking, so it does not give a lead its automatic wakes back.
+    pub fn record_agent_turn_boundary(&self, key: &AgentKey) -> anyhow::Result<()> {
+        self.turn_boundary
+            .get()
+            .map_or(Ok(()), |record| record(key, true))?;
+        self.note_agent_turn(key);
+        Ok(())
+    }
+
     /// A person submitted input. It opens a turn only when none is running: an Enter that
     /// answers a dialog or queues a line inside a turn leaves that turn's origin alone, and a
     /// state Perch cannot read counts as running.
@@ -573,6 +603,9 @@ impl AgentRuntimeAdapter {
                 key.session_id.clone(),
                 crate::sub_sessions::TurnOrigin::Person,
             );
+            if let Some(listener) = self.person_turn.get() {
+                listener(key);
+            }
         }
     }
 
@@ -1155,6 +1188,7 @@ impl AgentRuntimeAdapter {
         let event_key = key.clone();
         let turn_boundary = self.turn_boundary.clone();
         let identities = self.identities.get().cloned();
+        let exit_listener = self.exit_listener.get().cloned();
         let wrapped_on_exit: TerminalExitListener = Arc::new(move |terminal_id, code| {
             let intentional_stop = event_suppress.load(Ordering::Acquire);
             let identity = event_identity_slot.lock().unwrap().clone();
@@ -1200,6 +1234,9 @@ impl AgentRuntimeAdapter {
                     if let Err(error) = identities.revoke_session(&event_key) {
                         tracing::error!(%error, "could not revoke the ended run's agent token");
                     }
+                }
+                if let Some(listener) = exit_listener.as_ref() {
+                    listener(&event_key);
                 }
                 let mut active = active.lock().unwrap();
                 if active.get(&event_key).is_some_and(|runtime| {
@@ -2990,6 +3027,11 @@ mod tests {
                 Arc::new(|_, _| {}),
             )
             .unwrap();
+        let person_turns = Arc::new(Mutex::new(0usize));
+        let counted = person_turns.clone();
+        adapter
+            .set_person_turn_listener(Arc::new(move |_| *counted.lock().unwrap() += 1))
+            .unwrap();
         assert_eq!(
             adapter.turn_origin(&key),
             None,
@@ -3017,9 +3059,15 @@ mod tests {
         // Typed and submitted at idle: a person's turn.
         enter("hello\r");
         assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Person));
+        assert_eq!(
+            *person_turns.lock().unwrap(),
+            1,
+            "a person's turn is announced"
+        );
         // Perch delivered something for an agent: the turn it opens is not a person's.
         adapter.note_agent_turn(&key);
         assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Agent));
+        assert_eq!(*person_turns.lock().unwrap(), 1, "an agent's is not");
         // A person's Enter in the middle of that turn (a dialog, a queued line) changes nothing.
         adapter
             .signal(&key, ProviderSignal::TurnStarted, now_millis())
@@ -3027,6 +3075,11 @@ mod tests {
         assert_eq!(adapter.snapshot(&key).unwrap().state, AgentState::Working);
         enter("\r");
         assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Agent));
+        assert_eq!(
+            *person_turns.lock().unwrap(),
+            1,
+            "an Enter inside a turn is not an opening"
+        );
         // Once the turn is over, the next submission is a person's again.
         adapter
             .signal(

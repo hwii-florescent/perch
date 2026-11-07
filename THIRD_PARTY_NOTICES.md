@@ -96,6 +96,11 @@ Each module's `//!` header names the files it follows:
   stays `stop_unknown`) and the depth refusal of `src/shared/nested-worker-depth.ts` and its test.
   Orca's tasks, gates, coordinator loop and report settlement are not ported; the limits and the
   turn rule are Perch's own.
+- `agent_mail.rs` (with `db/agent_mail.rs`, `server/agent_mail.rs`): the message banner and its tests of
+  `src/main/runtime/orchestration/formatter.ts`, the custody rule `structuredMailOwed` of
+  `structured-mail-custody.ts` and the admit-once, never-resend delivery of
+  `structured-mailbox-pointer-delivery.ts` with its test. Orca's priorities, threads, payloads and
+  terminal pointer lane are not ported; idle-only delivery, quoting and the limits are Perch's own.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.

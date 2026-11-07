@@ -21,11 +21,11 @@ use serde_json::{json, Value};
 /// An error for the agent: the status to answer with and the text it reads.
 pub(super) type Failure = (StatusCode, String);
 
-fn fail(status: StatusCode, text: impl Into<String>) -> Failure {
+pub(super) fn fail(status: StatusCode, text: impl Into<String>) -> Failure {
     (status, text.into())
 }
 
-fn internal(context: &str, error: impl std::fmt::Display) -> Failure {
+pub(super) fn internal(context: &str, error: impl std::fmt::Display) -> Failure {
     tracing::error!(%error, "{context}");
     fail(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -666,14 +666,14 @@ pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::agent::tests::request;
     use super::*;
     use crate::agent_identity::IdentityStore;
     use crate::sub_sessions::TurnOrigin;
 
     /// A core booted over HTTP with its state, on a database under `root`.
-    async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
+    pub(in crate::server) async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -887,7 +887,7 @@ mod tests {
     }
 
     /// A lead and one recorded child, as the core would have left them after a spawn.
-    fn lead_with_child(
+    pub(in crate::server) fn lead_with_child(
         db: &HistoryDb,
         nest: &std::path::Path,
         child_state: SubState,

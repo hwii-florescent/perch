@@ -479,10 +479,15 @@ UI rows from step 0 continue between slices.
    stopped it. **Not verified:** a luna Codex child end to end (its quota was spent after it
    started) and `--worktree` live (Rust test only). Deleting a lead stops its live children first;
    Esc in the chat does not (it is not a stop).
-5. **Messaging** (`send`, `inbox`) with the durable queue and wake cap; write restart,
-   cancellation, duplicate and lease-contention behaviour down first. Check: queue
-   recovery after restart without duplicates; busy, approval-blocked and
-   person-typing prompts never receive bytes; Claude lease plus verify is one step.
+5. **Messaging. Done 2026-11-07** (details in the worker guide and ARCHITECTURE "Messages"):
+   `perch send|inbox|cancel`, the durable `agent_mail` queue, idle-only delivery per
+   provider, receipts (queued / delivered / unconfirmed / undelivered with a reason),
+   the 50-message and 10-wake caps, children's status notes to the lead. Live: a haiku
+   lead and a haiku child exchanged messages both ways with the window closed. **Open
+   owner decision:** a view that is open holds the input lease, and mail is never
+   delivered over it, so a lead someone is watching hears nothing until they close or
+   release it (the alternative, riding the holder's lease after the empty-prompt check, is
+   not built). **Not verified live:** delivery to Codex, Pi or OMP receivers.
 6. **Family strip and notes folder.** Check: e2e with a lead and two children showing
    working / waiting on you / reported.
 

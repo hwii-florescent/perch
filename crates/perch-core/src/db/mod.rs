@@ -21,7 +21,9 @@ mod attention;
 pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod browser_history;
 pub use browser_history::BrowserHistoryRow;
+mod agent_mail;
 mod instructions;
+pub use agent_mail::{Cancelled, Enqueued, MailRow, NewMail};
 mod sub_sessions;
 pub use sub_sessions::{Reserved, SubSessionRow, SubSessionSpec};
 mod workspace_order;
@@ -400,6 +402,33 @@ impl HistoryDb {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE (parent_session_id, spawn_key)
+            );
+            -- Messages and status notes between the sessions of a run (`agent_mail.rs`). `run_id` is
+            -- the run's lead. `idem_key` is the sender's key; a note has none.
+            CREATE TABLE IF NOT EXISTS agent_mail (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                sender_session_id TEXT NOT NULL,
+                sender_provider TEXT NOT NULL,
+                sender_label TEXT NOT NULL,
+                target_session_id TEXT NOT NULL,
+                target_provider TEXT NOT NULL,
+                target_incarnation TEXT NOT NULL,
+                body TEXT NOT NULL,
+                idem_key TEXT,
+                state TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE (sender_session_id, idem_key)
+            );
+            CREATE INDEX IF NOT EXISTS agent_mail_target ON agent_mail(target_session_id, state);
+            CREATE INDEX IF NOT EXISTS agent_mail_run ON agent_mail(run_id);
+            -- Automatic deliveries to a lead since a person last opened a turn on it.
+            CREATE TABLE IF NOT EXISTS agent_mail_wakes (
+                lead_session_id TEXT PRIMARY KEY,
+                wakes INTEGER NOT NULL
             );",
         )?;
         // The table above needs `sessions`, which an old database already has; the column

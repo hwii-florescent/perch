@@ -112,6 +112,14 @@ Useful existing coverage (not a claim of a fresh passing run):
   and first message were seen but its turn hit a usage limit. What a model will not do on cue (a spawn on
   a message-opened turn, the fifth child) is tested without models in `server/sub_sessions.rs`,
   `db/sub_sessions.rs` and `agent_runtime.rs`.
+- `agent-mail.spec.ts` (same config; needs `perch` beside the core; `PERCH_E2E_CHILD=claude` for a haiku
+  child, the default is a luna Codex one): a haiku lead starts a child whose task is `perch send` to the
+  lead; the person closes the window (an open view holds Claude's input lease and mail is never delivered
+  over it); the child's message and its status note reach the lead (delivered, confirmed by Claude's own
+  hook, one wake spent), the window comes back and shows both as `Perch message from` and `Perch status
+  from` user rows, then the lead messages the idle child, which acts on it (its `perch report` carries
+  the marker). Assertions read the core's SQLite file; nothing may be left `delivering` or `unconfirmed`.
+  Verified once (haiku child, ~30 s); Codex, Pi and OMP receivers were not run live.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

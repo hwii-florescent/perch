@@ -461,28 +461,38 @@ The contract is in ARCHITECTURE ("Sub-sessions"). What later slices build on:
   `perch list` and stopped it, and the core confirmed the stop. **Codex as a child is therefore not
   verified end to end.**
 
-## Slice 5: messaging
+## Slice 5 landed (2026-11-07): messaging
 
-**Orca to port with changes:** sender envelope (`formatter.ts` `formatMessageBanner`);
-custody until delivered (`structured-mail-custody.ts`); one message per turn through the
-session's own queue (`structured-mailbox-pointer-delivery.ts`). Table `agent_mail`
-(`messages` already exists in `db/mod.rs`).
-**Changes from Orca:** idle-only (Orca also delivers to working agents,
-`mailbox-owner.ts`); body inline ≤2,000 chars, longer goes to a notes file with a path;
-neutralise a leading `/`; `inbox` reads without consuming; per-message idempotency key.
-**Claude-desktop behaviour (spec):** queued notes on the lead (cap 32); the lead is woken
-only when idle with no pending approval, question or working child, at most 10 times per
-human message; a one-line status roster per child, marked as status rather than
-instruction; peer text treated as data, never as the user; receipts delivered / queued /
-undelivered with reason.
-**Delivery per provider:** Pi/OMP follow-up through the bridge; Codex `turn/start` at idle;
-Claude: take the input lease and verify the empty prompt in one step (extend
-`server/context_bridge.rs` flow: `acquire_control_if_unowned`, `prepare_input`,
-`reserve_prompt_operation`), confirmed only by `UserPromptSubmit`; never retried blindly.
+The contract is in ARCHITECTURE ("Messages", written before the code). What later slices build on:
 
-Write restart, cancel, duplicate and lease-contention behaviour into ARCHITECTURE first.
-Check: restart with queued mail delivers once; busy, approval-blocked and person-typing
-prompts receive no bytes; 50-message and wake caps; `/`-leading body cannot run a command.
+- **Files.** `agent_mail.rs` (pure: the banner, quoting, caps, admission, the idle-only rule
+  `wait_reason`, Orca's "owed" rule, the note and roster wording), `db/agent_mail.rs` (tables `agent_mail`
+  and `agent_mail_wakes`; admission, the key, the limits and the row in one transaction; the atomic
+  `queued` to `delivering` claim; `unconfirmed` at boot), `server/agent_mail.rs` (routes `/agent/send|inbox|
+  cancel`, the delivery engine `pass` over a `World` trait with the real `AppWorld`, `note_child`, the loop
+  `run_deliveries` every 2 s or when something is queued), verbs `send`, `inbox`, `cancel` in
+  `perchd/agent_cli.rs`. `AgentRuntimeAdapter` gained `record_agent_turn_boundary`, a person-turn listener
+  (resets a lead's wakes) and an exit listener (a confirmed exit notes the lead).
+- **Orca** (`308b5000`, header of `agent_mail.rs`): the banner, the custody ("owed") rule and the
+  claim-once pointer delivery, with the cases of their tests. Not ported: priorities, threads, payloads,
+  the terminal pointer lane, journal parking. Changed: idle-only, quoted bodies, notes-folder files,
+  `unconfirmed`.
+- **Receipts** are the four words of the guide; `unconfirmed` (bytes may have arrived, never resent) is
+  Perch's addition to the three the owner named, because unknown is not failure.
+- **Status notes** (`note_child`): a child's finished turn, a block on a person or a confirmed exit queues
+  one note for the lead (a newer one from the same child replaces a queued one); a lead's waiting notes
+  go in one roster prompt. Found live: the bridge's snapshot can trail the hook that ends the turn, so the
+  last message is read 1.5 s later, and a finished turn is noted even with nothing to quote.
+- **Notes folder.** `native_ui::notes_dir(run)`, `/tmp/perch-native-<uid>/notes/<run>/`, 0700. Slice 6 only
+  has to name it in `perch guide`; today it holds the files of long messages.
+- **Live** (`e2e/agent-mail.spec.ts`, TESTING): a haiku lead spawned a haiku child; with the window
+  closed the child's message and its status note reached the lead (Claude path: lease, empty prompt,
+  `UserPromptSubmit`), then the lead's message reached the idle child and it acted on it. **Found live:
+  an open view holds the input lease**, so with the chat open mail waited forever ("another view holds
+  input control"): the contract keeps that (never take a lease over) and the e2e closes the window. Open
+  owner decision: let delivery ride the holder's current lease after the empty-prompt check. **Not
+  verified live:** Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World`
+  trait only).
 
 ## Slice 6: family strip and notes folder
 

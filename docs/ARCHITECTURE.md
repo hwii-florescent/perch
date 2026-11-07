@@ -307,6 +307,74 @@ the core, not the agent, decides:
   message, labelled a fallback. Neither marks anything done.
 - Local only; a lead on a remote host cannot spawn.
 
+**Messages** (`agent_mail.rs` rules, `db/agent_mail.rs` queue, `server/agent_mail.rs` routes `/agent/send`,
+`inbox`, `cancel` and the delivery loop). Written before the code, slice 5; the behaviour below is the
+contract the tests hold it to.
+
+- *Who and what.* The members of a run are a lead and its children; a member may message any other
+  member of its run, never itself, never another run, and only one with a live identity (its
+  incarnation is recorded on the message). A body is at most 64 KiB without control characters; up to
+  2,000 characters it travels whole, a longer one is written to a private file under the run's notes folder
+  (`/tmp/perch-native-<uid>/notes/<run>/`, 0700/0600) and the receiver gets a 300-character preview and the
+  path. Two kinds exist: `message` (an agent's `perch send`) and `note` (Perch's own status line from a
+  child to its lead, below). 50 messages per run (notes do not count), 32 pending per receiver, and a key
+  (`--key`, else one per invocation) per sender: the same key returns the first message and queues nothing.
+  All of it is decided in one transaction before anything is queued; a refusal queues nothing.
+- *Receipts.* `queued` (with the reason it is still waiting), `delivered`, `unconfirmed`, `undelivered`
+  (with a reason). `delivered` only when the receiver's own bridge or hook confirmed it took the text
+  (Claude: the `UserPromptSubmit` event; Pi, OMP, Codex: the bridge's acknowledgement). Bytes written
+  without that proof are `unconfirmed`, never `delivered` and never `undelivered`: unknown is not failure.
+- *Delivery is idle-only and never steers.* A receiver is eligible only when all hold: its recorded
+  incarnation is still its live one; its runtime is alive and its native bridge has reported; its
+  lifecycle is Idle or Done and the bridge says no turn is running, nothing is blocked and no question or
+  approval is open; its input line is readable and empty (a person typing, a dialog or an overlay is not
+  empty); and, for a lead, no child is working and fewer than 10 automatic wakes were spent since a person
+  last opened a turn on it. Otherwise nothing is written and the message stays `queued` with the reason.
+  Nothing wakes a sleeping session, relaunches an exited one or restarts a process.
+- *Per provider.* Pi and OMP: the bridge's prompt (their own follow-up queue; the extension queues it if a
+  turn started in between). Codex: `turn/start` through the bridge, only on the snapshot above, because
+  Codex does not refuse a busy start (it joins the running turn; slice 0). Claude: the bridge's prompt
+  plus a paste. Every provider goes through one step under `agent_operation_lock`: take the input lease
+  **only if it is unowned**, check the input line (Claude: its real PID and empty prompt,
+  `claude::prepare_input`; the others: nothing typed, no dialog or overlay, `typed::input_ready`), claim,
+  enqueue the confirmation with the bridge and, for Claude only, paste; the borrowed lease is released
+  afterwards. Typed into a shell (`terminal` provider) cannot receive messages.
+- *Lease contention.* A view that holds the input lease is never overridden, by any provider's delivery:
+  the message stays queued with the reason "another view holds input control" and goes on the next pass
+  after that view releases or closes. **Any open chat or terminal view of a session takes and keeps its
+  input lease while attached**, so a lead (or child) a person has open is not written to until they
+  close it or release control; the live check closes the window first. Seen live, not assumed. Whether
+  delivery may instead ride the holder's current lease after the same empty-prompt check, without taking
+  or changing it, is an open owner decision (not built); the family strip (slice 6) shows what waits.
+  The core's own mail client holds the lease only for the length of one delivery.
+- *Duplicates and restarts.* The claim is one atomic `queued` to `delivering` update before any byte or
+  bridge call, so a message is attempted at most once. A core that stops with a message `delivering` finds
+  it `unconfirmed` at boot and never retries it blindly. Queued messages survive restarts; before any
+  attempt the incarnation is checked again, so a message is never handed to a later launch of the session
+  it was not addressed to (the receiver restarted: `undelivered`, "addressed to its previous run").
+  A delivery failure before the claim leaves the message queued; after it, `unconfirmed`.
+- *Cancel.* The sender may cancel its own message while it is `queued` (`perch cancel <id>`): `undelivered`,
+  "cancelled by sender". Once `delivering` it cannot be taken back. Receivers that end (identity revoked on
+  a confirmed exit, session deleted) turn their queued mail `undelivered`; deleting a lead deletes the
+  run's mail with it (its children become ordinary sessions, like their records).
+- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (title,
+  provider, session, kind) and saying the text is from another agent, not a person, and approves nothing;
+  the body follows as a quoted block, every line prefixed, so a leading `/`, `!` or `#` can never be a
+  command or a mode switch (the prompt starts with a `────` rule line, never a character from the
+  sender). Peer text is data; the guide tells agents the
+  same. A message never answers a dialog and never approves anything: delivery refuses while one is open.
+- *Turn origin.* A delivered message opens a turn Perch marks `Agent` (after the change-record barrier,
+  which would otherwise mark it a person's), so the person-turn rule refuses `perch spawn` there.
+- *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
+  queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
+  the first 400 characters of its own `perch report` or else of its last message, labelled a claim (a
+  finished turn is noted even when the child said and reported nothing: "It has reported nothing"). A
+  newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
+  (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
+- *Wake cap.* Delivering anything to a lead spends one of 10 wakes; a person opening a turn on the lead
+  (terminal Enter, chat send, Context Bridge send) resets it, durably, through a listener on the same
+  `note_person_input` that marks the turn `Person`. A core restart does not reset it.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.
