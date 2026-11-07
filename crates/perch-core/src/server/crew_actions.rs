@@ -625,6 +625,17 @@ pub(super) async fn agent_action(
     }))
 }
 
+/// Whether this connection's chat of `key` holds the input lease at `generation`: the same test
+/// typing in the chat has to pass.
+pub(super) fn holds_input_lease(state: &Arc<ConnState>, key: &AgentKey, generation: u64) -> bool {
+    state
+        .agent_input_leases
+        .lock()
+        .unwrap()
+        .get(&agents::lifecycle_control_key(key, ControlChannel::Input))
+        .is_some_and(|lease| lease.generation == generation)
+}
+
 /// `crew.act` from a person's chat. The strip belongs to the lead whose chat shows it, so the
 /// person must hold that chat's input lease, exactly as for typing in it.
 pub(super) fn handle_act(
@@ -675,16 +686,7 @@ pub(super) fn handle_act(
         let Ok(lead_key) = key_of(&state.app, &session_id, &provider) else {
             return refuse("that chat no longer exists");
         };
-        let held = state
-            .agent_input_leases
-            .lock()
-            .unwrap()
-            .get(&agents::lifecycle_control_key(
-                &lead_key,
-                ControlChannel::Input,
-            ))
-            .is_some_and(|lease| lease.generation == generation);
-        if !held {
+        if !holds_input_lease(&state, &lead_key, generation) {
             return refuse("Take control of this chat before acting on a sub-session");
         }
         let request = Request {

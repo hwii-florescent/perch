@@ -15,7 +15,7 @@ use crate::agent_fleet::{
 };
 use crate::agent_identity::AgentIdentity;
 use crate::db::{Reserved, SubSessionRow, SubSessionSpec};
-use crate::sub_sessions::{self, Report, ReportSource, SubState};
+use crate::sub_sessions::{self, Report, ReportSource, SubState, TurnOrigin};
 use serde_json::{json, Value};
 
 /// An error for the agent: the status to answer with and the text it reads.
@@ -34,7 +34,7 @@ pub(super) fn internal(context: &str, error: impl std::fmt::Display) -> Failure 
 }
 
 /// The agents a lead may start.
-const AGENTS: [&str; 4] = ["claude", "codex", "pi", "omp"];
+pub(super) const AGENTS: [&str; 4] = ["claude", "codex", "pi", "omp"];
 
 fn service_client() -> Result<ClientIdentity, Failure> {
     ClientIdentity::new("sub-session-launcher", "perch-core", ClientKind::Service)
@@ -137,11 +137,23 @@ fn child_json(row: &SubSessionRow, state: SubState, duplicate: bool) -> Value {
     })
 }
 
-/// `perch spawn`.
+/// `perch spawn`, with the lead allowed to start without asking: the turn must be one a person opened.
 pub(super) async fn spawn(
     app: &AppState,
     caller: &AgentIdentity,
     request: SpawnRequest,
+) -> Result<Value, Failure> {
+    start(app, caller, request, false).await
+}
+
+/// Start a sub-session of `caller`. `by_person` is a person's own click on a suggested task: that
+/// click is the person's action, so the turn rule is met by it. Everything else (depth, limits, the
+/// key, the launch) is the same as for `perch spawn`.
+pub(super) async fn start(
+    app: &AppState,
+    caller: &AgentIdentity,
+    request: SpawnRequest,
+    by_person: bool,
 ) -> Result<Value, Failure> {
     let lead = app
         .db
@@ -183,9 +195,13 @@ pub(super) async fn spawn(
         .agent_runtime
         .snapshot(&lead_key)
         .is_ok_and(|snapshot| matches!(snapshot.state, AgentState::Working | AgentState::Blocked));
-    let turn = in_turn
-        .then(|| app.agent_runtime.turn_origin(&lead_key))
-        .flatten();
+    let turn = if by_person {
+        Some(TurnOrigin::Person)
+    } else {
+        in_turn
+            .then(|| app.agent_runtime.turn_origin(&lead_key))
+            .flatten()
+    };
 
     let child_id = Uuid::new_v4().to_string();
     let spec = SubSessionSpec {
@@ -569,7 +585,8 @@ pub(super) async fn list(app: &AppState, caller: &AgentIdentity) -> Result<Value
                 Some((&row, state)),
             ));
         }
-        Ok(json!({ "lead": lead_id, "members": members }))
+        let suggested = super::suggestions::listed(&app, &lead_id);
+        Ok(json!({ "lead": lead_id, "members": members, "suggested": suggested }))
     })
     .await
     .map_err(|error| internal("list the run", error))?
@@ -741,6 +758,14 @@ pub(super) mod tests {
         let nest = root.join("nest");
         std::fs::create_dir_all(&nest).unwrap();
         let (address, db) = boot(&root).await;
+        // This test is about the person-turn rule, which applies once leads may start without asking.
+        super::super::booted_state(address)
+            .settings
+            .update(crate::settings::SettingsPatch {
+                leads_start_without_asking: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
         let (_, workspace) = db
             .create_project("local", &nest.to_string_lossy(), Some("nest"), None)
             .unwrap();

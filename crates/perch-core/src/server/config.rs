@@ -62,6 +62,7 @@ pub(super) fn handle_settings_update(
         reporter_enabled: patch.reporter_enabled,
         reporter_claude_model: patch.reporter_claude_model,
         reporter_codex_model: patch.reporter_codex_model,
+        leads_start_without_asking: patch.leads_start_without_asking,
         reporter_pi_model: patch.reporter_pi_model,
         reporter_omp_model: patch.reporter_omp_model,
     };
@@ -256,6 +257,7 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         reporter_enabled: s.reporter_enabled,
         reporter_claude_model: s.reporter_claude_model.clone(),
         reporter_codex_model: s.reporter_codex_model.clone(),
+        leads_start_without_asking: s.leads_start_without_asking,
         reporter_pi_model: s.reporter_pi_model.clone(),
         reporter_omp_model: s.reporter_omp_model.clone(),
     }

@@ -570,6 +570,11 @@ function NotificationsSection() {
         />
       </SettingRow>
     </SettingsGroup>
+    <SettingsGroup title="Sub-sessions">
+      <SettingRow title="Let leads start sub-sessions without asking" description="Off: when an agent wants to start a sub-session it puts a suggested task in its chat, and nothing starts until you press Start. On: it starts one itself, during a turn you opened.">
+        <Switch label="Let leads start sub-sessions without asking" testId="settings-leads-start-without-asking" checked={settings?.leadsStartWithoutAsking ?? false} onChange={(checked) => updateSettings({ leadsStartWithoutAsking: checked })} />
+      </SettingRow>
+    </SettingsGroup>
     <SettingsGroup title="Sub-session summaries">
       <SettingRow title="Summarise finished turns" description="When a sub-session finishes a turn without reporting, a small model writes a short summary for the session that started it. Off keeps the start of its last message.">
         <Switch label="Summarise finished sub-session turns" testId="settings-reporter-enabled" checked={settings?.reporterEnabled ?? true} onChange={(checked) => updateSettings({ reporterEnabled: checked })} />

@@ -38,9 +38,11 @@ export const CHEAP_CLAUDE_MODEL = "claude-haiku-4-5";
  * Pin the reporter's own model calls (Settings, "Sub-session summaries") to the two cheap models.
  * The product defaults are the aliases `haiku` and `gpt-6-luna`, which the suite never runs.
  * Write before the core starts: the settings file is the fixture's `PERCH_SETTINGS`.
+ * `leadsStartWithoutAsking` is on by default here: the specs that start children drive `perch spawn`
+ * directly; a spec of the suggested-task card passes `false` (the product default) to get a card.
  */
-export function pinReporterModels(fixture: string): void {
-  fs.writeFileSync(path.join(fixture, "settings.json"), JSON.stringify({ reporterClaudeModel: CHEAP_CLAUDE_MODEL, reporterCodexModel: CHEAP_CODEX_MODEL }));
+export function pinReporterModels(fixture: string, leadsStartWithoutAsking = true): void {
+  fs.writeFileSync(path.join(fixture, "settings.json"), JSON.stringify({ reporterClaudeModel: CHEAP_CLAUDE_MODEL, reporterCodexModel: CHEAP_CODEX_MODEL, leadsStartWithoutAsking }));
 }
 
 /**

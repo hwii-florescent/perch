@@ -28,6 +28,8 @@ mod reporter;
 pub use reporter::{ReporterRun, StoredSummary};
 mod sub_sessions;
 pub use sub_sessions::{Reserved, SubSessionRow, SubSessionSpec};
+mod suggestions;
+pub use suggestions::{Added, SuggestionRow};
 mod workspace_order;
 pub use workspace_order::{ORDER_PROJECTS, ORDER_SESSIONS};
 mod prompts;
@@ -447,6 +449,26 @@ impl HistoryDb {
                 model TEXT,
                 as_of INTEGER NOT NULL
             );
+            -- Tasks a lead suggested for a person to start (`suggestions.rs`). `card_key` is the
+            -- lead's key for one `perch suggest`; `card_id` groups the rows of one card.
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id TEXT PRIMARY KEY,
+                lead_session_id TEXT NOT NULL,
+                card_id TEXT NOT NULL,
+                card_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                task TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                worktree INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL,
+                child_session_id TEXT,
+                reason TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE (lead_session_id, card_key, position)
+            );
+            CREATE INDEX IF NOT EXISTS suggestions_lead ON suggestions(lead_session_id);
             -- Each model call the reporter made, for the spend estimate.
             CREATE TABLE IF NOT EXISTS reporter_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

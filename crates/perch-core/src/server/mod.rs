@@ -101,6 +101,7 @@ mod uploads;
 use terminal::claude_conversation_exists_in;
 mod session;
 mod sub_sessions;
+mod suggestions;
 /// The state of every core a test booted, by address: a test that talks to a core over HTTP can also
 /// call the service functions behind its routes on the same state.
 #[cfg(test)]
@@ -425,6 +426,15 @@ pub async fn run(
     }
 
     // Load settings store.
+    // A core booted by a test keeps its settings beside its own database, never in the user's file.
+    #[cfg(test)]
+    let settings = Arc::new(
+        match options.db_path.as_ref().and_then(|path| path.parent()) {
+            Some(dir) => SettingsStore::load(dir.join("settings.json")),
+            None => SettingsStore::load_default(),
+        },
+    );
+    #[cfg(not(test))]
     let settings = Arc::new(SettingsStore::load_default());
     tracing::info!("[perch] settings loaded from {:?}", settings.path);
 
@@ -743,6 +753,10 @@ pub async fn run(
             if let Err(error) = db.mark_unfinished_sub_sessions_unknown() {
                 tracing::warn!(%error, "could not mark unfinished sub-sessions");
             }
+            // A suggestion being started then is started if its sub-session was recorded.
+            if let Err(error) = db.settle_unfinished_suggestions() {
+                tracing::warn!(%error, "could not settle unfinished suggestions");
+            }
         });
     }
 
@@ -795,6 +809,10 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/spawn"),
             post(agent::spawn).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/suggest"),
+            post(agent::suggest).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             &format!("{base_path}agent/list"),
@@ -2527,6 +2545,7 @@ fn foundation_capabilities() -> Vec<String> {
         "instructions.v1",
         "crew.v1",
         "crew.actions.v1",
+        "suggestions.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

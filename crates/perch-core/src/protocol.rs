@@ -113,6 +113,10 @@ pub struct SettingsData {
     pub reporter_claude_model: String,
     #[serde(default = "crate::settings::default_reporter_codex_model")]
     pub reporter_codex_model: String,
+    /// Leads may start sub-sessions with `perch spawn` without a person's click. Missing means off:
+    /// `perch spawn` becomes a suggested-task card.
+    #[serde(default)]
+    pub leads_start_without_asking: bool,
     /// Pi's reporter model (`provider/id`); missing or empty means Pi has none.
     #[serde(default)]
     pub reporter_pi_model: String,
@@ -204,6 +208,8 @@ pub struct SettingsPatch {
     pub reporter_claude_model: Option<String>,
     #[serde(default)]
     pub reporter_codex_model: Option<String>,
+    #[serde(default)]
+    pub leads_start_without_asking: Option<bool>,
     #[serde(default)]
     pub reporter_pi_model: Option<String>,
     #[serde(default)]
@@ -366,6 +372,48 @@ pub struct SessionSummary {
     pub current_cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_branch: Option<String>,
+}
+
+/// One task of a suggested-task card (`suggestions.state`, `suggestions.rs`). `state` is `pending`,
+/// `starting`, `started` (then `child_session_id` and `dispatch` say where its sub-session is),
+/// `handed` or `dismissed`; `reason` is why Start did not start it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestionItem {
+    pub id: String,
+    pub task: String,
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub worktree: bool,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+}
+
+/// The tasks one `perch suggest` put in front of the person.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestionCard {
+    pub id: String,
+    pub items: Vec<SuggestionItem>,
+}
+
+/// What a `suggestion.act` did to one task.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestionResult {
+    pub suggestion_id: String,
+    /// `started`, `refused`, `handed` or `dismissed`.
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_session_id: Option<String>,
 }
 
 /// One member of a session's run for the family strip (`crew.state`, `crew.rs`). The record of
@@ -1248,6 +1296,37 @@ pub enum ClientMessage {
         generation: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+
+    /// The suggested-task cards of a lead's chat (capability `suggestions.v1`). Answered with
+    /// `suggestions.state`.
+    #[serde(rename = "suggestions.get", rename_all = "camelCase")]
+    SuggestionsGet {
+        request_id: String,
+        session_id: String,
+    },
+
+    /// A person's action on a suggested task of a lead's chat (capability `suggestions.v1`): `start`
+    /// (one task, with optional `agent`, `model` and `worktree` chosen in Options), `start_all` (every
+    /// waiting task of the card), `handed` (the chat sent the task to the lead as the person's own
+    /// message; this only records it) or `dismiss` (one task, or the whole card without
+    /// `suggestion_id`). `generation` is the chat's input lease, as for typing in it. Answered with
+    /// `suggestion.act.result`.
+    #[serde(rename = "suggestion.act", rename_all = "camelCase")]
+    SuggestionAct {
+        request_id: String,
+        session_id: String,
+        action: String,
+        card_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        suggestion_id: Option<String>,
+        generation: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree: Option<bool>,
     },
 
     /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
@@ -2285,6 +2364,36 @@ pub enum ServerMessage {
         reason: String,
         done: bool,
     },
+
+    /// Reply to `suggestions.get`: the cards still worth showing, oldest first.
+    #[serde(rename = "suggestions.state", rename_all = "camelCase")]
+    SuggestionsState {
+        request_id: String,
+        session_id: String,
+        cards: Vec<SuggestionCard>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `suggestion.act`. `outcome`: `started` (every task asked for was started), `partial`
+    /// (some were, `results` says which and why not), `refused` (nothing was done; `reason` says
+    /// why), `handed` or `dismissed`.
+    #[serde(rename = "suggestion.act.result", rename_all = "camelCase")]
+    SuggestionActResult {
+        request_id: String,
+        session_id: String,
+        action: String,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        results: Vec<SuggestionResult>,
+    },
+
+    /// Broadcast when a lead's suggested-task cards changed (one was added, answered or its sub-session
+    /// settled). Clients showing that chat ask again with `suggestions.get`.
+    #[serde(rename = "suggestions.changed", rename_all = "camelCase")]
+    SuggestionsChanged { session_id: String },
 
     /// Reply to `browser.history.search`, best match first.
     #[serde(rename = "browser.history.result", rename_all = "camelCase")]

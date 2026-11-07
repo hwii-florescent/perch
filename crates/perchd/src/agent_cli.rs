@@ -306,6 +306,10 @@ fn spawn(args: &[String]) -> Result<(), String> {
             "worktree": parsed.worktree,
         }),
     )?;
+    if answer["suggested"].as_bool().unwrap_or(false) {
+        println!("{}", render_suggested(&answer));
+        return Ok(());
+    }
     let session = answer["session"].as_str().unwrap_or_default();
     if answer["duplicate"].as_bool().unwrap_or(false) {
         println!("already started {session} (same key); nothing new was started");
@@ -313,6 +317,127 @@ fn spawn(args: &[String]) -> Result<(), String> {
         println!("started {session}");
     }
     println!("Read its report with `perch list`; stop it with `perch stop {session}`.");
+    Ok(())
+}
+
+/// What `perch suggest` was asked: one entry per task, each with the options written before it.
+#[derive(Debug, PartialEq, Eq)]
+struct SuggestArgs {
+    suggestions: Vec<SuggestedTask>,
+    key: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SuggestedTask {
+    agent: Option<String>,
+    model: Option<String>,
+    worktree: bool,
+    task: String,
+}
+
+const SUGGEST_USAGE: &str =
+    "usage: perch suggest [--agent <claude|codex|pi|omp>] [--model <name>] \
+     [--worktree] --task <text> [more options and --task <text> for each further task]";
+
+/// The option words that end a task's text on a suggest line. A task that has to contain one of them
+/// as a word of its own is passed as one quoted argument.
+fn is_suggest_word(word: &str) -> bool {
+    matches!(
+        word,
+        "--task" | "--agent" | "--model" | "--worktree" | "--key"
+    )
+}
+
+fn parse_suggest(args: &[String]) -> Result<SuggestArgs, String> {
+    let mut parsed = SuggestArgs {
+        suggestions: Vec::new(),
+        key: None,
+    };
+    let (mut agent, mut model, mut worktree) = (None, None, false);
+    let mut words = args.iter().peekable();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--agent" | "--model" | "--key" => {
+                let name = word.as_str();
+                let value = words
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| format!("{name} needs a value. {SUGGEST_USAGE}"))?;
+                match name {
+                    "--agent" => agent = Some(value),
+                    "--model" => model = Some(value),
+                    _ => parsed.key = Some(value),
+                }
+            }
+            "--worktree" => worktree = true,
+            "--task" => {
+                let mut text: Vec<&str> = Vec::new();
+                while let Some(next) = words.next_if(|next| !is_suggest_word(next)) {
+                    text.push(next);
+                }
+                let task = text.join(" ");
+                if task.trim().is_empty() {
+                    return Err(format!(
+                        "--task needs the text of the task. {SUGGEST_USAGE}"
+                    ));
+                }
+                parsed.suggestions.push(SuggestedTask {
+                    agent: agent.take(),
+                    model: model.take(),
+                    worktree: std::mem::take(&mut worktree),
+                    task,
+                });
+            }
+            other => return Err(format!("unknown option {other}. {SUGGEST_USAGE}")),
+        }
+    }
+    if agent.is_some() || model.is_some() || worktree {
+        return Err(format!(
+            "put --agent, --model and --worktree before the --task they belong to. {SUGGEST_USAGE}"
+        ));
+    }
+    if parsed.suggestions.is_empty() {
+        return Err(format!("--task is required. {SUGGEST_USAGE}"));
+    }
+    Ok(parsed)
+}
+
+/// What a card put in front of the person says, in words that cannot be read as "started".
+fn render_suggested(answer: &Value) -> String {
+    let count = answer["suggestions"].as_array().map_or(1, Vec::len);
+    let what = if count == 1 { "task" } else { "tasks" };
+    let again = if answer["duplicate"].as_bool().unwrap_or(false) {
+        " (same key; nothing new was suggested)"
+    } else {
+        ""
+    };
+    format!(
+        "suggested {count} {what}{again}: nothing was started. The person sees a card in this \
+         session's chat and starts a task, or has you do it, themselves. `perch list` shows \
+         which are still waiting. Carry on with what you can do without it."
+    )
+}
+
+fn suggest(args: &[String]) -> Result<(), String> {
+    let parsed = parse_suggest(args)?;
+    let key = match &parsed.key {
+        Some(key) => key.clone(),
+        None => fresh_key()?,
+    };
+    let suggestions: Vec<Value> = parsed
+        .suggestions
+        .iter()
+        .map(|task| {
+            json!({
+                "task": task.task,
+                "agent": task.agent,
+                "model": task.model,
+                "worktree": task.worktree,
+            })
+        })
+        .collect();
+    let answer = ask("suggest", json!({ "suggestions": suggestions, "key": key }))?;
+    println!("{}", render_suggested(&answer));
     Ok(())
 }
 
@@ -354,6 +479,20 @@ fn render_list(answer: &Value) -> String {
             };
             text += &format!("       {label}: {body}\n");
         }
+    }
+    for item in answer["suggested"].as_array().into_iter().flatten() {
+        let field = |name: &str| item[name].as_str().unwrap_or("");
+        let state = match field("state") {
+            "pending" => "waiting for the person".to_string(),
+            "starting" => "the person pressed Start".to_string(),
+            _ => format!("started as {}", field("session")),
+        };
+        text += &format!(
+            "suggested {} {}  {state}: {}\n",
+            field("id"),
+            field("agent"),
+            field("task")
+        );
     }
     text
 }
@@ -607,7 +746,18 @@ Commands
                           own, with its own agent. The task is its first message, so make it
                           complete (up to 3000 characters; for more, write a file and name
                           its path). --worktree gives it its own git checkout. The rest of
-                          the line after --task is the task; it needs no quoting.
+                          the line after --task is the task; it needs no quoting. Unless
+                          the person has allowed leads to start without asking, this only
+                          puts the task in front of them as a card (see `perch suggest`)
+                          and says so: nothing has started.
+  perch suggest [--agent <a>] [--model <m>] [--worktree] --task <text> [more --task ...]
+                          Put one or more tasks in front of the person as a card in your
+                          chat. They press Start (or Start all), choose Options, or have
+                          you do it here; nothing starts until they do, and a Start goes
+                          through the same limits as `perch spawn`. Options written before
+                          a --task belong to it. Up to 5 tasks a card, 10 waiting at once.
+                          Write each task as complete as for spawn. `perch list` shows
+                          which are waiting and which started.
   perch list [--json]     Your run: the session that leads it and every sub-session, with
                           what Perch knows of each (state, whether it needs a person, its
                           report). Read-only.
@@ -646,9 +796,12 @@ How it works
   when your run ends.
 
 Sub-sessions
-  - Only a person can have you start one: `perch spawn` works only during a turn a person
-    opened in this session, never in a turn that began with a message from another session.
-    If it is refused, do the work yourself or tell the person what you would delegate.
+  - Only a person can have you start one. By default a person starts it: suggest the work
+    with `perch suggest` (or `perch spawn`, which then does the same) and carry on without
+    it; the task may be handed back to you as a message (\"Do it here\"). Where the person has
+    let leads start without asking, `perch spawn` starts it directly, but only during a turn a
+    person opened in this session, never in one that began with a message from another
+    session. If it is refused, do the work yourself or tell the person what you would delegate.
   - A sub-session cannot start sub-sessions. At most 4 run at once and 8 in total.
   - A sub-session keeps running until it or you stop it, even after it reports. Stop the ones
     you no longer need; a stopped one is restarted only when a person sends it something.
@@ -705,6 +858,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "whoami" => whoami(args.iter().any(|arg| arg == "--json")),
         "report" => report(args),
         "spawn" => spawn(args),
+        "suggest" => suggest(args),
         "list" => list(args.iter().any(|arg| arg == "--json")),
         "stop" => stop(args),
         "send" => send(args),
@@ -1067,9 +1221,13 @@ mod tests {
             "cannot approve anything",
             "at most 10 times",
             "perch spawn",
+            "perch suggest",
+            "through the same limits as `perch spawn`",
+            "suggest the work",
+            "let leads start without asking",
             "perch list",
             "perch stop",
-            "a turn a person",
+            "never in one that began with a message from another",
             "cannot start sub-sessions",
             "4 run at once and 8 in total",
             "fallback",

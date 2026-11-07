@@ -485,6 +485,8 @@ export interface SettingsData {
   reporterEnabled?: boolean;
   reporterClaudeModel?: string;
   reporterCodexModel?: string;
+  /** Leads may start sub-sessions with `perch spawn` without a person's click. Absent = off: `perch spawn` becomes a suggested-task card. */
+  leadsStartWithoutAsking?: boolean;
   /** Pi's and OMP's reporter models (`provider/id`); absent or empty = that harness has none. */
   reporterPiModel?: string;
   reporterOmpModel?: string;
@@ -523,6 +525,7 @@ export interface SettingsPatch {
   reporterEnabled?: boolean;
   reporterClaudeModel?: string;
   reporterCodexModel?: string;
+  leadsStartWithoutAsking?: boolean;
   reporterPiModel?: string;
   reporterOmpModel?: string;
 }
@@ -1381,6 +1384,86 @@ export interface BrowserSuggestMessage {
 export interface CrewGetMessage {
   type: "crew.get";
   requestId: string;
+  sessionId: string;
+}
+
+/** The suggested-task cards of a lead's chat (capability `suggestions.v1`). Answered with `suggestions.state`. */
+export interface SuggestionsGetMessage {
+  type: "suggestions.get";
+  requestId: string;
+  sessionId: string;
+}
+
+/** A person's action on a suggested task (capability `suggestions.v1`): `start` (one task, with optional
+ * `agent`, `model` and `worktree` chosen in Options), `start_all` (every waiting task of the card),
+ * `handed` (the chat sent the task to the lead as the person's own message; this only records it) or
+ * `dismiss` (one task, or the whole card without `suggestionId`). `generation` is the chat's input
+ * lease, as for typing in it. Answered with `suggestion.act.result`. */
+export interface SuggestionActMessage {
+  type: "suggestion.act";
+  requestId: string;
+  sessionId: string;
+  action: string;
+  cardId: string;
+  suggestionId?: string;
+  generation: number;
+  agent?: string;
+  model?: string;
+  worktree?: boolean;
+}
+
+/** One task of a suggested-task card. `state` is `pending`, `starting`, `started` (then `childSessionId` and
+ * `dispatch` say where its sub-session is), `handed` or `dismissed`; `reason` is why Start did not start it. */
+export interface SuggestionItem {
+  id: string;
+  task: string;
+  agent: string;
+  model?: string;
+  worktree: boolean;
+  state: string;
+  childSessionId?: string;
+  dispatch?: string;
+  reason?: string;
+}
+
+/** The tasks one `perch suggest` put in front of the person. */
+export interface SuggestionCard {
+  id: string;
+  items: SuggestionItem[];
+}
+
+/** What a `suggestion.act` did to one task: `started`, `refused`, `handed` or `dismissed`. */
+export interface SuggestionResult {
+  suggestionId: string;
+  outcome: string;
+  reason?: string;
+  childSessionId?: string;
+}
+
+/** Reply to `suggestions.get`: the cards still worth showing, oldest first. */
+export interface SuggestionsStateMessage {
+  type: "suggestions.state";
+  requestId: string;
+  sessionId: string;
+  cards: SuggestionCard[];
+  error?: string;
+}
+
+/** Reply to `suggestion.act`. `outcome`: `started` (every task asked for was started), `partial` (some were;
+ * `results` says which and why not), `refused` (nothing was done; `reason` says why), `handed` or `dismissed`. */
+export interface SuggestionActResultMessage {
+  type: "suggestion.act.result";
+  requestId: string;
+  sessionId: string;
+  action: string;
+  outcome: string;
+  reason?: string;
+  results?: SuggestionResult[];
+}
+
+/** Broadcast when a lead's suggested-task cards changed; clients showing that chat ask again. */
+export interface SuggestionsChangedMessage {
+  type: "suggestions.changed";
   sessionId: string;
 }
 
@@ -2281,6 +2364,8 @@ export type ClientMessage =
   | InstructionsGetMessage
   | CrewGetMessage
   | CrewActMessage
+  | SuggestionsGetMessage
+  | SuggestionActMessage
   | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
@@ -3073,6 +3158,9 @@ export type ServerMessage =
   | InstructionsStateMessage
   | CrewStateMessage
   | CrewActResultMessage
+  | SuggestionsStateMessage
+  | SuggestionActResultMessage
+  | SuggestionsChangedMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage

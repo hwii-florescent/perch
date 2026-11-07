@@ -498,6 +498,31 @@ finished turn is summarised by a small model so the expensive one never writes a
   CLIs are run without a saved session, so no agent log holds them). Codex gives one total, counted as input.
 - *Not verified:* a summary is the model's reading of a transcript slice, no more than a report is.
 
+**Suggested tasks** (`suggestions.rs` rules, `db/suggestions.rs`, `server/suggestions.rs`, route `/agent/suggest`,
+WebSocket `suggestions.get|state|changed` and `suggestion.act|act.result`, capability `suggestions.v1`; slice 9a).
+A lead puts tasks in front of the person instead of starting them; nothing starts until a person clicks.
+
+- *Records.* One `suggestions` row per task, grouped by `card_id`; the lead's key names the card, so a retry
+  returns it and adds nothing. At most 5 tasks per card and 10 waiting per lead, checked with the insert in one
+  transaction. A task is plain text that cannot begin with `/`, `!` or `#`, because Do it here sends it to the
+  lead as the person's own message. A sub-session cannot suggest (depth 1, as for spawn); local leads only.
+- *`perch spawn` becomes a card* while the setting "Let leads start sub-sessions without asking"
+  (`leadsStartWithoutAsking`, default **off**) is off: the same request is stored as a card of one and the verb
+  says nothing was started. With it on, `perch spawn` is exactly as before (the person-opened-turn rule).
+- *Person's actions* (`suggestion.act`, under the lead chat's input lease, as typing in it): **Start** takes
+  `pending` to `starting` once (a second click finds it taken), then runs `sub_sessions::start` with the click
+  standing for the person-opened turn: the same depth, limits (4 live, 8 total), key (`suggestion-<id>`),
+  worktree and launch as `perch spawn`, and a refusal puts the task back to `pending` with the core's reason.
+  A launch that left a record (`start_unknown`) keeps the card following that sub-session; it is never started
+  a second time. **Start all** does the same for every waiting task in order, each refusal named. **Options**
+  are Start with an agent, model or worktree chosen. **Do it here** is sent by the chat to the lead as the
+  person's message through the composer's path, and only then recorded (`handed`); a task that did not reach
+  the lead stays on the card. **Dismiss** answers one task or the card. A Start in flight when the core stops
+  is `started` at boot if its sub-session was recorded, else waits again.
+- *The card* is read from these rows (a card whose tasks are all answered and whose sub-sessions are not live
+  leaves), shown above the family strip, and follows a started task's sub-session state. It is not in the
+  provider's transcript. Cards go with their lead when it is deleted.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

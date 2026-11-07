@@ -152,8 +152,26 @@ pub(super) async fn spawn(
         Err((status, error)) => return refuse(status, error),
     };
     match sub_sessions::SpawnRequest::parse(&body) {
+        // Leads that may not start without asking put the task in front of the person instead.
+        Ok(request) if !state.settings.get().leads_start_without_asking => {
+            answer(suggestions::suggest_spawn(&state, &identity, request))
+        }
         Ok(request) => answer(sub_sessions::spawn(&state, &identity, request).await),
         Err(failure) => answer(Err(failure)),
+    }
+}
+
+/// `POST {base}agent/suggest`: put one or more tasks in front of the person as a card
+/// (`server/suggestions.rs`). Nothing is started.
+pub(super) async fn suggest(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(suggestions::suggest(&state, &identity, &body)),
+        Err((status, error)) => refuse(status, error),
     }
 }
 

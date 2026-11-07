@@ -21,7 +21,9 @@ import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
 import { FamilyStrip } from "./nativeChat/FamilyStrip";
+import { SuggestionCards } from "./nativeChat/SuggestionCards";
 import { actOnChild, useCrew } from "../crew";
+import { actOnSuggestion, useSuggestions } from "../suggestions";
 import { TurnDiffRollup } from "./nativeChat/TurnDiffRollup";
 import { OlderHistoryRow } from "./nativeChat/OlderHistoryRow";
 import { useOlderHistory } from "./nativeChat/useOlderHistory";
@@ -134,6 +136,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const canChangeOptions = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("agent.ui.options") === true);
   const { rows: family, refresh: refreshFamily } = useCrew(sessionId);
   const canActOnFamily = usePerchStore((state) => state.serverInfo?.capabilities?.includes("crew.actions.v1") === true);
+  const { cards: suggestions } = useSuggestions(sessionId);
   const fileLinkScope = useMemo(() => canLinkFiles && workspaceId ? { workspaceId, hostId } : undefined, [canLinkFiles, workspaceId, hostId]);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
@@ -277,6 +280,17 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       setError((reason as Error).message);
     }
   }
+  // "Do it here": the task goes to this session as the person's own message, through the composer's path.
+  async function sendTaskHere(task: string): Promise<{ ok: boolean; reason?: string }> {
+    const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
+    if (generation === undefined || !connected) return { ok: false, reason: "Take control of this chat first" };
+    try {
+      const reply = await requestNativeUi({ type: "agent.ui.prompt", requestId: newId(), sessionId, providerId, generation, operationId: newId(), text: task });
+      return reply.type === "agent.ui.result" && reply.accepted ? { ok: true } : { ok: false, reason: "The CLI did not accept the message" };
+    } catch (reason) {
+      return { ok: false, reason: (reason as Error).message };
+    }
+  }
   // One digit to the CLI, for exactly the prompt on screen. The card goes away when the CLI's next snapshot drops it.
   async function answer(key: string) {
     const request = latest.current?.request;
@@ -405,6 +419,14 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
     {snapshot?.transcript?.tasks && <DockedTasks list={snapshot.transcript.tasks} />}
+    <SuggestionCards cards={suggestions} canAct={controlling && connected} onOpen={(id) => usePerchStore.getState().switchSession(id)}
+      onSendHere={sendTaskHere}
+      onAct={(cardId, click) => {
+        // Under this chat's input lease, like typing in it; without it the core refuses and nothing is done.
+        const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
+        if (generation === undefined) return Promise.resolve({ outcome: "refused", reason: "Take control of this chat first" });
+        return actOnSuggestion({ sessionId, cardId, generation, ...click });
+      }} />
     <FamilyStrip rows={family} onRefresh={refreshFamily} onOpen={(id) => usePerchStore.getState().switchSession(id)}
       onAct={canActOnFamily ? (childSessionId, action, text, onProgress) => {
         // Under this chat's input lease, like typing in it; without it the core refuses and nothing is sent.

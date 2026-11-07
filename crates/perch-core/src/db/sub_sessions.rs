@@ -169,6 +169,27 @@ impl HistoryDb {
             .optional()?)
     }
 
+    /// The child a lead's spawn key started, if any record of it exists.
+    pub fn sub_session_by_key(
+        &self,
+        parent_session_id: &str,
+        spawn_key: &str,
+    ) -> anyhow::Result<Option<SubSessionRow>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                &format!(
+                    "SELECT {COLUMNS} FROM sub_sessions
+                     WHERE parent_session_id = ?1 AND spawn_key = ?2"
+                ),
+                params![parent_session_id, spawn_key],
+                row_from,
+            )
+            .optional()?)
+    }
+
     /// Every child a lead started, oldest first.
     pub fn sub_sessions_of(&self, parent_session_id: &str) -> anyhow::Result<Vec<SubSessionRow>> {
         let conn = self.conn.lock().unwrap();

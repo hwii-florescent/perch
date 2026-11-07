@@ -110,6 +110,11 @@ pub struct Settings {
     /// The model the reporter asks of the Codex CLI.
     #[serde(default = "default_reporter_codex_model")]
     pub reporter_codex_model: String,
+    /// Lets a lead start sub-sessions with `perch spawn` without a person's click. Off (the
+    /// default): `perch spawn` puts a suggested-task card in the lead's chat instead
+    /// (`suggestions.rs`).
+    #[serde(default)]
+    pub leads_start_without_asking: bool,
     /// The model the reporter asks of Pi (`provider/id`); empty means Pi has no reporter.
     #[serde(default)]
     pub reporter_pi_model: String,
@@ -146,6 +151,7 @@ impl Default for Settings {
             reporter_codex_model: default_reporter_codex_model(),
             reporter_pi_model: String::new(),
             reporter_omp_model: String::new(),
+            leads_start_without_asking: false,
         }
     }
 }
@@ -248,6 +254,7 @@ pub struct SettingsPatch {
     pub reporter_codex_model: Option<String>,
     pub reporter_pi_model: Option<String>,
     pub reporter_omp_model: Option<String>,
+    pub leads_start_without_asking: Option<bool>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -422,6 +429,9 @@ impl SettingsStore {
         }
         if let Some(model) = patch.reporter_codex_model {
             guard.reporter_codex_model = model;
+        }
+        if let Some(allowed) = patch.leads_start_without_asking {
+            guard.leads_start_without_asking = allowed;
         }
         if let Some(model) = patch.reporter_pi_model {
             guard.reporter_pi_model = model;

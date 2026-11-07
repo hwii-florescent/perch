@@ -606,6 +606,19 @@ per bullet group.
   runs `perch suggest`, the test clicks Start, the child messages back and the lead sees a
   sender card; `perch read` returns the child's last turn.
 
+## Slice 9a landed (2026-11-07): suggested tasks
+
+The contract is in ARCHITECTURE ("Suggested tasks"). Where the pieces are: `suggestions.rs` (pure: limits,
+task check, states, card visibility), `db/suggestions.rs` (table `suggestions`, the once-only steps, boot
+settle), `server/suggestions.rs` (`/agent/suggest`, the card read model, `suggestion.act`), `sub_sessions::start`
+(spawn with `by_person`: the click stands for the person-opened turn), `perchd/agent_cli.rs` (`perch suggest`, a
+card answer for `perch spawn`, `perch list` shows waiting tasks, the guide), web `suggestions.ts` and
+`nativeChat/SuggestionCards.tsx`, Settings "Sub-sessions".
+
+- **Default changed.** `leadsStartWithoutAsking` is off, so `perch spawn` is a card unless the person turns it on.
+  The e2e specs that drive `perch spawn` directly turn it on through `pinReporterModels(fixture)`.
+- **Not run live yet:** the whole of 9a is exercised live in the single run at the end of slice 9.
+
 ## Slice 8 landed (2026-11-07): cheap-model reporter
 
 The contract is in ARCHITECTURE ("Cheap-model reporter"); DECISIONS 2026-11-07 "Cheap-model reporter".

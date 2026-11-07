@@ -303,7 +303,58 @@ fn spawn_list_and_stop_send_their_requests_and_show_the_core_s_answer() {
         .unwrap()
         .ends_with(r#"{"session":"s1","target":"c1"}"#));
 
+    // A card for the person: the verb says nothing was started, and the request carries each task
+    // with the options written before it.
+    let request = serve(
+        r#"{"card":"c","duplicate":false,"suggested":true,"suggestions":[{"id":"a"},{"id":"b"}]}"#,
+    );
+    let suggested = perch(
+        &dir,
+        &[
+            "suggest",
+            "--task",
+            "fix",
+            "the",
+            "parser",
+            "--agent",
+            "codex",
+            "--worktree",
+            "--task",
+            "write docs",
+            "--key",
+            "k9",
+        ],
+        true,
+    );
+    assert!(suggested.status.success(), "{}", text(&suggested));
+    assert!(
+        text(&suggested).contains("suggested 2 tasks: nothing was started"),
+        "{}",
+        text(&suggested)
+    );
+    let request = request.join().unwrap();
+    assert!(request.starts_with("POST /agent/suggest HTTP/1.0\r\n"));
+    let body: serde_json::Value =
+        serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["key"], "k9");
+    assert_eq!(body["suggestions"][0]["task"], "fix the parser");
+    assert_eq!(body["suggestions"][0]["agent"], serde_json::Value::Null);
+    assert_eq!(body["suggestions"][1]["task"], "write docs");
+    assert_eq!(body["suggestions"][1]["agent"], "codex");
+    assert_eq!(body["suggestions"][1]["worktree"], true);
+    // `perch spawn` that became a card says the same, not "started".
+    let request =
+        serve(r#"{"card":"c","duplicate":false,"suggested":true,"suggestions":[{"id":"a"}]}"#);
+    let carded = perch(&dir, &["spawn", "--agent", "codex", "--task", "fix"], true);
+    assert!(
+        text(&carded).contains("nothing was started"),
+        "{}",
+        text(&carded)
+    );
+    request.join().unwrap();
+
     // Local mistakes are caught without asking the core.
+    assert!(text(&perch(&dir, &["suggest"], true)).contains("--task is required"));
     assert_eq!(perch(&dir, &["stop"], true).status.code(), Some(1));
     assert!(text(&perch(&dir, &["spawn", "--task", "x"], true)).contains("--agent is required"));
     let _ = std::fs::remove_dir_all(dir);
