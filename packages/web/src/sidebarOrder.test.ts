@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { applySessionOrder, orderBy, orderProjects, refillSlots, stepTarget, writeScope } from "./sidebarOrder";
+import { applySessionOrder, isNestedIn, nestUnderLeads, orderBy, orderProjects, refillSlots, stepTarget, writeScope } from "./sidebarOrder";
+
+describe("nestUnderLeads", () => {
+  const item = (id: string, parentSessionId?: string) => ({ id, parentSessionId });
+  it("puts each sub-session straight after its lead, children in the order given", () => {
+    const list = [item("c2", "lead"), item("other"), item("lead"), item("c1", "lead"), item("last")];
+    expect(nestUnderLeads(list).map((entry) => entry.id)).toEqual(["other", "lead", "c2", "c1", "last"]);
+  });
+  it("leaves a sub-session whose lead is not in the list where it is, and a list with none untouched", () => {
+    const list = [item("a"), item("child", "elsewhere"), item("b")];
+    expect(nestUnderLeads(list)).toBe(list);
+    expect(isNestedIn(list[1]!, list)).toBe(false);
+    expect(isNestedIn(item("child", "a"), list)).toBe(true);
+    expect(isNestedIn(item("self", "self"), [item("self", "self")])).toBe(false);
+  });
+});
 
 const row = (id: string, favorite = false) => ({ id, favorite });
 const ids = (list: { id: string }[]) => list.map((item) => item.id);

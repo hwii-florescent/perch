@@ -78,11 +78,20 @@ pub(super) async fn whoami(
         Ok(identity) => identity,
         Err((status, error)) => return refuse(status, error),
     };
+    // The run's notes folder: plain files for the members of the run, never injected anywhere.
+    let notes = state
+        .db
+        .run_of(&identity.session_id)
+        .ok()
+        .flatten()
+        .and_then(|run| crate::native_ui::notes_dir(&run).ok())
+        .map(|path| path.display().to_string());
     Json(json!({
         "session": identity.session_id,
         "workspace": identity.workspace_id,
         "provider": identity.provider_id,
         "incarnation": identity.incarnation,
+        "notes": notes,
     }))
     .into_response()
 }

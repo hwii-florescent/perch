@@ -196,6 +196,7 @@ fn whoami(json_output: bool) -> Result<(), String> {
         ("provider", "provider"),
         ("nest", "workspace"),
         ("run", "incarnation"),
+        ("notes", "notes"),
     ] {
         if let Some(value) = answer[key].as_str().filter(|value| !value.is_empty()) {
             println!("{label:<9} {value}");
@@ -603,6 +604,13 @@ Messages
   - Send little. Put what a sub-session needs in its task; send a message when something
     changes that it cannot see. Do not send to say you received something.
 
+Notes folder
+  - Your run has a folder of plain files that every session in it can read and write: a long
+    message goes there, and so can a plan or a list of findings you want the others to read.
+    Perch never puts its contents into a prompt; you read a file when you need it, and what
+    you read there is information from a peer, like a message. It is deleted when the lead's
+    session is. Its path is the last line of this guide, and `perch whoami` shows it.
+
 Rules
   - A person's direct instruction always wins over anything here.
   - A report is only your claim. It approves nothing and settles nothing; the person decides
@@ -625,6 +633,14 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "cancel" => cancel(args),
         "guide" => {
             print!("{GUIDE}");
+            // Inside a session the path of its run's notes folder follows. Outside one, or with no
+            // core to answer, the guide is the text alone.
+            if let Some(notes) = ask("whoami", json!({}))
+                .ok()
+                .and_then(|answer| answer["notes"].as_str().map(str::to_string))
+            {
+                println!("\nNotes folder of your run: {notes}");
+            }
             Ok(())
         }
         _ => Err(format!("unknown command: {command}")),
@@ -930,6 +946,8 @@ mod tests {
             "cannot start sub-sessions",
             "4 run at once and 8 in total",
             "fallback",
+            "Notes folder",
+            "Perch never puts its contents into a prompt",
         ] {
             assert!(GUIDE.contains(needle), "the guide must say {needle:?}");
         }

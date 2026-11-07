@@ -20,6 +20,8 @@ import { FIND_MARK, RunRow, type FindMark } from "./nativeChat/RunRow";
 import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
+import { FamilyStrip } from "./nativeChat/FamilyStrip";
+import { useCrew } from "../crew";
 import { TurnDiffRollup } from "./nativeChat/TurnDiffRollup";
 import { OlderHistoryRow } from "./nativeChat/OlderHistoryRow";
 import { useOlderHistory } from "./nativeChat/useOlderHistory";
@@ -130,6 +132,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const workspaceId = usePerchStore((state) => state.sessions.find((entry) => entry.id === sessionId)?.workspaceId);
   const canLinkFiles = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("fs.links") === true);
   const canChangeOptions = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId])?.includes("agent.ui.options") === true);
+  const family = useCrew(sessionId);
   const fileLinkScope = useMemo(() => canLinkFiles && workspaceId ? { workspaceId, hostId } : undefined, [canLinkFiles, workspaceId, hostId]);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
@@ -401,6 +404,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
     {snapshot?.transcript?.tasks && <DockedTasks list={snapshot.transcript.tasks} />}
+    <FamilyStrip rows={family} onOpen={(id) => usePerchStore.getState().switchSession(id)} />
     <div className="shrink-0 px-4 pt-1 pb-3">
     <form className={cn("chat__input relative", CHAT_COLUMN, CHAT_INPUT)} onSubmit={(event) => { event.preventDefault(); if (sendable.action === "stop") void stop(); else void send(); }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}

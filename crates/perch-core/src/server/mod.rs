@@ -85,6 +85,7 @@ mod attention;
 mod browser_history;
 mod browser_suggest;
 mod context_bridge;
+mod crew;
 mod instructions;
 #[cfg(test)]
 mod local_authority;
@@ -2501,6 +2502,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.history.v1",
         "browser.suggest.v1",
         "instructions.v1",
+        "crew.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",
@@ -3005,6 +3007,7 @@ mod session_viewer_filter_tests {
                 stale: false,
                 project_id: None,
                 workspace_id: None,
+                parent_session_id: None,
             },
         };
         let workspace_git = ServerMessage::WorkspaceGit {

@@ -1598,6 +1598,7 @@ impl HubManager {
             | ServerMessage::BrowserHistoryResult { .. }
             | ServerMessage::BrowserSuggestResult { .. }
             | ServerMessage::InstructionsState { .. }
+            | ServerMessage::CrewState { .. }
             | ServerMessage::FsError { .. } => {
                 // Settings/pairing/attention remain host-private. Workspace
                 // replies/events were consumed by workspace's qualified relay

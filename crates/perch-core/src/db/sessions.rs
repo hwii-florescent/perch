@@ -87,6 +87,8 @@ pub struct SessionListRow {
     pub project_id: Option<String>,
     pub workspace_id: Option<String>,
     pub cli_provider_id: Option<String>,
+    /// The lead of a sub-session (`SessionSummary::parent_session_id`).
+    pub parent_session_id: Option<String>,
 }
 
 /// Shared `SELECT` body for [`HistoryDb::list_sessions`] and
@@ -122,7 +124,8 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
                 s.cli_activity,
                 s.project_id,
                 s.workspace_id,
-                s.cli_provider_id
+                s.cli_provider_id,
+                s.parent_session_id
              FROM sessions s
              ";
 
@@ -157,6 +160,7 @@ fn session_list_row_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionLis
         project_id: row.get(9)?,
         workspace_id: row.get(10)?,
         cli_provider_id: row.get(11)?,
+        parent_session_id: row.get(12)?,
     })
 }
 

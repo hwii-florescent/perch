@@ -130,6 +130,15 @@ test("a child's message and status reach an idle lead, and the lead's message re
     await expect.poll(() => sql(fixture, `select report from agent_identities where session_id = '${child}' and report is not null`), { timeout: 240_000, intervals: [2_000] }).toContain(downMarker);
     // The turn that message opened is an agent's, so the child still cannot spawn (covered without models in the core's tests).
     await untilReady(ui, 180_000);
+    // In the sidebar the child sits with its lead's family: its dot (compact) or row (list) is marked a sub-session.
+    await expect(page.locator(`[data-testid="workspace-session-${child}"][data-sub-session], [data-sub-session] > [data-testid="workspace-session-${child}"]`)).toHaveCount(1);
+    // The family strip above the composer names the child with four separate lines: Perch's own state, what
+    // the lead wrote and its receipt, and the child's own report labelled as its claim.
+    const family = page.locator(`[data-testid="native-cli-family-row"][data-session="${child}"]`);
+    await expect(family).toBeVisible({ timeout: 30_000 });
+    await expect(family.getByTestId("native-cli-family-state")).toHaveText(/^(Idle|Finished its turn)$/, { timeout: 30_000 });
+    await expect(family.getByTestId("native-cli-family-report")).toContainText(`Reported: ${downMarker}`);
+    await expect(family.getByTestId("native-cli-family-latest")).toContainText("You wrote");
     // No message was written twice and none was left half-handled.
     expect(sql(fixture, "select count(*) from agent_mail where state in ('delivering', 'unconfirmed')")).toBe("0");
     const everywhere = [await ui.innerText(), execFileSync("ps", ["-axo", "command"], { encoding: "utf8" }), fs.readFileSync(path.join(fixture, "core.log"), "utf8")].join("\n");

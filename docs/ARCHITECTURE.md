@@ -385,6 +385,34 @@ contract the tests hold it to.
   (terminal Enter, chat send, Context Bridge send) resets it, durably, through a listener on the same
   `note_person_input` that marks the turn `Person`. A core restart does not reset it.
 
+**Family strip and notes folder** (`crew.rs` read model, `server/crew.rs`, `packages/web/src/crew.ts`,
+`views/nativeChat/FamilyStrip.tsx`; slice 6). Read only: nothing here sends, stops or approves.
+
+- *Protocol.* `crew.get {sessionId}` answered by `crew.state {rows}` (capability `crew.v1`, local
+  sessions only; the hub does not relay it), and the optional `SessionSummary.parentSessionId` that the
+  sidebar nests by. A session in no run, or a lead with no children, gets no rows.
+- *Rows.* A lead sees each child as a `worker`; a child sees its lead as the `manager` and a sibling as a
+  `peer` only once they exchanged a message or the sibling is waiting on a person. Rows with the newest
+  message come first, the rest in run order. **What a member is doing is four separate records, never one
+  status word:** `lifecycle` (Perch's runtime state; unreadable is `unknown`, never idle) with the child's
+  `dispatch` record, `needsYou` (a pending approval or question from Perch's own blocked state and
+  request, never an agent's claim), the newest message with its delivery `receipt` and reason, and the
+  agent's `report` with its source (`report` or the fallback `last-message`). The strip's headline counts
+  working, waiting on you and reported (a fallback does not count as reported).
+- *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
+  one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
+  or settled. No polling.
+- *Sidebar.* A sub-session's row sits under its lead's wherever both are listed together (By project, in
+  compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
+  complete. "In one list" stays purely chronological. No panel, tab or drawer.
+- *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
+  session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
+  end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
+  prompt, and an agent reading it treats it as a peer's text.
+- *Actions* are the ordinary ones: the row's Open goes to that child's chat, where typing needs the input
+  lease like any chat, and closing the child is the existing close. The phone gets the same strip because it
+  is part of the same chat view.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

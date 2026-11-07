@@ -214,6 +214,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::BrowserSuggest { request_id, query } => {
             super::browser_suggest::handle_suggest(state, request_id, query)
         }
+        ClientMessage::CrewGet {
+            request_id,
+            session_id,
+        } => super::crew::handle_get(state, request_id, session_id),
         ClientMessage::InstructionsGet {
             request_id,
             scope,

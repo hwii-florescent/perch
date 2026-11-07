@@ -113,6 +113,9 @@ pub(super) fn send(app: &AppState, caller: &AgentIdentity, body: &Value) -> Resu
         }
     };
     app.mail_notify.notify_one();
+    // The family strip shows the receipt on both ends.
+    notify_session_updated(app, &caller.session_id);
+    notify_session_updated(app, target);
     Ok(json!({
         "id": row.id,
         "state": row.state.as_str(),
@@ -146,7 +149,13 @@ pub(super) fn cancel(app: &AppState, caller: &AgentIdentity, id: &str) -> Result
         .cancel_mail(&caller.session_id, id)
         .map_err(|error| internal("cancel the message", error))?
     {
-        Cancelled::Cancelled => Ok(json!({ "id": id, "state": "undelivered" })),
+        Cancelled::Cancelled => {
+            notify_session_updated(app, &caller.session_id);
+            if let Ok(Some(row)) = app.db.mail(id) {
+                notify_session_updated(app, &row.target_session_id);
+            }
+            Ok(json!({ "id": id, "state": "undelivered" }))
+        }
         Cancelled::TooLate(state) => Err(fail(
             StatusCode::CONFLICT,
             format!(
@@ -661,7 +670,16 @@ pub(super) async fn run_deliveries(app: AppState) {
             })
             .await;
             match outcome {
-                Ok(Pass::Sent { ids, reply }) => settle(&app.db, &ids, reply).await,
+                Ok(Pass::Sent { ids, reply }) => {
+                    settle(&app.db, &ids, reply).await;
+                    // Receipts changed on both ends: the family strip follows session updates.
+                    for id in &ids {
+                        if let Ok(Some(row)) = app.db.mail(id) {
+                            notify_session_updated(&app, &row.target_session_id);
+                            notify_session_updated(&app, &row.sender_session_id);
+                        }
+                    }
+                }
                 Ok(Pass::Waiting(reason)) => tracing::debug!(reason, "mail is waiting"),
                 _ => {}
             }
@@ -1131,6 +1149,18 @@ mod tests {
             .await
         };
         let send_body = |from: &str, to: &str, text: &str, key: &str| json!({"session": from, "target": to, "text": text, "key": key});
+
+        // The whole run shares one notes folder, named by its lead, and `whoami` says where it is.
+        for (token, session) in [(&lead.token, "lead"), (&child.token, "child")] {
+            let (status, who) = call("whoami", token.clone(), json!({ "session": session })).await;
+            assert_eq!(status, 200, "{who}");
+            assert!(
+                who["notes"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("/notes/lead")),
+                "{who}"
+            );
+        }
 
         // Refused before anything is queued, each with what to do instead.
         for (token, body, status, expect) in [

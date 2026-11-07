@@ -495,16 +495,30 @@ The contract is in ARCHITECTURE ("Messages", written before the code). What late
   lives in the browser and is not protected (ARCHITECTURE "Lease contention"). **Not verified live:**
   Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World` trait only).
 
-## Slice 6: family strip and notes folder
+## Slice 6 landed (2026-11-07): family strip and notes folder
 
-- Read model: Orca crew (`crew/crew-query.ts`, `crew-parent-relations.ts`,
-  `crew-party-snapshot.ts`, `src/shared/orchestration-crew.ts`), with `status` split into
-  lifecycle, needs-you, receipt and report fields. Push it through a capability-gated
-  protocol family.
-- UI: Orca `renderer/src/components/orchestration-crew/CrewRowView.tsx`, `CrewRowDetails.tsx`
-  (MIT) adapted into nested sidebar rows and a compact strip in the lead's chat; most
-  recent traffic first. No panel or tab.
-- Notes folder per run under the private native dir, path given in `perch guide`; never
-  injected.
-- Check: e2e with a lead and two children showing working / waiting on you / reported;
-  phone view shows the same and can stop and message with the input lease.
+The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pieces are:
+
+- **Read model** `crew.rs` (pure; header names Orca's `orchestration-crew.ts`, `crew-party-snapshot.ts` and
+  `crew-query.ts` at `308b5000`, with their preview bound, section roles, latest-line-per-peer and
+  newest-first rules and the cases of their tests that do not need Orca's dispatch tables), gathered by
+  `server/crew.rs` from Perch's own records (reuses `reconcile`, `key_of` and the new `member_report` of
+  `server/sub_sessions.rs`). Orca's `status` string is the four fields above. **Not ported:** Orca's
+  parent-claim reduction (`crew-parent-relations.ts`: a run here is flat, the parent is a column), its
+  recipient-availability checks, Mention and the row menu, the panel.
+- **Protocol.** `crew.get` / `crew.state`, `crew.v1`, `SessionSummary.parentSessionId` (Rust and TS
+  mirrored; the parity test passes). The hub ignores `crew.state` from a remote host.
+- **Web.** `crew.ts` (`useCrew`: asks on a family member's session update, 250 ms settle),
+  `nativeChat/FamilyStrip.tsx` (layout and fields from Orca's `CrewRowView`/`CrewRowDetails`, MIT, on
+  Perch's own classes; the pure `stateOf`, `headline`, `receiptNote` carry the wording and are tested),
+  `sidebarOrder.nestUnderLeads` / `isNestedIn` and the `WorkspaceOverview` rows.
+- **Notes folder.** `whoami` returns `notes`; `perch guide` prints it as its last line when it can reach the
+  core; the folder goes with its lead (`session::delete_session`).
+- **Live** (`e2e/agent-mail.spec.ts`, TESTING): with a real haiku lead and child the strip row shows the
+  child's state, its own report (`Reported: <marker>`) and "You wrote" for the lead's message, and the
+  sidebar dot (the default compact view; found by the first run, which looked for a row) is marked a
+  sub-session and set in beside its lead's. **Not run live:** a child waiting on a person (a unit/WebSocket test covers the
+  rows; the strip's rendering of it is tested in jsdom), the phone layout (same component, not opened at a
+  phone viewport), and a lead with two children at once.
+- **Owner decisions still open:** delivery over a held input lease (slice 5), and whether the strip should
+  offer Message and Stop buttons of its own instead of Open (today: Open, then the ordinary chat and close).

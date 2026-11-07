@@ -119,7 +119,10 @@ Useful existing coverage (not a claim of a fresh passing run):
   hook, one wake spent) and the chat shows both as `Perch message from` and `Perch status
   from` user rows, then the lead messages the idle child, which acts on it (its `perch report` carries
   the marker). Assertions read the core's SQLite file; nothing may be left `delivering` or `unconfirmed`.
-  Verified once (haiku child, ~30 s); Codex, Pi and OMP receivers were not run live.
+  The same run checks slice 6: the sidebar row of the child is nested under its lead's (`data-sub-session`)
+  and the family strip above the composer shows the child's state, `Reported: <marker>` (its own report)
+  and `You wrote` for the lead's message. Verified (haiku child, ~30 s each run); Codex, Pi and OMP receivers
+  were not run live, nor a child waiting on a person (jsdom and a booted-core WebSocket test cover it).
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

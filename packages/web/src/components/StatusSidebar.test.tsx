@@ -46,6 +46,18 @@ it("is the default view, with sections in order, counts, and no empty section", 
   expect(sectionIds()).toEqual(["working:1", "idle:1"]);
 });
 
+it("nests a sub-session under its lead within a section, and leaves one alone when its lead is in another", () => {
+  usePerchStore.setState({ sessions: [chat("idle"), chat("other"), chat("kid2", { parentSessionId: "idle" }), chat("kid1", { parentSessionId: "idle" }), chat("ask", { status: "running", blocked: true, parentSessionId: "idle" })] });
+  act(() => root.render(<WorkspaceOverview />));
+  const idleRows = [...get("status-section-idle")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close"])')];
+  expect(idleRows.map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""))).toEqual(["other", "idle", "kid1", "kid2"]);
+  const nested = (id: string) => get(`workspace-session-${id}`)!.parentElement!.hasAttribute("data-sub-session");
+  expect([nested("idle"), nested("kid1"), nested("kid2")]).toEqual([false, true, true]);
+  // Its lead is Idle but it is waiting on a person: it shows in Needs you, not nested there.
+  expect(nested("ask")).toBe(false);
+  expect(get("status-section-needs")!.querySelector('[data-testid="workspace-session-ask"]')).not.toBeNull();
+});
+
 it("shows the project as secondary text and the core's reason and certainty on a Needs you row", () => {
   act(() => root.render(<WorkspaceOverview />));
   expect(get("status-section-needs")!.querySelector('[data-testid="status-row-detail"]')!.textContent).toBe("Birdhouse · Waiting for you · Guessed from terminal output");
