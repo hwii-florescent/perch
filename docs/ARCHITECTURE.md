@@ -523,6 +523,35 @@ A lead puts tasks in front of the person instead of starting them; nothing start
   leaves), shown above the family strip, and follows a started task's sub-session state. It is not in the
   provider's transcript. Cards go with their lead when it is deleted.
 
+**Inbound control** (`agent_mail::{InboundMode, gate}`, `sessions.inbound_mode`, `db/agent_mail.rs`, `server/inbound.rs`,
+`inbound.get|state|act|act.result|changed`, capability `inbound.v1`, web `HeldMessages.tsx`, the session row menu; slice
+9d). Each session says what it does with messages other sessions send it: **accept** (default), **hold** for its
+person's approval, or **refuse**. It is the person's setting, in the session's row menu and on the card in its chat.
+
+- *Where it applies.* An agent's `perch send` and `perch steer` to the session. **Never** a person's own text through
+  the family strip (any kind), and not Perch's status notes from a child to its lead (Perch's own words, not an
+  agent's message), and not `perch interrupt` (no text). `agent_mail::gate(mode, kind, from_person)` is the rule.
+- *Hold.* The message is admitted as `held` (a seventh receipt, beside `queued`, `delivering`, `delivered`,
+  `unconfirmed`, `undelivered`): the delivery engine never sees it, it counts against the receiver's 32 waiting, and
+  the sender's receipt says it waits for the receiving person. The sender may still `perch cancel` it. The person's
+  chat shows a card (sender, text, **Deliver**, **Discard**, and all of them at once). Deliver moves it to `queued`
+  and it is delivered like any other message, when its receiver is idle (the idle-only rules are unchanged);
+  Discard makes it `undelivered: discarded by the person using that session`. Both need the chat's input lease
+  (they decide text that would be typed into the session); both are done once, so a second click does nothing.
+- *Refuse.* The message gets a row at once, `undelivered`, reason `refused: that session does not accept messages
+  from other sessions`, so the sender's `perch send` and `perch inbox` say so. It counts toward the run's 50 like
+  any message the agent sent.
+- *Steers.* A steer is only worth anything while the turn it corrects runs, so it is never held: under Hold or
+  Refuse it is refused with words that say which, and nothing is recorded or sent.
+- *Changing the mode* applies it to what already waits in one transaction: Hold holds each agent message still
+  `queued`; Refuse turns each one away; Accept changes nothing already held (the person still decides it). A message
+  already `delivering` or settled is untouched. Setting the mode a session already has moves nothing. Setting a mode
+  is a setting, not a keystroke, so it needs no input lease (the sidebar can do it).
+- *Hidden from the receiving agent.* `perch inbox` lists what was sent to a session without any held, refused or
+  discarded message: what the person holds back or turned away is not for the agent to read. Nothing is hidden
+  from the person or from the sender's own view.
+- *Not changed:* idle-only delivery, quoting, the envelope, limits, receipts' retry rules.
+
 **Reading a sub-session** (`child_read.rs` rules, `sub_sessions::read`, route `/agent/read`, `perch read <session>
 [--turns N]`; slice 9c). A lead reads a bounded tail of its own child's conversation, on demand, with no model call:
 the last N turns (default 2, at most 5) from the snapshot the child's native bridge holds, through the same

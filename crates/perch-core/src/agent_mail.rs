@@ -83,6 +83,10 @@ pub enum MailState {
     Unconfirmed,
     /// It will not be delivered; the row says why.
     Undelivered,
+    /// The receiving session holds messages from other sessions for its person's approval
+    /// ([`InboundMode::Hold`]): nothing is delivered until they choose Deliver; Discard makes it
+    /// `undelivered`. Counts against the receiver's queue.
+    Held,
 }
 
 impl MailState {
@@ -93,6 +97,7 @@ impl MailState {
             Self::Delivered => "delivered",
             Self::Unconfirmed => "unconfirmed",
             Self::Undelivered => "undelivered",
+            Self::Held => "held",
         }
     }
 
@@ -103,13 +108,80 @@ impl MailState {
             "delivered" => Self::Delivered,
             "unconfirmed" => Self::Unconfirmed,
             "undelivered" => Self::Undelivered,
+            "held" => Self::Held,
             _ => return None,
         })
     }
 
     /// Still counts against the receiver's queue.
     pub fn is_pending(self) -> bool {
-        matches!(self, Self::Queued | Self::Delivering)
+        matches!(self, Self::Queued | Self::Delivering | Self::Held)
+    }
+}
+
+/// What a session does with messages other sessions send it (slice 9d). A person's own text
+/// through Perch, and Perch's own status notes, are never affected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InboundMode {
+    /// Deliver them as `perch send` always did.
+    #[default]
+    Accept,
+    /// Keep each one for the session's person to deliver or discard.
+    Hold,
+    /// Turn each one away; the sender's receipt says so.
+    Refuse,
+}
+
+impl InboundMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Hold => "hold",
+            Self::Refuse => "refuse",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "accept" => Some(Self::Accept),
+            "hold" => Some(Self::Hold),
+            "refuse" => Some(Self::Refuse),
+            _ => None,
+        }
+    }
+}
+
+/// The reason a refused message carries as its receipt.
+pub const REFUSED_REASON: &str =
+    "refused: that session does not accept messages from other sessions";
+/// The reason a held message carries while it waits.
+pub const HELD_REASON: &str =
+    "held: the person using that session has to approve messages to it before it gets them";
+/// The reason a discarded message carries.
+pub const DISCARDED_REASON: &str = "discarded by the person using that session";
+
+/// What the receiver's mode does to one arriving item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// Admit as usual.
+    Pass,
+    /// Admit, but hold it for the person.
+    Hold,
+    /// Turn it away.
+    Refuse,
+}
+
+/// A person's text and Perch's notes pass whatever the mode. A message is held or refused as the mode
+/// says. A steer is never held, because it is only worth anything while the turn it corrects runs, so
+/// both Hold and Refuse turn it away (with different words: [`SendRefusal`]).
+pub fn gate(mode: InboundMode, kind: MailKind, from_person: bool) -> Gate {
+    if from_person || kind == MailKind::Note {
+        return Gate::Pass;
+    }
+    match (mode, kind) {
+        (InboundMode::Accept, _) => Gate::Pass,
+        (InboundMode::Hold, MailKind::Message) => Gate::Hold,
+        (InboundMode::Hold | InboundMode::Refuse, _) => Gate::Refuse,
     }
 }
 
@@ -577,6 +649,10 @@ pub enum SendRefusal {
     CannotReceive,
     RunLimit,
     QueueFull,
+    /// A steer to a session that refuses messages from other sessions.
+    InboundRefuses,
+    /// A steer to a session that holds messages for its person's approval.
+    InboundHolds,
 }
 
 impl SendRefusal {
@@ -597,6 +673,12 @@ impl SendRefusal {
                 "{MAX_PENDING_PER_TARGET} messages already wait for that session. Wait until it \
                  has read some."
             ),
+            Self::InboundRefuses => "that session does not accept messages or steers from other \
+                 sessions"
+                .into(),
+            Self::InboundHolds => "that session holds messages from other sessions for its person's \
+                 approval, and a steer cannot wait for that; send a message instead"
+                .into(),
         }
     }
 }
@@ -1226,6 +1308,35 @@ mod tests {
         for kind in [MailKind::Message, MailKind::Note] {
             assert_eq!(MailKind::parse(kind.as_str()), Some(kind));
         }
+    }
+
+    #[test]
+    fn the_inbound_mode_gates_agent_messages_and_never_a_person_or_a_note() {
+        for (mode, message, steer) in [
+            (InboundMode::Accept, Gate::Pass, Gate::Pass),
+            (InboundMode::Hold, Gate::Hold, Gate::Refuse),
+            (InboundMode::Refuse, Gate::Refuse, Gate::Refuse),
+        ] {
+            assert_eq!(gate(mode, MailKind::Message, false), message, "{mode:?}");
+            assert_eq!(gate(mode, MailKind::Steer, false), steer, "{mode:?}");
+            // The person's own text and Perch's notes pass in every mode.
+            for kind in [MailKind::Message, MailKind::Steer, MailKind::Note] {
+                assert_eq!(
+                    gate(mode, kind, true),
+                    Gate::Pass,
+                    "{mode:?} {kind:?} from a person"
+                );
+            }
+            assert_eq!(gate(mode, MailKind::Note, false), Gate::Pass);
+            assert_eq!(InboundMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(InboundMode::parse("allow"), None);
+        assert_eq!(InboundMode::default(), InboundMode::Accept);
+        assert_eq!(MailState::parse("held"), Some(MailState::Held));
+        assert!(
+            MailState::Held.is_pending(),
+            "a held message waits in the receiver's queue"
+        );
     }
 
     #[test]

@@ -365,6 +365,10 @@ pub struct SessionSummary {
     /// The sidebar nests it under that lead. Older peers omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    /// What this session does with messages from other sessions: `hold` (keep each for its person to
+    /// deliver or discard) or `refuse`. Absent means it accepts them. Older peers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbound_mode: Option<String>,
     /// Where a local terminal's shell is now (follows `cd`), and that
     /// directory's git branch (absent outside a repo). the Files/Git
     /// drawer follows these; other peers omit them.
@@ -414,6 +418,21 @@ pub struct SuggestionResult {
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<String>,
+}
+
+/// A message another session sent that this session's person has not answered (`inbound.state`).
+/// `text` is the message, cut to a preview when it was long (`truncated`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldMessage {
+    pub id: String,
+    pub from_session_id: String,
+    pub from_provider: String,
+    pub from_label: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    pub at: i64,
 }
 
 /// One member of a session's run for the family strip (`crew.state`, `crew.rs`). The record of
@@ -1327,6 +1346,31 @@ pub enum ClientMessage {
         model: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worktree: Option<bool>,
+    },
+
+    /// What a session does with messages from other sessions, and the messages it holds for its
+    /// person (capability `inbound.v1`). Answered with `inbound.state`.
+    #[serde(rename = "inbound.get", rename_all = "camelCase")]
+    InboundGet {
+        request_id: String,
+        session_id: String,
+    },
+
+    /// A person's action on a session's inbound control (capability `inbound.v1`): `set_mode` (with
+    /// `mode`: `accept`, `hold` or `refuse`), `deliver` or `discard` (one held message, `message_id`),
+    /// `deliver_all` or `discard_all`. Delivering and discarding need the chat's input lease
+    /// (`generation`), as typing in it does; the mode does not. Answered with `inbound.act.result`.
+    #[serde(rename = "inbound.act", rename_all = "camelCase")]
+    InboundAct {
+        request_id: String,
+        session_id: String,
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<u64>,
     },
 
     /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
@@ -2394,6 +2438,36 @@ pub enum ServerMessage {
     /// settled). Clients showing that chat ask again with `suggestions.get`.
     #[serde(rename = "suggestions.changed", rename_all = "camelCase")]
     SuggestionsChanged { session_id: String },
+
+    /// Reply to `inbound.get`: the session's mode and what it holds for its person, oldest first.
+    #[serde(rename = "inbound.state", rename_all = "camelCase")]
+    InboundState {
+        request_id: String,
+        session_id: String,
+        mode: String,
+        held: Vec<HeldMessage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `inbound.act`. `outcome`: `done` or `refused` (nothing changed; `reason` says why).
+    /// `count` is how many messages the action moved.
+    #[serde(rename = "inbound.act.result", rename_all = "camelCase")]
+    InboundActResult {
+        request_id: String,
+        session_id: String,
+        action: String,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+        #[serde(default)]
+        count: u32,
+    },
+
+    /// Broadcast when a session's inbound mode or its held messages changed. Clients showing it ask
+    /// again with `inbound.get`.
+    #[serde(rename = "inbound.changed", rename_all = "camelCase")]
+    InboundChanged { session_id: String },
 
     /// Reply to `browser.history.search`, best match first.
     #[serde(rename = "browser.history.result", rename_all = "camelCase")]

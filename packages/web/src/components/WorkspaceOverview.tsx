@@ -33,6 +33,7 @@ import { beginSlideDrag } from "../slideDrag";
 import { useNestShortcutHints } from "../keybinds";
 import { TabSplitMenu } from "./TabSplitMenu";
 import { useFileTabs } from "../fileTabs";
+import { inboundMenuItems } from "../inbound";
 
 // Sidebar project list. A few tokens stay as hooks: e2e and the harness select on
 // `workspace-project`, `workspace-entry`, `workspace-entry__button(--active)`,
@@ -576,7 +577,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   function sessionMenu(session: SessionSummary, x: number, y: number, siblings: SessionSummary[], flip = false) {
     const hostId = session.hostId ?? "local";
     const entries = workspaceTabs({ ...usePerchStore.getState(), sessionId: session.id, activeHostId: hostId, activeWorkspaceId: session.workspaceId ?? null, activeProject: { hostId, cwd: session.cwd } }, useFileTabs.getState().tabs);
-    setTabMenu({ menu: { id: session.id, x, y }, entries, extraItems: moveItems("session", session.id, siblings.map((other) => other.id), flip).filter((item) => item !== "divider") });
+    setTabMenu({ menu: { id: session.id, x, y }, entries, extraItems: [...moveItems("session", session.id, siblings.map((other) => other.id), flip).filter((item) => item !== "divider"), ...inboundMenuItems(session)] });
   }
   function pickSession(id: string) {
     switchSession(id);

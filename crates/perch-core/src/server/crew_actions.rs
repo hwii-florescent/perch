@@ -149,7 +149,9 @@ fn refusal_status(refusal: &agent_mail::SendRefusal) -> StatusCode {
     match refusal {
         ToSelf => StatusCode::BAD_REQUEST,
         OtherRun => StatusCode::FORBIDDEN,
-        NotRunning | CannotReceive | RunLimit | QueueFull => StatusCode::CONFLICT,
+        NotRunning | CannotReceive | RunLimit | QueueFull | InboundRefuses | InboundHolds => {
+            StatusCode::CONFLICT
+        }
     }
 }
 

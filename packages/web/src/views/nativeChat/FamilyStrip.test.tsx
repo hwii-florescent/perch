@@ -40,6 +40,8 @@ it("says what became of a message in words and nothing for a delivered one", () 
   expect(receiptNote(latest("delivered"))).toBe("");
   expect(receiptNote(latest("queued", "another view holds input control"))).toBe("queued, waiting: another view holds input control");
   expect(receiptNote(latest("unconfirmed"))).toBe("handed over, not confirmed");
+  expect(receiptNote(latest("held", "held: x"))).toBe("held: waiting for its person to approve it");
+  expect(receiptNote(latest("undelivered", "refused: that session does not accept messages from other sessions"))).toBe("not delivered: refused: that session does not accept messages from other sessions");
   expect(receiptNote(latest("undelivered", "cancelled by its sender"))).toBe("not delivered: cancelled by its sender");
   expect(ago(NOW - 30_000, NOW)).toBe("now");
   expect(ago(NOW - 5 * 60_000, NOW)).toBe("5m ago");

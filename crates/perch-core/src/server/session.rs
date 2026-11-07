@@ -245,6 +245,7 @@ pub(super) fn build_session_summary(
         project_id: row.project_id,
         workspace_id: row.workspace_id,
         parent_session_id: row.parent_session_id,
+        inbound_mode: row.inbound_mode,
     }
 }
 

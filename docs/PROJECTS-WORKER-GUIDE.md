@@ -619,6 +619,24 @@ card answer for `perch spawn`, `perch list` shows waiting tasks, the guide), web
   The e2e specs that drive `perch spawn` directly turn it on through `pinReporterModels(fixture)`.
 - **Not run live yet:** the whole of 9a is exercised live in the single run at the end of slice 9.
 
+## Slice 9d landed (2026-11-07): inbound control
+
+Contract in ARCHITECTURE ("Inbound control"). Own design. `agent_mail.rs` (`InboundMode`, `gate`, `MailState::Held`, the
+reasons), column `sessions.inbound_mode` (also `SessionSummary.inboundMode`), `db/agent_mail.rs` (gating inside the
+admission transaction, `set_inbound_mode` with its sweep, `held_mail_for`, `release_held_mail`, `discard_held_mail`),
+`server/inbound.rs`, web `inbound.ts`, `nativeChat/HeldMessages.tsx`, the session row menu
+(`inboundMenuItems`), `FamilyStrip` receipt words, `perch send`'s receipts and the guide.
+
+- **Decisions made without the owner** (the spec was silent; each is the safer reading): Perch's status notes and
+  `perch interrupt` are not gated; a steer is refused rather than held (it cannot wait); the mode is set without the
+  input lease, but Deliver and Discard need it; changing the mode sweeps what is still `queued` but never what is
+  already held; the receiving agent's `perch inbox` hides held, refused and discarded messages.
+- **Tested without a model:** the gate for every mode, kind and sender; admission, the sweep, Deliver, Discard,
+  cancel of a held message, the queue limit and deletion in `db/agent_mail.rs`; over HTTP and the socket in
+  `server/inbound.rs` (the lead's send is held, the child's inbox does not show it, a missing lease changes nothing,
+  refuse gives `undelivered: refused`); the card and the menu in jsdom. **Not run live:** Deliver through a real
+  receiver (the idle-only delivery it joins is the slice-5 path, run live then).
+
 ## Slice 9c landed (2026-11-07): `perch read`
 
 Contract in ARCHITECTURE ("Reading a sub-session"). `child_read.rs` (pure: `tail`, `check_turns`; reuses the

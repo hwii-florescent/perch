@@ -22,6 +22,8 @@ import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
 import { FamilyStrip } from "./nativeChat/FamilyStrip";
 import { SenderCard, senderTitle } from "./nativeChat/SenderCard";
+import { HeldMessages } from "./nativeChat/HeldMessages";
+import { actOnInbound, useInbound } from "../inbound";
 import { SuggestionCards } from "./nativeChat/SuggestionCards";
 import { actOnChild, useCrew } from "../crew";
 import { actOnSuggestion, useSuggestions } from "../suggestions";
@@ -138,6 +140,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const { rows: family, refresh: refreshFamily } = useCrew(sessionId);
   const canActOnFamily = usePerchStore((state) => state.serverInfo?.capabilities?.includes("crew.actions.v1") === true);
   const { cards: suggestions } = useSuggestions(sessionId);
+  const { state: inbound } = useInbound(sessionId);
   const fileLinkScope = useMemo(() => canLinkFiles && workspaceId ? { workspaceId, hostId } : undefined, [canLinkFiles, workspaceId, hostId]);
   const [snapshot, setSnapshot] = useState<NativeUiSnapshot | null>(null);
   const [status, setStatus] = useState<AgentLifecycleStatus | null>(null);
@@ -421,6 +424,12 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
       <button type="button" onClick={() => setRanCommand(null)}>Dismiss</button></div>}
     {error && <div className="terminal__cli-error" role="alert">{error} {!snapshot && !exited && <button type="button" onClick={() => setRetry((value) => value + 1)}>Reconnect UI</button>}</div>}
     {snapshot?.transcript?.tasks && <DockedTasks list={snapshot.transcript.tasks} />}
+    <HeldMessages state={inbound} canAct={controlling && connected} onOpen={(id) => usePerchStore.getState().switchSession(id)}
+      onAct={(click) => {
+        // Deliver and discard go under this chat's input lease, like typing in it; the mode needs none.
+        const generation = terminalId.current ? agentInputGeneration(terminalId.current) : undefined;
+        return actOnInbound({ sessionId, ...click, generation });
+      }} />
     <SuggestionCards cards={suggestions} canAct={controlling && connected} onOpen={(id) => usePerchStore.getState().switchSession(id)}
       onSendHere={sendTaskHere}
       onAct={(cardId, click) => {

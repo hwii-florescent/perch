@@ -604,6 +604,11 @@ impl HistoryDb {
         if !existing_session_columns.contains("parent_session_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT", [])?;
         }
+        // What the session does with messages from other sessions: `hold` or `refuse`
+        // (`agent_mail::InboundMode`); NULL accepts them.
+        if !existing_session_columns.contains("inbound_mode") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN inbound_mode TEXT", [])?;
+        }
 
         Self::migrate_attention(&conn)?;
         Self::migrate_browser_history(&conn)?;

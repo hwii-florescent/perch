@@ -68,6 +68,7 @@ export function ago(at: number, now: number): string {
 export function receiptNote(latest: NonNullable<CrewRow["latest"]>): string {
   switch (latest.receipt) {
     case "delivered": return "";
+    case "held": return "held: waiting for its person to approve it";
     case "queued": return latest.reason ? `queued, waiting: ${latest.reason}` : "queued";
     case "delivering": return "being delivered";
     case "unconfirmed": return "handed over, not confirmed";

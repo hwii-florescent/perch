@@ -1603,6 +1603,9 @@ impl HubManager {
             | ServerMessage::SuggestionsState { .. }
             | ServerMessage::SuggestionActResult { .. }
             | ServerMessage::SuggestionsChanged { .. }
+            | ServerMessage::InboundState { .. }
+            | ServerMessage::InboundActResult { .. }
+            | ServerMessage::InboundChanged { .. }
             | ServerMessage::FsError { .. } => {
                 // Settings/pairing/attention remain host-private. Workspace
                 // replies/events were consumed by workspace's qualified relay

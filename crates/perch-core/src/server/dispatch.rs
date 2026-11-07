@@ -218,6 +218,20 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             request_id,
             session_id,
         } => super::crew::handle_get(state, request_id, session_id),
+        ClientMessage::InboundGet {
+            request_id,
+            session_id,
+        } => super::inbound::handle_get(state, request_id, session_id),
+        ClientMessage::InboundAct {
+            request_id,
+            session_id,
+            action,
+            mode,
+            message_id,
+            generation,
+        } => super::inbound::handle_act(
+            state, request_id, session_id, action, mode, message_id, generation,
+        ),
         ClientMessage::SuggestionsGet {
             request_id,
             session_id,

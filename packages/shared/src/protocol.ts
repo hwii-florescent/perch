@@ -714,6 +714,8 @@ export interface SessionSummary {
   chatProviderId?: string;
   /** The lead this session is a sub-session of (local only). The sidebar nests it under that lead. */
   parentSessionId?: string;
+  /** What this session does with messages from other sessions: `hold` (keep each for its person) or `refuse`; absent = accept. */
+  inboundMode?: "hold" | "refuse";
   /** Where a local terminal's shell is now (follows `cd`) and that directory's
    * git branch (absent outside a repo). the Files/Git drawer follows these. */
   currentCwd?: string;
@@ -1481,6 +1483,68 @@ export interface SuggestionActResultMessage {
 /** Broadcast when a lead's suggested-task cards changed; clients showing that chat ask again. */
 export interface SuggestionsChangedMessage {
   type: "suggestions.changed";
+  sessionId: string;
+}
+
+/** What a session does with messages from other sessions, and what it holds for its person (capability
+ * `inbound.v1`). Answered with `inbound.state`. */
+export interface InboundGetMessage {
+  type: "inbound.get";
+  requestId: string;
+  sessionId: string;
+}
+
+/** A person's action on a session's inbound control: `set_mode` (with `mode`: `accept`, `hold` or `refuse`),
+ * `deliver` or `discard` (one held message, `messageId`), `deliver_all` or `discard_all`. Delivering and
+ * discarding need the chat's input lease (`generation`), as typing in it does; the mode does not. Answered
+ * with `inbound.act.result`. */
+export interface InboundActMessage {
+  type: "inbound.act";
+  requestId: string;
+  sessionId: string;
+  action: string;
+  mode?: string;
+  messageId?: string;
+  generation?: number;
+}
+
+/** A message another session sent that this session's person has not answered. `text` is cut to a preview
+ * when the message was long (`truncated`). */
+export interface HeldMessage {
+  id: string;
+  fromSessionId: string;
+  fromProvider: string;
+  fromLabel: string;
+  text: string;
+  truncated?: boolean;
+  at: number;
+}
+
+/** Reply to `inbound.get`: the session's mode (`accept`, `hold`, `refuse`) and what it holds, oldest first. */
+export interface InboundStateMessage {
+  type: "inbound.state";
+  requestId: string;
+  sessionId: string;
+  mode: string;
+  held: HeldMessage[];
+  error?: string;
+}
+
+/** Reply to `inbound.act`. `outcome`: `done` or `refused` (nothing changed; `reason` says why); `count` is
+ * how many messages the action moved. */
+export interface InboundActResultMessage {
+  type: "inbound.act.result";
+  requestId: string;
+  sessionId: string;
+  action: string;
+  outcome: string;
+  reason?: string;
+  count?: number;
+}
+
+/** Broadcast when a session's inbound mode or held messages changed; clients showing it ask again. */
+export interface InboundChangedMessage {
+  type: "inbound.changed";
   sessionId: string;
 }
 
@@ -2383,6 +2447,8 @@ export type ClientMessage =
   | CrewActMessage
   | SuggestionsGetMessage
   | SuggestionActMessage
+  | InboundGetMessage
+  | InboundActMessage
   | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
@@ -3178,6 +3244,9 @@ export type ServerMessage =
   | SuggestionsStateMessage
   | SuggestionActResultMessage
   | SuggestionsChangedMessage
+  | InboundStateMessage
+  | InboundActResultMessage
+  | InboundChangedMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage

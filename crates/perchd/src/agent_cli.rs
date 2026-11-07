@@ -654,6 +654,9 @@ fn receipt(state: &str, reason: &str) -> String {
         ("unconfirmed", _) => {
             format!("handed over but not confirmed ({reason}); it will not be sent again")
         }
+        ("held", _) => "held for the approval of the person using the receiver; nothing is \
+             delivered unless they choose to, and you can still take it back"
+            .into(),
         ("undelivered", false) => format!("not delivered: {reason}"),
         (other, _) => other.to_string(),
     }
@@ -901,6 +904,11 @@ Messages
     use them to chat, to check on progress or to hurry it. A steer or an interrupt that is not
     confirmed may still have taken effect: look at `perch list`, do not repeat it blindly.
     A sub-session cannot steer or interrupt anyone.
+  - A person may set a session to hold messages from other sessions for their approval, or to
+    refuse them. A held message waits (the receipt says so) until that person delivers or
+    discards it; a refused one comes back as not delivered: refused. Do not resend either, and
+    do not work around it: a steer is turned away from a session that holds or refuses. A
+    person's own messages and Perch's status notes are not affected.
   - Send little. Put what a sub-session needs in its task; send a message when something
     changes that it cannot see. Do not send to say you received something.
 
@@ -1246,6 +1254,14 @@ mod tests {
         assert!(
             receipt("undelivered", "cancelled by its sender").contains("not delivered: cancelled")
         );
+        assert!(receipt("held", "held: x").starts_with("held for the approval"));
+        assert_eq!(
+            receipt(
+                "undelivered",
+                "refused: that session does not accept messages from other sessions"
+            ),
+            "not delivered: refused: that session does not accept messages from other sessions"
+        );
     }
 
     #[test]
@@ -1283,6 +1299,7 @@ mod tests {
             "perch interrupt",
             "going the wrong way",
             "Queued messages are the default",
+            "hold messages from other sessions for their approval",
             "cannot steer or interrupt anyone",
             "perch inbox",
             "perch cancel",

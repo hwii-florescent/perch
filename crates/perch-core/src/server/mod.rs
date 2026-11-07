@@ -99,6 +99,7 @@ mod terminal;
 mod uploads;
 #[cfg(test)]
 use terminal::claude_conversation_exists_in;
+mod inbound;
 mod session;
 mod sub_sessions;
 mod suggestions;
@@ -2550,6 +2551,7 @@ fn foundation_capabilities() -> Vec<String> {
         "crew.v1",
         "crew.actions.v1",
         "suggestions.v1",
+        "inbound.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",
@@ -3055,6 +3057,7 @@ mod session_viewer_filter_tests {
                 project_id: None,
                 workspace_id: None,
                 parent_session_id: None,
+                inbound_mode: None,
             },
         };
         let workspace_git = ServerMessage::WorkspaceGit {

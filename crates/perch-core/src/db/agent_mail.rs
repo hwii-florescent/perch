@@ -6,7 +6,7 @@
 //! by a core that stopped is `unconfirmed` at boot and never claimed again (Orca's rule that a
 //! send that may have reached the agent is never sent again).
 use super::*;
-use crate::agent_mail::{self, MailKind, MailState, SendContext, SendRefusal};
+use crate::agent_mail::{self, Gate, InboundMode, MailKind, MailState, SendContext, SendRefusal};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailRow {
@@ -107,10 +107,25 @@ fn live_incarnation_of(conn: &Connection, session_id: &str) -> rusqlite::Result<
     .optional()
 }
 
+/// What the receiver does with messages from other sessions; accept unless its row says otherwise.
+fn inbound_mode_of(conn: &Connection, session_id: &str) -> rusqlite::Result<InboundMode> {
+    let mode: Option<String> = conn
+        .query_row(
+            "SELECT inbound_mode FROM sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(mode
+        .and_then(|mode| InboundMode::parse(&mode))
+        .unwrap_or_default())
+}
+
 fn pending_for(conn: &Connection, target: &str) -> rusqlite::Result<usize> {
     conn.query_row(
         "SELECT COUNT(*) FROM agent_mail
-         WHERE target_session_id = ?1 AND state IN ('queued', 'delivering')",
+         WHERE target_session_id = ?1 AND state IN ('queued', 'delivering', 'held')",
         params![target],
         |row| row.get::<_, i64>(0),
     )
@@ -214,6 +229,20 @@ impl HistoryDb {
         if let Err(refusal) = agent_mail::admit_send(&context) {
             return Ok(Enqueued::Refused(refusal));
         }
+        // The receiver's own say over what other sessions send it (never a person's text).
+        let mode = inbound_mode_of(&tx, new.target_session_id)?;
+        let (state, reason) = match agent_mail::gate(mode, kind, from_person) {
+            Gate::Pass => (state, ""),
+            Gate::Hold => (MailState::Held, agent_mail::HELD_REASON),
+            Gate::Refuse if kind == MailKind::Steer => {
+                return Ok(Enqueued::Refused(if mode == InboundMode::Hold {
+                    SendRefusal::InboundHolds
+                } else {
+                    SendRefusal::InboundRefuses
+                }));
+            }
+            Gate::Refuse => (MailState::Undelivered, agent_mail::REFUSED_REASON),
+        };
         let id = Uuid::new_v4().to_string();
         let now = now_millis();
         tx.execute(
@@ -221,7 +250,7 @@ impl HistoryDb {
                 (id, run_id, kind, sender_session_id, sender_provider, sender_label,
                  target_session_id, target_provider, target_incarnation, body, idem_key,
                  state, reason, created_at, updated_at)
-             VALUES (?1, ?2, ?12, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?13, '', ?11, ?11)",
+             VALUES (?1, ?2, ?12, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?13, ?14, ?11, ?11)",
             params![
                 id,
                 run,
@@ -235,7 +264,8 @@ impl HistoryDb {
                 new.key,
                 now,
                 kind.as_str(),
-                state.as_str()
+                state.as_str(),
+                reason
             ],
         )?;
         let row = tx.query_row(
@@ -493,12 +523,93 @@ impl HistoryDb {
         Ok(())
     }
 
-    /// Give up on queued mail with a reason. `false` when it was no longer queued.
+    /// Give up on queued (or held) mail with a reason. `false` when it was neither any more.
     pub fn undeliver_mail(&self, id: &str, reason: &str) -> anyhow::Result<bool> {
         Ok(self.conn.lock().unwrap().execute(
             "UPDATE agent_mail SET state = 'undelivered', reason = ?2, updated_at = ?3
-             WHERE id = ?1 AND state = 'queued'",
+             WHERE id = ?1 AND state IN ('queued', 'held')",
             params![id, reason, now_millis()],
+        )? > 0)
+    }
+
+    /// What a session does with messages other sessions send it.
+    pub fn inbound_mode(&self, session_id: &str) -> anyhow::Result<InboundMode> {
+        Ok(inbound_mode_of(&self.conn.lock().unwrap(), session_id)?)
+    }
+
+    /// Change what a session does with messages from other sessions, and apply it to what already
+    /// waits to be delivered: **Hold** holds each waiting message, **Refuse** turns each one away
+    /// (`undelivered`, with the reason). Mail already `delivering` or settled is untouched, and so is
+    /// mail already held (the person still decides it). A person's own text and Perch's notes are never
+    /// swept. Returns how many messages the change moved; setting the mode it already has moves none.
+    pub fn set_inbound_mode(&self, session_id: &str, mode: InboundMode) -> anyhow::Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let before = inbound_mode_of(&tx, session_id)?;
+        let stored = (mode != InboundMode::Accept).then(|| mode.as_str());
+        let changed = tx.execute(
+            "UPDATE sessions SET inbound_mode = ?2 WHERE id = ?1",
+            params![session_id, stored],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("that session no longer exists");
+        }
+        let swept = if before == mode {
+            0
+        } else {
+            let (state, reason) = match mode {
+                InboundMode::Accept => (None, ""),
+                InboundMode::Hold => (Some(MailState::Held), agent_mail::HELD_REASON),
+                InboundMode::Refuse => (Some(MailState::Undelivered), agent_mail::REFUSED_REASON),
+            };
+            match state {
+                None => 0,
+                Some(state) => tx.execute(
+                    "UPDATE agent_mail SET state = ?2, reason = ?3, updated_at = ?4
+                     WHERE target_session_id = ?1 AND state = 'queued' AND kind = 'message'
+                       AND sender_session_id <> ?5",
+                    params![
+                        session_id,
+                        state.as_str(),
+                        reason,
+                        now_millis(),
+                        crate::crew_actions::PERSON
+                    ],
+                )?,
+            }
+        };
+        tx.commit()?;
+        Ok(swept)
+    }
+
+    /// What waits for a session's person to deliver or discard, oldest first.
+    pub fn held_mail_for(&self, session_id: &str) -> anyhow::Result<Vec<MailRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM agent_mail WHERE target_session_id = ?1 AND state = 'held'
+             ORDER BY created_at, rowid"
+        ))?;
+        let rows = statement.query_map(params![session_id], row_from)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The person delivers a held message: it joins the queue and is delivered like any other when
+    /// its receiver is idle. `false` when it was not held for that session (already answered, or not
+    /// theirs), so a second click does nothing.
+    pub fn release_held_mail(&self, session_id: &str, id: &str) -> anyhow::Result<bool> {
+        Ok(self.conn.lock().unwrap().execute(
+            "UPDATE agent_mail SET state = 'queued', reason = '', updated_at = ?3
+             WHERE id = ?2 AND target_session_id = ?1 AND state = 'held'",
+            params![session_id, id, now_millis()],
+        )? > 0)
+    }
+
+    /// The person discards a held message: `undelivered`, and its sender's receipt says so.
+    pub fn discard_held_mail(&self, session_id: &str, id: &str) -> anyhow::Result<bool> {
+        Ok(self.conn.lock().unwrap().execute(
+            "UPDATE agent_mail SET state = 'undelivered', reason = ?3, updated_at = ?4
+             WHERE id = ?2 AND target_session_id = ?1 AND state = 'held'",
+            params![session_id, id, agent_mail::DISCARDED_REASON, now_millis()],
         )? > 0)
     }
 
@@ -597,7 +708,7 @@ impl HistoryDb {
         conn.execute(
             "UPDATE agent_mail SET state = 'undelivered', reason = 'the receiver was deleted',
                     updated_at = ?2
-             WHERE target_session_id = ?1 AND state = 'queued'",
+             WHERE target_session_id = ?1 AND state IN ('queued', 'held')",
             params![session_id, now_millis()],
         )?;
         conn.execute(
@@ -1084,6 +1195,157 @@ mod tests {
         assert_eq!(
             rows.iter().map(|r| r.body.as_str()).collect::<Vec<_>>(),
             ["m4", "m3", "m2"]
+        );
+    }
+
+    #[test]
+    fn a_session_that_refuses_turns_agent_messages_away_and_never_a_person_or_a_note() {
+        let Run { db, .. } = run();
+        assert_eq!(db.inbound_mode("a").unwrap(), InboundMode::Accept);
+        db.set_inbound_mode("a", InboundMode::Refuse).unwrap();
+        assert_eq!(db.inbound_mode("a").unwrap(), InboundMode::Refuse);
+        // The sender gets a row with the receipt `undelivered: refused`, and nothing is queued.
+        let refused = queued(&db, &send("lead", "a", "hello", "k1"));
+        assert_eq!(refused.state, MailState::Undelivered);
+        assert_eq!(refused.reason, agent_mail::REFUSED_REASON);
+        assert!(db.queued_mail_for("a").unwrap().is_empty());
+        assert!(db.queued_mail_targets().unwrap().is_empty());
+        // A steer is turned away without a row, and still counts nothing.
+        assert_eq!(
+            db.record_steer(&send("lead", "a", "stop", "k2")).unwrap(),
+            Enqueued::Refused(SendRefusal::InboundRefuses)
+        );
+        // The person's text and a child's status note go through.
+        let Enqueued::New(person) = db
+            .record_person_mail(&from_the_person("a", "from me", "p1"), MailKind::Message)
+            .unwrap()
+        else {
+            panic!("the person's message is queued");
+        };
+        assert_eq!(person.state, MailState::Queued);
+        assert!(db
+            .enqueue_note(("b", "codex", "b"), ("lead", "claude"), "b finished")
+            .unwrap()
+            .is_some());
+        db.set_inbound_mode("lead", InboundMode::Refuse).unwrap();
+        let note = db
+            .enqueue_note(("b", "codex", "b"), ("lead", "claude"), "b finished again")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            note.state,
+            MailState::Queued,
+            "a refusing lead still hears its children"
+        );
+        // Another session is unaffected.
+        assert_eq!(
+            queued(&db, &send("a", "b", "hi", "k3")).state,
+            MailState::Queued
+        );
+        assert!(db.set_inbound_mode("nobody", InboundMode::Hold).is_err());
+    }
+
+    #[test]
+    fn a_session_that_holds_keeps_each_message_for_its_person_to_deliver_or_discard() {
+        let Run { db, .. } = run();
+        db.set_inbound_mode("a", InboundMode::Hold).unwrap();
+        let held = queued(&db, &send("lead", "a", "please also run the tests", "k1"));
+        assert_eq!(held.state, MailState::Held);
+        assert_eq!(held.reason, agent_mail::HELD_REASON);
+        // The delivery engine never sees it; the person's list does.
+        assert!(db.queued_mail_for("a").unwrap().is_empty());
+        assert!(db.queued_mail_targets().unwrap().is_empty());
+        assert_eq!(db.held_mail_for("a").unwrap(), vec![held.clone()]);
+        assert!(db.held_mail_for("b").unwrap().is_empty());
+        // A steer cannot wait for approval.
+        assert_eq!(
+            db.record_steer(&send("lead", "a", "stop", "k2")).unwrap(),
+            Enqueued::Refused(SendRefusal::InboundHolds)
+        );
+        // Deliver: it joins the queue once, for the right receiver only.
+        assert!(!db.release_held_mail("b", &held.id).unwrap());
+        assert!(db.release_held_mail("a", &held.id).unwrap());
+        assert!(
+            !db.release_held_mail("a", &held.id).unwrap(),
+            "a second click does nothing"
+        );
+        let waiting = db.queued_mail_for("a").unwrap();
+        assert_eq!((waiting.len(), waiting[0].state), (1, MailState::Queued));
+        assert!(db.claim_mail(std::slice::from_ref(&held.id)).unwrap());
+        // Discard: undelivered with the person's words; it cannot be delivered afterwards.
+        let second = queued(&db, &send("lead", "a", "and this", "k3"));
+        assert_eq!(second.state, MailState::Held);
+        assert!(db.discard_held_mail("a", &second.id).unwrap());
+        assert!(!db.release_held_mail("a", &second.id).unwrap());
+        let settled = db.mail(&second.id).unwrap().unwrap();
+        assert_eq!(
+            (settled.state, settled.reason.as_str()),
+            (MailState::Undelivered, agent_mail::DISCARDED_REASON)
+        );
+        // The sender may take back a held message, like a queued one.
+        let third = queued(&db, &send("lead", "a", "or this", "k4"));
+        assert_eq!(
+            db.cancel_mail("lead", &third.id).unwrap(),
+            Cancelled::Cancelled
+        );
+        assert!(db.held_mail_for("a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn held_messages_count_against_the_receivers_queue_and_go_with_it() {
+        let Run { db, .. } = run();
+        db.set_inbound_mode("a", InboundMode::Hold).unwrap();
+        for n in 0..agent_mail::MAX_PENDING_PER_TARGET {
+            queued(&db, &send("lead", "a", "m", &format!("k{n}")));
+        }
+        // Over the queue limit, whatever the mode.
+        let over = db.enqueue_message(&send("lead", "a", "m", "over")).unwrap();
+        assert_eq!(over, Enqueued::Refused(SendRefusal::QueueFull));
+        db.delete_session("a").unwrap();
+        assert!(db.held_mail_for("a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn changing_the_mode_applies_it_to_what_already_waits_once() {
+        let Run { db, .. } = run();
+        let waiting = queued(&db, &send("lead", "a", "waiting", "k1"));
+        let Enqueued::New(person) = db
+            .record_person_mail(&from_the_person("a", "from me", "p1"), MailKind::Message)
+            .unwrap()
+        else {
+            panic!("queued");
+        };
+        // Hold: the waiting agent message is held; the person's stays queued.
+        assert_eq!(db.set_inbound_mode("a", InboundMode::Hold).unwrap(), 1);
+        let state_of = |id: &str| db.mail(id).unwrap().unwrap().state;
+        assert_eq!(state_of(&waiting.id), MailState::Held);
+        assert_eq!(state_of(&person.id), MailState::Queued);
+        // The same mode again moves nothing.
+        assert_eq!(db.set_inbound_mode("a", InboundMode::Hold).unwrap(), 0);
+        // Refuse does not take a held message from its person; a new one waiting is turned away.
+        let later = queued(&db, &send("b", "a", "later", "k2"));
+        assert_eq!(later.state, MailState::Held);
+        db.set_inbound_mode("a", InboundMode::Refuse).unwrap();
+        assert_eq!(state_of(&waiting.id), MailState::Held);
+        // Accepting again stores nothing special and delivers new mail as usual.
+        db.set_inbound_mode("a", InboundMode::Accept).unwrap();
+        assert_eq!(
+            queued(&db, &send("b", "a", "fine", "k3")).state,
+            MailState::Queued
+        );
+        // A claimed (delivering) message is never swept.
+        let claimed = queued(&db, &send("b", "a", "in flight", "k4"));
+        assert!(db.claim_mail(std::slice::from_ref(&claimed.id)).unwrap());
+        db.set_inbound_mode("a", InboundMode::Refuse).unwrap();
+        assert_eq!(state_of(&claimed.id), MailState::Delivering);
+        // And a queued one is turned away when Refuse is set.
+        db.set_inbound_mode("b", InboundMode::Accept).unwrap();
+        let to_b = queued(&db, &send("a", "b", "to b", "k5"));
+        assert_eq!(db.set_inbound_mode("b", InboundMode::Refuse).unwrap(), 1);
+        let turned = db.mail(&to_b.id).unwrap().unwrap();
+        assert_eq!(
+            (turned.state, turned.reason.as_str()),
+            (MailState::Undelivered, agent_mail::REFUSED_REASON)
         );
     }
 }

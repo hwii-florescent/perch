@@ -67,7 +67,9 @@ fn refusal_status(refusal: &agent_mail::SendRefusal) -> StatusCode {
     match refusal {
         ToSelf => StatusCode::BAD_REQUEST,
         OtherRun => StatusCode::FORBIDDEN,
-        NotRunning | CannotReceive | RunLimit | QueueFull => StatusCode::CONFLICT,
+        NotRunning | CannotReceive | RunLimit | QueueFull | InboundRefuses | InboundHolds => {
+            StatusCode::CONFLICT
+        }
     }
 }
 
@@ -128,10 +130,19 @@ pub(super) fn send(app: &AppState, caller: &AgentIdentity, body: &Value) -> Resu
 /// consumes nothing.
 pub(super) fn inbox(app: &AppState, caller: &AgentIdentity) -> Result<Value, Failure> {
     let read = |error| internal("read the mail", error);
-    let received = app
+    let mut received = app
         .db
         .mail_to(&caller.session_id, LIST_LIMIT)
         .map_err(read)?;
+    // What this session's person holds back or turned away is not for it to read.
+    received.retain(|row| {
+        row.state != MailState::Held
+            && !(row.state == MailState::Undelivered
+                && matches!(
+                    row.reason.as_str(),
+                    agent_mail::REFUSED_REASON | agent_mail::DISCARDED_REASON
+                ))
+    });
     let sent = app
         .db
         .mail_from(&caller.session_id, LIST_LIMIT)
