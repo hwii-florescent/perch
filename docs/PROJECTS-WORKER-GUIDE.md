@@ -542,6 +542,20 @@ The contract is in ARCHITECTURE ("Family strip actions"). Where the pieces are:
   and delivered as the person's, Interrupt confirmed with the session kept, Stop confirmed after the
   confirm step. Not run: the phone layout, which is the same component.
 
+## Slice 8b: reporter per harness (owner, 2026-11-07; do before Slice 9)
+
+- Reporter model is a setting **per harness** (Claude, Codex, Pi, OMP), run through that
+  harness's own one-shot mode so a Pi/OMP user's provider (e.g. an OpenRouter model) works.
+  Probe Pi's and OMP's print/one-shot flags first (`--help`; no tools, no session saved, no
+  extensions), like the Claude/Codex probes in Slice 8.
+- Defaults: Claude `haiku` (alias, follows the current Haiku), Codex `gpt-6-luna`; Pi/OMP no
+  default model: if unset, use Claude or Codex when installed, else the last-message fallback.
+  Verify with a zero-token check that the installed CLIs accept `haiku` and `gpt-6-luna`; if
+  not, fall back to `claude-haiku-4-5` / `gpt-5.6-luna` and say so in the setting's help text.
+- A child is summarised by its own harness's reporter when that harness has one, else by
+  the first available. Settings page: one model field per harness plus the on/off switch.
+- Tests and live runs keep `claude-haiku-4-5` / `gpt-5.6-luna` (AGENTS.md).
+
 ## Slice 9: suggested tasks, sender cards, `perch read`, inbound control (owner, 2026-11-07)
 
 DECISIONS 2026-11-07 "Suggested tasks, sender cards…". Behaviour per Claude desktop's doc
