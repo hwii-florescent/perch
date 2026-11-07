@@ -35,8 +35,11 @@ const MAC_DESKTOP = "__TAURI_INTERNALS__" in window && /Mac/.test(navigator.plat
 const ICON_BUTTON = "inline-flex size-7 shrink-0 items-center justify-center rounded-ui bg-transparent p-0 text-[0.9rem] leading-none text-subtext-0 [font-family:inherit] hover:bg-surface-1 hover:text-fg focus-visible:bg-surface-1 focus-visible:text-fg";
 // Soft corners for the desktop chrome: every `rounded-ui` inside follows --radius-pane (base.css).
 const SOFT = "[--radius:var(--radius-pane)]";
-// The open gutter between a column and the canvas is the column's resize handle (ResizeHandle.tsx).
+// The open gutter between two cards is the resize handle (ResizeHandle.tsx); the same 8px
+// surrounds the cards at the window edge.
 const GUTTER = 8;
+// A full-height column of the desktop shell, lifted off the --backdrop (themes.ts `backdropFor`).
+const CARD = "flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[12px] bg-[var(--card-bg)]";
 const toolsDefault = () => Math.min(760, Math.round(window.innerWidth * 0.46));
 
 // Per-viewer column widths (px), set by dragging the dividers.
@@ -186,7 +189,7 @@ export default function App() {
 
   const showSidebar = !isMobile && !sidebarCollapsed;
   const sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthRaw));
-  const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - 2 * GUTTER - MAIN_MIN);
+  const toolsMax = Math.max(TOOLS_MIN, window.innerWidth - (showSidebar ? sidebarWidth : 0) - 4 * GUTTER - MAIN_MIN);
   const toolsWidth = Math.min(toolsMax, Math.max(TOOLS_MIN, toolsWidthRaw));
 
   // The drawer holds Files and Git, so its toggle is a right-panel glyph.
@@ -229,68 +232,15 @@ export default function App() {
 
   return (
     <div
-      className={"app" + (isMobile ? " app--mobile" : "") + (MAC_DESKTOP ? " app--mac-desktop" : "")}
+      className={"app" + (isMobile ? " app--mobile" : " app--cards") + (MAC_DESKTOP ? " app--mac-desktop" : "")}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--tools-width": `${toolsWidth}px` } as CSSProperties}
     >
-      {isMobile ? (
-        <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />
-      ) : (
-        // One row (Orca): the sidebar toggle above the sidebar, tabs, then the
-        // drawer's header column. No rules: the column widths equal the sidebar
-        // and drawer widths below. In the macOS app it is also the title bar: the
-        // traffic lights sit in the first column's left padding and empty space
-        // drags the window (crates/perch-desktop/src/main.rs).
-        <div className={cn("box-border flex h-11 shrink-0 items-center", SOFT)} data-tauri-drag-region>
-          <div
-            className={cn(
-              "box-border flex shrink-0 items-center justify-end self-stretch pr-2",
-              MAC_DESKTOP ? "pl-[78px]" : "pl-3",
-              !sidebarCollapsed && "w-[var(--sidebar-width,240px)]",
-            )}
-            data-tauri-drag-region
-          >
-            {sidebarToggle}
-          </div>
-          <TabBar />
-          {/* With the drawer open, its Files/Git switch heads a column as wide as the drawer. */}
-          {tools ? (
-            <div
-              className="box-border flex w-[var(--tools-width)] shrink-0 items-center justify-between gap-2 self-stretch px-2"
-              data-testid="workspace-tools-header"
-              data-tauri-drag-region
-            >
-              <WorkspaceToolsTabs requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} />
-              {terminalButton}
-            </div>
-          ) : (
-            <div className="box-border flex shrink-0 items-center self-stretch pr-2 pl-1" data-testid="workspace-tools-header" data-tauri-drag-region>
-              {terminalButton}
-            </div>
-          )}
-        </div>
-      )}
+      {isMobile && <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} />}
 
       {!connected && !MAC_DESKTOP && <div className="shrink-0 px-4"><ConnectionDetails /></div>}
-      <div className="flex min-h-0 flex-1">
-        {showSidebar && <Sidebar />}
-        {showSidebar && (
-          <ResizeHandle
-            edge="left"
-            testId="resize-sidebar"
-            label="Resize sidebar"
-            value={sidebarWidth}
-            min={SIDEBAR_MIN}
-            max={SIDEBAR_MAX}
-            defaultValue={SIDEBAR_DEFAULT}
-            onChange={setSidebarWidth}
-            onCommit={(px) => writeWidth(SIDEBAR_KEY, px)}
-          />
-        )}
-        {/* The canvas floats in the shell: 8px gutters at its sides (the resize handles, or a
-            margin where a column is closed). It sits flush on the status bar, whose own height
-            is the space below it, so the bar's text is centred between the canvas and the window edge. */}
-        <main className={cn("dock-area relative flex min-h-0 min-w-0 flex-1", !isMobile && !showSidebar && "ml-2", !isMobile && !tools && "mr-2")}>
-          {isMobile ? (
+      {isMobile ? (
+        <div className="flex min-h-0 flex-1">
+          <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
             <MobilePaneShell
               activePane={mobilePane}
               workspaceFilesWorkspaceId={workspaceFilesWorkspaceId}
@@ -299,27 +249,78 @@ export default function App() {
               onCloseFiles={closeWorkspaceFiles}
               onCloseGitReview={closeWorkspaceGitReview}
             />
-          ) : (
-            <>
-              <SplitCanvas />
-            </>
+          </main>
+        </div>
+      ) : (
+        // Three full-height cards (sidebar, main, drawer) on --backdrop. Each card carries
+        // its own 44px head row: the sidebar toggle, the tabs, the drawer's Files/Git switch.
+        // In the macOS app the sidebar card's head is also the title bar: the traffic lights
+        // sit in its left padding, and the empty strips drag the window (perch-desktop glass.rs).
+        <div className={cn("flex min-h-0 flex-1 px-2 pt-2", SOFT)} data-tauri-drag-region>
+          {showSidebar && (
+            <div className={cn(CARD, "w-[var(--sidebar-width,240px)]")} data-testid="sidebar-card">
+              <div className={cn("box-border flex h-11 shrink-0 items-center justify-end pr-2", MAC_DESKTOP ? "pl-[78px]" : "pl-3")} data-tauri-drag-region>
+                {sidebarToggle}
+              </div>
+              <Sidebar />
+            </div>
           )}
-        </main>
-        {!isMobile && tools && (
-          <ResizeHandle
-            edge="right"
-            testId="resize-tools"
-            label="Resize files and Git"
-            value={toolsWidth}
-            min={TOOLS_MIN}
-            max={toolsMax}
-            defaultValue={toolsDefault()}
-            onChange={setToolsWidth}
-            onCommit={(px) => writeWidth(TOOLS_KEY, px)}
-          />
-        )}
-        {!isMobile && tools && <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} />}
-      </div>
+          {showSidebar && (
+            <ResizeHandle
+              edge="left"
+              testId="resize-sidebar"
+              label="Resize sidebar"
+              value={sidebarWidth}
+              min={SIDEBAR_MIN}
+              max={SIDEBAR_MAX}
+              defaultValue={SIDEBAR_DEFAULT}
+              onChange={setSidebarWidth}
+              onCommit={(px) => writeWidth(SIDEBAR_KEY, px)}
+            />
+          )}
+          <div className={cn(CARD, "min-w-0 flex-1")} data-testid="main-card">
+            <div className="box-border flex h-11 shrink-0 items-center" data-tauri-drag-region>
+              {/* With the sidebar closed, its toggle (and the traffic lights' room) heads the main card. */}
+              {!showSidebar && (
+                <div className={cn("box-border flex shrink-0 items-center self-stretch pr-1", MAC_DESKTOP ? "pl-[78px]" : "pl-3")} data-tauri-drag-region>
+                  {sidebarToggle}
+                </div>
+              )}
+              <TabBar />
+              {!tools && (
+                <div className="box-border flex shrink-0 items-center self-stretch pr-2 pl-1" data-testid="workspace-tools-header" data-tauri-drag-region>
+                  {terminalButton}
+                </div>
+              )}
+            </div>
+            <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
+              <SplitCanvas />
+            </main>
+          </div>
+          {tools && (
+            <ResizeHandle
+              edge="right"
+              testId="resize-tools"
+              label="Resize files and Git"
+              value={toolsWidth}
+              min={TOOLS_MIN}
+              max={toolsMax}
+              defaultValue={toolsDefault()}
+              onChange={setToolsWidth}
+              onCommit={(px) => writeWidth(TOOLS_KEY, px)}
+            />
+          )}
+          {tools && (
+            <div className={cn(CARD, "w-[var(--tools-width)]")} data-testid="tools-card">
+              <div className="box-border flex h-11 shrink-0 items-center justify-between gap-2 px-2" data-testid="workspace-tools-header" data-tauri-drag-region>
+                <WorkspaceToolsTabs requestedWorkspaceId={toolsWorkspaceId} tab={tools} onTabChange={setTools} />
+                {terminalButton}
+              </div>
+              <WorkspaceTools requestedWorkspaceId={toolsWorkspaceId} tab={tools} />
+            </div>
+          )}
+        </div>
+      )}
 
       {!isMobile && <StatusBar />}
       <SettingsPage />

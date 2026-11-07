@@ -40,7 +40,11 @@ pub fn apply(window: &WebviewWindow) {
 
 /// Height of the web view's top row (`h-11` in App.tsx) and the left edge of the close button.
 const TITLE_ROW: f64 = 44.0;
-const LIGHTS_LEFT: f64 = 14.0;
+const LIGHTS_LEFT: f64 = 22.0;
+/// The cards start this far below the window top and in from its left (`App.tsx` `GUTTER`), so the
+/// 44px row they head is centred this much lower and the lights sit this much further in
+/// (22 = 14 + 8).
+const CARD_TOP: f64 = 8.0;
 
 // AppKit geometry as plain C structs (CGFloat is f64 on every Mac perch runs on).
 #[derive(Clone, Copy)]
@@ -79,7 +83,7 @@ unsafe impl objc2::Encode for Rect {
         objc2::Encoding::Struct("CGRect", &[Point::ENCODING, Size::ENCODING]);
 }
 
-/// Centre the close / minimise / zoom buttons on the 44px top row.
+/// Centre the close / minimise / zoom buttons on the 44px top row of the sidebar card.
 ///
 /// Same approach as tao's `traffic_light_position` (resize the title bar container, then place the
 /// buttons), but centred explicitly: with the vibrancy content view tao's offset left the lights
@@ -110,8 +114,10 @@ pub fn position_traffic_lights(window: &WebviewWindow) {
             }
             let window_frame: Rect = msg_send![ns_window, frame];
             let mut container_frame: Rect = msg_send![container, frame];
-            container_frame.size.height = TITLE_ROW;
-            container_frame.origin.y = window_frame.size.height - TITLE_ROW;
+            // Centred on the row's middle, which sits CARD_TOP below the window top.
+            let band = TITLE_ROW + 2.0 * CARD_TOP;
+            container_frame.size.height = band;
+            container_frame.origin.y = window_frame.size.height - band;
             let _: () = msg_send![container, setFrame: container_frame];
             let first: Rect = msg_send![buttons[0], frame];
             let second: Rect = msg_send![buttons[1], frame];
@@ -120,7 +126,7 @@ pub fn position_traffic_lights(window: &WebviewWindow) {
                 let frame: Rect = msg_send![button, frame];
                 let origin = Point {
                     x: LIGHTS_LEFT + index as f64 * step,
-                    y: (TITLE_ROW - frame.size.height) / 2.0,
+                    y: (band - frame.size.height) / 2.0,
                 };
                 let _: () = msg_send![button, setFrameOrigin: origin];
             }

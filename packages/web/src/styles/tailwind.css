@@ -26,6 +26,7 @@
   --color-surface-0: var(--surface-0);
   --color-surface-1: var(--surface-1);
   --color-surface-dim: var(--surface-dim);
+  --color-backdrop: var(--backdrop);
   --color-overlay-0: var(--overlay-0);
   --color-overlay-1: var(--overlay-1);
   --color-fg: var(--text);

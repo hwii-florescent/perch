@@ -7,6 +7,31 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-07 — Desktop shell is three full-height cards on a backdrop (owner)
+
+The main view looked like the sidebars because every layer was the same shell color, and
+the empty gutters between them had no edge. Decided after mockups on real screenshots.
+
+- **Three cards, full height:** the sidebar, the main view (tab strip inside its top edge)
+  and the drawer each run from the window's top to the status bar as rounded (12px)
+  cards, 8px apart and 8px in from the window edge. Each card carries its own 44px head
+  row: the sidebar toggle and traffic lights, the tabs, the Files/Git switch. The status
+  bar sits on the backdrop. The phone layout is unchanged.
+- **Backdrop, derived per theme:** cards and panes keep `--panel-bg`; only the backdrop is
+  new. `backdropFor` (`themes.ts`) sets `--backdrop` in `applyTheme`: `panelBg` darkened
+  toward black until it is 1.12:1 against it, or, for a shell already too dark
+  (terminal, vesper), lightened toward the text color. Custom themes get one for free;
+  it is not in `resolveTheme`, so the Rust-compared fixture is unchanged. In the glass
+  app the backdrop and cards are the same 86% translucent mixes as before.
+- **Split gaps** inside the main card show the backdrop, so panes still read as separate
+  tiles.
+- **Replaces** "no vertical rules, open shell-colored gutters" (Layout, below): the
+  gutters are now backdrop-colored, still without rules. Compact seams, fine dividers and
+  glass cards were considered; glass remains a possible later option.
+- **Not verified:** the macOS app (the traffic lights are re-centred 8px lower in
+  `glass.rs`, with the lights 8px further in and a 78px left padding, unchecked on a real window), WebKit, and the
+  split-pane look with real split sets.
+
 ## 2026-11-07 — Cheap-model reporter for sub-sessions (owner)
 
 The expensive child model does not write reports. When a child's turn ends, Perch asks a
@@ -603,8 +628,8 @@ an exhaustive description of every component or a fresh acceptance result.
   protects a preview. Explorer arrows only move/fold, Space previews preserving
   list focus, Enter opens pinned and focuses the editor. External open uses the
   on-disk file, never silently saves a draft. Preserve this distinction.
-- **Layout:** soft separation (2026-10-24): no vertical rules, open shell-colored
-  gutters, individually rounded panes 6px apart, no split marker in the strip
+- **Layout:** soft separation (2026-10-24; gutters are backdrop-colored since the
+  2026-11-07 card shell): no vertical rules, open gutters, individually rounded panes 6px apart, no split marker in the strip
   (fills and weight show visible/focused panes), no header for a lone pane.
   Native browser pages are rounded from Rust (2026-10-25). Pointer-based tab
   dragging, not HTML5 OS drag-and-drop. A new split set has at most four tabs

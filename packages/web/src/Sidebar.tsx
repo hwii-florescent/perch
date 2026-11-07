@@ -949,7 +949,7 @@ export function SidebarContent({ compact = false, onNavigate, onManageHosts }: {
 export function Sidebar() {
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   return (
-    <aside className="sidebar flex w-[var(--sidebar-width,240px)] shrink-0 flex-col overflow-hidden bg-transparent [--radius:var(--radius-pane)] max-[700px]:hidden">
+    <aside className="sidebar flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-transparent [--radius:var(--radius-pane)] max-[700px]:hidden">
       <SidebarContent />
       <div className="flex shrink-0 items-stretch p-1">
         <button

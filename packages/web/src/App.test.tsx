@@ -55,7 +55,7 @@ it("has no Needs You button or panel in the top row or status bar, and drops the
   const topRow = get("tab-bar").parentElement!;
   expect(host.querySelector('[data-testid="needs-you-toggle"]')).toBeNull();
   expect(topRow.textContent).not.toContain("perch");
-  expect(topRow.querySelector('[data-testid="sidebar-collapse-toggle"]')).not.toBeNull();
+  expect(get("sidebar-card").querySelector('[data-testid="sidebar-collapse-toggle"]')).not.toBeNull();
   expect(get("status-connection").closest("footer")?.className).toContain("status-bar");
 });
 
@@ -72,45 +72,54 @@ it("keeps the alert when the sidebar is collapsed: a count on the control that o
   expect(get("sidebar-collapse-toggle").getAttribute("aria-label")).toBe("Expand sidebar");
 });
 
-it("has no rules: no border on the top row, sidebar column, drawer column or status bar", () => {
+it("has no rules: no border on the cards, their head rows or the status bar", () => {
   act(() => root.render(<App />));
   const topRow = get("tab-bar").parentElement!;
   const footer = get("status-connection").closest("footer")!;
-  for (const element of [topRow, topRow.firstElementChild!, get("workspace-tools-header"), footer]) {
+  for (const element of [topRow, get("sidebar-card"), get("main-card"), get("tools-card"), get("workspace-tools-header"), footer]) {
     expect(element.className, element.className).not.toMatch(/(^|\s)border(-[lrtb])?(-|\s|$)/);
   }
 });
 
-it("floats the canvas between 8px gutters and flush on the status bar, with the handles as the gutters", () => {
+it("lays out three full-height cards with the resize handles as the 8px gutters", () => {
   act(() => root.render(<App />));
-  const main = host.querySelector("main")!;
-  // No gap below: the status bar's own height is the space under the canvas, so its text is centred in it.
-  expect(main.className).not.toMatch(/(^|\s)mb-/);
-  // Both columns open: the resize handles are the 8px gutters, so main needs no side margin.
+  const row = get("main-card").parentElement!;
+  // The row insets the cards 8px from the window's top and sides; the status bar is the space below.
+  expect(row.className).toMatch(/(^|\s)px-2(\s|$)/);
+  expect(row.className).toMatch(/(^|\s)pt-2(\s|$)/);
+  expect(get("sidebar-card").parentElement).toBe(row);
+  expect(get("tools-card").parentElement).toBe(row);
   expect(get("resize-sidebar").className).toContain("flex-[0_0_8px]");
   expect(get("resize-tools").className).toContain("flex-[0_0_8px]");
-  expect(main.className).not.toMatch(/(^|\s)m[lr]-2/);
-  // The drawer's header column is as wide as the drawer itself.
-  expect(get("workspace-tools-header").className).toContain("w-[var(--tools-width)]");
+  // The tabs live inside the main card, above the canvas, so the card runs the full height.
+  expect(get("main-card").contains(get("tab-bar"))).toBe(true);
+  expect(get("main-card").contains(host.querySelector("main"))).toBe(true);
+  // The drawer's header is inside its card, as wide as the drawer itself.
+  expect(get("tools-card").className).toContain("w-[var(--tools-width)]");
+  expect(get("tools-card").contains(get("workspace-tools-header"))).toBe(true);
+  expect(host.firstElementChild!.className).toContain("app--cards");
 });
 
-it("keeps an 8px gutter where a column is closed", () => {
+it("moves the sidebar toggle into the main card when the sidebar is closed, and drops the drawer card", () => {
   act(() => usePerchStore.setState({ sidebarCollapsed: true }));
   storage.delete("perch.workspaceTools");
   act(() => root.render(<App />));
-  const main = host.querySelector("main")!;
-  expect(main.className).toContain("ml-2");
-  expect(main.className).toContain("mr-2");
+  expect(host.querySelector('[data-testid="sidebar-card"]')).toBeNull();
+  expect(host.querySelector('[data-testid="tools-card"]')).toBeNull();
   expect(host.querySelector('[data-testid="resize-sidebar"]')).toBeNull();
   expect(host.querySelector('[data-testid="resize-tools"]')).toBeNull();
-  // The drawer toggle stays reachable in the header column when the drawer is closed.
+  expect(get("main-card").querySelector('[data-testid="sidebar-collapse-toggle"]')).not.toBeNull();
+  // The drawer toggle stays reachable in the main card's head row when the drawer is closed.
   expect(get("workspace-tools-header").querySelector('[data-testid="workspace-tools-toggle"]')).not.toBeNull();
+  expect(get("main-card").contains(get("workspace-tools-header"))).toBe(true);
 });
 
 it("leaves the phone layout alone: no gutters, no desktop status bar", () => {
   matches.mobile = true;
   act(() => root.render(<App />));
   expect(host.querySelector("main")!.className).not.toMatch(/mb-\[6px\]|ml-2|mr-2/);
+  expect(host.querySelector('[data-testid="main-card"]')).toBeNull();
+  expect(host.firstElementChild!.className).not.toContain("app--cards");
   expect(host.querySelector("footer.status-bar")).toBeNull();
   expect(host.querySelector('[data-testid="workspace-tools-header"]')).toBeNull();
 });
