@@ -20,7 +20,7 @@ import { cheapModelEnv } from "./cheapModel";
 import { choose, optionStates } from "./select";
 
 const root = path.resolve(__dirname, "..");
-const DUMMY_KEY = "sk-ant-api03-perch-e2e-no-such-key-0000000000000000";
+const DUMMY_KEY = "perch-e2e-not-a-real-key-0000000000000000";
 
 async function freePort(): Promise<number> {
   return new Promise((resolve) => {
@@ -41,7 +41,7 @@ test("claude: pickers change model, effort and mode and show only what the CLI r
     customApiKeyResponses: { approved: [DUMMY_KEY.slice(-20)], rejected: [] },
     projects: { [project]: { hasTrustDialogAccepted: true, allowedTools: [] } },
   }));
-  fs.writeFileSync(path.join(config, "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true, promptSuggestionEnabled: false }));
+  fs.writeFileSync(path.join(config, "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
   const realSettings = path.join(os.homedir(), ".claude", "settings.json");
   const realBefore = fs.existsSync(realSettings) ? fs.statSync(realSettings).mtimeMs : null;
   fs.writeFileSync(path.join(fixture, "hosts.json"), '{"hosts":[]}');

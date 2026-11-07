@@ -699,20 +699,72 @@ fn transcript(path: &Path, session: &str, window: usize) -> anyhow::Result<Histo
 /// parked on a different row than the prompt (seen one row below it).
 fn prompt_row(screen: &str, cursor_row: usize) -> &str {
     let rows: Vec<&str> = screen.lines().collect();
+    boxed_prompt_index(&rows).map_or_else(
+        || rows.get(cursor_row).copied().unwrap_or_default(),
+        |i| rows[i],
+    )
+}
+
+/// Index of the last `❯` row sitting between two horizontal rules.
+fn boxed_prompt_index(rows: &[&str]) -> Option<usize> {
     let rule = |row: &str| !row.trim().is_empty() && row.trim().chars().all(|ch| ch == '─');
     (1..rows.len().saturating_sub(1))
         .rev()
         .find(|&i| rows[i].trim_start().starts_with('❯') && rule(rows[i - 1]) && rule(rows[i + 1]))
-        .map_or_else(
-            || rows.get(cursor_row).copied().unwrap_or_default(),
-            |i| rows[i],
-        )
 }
 
 fn empty_prompt(line: &str) -> bool {
     line.trim_start()
         .strip_prefix('❯')
         .is_some_and(|draft| draft.trim().is_empty())
+}
+
+/// Is Claude's input box empty? Besides a bare `❯`, a fresh Claude draws a greyed example in an empty
+/// prompt (`Try "fix lint errors"`) that is not text anyone typed. See [`example_placeholder`] for how
+/// it is told from a draft.
+pub(super) fn prompt_is_empty(screen: &str, cursor_row: usize, cursor_col: usize) -> bool {
+    let rows: Vec<&str> = screen.lines().collect();
+    match boxed_prompt_index(&rows) {
+        Some(i) => {
+            empty_prompt(rows[i]) || example_placeholder(rows[i], i == cursor_row, cursor_col)
+        }
+        None => empty_prompt(prompt_row(screen, cursor_row)),
+    }
+}
+
+/// The greyed example Claude 2.1.319 draws in an empty prompt: `❯`, a space, then `Try "…"`, with
+/// the cursor parked on its first letter. The screen text is all the daemon keeps (its terminal emulator
+/// drops the dim attribute the example is drawn with, checked on a raw capture), so the placeholder is
+/// recognised by shape **and** cursor: a typed draft leaves the cursor at its end, so only a draft of
+/// exactly this shape moved back to its start would pass (Ctrl-A). Anything else, including the dim
+/// suggestion Claude may draw after a turn, stays a draft and refuses the send; the person can type
+/// once or turn `promptSuggestionEnabled` off. Wording varies between launches, so only the shape is checked.
+pub(super) fn example_placeholder(row: &str, on_cursor_row: bool, cursor_col: usize) -> bool {
+    if !on_cursor_row {
+        return false;
+    }
+    let Some((mark, after)) = row
+        .char_indices()
+        .find(|(_, ch)| !ch.is_whitespace())
+        .filter(|(_, ch)| *ch == '❯')
+        .map(|(at, ch)| (at, &row[at + ch.len_utf8()..]))
+    else {
+        return false;
+    };
+    let text = after.trim_start();
+    let start = row[..mark].chars().count() + 1 + (after.chars().count() - text.chars().count());
+    let Some(inner) = text
+        .trim_end()
+        .strip_prefix("Try \"")
+        .and_then(|rest| rest.strip_suffix('"'))
+    else {
+        return false;
+    };
+    cursor_col == start
+        && !inner.is_empty()
+        && inner.chars().count() <= 80
+        && !inner.contains('"')
+        && !inner.chars().any(char::is_control)
 }
 
 /// Run only while the runtime's existing input authority is held. The capture
@@ -747,12 +799,15 @@ pub fn prepare_input(key: &AgentKey, prompt: Option<&str>) -> anyhow::Result<Opt
         return Ok(Some("\u{1b}".into()));
     };
     let screen = client.snapshot(&terminal)?;
-    let row = prompt_row(&screen.text, screen.cursor_row as usize);
     // ponytail: this recognizes Claude's native empty prompt on the installed
     // TUI. Fail closed on other layouts; replace with a native editor API if
     // Claude exposes one. Never clear or append to an unsubmitted CLI draft.
     ensure!(
-        empty_prompt(row),
+        prompt_is_empty(
+            &screen.text,
+            screen.cursor_row as usize,
+            screen.cursor_col as usize
+        ),
         "The CLI has a draft or dialog open. Finish it in CLI view before sending from UI."
     );
     Ok(Some(format!("\u{1b}[200~{prompt}\u{1b}[201~{SUBMIT}")))
@@ -1140,6 +1195,43 @@ mod tests {
             !empty_prompt(prompt_row(&dialog, 1)),
             "a permission dialog is not an empty prompt"
         );
+    }
+
+    /// Captured from Claude 2.1.319 started under a private config with prompt suggestions on: the greyed
+    /// example sits in the box, the cursor (row 5, column 2) is parked on its first letter, and the daemon
+    /// keeps no colour. Before this, every chat send was refused as "a draft is open".
+    fn fresh_claude_screen(prompt: &str) -> String {
+        let rule = "─".repeat(100);
+        format!("\n ▐▛███▜▌   Claude Code v2.1.319\n▝▜█████▛▘  Haiku 4.5\n\n{rule}\n{prompt}\n{rule}\n  my-status-line\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents")
+    }
+
+    #[test]
+    fn the_greyed_try_example_is_not_a_draft_but_typed_text_is() {
+        let example = fresh_claude_screen("❯\u{a0}Try \"fix lint errors\"");
+        assert!(
+            prompt_is_empty(&example, 5, 2),
+            "cursor parked on the example"
+        );
+        let other = fresh_claude_screen("❯\u{a0}Try \"how do I log an error?\"");
+        assert!(prompt_is_empty(&other, 5, 2), "the wording rotates");
+        // A draft leaves the cursor at its end, even when it has the example's shape.
+        let typed = fresh_claude_screen("❯\u{a0}Try \"x\"");
+        assert!(!prompt_is_empty(&typed, 5, 9), "cursor after typed text");
+        assert!(!prompt_is_empty(&example, 5, 9), "cursor not at the start");
+        assert!(!prompt_is_empty(&example, 6, 2), "cursor on another row");
+        assert!(!prompt_is_empty(&example, 99, 2), "cursor off screen");
+        // Other text, even at the cursor's start, is a draft: a suggestion or a real message.
+        for text in [
+            "fix the bug",
+            "Try fixing it",
+            "Try \"\"",
+            "Try \"a\" and \"b\"",
+            "Try \"unclosed",
+        ] {
+            let screen = fresh_claude_screen(&format!("❯\u{a0}{text}"));
+            assert!(!prompt_is_empty(&screen, 5, 2), "{text}");
+        }
+        assert!(prompt_is_empty(&fresh_claude_screen("❯\u{a0}"), 5, 2));
     }
 
     #[test]

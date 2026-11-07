@@ -97,15 +97,20 @@ pub fn read_draft(agent: &str, screen: &str, cursor_row: usize, cursor_col: usiz
         }),
         _ => None,
     };
-    let Some(row) = row.map(|i| rows[i]) else {
+    let Some((index, row)) = row.map(|i| (i, rows[i])) else {
         return Draft::Unreadable;
     };
     let line = row.trim_start();
     let line = line.strip_prefix(['❯', '›']).unwrap_or(line);
     // Text before the cursor is what was typed; a placeholder or hint is drawn after it. Claude's cursor is
-    // not trusted, and it draws no placeholder text on the line.
+    // not trusted, so only its greyed `Try "…"` example (shape and cursor, `claude::example_placeholder`)
+    // is told from a draft.
     let typed: String = if agent == "claude" {
-        line.to_string()
+        if super::claude::example_placeholder(row, index == cursor_row, cursor_col) {
+            String::new()
+        } else {
+            line.to_string()
+        }
     } else {
         let before: String = row.chars().take(cursor_col).collect();
         let before = before.trim_start();
@@ -345,6 +350,14 @@ mod tests {
         assert_eq!(
             read_draft("claude", &format!("{rule}\n❯ \n{rule}\n"), 1, 2),
             Draft::Empty
+        );
+        // Claude's greyed example in a fresh prompt is not a draft; the same words typed (cursor at their
+        // end) are.
+        let example = format!("x\n{rule}\n❯\u{a0}Try \"fix lint errors\"\n{rule}\n  status");
+        assert_eq!(read_draft("claude", &example, 2, 2), Draft::Empty);
+        assert_eq!(
+            read_draft("claude", &example, 2, 21),
+            text("Try \"fix lint errors\"")
         );
         let pi = format!("{rule}\n\n{rule}\nfirst line\n{rule}\n/tmp");
         assert_eq!(read_draft("pi", &pi, 3, 10), text("first line"));

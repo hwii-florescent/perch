@@ -388,11 +388,16 @@ API key):**
   at the current generation; the lease is looked up again before every write, so another viewer
   taking input ends a change half way. One change at a time per core. A change the CLI never showed in
   8 s is `unconfirmed`, never assumed.
-- **Found, not fixed:** a fresh Claude draws a placeholder in an empty prompt (`❯ Try "fix lint errors"`)
-  unless `promptSuggestionEnabled` is false (the user's own settings have it). `empty_prompt` reads that
-  as a draft, so *every* send from the chat (not only pickers) is refused until the setting is off or the
-  person types once. The fix needs a way to tell a placeholder from typed text (the screen text is the
-  same; colour is not in the snapshot).
+- **Found, then fixed (2026-11-06):** a fresh Claude draws a placeholder in an empty prompt (`❯ Try "fix lint errors"`)
+  unless `promptSuggestionEnabled` is false. `empty_prompt` read that as a draft, so *every* send from the
+  chat (not only pickers) was refused. Raw capture of 2.1.319: the example is drawn dim (SGR 2) and the cursor
+  is parked on its first letter; the daemon's emulator (vt100 0.15) drops SGR 2 and the snapshot is plain text,
+  so `claude::prompt_is_empty` / `example_placeholder` (also used by `typed::read_draft`) recognise it by shape
+  (`Try "…"`, one quoted phrase) **and** the cursor on its first letter, on the prompt row. Typed text leaves
+  the cursor at its end, so only a draft of exactly that shape moved back to its start (Ctrl-A) passes; every
+  other text stays a draft. **Not covered:** the dim *suggestion* Claude may draw after a turn (any wording, same
+  cursor spot) still reads as a draft; it needs the dim attribute, i.e. a terminal emulator that keeps SGR 2.
+  The e2e now leaves `promptSuggestionEnabled` on.
 
 **Not done, and why (an owner call each):**
 - **Codex.** `/model` is a two-step TUI list (model, then "Select Reasoning Level"; `enter` saves a

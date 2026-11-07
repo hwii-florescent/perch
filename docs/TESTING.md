@@ -98,8 +98,8 @@ Useful existing coverage (not a claim of a fresh passing run):
   that provider alone.
 - `native-options.spec.ts` (same config): Claude's model, effort and permission-mode pickers with **no model
   turn**. Claude runs under a private `CLAUDE_CONFIG_DIR` (pre-approved onboarding, trust, the dummy
-  `ANTHROPIC_API_KEY` and `promptSuggestionEnabled: false`, without which a fresh Claude's `Try "…"`
-  placeholder reads as a draft), because Claude saves `/model` and `/effort` picks as the user's own defaults;
+  `ANTHROPIC_API_KEY`, prompt suggestions left on, so the fresh Claude's greyed `Try "…"` placeholder is in the
+  prompt for every send), because Claude saves `/model` and `/effort` picks as the user's own defaults;
   the spec also checks that `~/.claude/settings.json` was not touched. Use the same recipe for any probe of
   Claude commands that write settings. Codex has an equivalent: a private `CODEX_HOME` and a dummy
   `OPENAI_API_KEY` reach its TUI and pickers (choose "Use an OpenAI API key" once).
