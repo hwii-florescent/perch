@@ -116,6 +116,9 @@ export function SplitCanvas() {
     const r = gapped(shared, box);
     return { left: r.x, top: r.y, width: r.w, height: r.h };
   };
+  // The canvas hangs from the main card's tab strip: a pane on the top edge (or alone) has square
+  // top corners, so it reads as attached to the strip. Where panes meet each other they stay rounded.
+  const flushTop = (id: string) => !placed || Boolean(zoomed) || (placed.panes.get(id)?.y ?? 0) === 0;
   const dividers = placed?.strips.flatMap((strip) => strip.edges.map((edge, i) => ({ strip, i, edge }))) ?? [];
 
   // Coming back to a project: its selected file or review returns. The session the
@@ -234,7 +237,7 @@ export function SplitCanvas() {
   return (
     <div ref={hostRef} className="absolute inset-0" data-testid="split-canvas" data-split={split ? split.ids.length : 0}>
       <div
-        className={cn("absolute inset-0 overflow-hidden rounded-soft", primaryHidden && "hidden")}
+        className={cn("absolute inset-0 overflow-hidden rounded-soft rounded-t-none", primaryHidden && "hidden")}
         data-testid={primaryHidden ? "split-dock-parked" : "split-pane-session"}
         data-pane-id={primaryHidden ? undefined : sessionId ?? undefined}
         data-pane-visible={!primaryHidden && !fileShown}
@@ -247,7 +250,7 @@ export function SplitCanvas() {
       {tiledSessions.map((entry) => (
         <div
           key={entry.id}
-          className="absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg"
+          className={cn("absolute z-10 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-soft bg-panel-bg", flushTop(entry.id) && "rounded-t-none")}
           style={slot(entry.id)}
           data-testid={entry.id === sessionId ? "split-pane-session" : `split-pane-session-${entry.id}`}
           data-pane-id={entry.id}
@@ -274,7 +277,7 @@ export function SplitCanvas() {
         <div
           key={id}
           // Files, reviews and browsers read as panes against the shell: inside, panel-bg is surface-dim.
-          className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0")}
+          className={cn("absolute z-10 flex overflow-hidden rounded-soft bg-panel-bg [--panel-bg:var(--surface-dim)]", !split && "inset-0", flushTop(id) && "rounded-t-none")}
           style={slot(id)}
           data-pane-id={id}
           data-pane-visible={tileVisible(id)}
