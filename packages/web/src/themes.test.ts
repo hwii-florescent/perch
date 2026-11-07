@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { applyTheme, PERCH_DEFAULT, resolveTheme, THEMES, THEME_NAMES } from "./themes";
+import { applyTheme, backdropFor, PERCH_DEFAULT, resolveTheme, THEMES, THEME_NAMES } from "./themes";
 import catppuccin from "./palettes/catppuccin.json";
 import resolvedBeforePaletteImport from "./__fixtures__/themes.resolved.json";
 
@@ -52,8 +52,19 @@ describe.each(Object.keys(THEMES))("%s theme", (name) => {
     expect(style.getPropertyValue("--text")).toBe(p.text);
     expect(style.getPropertyValue("--green")).toBe(p.green);
     expect(style.getPropertyValue("--accent")).toBe(p.accent);
+    expect(style.getPropertyValue("--backdrop")).toBe(backdropFor(p));
     expect(style.getPropertyValue("color-scheme")).toBe(lightThemes.includes(name) ? "light" : "dark");
   });
+});
+
+it.each(THEME_NAMES)("%s: the derived backdrop separates from the cards without being the card color", (name) => {
+  const p = resolveTheme(name);
+  const backdrop = backdropFor(p);
+  expect(backdrop).toMatch(/^#[0-9a-f]{6}$/);
+  expect(backdrop).not.toBe(p.panelBg);
+  expect(contrast(backdrop, p.panelBg)).toBeGreaterThanOrEqual(1.12);
+  // Light themes get a slightly darker backdrop, dark themes a darker one: never brighter than a light card.
+  if (lightThemes.includes(name)) expect(lum(backdrop)).toBeLessThan(lum(p.panelBg));
 });
 
 it("keeps the pinned Catppuccin colors intact and maps the existing surface roles", () => {

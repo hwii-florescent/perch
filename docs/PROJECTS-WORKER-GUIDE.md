@@ -542,6 +542,73 @@ The contract is in ARCHITECTURE ("Family strip actions"). Where the pieces are:
   and delivered as the person's, Interrupt confirmed with the session kept, Stop confirmed after the
   confirm step. Not run: the phone layout, which is the same component.
 
+## Slice 9: suggested tasks, sender cards, `perch read`, inbound control (owner, 2026-11-07)
+
+DECISIONS 2026-11-07 "Suggested tasks, sender cards…". Behaviour per Claude desktop's doc
+("Start a task that Claude suggests", "Work across sessions"); own code and words. One commit
+per bullet group.
+
+- **`perch suggest --task <t> [--agent --model --worktree]` (repeatable for several):** stores
+  suggestions on the lead's run and shows one card in the lead's chat (a transcript-adjacent
+  block from the core, like request cards). Buttons: Start (spawns with the suggested
+  options, through the same limits and checks as `perch spawn`), Do it here (sends the task to
+  the lead as the person's message), Options (a small form: provider, model, worktree,
+  permission mode, then Start), Start all (starts each, refusing beyond the limits with the
+  reason). Card shows each started child's state after. A person's click is the person action,
+  so the person-turn rule is satisfied by the click. Setting "Let leads start sub-sessions
+  without asking" (default off): when off, `perch spawn` returns `suggested` and makes a card
+  instead of starting. Update `perch guide`.
+- **Sender cards:** a delivered message is recognised in the receiver's transcript by its
+  envelope (Rust, `transcript.rs`) and rendered as a card: sender session title, provider,
+  link to open it, body; the raw envelope text is not shown. Works for Claude, Codex, Pi, OMP.
+- **`perch read <child> [--turns N]`:** lead only, own children only. Returns a bounded tail
+  from the projected transcript: the last N (default 2, max 5) turns as user text, final
+  assistant text, tool-run sentences and changed files; capped (e.g. 8k characters); no raw
+  tool output or file contents. Refused for non-children.
+- **Inbound control:** per session setting accept / hold / refuse (row menu and session
+  settings). Hold queues incoming messages with a "waiting for your approval" receipt and a
+  card for the person (Deliver / Discard); refuse returns `undelivered: refused` to the
+  sender. Applies to agent messages and steers; never to the person's own messages.
+- **Check:** Rust unit tests for each; web tests for the cards; one live e2e: a haiku lead
+  runs `perch suggest`, the test clicks Start, the child messages back and the lead sees a
+  sender card; `perch read` returns the child's last turn.
+
+## Slice 8: cheap-model reporter (owner, 2026-11-07)
+
+DECISIONS 2026-11-07 "Cheap-model reporter". *Own* design (Claude desktop's own report is the
+child's recap or last message; do not copy its text).
+
+- **Trigger:** a child's turn end as Perch already sees it (Claude Stop hook, Codex
+  `turn/completed`, Pi/OMP `agent_end`), once per turn; not for the lead.
+- **Running notes, not history** (same idea as Claude Code 2.1.316 moving background-subagent
+  status lines to Haiku 5.5 with short notes, reported ~99% cheaper per update): the input is
+  the child's previous summary plus only this turn's new events, so cost per summary stays flat
+  however long the child runs. Live "working" status between turns stays the free Rust live
+  line from `transcript.rs`; no periodic model call.
+- **Input:** a bounded slice of that turn from the transcript Perch already projects
+  (`native_ui/transcript.rs`): the final assistant text, one line per tool run (the run
+  sentence), changed files from `agent_change_snapshots`, and any pending question; cap the
+  input (e.g. 12k characters), never whole transcripts or file contents.
+- **Runner:** the provider's own CLI in one-shot mode under the user's login, cwd = the
+  child's Nest, no tools: Claude `claude -p --model haiku` with tools disabled and no
+  session persistence (probe the exact flags); Codex `codex exec` with `-m gpt-5.6-luna`, read-only
+  sandbox, no shell (probe flags; `codex debug prompt-input` for zero-token shape checks).
+  Pi/OMP children use Claude or Codex if installed. Model per provider in settings; a
+  setting turns the reporter off. Never runs a model the user has not installed/logged into.
+- **Output:** JSON `{status, text}` (text at most 400 characters), validated; on failure fall
+  back to the 400-character last-message report. Stored as a report with `source = "summary"`
+  and `model`; precedence: the child's own `perch report` (same turn) > summary > last message.
+- **Delivery:** the queued note to the lead and the family strip use it, labelled "Summary by
+  <model>".
+- **Guards:** one in flight per child; skipped when the run is over its message limit or the
+  child was stopped; timeouts; counted in the spend estimate (usage popover); never blocks
+  the child.
+- **`perch guide`:** stop asking children to report; `perch report` stays optional for a child
+  that wants to say something specific.
+- **Check:** Rust unit tests for slice building, caps, precedence and output validation
+  (captured outputs); one live run: a haiku lead spawns a haiku child, the child finishes
+  without `perch report`, and the lead's note carries a summary by haiku.
+
 ## Slice 6 landed (2026-11-07): family strip and notes folder
 
 The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pieces are:

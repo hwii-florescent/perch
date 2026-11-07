@@ -13,6 +13,9 @@
   --surface-0: #262626;
   --surface-1: #333333;
   --surface-dim: #1c1c1c;
+  /* Behind the sidebar, main and drawer cards; derived per theme by `backdropFor` (themes.ts).
+   * This is the perch default's value, for the first paint. */
+  --backdrop: #050505;
   --overlay-0: #3a3a3a;
   --overlay-1: #9b9b9b;
   --text: #d8d8d8;
@@ -114,6 +117,25 @@ html {
 }
 html[data-glass] {
   --shell-bg: color-mix(in srgb, var(--panel-bg) 86%, transparent);
+}
+
+/* The desktop shell is three cards (sidebar, main, drawer) on --backdrop. The backdrop is the
+ * one translucent layer in the glass app, so the cards are the same translucent mix as before. */
+html {
+  --backdrop-bg: var(--backdrop);
+  --card-bg: var(--panel-bg);
+}
+html[data-glass] {
+  --backdrop-bg: color-mix(in srgb, var(--backdrop) 86%, transparent);
+  --card-bg: color-mix(in srgb, var(--panel-bg) 86%, transparent);
+}
+body:has(.app--cards) {
+  background: var(--backdrop-bg);
+}
+/* Split panes are separate rounded panes: the gap between them shows the backdrop, as the
+ * open shell gutters did, instead of the main card's own color. */
+.app--cards .dock-area:has([data-testid="split-canvas"]:not([data-split="0"])) {
+  background: var(--backdrop-bg);
 }
 
 body {

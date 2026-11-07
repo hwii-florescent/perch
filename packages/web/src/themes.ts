@@ -241,6 +241,23 @@ export function resolveTheme(name: string) {
   return { ...palette, colorScheme: light ? "light" : "dark" };
 }
 
+const MIN_BACKDROP_CONTRAST = 1.12;
+
+/** The window backdrop behind the sidebar, main and drawer cards: the theme's own
+ * panel-bg pushed just far enough (1.12:1) to read as a separate layer. Darkened toward
+ * black; a shell already too dark for that (terminal, vesper) lightens toward the text
+ * color instead. Derived, so every theme, built-in or custom, gets a matching backdrop. */
+export function backdropFor(p: { panelBg: string; text: string }): string {
+  const mix = (a: string, b: string, pct: number) => `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - pct / 100) + parseInt(b.slice(i, i + 2), 16) * pct / 100).toString(16).padStart(2, "0")).join("")}`;
+  for (const [toward, max] of [["#000000", 90], [p.text, 40]] as const) {
+    for (let pct = 4; pct <= max; pct += 2) {
+      const candidate = mix(p.panelBg, toward, pct);
+      if (contrast(candidate, p.panelBg) >= MIN_BACKDROP_CONTRAST) return candidate;
+    }
+  }
+  return mix(p.panelBg, p.text, 40);
+}
+
 /** Set every semantic token as a CSS custom property on `<html>`. Falls
  * back to the default theme (perch) for an unknown/unset theme name so
  * a stale or corrupted `settings.theme` value never leaves the app
@@ -251,5 +268,6 @@ export function applyTheme(name: string): void {
   for (const key of Object.keys(TOKEN_CSS_VARS) as (keyof Palette)[]) {
     root.setProperty(TOKEN_CSS_VARS[key], palette[key]);
   }
+  root.setProperty("--backdrop", backdropFor(palette));
   root.setProperty("color-scheme", palette.colorScheme);
 }
