@@ -21,6 +21,7 @@ import { FindBar, MessageRail } from "./nativeChat/FindBar";
 import { CopyButton } from "./nativeChat/CopyButton";
 import { DockedTasks } from "./nativeChat/DockedTasks";
 import { FamilyStrip } from "./nativeChat/FamilyStrip";
+import { SenderCard, senderTitle } from "./nativeChat/SenderCard";
 import { SuggestionCards } from "./nativeChat/SuggestionCards";
 import { actOnChild, useCrew } from "../crew";
 import { actOnSuggestion, useSuggestions } from "../suggestions";
@@ -361,7 +362,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
   const mark = (id: string): FindMark | undefined => (id === current ? "current" : hits.includes(id) ? "hit" : undefined);
   const prompts = useMemo(() => blocks.flatMap((block) => {
     const message = block.kind === "message" ? messages.get(block.id) : undefined;
-    return message?.role === "user" ? [{ id: message.id, text: message.text }] : [];
+    return message?.role === "user" ? [{ id: message.id, text: block.kind === "message" && block.sender ? senderTitle(block.sender) : message.text }] : [];
   }), [blocks, messages]);
   const jump = (id: string) => {
     atBottom.current = false;
@@ -392,6 +393,7 @@ export function NativeCliChat({ sessionId, providerId, terminalProviderId = prov
         {snapshot && !snapshot.messages.length && <p className={HINT}>Start a conversation with {providerId === "omp" ? "OMP" : providerId === "claude" ? "Claude Code" : providerId === "codex" ? "Codex" : providerId === "opencode" ? "OpenCode" : "Pi"}. You can switch to CLI at any time.</p>}
         {blocks.map((block) => {
           const row = block.kind === "run" ? <RunRow key={block.id} run={block} find={mark(block.id)} />
+            : block.sender && messages.get(block.id) ? <SenderCard key={block.id} envelope={block.sender} blockId={block.id} turn={block.turn} onOpen={(id) => usePerchStore.getState().switchSession(id)} />
             : messages.get(block.id) && <NativeMessage key={block.id} message={messages.get(block.id)!} streaming={!!block.live} turn={block.turn} find={mark(block.id)} fileLinkScope={fileLinkScope} />;
           // Git's changed-files card speaks for the newest turn once it has settled; the rollup is for the others and for no Git.
           const diffs = rollups.after.get(block.id)?.filter((diff) => !(lastTurn && diff.turn === blocks[blocks.length - 1]?.turn));

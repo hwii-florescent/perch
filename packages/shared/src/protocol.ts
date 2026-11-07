@@ -157,8 +157,25 @@ export interface NativeUiTask {
 }
 export type NativeUiBlock =
   /** `id` is the `NativeUiMessage` it draws. */
-  | { kind: "message"; id: string; turn: string; live?: boolean }
+  | { kind: "message"; id: string; turn: string; live?: boolean; sender?: NativeUiEnvelope }
   | { kind: "run"; id: string; turn: string; live?: boolean; summary: string; calls: number; failed: number; steps: NativeUiStep[] };
+/** A user row that is a banner Perch delivered; the chat draws a card from it instead of the row's text
+ * (`agent_mail.rs::parse_envelope`). `sender`: `session` (another agent: `provider`, `label`, `session`),
+ * `person` (the person, through the family strip) or `perch` (a roster of status notes). */
+export interface NativeUiEnvelope {
+  kind: "message" | "steer" | "note" | "status";
+  sender: "session" | "person" | "perch";
+  provider?: string;
+  label?: string;
+  session?: string;
+  /** The header's `HH:MM UTC`. */
+  at: string;
+  /** The text that was sent, unquoted; for a body that went to a file, its preview. */
+  body: string;
+  fullTextPath?: string;
+  chars?: number;
+  messageId?: string;
+}
 export interface NativeUiStep {
   id: string;
   kind: "thinking" | "tool" | "result";

@@ -52,6 +52,11 @@ pub enum NativeUiBlock {
         turn: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         live: bool,
+        /// A user row that is a banner Perch delivered (another session's message, the person's
+        /// text through the family strip, a status roster): the chat draws a card from this instead
+        /// of the row's text (`crate::agent_mail::parse_envelope`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sender: Option<crate::agent_mail::Envelope>,
     },
     /// Consecutive thinking and tool calls, folded into one row.
     #[serde(rename_all = "camelCase")]
@@ -715,6 +720,7 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                         id: message.id.clone(),
                         turn: turn.clone(),
                         live: false,
+                        sender: None,
                     });
                 }
                 for (position, tool) in message.tools.iter().enumerate() {
@@ -791,6 +797,9 @@ pub fn project(snapshot: &NativeUiSnapshot) -> NativeUiTranscript {
                     id: message.id.clone(),
                     turn: turn.clone(),
                     live: false,
+                    sender: (role == "user")
+                        .then(|| crate::agent_mail::parse_envelope(&message.text))
+                        .flatten(),
                 });
             }
         }
@@ -1045,6 +1054,54 @@ mod tests {
             ..message(id, "toolResult")
         }
     }
+    #[test]
+    fn a_delivered_banner_in_a_user_row_becomes_a_sender_card_and_nothing_else_does() {
+        let banner = crate::agent_mail::format_banner(
+            &crate::agent_mail::Sender {
+                label: "fix the parser",
+                provider: "codex",
+                session: "s-7",
+            },
+            crate::agent_mail::MailKind::Message,
+            "m1",
+            0,
+            &crate::agent_mail::BodyText::Whole("found it"),
+        );
+        let mut from_peer = message("u1", "user");
+        from_peer.text = banner.clone();
+        let mut typed = message("u2", "user");
+        typed.text = "hello".into();
+        // Only a user row is an envelope: an assistant that quotes one is just talking.
+        let mut quoted = message("a1", "assistant");
+        quoted.text = banner;
+        let transcript = project(&snapshot(vec![from_peer, quoted, typed], false));
+        let senders: Vec<Option<String>> = transcript
+            .blocks
+            .iter()
+            .map(|block| match block {
+                NativeUiBlock::Message { sender, .. } => {
+                    Some(sender.as_ref().map(|s| s.body.clone()).unwrap_or_default())
+                }
+                NativeUiBlock::Run { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            senders,
+            [
+                Some("found it".into()),
+                Some(String::new()),
+                Some(String::new())
+            ]
+        );
+        let NativeUiBlock::Message { sender, .. } = &transcript.blocks[0] else {
+            panic!("a message");
+        };
+        assert_eq!(sender.as_ref().unwrap().session.as_deref(), Some("s-7"));
+        let wire = serde_json::to_value(&transcript.blocks).unwrap();
+        assert_eq!(wire[0]["sender"]["label"], "fix the parser");
+        assert!(wire[2].get("sender").is_none());
+    }
+
     #[test]
     fn a_roster_is_drawn_after_the_block_holding_its_spawn_call_and_one_row_per_turn() {
         let mut snap = snapshot(

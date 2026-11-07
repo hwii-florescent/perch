@@ -523,6 +523,18 @@ A lead puts tasks in front of the person instead of starting them; nothing start
   leaves), shown above the family strip, and follows a started task's sub-session state. It is not in the
   provider's transcript. Cards go with their lead when it is deleted.
 
+**Sender cards** (`agent_mail::parse_envelope`, `native_ui/transcript.rs`, web `SenderCard.tsx`; slice 9b). A
+message Perch delivered reaches the receiver as a banner in an ordinary user row (see "Messages"). When the
+core projects the transcript it reads that row back: a user row whose text is exactly a banner this module
+wrote (header, standing sentence, a closing hint naming the same session, the closing rule, every body line
+quoted) gets `sender` on its `message` block, and the chat draws a card (title "Message from codex “title”",
+time, the text, a link that opens the sending session, the file a long body went to) instead of the row's
+text. Anything that is not exactly that, including an assistant row quoting one, stays plain text. The same
+holds for the person's text through the family strip ("You, from the family strip") and a lead's roster of
+status notes. It is done in Rust once for all four providers because it reads the snapshot's user rows, which
+every bridge produces; nothing about a provider's own transcript format is parsed. Find and the prompt rail
+use the card's title; the banner is still what the agent was shown.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

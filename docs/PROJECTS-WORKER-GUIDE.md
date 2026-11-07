@@ -619,6 +619,15 @@ card answer for `perch spawn`, `perch list` shows waiting tasks, the guide), web
   The e2e specs that drive `perch spawn` directly turn it on through `pinReporterModels(fixture)`.
 - **Not run live yet:** the whole of 9a is exercised live in the single run at the end of slice 9.
 
+## Slice 9b landed (2026-11-07): sender cards
+
+Contract in ARCHITECTURE ("Sender cards"). `agent_mail::parse_envelope` is the inverse of `format_banner`,
+`format_person_banner` and `roster_prompt` (tested by round trip and by forged near-misses); `transcript::project`
+sets `sender` on a user row's `message` block; `protocol.ts` `NativeUiEnvelope`; web `nativeChat/SenderCard.tsx`
+and `NativeCliChat.tsx`. Orca's chat draws the banner text; the card is Perch's own. Not run on a real Codex,
+Pi or OMP receiver: the parse is on the snapshot's user rows, so the check there is that a delivered banner is
+reproduced verbatim in the user row (Claude seen live in the slice-5 run).
+
 ## Slice 8 landed (2026-11-07): cheap-model reporter
 
 The contract is in ARCHITECTURE ("Cheap-model reporter"); DECISIONS 2026-11-07 "Cheap-model reporter".

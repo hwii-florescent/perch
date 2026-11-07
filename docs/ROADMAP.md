@@ -519,8 +519,10 @@ UI rows from step 0 continue between slices.
    **9a. Done 2026-11-07** (ARCHITECTURE "Suggested tasks"): `perch suggest` and, by default, `perch spawn` put a
    card in the lead's chat (Start, Do it here, Options, Start all, Dismiss); a person's click starts the
    sub-session through the same limits and checks as spawn. Setting "Let leads start sub-sessions without asking"
-   (default off). Live run: with 9b and 9c, at the end of the slice. 9b sender cards, 9c `perch read`, 9d inbound
-   control: not yet.
+   (default off). Live run: with 9b and 9c, at the end of the slice.
+   **9b. Done 2026-11-07** (ARCHITECTURE "Sender cards"): a delivered banner in a user row is a card titled with
+   the sender and a link back, for all four providers (parsed in Rust from the snapshot). 9c `perch read`, 9d
+   inbound control: not yet.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 
