@@ -121,8 +121,9 @@ test("a child's message and status reach an idle lead, and the lead's message re
     expect(sql(fixture, `select body from agent_mail where kind = 'note' and sender_session_id = '${child}' order by created_at desc limit 1`)).toContain("finished its turn");
     // The lead saw both as Perch's quoted text, not as something a person typed, and its view still holds control.
     await expect(box).toBeEnabled();
-    await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Perch message from" }).first()).toBeVisible({ timeout: 60_000 });
-    await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Perch status from" }).first()).toBeVisible({ timeout: 60_000 });
+    // (Slice 9b: each is a card titled with its sender, not the envelope's text.)
+    await expect(ui.getByTestId("native-cli-sender-card").filter({ hasText: "Message from" }).first()).toBeVisible({ timeout: 60_000 });
+    await expect(ui.getByTestId("native-cli-sender-card").filter({ hasText: "Status from your sub-sessions" }).first()).toBeVisible({ timeout: 60_000 });
     await untilReady(ui, 180_000);
 
     // The lead messages the idle child: a Codex or Claude receiver takes it only when idle, and acts on it.

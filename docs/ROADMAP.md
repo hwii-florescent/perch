@@ -527,7 +527,8 @@ UI rows from step 0 continue between slices.
    **9d. Done 2026-11-07** (ARCHITECTURE "Inbound control"): per session accept / hold / refuse for messages and
    steers from other sessions (row menu and a card in the chat); held ones wait for Deliver or Discard, refused
    ones are `undelivered: refused`; a person's own messages and Perch's notes are never affected. Unit, HTTP and
-   jsdom tests only; **no live run** (the live e2e for 9a-9c is below).
+   jsdom tests only; **no live run**. 9a-9c ran live once (`e2e/suggestions.spec.ts`, haiku lead and child): suggest,
+   Start by click, sender card, `perch read`. Not run live: Do it here, Options, Start all, non-Claude receivers.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 

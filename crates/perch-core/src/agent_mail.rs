@@ -553,11 +553,32 @@ fn read_body(inner: &[&str], quoted: bool) -> Option<(String, Option<(String, us
     }
 }
 
+/// Claude records a delivered banner (a paste into its prompt) between `<pasted_content id="N">` and
+/// `</pasted_content id="N">` lines (seen live, 2.1.319); the banner is what is inside. Text that is
+/// not wrapped, or only half wrapped, comes back as it is.
+fn unwrap_paste(text: &str) -> &str {
+    let Some((first, rest)) = text.split_once('\n') else {
+        return text;
+    };
+    let Some((inner, last)) = rest.rsplit_once('\n') else {
+        return text;
+    };
+    if first.starts_with("<pasted_content")
+        && first.ends_with('>')
+        && last.starts_with("</pasted_content")
+        && last.ends_with('>')
+    {
+        inner.trim()
+    } else {
+        text
+    }
+}
+
 /// Read a banner this module wrote (`format_banner`, `format_person_banner`, `roster_prompt`) from the
 /// text of a user row. Strict: the header, the standing sentence, a well-formed closing hint and the
 /// closing rule must all be there, else it is not an envelope and the row is shown as it is.
 pub fn parse_envelope(text: &str) -> Option<Envelope> {
-    let text = text.trim();
+    let text = unwrap_paste(text.trim());
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() < 4 || lines.last() != Some(&RULE) {
         return None;
@@ -1409,6 +1430,21 @@ mod tests {
             ("status", "perch")
         );
         assert_eq!(roster.body, "one is done.\ntwo has exited.");
+    }
+
+    #[test]
+    fn claude_s_paste_wrapper_around_a_banner_is_looked_through() {
+        let banner = format_banner(&sender(), MailKind::Message, "m", 0, &BodyText::Whole("hi"));
+        let wrapped =
+            format!("\n\n<pasted_content id=\"5170\">\n{banner}\n</pasted_content id=\"5170\">\n");
+        let envelope = parse_envelope(&wrapped).unwrap();
+        assert_eq!(envelope.body, "hi");
+        assert_eq!(envelope.session.as_deref(), Some("7f3a9c10"));
+        // Only a complete wrapper counts, and what is inside must still be a banner.
+        let half = format!("<pasted_content id=\"1\">\n{banner}");
+        assert_eq!(parse_envelope(&half), None);
+        let other = "<pasted_content id=\"1\">\nhello\n</pasted_content id=\"1\">";
+        assert_eq!(parse_envelope(other), None);
     }
 
     #[test]

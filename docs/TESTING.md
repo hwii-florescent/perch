@@ -138,6 +138,18 @@ Useful existing coverage (not a claim of a fresh passing run):
   and Pi/OMP children. The product defaults are the aliases `haiku` and `gpt-6-luna`; every spec that starts
   children writes the fixture's `settings.json` through `pinReporterModels` (`cheapModel.ts`) so the reporter
   also runs `claude-haiku-4-5` and `gpt-5.6-luna`, as the rest of the suite does.
+- `suggestions.spec.ts` (same config; needs `perch` beside the core; run outside a Perch shell; haiku only, three
+  lead/child turns and the reporter's call): the fixture leaves "Let leads start sub-sessions without asking" at its
+  default (off; the other specs turn it on through `pinReporterModels`). A haiku lead runs `perch suggest`; the card
+  appears and nothing is started (SQLite); the test presses Start, and `suggestions.state` becomes `started` with one
+  sub-session; the haiku child's `perch send` reaches the lead, whose chat draws a sender card (`data-from-session` is the
+  child, no envelope text on the page); then the lead runs `perch read <child> --turns 2 > file` and the file holds the
+  child's turn (the task wrapper, `Did: perch send …`, its last words, no `────` rule). Passed once in 30 s. Earlier
+  runs failed for model reasons only (the lead ran the suggested task itself, and a wrong assertion about how a child's
+  first message reads); **found live:** Claude records a delivered banner between `<pasted_content id="N">` lines, which
+  the first card parser did not look through. Not covered live: Do it here, Options, Start all, Codex/Pi/OMP receivers
+  for sender cards, and inbound control (slice 9d: unit, HTTP/socket and jsdom tests only). `agent-mail.spec.ts` now
+  looks for sender cards instead of envelope text and was **not re-run** after that change.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

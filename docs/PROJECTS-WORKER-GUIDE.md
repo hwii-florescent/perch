@@ -617,7 +617,11 @@ card answer for `perch spawn`, `perch list` shows waiting tasks, the guide), web
 
 - **Default changed.** `leadsStartWithoutAsking` is off, so `perch spawn` is a card unless the person turns it on.
   The e2e specs that drive `perch spawn` directly turn it on through `pinReporterModels(fixture)`.
-- **Not run live yet:** the whole of 9a is exercised live in the single run at the end of slice 9.
+- **Live** (`e2e/suggestions.spec.ts`, TESTING): haiku lead suggested, the test pressed Start, the haiku child messaged
+  back, the lead's chat drew a sender card, and `perch read` returned the child's turn. Not run live: Do it here,
+  Options, Start all.
+- **Found live (9b):** Claude records a delivered banner wrapped in `<pasted_content id="N">` lines; `parse_envelope`
+  looks through a complete wrapper.
 
 ## Slice 9d landed (2026-11-07): inbound control
 
