@@ -28,6 +28,7 @@ pub mod dialog;
 pub mod edits;
 pub mod file_links;
 pub mod opencode;
+pub mod option_pickers;
 pub mod session_options;
 pub mod subagents;
 pub mod tasks;

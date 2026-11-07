@@ -83,6 +83,19 @@ Each module's `//!` header names the files it follows:
   `src/renderer/src/components/native-chat/native-chat-permission-mode-labels.ts`, Claude's mode
   names from `src/main/claude/structured/claude-structured-init-proof.ts` and Codex's policies from
   `src/shared/codex-permission-policy.ts`.
+- `native_ui/option_pickers.rs`: the Claude catalog of `src/shared/agent-session/options/
+  agent-session-option-catalog-claude-codex.ts` (aliases, effort ladder, command templates),
+  `src/shared/native-chat/input/native-chat-session-option-{snapshot,commands,state}.ts`
+  (picker rules, `parseBuiltSessionOptionCommand`, `matchNativeChatCatalogModelId`) and the mode
+  descriptions of `native-chat-permission-mode-labels.ts`. `packages/web/src/views/nativeChat/
+  OptionLabels.tsx` takes the roles of `NativeChatModelCombobox.tsx` and
+  `NativeChatPermissionModePicker.tsx` on Perch's own `Select`; no component code is copied.
+- `sub_sessions.rs`: the worker states and the live set of `src/main/runtime/orchestration/types.ts`
+  and `db/schema/create-core-tables-sql.ts`, the stop rules of `db/worker-dispatch/
+  worker-dispatch-stop.ts` (a stop begins only from a running or unknown worker; an unconfirmed stop
+  stays `stop_unknown`) and the depth refusal of `src/shared/nested-worker-depth.ts` and its test.
+  Orca's tasks, gates, coordinator loop and report settlement are not ported; the limits and the
+  turn rule are Perch's own.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.

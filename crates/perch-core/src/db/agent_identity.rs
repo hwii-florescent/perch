@@ -53,6 +53,23 @@ impl HistoryDb {
             .optional()?)
     }
 
+    /// The newest report any run of a session left, and when, in milliseconds. A report
+    /// outlives its run: a child that reported and exited is still read.
+    pub fn latest_session_report(&self, session_id: &str) -> anyhow::Result<Option<(String, i64)>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT report, reported_at FROM agent_identities
+                 WHERE session_id = ?1 AND report IS NOT NULL
+                 ORDER BY reported_at DESC LIMIT 1",
+                params![session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
     /// Every run that has not ended, for the boot-time check against what perchd says.
     pub fn active_agent_identities(&self) -> anyhow::Result<Vec<AgentIdentity>> {
         let conn = self.conn.lock().unwrap();

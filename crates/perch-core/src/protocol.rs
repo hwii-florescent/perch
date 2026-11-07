@@ -877,6 +877,45 @@ pub struct NativeUiOptions {
     /// "Accept edits".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    /// The options a person may change from the chat, each with the value last read back from the CLI
+    /// (`native_ui/option_pickers.rs`). Absent where no option has a read-back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pickers: Vec<NativeUiPicker>,
+}
+
+/// One option the chat can change in the running CLI: `model`, `effort` or `mode`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiPicker {
+    pub id: String,
+    pub label: String,
+    /// The choice value the CLI was last seen running with. Never what was merely sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    pub choices: Vec<NativeUiPickerChoice>,
+    /// False while a turn runs or the CLI is waiting on a person: the core refuses a change then.
+    pub settable: bool,
+    /// A consequence worth knowing before choosing (Claude saves model and effort as defaults).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeUiPickerChoice {
+    pub value: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// How a change of model, effort or mode ended when the CLI said (`agent.ui.option.result`). A change
+/// the CLI never showed is `Unconfirmed`, and the picker keeps the value that was read back before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OptionOutcome {
+    Applied,
+    Unconfirmed,
 }
 
 /// What a request for an older page came to (Orca `NativeChatOlderPageResult`, less `superseded`:
@@ -1336,6 +1375,19 @@ pub enum ClientMessage {
         prompt_id: String,
         /// `NativeUiRequestOption.key` they chose.
         key: String,
+    },
+    /// Change one option of the running CLI (`agent.ui.option.result`). Typed or keyed at an idle,
+    /// verified-empty prompt under the input lease; capability `agent.ui.options`.
+    #[serde(rename = "agent.ui.option", rename_all = "camelCase")]
+    AgentUiOption {
+        request_id: String,
+        session_id: String,
+        provider_id: String,
+        generation: u64,
+        /// `NativeUiPicker.id`.
+        option: String,
+        /// A `NativeUiPickerChoice.value`.
+        value: String,
     },
     #[serde(rename = "agent.ui.cancel", rename_all = "camelCase")]
     AgentUiCancel {
@@ -2193,6 +2245,16 @@ pub enum ServerMessage {
         request_id: String,
         session_id: String,
         outcome: OlderPageOutcome,
+    },
+    #[serde(rename = "agent.ui.option.result", rename_all = "camelCase")]
+    AgentUiOptionResult {
+        request_id: String,
+        session_id: String,
+        option: String,
+        outcome: OptionOutcome,
+        /// The value read back from the CLI; absent when `outcome` is `unconfirmed`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
     },
     #[serde(rename = "agent.ui.result", rename_all = "camelCase")]
     AgentUiResult {

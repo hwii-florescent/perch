@@ -166,9 +166,9 @@ appears only in a user's own status line), so Claude shows no effort and Orca's 
 (`claude-terminal-session-options.ts`) was not ported. Codex 0.166's `thread/settings/updated` and
 `thread/resume` carry `model`, `effort`/`reasoningEffort`, `approvalPolicy`, `sandbox(Policy)` and
 `approvalsReviewer`; the mode is one of Orca's three policies or nothing (unit-tested; no live Codex
-run). Pi/OMP/OpenCode: model only. **Pending the owner's yes (PARITY, DECISIONS "no model chrome over a
-live session"): the pickers and typed `/model`, `/effort`, mode-cycle commands that change a running
-session.** Nothing here writes to a session.
+run). Pi/OMP/OpenCode: model only. Nothing in this row writes to a session; the owner said yes to
+live pickers the same day, see "Row 10b landed" below (Claude's footer also shows the effort that
+the hooks do not carry).
 
 Skip for the terminal-backed chat (Orca feeds them only from its structured journal):
 usage-limit cut and auto-continue, provider retry runs, thread goal banner, background
@@ -305,9 +305,8 @@ What later slices build on:
 - **Live check:** `e2e/instructions.spec.ts` (one extra `perch whoami` turn per provider, haiku and
   luna): the reply names the session, the session has exactly one live identity row, and no
   `perch_agent_` string reaches the chat, `ps` or the core log.
-- The guide text still describes only `whoami`, `report` and `guide`; each later slice adds its
-  verbs and the rules that go with them (only person-started turns may spawn, children cannot
-  spawn, messages never approve).
+- The guide text grows with each slice: slice 4 added `spawn`, `list` and `stop` and the spawn
+  rules; slice 5 adds messages (messages never approve).
 
 ## Slice 3a landed (2026-11-06): no tokenless local authority
 
@@ -348,49 +347,108 @@ exists in the repo (the release job ships only the desktop installers and the st
 there was nothing to put it in; the Linux bundles were not built here; the app itself was not
 launched (it has no headless mode).
 
-## Row 10b: live model/effort/mode pickers (owner yes, 2026-11-06)
+## Row 10b landed (2026-11-06): live pickers for **Claude**
 
-Port Orca's pickers: `NativeChatSessionOptionPickers.tsx`, `NativeChatModelCombobox.tsx`,
-`NativeChatPermissionModePicker.tsx` (components), and the logic in
-`shared/native-chat/input/native-chat-session-option-{commands,apply,state}.ts` and
-`native-chat-pty-session-options.ts` to Rust (`native_ui/`), with their tests. Apply only at an
-idle, verified-empty prompt under the input lease by typing the CLI's own command
-(`/model`, `/effort`, permission-mode cycle, per provider; probe each CLI's command first);
-the UI shows the new value only after read-back (`PostModelSwitch`, `SessionStart.model`,
-Codex app-server events, screen); refused while a turn runs, a dialog is open or a draft is in
-the prompt. Providers without a confirmable read-back show no picker for that option.
+Owner yes, 2026-11-06. `native_ui/option_pickers.rs` (Orca's Claude catalog: model aliases, effort
+ladder, the `/model <v>` and `/effort <v>` templates, the picker rules that keep the running model
+as a row and drop a one-choice effort, the guard that a value is a listed choice and never prose, and
+`matchNativeChatCatalogModelId`; Orca's tracked-"dispatched" state and caption are **not** ported:
+the picker shows only a value read back), `NativeUiOptions.pickers` (each `{id, label, current,
+choices, settable, note}`, built when a snapshot goes to a viewer), `agent.ui.option` and
+`agent.ui.option.result` (capability `agent.ui.options`; `outcome` `applied` or `unconfirmed`, a
+refusal is an `error` with code `native_ui_option_failed`), `server/native_ui.rs` `option`/`apply_option`,
+`nativeChat/OptionLabels.tsx` (`PickerSelect` on `components/ui/select.tsx`: Orca's combobox and
+permission picker play the same role; none of their code is copied).
 
-## Slice 4: spawn, list, stop, reports
+**Probed 2026-11-06 (Claude 2.1.319, Codex 0.166, tmux, no tokens, isolated config dirs and a dummy
+API key):**
+- Claude `/model <alias|id>` and `/effort <level>` take effect at once and answer `Set model to Haiku 5.5
+  and saved as your default for new sessions` / `Set effort level to high (saved as your default for new
+  sessions): …`. **Both write the user's own settings** (`model`, `modelSettings.<model>.effortLevel`);
+  that is Claude's behaviour for its own command, so each picker carries the note "Claude also saves the
+  pick as your default for new sessions" (the `/model` dialog offers `s` for session-only, but it is a
+  list to navigate, not a command). The alias `haiku` is Haiku **5.5**; only the id `claude-haiku-4-5`
+  is 4.5, so the model picker lists four aliases plus the running model's id.
+- Permission mode has no command: Shift+Tab (`ESC [ Z`) steps a cycle that depends on how Claude was
+  started (`manual → accept edits → plan → auto → manual`; with `--dangerously-skip-permissions`, which
+  Perch uses: `bypass → auto → manual → accept edits → plan → bypass`). The footer names the mode
+  (`⏸ manual mode on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`, `⏵⏵ bypass permissions
+  on`), so the core steps one key at a time, re-reads the footer after each, stops at the target, and
+  gives up when the starting mode comes round again (a mode this session was not started with is not
+  in the cycle).
+- Read-back: the model by the `PostModelSwitch` hook (`to_model`; **it does fire** in 2.1.319, so the
+  hook-reported model is current) or Claude's "Set model to" line; the mode by the footer; the effort by
+  the `● high · /effort` indicator **or**, when a short notice ("auto mode unavailable for this model",
+  "Image in clipboard") holds its slot, by the newest `Set effort level to …` line still on screen, voided by
+  a `Set model to` line after it. After a model switch Claude draws no effort until one is set, so there
+  is no effort picker then (seen live: it comes back once the person runs `/effort` in CLI view and the
+  chat is reopened). Haiku 4.5 has none ("Effort not supported").
+- Refused (nothing written) while a turn runs, a question or permission prompt is open, the prompt
+  holds a draft (`claude::prepare_input`'s empty-prompt check) or the input lease is not this client's
+  at the current generation; the lease is looked up again before every write, so another viewer
+  taking input ends a change half way. One change at a time per core. A change the CLI never showed in
+  8 s is `unconfirmed`, never assumed.
+- **Found, not fixed:** a fresh Claude draws a placeholder in an empty prompt (`❯ Try "fix lint errors"`)
+  unless `promptSuggestionEnabled` is false (the user's own settings have it). `empty_prompt` reads that
+  as a draft, so *every* send from the chat (not only pickers) is refused until the setting is off or the
+  person types once. The fix needs a way to tell a placeholder from typed text (the screen text is the
+  same; colour is not in the snapshot).
 
-**Orca to port with changes** (paths under `src/main/runtime/orchestration/`):
-- Worker states incl. `start_unknown` / `stop_unknown` (`db/schema/create-core-tables-sql.ts`
-  `worker_dispatches`) → `sub_sessions.rs`. Unknown stays unknown.
-- Stop is confirmed before destructive cleanup (`db/worker-dispatch/worker-dispatch-stop.ts`).
-- Depth check and its "do the work yourself" refusal (`src/shared/nested-worker-depth.ts`), fixed at 1.
-- Report admission only (`worker-report-admission.ts`); **do not** port settlement:
-  a report settles nothing.
-- CLI verbs: `worker-start` → `perch spawn --agent --model [--worktree] --task`,
-  `worker-list` → `perch list`, `worker-stop` → `perch stop`
-  (`src/cli/specs/orchestration-worker-specs.ts`).
-**Do not port:** tasks/DAG, gates, coordinator loop, circuit breaker, federation,
-mutation-receipt ledger, auto-release.
+**Not done, and why (an owner call each):**
+- **Codex.** `/model` is a two-step TUI list (model, then "Select Reasoning Level"; `enter` saves a
+  default, `s` is session-only) whose rows are the account's own models, so the choices need the
+  app-server's `model/list`; `/permissions` is a numbered list, and "Full Access" is followed by an
+  "Enable full access?" confirmation (`Yes, continue anyway`). Reading back works (`thread/settings/updated`,
+  the footer `GPT-6-Luna medium`), but auto-confirming a risk dialog was not approved and no live
+  Codex apply was run. No Codex picker.
+- **Pi and OMP.** `/model` only opens a TUI list; Orca applies an OMP model through its own extension
+  command (`/orca-model`), which Perch's extension does not have. Their effort and mode have no
+  read-back. No picker.
+- **Fast mode** (Orca's `/fast` toggle): no baseline to read back.
 
-**Claude-desktop behaviour to implement (spec, own code):**
-- A child is told its first message is its task and that its report goes to the session
-  that started it. Report = its own `perch report` if given, else the last assistant
-  message (Stop / `last_assistant_message`), first 400 characters, labelled fallback.
-- Parent link on the session record (`sessions.parent_session_id`); family = bounded walk.
-- Spawning is refused on a turn not opened by a person (prompt ledger
-  `prompt_operations` plus provider `UserPromptSubmit`/bridge events; a delivered
-  message's operation is marked agent-originated).
-- Stop interrupts every live descendant and marks it "stopped until a person sends".
-- Status from Perch's own records: needs you = pending approval/question
-  (attention service), never a model claim.
-- Limits before dispatch: 4 concurrent, 8 descendants, depth 1.
+## Slice 4 landed (2026-11-06): spawn, list, stop, reports
 
-Check: tests for duplicate spawn (idempotency key), each limit, spawn on an
-agent-opened turn, stop confirmation, report truncation and labels; live, a haiku lead
-spawns a luna child in the same Nest and reads its report.
+The contract is in ARCHITECTURE ("Sub-sessions"). What later slices build on:
+
+- **Files.** `sub_sessions.rs` (pure: Orca's worker states and stop rules, the depth text, Perch's own
+  limits 4 / 8 / 1, the turn rule, task/model/key checks, the child's first message, the 400-character
+  fallback), `db/sub_sessions.rs` (table `sub_sessions`, column `sessions.parent_session_id`;
+  `reserve_sub_session` checks the key, the limits and the turn rule and writes both rows in one
+  transaction), `server/sub_sessions.rs` (`spawn`, `list`, `stop`, `stop_children_of`, launch of the
+  child), routes `/agent/spawn|list|stop` in `server/agent.rs`, verbs in `perchd/agent_cli.rs`.
+  `AgentRuntimeAdapter` gained `turn_origin`, `note_agent_turn` (slice 5 calls it for every message it
+  delivers) and `stop_confirmed`.
+- **Spawn needs the lead to be Working/Blocked and its turn marked `Person`.** The mark is set when a
+  person's Enter reaches an idle session (terminal), a chat send or a Context Bridge send records its
+  boundary, and cleared by a new process. A person typing before a fresh launch has settled to idle
+  (state still Working) is not marked, so that first turn cannot spawn; a core restart loses marks.
+  Both fail closed. Not covered live: a refusal on a message-opened turn (nothing delivers messages
+  until slice 5; unit-tested).
+- **The task travels as the child's last command-line argument** (all four CLIs take a positional
+  prompt and parse options after it, checked with `--version`), so no lease, no typing. Limit 3,000
+  characters because Perch bounds an argument at 4 KiB. The text is visible in `ps`; it is a task, not
+  a secret. Pi and OMP's `[messages...]` were checked only for option parsing, not by a live turn.
+- **`--worktree`** makes a checkout of the lead's repository (`worktree::create` plus
+  `workspace::register_created`, nested under the lead's Nest) after the record exists and moves the
+  child into it; a failed checkout discards the child. **Not run live and without a Rust test** (it
+  needs a git repository); the path is `make_worktree` in `server/sub_sessions.rs`.
+- **Fallback report.** Taken from the native bridge's snapshot (the transcript's last assistant
+  message), not the Stop hook's `last_assistant_message`: same text, works for all four providers, and
+  needs no new hook plumbing. Shown only while the bridge is up (not after a core restart).
+- **Stop.** Confirmed by perchd through `stop_confirmed`; the lead's own children only. A person's
+  terminal kill of a lead also stops its live children. *Not done:* the chat's interrupt (Esc) of a
+  lead does not stop children, and deleting a lead leaves its children running as ordinary sessions.
+- **Guide.** `perch guide` now teaches `spawn`, `list`, `stop` and the rules (person's turn only,
+  depth 1, 4 / 8, stop what you no longer need, what a report or a fallback is worth). The bare `list`,
+  `serve` and `connect` aliases of `perch` are gone (`perch daemon list|serve|connect`); `perchd`
+  itself is unchanged.
+- **Live** (`e2e/sub-sessions.spec.ts`, TESTING): the first run, with a luna Codex child, got as far as
+  the child receiving its task and running `gpt-5.6-luna` in the lead's Nest, then the child's turn hit
+  Codex's usage limit (`task_complete … usage_limit_exceeded` in its rollout), so its report and the
+  stop were not exercised. The second, with a haiku Claude child (`PERCH_E2E_CHILD=claude`), passed: the
+  lead spawned it during a person's turn, the child reported, the lead read the report back through
+  `perch list` and stopped it, and the core confirmed the stop. **Codex as a child is therefore not
+  verified end to end.**
 
 ## Slice 5: messaging
 

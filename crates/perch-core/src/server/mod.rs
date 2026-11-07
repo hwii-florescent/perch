@@ -96,6 +96,7 @@ mod uploads;
 #[cfg(test)]
 use terminal::claude_conversation_exists_in;
 mod session;
+mod sub_sessions;
 use session::{
     build_session_summary, local_sessions_snapshot, mark_unseen_if_unviewed,
     should_forward_to_viewer, status_message,
@@ -689,7 +690,13 @@ pub async fn run(
     // perchd confirms the process is gone. Unknown is not gone.
     {
         let db = state.db.clone();
-        tokio::task::spawn_blocking(move || revoke_ended_agent_identities(&db));
+        tokio::task::spawn_blocking(move || {
+            revoke_ended_agent_identities(&db);
+            // A sub-session whose launch was in flight is not known to have started.
+            if let Err(error) = db.mark_unfinished_sub_sessions_unknown() {
+                tracing::warn!(%error, "could not mark unfinished sub-sessions");
+            }
+        });
     }
 
     spawn_git_poll_task(state.clone());
@@ -736,6 +743,18 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/report"),
             post(agent::report).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/spawn"),
+            post(agent::spawn).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/list"),
+            post(agent::list).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/stop"),
+            post(agent::stop).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
@@ -2387,6 +2406,7 @@ fn foundation_capabilities() -> Vec<String> {
         "agent.ui.get",
         "agent.ui.prompt",
         "agent.ui.cancel",
+        "agent.ui.options",
         "agent.terminal.open",
         "agent.terminal.release",
         "agent.lifecycle.get",

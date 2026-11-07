@@ -22,6 +22,8 @@ pub use attention::{AttentionAdmit, AttentionRow, ATTENTION_WINDOW_MS};
 mod browser_history;
 pub use browser_history::BrowserHistoryRow;
 mod instructions;
+mod sub_sessions;
+pub use sub_sessions::{Reserved, SubSessionRow, SubSessionSpec};
 mod workspace_order;
 pub use workspace_order::{ORDER_PROJECTS, ORDER_SESSIONS};
 mod prompts;
@@ -382,7 +384,29 @@ impl HistoryDb {
                 reported_at INTEGER
             );
             CREATE INDEX IF NOT EXISTS agent_identities_session
-                ON agent_identities(session_id);",
+                ON agent_identities(session_id);
+            -- One row per child a lead started (`sub_sessions.rs`). The link that nests the
+            -- child is `sessions.parent_session_id`; this holds the spawn itself.
+            CREATE TABLE IF NOT EXISTS sub_sessions (
+                child_session_id TEXT PRIMARY KEY,
+                parent_session_id TEXT NOT NULL,
+                parent_incarnation TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                model TEXT,
+                spawn_key TEXT NOT NULL,
+                state TEXT NOT NULL,
+                task TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE (parent_session_id, spawn_key)
+            );",
+        )?;
+        // The table above needs `sessions`, which an old database already has; the column
+        // below is added after the table list so that a fresh one has both.
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS sub_sessions_parent
+                ON sub_sessions(parent_session_id);",
         )?;
 
         let mut existing_columns = std::collections::HashSet::new();
@@ -493,6 +517,11 @@ impl HistoryDb {
         }
         if !existing_session_columns.contains("workspace_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT", [])?;
+        }
+        // The lead a sub-session was started under (`sub_sessions.rs`); NULL for every other
+        // session.
+        if !existing_session_columns.contains("parent_session_id") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT", [])?;
         }
 
         Self::migrate_attention(&conn)?;

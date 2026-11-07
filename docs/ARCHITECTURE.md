@@ -264,6 +264,42 @@ neither identity nor pointer. The desktop bundle does (`bundle.macOS.files` and 
 has `perch` beside `perch-core` in `target/<profile>/` once `cargo build --workspace` has run, and
 any future headless archive must keep the two together (`e2e/packaged-perch.check.mjs`).
 
+**Sub-sessions** (`sub_sessions.rs` rules, `db/sub_sessions.rs` records, `server/sub_sessions.rs`
+routes `/agent/spawn`, `list`, `stop`). A lead starts children in its own Nest with `perch spawn`;
+the core, not the agent, decides:
+
+- *Admission before dispatch*, in one transaction that also writes the child's session row
+  (`sessions.parent_session_id`) and its record (`sub_sessions`): not a child itself (depth 1),
+  a turn a person opened, at most 4 live children and 8 ever, and the key (`--key`, else one per
+  invocation) names the spawn, so a retry returns the first child and starts nothing. A refusal
+  creates nothing.
+- *Person-opened turn*: `AgentRuntimeAdapter` records who opened each session's turn, in memory
+  only. A person submitting input (terminal Enter, chat send, Context Bridge send) while no turn is
+  running marks it `Person`; an Enter inside a running turn changes nothing; input Perch delivers for
+  an agent (a child's first message; slice 5's messages) marks it `Agent`; a new process starts with
+  no mark. Spawn needs the lead to be Working or Blocked now **and** the mark to be `Person`. After a
+  core restart a running lead's mark is unknown and spawn is refused until a person speaks again.
+  A turn that opens before the provider has settled a fresh launch to idle is not marked either.
+- *The child* is launched like any session (same registration, Instructions pin, own token and
+  native bridge) with nobody viewing it, and its first message is the task: the last argument of
+  its command line, so no input lease is taken and nothing is typed into a prompt. Its first turn is
+  marked `Agent`. Provider flags go before it and parse after it (checked on all four CLIs).
+- *Unknown is not exit.* A launch not confirmed either way is `start_unknown`; a stop not confirmed
+  is `stop_unknown`; both, and `starting`/`stopping`, still count against the limits. Only a
+  perchd-confirmed exit settles a record (`exited`, or `stopped` after a stop). A launch in flight
+  when the core stopped becomes `start_unknown` at boot. A child confirmed never to have started
+  leaves nothing behind.
+- *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
+  process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
+  `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
+  children the same way. Deleting a lead frees its children as ordinary sessions; deleting a child
+  drops its record.
+- *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
+  blocked state, never something the agent said), the dispatch record, and a report: the child's own
+  `perch report` (kept per run, outliving it), else the first 400 characters of its last assistant
+  message, labelled a fallback. Neither marks anything done.
+- Local only; a lead on a remote host cannot spawn.
+
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;
 its existence is not evidence that every alpha security gate has passed.

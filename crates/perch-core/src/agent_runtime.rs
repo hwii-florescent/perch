@@ -261,6 +261,9 @@ pub struct AgentRuntimeAdapter {
     /// oldest first; the last is current. Display and Files/Git scoping only.
     cwds: Mutex<HashMap<String, Vec<String>>>,
     turn_boundary: Arc<std::sync::OnceLock<TurnBoundaryListener>>,
+    /// Who opened the turn each session is in, as Perch saw it open (`sub_sessions.rs`). In
+    /// memory on purpose: after a restart a turn's origin is unknown, and unknown is refused.
+    turn_origins: Mutex<HashMap<String, crate::sub_sessions::TurnOrigin>>,
     instructions: std::sync::OnceLock<InstructionsResolver>,
     identities: std::sync::OnceLock<Arc<dyn crate::agent_identity::IdentityStore>>,
 }
@@ -288,6 +291,7 @@ impl AgentRuntimeAdapter {
             shell_chats: Mutex::new(HashMap::new()),
             cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
+            turn_origins: Mutex::new(HashMap::new()),
             instructions: std::sync::OnceLock::new(),
             identities: std::sync::OnceLock::new(),
         }
@@ -549,9 +553,45 @@ impl AgentRuntimeAdapter {
 
     /// Complete the persistence barrier before releasing input or completion.
     pub fn record_turn_boundary(&self, key: &AgentKey, before: bool) -> anyhow::Result<()> {
+        if before {
+            self.note_person_input(key);
+        }
         self.turn_boundary
             .get()
             .map_or(Ok(()), |record| record(key, before))
+    }
+
+    /// A person submitted input. It opens a turn only when none is running: an Enter that
+    /// answers a dialog or queues a line inside a turn leaves that turn's origin alone, and a
+    /// state Perch cannot read counts as running.
+    fn note_person_input(&self, key: &AgentKey) {
+        let idle = self.lifecycle.get(key).is_ok_and(|snapshot| {
+            !matches!(snapshot.state, AgentState::Working | AgentState::Blocked)
+        });
+        if idle {
+            self.turn_origins.lock().unwrap().insert(
+                key.session_id.clone(),
+                crate::sub_sessions::TurnOrigin::Person,
+            );
+        }
+    }
+
+    /// Perch delivered input for an agent: a sub-session's first message, or a message from
+    /// another session. The turn it opens is not a person's.
+    pub fn note_agent_turn(&self, key: &AgentKey) {
+        self.turn_origins.lock().unwrap().insert(
+            key.session_id.clone(),
+            crate::sub_sessions::TurnOrigin::Agent,
+        );
+    }
+
+    /// Who opened the turn the session is in; `None` when Perch did not see it open.
+    pub fn turn_origin(&self, key: &AgentKey) -> Option<crate::sub_sessions::TurnOrigin> {
+        self.turn_origins
+            .lock()
+            .unwrap()
+            .get(&key.session_id)
+            .copied()
     }
 
     /// Only a native running-to-ready edge completes a native turn. Startup
@@ -953,6 +993,8 @@ impl AgentRuntimeAdapter {
         // signal. Its Drop wakes a concurrent attach only after all of those
         // steps have completed or failed.
         let _start_reservation = start_reservation.expect("checked above");
+        // A new process has opened no turn yet.
+        self.turn_origins.lock().unwrap().remove(&key.session_id);
         let command = match self.cli_command(
             &provider_id,
             &cwd,
@@ -1622,6 +1664,27 @@ impl AgentRuntimeAdapter {
         }
         self.active.lock().unwrap().remove(key);
         self.lifecycle.remove(key)?;
+        Ok(())
+    }
+
+    /// Stop a runtime this core started on behalf of its owner, with no input lease: a lead
+    /// stopping its own child (`server/sub_sessions.rs`, which checks that authority). Like
+    /// [`Self::remove`], it returns `Ok` only once the process is confirmed gone, and it keeps
+    /// the lifecycle record, so the exit is observed and the session can be woken later.
+    pub fn stop_confirmed(&self, key: &AgentKey) -> Result<(), RuntimeAdapterError> {
+        let _authority = self.authority.lock().unwrap();
+        if let Some(handle) = self.runtime(key) {
+            self.terminals
+                .terminate_for_hibernation(&handle.terminal)
+                .map_err(RuntimeAdapterError::Process)?;
+            if self.terminals.runtime_alive(&handle.terminal) {
+                return Err(RuntimeAdapterError::RuntimeStillAlive(handle.terminal));
+            }
+        } else if !crate::daemon::terminate(&terminal_key(key)) {
+            return Err(RuntimeAdapterError::Process(anyhow::anyhow!(
+                "could not confirm that the daemon process stopped"
+            )));
+        }
         Ok(())
     }
 
@@ -2896,6 +2959,104 @@ mod tests {
         // The running→ready edge is spent: later ready snapshots capture nothing.
         adapter.observe_native_turn(&key, false).unwrap();
         assert_eq!(captures.load(Ordering::SeqCst), 1);
+    }
+
+    /// A turn is a person's only when a person submitted it while none was running, or Perch
+    /// delivered nothing for an agent in it. An Enter inside a turn (a dialog, a queued line) does
+    /// not take the turn over, and a new process starts with no origin.
+    #[test]
+    fn the_origin_of_a_turn_is_the_input_that_opened_it() {
+        use crate::sub_sessions::TurnOrigin;
+        let adapter = adapter();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        adapter
+            .attach_cli(
+                AgentRegistration {
+                    key: key.clone(),
+                    provider_id: "fixture".to_string(),
+                    provider_session_id: Some("provider-session".to_string()),
+                    resumable: true,
+                    now_ms: 1,
+                },
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert_eq!(
+            adapter.turn_origin(&key),
+            None,
+            "a new process has opened no turn"
+        );
+        // A launch reads as working until the provider settles it.
+        assert_eq!(adapter.snapshot(&key).unwrap().state, AgentState::Working);
+        adapter
+            .signal(
+                &key,
+                ProviderSignal::Completed {
+                    reason: "settled".into(),
+                },
+                now_millis(),
+            )
+            .unwrap();
+        let lease = adapter
+            .acquire_control(&key, ControlChannel::Input, client("desktop"), 2)
+            .unwrap();
+        let enter = |text: &str| {
+            adapter
+                .input(&key, &lease, text, now_millis(), Duration::ZERO)
+                .unwrap()
+        };
+        // Typed and submitted at idle: a person's turn.
+        enter("hello\r");
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Person));
+        // Perch delivered something for an agent: the turn it opens is not a person's.
+        adapter.note_agent_turn(&key);
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Agent));
+        // A person's Enter in the middle of that turn (a dialog, a queued line) changes nothing.
+        adapter
+            .signal(&key, ProviderSignal::TurnStarted, now_millis())
+            .unwrap();
+        assert_eq!(adapter.snapshot(&key).unwrap().state, AgentState::Working);
+        enter("\r");
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Agent));
+        // Once the turn is over, the next submission is a person's again.
+        adapter
+            .signal(
+                &key,
+                ProviderSignal::Completed {
+                    reason: "test".into(),
+                },
+                now_millis(),
+            )
+            .unwrap();
+        assert_eq!(adapter.snapshot(&key).unwrap().state, AgentState::Done);
+        enter("again\r");
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Person));
+        // A prompt sent from the chat records its boundary and is a person's too.
+        adapter
+            .signal(
+                &key,
+                ProviderSignal::Completed {
+                    reason: "test".into(),
+                },
+                now_millis(),
+            )
+            .unwrap();
+        adapter.note_agent_turn(&key);
+        adapter.record_turn_boundary(&key, true).unwrap();
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Person));
+        // The close of a turn is not an opening.
+        adapter.note_agent_turn(&key);
+        adapter.record_turn_boundary(&key, false).unwrap();
+        assert_eq!(adapter.turn_origin(&key), Some(TurnOrigin::Agent));
     }
 
     #[test]

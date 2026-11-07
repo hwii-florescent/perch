@@ -7,7 +7,8 @@
 //! `src/renderer/src/components/native-chat/native-chat-permission-mode-labels.ts`, Claude's reported
 //! mode names from `src/main/claude/structured/claude-structured-init-proof.ts`
 //! (`readClaudeReportedPermissionMode`) and Codex's mode policies from `src/shared/
-//! codex-permission-policy.ts`. Orca's pickers, option descriptors and banner reader are not ported.
+//! codex-permission-policy.ts`. Orca's option descriptors and banner reader are not ported; the
+//! pickers that change these options are `option_pickers.rs`.
 //!
 //! The mode is one of Orca's four (`ask`, `accept-edits`, `auto`, `full-access`) or Claude's `plan`.
 //! A value no table here knows is dropped, never guessed.
@@ -92,7 +93,7 @@ fn effort_label(value: &str) -> String {
     .to_string()
 }
 
-fn permission_mode_label(mode: &str) -> Option<&'static str> {
+pub(super) fn permission_mode_label(mode: &str) -> Option<&'static str> {
     Some(match mode {
         "ask" => "Ask for approval",
         "accept-edits" => "Accept edits",
@@ -152,6 +153,7 @@ pub fn options_of(snapshot: &NativeUiSnapshot) -> Option<NativeUiOptions> {
             .as_deref()
             .and_then(permission_mode_label)
             .map(str::to_string),
+        pickers: Vec::new(),
     };
     (options.model.is_some() || options.effort.is_some() || options.permission_mode.is_some())
         .then_some(options)
@@ -262,6 +264,7 @@ mod tests {
                 model: Some("Haiku 4.5".into()),
                 effort: Some("High".into()),
                 permission_mode: Some("Accept edits".into()),
+                pickers: Vec::new(),
             })
         );
         // A mode this module does not know is not shown.

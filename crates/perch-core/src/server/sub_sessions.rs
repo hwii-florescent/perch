@@ -1,0 +1,852 @@
+//! `perch spawn`, `list` and `stop` on the core: the routes in `server/agent.rs` call these
+//! with the caller already authenticated as an agent (`agent_identity`). Own design, slice 4;
+//! the rules are `crate::sub_sessions`, the records `db/sub_sessions.rs`.
+//!
+//! A spawn is admitted and recorded in one transaction before anything is started. The child
+//! is an ordinary session of the lead's Nest, launched like one a person opens (same
+//! registration, Instructions pin, identity and native bridge), except that nobody views it
+//! and its first message is its task, passed on the agent's command line so no input lease
+//! and no typing into a prompt is involved. A launch that cannot be shown to have started or
+//! failed stays `start_unknown`; a stop that is not confirmed stays `stop_unknown`. Unknown
+//! is not exit: both keep counting against the limits.
+use super::*;
+use crate::agent_fleet::{
+    AgentRegistration, AgentState, ClientIdentity, ClientKind, ProviderCapability,
+};
+use crate::agent_identity::AgentIdentity;
+use crate::db::{Reserved, SubSessionRow, SubSessionSpec};
+use crate::sub_sessions::{self, ReportSource, SubState};
+use serde_json::{json, Value};
+
+/// An error for the agent: the status to answer with and the text it reads.
+pub(super) type Failure = (StatusCode, String);
+
+fn fail(status: StatusCode, text: impl Into<String>) -> Failure {
+    (status, text.into())
+}
+
+fn internal(context: &str, error: impl std::fmt::Display) -> Failure {
+    tracing::error!(%error, "{context}");
+    fail(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Perch could not {context}"),
+    )
+}
+
+/// The agents a lead may start.
+const AGENTS: [&str; 4] = ["claude", "codex", "pi", "omp"];
+
+fn service_client() -> Result<ClientIdentity, Failure> {
+    ClientIdentity::new("sub-session-launcher", "perch-core", ClientKind::Service)
+        .map_err(|error| internal("name the launcher", error))
+}
+
+fn key_of(app: &AppState, session_id: &str, provider: &str) -> Result<AgentKey, Failure> {
+    let row = app
+        .db
+        .get_session(session_id)
+        .map_err(|error| internal("read the session", error))?
+        .ok_or_else(|| fail(StatusCode::NOT_FOUND, "that session no longer exists"))?;
+    let workspace = row
+        .workspace_id
+        .unwrap_or_else(|| format!("session-{session_id}"));
+    AgentKey::new(&workspace, session_id, provider)
+        .map_err(|error| internal("name the session", error))
+}
+
+/// Bring a record that says "may be running" up to what perchd confirms. Only a confirmed
+/// exit changes it; an unreachable daemon changes nothing.
+fn reconcile(app: &AppState, row: &SubSessionRow) -> SubState {
+    if !matches!(
+        row.state,
+        SubState::Running | SubState::StartUnknown | SubState::StopUnknown
+    ) {
+        return row.state;
+    }
+    let Ok(key) = key_of(app, &row.child_session_id, &row.provider_id) else {
+        return row.state;
+    };
+    if crate::daemon::session_state(&crate::agent_runtime::terminal_key(&key))
+        != crate::daemon::RuntimeState::Exited
+    {
+        return row.state;
+    }
+    let settled = if row.state == SubState::StopUnknown {
+        SubState::Stopped
+    } else {
+        SubState::Exited
+    };
+    match app
+        .db
+        .move_sub_session(&row.child_session_id, &[row.state], settled)
+    {
+        Ok(_) => settled,
+        Err(_) => row.state,
+    }
+}
+
+pub(super) struct SpawnRequest {
+    pub agent: String,
+    pub model: Option<String>,
+    pub task: String,
+    pub key: String,
+    pub worktree: bool,
+}
+
+impl SpawnRequest {
+    pub fn parse(body: &Value) -> Result<Self, Failure> {
+        let bad = |text: String| fail(StatusCode::BAD_REQUEST, text);
+        let agent = body["agent"].as_str().unwrap_or_default();
+        if !AGENTS.contains(&agent) {
+            return Err(bad(format!(
+                "choose the agent with --agent: {}",
+                AGENTS.join(", ")
+            )));
+        }
+        let task = sub_sessions::check_task(body["task"].as_str().unwrap_or_default())
+            .map_err(bad)?
+            .to_string();
+        let model = match body["model"].as_str() {
+            Some(model) => Some(sub_sessions::check_model(model).map_err(bad)?.to_string()),
+            None => None,
+        };
+        let key = sub_sessions::check_key(body["key"].as_str().unwrap_or_default())
+            .map_err(bad)?
+            .to_string();
+        Ok(Self {
+            agent: agent.to_string(),
+            model,
+            task,
+            key,
+            worktree: body["worktree"].as_bool().unwrap_or(false),
+        })
+    }
+}
+
+fn child_json(row: &SubSessionRow, state: SubState, duplicate: bool) -> Value {
+    json!({
+        "session": row.child_session_id,
+        "agent": row.provider_id,
+        "model": row.model,
+        "dispatch": state.as_str(),
+        "duplicate": duplicate,
+    })
+}
+
+/// `perch spawn`.
+pub(super) async fn spawn(
+    app: &AppState,
+    caller: &AgentIdentity,
+    request: SpawnRequest,
+) -> Result<Value, Failure> {
+    let lead = app
+        .db
+        .get_session(&caller.session_id)
+        .map_err(|error| internal("read the session", error))?
+        .ok_or_else(|| fail(StatusCode::NOT_FOUND, "your session no longer exists"))?;
+    if !(lead.host_id.is_empty() || lead.host_id == "local") {
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            "sub-sessions can be started only from a session on this computer",
+        ));
+    }
+    let workspace = {
+        let id = lead
+            .workspace_id
+            .as_deref()
+            .ok_or_else(|| fail(StatusCode::FORBIDDEN, "this session is not in a Nest"))?;
+        app.db
+            .resolve_workspace(id)
+            .map_err(|error| fail(StatusCode::FORBIDDEN, error.to_string()))?
+    };
+    let (_, preferences) = app
+        .db
+        .provider_preferences()
+        .map_err(|error| internal("read the agent settings", error))?;
+    if preferences
+        .get(&request.agent)
+        .is_some_and(|preference| !preference.enabled)
+    {
+        return Err(fail(
+            StatusCode::FORBIDDEN,
+            format!("{} is disabled in Perch's Agents settings", request.agent),
+        ));
+    }
+    let lead_key = AgentKey::new(&workspace.id, &caller.session_id, &caller.provider_id)
+        .map_err(|error| internal("name the session", error))?;
+    // The turn must be running now: a process left behind by an earlier turn is not one.
+    let in_turn = app
+        .agent_runtime
+        .snapshot(&lead_key)
+        .is_ok_and(|snapshot| matches!(snapshot.state, AgentState::Working | AgentState::Blocked));
+    let turn = in_turn
+        .then(|| app.agent_runtime.turn_origin(&lead_key))
+        .flatten();
+
+    let child_id = Uuid::new_v4().to_string();
+    let spec = SubSessionSpec {
+        child_session_id: &child_id,
+        parent_session_id: &caller.session_id,
+        parent_incarnation: &caller.incarnation,
+        workspace: &workspace,
+        cwd: &lead.cwd,
+        provider_id: &request.agent,
+        model: request.model.as_deref(),
+        spawn_key: &request.key,
+        task: &request.task,
+    };
+    let row = match app
+        .db
+        .reserve_sub_session(&spec, turn)
+        .map_err(|error| internal("record the sub-session", error))?
+    {
+        Reserved::Refused(refusal) => {
+            use sub_sessions::Refusal;
+            let status = match refusal {
+                Refusal::Concurrent | Refusal::Descendants => StatusCode::CONFLICT,
+                Refusal::Depth | Refusal::NotPersonTurn => StatusCode::FORBIDDEN,
+            };
+            return Err(fail(status, refusal.message()));
+        }
+        Reserved::Existing(row) => {
+            let state = reconcile(app, &row);
+            return Ok(child_json(&row, state, true));
+        }
+        Reserved::New(row) => row,
+    };
+
+    let mut cwd = lead.cwd.clone();
+    if request.worktree {
+        match make_worktree(app, &workspace, &request.task).await {
+            Ok((checkout, created)) => {
+                if let Err(error) = app
+                    .db
+                    .move_child_to_workspace(&child_id, &checkout, &created)
+                {
+                    discard(app, &row);
+                    return Err(internal("place the sub-session in its checkout", error));
+                }
+                cwd = created;
+            }
+            Err(message) => {
+                discard(app, &row);
+                return Err(fail(StatusCode::BAD_GATEWAY, message));
+            }
+        }
+    }
+
+    let launch_app = app.clone();
+    let launch_row = row.clone();
+    let launched = tokio::task::spawn_blocking(move || launch(&launch_app, &launch_row, &cwd))
+        .await
+        .map_err(|error| internal("start the sub-session", error))?;
+    match launched {
+        Ok(()) => {
+            let _ = app
+                .db
+                .move_sub_session(&child_id, &[SubState::Starting], SubState::Running);
+            Ok(child_json(&row, SubState::Running, false))
+        }
+        Err(launch_error) => {
+            if launch_error.confirmed_absent {
+                discard(app, &row);
+            } else {
+                let _ = app.db.move_sub_session(
+                    &child_id,
+                    &[SubState::Starting],
+                    SubState::StartUnknown,
+                );
+            }
+            Err(fail(StatusCode::BAD_GATEWAY, launch_error.message))
+        }
+    }
+}
+
+/// A child that was recorded and then confirmed never to have started leaves nothing behind.
+fn discard(app: &AppState, row: &SubSessionRow) {
+    if let Ok(key) = key_of(app, &row.child_session_id, &row.provider_id) {
+        let _ = app.agent_runtime.remove(&key);
+    }
+    if let Err(error) = app.db.delete_session(&row.child_session_id) {
+        tracing::warn!(%error, "could not remove a sub-session that never started");
+    }
+}
+
+/// A checkout of the lead's repository for the child, registered under the lead's Nest.
+async fn make_worktree(
+    app: &AppState,
+    parent: &crate::db::WorkspaceRow,
+    task: &str,
+) -> Result<(crate::db::WorkspaceRow, String), String> {
+    let name: String = task
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(60)
+        .collect();
+    let created = crate::worktree::create(&crate::worktree::CreateRequest {
+        repo_path: parent.path.clone(),
+        name: Some(name),
+        new_branch: true,
+        ..Default::default()
+    })
+    .await
+    .map_err(|error| error.message)?;
+    let summary = workspace::register_created(app, &parent.path, &created, Some(&parent.id))
+        .await
+        .map_err(|error| error.to_string())?;
+    let checkout = app
+        .db
+        .resolve_workspace(&summary.id)
+        .map_err(|error| error.to_string())?;
+    let path = checkout.path.clone();
+    Ok((checkout, path))
+}
+
+struct LaunchFailure {
+    message: String,
+    /// perchd confirms no process exists for the child.
+    confirmed_absent: bool,
+}
+
+/// Start the child's agent. Blocking: it talks to perchd.
+fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFailure> {
+    let key = key_of(app, &row.child_session_id, &row.provider_id).map_err(|(_, message)| {
+        LaunchFailure {
+            message,
+            confirmed_absent: true,
+        }
+    })?;
+    let terminal = crate::agent_runtime::terminal_key(&key);
+    let failure = |message: String| LaunchFailure {
+        message,
+        confirmed_absent: crate::daemon::session_state(&terminal)
+            == crate::daemon::RuntimeState::Exited
+            && !app.agent_runtime.runtime_alive(&key),
+    };
+    let provider = row.provider_id.as_str();
+    let manifest = app
+        .agent_runtime
+        .providers()
+        .get(provider)
+        .ok_or_else(|| failure(format!("unknown agent {provider}")))?;
+
+    let mut extra: Vec<String> = Vec::new();
+    if let Some(model) = &row.model {
+        extra.extend(["--model".into(), model.clone()]);
+    }
+    let provider_session_id = if provider == "claude" {
+        let id = Uuid::new_v4().to_string();
+        app.db
+            .set_claude_session_id(&row.child_session_id, &id)
+            .map_err(|error| failure(error.to_string()))?;
+        extra.extend(["--session-id".into(), id.clone()]);
+        Some(id)
+    } else {
+        None
+    };
+    let paths = crate::native_ui::prepare(&key, provider, true)
+        .map_err(|error| failure(error.to_string()))?;
+    if provider != "codex" {
+        extra.extend([
+            if provider == "claude" {
+                "--settings"
+            } else {
+                "--extension"
+            }
+            .into(),
+            paths.extension.to_string_lossy().into_owned(),
+        ]);
+    }
+    // The task is the last argument: the agent reads it as its first message.
+    extra.push(sub_sessions::first_message(
+        &row.parent_session_id,
+        &row.task,
+    ));
+
+    let registration = AgentRegistration {
+        key: key.clone(),
+        provider_id: provider.to_string(),
+        provider_session_id,
+        resumable: manifest.supports_capability(
+            crate::agent_fleet::AgentMode::Cli,
+            ProviderCapability::Resume,
+        ),
+        now_ms: now_millis(),
+    };
+    {
+        let _guard = app.foundation_lock.lock().unwrap();
+        app.agent_runtime
+            .lifecycle()
+            .register(registration.clone())
+            .map_err(|error| failure(error.to_string()))?;
+        app.db
+            .set_cli_provider(&row.child_session_id, provider)
+            .map_err(|error| failure(error.to_string()))?;
+        persist_agent_runtime(app, &key).map_err(|error| failure(error.to_string()))?;
+    }
+    // The change record of the child's first turn starts before the agent can touch a file.
+    if let Err(error) = app.agent_runtime.record_turn_boundary(&key, true) {
+        tracing::warn!(%error, "could not record the first turn boundary of a sub-session");
+    }
+    let client = service_client().map_err(|(_, message)| failure(message))?;
+    let on_data: crate::terminal::TerminalDataListener = Arc::new(|_, _| {});
+    let on_exit: crate::terminal::TerminalExitListener = Arc::new(|_, _| {});
+    app.agent_runtime
+        .attach_cli_with_ready(
+            registration,
+            cwd,
+            client.clone(),
+            120,
+            32,
+            &extra,
+            false,
+            on_data,
+            on_exit,
+            |_, _| {},
+        )
+        .map_err(|error| failure(error.to_string()))?;
+    // Nobody views a child; the agent keeps running in perchd without the launcher.
+    let _ = app.agent_runtime.detach(&key, &client);
+    // Its first turn is the task Perch delivered, not one a person opened.
+    app.agent_runtime.note_agent_turn(&key);
+    if let Err(error) = native_ui::observe(app, key.clone()) {
+        tracing::warn!(%error, "native UI observation unavailable for a sub-session");
+    }
+    if let Err(error) = app.db.mark_cli_activity(&row.child_session_id) {
+        tracing::warn!(%error, "could not make a sub-session visible");
+    } else {
+        app.cli_active_sessions
+            .lock()
+            .unwrap()
+            .insert(row.child_session_id.clone());
+    }
+    if let Err(error) = persist_agent_runtime(app, &key) {
+        tracing::warn!(%error, "could not checkpoint a sub-session");
+    }
+    notify_session_updated(app, &row.child_session_id);
+    Ok(())
+}
+
+/// What one member of the run looks like, from Perch's own records. `needsYou` is a pending
+/// approval or question, never something the agent said.
+fn member_json(
+    app: &AppState,
+    caller: &AgentIdentity,
+    session_id: &str,
+    provider: &str,
+    child: Option<(&SubSessionRow, SubState)>,
+) -> Value {
+    let title = app
+        .db
+        .list_sessions()
+        .ok()
+        .and_then(|rows| rows.into_iter().find(|row| row.id == session_id))
+        .map(|row| row.title)
+        .unwrap_or_default();
+    let key = key_of(app, session_id, provider).ok();
+    let lifecycle = key
+        .as_ref()
+        .and_then(|key| app.agent_runtime.snapshot(key).ok())
+        .map(|snapshot| snapshot.state);
+    let report =
+        app.db
+            .latest_session_report(session_id)
+            .ok()
+            .flatten()
+            .map(|(text, at)| (text, ReportSource::Reported, at))
+            .or_else(|| {
+                // The fallback is for a child only: the last thing it said, cut and labelled.
+                child?;
+                let latest = app.native_ui.get(key.as_ref()?)?.latest()?;
+                let said = latest.messages.iter().rev().find(|message| {
+                    message.role == "assistant" && !message.text.trim().is_empty()
+                })?;
+                let text = sub_sessions::fallback_report(&said.text)?;
+                Some((text, ReportSource::LastMessage, wall_clock_millis()))
+            });
+    json!({
+        "session": session_id,
+        "role": if child.is_some() { "child" } else { "lead" },
+        "you": session_id == caller.session_id,
+        "agent": provider,
+        "model": child.and_then(|(row, _)| row.model.clone()),
+        "title": title,
+        "dispatch": child.map(|(_, state)| state.as_str()),
+        "state": lifecycle.map_or(Value::String("unknown".into()), |state| json!(state)),
+        "needsYou": lifecycle == Some(AgentState::Blocked),
+        "task": child.map(|(row, _)| row.task.clone()),
+        "report": report.map(|(text, source, at)| json!({
+            "text": text,
+            "source": source.as_str(),
+            "at": at,
+        })),
+    })
+}
+
+/// `perch list`: the caller's run, its lead and the lead's children.
+pub(super) async fn list(app: &AppState, caller: &AgentIdentity) -> Result<Value, Failure> {
+    let app = app.clone();
+    let caller = caller.clone();
+    tokio::task::spawn_blocking(move || {
+        let lead_id = app
+            .db
+            .parent_of(&caller.session_id)
+            .map_err(|error| internal("read the session", error))?
+            .unwrap_or_else(|| caller.session_id.clone());
+        let lead_provider = if lead_id == caller.session_id {
+            caller.provider_id.clone()
+        } else {
+            app.db
+                .get_session(&lead_id)
+                .ok()
+                .flatten()
+                .and_then(|row| row.cli_provider_id)
+                .unwrap_or_default()
+        };
+        let mut members = vec![member_json(&app, &caller, &lead_id, &lead_provider, None)];
+        for row in app
+            .db
+            .sub_sessions_of(&lead_id)
+            .map_err(|error| internal("read the sub-sessions", error))?
+        {
+            let state = reconcile(&app, &row);
+            members.push(member_json(
+                &app,
+                &caller,
+                &row.child_session_id,
+                &row.provider_id,
+                Some((&row, state)),
+            ));
+        }
+        Ok(json!({ "lead": lead_id, "members": members }))
+    })
+    .await
+    .map_err(|error| internal("list the run", error))?
+}
+
+/// `perch stop <session>`: stop one of the caller's own children, and say it stopped only once
+/// perchd confirms the process is gone.
+pub(super) async fn stop(
+    app: &AppState,
+    caller: &AgentIdentity,
+    target: &str,
+) -> Result<Value, Failure> {
+    let app = app.clone();
+    let caller = caller.clone();
+    let target = target.to_string();
+    tokio::task::spawn_blocking(move || {
+        let row = app
+            .db
+            .sub_session(&target)
+            .map_err(|error| internal("read the sub-session", error))?
+            .filter(|row| row.parent_session_id == caller.session_id)
+            .ok_or_else(|| {
+                fail(
+                    StatusCode::NOT_FOUND,
+                    "that is not one of your sub-sessions",
+                )
+            })?;
+        let state = reconcile(&app, &row);
+        let state = stop_child(
+            &app,
+            &SubSessionRow {
+                state,
+                ..row.clone()
+            },
+        )?;
+        Ok(json!({ "session": row.child_session_id, "dispatch": state.as_str() }))
+    })
+    .await
+    .map_err(|error| internal("stop the sub-session", error))?
+}
+
+/// Move a child toward `stopped`. `Ok` carries a settled state; an unconfirmed stop is an
+/// error and leaves `stop_unknown`.
+fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState, Failure> {
+    if matches!(
+        row.state,
+        SubState::Stopped | SubState::Exited | SubState::Failed
+    ) {
+        return Ok(row.state);
+    }
+    if !row.state.can_begin_stop() {
+        return Err(fail(
+            StatusCode::CONFLICT,
+            "that sub-session is still starting; try again in a moment",
+        ));
+    }
+    let key = key_of(app, &row.child_session_id, &row.provider_id)?;
+    if !app
+        .db
+        .move_sub_session(&row.child_session_id, &[row.state], SubState::Stopping)
+        .map_err(|error| internal("record the stop", error))?
+    {
+        return Err(fail(
+            StatusCode::CONFLICT,
+            "that sub-session changed; list it and try again",
+        ));
+    }
+    let outcome = {
+        let _operation = app.agent_operation_lock.lock().unwrap();
+        app.agent_runtime.stop_confirmed(&key)
+    };
+    match outcome {
+        Ok(()) => {
+            let _ = app.db.move_sub_session(
+                &row.child_session_id,
+                &[SubState::Stopping],
+                SubState::Stopped,
+            );
+            if let Err(error) = persist_agent_runtime(app, &key) {
+                tracing::warn!(%error, "could not checkpoint a stopped sub-session");
+            }
+            notify_session_updated(app, &row.child_session_id);
+            Ok(SubState::Stopped)
+        }
+        Err(error) => {
+            let _ = app.db.move_sub_session(
+                &row.child_session_id,
+                &[SubState::Stopping],
+                SubState::StopUnknown,
+            );
+            tracing::warn!(%error, "a sub-session stop was not confirmed");
+            Err(fail(
+                StatusCode::BAD_GATEWAY,
+                "Perch could not confirm that the sub-session stopped; it still counts as running. \
+                 Try `perch stop` again.",
+            ))
+        }
+    }
+}
+
+/// A person stopped a lead: stop every live child of it too. Each stop is confirmed on its own;
+/// one that is not stays `stop_unknown` and the rest still proceed.
+pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) {
+    let Ok(children) = app.db.sub_sessions_of(lead_session_id) else {
+        return;
+    };
+    for row in children {
+        let state = reconcile(app, &row);
+        if state.is_live() && state != SubState::Starting {
+            let _ = stop_child(app, &SubSessionRow { state, ..row });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::agent::tests::request;
+    use super::*;
+    use crate::agent_identity::IdentityStore;
+    use crate::sub_sessions::TurnOrigin;
+
+    /// The spawn, list and stop routes over real HTTP against a booted core, up to the point of
+    /// starting an agent: what is refused, what is recorded, what a retry returns.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spawn_list_and_stop_enforce_their_rules_over_http() {
+        let root = std::env::temp_dir().join(format!("perch-sub-http-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let db_path = root.join("history.sqlite");
+        let db = Arc::new(HistoryDb::open(&db_path).unwrap());
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(run(
+            ServerOptions {
+                port: 0,
+                base_path: "/".into(),
+                web_dist_dir: root.join("web"),
+                db_path: Some(db_path),
+                hosts_path: Some(root.join("hosts.json")),
+                providers_path: None,
+                devices_path: Some(root.join("devices.json")),
+                ready_tx: Some(ready_tx),
+                phone_access_port: None,
+                local_ui: crate::local_ui::LocalUi::in_process(),
+            },
+            db.clone(),
+            root.display().to_string(),
+        ));
+        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, workspace) = db
+            .create_project("local", &nest.to_string_lossy(), Some("nest"), None)
+            .unwrap();
+        db.create_session_in_workspace("lead", &workspace, &nest.to_string_lossy())
+            .unwrap();
+        db.set_cli_provider("lead", "claude").unwrap();
+        let lead = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let call = |route: &'static str, token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                &format!("/agent/{route}"),
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+        let spawn_body = |key: &str, session: &str| {
+            json!({"session": session, "agent": "codex", "model": "gpt-5.6-luna",
+                   "task": "fix the parser", "key": key})
+        };
+
+        // Bad requests are refused before anything is recorded.
+        for (change, expect) in [
+            (json!({"agent": "gemini"}), "choose the agent"),
+            (json!({"task": "  "}), "needs a task"),
+            (json!({"task": "x".repeat(3001)}), "limited to 3000"),
+            (json!({"model": "--help"}), "not a model"),
+            (json!({"key": "a b"}), "spawn key"),
+        ] {
+            let mut body = spawn_body("k0", "lead");
+            body.as_object_mut()
+                .unwrap()
+                .extend(change.as_object().unwrap().clone());
+            let (status, answer) = call("spawn", lead.token.clone(), body).await;
+            assert_eq!(status, 400, "{answer}");
+            assert!(
+                answer["error"].as_str().unwrap().contains(expect),
+                "{answer}"
+            );
+        }
+        assert!(db.sub_sessions_of("lead").unwrap().is_empty());
+
+        // A lead that is not in a turn Perch saw a person open may not spawn, and no session or
+        // record is made by the refusal.
+        let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k1", "lead")).await;
+        assert_eq!(status, 403, "{answer}");
+        assert!(
+            answer["error"].as_str().unwrap().contains("a person"),
+            "{answer}"
+        );
+        assert!(db.sub_sessions_of("lead").unwrap().is_empty());
+
+        // A child the lead started earlier, recorded as the core would have.
+        let nest_path = nest.to_string_lossy().into_owned();
+        let spec = |child: &'static str, key: &'static str| crate::db::SubSessionSpec {
+            child_session_id: child,
+            parent_session_id: "lead",
+            parent_incarnation: &lead.incarnation,
+            workspace: &workspace,
+            cwd: &nest_path,
+            provider_id: "codex",
+            model: Some("gpt-5.6-luna"),
+            spawn_key: key,
+            task: "fix the parser",
+        };
+        let Reserved::New(child) = db
+            .reserve_sub_session(&spec("child", "k1"), Some(TurnOrigin::Person))
+            .unwrap()
+        else {
+            panic!("the child should have been recorded");
+        };
+        db.move_sub_session(
+            &child.child_session_id,
+            &[SubState::Starting],
+            SubState::Running,
+        )
+        .unwrap();
+        db.set_cli_provider("child", "codex").unwrap();
+        let child_token = db
+            .issue(&AgentKey::new(&workspace.id, "child", "codex").unwrap())
+            .unwrap();
+
+        // The same key again returns that child and starts nothing, even with no turn running.
+        let (status, answer) = call("spawn", lead.token.clone(), spawn_body("k1", "lead")).await;
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["session"], "child");
+        assert_eq!(answer["duplicate"], true);
+        assert_eq!(db.sub_sessions_of("lead").unwrap().len(), 1);
+
+        // A child may not spawn, whatever its turn: the depth refusal tells it to do the work.
+        let (status, answer) = call(
+            "spawn",
+            child_token.token.clone(),
+            spawn_body("k2", "child"),
+        )
+        .await;
+        assert_eq!(status, 403, "{answer}");
+        assert!(answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("Complete this task yourself"));
+
+        // `list` is the run, from the lead's side or the child's. The child's process is not in
+        // perchd (a fresh isolated daemon), which confirms it gone: the record says exited.
+        for (token, session) in [(&lead.token, "lead"), (&child_token.token, "child")] {
+            let (status, answer) = call("list", token.clone(), json!({"session": session})).await;
+            assert_eq!(status, 200, "{answer}");
+            assert_eq!(answer["lead"], "lead");
+            let members = answer["members"].as_array().unwrap();
+            assert_eq!(members.len(), 2, "{answer}");
+            assert_eq!(
+                (members[0]["role"].as_str(), members[0]["session"].as_str()),
+                (Some("lead"), Some("lead"))
+            );
+            assert_eq!(members[1]["session"], "child");
+            assert_eq!(members[1]["dispatch"], "exited", "{answer}");
+            assert_eq!(members[1]["you"], session == "child");
+            assert_eq!(
+                members[1]["state"], "unknown",
+                "Perch has no lifecycle record of it"
+            );
+            assert_eq!(members[1]["needsYou"], false);
+            assert_eq!(
+                members[1]["report"],
+                Value::Null,
+                "nothing reported, nothing said"
+            );
+        }
+
+        // A report is kept per session, outlives its run and is labelled as the agent's claim.
+        let (status, _) = call(
+            "report",
+            child_token.token.clone(),
+            json!({"session": "child", "text": "parser fixed"}),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let (_, answer) = call("list", lead.token.clone(), json!({"session": "lead"})).await;
+        assert_eq!(answer["members"][1]["report"]["text"], "parser fixed");
+        assert_eq!(answer["members"][1]["report"]["source"], "report");
+
+        // `stop` reaches only the caller's own children, and a settled child is just reported.
+        let (status, answer) = call(
+            "stop",
+            child_token.token.clone(),
+            json!({"session": "child", "target": "lead"}),
+        )
+        .await;
+        assert_eq!(status, 404, "{answer}");
+        let (status, _) = call("stop", lead.token.clone(), json!({"session": "lead"})).await;
+        assert_eq!(status, 400);
+        let (status, answer) = call(
+            "stop",
+            lead.token.clone(),
+            json!({"session": "lead", "target": "child"}),
+        )
+        .await;
+        assert_eq!(status, 200, "{answer}");
+        assert_eq!(answer["dispatch"], "exited");
+        // Another lead's child is not this lead's.
+        db.create_session_in_workspace("other", &workspace, &nest.to_string_lossy())
+            .unwrap();
+        let other = db
+            .issue(&AgentKey::new(&workspace.id, "other", "claude").unwrap())
+            .unwrap();
+        let (status, _) = call(
+            "stop",
+            other.token.clone(),
+            json!({"session": "other", "target": "child"}),
+        )
+        .await;
+        assert_eq!(status, 404);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
