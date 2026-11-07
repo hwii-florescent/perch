@@ -1236,7 +1236,19 @@ pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, termi
             .get(&lifecycle_control_key(&key, ControlChannel::Input))
             .cloned();
         if let Some(lease) = lease {
-            let _ = state.app.agent_runtime.stop(&key, &lease, now_millis());
+            if state
+                .app
+                .agent_runtime
+                .stop(&key, &lease, now_millis())
+                .is_ok()
+            {
+                // Stopping a lead stops what it started, each confirmed on its own.
+                let app = state.app.clone();
+                let lead = key.session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    super::sub_sessions::stop_children_of(&app, &lead)
+                });
+            }
         }
         return;
     }

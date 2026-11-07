@@ -305,9 +305,8 @@ What later slices build on:
 - **Live check:** `e2e/instructions.spec.ts` (one extra `perch whoami` turn per provider, haiku and
   luna): the reply names the session, the session has exactly one live identity row, and no
   `perch_agent_` string reaches the chat, `ps` or the core log.
-- The guide text still describes only `whoami`, `report` and `guide`; each later slice adds its
-  verbs and the rules that go with them (only person-started turns may spawn, children cannot
-  spawn, messages never approve).
+- The guide text grows with each slice: slice 4 added `spawn`, `list` and `stop` and the spawn
+  rules; slice 5 adds messages (messages never approve).
 
 ## Slice 3a landed (2026-11-06): no tokenless local authority
 
@@ -407,37 +406,49 @@ API key):**
   read-back. No picker.
 - **Fast mode** (Orca's `/fast` toggle): no baseline to read back.
 
-## Slice 4: spawn, list, stop, reports
+## Slice 4 landed (2026-11-06): spawn, list, stop, reports
 
-**Orca to port with changes** (paths under `src/main/runtime/orchestration/`):
-- Worker states incl. `start_unknown` / `stop_unknown` (`db/schema/create-core-tables-sql.ts`
-  `worker_dispatches`) → `sub_sessions.rs`. Unknown stays unknown.
-- Stop is confirmed before destructive cleanup (`db/worker-dispatch/worker-dispatch-stop.ts`).
-- Depth check and its "do the work yourself" refusal (`src/shared/nested-worker-depth.ts`), fixed at 1.
-- Report admission only (`worker-report-admission.ts`); **do not** port settlement:
-  a report settles nothing.
-- CLI verbs: `worker-start` → `perch spawn --agent --model [--worktree] --task`,
-  `worker-list` → `perch list`, `worker-stop` → `perch stop`
-  (`src/cli/specs/orchestration-worker-specs.ts`).
-**Do not port:** tasks/DAG, gates, coordinator loop, circuit breaker, federation,
-mutation-receipt ledger, auto-release.
+The contract is in ARCHITECTURE ("Sub-sessions"). What later slices build on:
 
-**Claude-desktop behaviour to implement (spec, own code):**
-- A child is told its first message is its task and that its report goes to the session
-  that started it. Report = its own `perch report` if given, else the last assistant
-  message (Stop / `last_assistant_message`), first 400 characters, labelled fallback.
-- Parent link on the session record (`sessions.parent_session_id`); family = bounded walk.
-- Spawning is refused on a turn not opened by a person (prompt ledger
-  `prompt_operations` plus provider `UserPromptSubmit`/bridge events; a delivered
-  message's operation is marked agent-originated).
-- Stop interrupts every live descendant and marks it "stopped until a person sends".
-- Status from Perch's own records: needs you = pending approval/question
-  (attention service), never a model claim.
-- Limits before dispatch: 4 concurrent, 8 descendants, depth 1.
-
-Check: tests for duplicate spawn (idempotency key), each limit, spawn on an
-agent-opened turn, stop confirmation, report truncation and labels; live, a haiku lead
-spawns a luna child in the same Nest and reads its report.
+- **Files.** `sub_sessions.rs` (pure: Orca's worker states and stop rules, the depth text, Perch's own
+  limits 4 / 8 / 1, the turn rule, task/model/key checks, the child's first message, the 400-character
+  fallback), `db/sub_sessions.rs` (table `sub_sessions`, column `sessions.parent_session_id`;
+  `reserve_sub_session` checks the key, the limits and the turn rule and writes both rows in one
+  transaction), `server/sub_sessions.rs` (`spawn`, `list`, `stop`, `stop_children_of`, launch of the
+  child), routes `/agent/spawn|list|stop` in `server/agent.rs`, verbs in `perchd/agent_cli.rs`.
+  `AgentRuntimeAdapter` gained `turn_origin`, `note_agent_turn` (slice 5 calls it for every message it
+  delivers) and `stop_confirmed`.
+- **Spawn needs the lead to be Working/Blocked and its turn marked `Person`.** The mark is set when a
+  person's Enter reaches an idle session (terminal), a chat send or a Context Bridge send records its
+  boundary, and cleared by a new process. A person typing before a fresh launch has settled to idle
+  (state still Working) is not marked, so that first turn cannot spawn; a core restart loses marks.
+  Both fail closed. Not covered live: a refusal on a message-opened turn (nothing delivers messages
+  until slice 5; unit-tested).
+- **The task travels as the child's last command-line argument** (all four CLIs take a positional
+  prompt and parse options after it, checked with `--version`), so no lease, no typing. Limit 3,000
+  characters because Perch bounds an argument at 4 KiB. The text is visible in `ps`; it is a task, not
+  a secret. Pi and OMP's `[messages...]` were checked only for option parsing, not by a live turn.
+- **`--worktree`** makes a checkout of the lead's repository (`worktree::create` plus
+  `workspace::register_created`, nested under the lead's Nest) after the record exists and moves the
+  child into it; a failed checkout discards the child. **Not run live and without a Rust test** (it
+  needs a git repository); the path is `make_worktree` in `server/sub_sessions.rs`.
+- **Fallback report.** Taken from the native bridge's snapshot (the transcript's last assistant
+  message), not the Stop hook's `last_assistant_message`: same text, works for all four providers, and
+  needs no new hook plumbing. Shown only while the bridge is up (not after a core restart).
+- **Stop.** Confirmed by perchd through `stop_confirmed`; the lead's own children only. A person's
+  terminal kill of a lead also stops its live children. *Not done:* the chat's interrupt (Esc) of a
+  lead does not stop children, and deleting a lead leaves its children running as ordinary sessions.
+- **Guide.** `perch guide` now teaches `spawn`, `list`, `stop` and the rules (person's turn only,
+  depth 1, 4 / 8, stop what you no longer need, what a report or a fallback is worth). The bare `list`,
+  `serve` and `connect` aliases of `perch` are gone (`perch daemon list|serve|connect`); `perchd`
+  itself is unchanged.
+- **Live** (`e2e/sub-sessions.spec.ts`, TESTING): the first run, with a luna Codex child, got as far as
+  the child receiving its task and running `gpt-5.6-luna` in the lead's Nest, then the child's turn hit
+  Codex's usage limit (`task_complete … usage_limit_exceeded` in its rollout), so its report and the
+  stop were not exercised. The second, with a haiku Claude child (`PERCH_E2E_CHILD=claude`), passed: the
+  lead spawned it during a person's turn, the child reported, the lead read the report back through
+  `perch list` and stopped it, and the core confirmed the stop. **Codex as a child is therefore not
+  verified end to end.**
 
 ## Slice 5: messaging
 

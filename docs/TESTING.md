@@ -103,6 +103,15 @@ Useful existing coverage (not a claim of a fresh passing run):
   the spec also checks that `~/.claude/settings.json` was not touched. Use the same recipe for any probe of
   Claude commands that write settings. Codex has an equivalent: a private `CODEX_HOME` and a dummy
   `OPENAI_API_KEY` reach its TUI and pickers (choose "Use an OpenAI API key" once).
+- `sub-sessions.spec.ts` (same config; needs `perch` built beside the core): a Claude lead (haiku) that a
+  person has just spoken to runs `perch spawn`, the child (luna Codex; `PERCH_E2E_CHILD=claude` makes it a
+  haiku Claude when Codex's quota is spent) is started in the same Nest with its task as its first
+  message, reports with `perch report`, the lead reads it with `perch list`, then `perch stop` ends it
+  and the core confirms. One lead turn to start and read, one to stop, one child turn. The assertions read
+  the core's SQLite file, not the models' words. Verified once with a haiku child; the Codex child's launch
+  and first message were seen but its turn hit a usage limit. What a model will not do on cue (a spawn on
+  a message-opened turn, the fifth child) is tested without models in `server/sub_sessions.rs`,
+  `db/sub_sessions.rs` and `agent_runtime.rs`.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated
@@ -221,8 +230,9 @@ target/debug/perch cleanup                  # confirms the exact preview
 # Noninteractive execution requires explicit --yes.
 ```
 
-`perch daemon ps` and `perch daemon cleanup` are the same commands under their new home.
-`perch whoami`, `report` and `guide` are for agents; the e2e that exercises them
+`perch daemon ps` and `perch daemon cleanup` are the same commands under their new home; only
+`ps`, `cleanup` and `release` keep a bare alias (`perch list` is the agent's own run, and `perch
+daemon list` the daemon's). `perch whoami`, `report`, `guide`, `spawn`, `list` and `stop` are for agents; the e2e that exercises them
 (`instructions.spec.ts`) needs `perch` built beside the core (`cargo build --workspace`, or
 `-p perchd --bin perch` too): a core with no `perch` beside it gives agents no identity and no
 pointer, by design.

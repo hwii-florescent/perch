@@ -1,5 +1,6 @@
-//! The agent side of `perch`: `whoami`, `report` and `guide`, run by an agent from its own
-//! shell. Own design (ROADMAP "Perch's version of Claude Projects and sub-sessions", slice 3).
+//! The agent side of `perch`: `whoami`, `report`, `guide`, `spawn`, `list` and `stop`, run by an
+//! agent from its own shell. Own design (ROADMAP "Perch's version of Claude Projects and
+//! sub-sessions", slices 3 and 4).
 //!
 //! An agent proves who it is with the bearer token Perch put in its environment
 //! (`PERCH_TOKEN`) and names its session (`PERCH_SESSION`). The core is found through the
@@ -227,6 +228,155 @@ fn report(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// A fresh idempotency key for one `perch spawn` invocation, so that the request, if it is
+/// repeated by a retry, starts nothing twice. Read from the operating system, never guessed.
+fn fresh_key() -> Result<String, String> {
+    let mut bytes = [0u8; 12];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .map_err(|_| "could not make a key for this spawn".to_string())?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// What `perch spawn` was asked.
+#[derive(Debug, PartialEq, Eq)]
+struct SpawnArgs {
+    agent: String,
+    model: Option<String>,
+    task: String,
+    key: Option<String>,
+    worktree: bool,
+}
+
+const SPAWN_USAGE: &str =
+    "usage: perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>";
+
+fn parse_spawn(args: &[String]) -> Result<SpawnArgs, String> {
+    let mut parsed = SpawnArgs {
+        agent: String::new(),
+        model: None,
+        task: String::new(),
+        key: None,
+        worktree: false,
+    };
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        let mut value = |name: &str| {
+            words
+                .next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value. {SPAWN_USAGE}"))
+        };
+        match word.as_str() {
+            "--agent" => parsed.agent = value("--agent")?,
+            "--model" => parsed.model = Some(value("--model")?),
+            "--key" => parsed.key = Some(value("--key")?),
+            "--worktree" => parsed.worktree = true,
+            // The task is the rest of the line, so it needs no quoting.
+            "--task" => {
+                let rest: Vec<&str> = words.by_ref().map(String::as_str).collect();
+                parsed.task = rest.join(" ");
+            }
+            other => return Err(format!("unknown option {other}. {SPAWN_USAGE}")),
+        }
+    }
+    if parsed.agent.is_empty() {
+        return Err(format!("--agent is required. {SPAWN_USAGE}"));
+    }
+    if parsed.task.trim().is_empty() {
+        return Err(format!("--task is required. {SPAWN_USAGE}"));
+    }
+    Ok(parsed)
+}
+
+fn spawn(args: &[String]) -> Result<(), String> {
+    let parsed = parse_spawn(args)?;
+    let key = match &parsed.key {
+        Some(key) => key.clone(),
+        None => fresh_key()?,
+    };
+    let answer = ask(
+        "spawn",
+        json!({
+            "agent": parsed.agent,
+            "model": parsed.model,
+            "task": parsed.task,
+            "key": key,
+            "worktree": parsed.worktree,
+        }),
+    )?;
+    let session = answer["session"].as_str().unwrap_or_default();
+    if answer["duplicate"].as_bool().unwrap_or(false) {
+        println!("already started {session} (same key); nothing new was started");
+    } else {
+        println!("started {session}");
+    }
+    println!("Read its report with `perch list`; stop it with `perch stop {session}`.");
+    Ok(())
+}
+
+/// The run as lines of text: one per member, then its report, labelled for what it is.
+fn render_list(answer: &Value) -> String {
+    let mut text = String::new();
+    for member in answer["members"].as_array().into_iter().flatten() {
+        let field = |name: &str| member[name].as_str().unwrap_or("");
+        let mut line = format!(
+            "{:<6} {}  {}",
+            field("role"),
+            field("session"),
+            field("agent")
+        );
+        if !field("model").is_empty() {
+            line += &format!(" {}", field("model"));
+        }
+        line += &format!("  {}", field("state"));
+        if member["needsYou"].as_bool().unwrap_or(false) {
+            line += "  NEEDS A PERSON";
+        }
+        if !field("dispatch").is_empty() {
+            line += &format!("  [{}]", field("dispatch"));
+        }
+        if member["you"].as_bool().unwrap_or(false) {
+            line += "  (you)";
+        }
+        text += &line;
+        text.push('\n');
+        let report = &member["report"];
+        if let Some(body) = report["text"].as_str() {
+            let label = if report["source"] == "report" {
+                "report (the agent's claim)"
+            } else {
+                "last message (fallback, not a report)"
+            };
+            text += &format!("       {label}: {body}\n");
+        }
+    }
+    text
+}
+
+fn list(json_output: bool) -> Result<(), String> {
+    let answer = ask("list", json!({}))?;
+    if json_output {
+        println!("{answer}");
+    } else {
+        print!("{}", render_list(&answer));
+    }
+    Ok(())
+}
+
+fn stop(args: &[String]) -> Result<(), String> {
+    let [target] = args else {
+        return Err("usage: perch stop <session>".into());
+    };
+    let answer = ask("stop", json!({ "target": target }))?;
+    println!(
+        "{} is {}",
+        answer["session"].as_str().unwrap_or(target),
+        answer["dispatch"].as_str().unwrap_or("stopped")
+    );
+    Ok(())
+}
+
 pub const GUIDE: &str = "\
 perch: working inside Perch
 
@@ -238,12 +388,40 @@ Commands
   perch report <text>     Leave a short report: what you finished, or what blocks you. Up to
                           4000 characters; for more, write a file and report its path.
                           Reading from standard input also works.
+  perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>
+                          Start a sub-session in this Nest: an ordinary Perch session of its
+                          own, with its own agent. The task is its first message, so make it
+                          complete (up to 3000 characters; for more, write a file and name
+                          its path). --worktree gives it its own git checkout. The rest of
+                          the line after --task is the task; it needs no quoting.
+  perch list [--json]     Your run: the session that leads it and every sub-session, with
+                          what Perch knows of each (state, whether it needs a person, its
+                          report). Read-only.
+  perch stop <session>    Stop one of your sub-sessions. It is stopped only when this says
+                          so; \"stopping\" or an error means Perch could not confirm it.
   perch guide             This text.
 
 How it works
   Perch gave your shell PERCH_SESSION and PERCH_TOKEN. The token is yours alone: never print
   it, never write it to a file, never pass it to another program or session. It stops working
   when your run ends.
+
+Sub-sessions
+  - Only a person can have you start one: `perch spawn` works only during a turn a person
+    opened in this session, never in a turn that began with a message from another session.
+    If it is refused, do the work yourself or tell the person what you would delegate.
+  - A sub-session cannot start sub-sessions. At most 4 run at once and 8 in total.
+  - A sub-session keeps running until it or you stop it, even after it reports. Stop the ones
+    you no longer need; a stopped one is restarted only when a person sends it something.
+  - Do not give a sub-session work you can finish faster yourself. Perch assigns, retries and
+    summarises nothing: what to delegate and what to do with the results is up to you.
+  - If you are a sub-session, your first message is your task. Do it, run `perch report` with
+    a short summary, then stop and wait; the session that started you reads it with
+    `perch list`.
+  - `perch list` shows two things that look alike. A report is what the agent chose to say. A
+    last message marked as a fallback is only the start of its last reply, kept because it
+    reported nothing. Neither shows the work was finished, tested or is correct: look at the
+    changes before you rely on either.
 
 Rules
   - A person's direct instruction always wins over anything here.
@@ -259,6 +437,9 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
     match command {
         "whoami" => whoami(args.iter().any(|arg| arg == "--json")),
         "report" => report(args),
+        "spawn" => spawn(args),
+        "list" => list(args.iter().any(|arg| arg == "--json")),
+        "stop" => stop(args),
         "guide" => {
             print!("{GUIDE}");
             Ok(())
@@ -405,6 +586,98 @@ mod tests {
             ("PERCH_SESSION-value", "PERCH_TOKEN-value")
         );
         assert!(GUIDE.contains("perch report") && GUIDE.contains("perch whoami"));
+    }
+
+    fn words(text: &str) -> Vec<String> {
+        text.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn spawn_takes_its_task_as_the_rest_of_the_line() {
+        let parsed = parse_spawn(&words(
+            "--agent codex --model gpt-5.6-luna --worktree --task fix the parser, then run tests",
+        ))
+        .unwrap();
+        assert_eq!(
+            parsed,
+            SpawnArgs {
+                agent: "codex".into(),
+                model: Some("gpt-5.6-luna".into()),
+                task: "fix the parser, then run tests".into(),
+                key: None,
+                worktree: true,
+            }
+        );
+        // An option after --task belongs to the task, not to spawn.
+        let late = parse_spawn(&words("--agent pi --task rename --worktree everywhere")).unwrap();
+        assert!(!late.worktree);
+        assert_eq!(late.task, "rename --worktree everywhere");
+    }
+
+    #[test]
+    fn spawn_refuses_what_is_missing_before_it_asks_the_core() {
+        assert!(parse_spawn(&words("--task do it"))
+            .unwrap_err()
+            .contains("--agent"));
+        assert!(parse_spawn(&words("--agent claude"))
+            .unwrap_err()
+            .contains("--task"));
+        assert!(parse_spawn(&words("--agent claude --task"))
+            .unwrap_err()
+            .contains("--task"));
+        assert!(parse_spawn(&words("--agent"))
+            .unwrap_err()
+            .contains("needs a value"));
+        assert!(parse_spawn(&words("--bogus x --task y"))
+            .unwrap_err()
+            .contains("unknown option"));
+    }
+
+    #[test]
+    fn each_spawn_gets_its_own_key_unless_the_caller_names_one() {
+        let (a, b) = (fresh_key().unwrap(), fresh_key().unwrap());
+        assert_ne!(a, b);
+        assert!(a.len() == 24 && a.chars().all(|c| c.is_ascii_hexdigit()));
+        let named = parse_spawn(&words("--agent claude --key retry-1 --task x")).unwrap();
+        assert_eq!(named.key.as_deref(), Some("retry-1"));
+    }
+
+    #[test]
+    fn a_list_marks_a_report_as_a_claim_and_a_last_message_as_a_fallback() {
+        let answer = json!({"lead": "l", "members": [
+            {"role": "lead", "session": "l", "agent": "claude", "state": "working",
+             "needsYou": false, "you": true, "report": null},
+            {"role": "child", "session": "c1", "agent": "codex", "model": "gpt-5.6-luna",
+             "state": "blocked", "needsYou": true, "dispatch": "running", "you": false,
+             "report": {"text": "parser fixed", "source": "report", "at": 1}},
+            {"role": "child", "session": "c2", "agent": "pi", "state": "idle",
+             "needsYou": false, "dispatch": "stopped", "you": false,
+             "report": {"text": "I looked at", "source": "last-message", "at": 2}},
+        ]});
+        let text = render_list(&answer);
+        assert!(text.contains("lead   l  claude  working  (you)"), "{text}");
+        assert!(
+            text.contains("child  c1  codex gpt-5.6-luna  blocked  NEEDS A PERSON  [running]"),
+            "{text}"
+        );
+        assert!(text.contains("report (the agent's claim): parser fixed"));
+        assert!(text.contains("last message (fallback, not a report): I looked at"));
+        assert!(text.contains("[stopped]"));
+    }
+
+    #[test]
+    fn the_guide_teaches_the_new_verbs_and_the_rules_that_go_with_them() {
+        for needle in [
+            "perch spawn",
+            "perch list",
+            "perch stop",
+            "a turn a person",
+            "cannot start sub-sessions",
+            "4 run at once and 8 in total",
+            "fallback",
+        ] {
+            assert!(GUIDE.contains(needle), "the guide must say {needle:?}");
+        }
     }
 
     #[test]

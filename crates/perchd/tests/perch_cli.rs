@@ -172,8 +172,9 @@ fn report_sends_its_text_and_refuses_empty_or_oversized_ones_locally() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// `perch daemon <verb>` is the home of the daemon verbs and the bare verbs still work. Both
-/// are connect-only: with no daemon they report nothing and create no directory.
+/// `perch daemon <verb>` is the home of the daemon verbs; `ps`, `cleanup` and `release` keep a
+/// bare alias. Both are connect-only: with no daemon they report nothing and create no
+/// directory.
 #[test]
 fn daemon_verbs_work_under_daemon_and_as_the_old_aliases() {
     let dir = std::env::temp_dir().join(format!("perch-cli-alias-{}", std::process::id()));
@@ -182,7 +183,6 @@ fn daemon_verbs_work_under_daemon_and_as_the_old_aliases() {
     for args in [
         vec!["ps", "--json", "--dir", &path],
         vec!["daemon", "ps", "--json", "--dir", &path],
-        vec!["list", "--json", "--dir", &path],
         vec!["daemon", "list", "--json", "--dir", &path],
         vec!["cleanup", "--dry-run", "--json", "--dir", &path],
         vec!["daemon", "cleanup", "--dry-run", "--json", "--dir", &path],
@@ -196,4 +196,115 @@ fn daemon_verbs_work_under_daemon_and_as_the_old_aliases() {
     assert_eq!(plain.stdout, nested.stdout);
     let unknown = perch(&dir, &["daemon", "no-such-verb"], false);
     assert_eq!(unknown.status.code(), Some(2));
+}
+
+/// The bare `list` is the agent's own run, and bare `serve` and `connect` are gone: the first
+/// asks the core as an agent, the others are unknown commands that start nothing.
+#[test]
+fn bare_list_is_the_agents_run_and_bare_serve_and_connect_are_gone() {
+    let dir = temp("bare");
+    let output = perch(&dir, &["list"], false);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        text(&output).contains("PERCH_SESSION and PERCH_TOKEN are not set"),
+        "{}",
+        text(&output)
+    );
+    for verb in ["serve", "connect"] {
+        let output = perch(&dir, &[verb, "--dir", &dir.to_string_lossy()], false);
+        assert_eq!(output.status.code(), Some(2), "{verb}");
+        assert!(text(&output).contains("usage:"), "{verb}");
+        assert!(
+            !dir.join("perchd.sock").exists(),
+            "{verb} must start no daemon"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Each new verb sends exactly its request as the calling agent and prints what the core said,
+/// and a refusal's own text reaches the agent.
+#[test]
+fn spawn_list_and_stop_send_their_requests_and_show_the_core_s_answer() {
+    let dir = temp("verbs");
+    let serve = |body: &'static str| {
+        let (port, request) = answer_once(body);
+        write_core_file(
+            &dir,
+            &CoreAddress {
+                pid: std::process::id(),
+                port,
+                base_path: "/".into(),
+                local_token: None,
+            },
+        )
+        .unwrap();
+        request
+    };
+
+    let request = serve(r#"{"session":"c1","agent":"codex","duplicate":false}"#);
+    let output = perch(
+        &dir,
+        &[
+            "spawn", "--agent", "codex", "--key", "k1", "--task", "fix", "it",
+        ],
+        true,
+    );
+    assert!(output.status.success(), "{}", text(&output));
+    assert!(text(&output).contains("started c1"));
+    let request = request.join().unwrap();
+    assert!(request.starts_with("POST /agent/spawn HTTP/1.0\r\n"));
+    let body: serde_json::Value =
+        serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["session"], "s1");
+    assert_eq!(body["agent"], "codex");
+    assert_eq!(body["task"], "fix it");
+    assert_eq!(body["key"], "k1");
+    assert_eq!(body["worktree"], false);
+
+    let request = serve(r#"{"session":"c1","duplicate":true}"#);
+    let again = perch(
+        &dir,
+        &[
+            "spawn", "--agent", "codex", "--key", "k1", "--task", "fix it",
+        ],
+        true,
+    );
+    assert!(
+        text(&again).contains("already started c1"),
+        "{}",
+        text(&again)
+    );
+    request.join().unwrap();
+
+    let request = serve(
+        r#"{"lead":"s1","members":[{"role":"lead","session":"s1","agent":"claude","state":"working","you":true}]}"#,
+    );
+    let listed = perch(&dir, &["list"], true);
+    assert!(
+        text(&listed).contains("lead   s1  claude  working  (you)"),
+        "{}",
+        text(&listed)
+    );
+    assert!(request
+        .join()
+        .unwrap()
+        .starts_with("POST /agent/list HTTP/1.0\r\n"));
+
+    let request = serve(r#"{"session":"c1","dispatch":"stopped"}"#);
+    let stopped = perch(&dir, &["stop", "c1"], true);
+    assert!(
+        text(&stopped).contains("c1 is stopped"),
+        "{}",
+        text(&stopped)
+    );
+    assert!(request
+        .join()
+        .unwrap()
+        .ends_with(r#"{"session":"s1","target":"c1"}"#));
+
+    // Local mistakes are caught without asking the core.
+    assert_eq!(perch(&dir, &["stop"], true).status.code(), Some(1));
+    assert!(text(&perch(&dir, &["spawn", "--task", "x"], true)).contains("--agent is required"));
+    let _ = std::fs::remove_dir_all(dir);
 }

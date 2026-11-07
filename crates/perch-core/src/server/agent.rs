@@ -124,6 +124,63 @@ pub(super) async fn report(
     }
 }
 
+fn answer(result: Result<Value, sub_sessions::Failure>) -> Response {
+    match result {
+        Ok(body) => Json(body).into_response(),
+        Err((status, error)) => refuse(status, &error),
+    }
+}
+
+/// `POST {base}agent/spawn`: start a sub-session (`server/sub_sessions.rs`).
+pub(super) async fn spawn(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    match sub_sessions::SpawnRequest::parse(&body) {
+        Ok(request) => answer(sub_sessions::spawn(&state, &identity, request).await),
+        Err(failure) => answer(Err(failure)),
+    }
+}
+
+/// `POST {base}agent/list`: the caller's run and what Perch knows of each member.
+pub(super) async fn list(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(sub_sessions::list(&state, &identity).await),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/stop`: stop one of the caller's own sub-sessions.
+pub(super) async fn stop(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    let Some(target) = body["target"].as_str().filter(|target| !target.is_empty()) else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "say which sub-session: perch stop <session>",
+        );
+    };
+    answer(sub_sessions::stop(&state, &identity, target).await)
+}
+
 /// An agent token on a route that is not `/agent/*` is refused outright, even from loopback:
 /// whoever holds one is an agent, and agents get agent operations only.
 pub(super) fn carries_agent_token(headers: &HeaderMap, params: &HashMap<String, String>) -> bool {

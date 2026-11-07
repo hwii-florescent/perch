@@ -470,10 +470,15 @@ UI rows from step 0 continue between slices.
    build it first; `e2e/packaged-perch.check.mjs`). Not done: there is no headless package to
    put it in (open question for the owner), and the Linux packages were not built here. Slice 4
    makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
-4. **Spawn, list, stop and reports:** parent link, limits before dispatch, the
-   person-turn rule, reports as claims with the Stop-hook fallback. Check: tests for
-   duplicate spawn, limit refusal, a spawn on a message-opened turn, stop confirmed
-   before cleanup; live, a haiku lead spawns a luna child and reads its report.
+4. **Spawn, list, stop and reports. Done 2026-11-06** (details in the worker guide):
+   `perch spawn|list|stop`, parent link (`sessions.parent_session_id`) and `sub_sessions`
+   records, limits (4 live, 8 total, depth 1) and the person-turn rule admitted in one
+   transaction before anything starts, an idempotency key, stop confirmed by perchd, reports
+   as labelled claims with a last-message fallback, bare `list`/`serve`/`connect` aliases
+   gone, `perch guide` extended. Live: a haiku lead spawned a haiku child, read its report and
+   stopped it. **Not verified:** a luna Codex child end to end (its quota was spent after it
+   started), `--worktree` (no test, no live run), and the stop of children on the chat's
+   interrupt or a lead's deletion (not built).
 5. **Messaging** (`send`, `inbox`) with the durable queue and wake cap; write restart,
    cancellation, duplicate and lease-contention behaviour down first. Check: queue
    recovery after restart without duplicates; busy, approval-blocked and
