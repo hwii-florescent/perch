@@ -531,6 +531,11 @@ child's recap or last message; do not copy its text).
 
 - **Trigger:** a child's turn end as Perch already sees it (Claude Stop hook, Codex
   `turn/completed`, Pi/OMP `agent_end`), once per turn; not for the lead.
+- **Running notes, not history** (same idea as Claude Code 2.1.316 moving background-subagent
+  status lines to Haiku 5.5 with short notes, reported ~99% cheaper per update): the input is
+  the child's previous summary plus only this turn's new events, so cost per summary stays flat
+  however long the child runs. Live "working" status between turns stays the free Rust live
+  line from `transcript.rs`; no periodic model call.
 - **Input:** a bounded slice of that turn from the transcript Perch already projects
   (`native_ui/transcript.rs`): the final assistant text, one line per tool run (the run
   sentence), changed files from `agent_change_snapshots`, and any pending question; cap the
