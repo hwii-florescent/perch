@@ -1392,6 +1392,23 @@ export interface CrewRow {
   latest?: CrewLatest;
   /** A message to it would be accepted now. */
   canMessage: boolean;
+  /** What a person may do to this child from the strip, each with the reason it is not offered
+   * (capability `crew.actions.v1`). Only a lead's `worker` rows have it. */
+  actions?: CrewActions;
+}
+
+/** The four family-strip actions on a child and whether each is available now. */
+export interface CrewActions {
+  message: CrewActionState;
+  steer: CrewActionState;
+  interrupt: CrewActionState;
+  stop: CrewActionState;
+}
+
+export interface CrewActionState {
+  ok: boolean;
+  /** Why it is not available; absent when it is. */
+  reason?: string;
 }
 
 export interface CrewNeedsYou {
@@ -1416,6 +1433,37 @@ export interface CrewLatest {
   at: number;
   receipt: string;
   reason: string;
+  /** `message` or `steer`; absent from an older core, which means `message`. */
+  kind?: string;
+}
+
+/** Act on one of a lead's sub-sessions from its family strip (capability `crew.actions.v1`):
+ * `message` (queued, idle-only), `steer` (into its running turn), `interrupt` (stop its current
+ * turn) or `stop` (confirmed). `sessionId` is the lead whose chat shows the strip and `generation`
+ * that chat's input lease, as for typing in it. Answered with `crew.act.result` (a `sent` result may
+ * precede the final one). Nothing here is ever retried. */
+export interface CrewActMessage {
+  type: "crew.act";
+  requestId: string;
+  sessionId: string;
+  childSessionId: string;
+  action: string;
+  generation: number;
+  text?: string;
+}
+
+/** Reply to `crew.act`. `outcome`: `queued`, `sent` (handed to the provider, its answer awaited, not
+ * final), `confirmed`, `not_confirmed` (it may have taken effect; never retried) or `refused`
+ * (nothing was done; `reason` says why). `done` is false only for `sent`. */
+export interface CrewActResultMessage {
+  type: "crew.act.result";
+  requestId: string;
+  sessionId: string;
+  childSessionId: string;
+  action: string;
+  outcome: string;
+  reason?: string;
+  done: boolean;
 }
 
 /** Reply to `crew.get`: the session's family, newest traffic first. */
@@ -2218,6 +2266,7 @@ export type ClientMessage =
   | BrowserSuggestMessage
   | InstructionsGetMessage
   | CrewGetMessage
+  | CrewActMessage
   | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
@@ -3009,6 +3058,7 @@ export type ServerMessage =
   | BrowserSuggestResultMessage
   | InstructionsStateMessage
   | CrewStateMessage
+  | CrewActResultMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage

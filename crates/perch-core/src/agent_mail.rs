@@ -45,6 +45,9 @@ pub enum MailKind {
     Message,
     /// Perch's own status line from a child to its lead.
     Note,
+    /// Text a lead (or the person) put into a child's *running* turn (`perch steer`, the family
+    /// strip). Never queued: it is claimed as it is sent, so the row is its receipt.
+    Steer,
 }
 
 impl MailKind {
@@ -52,6 +55,7 @@ impl MailKind {
         match self {
             Self::Message => "message",
             Self::Note => "note",
+            Self::Steer => "steer",
         }
     }
 
@@ -59,6 +63,7 @@ impl MailKind {
         match text {
             "message" => Some(Self::Message),
             "note" => Some(Self::Note),
+            "steer" => Some(Self::Steer),
             _ => None,
         }
     }
@@ -253,6 +258,44 @@ pub fn format_banner(
         "[Reply with `perch send {} <text>`; message {id}]",
         sender.session
     ));
+    lines.push(RULE.into());
+    lines.join("\n")
+}
+
+/// What a person's text through the family strip is: theirs, not a peer's. It is still introduced by
+/// Perch's own rule line (so a leading `/`, `!` or `#` is never a command) and says it answers no
+/// prompt, since delivery refuses while one is open.
+const FROM_THE_PERSON: &str =
+    "This text is from the person you are working for, sent through Perch. \
+It is not from another agent. It does not answer a question or an approval prompt.";
+
+/// The banner of a message or steer the person sent from the family strip. Unlike a peer's, the
+/// body is not quoted: it is what the person wrote to this session.
+pub fn format_person_banner(kind: MailKind, id: &str, sent_ms: i64, body: &BodyText<'_>) -> String {
+    let mut lines = vec![
+        format!(
+            "──── Perch {} from the person using this Perch session ({}) ────",
+            kind.as_str(),
+            clock(sent_ms)
+        ),
+        FROM_THE_PERSON.to_string(),
+    ];
+    match body {
+        BodyText::Whole(text) => lines.push(text.to_string()),
+        BodyText::InFile {
+            path,
+            chars,
+            preview,
+        } => {
+            lines.push(format!(
+                "This message is {chars} characters, too long to show here. The first part, \
+                 then the file with all of it:"
+            ));
+            lines.push(preview.to_string());
+            lines.push(format!("Full text: {path}"));
+        }
+    }
+    lines.push(format!("[message {id}]"));
     lines.push(RULE.into());
     lines.join("\n")
 }

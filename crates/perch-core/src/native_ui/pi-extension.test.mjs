@@ -22,7 +22,8 @@ async function check(provider) {
     .replace('"__PERCH_NATIVE_SOCKET__"', JSON.stringify(socket))
     .replace('"__PERCH_NATIVE_PROVIDER__"', JSON.stringify(provider)));
   const handlers = new Map();
-  const pi = { on(name, fn) { handlers.set(name, fn); }, appendEntry() {}, sendUserMessage() {} };
+  const sentMessages = [];
+  const pi = { on(name, fn) { handlers.set(name, fn); }, appendEntry() {}, sendUserMessage(text, options) { sentMessages.push([text, options]); } };
   let idle = true;
   const ctx = {
     cwd: dir, model: { id: "model" }, isIdle: () => idle, hasPendingMessages: () => false, abort() {},
@@ -38,7 +39,7 @@ async function check(provider) {
     peer = net.connect(socket);
     let buffer = "";
     peer.setEncoding("utf8");
-    peer.on("data", data => { buffer += data; let end; while ((end = buffer.indexOf("\n")) >= 0) { received.push(JSON.parse(buffer.slice(0, end))); buffer = buffer.slice(end + 1); } });
+    peer.on("data", data => { buffer += data; let end; while ((end = buffer.indexOf("\n")) >= 0) { const event = JSON.parse(buffer.slice(0, end)); if (event.type !== "commands") received.push(event); buffer = buffer.slice(end + 1); } });
     await until(() => received.length > 0);
     assert.equal(received.at(-1).blocked, false);
     idle = false;
@@ -64,6 +65,19 @@ async function check(provider) {
     idle = true;
     fire("agent_end");
     await until(() => received.at(-1).blocked === false && received.at(-1).running === false);
+    // A steer joins a running turn through the CLI's steering queue, and is refused on an idle session.
+    peer.write(JSON.stringify({ type: "steer", requestId: "s1", text: "use the other file" }) + "\n");
+    await until(() => received.some(event => event.requestId === "s1"));
+    assert.equal(received.find(event => event.requestId === "s1").accepted, false);
+    assert.equal(sentMessages.length, 0);
+    idle = false;
+    peer.write(JSON.stringify({ type: "steer", requestId: "s2", text: "use the other file" }) + "\n");
+    await until(() => received.some(event => event.requestId === "s2"));
+    assert.equal(received.find(event => event.requestId === "s2").accepted, true);
+    assert.deepEqual(sentMessages, [["use the other file", { deliverAs: "steer" }]]);
+    peer.write(JSON.stringify({ type: "steer", requestId: "s2", text: "use the other file" }) + "\n");
+    await until(() => received.filter(event => event.requestId === "s2").length === 2);
+    assert.equal(sentMessages.length, 1, "a repeated request id is not sent twice");
   } finally {
     peer?.destroy();
     await handlers.get("session_shutdown")?.();

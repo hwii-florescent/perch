@@ -106,8 +106,12 @@ Each module's `//!` header names the files it follows:
   crew-party-snapshot.ts` and the admitted-traffic, latest-per-peer and newest-first rules of
   `crew-query.ts`. `packages/web/src/views/nativeChat/FamilyStrip.tsx`: layout, wording and detail fields of
   `src/renderer/src/components/orchestration-crew/CrewRowView.tsx` and `CrewRowDetails.tsx`, on Perch's
-  own classes. Orca's parent-claim reduction, recipient availability, Mention, row menu and panel are not
-  ported.
+  own classes. Orca's parent-claim reduction, recipient availability, Mention and panel are not ported.
+- `crew_actions.rs` (with `server/crew_actions.rs`) and the row actions of `FamilyStrip.tsx`: the menu shape
+  of `src/renderer/src/components/orchestration-crew/CrewRowMenu.tsx` (a default action beside a "more"
+  menu of the others, each item disabled when not possible), on Perch's own classes. Which provider
+  mechanism carries Steer and Interrupt, who may use them and the caps are Perch's own; Orca's menu items
+  (Mention, Open its chat, Copy address) are not ported.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.

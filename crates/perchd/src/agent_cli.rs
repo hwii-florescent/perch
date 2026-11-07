@@ -389,11 +389,20 @@ struct SendArgs {
 }
 
 fn parse_send(args: &[String], stdin: impl FnOnce() -> Option<String>) -> Result<SendArgs, String> {
+    parse_text_verb(args, stdin, SEND_USAGE)
+}
+
+/// `<session> [--key <key>] <text>`, the shape of `send` and `steer`.
+fn parse_text_verb(
+    args: &[String],
+    stdin: impl FnOnce() -> Option<String>,
+    usage: &str,
+) -> Result<SendArgs, String> {
     let mut words = args.iter();
     let target = words
         .next()
         .filter(|word| !word.starts_with("--"))
-        .ok_or_else(|| SEND_USAGE.to_string())?
+        .ok_or_else(|| usage.to_string())?
         .clone();
     let mut key = None;
     let mut rest: Vec<&str> = Vec::new();
@@ -403,7 +412,7 @@ fn parse_send(args: &[String], stdin: impl FnOnce() -> Option<String>) -> Result
                 words
                     .next()
                     .cloned()
-                    .ok_or_else(|| format!("--key needs a value. {SEND_USAGE}"))?,
+                    .ok_or_else(|| format!("--key needs a value. {usage}"))?,
             );
         } else {
             rest.push(word);
@@ -415,7 +424,7 @@ fn parse_send(args: &[String], stdin: impl FnOnce() -> Option<String>) -> Result
         text = stdin().unwrap_or_default();
     }
     if text.trim().is_empty() {
-        return Err(format!("a message needs text. {SEND_USAGE}"));
+        return Err(format!("it needs text. {usage}"));
     }
     Ok(SendArgs { target, key, text })
 }
@@ -523,6 +532,51 @@ fn inbox(json_output: bool) -> Result<(), String> {
     Ok(())
 }
 
+const STEER_USAGE: &str = "usage: perch steer <session> [--key <key>] <text>";
+
+/// A receipt for a steer or an interrupt, in words. `not_confirmed` is never a failure to retry:
+/// the action may have taken effect.
+fn action_receipt(answer: &Value) -> String {
+    let reason = answer["reason"].as_str().unwrap_or_default();
+    match answer["outcome"].as_str().unwrap_or_default() {
+        "confirmed" => "confirmed by the agent's own event".to_string(),
+        "not_confirmed" if reason.is_empty() => "sent, not confirmed; it may have taken effect, so look at `perch list` before doing anything again".to_string(),
+        "not_confirmed" => format!("sent, not confirmed ({reason}); it may have taken effect, so look at `perch list` before doing anything again"),
+        other => other.to_string(),
+    }
+}
+
+fn steer(args: &[String]) -> Result<(), String> {
+    let parsed = parse_text_verb(args, piped_text, STEER_USAGE)?;
+    let key = match &parsed.key {
+        Some(key) => key.clone(),
+        None => fresh_key()?,
+    };
+    let answer = ask(
+        "steer",
+        json!({ "target": parsed.target, "text": parsed.text, "key": key }),
+    )?;
+    let id = answer["id"].as_str().unwrap_or_default();
+    if answer["duplicate"].as_bool().unwrap_or(false) {
+        println!("already sent as {id} (same key); nothing new was sent");
+    }
+    println!("steer {id}: {}", action_receipt(&answer));
+    Ok(())
+}
+
+fn interrupt(args: &[String]) -> Result<(), String> {
+    let [target] = args else {
+        return Err("usage: perch interrupt <session>".into());
+    };
+    let answer = ask("interrupt", json!({ "target": target }))?;
+    println!(
+        "{}: interrupt {}",
+        answer["session"].as_str().unwrap_or(target),
+        action_receipt(&answer)
+    );
+    Ok(())
+}
+
 fn cancel(args: &[String]) -> Result<(), String> {
     let [message] = args else {
         return Err("usage: perch cancel <message>".into());
@@ -567,6 +621,18 @@ Commands
   perch inbox [--json]    What was sent to you and what you sent, with each receipt. Read-only;
                           it does not mark anything read.
   perch cancel <message>  Take back a message of yours while it is still queued.
+  perch steer <session> [--key <key>] <text>
+                          Put text into the running turn of one of your sub-sessions, to
+                          correct it while it is going the wrong way. Only a lead can, only
+                          for its own sub-sessions, only while that turn runs, and never
+                          while the sub-session waits on a person's approval or answer. It
+                          is a message for the limits (up to 2000 characters, counts toward
+                          your 50) and reaches it quoted, like any message. The receipt says
+                          confirmed or sent but not confirmed; neither is repeated for you.
+  perch interrupt <session>
+                          Stop the current turn of one of your sub-sessions and keep the
+                          session (it waits for its next message). Same conditions as steer;
+                          at most 3 per sub-session between one person's messages to you.
   perch guide             This text.
 
 How it works
@@ -601,6 +667,12 @@ Messages
     sub-session did (finished its turn, is waiting on a person, exited) and, quoted as its own
     claim, the start of its report. A lead is woken at most 10 times by these between one
     person's messages, and only when no sub-session is working.
+  - Queued messages are the default: `perch send` waits until the receiver is idle and never
+    interrupts it. `perch steer` and `perch interrupt` are for correcting a sub-session that
+    is going the wrong way right now (the wrong files, a loop, work you no longer want); do not
+    use them to chat, to check on progress or to hurry it. A steer or an interrupt that is not
+    confirmed may still have taken effect: look at `perch list`, do not repeat it blindly.
+    A sub-session cannot steer or interrupt anyone.
   - Send little. Put what a sub-session needs in its task; send a message when something
     changes that it cannot see. Do not send to say you received something.
 
@@ -631,6 +703,8 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "send" => send(args),
         "inbox" => inbox(args.iter().any(|arg| arg == "--json")),
         "cancel" => cancel(args),
+        "steer" => steer(args),
+        "interrupt" => interrupt(args),
         "guide" => {
             print!("{GUIDE}");
             // Inside a session the path of its run's notes folder follows. Outside one, or with no
@@ -892,6 +966,38 @@ mod tests {
     }
 
     #[test]
+    fn steer_takes_the_shape_of_send_and_names_its_own_usage_when_refused() {
+        let none = || -> Option<String> { None };
+        let parsed =
+            parse_text_verb(&words("child-1 use the /other file"), none, STEER_USAGE).unwrap();
+        assert_eq!(
+            (parsed.target.as_str(), parsed.text.as_str()),
+            ("child-1", "use the /other file")
+        );
+        let refused = parse_text_verb(&words("child-1"), none, STEER_USAGE).unwrap_err();
+        assert!(refused.contains("perch steer <session>"), "{refused}");
+        assert!(parse_text_verb(&words(""), none, STEER_USAGE)
+            .unwrap_err()
+            .contains("perch steer"));
+    }
+
+    #[test]
+    fn a_steer_or_interrupt_receipt_never_calls_an_unconfirmed_one_a_failure() {
+        assert!(action_receipt(&json!({"outcome": "confirmed"})).starts_with("confirmed"));
+        let unconfirmed =
+            action_receipt(&json!({"outcome": "not_confirmed", "reason": "it did not answer"}));
+        assert!(
+            unconfirmed.contains("not confirmed (it did not answer)"),
+            "{unconfirmed}"
+        );
+        assert!(
+            unconfirmed.contains("may have taken effect"),
+            "{unconfirmed}"
+        );
+        assert!(!unconfirmed.contains("failed"));
+    }
+
+    #[test]
     fn a_receipt_says_where_the_message_stands_and_why() {
         assert!(receipt("queued", "").contains("when the receiver is idle"));
         assert!(receipt("queued", "the receiver is working")
@@ -934,6 +1040,11 @@ mod tests {
     fn the_guide_teaches_the_new_verbs_and_the_rules_that_go_with_them() {
         for needle in [
             "perch send",
+            "perch steer",
+            "perch interrupt",
+            "going the wrong way",
+            "Queued messages are the default",
+            "cannot steer or interrupt anyone",
             "perch inbox",
             "perch cancel",
             "never over a person's draft",

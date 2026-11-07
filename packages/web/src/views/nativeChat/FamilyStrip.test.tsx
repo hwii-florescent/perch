@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CrewRow } from "@perch/shared";
-import { FamilyStrip, ago, headline, receiptNote, stateOf } from "./FamilyStrip";
+import { FamilyStrip, actionReceipt, ago, headline, receiptNote, stateOf, type OnAct } from "./FamilyStrip";
 import { familySignature } from "../../crew";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,6 +77,113 @@ it("labels a fallback last message as not a report and draws nothing for an empt
   expect(host.querySelector('[data-testid="native-cli-family-report"]')!.textContent).toBe("Last message, not a report: I changed x");
   act(() => root.render(<FamilyStrip rows={[]} onOpen={() => {}} />));
   expect(host.querySelector('[data-testid="native-cli-family"]')).toBeNull();
+});
+
+const offered = (extra: Record<string, { ok: boolean; reason?: string }> = {}) => ({
+  message: { ok: true }, steer: { ok: true }, interrupt: { ok: true }, stop: { ok: true }, ...extra,
+});
+const click = (element: Element | null) => act(() => (element as HTMLElement).click());
+const typeInto = (area: HTMLTextAreaElement, value: string) => act(() => {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, value);
+  area.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+it("words a receipt as the core said it: an unconfirmed steer is never called done or failed", () => {
+  expect(actionReceipt("steer", "confirmed")).toBe("Steer confirmed");
+  expect(actionReceipt("interrupt", "sent")).toBe("Interrupt sent, waiting for its answer…");
+  expect(actionReceipt("steer", "not_confirmed", "it did not answer in time")).toBe("Steer sent, not confirmed: it did not answer in time. It may have taken effect; Perch does not retry it");
+  expect(actionReceipt("stop", "confirmed")).toBe("Stopped");
+  expect(actionReceipt("stop", "not_confirmed", "Perch could not confirm")).toBe("Stop not confirmed: Perch could not confirm");
+  expect(actionReceipt("message", "queued")).toBe("Message queued; it is delivered when the child is idle");
+  expect(actionReceipt("interrupt", "refused", "no turn is running in it")).toBe("Interrupt refused: no turn is running in it");
+});
+
+it("offers Message and a menu whose unavailable actions are disabled with the core's reason", () => {
+  const onAct: OnAct = vi.fn();
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} onAct={onAct} rows={[
+    row({ task: "fix", lifecycle: "idle", dispatch: "running", actions: offered({ steer: { ok: false, reason: "no turn is running in it; use Message" }, interrupt: { ok: false, reason: "no turn is running in it" } }) }),
+    row({ sessionId: "lead", role: "manager", lifecycle: "working" }),
+  ]} />));
+  // Only a worker row has actions; the lead row has none.
+  expect(host.querySelectorAll('[data-testid="native-cli-family-actions"]')).toHaveLength(1);
+  expect((host.querySelector('[data-testid="native-cli-family-message"]') as HTMLButtonElement).disabled).toBe(false);
+  click(host.querySelector('[data-testid="native-cli-family-more"]'));
+  const steer = host.querySelector('[data-testid="native-cli-family-steer"]') as HTMLButtonElement;
+  expect(steer.disabled).toBe(true);
+  expect(host.querySelector('[data-testid="native-cli-family-steer-reason"]')!.textContent).toBe("no turn is running in it; use Message");
+  expect((host.querySelector('[data-testid="native-cli-family-interrupt"]') as HTMLButtonElement).disabled).toBe(true);
+  expect((host.querySelector('[data-testid="native-cli-family-stop"]') as HTMLButtonElement).disabled).toBe(false);
+  click(steer);
+  expect(onAct).not.toHaveBeenCalled();
+});
+
+it("asks for fresh rows as the action menu opens and while it stays open, and not otherwise", () => {
+  vi.useFakeTimers();
+  try {
+    const onRefresh = vi.fn();
+    act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} onAct={vi.fn()} onRefresh={onRefresh} rows={[row({ actions: offered() })]} />));
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(onRefresh).not.toHaveBeenCalled();
+    click(host.querySelector('[data-testid="native-cli-family-more"]'));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(4_000); });
+    expect(onRefresh).toHaveBeenCalledTimes(3);
+    click(host.querySelector('[data-testid="native-cli-family-more"]'));
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(onRefresh).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
+});
+
+it("without the chat's input control every action is disabled with that reason, and a core that cannot act shows no actions", () => {
+  const onAct: OnAct = vi.fn();
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} onAct={onAct} unavailable="Take control of this chat to act on a sub-session" rows={[row({ actions: offered() })]} />));
+  const message = host.querySelector('[data-testid="native-cli-family-message"]') as HTMLButtonElement;
+  expect(message.disabled).toBe(true);
+  expect(message.title).toBe("Take control of this chat to act on a sub-session");
+  click(host.querySelector('[data-testid="native-cli-family-more"]'));
+  expect((host.querySelector('[data-testid="native-cli-family-interrupt"]') as HTMLButtonElement).disabled).toBe(true);
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[row({ actions: offered() })]} />));
+  expect(host.querySelector('[data-testid="native-cli-family-actions"]')).toBeNull();
+});
+
+it("sends a steer from the row's composer, shows the core's progress and final receipt, and sends it once", async () => {
+  let finish: (value: { outcome: string; reason?: string }) => void = () => {};
+  const onAct = vi.fn<OnAct>((_child, _action, _text, progress) => { progress({ outcome: "sent" }); return new Promise((resolve) => { finish = resolve; }); });
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} onAct={onAct} rows={[row({ sessionId: "c1", lifecycle: "working", dispatch: "running", actions: offered() })]} />));
+  click(host.querySelector('[data-testid="native-cli-family-more"]'));
+  click(host.querySelector('[data-testid="native-cli-family-steer"]'));
+  const area = host.querySelector('[data-testid="native-cli-family-compose"] textarea') as HTMLTextAreaElement;
+  typeInto(area, "use the other file");
+  click(host.querySelector('[data-testid="native-cli-family-send"]'));
+  expect(onAct).toHaveBeenCalledTimes(1);
+  expect(onAct.mock.calls[0]!.slice(0, 3)).toEqual(["c1", "steer", "use the other file"]);
+  expect(host.querySelector('[data-testid="native-cli-family-receipt"]')!.textContent).toBe("Steer sent, waiting for its answer…");
+  // While it is awaited a second press does nothing.
+  click(host.querySelector('[data-testid="native-cli-family-send"]'));
+  expect(onAct).toHaveBeenCalledTimes(1);
+  await act(async () => { finish({ outcome: "not_confirmed", reason: "it did not answer in time" }); });
+  expect(host.querySelector('[data-testid="native-cli-family-receipt"]')!.textContent).toContain("Steer sent, not confirmed: it did not answer in time");
+  expect(host.querySelector('[data-testid="native-cli-family-compose"]')).toBeNull();
+});
+
+it("keeps the words when an action is refused, interrupts at once, and stops only after a confirm step", async () => {
+  const onAct = vi.fn<OnAct>(async (_child, action) => action === "message" ? { outcome: "refused", reason: "it is not running" } : action === "stop" ? { outcome: "not_confirmed", reason: "Perch could not confirm" } : { outcome: "confirmed" });
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} onAct={onAct} rows={[row({ sessionId: "c1", lifecycle: "working", dispatch: "running", actions: offered() })]} />));
+  click(host.querySelector('[data-testid="native-cli-family-message"]'));
+  typeInto(host.querySelector('[data-testid="native-cli-family-compose"] textarea') as HTMLTextAreaElement, "hello");
+  await act(async () => click(host.querySelector('[data-testid="native-cli-family-send"]')));
+  expect((host.querySelector('[data-testid="native-cli-family-compose"] textarea') as HTMLTextAreaElement).value).toBe("hello");
+  expect(host.querySelector('[data-testid="native-cli-family-receipt"]')!.textContent).toBe("Message refused: it is not running");
+  click(host.querySelector('[data-testid="native-cli-family-more"]'));
+  await act(async () => click(host.querySelector('[data-testid="native-cli-family-interrupt"]')));
+  expect(onAct).toHaveBeenLastCalledWith("c1", "interrupt", undefined, expect.any(Function));
+  expect(host.querySelector('[data-testid="native-cli-family-receipt"]')!.textContent).toBe("Interrupt confirmed");
+  click(host.querySelector('[data-testid="native-cli-family-more"]'));
+  click(host.querySelector('[data-testid="native-cli-family-stop"]'));
+  expect(onAct).toHaveBeenCalledTimes(2);
+  await act(async () => click(host.querySelector('[data-testid="native-cli-family-confirm"]')));
+  expect(onAct).toHaveBeenLastCalledWith("c1", "stop", undefined, expect.any(Function));
+  expect(host.querySelector('[data-testid="native-cli-family-receipt"]')!.textContent).toBe("Stop not confirmed: Perch could not confirm");
 });
 
 it("watches only the sessions that can change a family: the lead and its children", () => {

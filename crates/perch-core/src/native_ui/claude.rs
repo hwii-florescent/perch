@@ -325,6 +325,71 @@ pub(super) fn prompt_stamp(config: &Path) -> String {
     stamp(&event_path(config, "UserPromptSubmit"))
 }
 
+/// How much of the end of the transcript is read to see whether a steer joined the running turn.
+const STEER_TAIL: u64 = 512 * 1024;
+
+/// Did Claude's own prompt queue feed the prompt holding `marker` into the turn that was running?
+/// Observed on 2.1.319 (2026-11-07): text submitted mid-turn is written as a `queue-operation`
+/// `enqueue` row; when the turn takes it in at its next step Claude writes a `remove` row whose
+/// `reason` is `absorbed_mid_turn` and a `queued_command` attachment carrying the text, and the turn
+/// goes on without a new prompt. Text that waited until the turn ended is `dequeue`d instead and
+/// starts a turn of its own, which is not a steer. The transcript is undocumented, so a row that does
+/// not read as expected counts as not absorbed. `marker` is text unique to the prompt (its message id).
+pub(crate) fn steer_absorbed(transcript_tail: &str, marker: &str) -> bool {
+    transcript_tail.lines().any(|line| {
+        if !line.contains(marker) {
+            return false;
+        }
+        let Ok(row) = serde_json::from_str::<Value>(line) else {
+            return false;
+        };
+        let queued = &row["attachment"];
+        (row["type"] == "queue-operation"
+            && row["operation"] == "remove"
+            && row["reason"] == "absorbed_mid_turn"
+            && row["content"]
+                .as_str()
+                .is_some_and(|text| text.contains(marker)))
+            || (row["type"] == "attachment"
+                && queued["type"] == "queued_command"
+                && queued["prompt"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(marker)))
+    })
+}
+
+/// [`steer_absorbed`] over the end of this session's transcript (the file its `SessionStart` hook
+/// named). Unreadable is not absorbed.
+pub(crate) fn steer_absorbed_in_session(key: &AgentKey, marker: &str) -> bool {
+    let Ok(paths) = paths(key) else {
+        return false;
+    };
+    let Ok((_, start)) = read_event(&event_path(&paths.extension, "SessionStart")) else {
+        return false;
+    };
+    let Some(path) = start["transcript_path"].as_str() else {
+        return false;
+    };
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let Ok(length) = file.metadata().map(|meta| meta.len()) else {
+        return false;
+    };
+    use std::io::Seek;
+    if file
+        .seek(std::io::SeekFrom::Start(length.saturating_sub(STEER_TAIL)))
+        .is_err()
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    if file.take(STEER_TAIL).read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    steer_absorbed(&String::from_utf8_lossy(&bytes), marker)
+}
+
 pub(super) fn settings(
     config: &Path,
     fresh: bool,
@@ -952,9 +1017,38 @@ pub(super) async fn observe(
 #[cfg(test)]
 mod tests {
     use super::{
-        empty_prompt, ends_interrupted, iso_ms, messages, prompt_row, roster_stamp, subagent_roster,
+        empty_prompt, ends_interrupted, iso_ms, messages, prompt_row, roster_stamp, steer_absorbed,
+        subagent_roster,
     };
     use serde_json::json;
+
+    /// Rows as Claude 2.1.319 wrote them for text submitted mid-turn (probed 2026-11-07).
+    #[test]
+    fn a_steer_counts_as_absorbed_only_when_claude_took_it_into_the_running_turn() {
+        let marker = "message 5d1f";
+        let text = format!("──── Perch steer ────\nuse the other file\n[{marker}]");
+        let enqueue = json!({"type": "queue-operation", "operation": "enqueue", "content": text});
+        let absorbed = json!({"type": "queue-operation", "operation": "remove", "content": text, "reason": "absorbed_mid_turn"});
+        let attachment =
+            json!({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}});
+        let rows = |list: &[&serde_json::Value]| {
+            list.iter()
+                .map(|row| row.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        // Only queued: it may yet start a turn of its own instead.
+        assert!(!steer_absorbed(&rows(&[&enqueue]), marker));
+        assert!(steer_absorbed(&rows(&[&enqueue, &absorbed]), marker));
+        assert!(steer_absorbed(&rows(&[&enqueue, &attachment]), marker));
+        // It waited for the turn to end and was dequeued: that is a new turn, not a steer.
+        let dequeued = json!({"type": "queue-operation", "operation": "dequeue"});
+        assert!(!steer_absorbed(&rows(&[&enqueue, &dequeued]), marker));
+        // Another message's absorption, and a row that does not parse, prove nothing.
+        let other = json!({"type": "queue-operation", "operation": "remove", "content": "other text", "reason": "absorbed_mid_turn"});
+        assert!(!steer_absorbed(&rows(&[&other]), marker));
+        assert!(!steer_absorbed(&format!("{{ {marker} not json"), marker));
+    }
 
     #[test]
     fn claude_timestamps_read_as_epoch_milliseconds() {

@@ -494,6 +494,15 @@ UI rows from step 0 continue between slices.
    named in `perch guide`. Live: the strip and the nested row beside a real haiku lead and child; working
    / waiting on you / reported are unit-tested, **"waiting on you" and the phone layout not run live**.
 
+7. **Family strip actions. Done 2026-11-07** (worker guide "Slice 7 landed", ARCHITECTURE "Family strip
+   actions"): Message (default, idle-only, from the person), Steer, Interrupt and Stop on each worker row,
+   `crew.act` / `crew.act.result` (capability `crew.actions.v1`) under the lead chat's input lease, receipts
+   (`sent` / `confirmed` / `not confirmed`) never retried; the lead may steer and interrupt its own children
+   (`perch steer`, `perch interrupt`; refused while the child waits on a person, interrupts capped at 3 per
+   child per person's message). Claude steer is offered: its own queue feeds mid-turn text into the turn
+   (probed, transcript-confirmed). Live: haiku lead and child, all four actions. **Not run live:** Codex,
+   Pi, OMP, a lead's own steer or interrupt, the phone layout.
+
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 
 **Probed live first (2026-11-06):** see slice 0 above and the evidence table; nothing

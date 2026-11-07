@@ -175,6 +175,23 @@ export default function (pi: any) {
         schedule();
         return;
       }
+      if (request.type === "steer") {
+        // Into the running turn through the CLI's own steering queue. Only while a turn runs: a steer on an
+        // idle session would start one, and starting turns is `prompt`'s job.
+        if (typeof request.text !== "string" || !request.text.trim() || Buffer.byteLength(request.text) > 64 * 1024) throw new Error("Invalid steer");
+        if (receipts.has(requestId)) {
+          send(client, { type: "ack", requestId, accepted: receipts.get(requestId) === "accepted", duplicate: true });
+          return;
+        }
+        if (ctx.isIdle()) throw new Error("No turn is running to steer");
+        receipt(requestId, "dispatching");
+        const result = pi.sendUserMessage(request.text, { deliverAs: "steer" });
+        Promise.resolve(result).catch(() => schedule(0));
+        receipt(requestId, "accepted");
+        send(client, { type: "ack", requestId, accepted: true });
+        schedule(0);
+        return;
+      }
       if (request.type !== "prompt" || typeof request.text !== "string" || !request.text.trim() || Buffer.byteLength(request.text) > 64 * 1024) throw new Error("Invalid prompt");
       if (receipts.has(requestId)) {
         send(client, { type: "ack", requestId, accepted: receipts.get(requestId) === "accepted", duplicate: true });

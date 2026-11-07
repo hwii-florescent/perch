@@ -121,6 +121,47 @@ impl HistoryDb {
     /// Admit and queue a message: the sender's earlier message under the same key if there is
     /// one, else the run, the limits and the receiver's live identity, then the row, atomically.
     pub fn enqueue_message(&self, new: &NewMail<'_>) -> anyhow::Result<Enqueued> {
+        self.admit_mail(new, MailKind::Message, MailState::Queued)
+    }
+
+    /// Record a steer an agent sends into a child's running turn. Admitted like a message (same run,
+    /// limits, live receiver, key, and it counts toward the run's messages) but never queued: the
+    /// row starts `delivering`, claimed as it is sent, and is settled by the receiver's answer.
+    pub fn record_steer(&self, new: &NewMail<'_>) -> anyhow::Result<Enqueued> {
+        self.admit_mail(new, MailKind::Steer, MailState::Delivering)
+    }
+
+    /// Record a message (queued) or a steer (claimed) a person sent from the family strip. The
+    /// sender is [`crate::crew_actions::PERSON`], so it does not count toward the run's messages
+    /// and spends no wake. `new.sender_session_id` is ignored; `new.target_session_id` must be a
+    /// session of a run.
+    pub fn record_person_mail(
+        &self,
+        new: &NewMail<'_>,
+        kind: MailKind,
+    ) -> anyhow::Result<Enqueued> {
+        debug_assert!(matches!(kind, MailKind::Message | MailKind::Steer));
+        let state = if kind == MailKind::Steer {
+            MailState::Delivering
+        } else {
+            MailState::Queued
+        };
+        let person = NewMail {
+            sender_session_id: crate::crew_actions::PERSON,
+            sender_provider: crate::crew_actions::PERSON,
+            sender_label: crate::crew_actions::PERSON,
+            ..*new
+        };
+        self.admit_mail(&person, kind, state)
+    }
+
+    fn admit_mail(
+        &self,
+        new: &NewMail<'_>,
+        kind: MailKind,
+        state: MailState,
+    ) -> anyhow::Result<Enqueued> {
+        let from_person = new.sender_session_id == crate::crew_actions::PERSON;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let existing = tx
@@ -136,15 +177,25 @@ impl HistoryDb {
         if let Some(existing) = existing {
             return Ok(Enqueued::Existing(existing));
         }
-        let sender_run = run_of(&tx, new.sender_session_id)?;
         let target_run = run_of(&tx, new.target_session_id)?;
+        let sender_run = if from_person {
+            target_run.clone()
+        } else {
+            run_of(&tx, new.sender_session_id)?
+        };
+        if from_person && target_run.is_none() {
+            // A session in no run: there is nobody to write to.
+            return Ok(Enqueued::Refused(SendRefusal::OtherRun));
+        }
         let run = sender_run
             .clone()
             .ok_or_else(|| anyhow::anyhow!("the sending session no longer exists"))?;
         let incarnation = live_incarnation_of(&tx, new.target_session_id)?;
+        // What an agent of the run sent counts, a person's does not.
         let run_messages: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM agent_mail WHERE run_id = ?1 AND kind = 'message'",
-            params![run],
+            "SELECT COUNT(*) FROM agent_mail
+             WHERE run_id = ?1 AND kind IN ('message', 'steer') AND sender_session_id <> ?2",
+            params![run, crate::crew_actions::PERSON],
             |row| row.get(0),
         )?;
         let context = SendContext {
@@ -152,7 +203,12 @@ impl HistoryDb {
             same_run: target_run.is_some() && target_run == sender_run,
             target_live: incarnation.is_some(),
             target_is_agent: new.target_is_agent,
-            run_messages: run_messages as usize,
+            // The run's limit is on what its agents send.
+            run_messages: if from_person {
+                0
+            } else {
+                run_messages as usize
+            },
             target_pending: pending_for(&tx, new.target_session_id)?,
         };
         if let Err(refusal) = agent_mail::admit_send(&context) {
@@ -165,7 +221,7 @@ impl HistoryDb {
                 (id, run_id, kind, sender_session_id, sender_provider, sender_label,
                  target_session_id, target_provider, target_incarnation, body, idem_key,
                  state, reason, created_at, updated_at)
-             VALUES (?1, ?2, 'message', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', '', ?11, ?11)",
+             VALUES (?1, ?2, ?12, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?13, '', ?11, ?11)",
             params![
                 id,
                 run,
@@ -177,7 +233,9 @@ impl HistoryDb {
                 incarnation,
                 new.body,
                 new.key,
-                now
+                now,
+                kind.as_str(),
+                state.as_str()
             ],
         )?;
         let row = tx.query_row(
@@ -187,6 +245,62 @@ impl HistoryDb {
         )?;
         tx.commit()?;
         Ok(Enqueued::New(row))
+    }
+
+    /// A claimed steer that certainly never reached its receiver (nothing was handed over): it
+    /// is `undelivered`, with the reason. Not for anything that may have been written.
+    pub fn void_claimed_mail(&self, id: &str, reason: &str) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE agent_mail SET state = 'undelivered', reason = ?2, updated_at = ?3
+             WHERE id = ?1 AND state = 'delivering'",
+            params![id, reason, now_millis()],
+        )?;
+        Ok(())
+    }
+
+    /// What a person sent a session from the family strip, newest first.
+    pub fn person_mail_to(&self, session_id: &str, limit: usize) -> anyhow::Result<Vec<MailRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM agent_mail
+             WHERE target_session_id = ?1 AND sender_session_id = ?2
+             ORDER BY created_at DESC, rowid DESC LIMIT ?3"
+        ))?;
+        let rows = statement.query_map(
+            params![session_id, crate::crew_actions::PERSON, limit as i64],
+            row_from,
+        )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Interrupts the lead sent this child since a person last wrote to the lead.
+    pub fn lead_interrupts(&self, child_session_id: &str) -> anyhow::Result<u32> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT interrupts FROM agent_interrupts WHERE child_session_id = ?1",
+                params![child_session_id],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
+    /// Count one interrupt a lead is about to send a child.
+    pub fn spend_lead_interrupt(
+        &self,
+        lead_session_id: &str,
+        child_session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO agent_interrupts (child_session_id, lead_session_id, interrupts)
+             VALUES (?1, ?2, 1)
+             ON CONFLICT(child_session_id) DO UPDATE SET interrupts = interrupts + 1",
+            params![child_session_id, lead_session_id],
+        )?;
+        Ok(())
     }
 
     /// Queue Perch's own status note from `child` to `lead`. A note of the same child still
@@ -457,8 +571,14 @@ impl HistoryDb {
 
     /// A person opened a turn on the lead: its automatic wakes start again.
     pub fn reset_mail_wakes(&self, lead_session_id: &str) -> anyhow::Result<()> {
-        self.conn.lock().unwrap().execute(
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
             "DELETE FROM agent_mail_wakes WHERE lead_session_id = ?1",
+            params![lead_session_id],
+        )?;
+        // The lead's interrupt allowance starts again with it.
+        conn.execute(
+            "DELETE FROM agent_interrupts WHERE lead_session_id = ?1",
             params![lead_session_id],
         )?;
         Ok(())
@@ -482,6 +602,10 @@ impl HistoryDb {
         )?;
         conn.execute(
             "DELETE FROM agent_mail_wakes WHERE lead_session_id = ?1",
+            params![session_id],
+        )?;
+        conn.execute(
+            "DELETE FROM agent_interrupts WHERE lead_session_id = ?1",
             params![session_id],
         )?;
         Ok(())
@@ -824,6 +948,130 @@ mod tests {
         assert!(db.mail(&to_child.id).unwrap().is_none());
         assert!(db.mail(&to_sibling.id).unwrap().is_none());
         assert_eq!(db.mail_wakes("lead").unwrap(), 0);
+    }
+
+    fn from_the_person(
+        to: &'static str,
+        body: &'static str,
+        key: &'static str,
+    ) -> NewMail<'static> {
+        send("ignored", to, body, key)
+    }
+
+    #[test]
+    fn a_steer_counts_toward_the_runs_limit_and_a_persons_message_does_not() {
+        let Run { db, .. } = run();
+        for n in 0..49 {
+            let to = if n % 2 == 0 { "a" } else { "b" };
+            queued(&db, &send("lead", to, "m", &format!("k{n}")));
+        }
+        // The 50th message of the run is a steer: claimed as it is sent, never queued.
+        let Enqueued::New(steer) = db.record_steer(&send("lead", "a", "use b", "s1")).unwrap()
+        else {
+            panic!("the steer should be recorded");
+        };
+        assert_eq!(
+            (steer.kind, steer.state),
+            (MailKind::Steer, MailState::Delivering)
+        );
+        assert_eq!(
+            db.enqueue_message(&send("lead", "b", "one too many", "k50"))
+                .unwrap(),
+            Enqueued::Refused(SendRefusal::RunLimit)
+        );
+        // What the person wrote is the person's: it still goes in, as the person, with no sender run.
+        let Enqueued::New(person) = db
+            .record_person_mail(
+                &from_the_person("b", "please also add tests", "p1"),
+                MailKind::Message,
+            )
+            .unwrap()
+        else {
+            panic!("a person's message should be queued");
+        };
+        assert_eq!(
+            (
+                person.sender_session_id.as_str(),
+                person.run_id.as_str(),
+                person.state
+            ),
+            ("person", "lead", MailState::Queued)
+        );
+        // The same request again returns the first and queues nothing.
+        assert!(matches!(
+            db.record_person_mail(&from_the_person("b", "changed", "p1"), MailKind::Message)
+                .unwrap(),
+            Enqueued::Existing(row) if row.id == person.id
+        ));
+        assert_eq!(db.person_mail_to("b", 10).unwrap().len(), 1);
+        assert!(
+            db.person_mail_to("a", 10).unwrap().is_empty(),
+            "only the person's"
+        );
+    }
+
+    #[test]
+    fn a_person_steer_is_claimed_as_it_is_sent_and_a_steer_that_never_left_is_voided() {
+        let Run { db, .. } = run();
+        let Enqueued::New(steer) = db
+            .record_person_mail(&from_the_person("a", "use b", "s1"), MailKind::Steer)
+            .unwrap()
+        else {
+            panic!("recorded");
+        };
+        assert_eq!(
+            (steer.kind, steer.state),
+            (MailKind::Steer, MailState::Delivering)
+        );
+        assert!(
+            db.queued_mail_for("a").unwrap().is_empty(),
+            "a steer is never queued"
+        );
+        db.void_claimed_mail(&steer.id, "it could not be reached")
+            .unwrap();
+        let after = db.mail(&steer.id).unwrap().unwrap();
+        assert_eq!(after.state, MailState::Undelivered);
+        assert_eq!(after.reason, "it could not be reached");
+        // A settled row is not voided again.
+        db.void_claimed_mail(&steer.id, "other").unwrap();
+        assert_eq!(
+            db.mail(&steer.id).unwrap().unwrap().reason,
+            "it could not be reached"
+        );
+        // A person cannot message a session in no run: nothing is queued for a stranger.
+        assert!(matches!(
+            db.record_person_mail(&from_the_person("nobody", "hi", "p9"), MailKind::Message)
+                .unwrap(),
+            Enqueued::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn a_leads_interrupts_are_counted_per_child_and_start_again_when_a_person_writes_to_the_lead() {
+        let Run { db, .. } = run();
+        assert_eq!(db.lead_interrupts("a").unwrap(), 0);
+        db.spend_lead_interrupt("lead", "a").unwrap();
+        db.spend_lead_interrupt("lead", "a").unwrap();
+        db.spend_lead_interrupt("lead", "b").unwrap();
+        assert_eq!(
+            (
+                db.lead_interrupts("a").unwrap(),
+                db.lead_interrupts("b").unwrap()
+            ),
+            (2, 1)
+        );
+        // A person opening a turn on the lead resets the wakes, and the allowance with them.
+        db.reset_mail_wakes("lead").unwrap();
+        assert_eq!(
+            (
+                db.lead_interrupts("a").unwrap(),
+                db.lead_interrupts("b").unwrap()
+            ),
+            (0, 0)
+        );
+        db.spend_lead_interrupt("lead", "a").unwrap();
+        db.delete_session("lead").unwrap();
+        assert_eq!(db.lead_interrupts("a").unwrap(), 0);
     }
 
     #[test]

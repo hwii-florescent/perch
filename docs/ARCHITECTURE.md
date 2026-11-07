@@ -324,7 +324,7 @@ contract the tests hold it to.
   (with a reason). `delivered` only when the receiver's own bridge or hook confirmed it took the text
   (Claude: the `UserPromptSubmit` event; Pi, OMP, Codex: the bridge's acknowledgement). Bytes written
   without that proof are `unconfirmed`, never `delivered` and never `undelivered`: unknown is not failure.
-- *Delivery is idle-only and never steers.* A receiver is eligible only when all hold: its recorded
+- *Delivery is idle-only and never steers* (a steer is a separate, explicit action: see "Family strip actions"). A receiver is eligible only when all hold: its recorded
   incarnation is still its live one; its runtime is alive and its native bridge has reported; its
   lifecycle is Idle or Done and the bridge says no turn is running, nothing is blocked and no question or
   approval is open; its input line is readable and empty (a person typing, a dialog or an overlay is not
@@ -386,7 +386,8 @@ contract the tests hold it to.
   `note_person_input` that marks the turn `Person`. A core restart does not reset it.
 
 **Family strip and notes folder** (`crew.rs` read model, `server/crew.rs`, `packages/web/src/crew.ts`,
-`views/nativeChat/FamilyStrip.tsx`; slice 6). Read only: nothing here sends, stops or approves.
+`views/nativeChat/FamilyStrip.tsx`; slice 6). The read model sends, stops and approves nothing; the
+strip's actions are the next section.
 
 - *Protocol.* `crew.get {sessionId}` answered by `crew.state {rows}` (capability `crew.v1`, local
   sessions only; the hub does not relay it), and the optional `SessionSummary.parentSessionId` that the
@@ -409,9 +410,48 @@ contract the tests hold it to.
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
   prompt, and an agent reading it treats it as a peer's text.
-- *Actions* are the ordinary ones: the row's Open goes to that child's chat, where typing needs the input
-  lease like any chat, and closing the child is the existing close. The phone gets the same strip because it
-  is part of the same chat view.
+- *Open* goes to that child's chat, where typing needs the input lease like any chat. The phone gets the
+  same strip because it is part of the same chat view.
+
+**Family strip actions** (`crew_actions.rs` rules, `server/crew_actions.rs`, `/agent/steer`, `/agent/interrupt`,
+`crew.act`; slice 7). Each worker row of a lead's strip offers Message (default), Steer, Interrupt and Stop.
+
+- *Who.* A **person** at the lead's chat (desktop or phone) sends `crew.act` (capability `crew.actions.v1`)
+  with the chat's input-lease `generation`, exactly as typing in it needs; without the lease the core
+  refuses and sends nothing. The **lead** may steer and interrupt its own children with `perch steer` and
+  `perch interrupt` (agent token). A child cannot do either to anyone (403), and a lead cannot reach a
+  session that is not its child (404). An agent has no way to message-bypass idle-only delivery: `perch
+  send` is unchanged, and a person's Message is the only queued text with a person as sender.
+- *One engine.* `crew_actions::availability(action, actor, facts)` decides, with the reason shown on the
+  disabled item and in a refusal, and the core decides again under the locks mail delivery uses
+  (`agent_operation_lock`, `dispatch_under_current_lease`) before anything is handed to a provider. The
+  rows of `crew.state` carry the person's `actions` with each reason. The strip asks again while its menu
+  is open, since what can be sent changes with the child's turn without a session update.
+- *Message* (person only): the slice 5 queue with sender `person` (`record_person_mail`): same limits
+  except that it does not count toward the run's 50, spends no wake and opens a turn that is the person's;
+  the banner names the person, still opens with Perch's rule line and leaves the person's words unquoted.
+- *Steer* (person or lead): only while a turn runs and never while the child waits on a person's approval
+  or answer (a steer cannot answer or approve anything). A `steer` row in `agent_mail` is claimed as it is
+  sent (never queued): it gives the receipt and the idempotency key, and counts toward a lead's 50
+  messages (a person's does not). Text up to 2,000 characters, control characters refused, never moved to a
+  notes file; a lead's steer is quoted under Perch's header like any peer's. Per provider: Codex
+  `turn/steer` with `expectedTurnId` (the turn the bridge saw), Pi and OMP `deliverAs: "steer"` through the
+  extension, Claude through its own prompt queue: written into a verified empty prompt after 2 s of PTY
+  quiet, confirmed by its `UserPromptSubmit` hook and then by its transcript showing the text absorbed
+  into the running turn (`queue-operation remove` / `absorbed_mid_turn`, probed 2.1.319); not seen joining
+  within 25 s is `not confirmed`.
+- *Interrupt*: the chat's Stop path (`queue_cancel`: Claude's Esc into a verified process, Codex
+  `turn/interrupt`, Pi/OMP abort), confirmed only when the provider answers **and** reports the turn over.
+  A lead's is refused while the child waits on a person and capped at 3 per child between two messages a
+  person sends the lead (`agent_interrupts`, reset with the wakes; counted when sent, confirmed or not).
+  A person's may also stop a turn that waits on a prompt (as the chat's Stop does).
+- *Stop*: `stop_child` unchanged: confirmed by perchd, otherwise `Stop not confirmed`.
+- *Receipts, never retried.* `crew.act.result` carries `queued`, `sent` (the provider has it, answer
+  awaited), `confirmed`, `not_confirmed` (it may have taken effect) or `refused` (nothing was done). The
+  same request id again returns the first result and sends nothing twice; a restart leaves a `delivering`
+  steer `unconfirmed`. A lead reads the same words from `perch steer` and `perch interrupt`. Nothing here
+  is ever relaunched or typed into a shell, and a provider with no confirmable mechanism has the action
+  disabled with the reason.
 
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;

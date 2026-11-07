@@ -90,6 +90,8 @@ pub struct Traffic {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Latest {
+    /// `Message` or `Steer`.
+    pub kind: MailKind,
     pub to_peer: bool,
     pub preview: String,
     pub at: i64,
@@ -117,15 +119,16 @@ pub fn preview(body: &str) -> String {
     format!("{}…", &body[..end])
 }
 
-/// The newest admitted line per peer. Only an agent's own message is one: a status note is
+/// The newest admitted line per peer. Only an agent's or a person's own message or steer is one: a status note is
 /// Perch's wording (its facts are the row's lifecycle and report), and an empty body says nothing.
 pub fn latest_traffic(traffic: &[Traffic]) -> Vec<(String, Latest)> {
     let mut newest: Vec<(String, Latest)> = Vec::new();
     for item in traffic {
-        if item.kind != MailKind::Message || item.body.trim().is_empty() {
+        if item.kind == MailKind::Note || item.body.trim().is_empty() {
             continue;
         }
         let line = Latest {
+            kind: item.kind,
             to_peer: item.to_peer,
             preview: preview(&item.body),
             at: item.at,
@@ -302,6 +305,16 @@ mod tests {
         assert!(build("x", &[], &[]).is_empty());
         let rows = build("lead", &[member("lead")], &[message("lead", true, "me", 1)]);
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn a_steer_is_a_line_of_its_own_kind_and_a_note_is_still_not_one() {
+        let mut steer = message("a", true, "use the other file", 20);
+        steer.kind = MailKind::Steer;
+        steer.state = MailState::Unconfirmed;
+        let latest = latest_traffic(&[message("a", true, "earlier", 10), steer]);
+        assert_eq!(latest[0].1.kind, MailKind::Steer);
+        assert_eq!(latest[0].1.receipt, MailState::Unconfirmed);
     }
 
     #[test]

@@ -190,6 +190,49 @@ pub(super) async fn stop(
     answer(sub_sessions::stop(&state, &identity, target).await)
 }
 
+/// `POST {base}agent/steer`: put text into the running turn of one of the caller's own sub-sessions.
+/// The core refuses it from a sub-session, and for a session that is not the caller's child.
+pub(super) async fn steer(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(
+            crew_actions::agent_action(
+                &state,
+                &identity,
+                crate::crew_actions::Action::Steer,
+                &body,
+            )
+            .await,
+        ),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/interrupt`: stop the current turn of one of the caller's own sub-sessions.
+pub(super) async fn interrupt(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(
+            crew_actions::agent_action(
+                &state,
+                &identity,
+                crate::crew_actions::Action::Interrupt,
+                &body,
+            )
+            .await,
+        ),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
 /// `POST {base}agent/send`: queue a message for another session of the caller's run.
 pub(super) async fn send(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

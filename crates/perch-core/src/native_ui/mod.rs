@@ -417,11 +417,59 @@ impl NativeBridge {
         id: &str,
         text: Option<&str>,
     ) -> anyhow::Result<oneshot::Receiver<Result<bool, String>>> {
-        let (tx, rx) = oneshot::channel();
-        let mut payload = match text {
+        let payload = match text {
             Some(text) => serde_json::json!({ "type": "prompt", "requestId": id, "text": text }),
             None => serde_json::json!({ "type": "cancel", "requestId": id }),
         };
+        self.send(id, payload)
+    }
+
+    /// Put `text` into the provider's *running* turn (Codex `turn/steer`, Pi and OMP `deliverAs:
+    /// "steer"`), answered only when a turn runs. Claude has no such bridge command: its steer is a
+    /// typed prompt that Claude's own queue absorbs (`enqueue` and a verified write).
+    pub fn enqueue_steer(
+        &self,
+        id: &str,
+        text: &str,
+    ) -> anyhow::Result<oneshot::Receiver<Result<bool, String>>> {
+        anyhow::ensure!(
+            self.key.agent_id != "claude",
+            "Claude takes a steer through its own prompt queue"
+        );
+        self.send(
+            id,
+            serde_json::json!({ "type": "steer", "requestId": id, "text": text }),
+        )
+    }
+
+    /// Whether the provider reports its turn over (no turn running) within `within`: the event that
+    /// confirms an interrupt. A bridge that went away is not a confirmation.
+    pub async fn wait_turn_end(&self, within: Duration) -> bool {
+        let mut receiver = self.snapshot.clone();
+        tokio::time::timeout(within, async {
+            loop {
+                if receiver
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|snapshot| !snapshot.running)
+                {
+                    return true;
+                }
+                if receiver.changed().await.is_err() {
+                    return false;
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    fn send(
+        &self,
+        id: &str,
+        mut payload: serde_json::Value,
+    ) -> anyhow::Result<oneshot::Receiver<Result<bool, String>>> {
+        let (tx, rx) = oneshot::channel();
         if self.key.agent_id == "claude" {
             payload["after"] = claude::prompt_stamp(&paths(&self.key)?.extension).into();
         }
@@ -731,6 +779,50 @@ mod tests {
             }
         });
         (bridge, snapshot_tx)
+    }
+
+    /// An interrupt is confirmed by the provider reporting its turn over, not by its answer alone.
+    #[tokio::test]
+    async fn an_interrupt_is_confirmed_only_when_the_provider_reports_the_turn_over() {
+        let (bridge, publisher) = claude_bridge(1);
+        let mut running = shown(2, 1, false, false);
+        running.running = true;
+        publisher.send_replace(Some(running.clone()));
+        // Still running when the wait ends: not confirmed.
+        assert!(!bridge.wait_turn_end(Duration::from_millis(60)).await);
+        let later = publisher.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            later.send_replace(Some(shown(3, 1, false, false)));
+        });
+        assert!(bridge.wait_turn_end(Duration::from_secs(2)).await);
+        // A bridge with nothing to say (it went away) is not a confirmation either.
+        publisher.send_replace(None);
+        assert!(!bridge.wait_turn_end(Duration::from_millis(60)).await);
+    }
+
+    /// Claude has no bridge command for a steer: its text goes through its own prompt queue.
+    #[tokio::test]
+    async fn claude_takes_no_bridge_steer_and_the_others_queue_one() {
+        let (claude, _keep) = claude_bridge(1);
+        assert!(claude.enqueue_steer("s1", "use the other file").is_err());
+        let (commands, mut queued) = mpsc::channel(4);
+        let (_tx, snapshot) = watch::channel(None);
+        let codex = NativeBridge {
+            key: AgentKey::new("workspace", "session", "codex").unwrap(),
+            snapshot,
+            commands,
+            slash: Arc::new(Mutex::new(vec![])),
+            window: Arc::new(std::sync::atomic::AtomicUsize::new(claude::WINDOW)),
+            paging: tokio::sync::Mutex::new(()),
+        };
+        let _reply = codex.enqueue_steer("s1", "use the other file").unwrap();
+        let command = queued.recv().await.unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&command.payload).unwrap();
+        assert_eq!(
+            (payload["type"].as_str(), payload["text"].as_str()),
+            (Some("steer"), Some("use the other file"))
+        );
     }
 
     #[tokio::test]

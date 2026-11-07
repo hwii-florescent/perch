@@ -454,6 +454,24 @@ pub(super) fn get(
     });
 }
 
+/// Stop the current turn without ending the session: Claude's Esc into a verified process, the other
+/// providers' own cancel through the bridge (Codex `turn/interrupt`, Pi and OMP abort). Called with the
+/// runtime's authority held, by the chat's Stop and by the family strip's Interrupt alike. The reply
+/// is the provider's answer, never proof the turn ended.
+pub(super) fn queue_cancel(
+    bridge_key: &AgentKey,
+    bridge: &crate::native_ui::NativeBridge,
+    id: &str,
+    write: &dyn Fn(&str) -> anyhow::Result<()>,
+) -> anyhow::Result<tokio::sync::oneshot::Receiver<Result<bool, String>>> {
+    let input = crate::native_ui::claude::prepare_input(bridge_key, None)?;
+    let reply = bridge.enqueue(id, None)?;
+    if let Some(input) = input {
+        crate::native_ui::claude::write_input(&input, write)?;
+    }
+    Ok(reply)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn control(
     state: &Arc<ConnState>,
@@ -538,10 +556,7 @@ pub(super) fn control(
                 let _ = state.app.db.set_cli_title(&session_id, text);
                 Ok(Some(reply))
             } else {
-                let input = crate::native_ui::claude::prepare_input(&bridge_key, None)?;
-                let reply = bridge.enqueue(&request_id, None)?;
-                if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
-                Ok(Some(reply))
+                Ok(Some(queue_cancel(&bridge_key, &bridge, &request_id, write)?))
             }
         })
         })();

@@ -86,6 +86,7 @@ mod browser_history;
 mod browser_suggest;
 mod context_bridge;
 mod crew;
+mod crew_actions;
 mod instructions;
 #[cfg(test)]
 mod local_authority;
@@ -802,6 +803,14 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/send"),
             post(agent::send).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/steer"),
+            post(agent::steer).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/interrupt"),
+            post(agent::interrupt).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             &format!("{base_path}agent/inbox"),
@@ -2503,6 +2512,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.suggest.v1",
         "instructions.v1",
         "crew.v1",
+        "crew.actions.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",

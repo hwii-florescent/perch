@@ -148,10 +148,27 @@ fn traffic(app: &AppState, viewer: &str) -> Vec<Traffic> {
         reason: row.reason,
         at: row.created_at,
     };
+    // What a person wrote to a child from this strip is the viewing lead's own traffic.
+    let viewer_is_lead = matches!(app.db.run_of(viewer), Ok(Some(lead)) if lead == viewer);
+    let from_person: Vec<crate::db::MailRow> = if viewer_is_lead {
+        app.db
+            .sub_sessions_of(viewer)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|child| {
+                app.db
+                    .person_mail_to(&child.child_session_id, TRAFFIC_LIMIT)
+                    .unwrap_or_default()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     sent.into_iter()
         .map(|row| line(row, true))
+        .chain(from_person.into_iter().map(|row| line(row, true)))
         .chain(received.into_iter().map(|row| line(row, false)))
-        .filter(|item| item.kind == MailKind::Message)
+        .filter(|item| item.kind != MailKind::Note)
         .collect()
 }
 
@@ -160,6 +177,10 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
     crew::build(viewer, &members, &traffic(app, viewer))
         .into_iter()
         .map(|row| CrewRow {
+            // Before the fields that move out of `row.member`.
+            actions: (row.role == crew::Role::Worker)
+                .then(|| super::crew_actions::offered(app, &row.member.session_id))
+                .flatten(),
             session_id: row.member.session_id,
             role: row.role.as_str().into(),
             title: row.member.title,
@@ -182,6 +203,7 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
                 at: latest.at,
                 receipt: latest.receipt.as_str().into(),
                 reason: latest.reason,
+                kind: latest.kind.as_str().into(),
             }),
             can_message: row.member.can_message,
         })

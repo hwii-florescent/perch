@@ -218,6 +218,22 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             request_id,
             session_id,
         } => super::crew::handle_get(state, request_id, session_id),
+        ClientMessage::CrewAct {
+            request_id,
+            session_id,
+            child_session_id,
+            action,
+            generation,
+            text,
+        } => super::crew_actions::handle_act(
+            state,
+            request_id,
+            session_id,
+            child_session_id,
+            action,
+            generation,
+            text,
+        ),
         ClientMessage::InstructionsGet {
             request_id,
             scope,

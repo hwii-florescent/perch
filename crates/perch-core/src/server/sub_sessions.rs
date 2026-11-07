@@ -596,7 +596,7 @@ pub(super) async fn stop(
 
 /// Move a child toward `stopped`. `Ok` carries a settled state; an unconfirmed stop is an
 /// error and leaves `stop_unknown`.
-fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState, Failure> {
+pub(super) fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState, Failure> {
     if matches!(
         row.state,
         SubState::Stopped | SubState::Exited | SubState::Failed

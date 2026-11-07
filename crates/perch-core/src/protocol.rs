@@ -373,6 +373,29 @@ pub struct CrewRow {
     pub latest: Option<CrewLatest>,
     /// A message to it would be accepted now.
     pub can_message: bool,
+    /// What a person may do to this child from the strip, each with the reason it is not offered
+    /// (capability `crew.actions.v1`). Only a lead's `worker` rows have it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions: Option<CrewActions>,
+}
+
+/// The four family-strip actions on a child and whether each is available now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewActions {
+    pub message: CrewActionState,
+    pub steer: CrewActionState,
+    pub interrupt: CrewActionState,
+    pub stop: CrewActionState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewActionState {
+    pub ok: bool,
+    /// Why it is not available; empty when it is.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -403,6 +426,9 @@ pub struct CrewLatest {
     pub at: i64,
     pub receipt: String,
     pub reason: String,
+    /// `message` or `steer`; absent from an older core, which means `message`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
 /// One remembered page of the built-in browser (`server/browser_history.rs`).
@@ -1180,6 +1206,22 @@ pub enum ClientMessage {
     CrewGet {
         request_id: String,
         session_id: String,
+    },
+
+    /// Act on one of a lead's sub-sessions from its family strip (capability `crew.actions.v1`):
+    /// `message` (queued, idle-only), `steer` (into its running turn), `interrupt` (stop its
+    /// current turn) or `stop` (confirmed). `session_id` is the lead whose chat shows the strip and
+    /// `generation` that chat's input lease, as for typing in it. Answered with `crew.act.result`
+    /// (a `sent` result may precede the final one). Nothing here is ever retried.
+    #[serde(rename = "crew.act", rename_all = "camelCase")]
+    CrewAct {
+        request_id: String,
+        session_id: String,
+        child_session_id: String,
+        action: String,
+        generation: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
 
     /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
@@ -2201,6 +2243,21 @@ pub enum ServerMessage {
         rows: Vec<CrewRow>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+
+    /// Reply to `crew.act`. `outcome`: `queued`, `sent` (handed to the provider, its answer awaited,
+    /// not final), `confirmed`, `not_confirmed` (it may have taken effect; never retried) or
+    /// `refused` (nothing was done; `reason` says why). `done` is false only for `sent`.
+    #[serde(rename = "crew.act.result", rename_all = "camelCase")]
+    CrewActResult {
+        request_id: String,
+        session_id: String,
+        child_session_id: String,
+        action: String,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+        done: bool,
     },
 
     /// Reply to `browser.history.search`, best match first.

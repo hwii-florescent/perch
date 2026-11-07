@@ -364,6 +364,16 @@ fn primary(thread: &Value) -> bool {
             .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
 }
 
+/// Codex answered a request with an error of its own (as opposed to the connection failing).
+#[derive(Debug)]
+struct Rejected(String);
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+impl std::error::Error for Rejected {}
+
 type Peer = WebSocketStream<UnixStream>;
 async fn request(
     peer: &mut Peer,
@@ -391,15 +401,13 @@ async fn request(
             let value: Value = serde_json::from_str(frame.to_text()?)?;
             if value["id"] == id && value["method"].is_null() {
                 if !value["error"].is_null() {
-                    bail!(
-                        "{}",
-                        clip(
-                            value["error"]["message"]
-                                .as_str()
-                                .unwrap_or("Codex rejected this action"),
-                            4096
-                        )
-                    );
+                    return Err(Rejected(clip(
+                        value["error"]["message"]
+                            .as_str()
+                            .unwrap_or("Codex rejected this action"),
+                        4096,
+                    ))
+                    .into());
                 }
                 return Ok(value["result"].clone());
             }
@@ -611,6 +619,10 @@ async fn connection(
                     let payload: Value = serde_json::from_str(&command.payload)?;
                     let action = if payload["type"] == "prompt" {
                         Some(("turn/start", json!({"threadId":native,"clientUserMessageId":command.id,"input":[{"type":"text","text":payload["text"],"text_elements":[]}]})))
+                    } else if payload["type"] == "steer" {
+                        // Into the running turn, which must still be the one the bridge saw: Codex refuses
+                        // a steer whose `expectedTurnId` is not the active turn (schema 0.166).
+                        view.turn.as_ref().map(|turn| ("turn/steer", json!({"threadId":native,"expectedTurnId":turn,"clientUserMessageId":command.id,"input":[{"type":"text","text":payload["text"],"text_elements":[]}]})))
                     } else { view.turn.as_ref().map(|turn| ("turn/interrupt", json!({"threadId":native,"turnId":turn}))) };
                     if let Some((method, params)) = action {
                         id += 1;
@@ -622,10 +634,18 @@ async fn connection(
                                 view.dirty = true;
                             }
                         }
-                        let failed = result.is_err();
+                        // Codex answering a steer with an error is an answer (no running turn, not steerable),
+                        // not a broken connection: the refusal is reported and the connection kept.
+                        let refused = method == "turn/steer" && result.as_ref().err().is_some_and(|error| error.is::<Rejected>());
+                        // A steer is confirmed by the turn it joined, not by any answer.
+                        let result = result.and_then(|answer| {
+                            if method == "turn/steer" { ensure!(answer["turnId"].as_str() == view.turn.as_deref(), "Codex steered a different turn than the one running"); }
+                            Ok(answer)
+                        });
+                        let failed = result.is_err() && !refused;
                         let _ = command.reply.send(result.map(|_| true).map_err(|error| error.to_string()));
                         if failed { bail!("native action failed; reconnect without replaying it"); }
-                    } else { let _ = command.reply.send(Err("No active native turn is available to cancel".into())); }
+                    } else { let _ = command.reply.send(Err(if payload["type"] == "steer" { "No active native turn is available to steer" } else { "No active native turn is available to cancel" }.into())); }
                 }
                 frame = peer.next() => {
                     let frame = frame.context("Codex native connection closed")??;

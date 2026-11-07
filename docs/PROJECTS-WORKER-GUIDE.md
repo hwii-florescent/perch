@@ -495,34 +495,52 @@ The contract is in ARCHITECTURE ("Messages", written before the code). What late
   lives in the browser and is not protected (ARCHITECTURE "Lease contention"). **Not verified live:**
   Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World` trait only).
 
-## Slice 7: family strip actions (owner, 2026-11-07)
+## Slice 7 landed (2026-11-07): family strip actions
 
-DECISIONS 2026-11-07. Four actions per child row in `FamilyStrip.tsx` (Orca's
-`CrewRowMenu.tsx`, MIT, for the menu shape; reuse `components/ui/`). Logic and checks in Rust;
-the web only calls capability-gated core messages and shows receipts.
+The contract is in ARCHITECTURE ("Family strip actions"). Where the pieces are:
 
-- **Message** (default): a small composer in the row; goes through the slice 5 queue as a
-  person-originated message (sender = the person, not the lead), idle-only, same envelope,
-  limits and receipts. A person's message does not count toward the lead's automatic wakes.
-- **Stop**: the existing confirmed child stop (`stop_child`), with a confirm step; shows
-  "Stop not confirmed" rather than "Stopped" until perchd confirms.
-- **Interrupt** (stop the current turn, keep the session): Codex `turn/interrupt` (already
-  used by the chat's Stop, `native_ui/codex.rs`); Pi/OMP abort through the bridge; Claude the
-  chat's existing Esc path under the input lease. Reuse the lead chat's Stop code path.
-- **Steer** (into the running turn): probe each first, zero or one cheap turn each.
-  Codex `turn/steer` with `expectedTurnId` (slice 0: accepted); Pi/OMP `sendUserMessage`
-  with `deliverAs: "steer"`; Claude: probe whether text submitted while a turn runs is held
-  by Claude's own queue and fed into the turn (screen + transcript evidence); if it is,
-  write it under the lease with the same verified-input rules (no draft in the prompt line,
-  2 s quiet); if not confirmable, Steer is disabled for Claude with the reason. Steer is
-  only offered while the child's turn runs; when idle the action is Message.
-- Receipts for steer and interrupt (sent, confirmed by the provider event, or not
-  confirmed), shown on the row; never retried blindly.
-- Agents cannot steer or interrupt: no `perch` verb for it; `/agent/*` refuses it.
-- Phone: same actions, same lease rules.
-- Check: Rust unit tests per provider adapter (captured events/screens); web tests for the
-  menu and disabled reasons; one live e2e with a haiku lead and haiku child covering Message,
-  Steer (or its disabled reason), Interrupt and Stop; Codex/Pi live only if no usage limit.
+- **Rules** `crew_actions.rs` (pure: `availability(action, actor, facts)` with the reason each action is
+  not offered, the caps, `check_steer_text`), run by `server/crew_actions.rs` (`run`, one path for a
+  person's `crew.act` and a lead's `/agent/steer|interrupt`), bridge pieces `NativeBridge::enqueue_steer`
+  and `wait_turn_end`, `server/native_ui.rs::queue_cancel` (the chat's Stop path, now shared), Codex
+  `turn/steer` in `native_ui/codex.rs`, Pi/OMP `steer` in `pi-extension.ts`, Claude's transcript check
+  `claude::steer_absorbed`. Menu shape from Orca's `CrewRowMenu.tsx` (MIT, 308b5000; THIRD_PARTY_NOTICES).
+- **Owner change mid-slice:** the *lead* may also steer and interrupt its own children (`perch steer`,
+  `perch interrupt`), with the same engine, receipts and refusals as the person's actions, plus: refused
+  while the child waits on a person, interrupts capped at 3 per child per person's message to the lead,
+  a steer counts toward the run's 50 messages and keeps the 2,000-character cap, the envelope and the
+  quoting. A child cannot steer or interrupt anyone. `perch send` stays idle-only; `perch guide` says
+  queued messages are the default and these are for correcting a child that is going the wrong way.
+- **Probed 2026-11-07 (Claude 2.1.319, haiku, tmux, hooks on):** text submitted while a turn runs
+  goes into Claude's own queue and **is fed into the running turn at its next step**. Evidence: with four
+  foreground `sleep 8` calls running, a line typed during the second came back as `ABCD MANGO` in the
+  same turn; the transcript had `queue-operation enqueue`, then `queue-operation remove` with
+  `reason: absorbed_mid_turn`, and an `attachment` of type `queued_command` holding the text; one `Stop`
+  hook for the whole turn; `UserPromptSubmit` fired at submission, not at absorption. So Steer is offered
+  for Claude. Absorption waits for the running tool call to end (seen live: the row appears when a 12 s
+  `sleep` ends), so Perch confirms the hook first (`Delivered`) and then watches the transcript up to 25 s;
+  a steer not seen joining the turn in that time is `not confirmed` ("Claude holds it in its own queue"),
+  never retried. A first probe that mistook a turn that had just ended for a running one started a new
+  turn instead: a steer needs a running turn, which Perch checks.
+- **Codex** (schema 0.166 `TurnSteerParams`: `threadId`, `expectedTurnId`, `input`; response `turnId`):
+  confirmed only when the answer names the turn that was running. A rejected steer does not drop the
+  connection (a typed `Rejected` error). **Pi/OMP:** `sendUserMessage(text, {deliverAs: "steer"})`, only
+  while `!ctx.isIdle()`, acknowledged by the extension. **Not run live:** Codex, Pi, OMP steer or interrupt,
+  and a lead's own `perch steer` / `perch interrupt` (the engine is shared with the person's actions and
+  its refusals are tested over HTTP).
+- **Receipts** are the core's words in `crew.act.result` (`queued`, `sent`, `confirmed`, `not_confirmed`,
+  `refused`); `FamilyStrip.tsx` shows them on the row and never turns `not_confirmed` into a failure or a
+  retry. An interrupt is `confirmed` only after the provider's answer **and** its report that the turn
+  is over.
+- **Lease.** A person's action needs the input lease of the *lead's* chat (its `generation`), as typing in
+  it does; the child is then written under whatever lease its own viewer holds, as mail is (ARCHITECTURE).
+  The strip refreshes while its menu is open, because what can be sent depends on the running turn,
+  which changes without a session update (found live: the menu opened before the bridge had reported the
+  turn read "no turn is running" until the next update).
+- **Live** (`e2e/family-actions.spec.ts`, TESTING): haiku lead and haiku child; Steer confirmed
+  through Claude's queue and transcript and the child's report carried the steer's marker, Message queued
+  and delivered as the person's, Interrupt confirmed with the session kept, Stop confirmed after the
+  confirm step. Not run: the phone layout, which is the same component.
 
 ## Slice 6 landed (2026-11-07): family strip and notes folder
 
@@ -549,5 +567,5 @@ The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pie
   sub-session and set in beside its lead's. **Not run live:** a child waiting on a person (a unit/WebSocket test covers the
   rows; the strip's rendering of it is tested in jsdom), the phone layout (same component, not opened at a
   phone viewport), and a lead with two children at once.
-- **Owner decisions still open:** delivery over a held input lease (slice 5), and whether the strip should
-  offer Message and Stop buttons of its own instead of Open (today: Open, then the ordinary chat and close).
+- **Owner decisions:** delivery over a held input lease was decided in slice 5; the strip's own Message,
+  Steer, Interrupt and Stop are slice 7 (below, landed).

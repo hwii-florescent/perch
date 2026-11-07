@@ -429,6 +429,12 @@ impl HistoryDb {
             CREATE TABLE IF NOT EXISTS agent_mail_wakes (
                 lead_session_id TEXT PRIMARY KEY,
                 wakes INTEGER NOT NULL
+            );
+            -- Interrupts a lead sent each child since a person last wrote to the lead.
+            CREATE TABLE IF NOT EXISTS agent_interrupts (
+                child_session_id TEXT PRIMARY KEY,
+                lead_session_id TEXT NOT NULL,
+                interrupts INTEGER NOT NULL
             );",
         )?;
         // The table above needs `sessions`, which an old database already has; the column

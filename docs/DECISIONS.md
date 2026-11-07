@@ -13,10 +13,16 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
   **Interrupt**. Message is the default and keeps the slice 5 rule: queued, delivered only
   when the child is idle. Stop is the confirmed `perch stop`.
 - **Steer** sends the text into the child's running turn, and **Interrupt** stops the
-  current turn without ending the session. Both are explicit person actions from the UI (desktop
-  or phone, with the input lease rules), never an agent's: `perch send` stays idle-only, and a
-  steer never approves anything. Each uses the provider's own mechanism; a provider without
-  a confirmable one shows the action disabled with the reason, never a PTY guess.
+  current turn without ending the session. A person does both from the UI (desktop or phone,
+  with the input lease rules). **The lead may steer and interrupt its own children** with
+  `perch steer` and `perch interrupt` (a child cannot do either to anyone): `perch send` stays
+  idle-only and queued messages stay the default; a steer is a message for the limits, keeps the
+  envelope, the 2,000-character cap and the quoting, and never approves anything; neither is
+  allowed while the child waits on a person's approval or answer; a lead's interrupts are capped at
+  3 per child per person's message to it. Each uses the provider's own mechanism; a provider
+  without a confirmable one shows the action disabled with the reason, never a PTY guess.
+  *Built 2026-11-07:* Claude's own prompt queue proved to feed mid-turn text into the turn, so Steer
+  is offered for Claude too (details in the worker guide).
 
 ## 2026-11-06 — Local authority, `perch list`, packaging, live pickers (owner)
 

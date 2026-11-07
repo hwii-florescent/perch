@@ -123,6 +123,13 @@ Useful existing coverage (not a claim of a fresh passing run):
   and the family strip above the composer shows the child's state, `Reported: <marker>` (its own report)
   and `You wrote` for the lead's message. Verified (haiku child, ~30 s each run); Codex, Pi and OMP receivers
   were not run live, nor a child waiting on a person (jsdom and a booted-core WebSocket test cover it).
+- `family-actions.spec.ts` (same config; needs `perch` beside the core): a haiku lead starts a haiku child with a
+  slow four-`sleep` task; from the lead's open chat the person steers it mid-turn (`Steer confirmed` needs
+  Claude's transcript to show the text absorbed into the turn, which waits for the running tool call), messages
+  it once idle (queued, delivered as the person's, no wake), interrupts a second slow turn (confirmed, session
+  kept) and stops it after a confirm step. Four haiku turns. Run it outside a Perch shell (as the native specs).
+  Not covered live: Codex, Pi and OMP steer or interrupt, and a lead's own `perch steer`/`perch interrupt`
+  (unit and HTTP tests in `crew_actions.rs`, `server/crew_actions.rs`, `native_ui`).
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

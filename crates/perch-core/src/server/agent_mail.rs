@@ -47,7 +47,7 @@ fn mail_json(row: &MailRow) -> Value {
 }
 
 /// What a sender is called in a header: a child by its task, any other session by its title.
-fn sender_label(app: &AppState, session_id: &str, provider: &str) -> String {
+pub(super) fn sender_label(app: &AppState, session_id: &str, provider: &str) -> String {
     if let Ok(Some(child)) = app.db.sub_session(session_id) {
         let line = child.task.lines().next().unwrap_or_default();
         return agent_mail::clean_label(line, provider);
@@ -265,11 +265,13 @@ pub(super) trait World {
     fn notes_file(&self, run: &str, name: &str, text: &str) -> anyhow::Result<String>;
     /// Check the receiver again under the delivery lock, call `claim` (once, just before the first
     /// byte) and write `prompt`. `claim` is false when another pass already holds the message.
+    /// `from_person`: a person wrote it (the family strip), so the turn it opens is the person's.
     fn deliver(
         &self,
         session: &str,
         delivery_id: &str,
         prompt: &str,
+        from_person: bool,
         claim: &dyn Fn() -> bool,
     ) -> Delivery;
 }
@@ -321,7 +323,7 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
     };
     // One message per delivery; every waiting note of a lead goes in one roster.
     let batch: Vec<&MailRow> = match first.kind {
-        MailKind::Message => vec![first],
+        MailKind::Message | MailKind::Steer => vec![first],
         MailKind::Note => owed
             .iter()
             .filter(|item| item.kind == MailKind::Note)
@@ -333,8 +335,9 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
         let _ = db.set_mail_wait(&all_ids, &reason);
         return Pass::Waiting(reason);
     }
+    let from_person = first.sender_session_id == crate::crew_actions::PERSON;
     let (prompt, delivery_id) = match first.kind {
-        MailKind::Message => {
+        MailKind::Message | MailKind::Steer => {
             let sender = Sender {
                 label: &first.sender_label,
                 provider: &first.sender_provider,
@@ -354,31 +357,43 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
                     }
                 };
                 let preview = agent_mail::preview(&first.body);
+                let in_file = BodyText::InFile {
+                    path: &path,
+                    chars: first.body.chars().count(),
+                    preview: &preview,
+                };
+                let banner = if from_person {
+                    agent_mail::format_person_banner(
+                        first.kind,
+                        &first.id,
+                        first.created_at,
+                        &in_file,
+                    )
+                } else {
+                    agent_mail::format_banner(
+                        &sender,
+                        first.kind,
+                        &first.id,
+                        first.created_at,
+                        &in_file,
+                    )
+                };
                 return deliver_batch(
                     db,
                     world,
                     target,
                     &facts,
-                    &batch,
-                    &all_ids,
-                    &first.id,
-                    &agent_mail::format_banner(
-                        &sender,
-                        first.kind,
-                        &first.id,
-                        first.created_at,
-                        &BodyText::InFile {
-                            path: &path,
-                            chars: first.body.chars().count(),
-                            preview: &preview,
-                        },
-                    ),
+                    (&batch, &all_ids),
+                    (&first.id, &banner),
+                    from_person,
                 );
             };
-            (
-                agent_mail::format_banner(&sender, first.kind, &first.id, first.created_at, &body),
-                first.id.clone(),
-            )
+            let banner = if from_person {
+                agent_mail::format_person_banner(first.kind, &first.id, first.created_at, &body)
+            } else {
+                agent_mail::format_banner(&sender, first.kind, &first.id, first.created_at, &body)
+            };
+            (banner, first.id.clone())
         }
         MailKind::Note => {
             let lines: Vec<&str> = batch.iter().map(|item| item.body.as_str()).collect();
@@ -393,26 +408,27 @@ pub(super) fn pass(db: &HistoryDb, world: &dyn World, target: &str, now_ms: i64)
         world,
         target,
         &facts,
-        &batch,
-        &all_ids,
-        &delivery_id,
-        &prompt,
+        (&batch, &all_ids),
+        (&delivery_id, &prompt),
+        from_person,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+/// `mail` is the batch and every id waiting for the receiver; `text` the delivery id and prompt.
 fn deliver_batch(
     db: &HistoryDb,
     world: &dyn World,
     target: &str,
     facts: &TargetFacts,
-    batch: &[&MailRow],
-    all_ids: &[String],
-    delivery_id: &str,
-    prompt: &str,
+    mail: (&[&MailRow], &[String]),
+    text: (&str, &str),
+    from_person: bool,
 ) -> Pass {
+    let (batch, all_ids) = mail;
+    let (delivery_id, prompt) = text;
     let ids: Vec<String> = batch.iter().map(|item| item.id.clone()).collect();
-    let lead = facts.is_lead;
+    // A person's message is not an automatic wake, so it spends none.
+    let lead = facts.is_lead && !from_person;
     let claim = || {
         if !db.claim_mail(&ids).unwrap_or(false) {
             return false;
@@ -422,7 +438,7 @@ fn deliver_batch(
         }
         true
     };
-    match world.deliver(target, delivery_id, prompt, &claim) {
+    match world.deliver(target, delivery_id, prompt, from_person, &claim) {
         Delivery::Held(wait) => {
             let reason = wait.reason();
             let _ = db.set_mail_wait(all_ids, &reason);
@@ -562,6 +578,7 @@ impl World for AppWorld<'_> {
         session: &str,
         delivery_id: &str,
         prompt: &str,
+        from_person: bool,
         claim: &dyn Fn() -> bool,
     ) -> Delivery {
         let app = self.0;
@@ -581,7 +598,14 @@ impl World for AppWorld<'_> {
             return Delivery::Held(Wait::NotReported);
         };
         let recheck = || agent_mail::wait_reason(&self.facts(session));
-        deliver_native(app, &key, &bridge, delivery_id, prompt, claim, &recheck)
+        deliver_native(
+            app,
+            (&key, &bridge),
+            (delivery_id, prompt),
+            from_person,
+            claim,
+            &recheck,
+        )
     }
 }
 
@@ -600,13 +624,14 @@ const QUIET: Duration = Duration::from_secs(2);
 /// bridge's own answer; an unconfirmed write is never repeated.
 fn deliver_native(
     app: &AppState,
-    key: &AgentKey,
-    bridge: &Arc<crate::native_ui::NativeBridge>,
-    delivery_id: &str,
-    prompt: &str,
+    receiver: (&AgentKey, &Arc<crate::native_ui::NativeBridge>),
+    text: (&str, &str),
+    from_person: bool,
     claim: &dyn Fn() -> bool,
     recheck: &dyn Fn() -> Option<Wait>,
 ) -> Delivery {
+    let (key, bridge) = receiver;
+    let (delivery_id, prompt) = text;
     let client = match mail_client() {
         Ok(client) => client,
         Err(error) => return Delivery::Held(Wait::Input(error)),
@@ -626,7 +651,13 @@ fn deliver_native(
             if !claim() {
                 return Ok(Delivery::Held(Wait::Working));
             }
-            if let Err(error) = app.agent_runtime.record_agent_turn_boundary(key) {
+            // A person's message opens a turn that is theirs; any other opens one Perch marks `Agent`.
+            let boundary = if from_person {
+                app.agent_runtime.record_turn_boundary(key, true)
+            } else {
+                app.agent_runtime.record_agent_turn_boundary(key)
+            };
+            if let Err(error) = boundary {
                 return Ok(Delivery::NotSent(format!(
                     "could not record the turn's start: {error}"
                 )));
@@ -735,7 +766,14 @@ mod tests {
             self.files.borrow_mut().push((name.into(), text.into()));
             Ok(format!("/notes/{run}/{name}"))
         }
-        fn deliver(&self, _: &str, _: &str, prompt: &str, claim: &dyn Fn() -> bool) -> Delivery {
+        fn deliver(
+            &self,
+            _: &str,
+            _: &str,
+            prompt: &str,
+            _: bool,
+            claim: &dyn Fn() -> bool,
+        ) -> Delivery {
             if self.claims_refused.get() || !claim() {
                 return Delivery::Held(Wait::Working);
             }
@@ -1110,6 +1148,83 @@ mod tests {
         ));
         assert_eq!(run.db.mail_wakes("child").unwrap(), 0);
         assert_eq!(run.db.mail_wakes("lead").unwrap(), 0);
+    }
+
+    fn person_message(run: &Run, to: &str, text: &str, key: &str) -> MailRow {
+        let new = NewMail {
+            sender_session_id: "ignored",
+            sender_provider: "ignored",
+            sender_label: "ignored",
+            target_session_id: to,
+            target_provider: "codex",
+            target_is_agent: true,
+            body: text,
+            key,
+        };
+        match run.db.record_person_mail(&new, MailKind::Message).unwrap() {
+            Enqueued::New(row) => row,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// What a person wrote from the family strip reaches the child as theirs: the header names the
+    /// person, not an agent, and still opens with Perch's rule line so a leading `/` is no command;
+    /// the body is their own words, unquoted. It queues like any message and waits like one.
+    #[test]
+    fn a_persons_message_is_headed_as_theirs_and_waits_for_idle_like_any_other() {
+        let run = run();
+        let row = person_message(&run, "child", "/clear\nstart with the lexer", "p1");
+        let working = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
+        working.facts.borrow_mut().running = true;
+        assert!(matches!(
+            pass(&run.db, &working, "child", 0),
+            Pass::Waiting(_)
+        ));
+        assert!(working.written.borrow().is_empty(), "never into a turn");
+        assert_eq!(state_of(&run.db, &row.id).0, MailState::Queued);
+        let idle = Fake::idle(Live::Known(Some(run.child_incarnation.clone())), false);
+        assert!(matches!(
+            pass(&run.db, &idle, "child", 0),
+            Pass::Sent { .. }
+        ));
+        let written = idle.written.borrow();
+        assert!(
+            written[0].starts_with("──── Perch message from the person using this Perch session")
+        );
+        assert!(written[0].contains("not from another agent"));
+        assert!(
+            written[0].contains("\n/clear\nstart with the lexer\n"),
+            "the person's words, unquoted"
+        );
+        assert!(!written[0].contains("> /clear"));
+        assert!(
+            !written[0].contains("perch send"),
+            "there is no peer to reply to"
+        );
+    }
+
+    /// Not an automatic wake: a person's message to a lead spends none of its ten.
+    #[test]
+    fn a_persons_message_spends_no_wake() {
+        let run = run();
+        person_message(&run, "lead", "how is it going", "p1");
+        let world = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
+        assert!(matches!(
+            pass(&run.db, &world, "lead", 0),
+            Pass::Sent { .. }
+        ));
+        assert_eq!(run.db.mail_wakes("lead").unwrap(), 0);
+        send(&run.db, "child", "lead", "agent text", "k");
+        let again = Fake::idle(Live::Known(Some(run.lead_incarnation.clone())), true);
+        assert!(matches!(
+            pass(&run.db, &again, "lead", 0),
+            Pass::Sent { .. }
+        ));
+        assert_eq!(
+            run.db.mail_wakes("lead").unwrap(),
+            1,
+            "an agent's still spends one"
+        );
     }
 
     /// `send`, `inbox` and `cancel` over real HTTP against a booted core, up to the point of

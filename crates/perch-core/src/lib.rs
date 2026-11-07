@@ -11,6 +11,7 @@ pub mod clipboard_image;
 pub mod commands;
 pub mod context_bridge;
 pub mod crew;
+pub mod crew_actions;
 pub mod daemon;
 #[cfg(target_os = "macos")]
 pub mod daemon_host;
