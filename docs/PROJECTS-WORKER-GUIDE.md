@@ -619,6 +619,14 @@ card answer for `perch spawn`, `perch list` shows waiting tasks, the guide), web
   The e2e specs that drive `perch spawn` directly turn it on through `pinReporterModels(fixture)`.
 - **Not run live yet:** the whole of 9a is exercised live in the single run at the end of slice 9.
 
+## Slice 9c landed (2026-11-07): `perch read`
+
+Contract in ARCHITECTURE ("Reading a sub-session"). `child_read.rs` (pure: `tail`, `check_turns`; reuses the
+projection and the envelope reader), `sub_sessions::read` (ownership and the bridge snapshot), `agent::read`,
+`perch read` in `perchd/agent_cli.rs` and the guide. Tested without a model: the pure cap and the never-tool-output
+rule, and over HTTP with a Pi child whose bridge socket the test stands in for (a Codex or Claude child's bridge
+reads files, so the HTTP test uses Pi; the projection is the same for all four).
+
 ## Slice 9b landed (2026-11-07): sender cards
 
 Contract in ARCHITECTURE ("Sender cards"). `agent_mail::parse_envelope` is the inverse of `format_banner`,

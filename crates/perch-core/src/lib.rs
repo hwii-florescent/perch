@@ -6,6 +6,7 @@ pub mod agent_persistence;
 pub mod agent_runtime;
 pub mod agent_title;
 pub mod boot;
+pub mod child_read;
 pub mod cli_title;
 pub mod clipboard_image;
 pub mod commands;

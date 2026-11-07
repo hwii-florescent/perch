@@ -819,6 +819,10 @@ pub async fn run(
             post(agent::list).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
+            &format!("{base_path}agent/read"),
+            post(agent::read).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             &format!("{base_path}agent/stop"),
             post(agent::stop).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )

@@ -594,6 +594,68 @@ pub(super) async fn list(app: &AppState, caller: &AgentIdentity) -> Result<Value
 
 /// `perch stop <session>`: stop one of the caller's own children, and say it stopped only once
 /// perchd confirms the process is gone.
+/// `perch read`: a bounded tail of one of the caller's own sub-sessions' transcript
+/// (`child_read.rs`), read from the snapshot its native bridge holds. Another session, and a
+/// sub-session asking, are refused; a child whose conversation Perch cannot reach says so.
+pub(super) async fn read(
+    app: &AppState,
+    caller: &AgentIdentity,
+    target: &str,
+    turns: usize,
+) -> Result<Value, Failure> {
+    let app = app.clone();
+    let caller = caller.clone();
+    let target = target.to_string();
+    tokio::task::spawn_blocking(move || {
+        if app
+            .db
+            .parent_of(&caller.session_id)
+            .map_err(|error| internal("read the session", error))?
+            .is_some()
+        {
+            return Err(fail(
+                StatusCode::FORBIDDEN,
+                "a sub-session cannot read another session; only a lead can, and only its own sub-sessions",
+            ));
+        }
+        let row = app
+            .db
+            .sub_session(&target)
+            .map_err(|error| internal("read the sub-session", error))?
+            .filter(|row| row.parent_session_id == caller.session_id)
+            .ok_or_else(|| {
+                fail(
+                    StatusCode::NOT_FOUND,
+                    "that is not one of your sub-sessions",
+                )
+            })?;
+        let state = reconcile(&app, &row);
+        let key = key_of(&app, &row.child_session_id, &row.provider_id)?;
+        let snapshot = app
+            .native_ui
+            .get(&key)
+            .and_then(|bridge| bridge.latest())
+            .ok_or_else(|| {
+                fail(
+                    StatusCode::CONFLICT,
+                    "Perch cannot read that sub-session's conversation right now (its chat is not \
+                     connected); `perch list` shows its last report",
+                )
+            })?;
+        let tail = crate::child_read::tail(&snapshot, turns);
+        Ok(json!({
+            "session": row.child_session_id,
+            "agent": row.provider_id,
+            "dispatch": state.as_str(),
+            "turns": tail.turns,
+            "cut": tail.cut,
+            "text": tail.text,
+        }))
+    })
+    .await
+    .map_err(|error| internal("read the sub-session", error))?
+}
+
 pub(super) async fn stop(
     app: &AppState,
     caller: &AgentIdentity,
@@ -950,6 +1012,16 @@ pub(super) mod tests {
         nest: &std::path::Path,
         child_state: SubState,
     ) -> (crate::db::WorkspaceRow, SubSessionRow) {
+        lead_with_child_of(db, nest, child_state, "codex")
+    }
+
+    /// The same, with the child on another agent.
+    pub(in crate::server) fn lead_with_child_of(
+        db: &HistoryDb,
+        nest: &std::path::Path,
+        child_state: SubState,
+        child_provider: &str,
+    ) -> (crate::db::WorkspaceRow, SubSessionRow) {
         let (_, workspace) = db
             .create_project("local", &nest.to_string_lossy(), Some("nest"), None)
             .unwrap();
@@ -968,7 +1040,7 @@ pub(super) mod tests {
                     parent_incarnation: &lead.incarnation,
                     workspace: &workspace,
                     cwd: &cwd,
-                    provider_id: "codex",
+                    provider_id: child_provider,
                     model: None,
                     spawn_key: "k",
                     task: "fix the parser",
@@ -979,7 +1051,7 @@ pub(super) mod tests {
         else {
             panic!("the child should have been recorded");
         };
-        db.set_cli_provider("child", "codex").unwrap();
+        db.set_cli_provider("child", child_provider).unwrap();
         if child_state != SubState::Starting {
             db.move_sub_session("child", &[SubState::Starting], child_state)
                 .unwrap();
@@ -1168,6 +1240,133 @@ pub(super) mod tests {
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert!(db.get_session("child-two").unwrap().is_none());
         assert!(db.sub_session("child-two").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `perch read`: a lead reads its own child's tail from the snapshot its bridge holds, with the
+    /// run sentences and the last words but never a tool's output; anyone else is refused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_lead_reads_its_own_child_s_tail_and_nobody_else_s() {
+        use tokio::io::AsyncWriteExt;
+        let root = std::env::temp_dir().join(format!("perch-sub-read-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        // A Pi child: its bridge is a plain socket, which this test can stand in for.
+        let (workspace, _) = lead_with_child_of(&db, &nest, SubState::Running, "pi");
+        let lead = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let child = db
+            .issue(&AgentKey::new(&workspace.id, "child", "pi").unwrap())
+            .unwrap();
+        let read = |token: String, body: Value| async move {
+            request(
+                address,
+                "POST",
+                "/agent/read",
+                &[("Authorization", &format!("Bearer {token}"))],
+                &body.to_string(),
+            )
+            .await
+        };
+
+        // No bridge yet: Perch cannot read its conversation, and says so rather than guessing.
+        let (status, answer) = read(
+            lead.token.clone(),
+            json!({"session": "lead", "target": "child"}),
+        )
+        .await;
+        assert_eq!(status, 409, "{answer}");
+        assert!(answer["error"].as_str().unwrap().contains("not connected"));
+
+        // The child's bridge reports a conversation.
+        let key = AgentKey::new(&workspace.id, "child", "pi").unwrap();
+        let socket = crate::native_ui::paths(&key).unwrap().socket;
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        app.native_ui
+            .start(key.clone(), None, Arc::new(|| true), Arc::new(|_| {}))
+            .unwrap();
+        let (mut peer, _) = listener.accept().await.unwrap();
+        let message = |id: &str, role: &str, text: &str| json!({"id": id, "role": role, "text": text, "thinking": "", "tools": []});
+        let mut call = message("a1", "assistant", "");
+        call["tools"] =
+            json!([{"name": "Read", "input": "{\"file_path\":\"/w/a.rs\"}", "id": "c1"}]);
+        let mut output = message("r1", "toolResult", "SECRET FILE CONTENTS");
+        output["toolCallId"] = json!("c1");
+        let snapshot = json!({"type": "snapshot", "version": 1, "revision": 1, "pid": 1,
+        "providerSessionId": "/n", "cwd": "/n", "model": null, "running": false,
+        "truncated": false, "messages": [
+            message("u1", "user", "fix the parser"), call, output,
+            message("a2", "assistant", "Fixed it in a.rs"),
+        ]})
+        .to_string()
+            + "\n";
+        peer.write_all(snapshot.as_bytes()).await.unwrap();
+        for _ in 0..100 {
+            if app.native_ui.get(&key).and_then(|b| b.latest()).is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let (status, answer) = read(
+            lead.token.clone(),
+            json!({"session": "lead", "target": "child", "turns": 1}),
+        )
+        .await;
+        assert_eq!(status, 200, "{answer}");
+        let text = answer["text"].as_str().unwrap();
+        assert!(text.contains("Asked: fix the parser"), "{text}");
+        assert!(text.contains("Did: Read"), "{text}");
+        assert!(text.contains("Fixed it in a.rs"), "{text}");
+        assert!(!text.contains("SECRET FILE CONTENTS"), "{text}");
+        assert_eq!(
+            (answer["turns"].as_u64(), answer["agent"].as_str()),
+            (Some(1), Some("pi"))
+        );
+
+        // Refusals: a bad count, a session that is not the caller's child, and a sub-session asking.
+        for (token, body, status, expect) in [
+            (
+                &lead.token,
+                json!({"target": "child", "turns": 0}),
+                400,
+                "1 to 5",
+            ),
+            (
+                &lead.token,
+                json!({"target": "child", "turns": 6}),
+                400,
+                "1 to 5",
+            ),
+            (&lead.token, json!({"target": ""}), 400, "say which"),
+            (
+                &lead.token,
+                json!({"target": "lead"}),
+                404,
+                "not one of your",
+            ),
+            (
+                &lead.token,
+                json!({"target": "nobody"}),
+                404,
+                "not one of your",
+            ),
+            (&child.token, json!({"target": "child"}), 403, "cannot read"),
+            (&child.token, json!({"target": "lead"}), 403, "cannot read"),
+        ] {
+            let mut full = json!({"session": if *token == lead.token { "lead" } else { "child" }});
+            full.as_object_mut()
+                .unwrap()
+                .extend(body.as_object().unwrap().clone());
+            let (got, answer) = read(token.clone(), full).await;
+            assert_eq!(got, status, "{answer}");
+            assert!(
+                answer["error"].as_str().unwrap().contains(expect),
+                "{answer}"
+            );
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 }

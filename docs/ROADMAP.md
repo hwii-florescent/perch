@@ -523,6 +523,8 @@ UI rows from step 0 continue between slices.
    **9b. Done 2026-11-07** (ARCHITECTURE "Sender cards"): a delivered banner in a user row is a card titled with
    the sender and a link back, for all four providers (parsed in Rust from the snapshot). 9c `perch read`, 9d
    inbound control: not yet.
+   **9c. Done 2026-11-07** (ARCHITECTURE "Reading a sub-session"): `perch read <child> [--turns N]`, lead only, own
+   children only, default 2 and at most 5 turns, 8,000 characters, never tool output or file contents.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 

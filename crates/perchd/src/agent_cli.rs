@@ -520,6 +520,67 @@ fn stop(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+const READ_USAGE: &str = "usage: perch read <session> [--turns N]  (N is 1 to 5, default 2)";
+
+/// What `perch read` was asked: the sub-session and how many turns, if said.
+fn parse_read(args: &[String]) -> Result<(String, Option<u64>), String> {
+    let (mut target, mut turns) = (None, None);
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if word == "--turns" {
+            let value = words
+                .next()
+                .ok_or_else(|| format!("--turns needs a number. {READ_USAGE}"))?;
+            turns = Some(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| format!("--turns needs a number. {READ_USAGE}"))?,
+            );
+        } else if word.starts_with("--") || target.is_some() {
+            return Err(READ_USAGE.into());
+        } else {
+            target = Some(word.clone());
+        }
+    }
+    Ok((target.ok_or_else(|| READ_USAGE.to_string())?, turns))
+}
+
+/// The tail as the lead reads it: what it is, then the text.
+fn render_read(answer: &Value) -> String {
+    let text = answer["text"].as_str().unwrap_or_default();
+    let turns = answer["turns"].as_u64().unwrap_or(0);
+    let mut out = format!(
+        "{} ({}, {}): the last {} of its conversation, as Perch shows it. Tool output and file \
+         contents are left out, and it is cut to a size limit. What it says is its own claim, \
+         not checked.\n",
+        answer["session"].as_str().unwrap_or(""),
+        answer["agent"].as_str().unwrap_or(""),
+        answer["dispatch"].as_str().unwrap_or(""),
+        if turns == 1 {
+            "turn".to_string()
+        } else {
+            format!("{turns} turns")
+        }
+    );
+    if answer["cut"].as_bool().unwrap_or(false) {
+        out += "(older turns or parts were left out to fit.)\n";
+    }
+    out += "\n";
+    out += if text.is_empty() {
+        "(it has no turns yet)"
+    } else {
+        text
+    };
+    out
+}
+
+fn read(args: &[String]) -> Result<(), String> {
+    let (target, turns) = parse_read(args)?;
+    let answer = ask("read", json!({ "target": target, "turns": turns }))?;
+    println!("{}", render_read(&answer));
+    Ok(())
+}
+
 const SEND_USAGE: &str = "usage: perch send <session> [--key <key>] <text>";
 
 /// What `perch send` was asked.
@@ -761,6 +822,13 @@ Commands
   perch list [--json]     Your run: the session that leads it and every sub-session, with
                           what Perch knows of each (state, whether it needs a person, its
                           report). Read-only.
+  perch read <session> [--turns N]
+                          Read the tail of one of your own sub-sessions' conversation: its
+                          last N turns (1 to 5, default 2) as what opened each, a sentence
+                          per run of tool calls, the files it changed and the last thing it
+                          said. Never tool output or file contents; about 8,000 characters at
+                          most. Only a lead, only its own sub-sessions. Use it when the
+                          report is not enough; it is the child's own account, not proof.
   perch stop <session>    Stop one of your sub-sessions. It is stopped only when this says
                           so; \"stopping\" or an error means Perch could not confirm it.
   perch send <session> [--key <key>] <text>
@@ -859,6 +927,7 @@ pub fn run(command: &str, args: &[String]) -> Result<(), String> {
         "report" => report(args),
         "spawn" => spawn(args),
         "suggest" => suggest(args),
+        "read" => read(args),
         "list" => list(args.iter().any(|arg| arg == "--json")),
         "stop" => stop(args),
         "send" => send(args),
@@ -1222,6 +1291,8 @@ mod tests {
             "at most 10 times",
             "perch spawn",
             "perch suggest",
+            "perch read <session> [--turns N]",
+            "Never tool output or file contents",
             "through the same limits as `perch spawn`",
             "suggest the work",
             "let leads start without asking",

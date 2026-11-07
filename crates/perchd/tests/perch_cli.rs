@@ -353,7 +353,34 @@ fn spawn_list_and_stop_send_their_requests_and_show_the_core_s_answer() {
     );
     request.join().unwrap();
 
+    // `perch read` asks for a child's tail and prints it under words that say what it is.
+    let request = serve(
+        r#"{"session":"c1","agent":"codex","dispatch":"running","turns":2,"cut":false,"text":"Turn 2/2:\n  Said:\n    done"}"#,
+    );
+    let read = perch(&dir, &["read", "c1", "--turns", "2"], true);
+    assert!(read.status.success(), "{}", text(&read));
+    let shown = text(&read);
+    assert!(
+        shown.contains("c1 (codex, running): the last 2 turns"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("not checked") && shown.contains("Turn 2/2:"),
+        "{shown}"
+    );
+    assert!(request
+        .join()
+        .unwrap()
+        .ends_with(r#"{"session":"s1","target":"c1","turns":2}"#));
+
     // Local mistakes are caught without asking the core.
+    for bad in [
+        &["read"][..],
+        &["read", "c1", "--turns", "x"],
+        &["read", "a", "b"],
+    ] {
+        assert_eq!(perch(&dir, bad, true).status.code(), Some(1), "{bad:?}");
+    }
     assert!(text(&perch(&dir, &["suggest"], true)).contains("--task is required"));
     assert_eq!(perch(&dir, &["stop"], true).status.code(), Some(1));
     assert!(text(&perch(&dir, &["spawn", "--task", "x"], true)).contains("--agent is required"));

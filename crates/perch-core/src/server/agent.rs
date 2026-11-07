@@ -188,6 +188,30 @@ pub(super) async fn list(
     }
 }
 
+/// `POST {base}agent/read`: a bounded tail of one of the caller's own sub-sessions' transcript.
+pub(super) async fn read(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    let Some(target) = body["target"].as_str().filter(|target| !target.is_empty()) else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "say which sub-session: perch read <session> [--turns N]",
+        );
+    };
+    let turns = match crate::child_read::check_turns(body["turns"].as_u64()) {
+        Ok(turns) => turns,
+        Err(error) => return refuse(StatusCode::BAD_REQUEST, &error),
+    };
+    answer(sub_sessions::read(&state, &identity, target, turns).await)
+}
+
 /// `POST {base}agent/stop`: stop one of the caller's own sub-sessions.
 pub(super) async fn stop(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

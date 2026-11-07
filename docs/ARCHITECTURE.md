@@ -523,6 +523,19 @@ A lead puts tasks in front of the person instead of starting them; nothing start
   leaves), shown above the family strip, and follows a started task's sub-session state. It is not in the
   provider's transcript. Cards go with their lead when it is deleted.
 
+**Reading a sub-session** (`child_read.rs` rules, `sub_sessions::read`, route `/agent/read`, `perch read <session>
+[--turns N]`; slice 9c). A lead reads a bounded tail of its own child's conversation, on demand, with no model call:
+the last N turns (default 2, at most 5) from the snapshot the child's native bridge holds, through the same
+`transcript::project` the chat and the reporter use. Per turn: what opened it (a delivered message reads as who
+sent it), one sentence per run of tool calls, the files its landed edits changed with their line counts, the
+last thing the agent said, and a pending question or "still running". **Never** a tool's output or a file's
+contents; at most 8,000 characters in all, dropping the oldest turn first (the newest is kept, and a single turn is
+cut with a marker). Only a lead may ask, and only about a session it started (`parent_session_id` matches);
+another session or a non-existent one is `not one of your sub-sessions`, a sub-session asking is refused, and a
+child whose bridge Perch cannot reach (not connected, or after a core restart) says so instead of guessing. It
+changes nothing and is not counted against any limit. The text is the child's own account of its work: the CLI
+says so and that it is not checked.
+
 **Sender cards** (`agent_mail::parse_envelope`, `native_ui/transcript.rs`, web `SenderCard.tsx`; slice 9b). A
 message Perch delivered reaches the receiver as a banner in an ordinary user row (see "Messages"). When the
 core projects the transcript it reads that row back: a user row whose text is exactly a banner this module
