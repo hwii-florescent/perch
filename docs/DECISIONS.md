@@ -32,6 +32,23 @@ the empty gutters between them had no edge. Decided after mockups on real screen
   `glass.rs`, with the lights 8px further in and a 78px left padding, unchecked on a real window), WebKit, and the
   split-pane look with real split sets.
 
+## 2026-11-07 — Suggested tasks, sender cards, `perch read`, inbound control (owner)
+
+Closes the gaps against Claude desktop's sub-sessions (desktop doc: "Work across sessions",
+"Start a task that Claude suggests").
+
+- **Suggested-task cards.** `perch suggest` puts a card in the lead's chat with **Start**,
+  **Do it here** (sends the task to the lead as a message), **Options** (provider, model,
+  worktree, permissions) and **Start all** for several. A setting "Let leads start
+  sub-sessions without asking" decides whether `perch spawn` starts directly (on a
+  person-opened turn, as today) or becomes a card; default: ask (card), like Claude.
+- **Sender cards.** An incoming message shows in the receiver as a card titled with the
+  sending session and a link back, not plain text.
+- **`perch read <child>`.** The lead reads a bounded tail of its own child's transcript
+  (recent turns, tool-run sentences, changed files) on demand. Own run only.
+- **Inbound control** per session: accept (default), hold for my approval, or refuse messages
+  from other sessions; a refusal is reported to the sender.
+
 ## 2026-11-07 — Cheap-model reporter for sub-sessions (owner)
 
 The expensive child model does not write reports. When a child's turn ends, Perch asks a

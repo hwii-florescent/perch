@@ -524,6 +524,37 @@ the web only calls capability-gated core messages and shows receipts.
   menu and disabled reasons; one live e2e with a haiku lead and haiku child covering Message,
   Steer (or its disabled reason), Interrupt and Stop; Codex/Pi live only if no usage limit.
 
+## Slice 9: suggested tasks, sender cards, `perch read`, inbound control (owner, 2026-11-07)
+
+DECISIONS 2026-11-07 "Suggested tasks, sender cards…". Behaviour per Claude desktop's doc
+("Start a task that Claude suggests", "Work across sessions"); own code and words. One commit
+per bullet group.
+
+- **`perch suggest --task <t> [--agent --model --worktree]` (repeatable for several):** stores
+  suggestions on the lead's run and shows one card in the lead's chat (a transcript-adjacent
+  block from the core, like request cards). Buttons: Start (spawns with the suggested
+  options, through the same limits and checks as `perch spawn`), Do it here (sends the task to
+  the lead as the person's message), Options (a small form: provider, model, worktree,
+  permission mode, then Start), Start all (starts each, refusing beyond the limits with the
+  reason). Card shows each started child's state after. A person's click is the person action,
+  so the person-turn rule is satisfied by the click. Setting "Let leads start sub-sessions
+  without asking" (default off): when off, `perch spawn` returns `suggested` and makes a card
+  instead of starting. Update `perch guide`.
+- **Sender cards:** a delivered message is recognised in the receiver's transcript by its
+  envelope (Rust, `transcript.rs`) and rendered as a card: sender session title, provider,
+  link to open it, body; the raw envelope text is not shown. Works for Claude, Codex, Pi, OMP.
+- **`perch read <child> [--turns N]`:** lead only, own children only. Returns a bounded tail
+  from the projected transcript: the last N (default 2, max 5) turns as user text, final
+  assistant text, tool-run sentences and changed files; capped (e.g. 8k characters); no raw
+  tool output or file contents. Refused for non-children.
+- **Inbound control:** per session setting accept / hold / refuse (row menu and session
+  settings). Hold queues incoming messages with a "waiting for your approval" receipt and a
+  card for the person (Deliver / Discard); refuse returns `undelivered: refused` to the
+  sender. Applies to agent messages and steers; never to the person's own messages.
+- **Check:** Rust unit tests for each; web tests for the cards; one live e2e: a haiku lead
+  runs `perch suggest`, the test clicks Start, the child messages back and the lead sees a
+  sender card; `perch read` returns the child's last turn.
+
 ## Slice 8: cheap-model reporter (owner, 2026-11-07)
 
 DECISIONS 2026-11-07 "Cheap-model reporter". *Own* design (Claude desktop's own report is the
