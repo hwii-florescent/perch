@@ -88,6 +88,41 @@ it("keeps a failed native permission check unknown, not the plugin’s fake gran
   }
 });
 
+it("searches rows across sections, matches a group title, clears on Escape and says when nothing matches", async () => {
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+  usePerchStore.setState({ settingsOpen: true, settings: { theme: "perch" } as never, fetchSettings: vi.fn(), fetchHosts: vi.fn(), updateSettings: vi.fn() });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const input = () => host.querySelector<HTMLInputElement>('[data-testid="settings-search"]')!;
+  const type = async (value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), value);
+      input().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  const rows = () => [...host.querySelectorAll("[data-setting-row]")].map((r) => r.textContent ?? "");
+  try {
+    await act(async () => root.render(<SettingsPage />));
+    await type("search engine");
+    expect(rows().some((r) => r.includes("Default search engine"))).toBe(true);
+    expect(host.textContent).not.toContain("Warn before closing an agent");
+    await type("tab shape");
+    expect(rows()).toHaveLength(1);
+    await type("theme"); // a group title shows its whole group
+    expect(host.querySelector('[data-testid="theme-option-perch"]')).not.toBeNull();
+    await type("zzzz");
+    expect(rows()).toHaveLength(0);
+    expect(host.querySelector("[data-none]")).not.toBeNull();
+    await act(async () => { input().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(input().value).toBe("");
+    expect(usePerchStore.getState().settingsOpen).toBe(true);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("persists the dropped-path quoting toggle and follows authoritative settings", async () => {
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   const updateSettings = vi.fn();

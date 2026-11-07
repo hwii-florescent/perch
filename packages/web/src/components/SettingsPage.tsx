@@ -4,7 +4,7 @@
  * server. Sections are grouped into the left-hand tabs; each is a card of rows.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePerchStore } from "../store";
 import type { BrowserSearchEngine, HostConnectionState, HostMode, DeviceSummary } from "@perch/shared";
 import { THEME_NAMES, applyTheme } from "../themes";
@@ -23,7 +23,7 @@ import { MIN_SCROLLBACK, MAX_SCROLLBACK } from "../xtermSetup";
 import { newId } from "../ids";
 import { HostStateDot } from "./HostStateDot";
 import { cn } from "../lib/cn";
-import { SettingsGroup, SettingRow } from "./ui/setting-row";
+import { SettingsGroup, SettingRow, SettingsQuery } from "./ui/setting-row";
 import { Switch } from "./ui/switch";
 import { Select } from "./ui/select";
 import { KeybindingsSection } from "./KeybindingsSection";
@@ -38,6 +38,9 @@ import {
   LIST, MODEL_ROW, MUTED, NAME, SELECT, SELECT_HOST,
 } from "./ui/settings";
 
+// A full-height column of the shell, as in App.tsx (kept in step by hand: App imports this file).
+const CARD = "flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[12px] bg-[var(--card-bg)]";
+
 // ---------------------------------------------------------------------------
 // ThemeSection
 // ---------------------------------------------------------------------------
@@ -46,7 +49,8 @@ function ThemeSection() {
   const settings = usePerchStore((s) => s.settings);
   const updateSettings = usePerchStore((s) => s.updateSettings);
 
-  if (!settings) return null;
+  const q = useContext(SettingsQuery);
+  if (!settings || (q && !"theme".includes(q))) return null; // the chips are no row: search finds them by the group title
   const current = settings.theme;
 
   const handleSelect = (name: string) => {
@@ -59,7 +63,7 @@ function ThemeSection() {
 
   return (
     <SettingsGroup title="Theme">
-      <div className="py-3">
+      <div className="py-3" data-setting-row>
       <ul className="m-0 mb-2 flex list-none flex-wrap gap-[0.4rem] p-0">
         {THEME_NAMES.map((name) => (
           <li key={name}>
@@ -833,11 +837,57 @@ function TabContent({ tab }: { tab: SettingsTab }) {
   }
 }
 
+const SEARCH_FIELD = "box-border h-8 w-full min-w-0 rounded-ui bg-surface-0 px-[0.65rem] text-[0.82rem] text-fg [border:none] [font:inherit] placeholder:text-subtext-0 focus-visible:[outline:2px_solid_var(--accent)] focus-visible:[outline-offset:-1px]";
+
+/** The settings search field. Escape clears the text first, so a second Escape closes the page. */
+function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <input
+      className={SEARCH_FIELD}
+      type="search"
+      data-testid="settings-search"
+      aria-label="Search settings"
+      placeholder="Search settings"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Escape" && value) { e.stopPropagation(); onChange(""); } }}
+    />
+  );
+}
+
+/** Every matching row across the sections, grouped under the section name. Agents and Keyboard have
+ * no rows to filter, so they appear (whole) only when their name matches. */
+function SettingsResults({ query }: { query: string }) {
+  const q = query.trim().toLowerCase();
+  const isMobile = useIsMobileWidth();
+  return (
+    <div className="[&:not(:has([data-setting-row]))>[data-none]]:block" data-testid="settings-results">
+      {TABS.map(({ id, label }) => {
+        const whole = id === "agents" || id === "keyboard";
+        if (whole && !label.toLowerCase().includes(q)) return null;
+        if (id === "keyboard" && isMobile) return null; // no shortcuts to rebind on a touch screen
+        return (
+          <div key={id} data-testid={`settings-result-${id}`} className="not-has-[[data-setting-row]]:hidden">
+            <h2 className="m-0 mb-3 text-[0.75rem] font-medium tracking-[0.04em] text-subtext-0 uppercase">{label}</h2>
+            <SettingsQuery.Provider value={whole ? "" : q}>
+              {whole && <span data-setting-row hidden />}
+              <TabContent tab={id} />
+            </SettingsQuery.Provider>
+          </div>
+        );
+      })}
+      <p className="m-0 hidden text-[0.85rem] text-subtext-0" data-none>No settings match “{query.trim()}”.</p>
+    </div>
+  );
+}
+
 /** The phone's settings: a section list, then one section at a time with a back
  * row (iOS-style), instead of the desktop's sidebar. Keyboard shortcuts are left
  * out: a touch screen has none to rebind. */
 function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTab: (tab: SettingsTab | null) => void; onClose: () => void }) {
   const current = TABS.find((t) => t.id === tab);
+  const [query, setQuery] = useState("");
+  const searching = !current && query.trim() !== "";
   return (
     <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
       <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center pt-[max(0.5rem,env(safe-area-inset-top))] pr-[env(safe-area-inset-right)] pl-[max(0.25rem,env(safe-area-inset-left))]">
@@ -859,6 +909,8 @@ function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTa
         </main>
       ) : (
         <nav className="flex-1 overflow-y-auto px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" aria-label="Settings sections">
+          <div className="mb-4"><SearchBox value={query} onChange={setQuery} /></div>
+          {searching ? <SettingsResults query={query} /> : <>
           <div className="overflow-hidden rounded-ui bg-surface-0">
             {TABS.filter((t) => t.id !== "keyboard").map(({ id, label }) => (
               <button
@@ -883,6 +935,7 @@ function MobileSettings({ tab, onTab, onClose }: { tab: SettingsTab | null; onTa
               Change computer
             </button>
           )}
+          </>}
         </nav>
       )}
     </div>
@@ -901,10 +954,12 @@ export function SettingsPage() {
   const isMobile = useIsMobileWidth();
   // `null` = the phone's section list.
   const [tab, setTab] = useState<SettingsTab | null>("general");
+  const [query, setQuery] = useState("");
 
   // Fetch data every time the page opens, on the section the opener asked for.
   useEffect(() => {
     if (settingsOpen) {
+      setQuery("");
       setTab(settingsPage === "agents" ? "agents" : window.matchMedia(`(max-width: ${MOBILE_WIDTH_BREAKPOINT}px)`).matches ? null : "general");
       fetchSettings();
       fetchHosts();
@@ -921,16 +976,16 @@ export function SettingsPage() {
   if (!settingsOpen) return null;
   if (isMobile) return <MobileSettings tab={tab} onTab={setTab} onClose={() => setSettingsOpen(false)} />;
   const current = TABS.find((t) => t.id === (tab ?? "general"))!;
+  const searching = query.trim() !== "";
 
   return (
-    <div className="fixed inset-0 z-[1000] flex flex-col bg-panel-bg" data-testid="settings-modal" role="region" aria-label="Settings">
-      {/* The title bar of the macOS app: empty space drags the window. */}
-      <div className="h-9 shrink-0" data-tauri-drag-region />
-      <div className="flex min-h-0 flex-1 max-[700px]:flex-col">
-        <nav className="flex w-[15rem] shrink-0 flex-col gap-[0.15rem] overflow-y-auto bg-surface-0 px-3 py-3 max-[700px]:w-auto max-[700px]:flex-row max-[700px]:overflow-x-auto max-[700px]:py-2" aria-label="Settings sections">
+    // Same shell as the app: full-height cards on the backdrop (App.tsx CARD; the traffic lights sit in the nav card).
+    <div className="fixed inset-0 z-[1000] flex gap-2 bg-[var(--backdrop)] p-2 [--radius:var(--radius-pane)]" data-testid="settings-modal" role="region" aria-label="Settings" data-tauri-drag-region>
+      <nav className={cn(CARD, "w-[15rem]")} aria-label="Settings sections">
+        <div className="box-border flex h-11 shrink-0 items-center pl-3 in-[.app--mac-desktop]:pl-[84px]" data-tauri-drag-region>
           <button
             type="button"
-            className={cn(GHOST_BUTTON, "mb-3 flex items-center gap-2 px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:mb-0 max-[700px]:shrink-0")}
+            className={cn(GHOST_BUTTON, "flex items-center gap-1 py-[0.3rem] pr-2 pl-1 text-left text-[0.85rem]")}
             data-testid="settings-close"
             aria-label="Close settings"
             onClick={() => setSettingsOpen(false)}
@@ -938,27 +993,32 @@ export function SettingsPage() {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5" /></svg>
             Back to app
           </button>
-          <h2 className="m-0 mb-2 px-2 text-[1.1rem] font-semibold text-fg max-[700px]:hidden">Settings</h2>
+        </div>
+        <div className="px-3 pt-1 pb-2"><SearchBox value={query} onChange={setQuery} /></div>
+        <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-2 pb-3">
           {TABS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
-              className={cn(GHOST_BUTTON, "px-2 py-[0.4rem] text-left text-[0.85rem] max-[700px]:shrink-0", id === current.id && "bg-surface-1 text-fg")}
+              className={cn(GHOST_BUTTON, "px-[0.65rem] py-[0.4rem] text-left text-[0.85rem]", !searching && id === current.id && "bg-surface-1 text-fg")}
               data-testid={`settings-nav-${id}`}
-              aria-current={id === current.id ? "page" : undefined}
-              onClick={() => setTab(id)}
+              aria-current={!searching && id === current.id ? "page" : undefined}
+              onClick={() => { setQuery(""); setTab(id); }}
             >
               {label}
             </button>
           ))}
-        </nav>
-        <main className="settings-modal__body min-w-0 flex-1 overflow-y-auto px-8 py-8 max-[700px]:px-4">
-          <div className={cn("mx-auto", tab === "agents" ? "max-w-[60rem]" : "max-w-[46rem]")}>
-            <h1 className="m-0 mb-8 text-[1.6rem] font-semibold text-fg">{current.label}</h1>
-            <TabContent tab={current.id} />
+        </div>
+      </nav>
+      <main className={cn(CARD, "min-w-0 flex-1")}>
+        <div className="h-6 shrink-0" data-tauri-drag-region />
+        <div className="settings-modal__body min-h-0 flex-1 overflow-y-auto px-8 pb-8">
+          <div className={cn("mx-auto", tab === "agents" && !searching ? "max-w-[60rem]" : "max-w-[46rem]")}>
+            <h1 className="m-0 mb-8 text-[1.6rem] font-semibold text-fg">{searching ? "Search results" : current.label}</h1>
+            {searching ? <SettingsResults query={query} /> : <TabContent tab={current.id} />}
           </div>
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }
