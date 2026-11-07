@@ -1,7 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { BROWSER_COVERS, browserAddressDrafts, browserCall, browserHasFocus, browserId, nativeBrowser, noteBrowserFocus, onPassthrough, passthroughActive } from "../browserNative";
-import { browserAddress, openExternal, parseUrl, webUrl } from "../links";
+import { browserAddress, fileUrl, openExternal, parseUrl, webUrl } from "../links";
+
+/** A page this browser shows: the web, or (desktop) a local file an agent linked. */
+const shownUrl = (uri: string) => webUrl(uri) ?? (nativeBrowser ? fileUrl(uri) : null);
 import { useBrowserPages, safeIcon } from "../browserPages";
 import { recordPage, removePage, searchHistory, searchSuggestions, type HistoryEntry } from "../browserHistory";
 import { addressRows, type AddressRow } from "../addressSuggestions";
@@ -27,7 +30,7 @@ export function WorkspaceBrowser({ tabId, initialUrl, onUrl, active }: {
 }) {
   const id = browserId(tabId);
   // After a restart the page it last showed (not the address the tab was opened with) comes back.
-  const [start] = useState(() => webUrl(useBrowserPages.getState().pages[tabId]?.url ?? "") ?? initialUrl);
+  const [start] = useState(() => shownUrl(useBrowserPages.getState().pages[tabId]?.url ?? "") ?? initialUrl);
   const [url, setUrl] = useState(start);
   const [draft, setDraft] = useState(() => browserAddressDrafts.get(id)?.value ?? start);
   const [reloads, setReloads] = useState(0);

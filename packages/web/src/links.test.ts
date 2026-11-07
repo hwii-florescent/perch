@@ -85,6 +85,27 @@ describe("terminal links", () => {
     expect(useFileTabs.getState().tabs).toHaveLength(1);
   });
 
+  it("desktop: file: links open in Perch's browser, Cmd+click in the default app", () => {
+    vi.resetModules();
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = { invoke };
+    return import("./links").then(async (links) => {
+      const { useFileTabs: tabs } = await import("./fileTabs");
+      const { usePerchStore: store } = await import("./store");
+      tabs.setState({ tabs: [], active: null });
+      store.setState({ activeWorkspaceId: "w1", workspaces: [{ id: "w1", hostId: "local", path: "/p" }] as never });
+      const href = "file:///private/tmp/perch-separator-study/index.html";
+      links.openTerminalLink({ metaKey: false, ctrlKey: false }, href);
+      expect(tabs.getState().tabs).toEqual([{ workspaceId: "w1", path: href, kind: "browser" }]);
+      expect(invoke).not.toHaveBeenCalled();
+      links.openTerminalLink({ metaKey: true, ctrlKey: false }, "file:///tmp/a%20b.png");
+      expect(invoke).toHaveBeenCalledWith("open_in_default_app", { path: "/tmp/a b.png" });
+      links.openTerminalLink({ metaKey: false, ctrlKey: false }, "file://evil.example/x");
+      expect(tabs.getState().tabs).toHaveLength(1);
+      delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
+  });
+
   it("ignores non-web links", () => {
     usePerchStore.setState({
       activeWorkspaceId: "w2",

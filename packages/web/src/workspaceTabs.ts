@@ -142,7 +142,7 @@ export function tabName(tab: FileTab): string {
   if (tab.kind === "browser") {
     const page = useBrowserPages.getState().pages[fileTabKey(tab)];
     const url = page?.url || (isBlankBrowser(tab) ? "" : tab.path);
-    return page?.title.trim() || (url ? parseUrl(url)?.host ?? url : "New browser");
+    return page?.title.trim() || (url ? parseUrl(url)?.host || url : "New browser");
   }
   return tab.path.split("/").pop() || tab.path;
 }

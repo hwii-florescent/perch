@@ -28,8 +28,44 @@ fn web_url(url: &str) -> Result<tauri::Url, String> {
     let url: tauri::Url = url.parse().map_err(|e| format!("{e}"))?;
     match url.scheme() {
         "http" | "https" => Ok(url),
-        _ => Err("only http(s) pages can be shown".into()),
+        // A file an agent printed (an HTML page, an image, a PDF) shown in place; macOS only.
+        "file" if cfg!(target_os = "macos") && is_local_file(&url) => Ok(url),
+        _ => Err("only http(s) pages and local files can be shown".into()),
     }
+}
+
+fn is_local_file(url: &tauri::Url) -> bool {
+    url.scheme() == "file"
+        && matches!(url.host_str(), None | Some("" | "localhost"))
+        && url.to_file_path().is_ok_and(|path| path.is_file())
+}
+
+/// WKWebView refuses a `file:` URL given to `loadRequest` (what wry navigates with); it needs
+/// `loadFileURL` plus a read root. The root is the file's folder, so a page's relative
+/// styles and images load. The child has no app IPC, as for any page here.
+#[cfg(target_os = "macos")]
+fn load_file(view: &tauri::Webview, url: &tauri::Url) -> Result<(), String> {
+    let path = url.to_file_path().map_err(|_| "not a local file")?;
+    let dir = path.parent().unwrap_or(&path).to_path_buf();
+    view.with_webview(move |platform| {
+        use objc2::{msg_send, runtime::AnyObject};
+        use objc2_foundation::{NSString, NSURL};
+        // SAFETY: with_webview runs on the main thread with a live WKWebView.
+        unsafe {
+            let file = NSURL::fileURLWithPath_isDirectory(
+                &NSString::from_str(&path.to_string_lossy()),
+                false,
+            );
+            let root = NSURL::fileURLWithPath_isDirectory(
+                &NSString::from_str(&dir.to_string_lossy()),
+                true,
+            );
+            let web = platform.inner().cast::<AnyObject>();
+            let _: *mut AnyObject =
+                msg_send![web, loadFileURL: &*file, allowingReadAccessToURL: &*root];
+        }
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Menu id of File > Close Tab.
@@ -293,7 +329,13 @@ pub async fn browser_show(
     }
     let window = app.get_window("main").ok_or("no main window")?;
     let (handle, own_label) = (app.clone(), label.clone());
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(web_url(&url)?))
+    let target = web_url(&url)?;
+    let first = if target.scheme() == "file" {
+        "about:blank".parse().map_err(|e| format!("{e}"))?
+    } else {
+        target.clone()
+    };
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(first))
         // target=_blank / window.open stay in this tab instead of vanishing.
         .on_new_window(move |url, _| {
             if let Some(view) = handle.get_webview(&own_label) {
@@ -312,6 +354,10 @@ pub async fn browser_show(
     }
     if let Some(zoom) = zoom {
         view.set_zoom(zoom).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    if target.scheme() == "file" {
+        load_file(&view, &target)?;
     }
     Ok(())
 }
@@ -461,6 +507,8 @@ pub async fn browser_close(app: AppHandle, id: String) -> Result<(), String> {
 pub async fn browser_go(app: AppHandle, id: String, url: String) -> Result<(), String> {
     let url = web_url(&url)?;
     match app.get_webview(&label(&id)?) {
+        #[cfg(target_os = "macos")]
+        Some(view) if url.scheme() == "file" => load_file(&view, &url),
         Some(view) => view.navigate(url).map_err(|e| e.to_string()),
         None => Ok(()),
     }

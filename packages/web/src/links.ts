@@ -23,6 +23,13 @@ export function webUrl(uri: string): string | null {
   return url && (url.protocol === "http:" || url.protocol === "https:") ? url.href : null;
 }
 
+/** A local `file:` URL (host empty or localhost) as an agent prints it, or null. Only the desktop
+ * app's native browser can show one, so callers gate on `tauriInvoke`. */
+export function fileUrl(uri: string): string | null {
+  const url = parseUrl(uri);
+  return url?.protocol === "file:" && (url.hostname === "" || url.hostname === "localhost") ? url.href : null;
+}
+
 /** Address-bar input, not terminal output: infer a web address or search for words. */
 export function browserAddress(input: string, searchEngine = "google"): string | null {
   const value = input.trim();
@@ -56,9 +63,16 @@ export function openExternal(url: string): void {
 /** A click on a link in a terminal or agent TUI: Cmd/Ctrl+click opens the OS browser,
  * a plain click opens perch's own browser tab in the workspace on screen. */
 export function openTerminalLink(event: Pick<MouseEvent, "metaKey" | "ctrlKey">, uri: string): void {
-  const url = webUrl(uri);
+  const local = tauriInvoke ? fileUrl(uri) : null;
+  const url = local ?? webUrl(uri);
   if (!url) return;
   const workspace = effectiveWorkspace(usePerchStore.getState());
+  if (local && tauriInvoke && (event.metaKey || event.ctrlKey || !workspace)) {
+    try {
+      void tauriInvoke("open_in_default_app", { path: decodeURIComponent(new URL(local).pathname) }).catch(() => {});
+    } catch { /* a malformed escape names no file */ }
+    return;
+  }
   if (event.metaKey || event.ctrlKey || !workspace) openExternal(url);
   else useFileTabs.getState().open(workspace.id, url, "browser");
 }
