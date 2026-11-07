@@ -1,6 +1,7 @@
 # Perch architecture
 
-Current implementation reference, refreshed against `8dae768`.
+Current implementation reference. Core sections were refreshed against `8dae768`;
+the sub-session sections were added through `3aa0afb` (2026-11-07).
 [ROADMAP](ROADMAP.md) tracks what remains; [PUBLIC-ALPHA](PUBLIC-ALPHA.md)
 defines acceptance evidence. Source presence is not a release certification.
 

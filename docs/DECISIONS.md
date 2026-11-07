@@ -7,6 +7,26 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-07 — Projects parity: persistent memory and a project home (owner)
+
+Owner direction: Perch should have the same feature as Claude Code Projects (beta), not
+only Instructions. Instructions alone duplicate `AGENTS.md`, which Claude and Codex both
+read; they add privacy and per-Nest text, nothing else.
+
+- **Persistent project memory is a must.** This lifts "no agent-written memory in the first
+  cut" (2026-11-06): that was a first-cut deferral, listed as "Later", not a rejection.
+  Design constraints stay as decided then: agent-written content never silently becomes
+  trusted Instructions; scope and atomic, conflict-safe updates; provenance per file; a
+  person can review, edit and delete. Proposed, to be settled when the slice starts: a
+  per-Birdhouse memory folder with an index, never injected (only a short pointer), read
+  by agents on demand like the notes folder.
+- **Also in scope, in order:** a library of picked files and folders, a project home with an
+  Overview grouped by state, branch/PR status per thread, and a review of the 4-live/8-total
+  limits. Out of reach: cloud threads and the claude.ai `/project` bridge.
+- **Unchanged:** the lead is an ordinary session the user picks; Perch hosts no model, planner
+  or scheduler; no new noun for "Project" (it stays the Birdhouse) until the owner renames it.
+- Steps and open questions: [ROADMAP](ROADMAP.md) "Projects parity". Nothing here is built.
+
 ## 2026-11-07 — Desktop shell is three full-height cards on a backdrop (owner)
 
 The main view looked like the sidebars because every layer was the same shell color, and
@@ -159,12 +179,13 @@ open questions, [research](evidence/agent-workspaces-2026-11-05.md) the evidence
   in-process subagents) in runs the user starts: visible under their parent,
   messaging and reporting through Perch. Native subagents/teams are observed.
 - **Agents reach Perch through a `perch` CLI plus a skill, not an MCP server**, to
-  keep tool schemas out of every context. This narrows "no orchestration suite" to
+  keep tool schemas out of every context (the skill became an appended pointer to
+  `perch guide`, 2026-11-06). This narrows "no orchestration suite" to
   no scheduler, kanban or autonomous planner.
 - Inter-agent messages are automatic within a user-started run, but only into an
   idle verified prompt; never into a busy PTY, never auto-approving permissions.
 - Model and effort are picked when a session or child starts (reporters default
-  to Haiku 5.5); still no model chrome over a live session.
+  to Haiku, set per harness since 2026-11-07); still no model chrome over a live session.
 
 ## 2026-11-05 — Real desktop apps as a switchable view: withdrawn (owner)
 

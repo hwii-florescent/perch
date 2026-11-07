@@ -1,14 +1,14 @@
 # Terminal input: multi-character key events (Vietnamese IMEs)
 
 Status: **fixed in Perch (unverified with a real IME).** `createPerchTerminal`
-(`packages/web/src/xtermSetup.ts`) now forwards the part of a multi-character
+(`packages/web/src/xtermSetup.ts`) forwards the part of a multi-character
 `insertText` that xterm's keypress path did not send; regression test in
 `xtermSetup.test.ts`. Confirm with the repro below on a real event-tap IME.
 The IME-side workaround remains harmless.
 Found while using Perch with a custom Vietnamese input method
 ([`vietnativekey`](https://github.com/hwii-florescent/vietnativekey), a fork of
-Gõ Nhanh). Cause is a reading of xterm.js behaviour and is **not yet verified
-inside Perch**; confirm with the repro below before changing code.
+Gõ Nhanh). The cause below is a reading of xterm.js behaviour, not confirmed by
+inspecting the pinned version.
 
 ## Symptom
 
@@ -46,16 +46,12 @@ Cursor integrated terminals, Hyper, Tabby. Terminals that read the whole string
 branch in `platforms/macos/RustBridge.swift`. That makes Perch work only with
 that IME build and costs ~8 ms per restored letter.
 
-## Possible fix in Perch
+## The fix in Perch
 
-Make the terminal accept a multi-character insertion regardless of IME:
-listen for the textarea `input` event (`inputType: "insertText"`, `data` longer
-than one character) in or next to `createPerchTerminal`
-(`packages/web/src/xtermSetup.ts`) and forward the full `data` to the terminal's
-input path, while not double-sending what xterm already handled. Keep native
-input and the `onTerminalInput` user-input classification intact (see
-`AGENTS.md`). Mind IME composition (`isComposing`) and the Ctrl+Enter textarea
-handling already in that file.
+`createPerchTerminal` listens for the textarea `input` event (`inputType:
+"insertText"`, `data` longer than one character, not composing) and forwards the
+full `data`, without double-sending what xterm already handled. Native input and
+the `onTerminalInput` user-input classification are unchanged.
 
 ## Repro
 

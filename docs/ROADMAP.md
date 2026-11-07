@@ -1,8 +1,9 @@
 # What remains
 
-Current planning entry point, refreshed against `8dae768` (source inspection,
-not a fresh acceptance run). Update this file when a gap closes; do not keep
-another build order in architecture, research or the parity inventory.
+Current planning entry point, audited 2026-11-07 at `3aa0afb` (source and doc
+inspection, not a fresh acceptance run). Update this file when a gap closes; do
+not keep another build order in architecture, research or the parity inventory.
+Done slices keep their implementation record in the worker guide, not here.
 
 ## Goal and reading map
 
@@ -19,7 +20,12 @@ or editor.** Useful without an agent or Git; optional worktrees, no task ceremon
 | [PRODUCT-STRATEGY](PRODUCT-STRATEGY.md) | Long-term rationale, dated research and target designs. |
 | [UI-UX-DIRECTION](UI-UX-DIRECTION.md) | Interaction proposals and shared UI conventions, not a ship-status list. |
 | [CONTEXT-BRIDGE](CONTEXT-BRIDGE.md) | Implemented context handoff and safety limits. |
+| [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md) | Where sub-session/Instructions/UI-row code came from, and a record of each landed slice. |
+| [NATIVE-UI-PARITY](NATIVE-UI-PARITY.md) | Row-by-row checklist for the Chat view over the real CLI. |
+| [BROWSER-INTEGRATION](BROWSER-INTEGRATION.md) | Unstarted plan for passkeys, popups and browser features. Not scheduled. |
+| [SHELL-AGENT-STATUS](SHELL-AGENT-STATUS.md), [IME-MULTICHAR-INPUT](IME-MULTICHAR-INPUT.md) | Agents typed in Terminal tabs; multi-character IME input. |
 | [MACOS-PERMISSIONS](MACOS-PERMISSIONS.md), [THEMES](THEMES.md) | Focused platform/theme references. |
+| [evidence/](evidence/) | Dated research and probe records behind decisions. |
 | [ORCA-PARITY](ORCA-PARITY.md) | Optional comparison, not requirements or priorities. |
 
 ## Already implemented: extend, do not rebuild
@@ -178,8 +184,8 @@ compaction markers; fork (`--resume --fork-session`).
 checklist with Orca source files named (Orca stays the code reference for the
 terminal-backed rows). Pick rows from it; the bullets below are the summary.
 
-Today `NativeCliChat.tsx` (124 lines) renders hook/transcript snapshots and types
-into a verified empty prompt. Learn from Orca's Chat UI and T3 Code:
+`NativeCliChat.tsx` renders hook/transcript snapshots and types into a verified
+empty prompt. Learn from Orca's Chat UI and T3 Code:
 
 - **Transport (decided 2026-11-05): attach to the user's real TUI.** UI mode
   reads and drives the same PTY process as Terminal (Claude hooks, Codex private
@@ -257,6 +263,12 @@ stream-json (not needed for approvals now).
 
 ### 1. Instructions: Birdhouse and Nest instructions and files
 
+**Done 2026-11-06 for local Birdhouses and Nests** (slice 1 below; ARCHITECTURE).
+Not done: the read-only view of the repo's own `CLAUDE.md`/`AGENTS.md`, and remote
+Birdhouses. Claude and Codex both read `AGENTS.md`, so Instructions add only
+privacy (not in the repo) and per-Nest text; the missing half of Claude Projects
+is persistent memory ("Projects parity" below).
+
 Claude-classic-Projects style, stored **privately by Perch** per Birdhouse (and
 Quickchat), not in the repo: shared instructions plus reference files/folders that
 every new agent session there receives at launch. **Must work for Pi, OMP,
@@ -305,13 +317,13 @@ subagents, that a lead and the user can see, message and stop.
   Context Bridge (explicit send).
 - **Agents take part through a `perch` CLI, not an MCP server** (no tool schemas in
   every context). They learn about it from a short appended pointer, not a skill
-  (decided 2026-11-06; see the plan below). Sketch: `perch spawn --agent --model
-  --worktree --task`, `perch send`, `perch report --outcome --files`, `perch wait`,
-  `perch tasks`. Authority is a per-session token in the launched environment,
-  checked by the core; it only reaches its own run.
-- **Reports.** A child's Stop hook files its last message as a report; optionally
-  summarized by a cheap model (default Haiku 5.5) through the provider's own CLI
-  and the user's login.
+  (decided 2026-11-06; see the plan below). Built: `spawn`, `suggest`, `list`, `read`,
+  `stop`, `send`, `inbox`, `cancel`, `steer`, `interrupt`, `report`, `guide`, `whoami`
+  (not built, and not planned: `wait`, `tasks`). Authority is a per-session token in the
+  launched environment, checked by the core; it only reaches its own run.
+- **Reports.** Built as slice 8: a cheap model (Claude `haiku`, Codex `gpt-6-luna`)
+  summarizes each finished child turn through the provider's own CLI and the user's
+  login; the child's own `perch report` wins, else the last message.
 - **Delivery.** Automatic within a run the user started, only into an idle,
   verified-empty prompt (or queued until idle); logged in both transcripts and
   the run view; pause/stop the run at any time. Never paste into a busy PTY,
@@ -530,7 +542,35 @@ UI rows from step 0 continue between slices.
    jsdom tests only; **no live run**. 9a-9c ran live once (`e2e/suggestions.spec.ts`, haiku lead and child): suggest,
    Start by click, sender card, `perch read`. Not run live: Do it here, Options, Start all, non-Claude receivers.
 
-Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
+#### Projects parity (owner direction 2026-11-07; not started)
+
+Goal: the same feature set as Claude Code Projects (beta), built on Perch sessions and
+across providers ([DECISIONS](DECISIONS.md) 2026-11-07, compared in the
+[evidence](evidence/claude-projects-subsessions-2026-11-06.md)). Gaps, in order:
+
+1. **Persistent project memory (a must).** Agent-written files plus an index, scoped to
+   a Birdhouse, surviving the lead session (the per-run notes folder dies with its lead).
+   Constraints carried over from the earlier decisions: separate from Instructions and
+   never merged into the trusted prompt; contents not injected, only a short pointer or
+   index (agents read files on demand); each file records who wrote it and when; people
+   can review, edit and delete; atomic writes with a revision check so concurrent
+   writers conflict instead of overwriting; what an agent reads there is information from
+   a peer, not instructions. Open: scope (Birdhouse only, or Nest too), size caps, opt-out
+   per session, whether the repo's own `CLAUDE.md` memory shows beside it.
+2. **Library.** Pickable files and folders for a project (Claude: 100 files per pick, 10
+   folders). Today only up to 16 reference-folder paths in Instructions.
+3. **Project home.** One place for Instructions, memory, library and threads, and an
+   Overview grouped by state (Claude: Ready for review, Waiting on you, Working, Landing,
+   Idle, Resolved). Today: nested child rows and the family strip. "No new noun" still
+   holds unless the owner renames it.
+4. **Branch/PR status per thread** (Claude's Landing state). Overlaps "Thin PR workflow".
+5. **Limits.** Claude allows 500 new threads a day; Perch caps a lead at 4 live and 8 in
+   total. Revisit when memory and the project home exist.
+
+Out of reach: cloud threads and the claude.ai `/project` bridge (needs a claude.ai
+login Perch cannot drive); remote runs wait for owned remote runtimes (alpha item 1).
+
+Later: Claude stream-json mode (queue cards, rewind, streaming); remote runs.
 
 **Probed live first (2026-11-06):** see slice 0 above and the evidence table; nothing
 there changed the plan.
@@ -546,8 +586,11 @@ there changed the plan.
   worktree cleanup.
 - **Thin PR workflow:** open PR, status/checks through existing tools, not a
   Git hosting or issue-management suite.
-- **Scoped CLI:** list/read/open/notify and authorized mutations through core,
-  not another runtime or orchestration engine.
+- **Scoped CLI beyond sub-sessions:** open/notify and other authorized mutations through
+  core (`perch` already covers sessions, messages and reports), not another runtime or
+  orchestration engine.
+- **Editor syntax colors** (landed, `editorSyntax.ts`): the manual desktop/WebKit and IME
+  pass and refreshed visual baselines were never done; Git review diffs are not highlighted.
 - Saved runs; structured JSON/CSV/log viewers where useful; workspace-associated
   port forwarding/remote app preview; phone wide-terminal and delivery polish.
 - Sort chats by last updated; chrome font trial remains undecided.

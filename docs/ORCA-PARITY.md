@@ -23,7 +23,7 @@ not a fresh runtime comparison. Orca reference revision: `564f1352`.
 | Usage/profiles | Plan usage windows, API-equivalent spend estimates and threshold alerts; iTerm/Ghostty profiles. | Not an account manager; Warp import not implemented. |
 | Remote/phone | Perch federation, reduced direct SSH/tmux, paired browser/PWA and shared CLI input. | Full managed remote workspace and phone refinements remain. |
 | Browser | Browser tabs/drawer; desktop native child webviews. | Remote service forwarding/security verification are distinct from merely having a viewer. |
-| Agent-facing CLI | No scoped Perch CLI yet. | Later, through core's services and authority model. |
+| Agent-facing CLI | `perch` with a per-session token: spawn, suggest, list, read, stop, send, inbox, steer, interrupt, report. | Depth 1, 4 live / 8 total children, idle-only messages; no tasks, gates or coordinator loop (see ROADMAP). |
 
 ## Not parity tasks
 

@@ -15,8 +15,9 @@ agents, files, workspace restoration or remote execution.
 
 Keep the existing native engine and pane architecture first. This is not a
 promise of Safari/Chrome parity or guaranteed Google sign-in. Product and safety
-contracts in [DECISIONS](docs/DECISIONS.md), [ARCHITECTURE](docs/ARCHITECTURE.md)
-and [TESTING](docs/TESTING.md) continue to apply.
+contracts in [DECISIONS](DECISIONS.md), [ARCHITECTURE](ARCHITECTURE.md)
+and [TESTING](TESTING.md) continue to apply. Not started as of 2026-11-07; the
+[ROADMAP](ROADMAP.md) does not schedule it.
 
 ## Starting point and uncertainties
 
@@ -224,7 +225,7 @@ Apply this gate to **every implementation slice**, not only at the end.
       redirects, opening loopback content or closing the initiating page.
 - [ ] Check shell/agent continuity and packaging effects without changing runtime
       ownership or treating unknown execution state as exit.
-- [ ] Follow [TESTING](docs/TESTING.md): isolate `PERCH_DB`, `PERCH_HOSTS`,
+- [ ] Follow [TESTING](TESTING.md): isolate `PERCH_DB`, `PERCH_HOSTS`,
       `PERCHD_DIR`, `PERCH_SETTINGS` and native webview storage. The four environment
       variables alone do not isolate WKWebView cookies. Clean up only owned test
       processes and state; never use the installed app's daemon or reinstall it.
