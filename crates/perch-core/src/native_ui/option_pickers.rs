@@ -20,7 +20,7 @@
 //! "Set model to …" line. A mode has no command, so it is changed by Shift+Tab one step at a time,
 //! reading the footer after every step. Orca's catalog for other CLIs is not ported: Codex's
 //! `/model` is a two-step TUI picker and Pi/OMP have no typed command with a read-back (see the
-//! worker guide, Row 10b).
+//! docs/evidence/cli-probes-2026-11.md).
 use super::session_options::{model_id_label, permission_mode_label};
 use crate::protocol::{NativeUiOptions, NativeUiPicker, NativeUiPickerChoice, NativeUiSnapshot};
 use regex::Regex;

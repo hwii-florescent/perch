@@ -3,7 +3,7 @@
 Current planning entry point, audited 2026-11-07 at `3aa0afb` (source and doc
 inspection, not a fresh acceptance run). Update this file when a gap closes; do
 not keep another build order in architecture, research or the parity inventory.
-Done slices keep their implementation record in the worker guide, not here.
+Done slices are described by the code (module `//!` headers) and ARCHITECTURE, not here.
 
 ## Goal and reading map
 
@@ -20,7 +20,7 @@ or editor.** Useful without an agent or Git; optional worktrees, no task ceremon
 | [PRODUCT-STRATEGY](PRODUCT-STRATEGY.md) | Long-term rationale, dated research and target designs. |
 | [UI-UX-DIRECTION](UI-UX-DIRECTION.md) | Interaction proposals and shared UI conventions, not a ship-status list. |
 | [CONTEXT-BRIDGE](CONTEXT-BRIDGE.md) | Implemented context handoff and safety limits. |
-| [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md) | Where sub-session/Instructions/UI-row code came from, and a record of each landed slice. |
+| [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md) | Rules for the next slice, choices not to reverse, and what is not verified live. |
 | [NATIVE-UI-PARITY](NATIVE-UI-PARITY.md) | Row-by-row checklist for the Chat view over the real CLI. |
 | [BROWSER-INTEGRATION](BROWSER-INTEGRATION.md) | Unstarted plan for passkeys, popups and browser features. Not scheduled. |
 | [SHELL-AGENT-STATUS](SHELL-AGENT-STATUS.md), [IME-MULTICHAR-INPUT](IME-MULTICHAR-INPUT.md) | Agents typed in Terminal tabs; multi-character IME input. |
@@ -197,7 +197,7 @@ empty prompt. Learn from Orca's Chat UI and T3 Code:
   into the turn where supported; Stop; Rewind to a message (idle only); `/compact`;
   one slash/skill picker; `@file`; image paste; prompt recall. Claude's model, effort and
   permission-mode pickers type the CLI's own command at an idle, verified prompt and show only what the
-  CLI reads back (landed 2026-11-06; Codex, Pi and OMP have none yet, see the worker guide, Row 10b).
+  CLI reads back (landed 2026-11-06; Codex, Pi and OMP have none yet, see [cli-probes](evidence/cli-probes-2026-11.md)).
 - **Send states.** Sending / Not sent (Retry) / unconfirmed after a restart,
   settled from the transcript; never resend a steer or an unproven message.
 - **Approvals and questions in the UI.** Claude permission prompt tool and
@@ -293,8 +293,7 @@ knowledge search. Remote Birdhouses keep theirs on the owning core.
 
 ### 2. Observe native subagents and teams
 
-Done for Claude's native subagents as roster rows (2026-11-06, details in the
-[worker guide](PROJECTS-WORKER-GUIDE.md) slice 2): read from Claude's per-session `subagents/`
+Done for Claude's native subagents as roster rows (2026-11-06, `native_ui/subagents.rs`): read from Claude's per-session `subagents/`
 files, not from hooks. Still open below: a read-only child transcript, Codex, Pi/OMP, teams.
 
 Child rows under a session, with status, description, model and a read-only
@@ -441,8 +440,8 @@ The ten questions these settle (as posed 2026-11-05; answers above):
 10. Codex app-server and Claude structured sessions: re-check provider terms each release;
     Anthropic paused, not dropped, SDK subscription changes.
 
-**Slices, in order.** Where the code comes from (Orca ports, Claude behaviour specs),
-target modules and checks per slice: [PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md).
+**Slices, in order.** Source policy, checks and choices not to reverse:
+[PROJECTS-WORKER-GUIDE](PROJECTS-WORKER-GUIDE.md).
 One at a time; each ends with its check passing, docs updated and a local commit. Live turns only on `claude-haiku-4-5` or `gpt-5.6-luna`. Claude-desktop
 UI rows from step 0 continue between slices.
 
@@ -464,7 +463,7 @@ UI rows from step 0 continue between slices.
 2. **UI rows sub-sessions need:** status with nested child rows, subagent rows from
    SubagentStart/Stop hooks, docked task list. Check: unit tests on the Rust projection;
    e2e with a native Claude subagent and a TodoWrite turn.
-3. **Identity and authority. Done 2026-11-06** (details in the worker guide): session
+3. **Identity and authority. Done 2026-11-06**: session
    incarnation, scoped hashed token in `PERCH_TOKEN`, discovery file `core.json`, the merged
    `perch` binary with `whoami`, `guide`, `report` and `perch daemon …` (old verbs still
    work), the pointer appended to every launch. Tests: a token cannot act outside its run
@@ -482,7 +481,7 @@ UI rows from step 0 continue between slices.
    build it first; `e2e/packaged-perch.check.mjs`). Not done: there is no headless package to
    put it in (open question for the owner), and the Linux packages were not built here. Slice 4
    makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
-4. **Spawn, list, stop and reports. Done 2026-11-06** (details in the worker guide):
+4. **Spawn, list, stop and reports. Done 2026-11-06**:
    `perch spawn|list|stop`, parent link (`sessions.parent_session_id`) and `sub_sessions`
    records, limits (4 live, 8 total, depth 1) and the person-turn rule admitted in one
    transaction before anything starts, an idempotency key, stop confirmed by perchd, reports
@@ -491,7 +490,7 @@ UI rows from step 0 continue between slices.
    stopped it. **Not verified:** a luna Codex child end to end (its quota was spent after it
    started) and `--worktree` live (Rust test only). Deleting a lead stops its live children first;
    Esc in the chat does not (it is not a stop).
-5. **Messaging. Done 2026-11-07** (details in the worker guide and ARCHITECTURE "Messages"):
+5. **Messaging. Done 2026-11-07** (ARCHITECTURE "Messages"):
    `perch send|inbox|cancel`, the durable `agent_mail` queue, idle-only delivery per
    provider, receipts (queued / delivered / unconfirmed / undelivered with a reason),
    the 50-message and 10-wake caps, children's status notes to the lead. Live: a haiku
@@ -499,14 +498,14 @@ UI rows from step 0 continue between slices.
    input lease an open view holds, unchanged, after the idle, empty-prompt and 2 s PTY-quiet
    checks (owner decision 2026-11-07; a composer draft is browser-side and not protected).
    **Not verified live:** delivery to Codex, Pi or OMP receivers.
-6. **Family strip and notes folder. Done 2026-11-07** (details in the worker guide and ARCHITECTURE
+6. **Family strip and notes folder. Done 2026-11-07** (ARCHITECTURE
    "Family strip"): `crew.get`/`crew.state` (capability `crew.v1`), `parentSessionId` on sessions,
    children nested under their lead in the sidebar, a strip above the lead's composer (state, waiting on
    you, the last message's receipt, the agent's own report, newest traffic first), the run's notes folder
    named in `perch guide`. Live: the strip and the nested row beside a real haiku lead and child; working
    / waiting on you / reported are unit-tested, **"waiting on you" and the phone layout not run live**.
 
-7. **Family strip actions. Done 2026-11-07** (worker guide "Slice 7 landed", ARCHITECTURE "Family strip
+7. **Family strip actions. Done 2026-11-07** (ARCHITECTURE "Family strip
    actions"): Message (default, idle-only, from the person), Steer, Interrupt and Stop on each worker row,
    `crew.act` / `crew.act.result` (capability `crew.actions.v1`) under the lead chat's input lease, receipts
    (`sent` / `confirmed` / `not confirmed`) never retried; the lead may steer and interrupt its own children
@@ -515,19 +514,19 @@ UI rows from step 0 continue between slices.
    (probed, transcript-confirmed). Live: haiku lead and child, all four actions. **Not run live:** Codex,
    Pi, OMP, a lead's own steer or interrupt, the phone layout.
 
-8. **Cheap-model reporter. Done 2026-11-07** (worker guide "Slice 8 landed", ARCHITECTURE "Cheap-model
+8. **Cheap-model reporter. Done 2026-11-07** (ARCHITECTURE "Cheap-model
    reporter"): when a child's turn ends, haiku (Claude children; Codex children use `gpt-5.6-luna`; Pi/OMP use
    whichever is installed) writes a 400-character summary from the child's **previous summary plus only that
    turn's events**, so cost stays flat; no periodic model call. A child's own `perch report` of the turn wins,
    else the summary, else the last message; the lead's note and the strip say `Summary by <model>`; settings
    to turn it off or change the models; counted in the spend estimate. Live: haiku lead and child, summary by
    haiku in the note and on the strip. **Not run live:** the Codex runner, Pi/OMP children.
-   **8b. Done 2026-11-07** (worker guide "Slice 8b landed"): the model is a setting per harness, each run through
+   **8b. Done 2026-11-07** (`reporter.rs`): the model is a setting per harness, each run through
    that harness's own one-shot mode: Claude `haiku`, Codex `gpt-6-luna`, Pi and OMP `provider/model` with no
    default (unset: their children use Claude or Codex when installed, else the last message). Probed Pi and OMP
    with one haiku and one luna call each; the Codex and Claude defaults were checked without spending tokens.
 
-9. **Suggested tasks, sender cards, `perch read`, inbound control** (worker guide "Slice 9"; DECISIONS 2026-11-07).
+9. **Suggested tasks, sender cards, `perch read`, inbound control** (DECISIONS 2026-11-07).
    **9a. Done 2026-11-07** (ARCHITECTURE "Suggested tasks"): `perch suggest` and, by default, `perch spawn` put a
    card in the lead's chat (Start, Do it here, Options, Start all, Dismiss); a person's click starts the
    sub-session through the same limits and checks as spawn. Setting "Let leads start sub-sessions without asking"

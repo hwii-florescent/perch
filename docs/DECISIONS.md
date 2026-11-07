@@ -96,7 +96,7 @@ assigns or retries work.
   3 per child per person's message to it. Each uses the provider's own mechanism; a provider
   without a confirmable one shows the action disabled with the reason, never a PTY guess.
   *Built 2026-11-07:* Claude's own prompt queue proved to feed mid-turn text into the turn, so Steer
-  is offered for Claude too (details in the worker guide).
+  is offered for Claude too (probe in evidence/cli-probes-2026-11.md).
 
 ## 2026-11-06 — Local authority, `perch list`, packaging, live pickers (owner)
 
