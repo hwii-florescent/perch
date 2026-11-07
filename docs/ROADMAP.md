@@ -477,8 +477,8 @@ UI rows from step 0 continue between slices.
    as labelled claims with a last-message fallback, bare `list`/`serve`/`connect` aliases
    gone, `perch guide` extended. Live: a haiku lead spawned a haiku child, read its report and
    stopped it. **Not verified:** a luna Codex child end to end (its quota was spent after it
-   started), `--worktree` (no test, no live run), and the stop of children on the chat's
-   interrupt or a lead's deletion (not built).
+   started) and `--worktree` live (Rust test only). Deleting a lead stops its live children first;
+   Esc in the chat does not (it is not a stop).
 5. **Messaging** (`send`, `inbox`) with the durable queue and wake cap; write restart,
    cancellation, duplicate and lease-contention behaviour down first. Check: queue
    recovery after restart without duplicates; busy, approval-blocked and

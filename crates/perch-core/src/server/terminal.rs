@@ -1246,7 +1246,9 @@ pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, termi
                 let app = state.app.clone();
                 let lead = key.session_id.clone();
                 tokio::task::spawn_blocking(move || {
-                    super::sub_sessions::stop_children_of(&app, &lead)
+                    if let Err(error) = super::sub_sessions::stop_children_of(&app, &lead) {
+                        tracing::warn!(%error, "children of a stopped lead may still be running");
+                    }
                 });
             }
         }

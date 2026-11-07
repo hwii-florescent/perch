@@ -292,8 +292,15 @@ the core, not the agent, decides:
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
   `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
-  children the same way. Deleting a lead frees its children as ordinary sessions; deleting a child
-  drops its record.
+  children the same way. Deleting a lead (also what archiving its Nest does, which deletes the Nest's
+  sessions) first stops its live children, each confirmed; if one cannot be shown stopped (a stop not
+  confirmed, a launch still in flight) the delete is refused and the lead and its records are kept. The
+  stopped children then remain as ordinary sessions without a parent; deleting a child drops its record.
+  **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
+  its children keep running; only a terminal kill, a delete and `perch stop` stop them.
+- *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
+  registers it as a Nest under the lead's Nest in the same Birdhouse and moves the child's session and
+  record there before launching; any failure discards the child, which never started.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
   `perch report` (kept per run, outliving it), else the first 400 characters of its last assistant

@@ -762,6 +762,10 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
 /// its row goes. The project folder and the agent's own transcript stay on
 /// disk; resuming is the CLI's (`claude --resume <id>`).
 pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result<()> {
+    // A lead's live children stop first, each confirmed like a person's kill. If one cannot be
+    // shown stopped the lead is kept: unknown is not exit. (Takes the operation lock itself.)
+    super::sub_sessions::stop_children_of(app, session_id)
+        .map_err(|error| anyhow::anyhow!("{error}; session retained"))?;
     let _agent_operation = app.agent_operation_lock.lock().unwrap();
     let agent_keys = app
         .agent_runtime

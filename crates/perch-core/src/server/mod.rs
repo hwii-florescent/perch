@@ -97,6 +97,20 @@ mod uploads;
 use terminal::claude_conversation_exists_in;
 mod session;
 mod sub_sessions;
+/// The state of every core a test booted, by address: a test that talks to a core over HTTP can also
+/// call the service functions behind its routes on the same state.
+#[cfg(test)]
+static BOOTED: Mutex<Vec<(SocketAddr, AppState)>> = Mutex::new(Vec::new());
+#[cfg(test)]
+fn booted_state(address: SocketAddr) -> AppState {
+    BOOTED
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(booted, _)| *booted == address)
+        .map(|(_, state)| state.clone())
+        .expect("no core booted at that address")
+}
 use session::{
     build_session_summary, local_sessions_snapshot, mark_unseen_if_unviewed,
     should_forward_to_viewer, status_message,
@@ -644,6 +658,8 @@ pub async fn run(
     // Turn boundaries are recorded from a pty reader thread as well as from
     // async handlers, so `agent_history` needs this state.
     let _ = agent_activity_app.set(state.clone());
+    #[cfg(test)]
+    BOOTED.lock().unwrap().push((bound_addr, state.clone()));
     // perch used to archive instead of deleting; nothing archived is ever
     // shown again, so delete it (ending anything it still runs).
     let purge = state.db.local_session_ids(None).and_then(|sessions| {

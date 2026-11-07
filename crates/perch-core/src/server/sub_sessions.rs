@@ -217,22 +217,7 @@ pub(super) async fn spawn(
 
     let mut cwd = lead.cwd.clone();
     if request.worktree {
-        match make_worktree(app, &workspace, &request.task).await {
-            Ok((checkout, created)) => {
-                if let Err(error) = app
-                    .db
-                    .move_child_to_workspace(&child_id, &checkout, &created)
-                {
-                    discard(app, &row);
-                    return Err(internal("place the sub-session in its checkout", error));
-                }
-                cwd = created;
-            }
-            Err(message) => {
-                discard(app, &row);
-                return Err(fail(StatusCode::BAD_GATEWAY, message));
-            }
-        }
+        cwd = place_in_worktree(app, &row, &workspace, &request.task, None).await?;
     }
 
     let launch_app = app.clone();
@@ -272,11 +257,41 @@ fn discard(app: &AppState, row: &SubSessionRow) {
     }
 }
 
+/// `perch spawn --worktree`: make the child a checkout of the lead's repository, registered under
+/// the lead's Nest, and move its session and record there. Returns the directory it starts in. A
+/// failure at any step discards the child, which has not started. `path` is the checkout's
+/// location; `None` is Perch's default (`~/.perch/worktrees/<repo>/<branch>`).
+async fn place_in_worktree(
+    app: &AppState,
+    row: &SubSessionRow,
+    lead_workspace: &crate::db::WorkspaceRow,
+    task: &str,
+    path: Option<String>,
+) -> Result<String, Failure> {
+    match make_worktree(app, lead_workspace, task, path).await {
+        Ok((checkout, created)) => {
+            if let Err(error) =
+                app.db
+                    .move_child_to_workspace(&row.child_session_id, &checkout, &created)
+            {
+                discard(app, row);
+                return Err(internal("place the sub-session in its checkout", error));
+            }
+            Ok(created)
+        }
+        Err(message) => {
+            discard(app, row);
+            Err(fail(StatusCode::BAD_GATEWAY, message))
+        }
+    }
+}
+
 /// A checkout of the lead's repository for the child, registered under the lead's Nest.
 async fn make_worktree(
     app: &AppState,
     parent: &crate::db::WorkspaceRow,
     task: &str,
+    path: Option<String>,
 ) -> Result<(crate::db::WorkspaceRow, String), String> {
     let name: String = task
         .lines()
@@ -289,6 +304,7 @@ async fn make_worktree(
         repo_path: parent.path.clone(),
         name: Some(name),
         new_branch: true,
+        path,
         ..Default::default()
     })
     .await
@@ -621,17 +637,31 @@ fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState, Failure> 
     }
 }
 
-/// A person stopped a lead: stop every live child of it too. Each stop is confirmed on its own;
-/// one that is not stays `stop_unknown` and the rest still proceed.
-pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) {
-    let Ok(children) = app.db.sub_sessions_of(lead_session_id) else {
-        return;
-    };
+/// A person stopped or deleted a lead: stop every live child of it too. Each stop is confirmed on
+/// its own; one that is not stays `stop_unknown` and the rest still proceed. `Err` says how many
+/// children may still be running (a stop not confirmed, a launch still in flight, an unreadable
+/// record), so a caller about to forget the lead can refuse instead.
+pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<(), String> {
+    let children = app
+        .db
+        .sub_sessions_of(lead_session_id)
+        .map_err(|error| format!("could not read its sub-sessions: {error}"))?;
+    let mut unconfirmed = 0;
     for row in children {
         let state = reconcile(app, &row);
-        if state.is_live() && state != SubState::Starting {
-            let _ = stop_child(app, &SubSessionRow { state, ..row });
+        if !state.is_live() {
+            continue;
         }
+        if state == SubState::Starting || stop_child(app, &SubSessionRow { state, ..row }).is_err()
+        {
+            unconfirmed += 1;
+        }
+    }
+    match unconfirmed {
+        0 => Ok(()),
+        count => Err(format!(
+            "{count} of its sub-sessions could not be confirmed stopped"
+        )),
     }
 }
 
@@ -642,13 +672,8 @@ mod tests {
     use crate::agent_identity::IdentityStore;
     use crate::sub_sessions::TurnOrigin;
 
-    /// The spawn, list and stop routes over real HTTP against a booted core, up to the point of
-    /// starting an agent: what is refused, what is recorded, what a retry returns.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn spawn_list_and_stop_enforce_their_rules_over_http() {
-        let root = std::env::temp_dir().join(format!("perch-sub-http-{}", Uuid::new_v4()));
-        let nest = root.join("nest");
-        std::fs::create_dir_all(&nest).unwrap();
+    /// A core booted over HTTP with its state, on a database under `root`.
+    async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -672,6 +697,17 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        (address, db)
+    }
+
+    /// The spawn, list and stop routes over real HTTP against a booted core, up to the point of
+    /// starting an agent: what is refused, what is recorded, what a retry returns.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spawn_list_and_stop_enforce_their_rules_over_http() {
+        let root = std::env::temp_dir().join(format!("perch-sub-http-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
         let (_, workspace) = db
             .create_project("local", &nest.to_string_lossy(), Some("nest"), None)
             .unwrap();
@@ -847,6 +883,233 @@ mod tests {
         )
         .await;
         assert_eq!(status, 404);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A lead and one recorded child, as the core would have left them after a spawn.
+    fn lead_with_child(
+        db: &HistoryDb,
+        nest: &std::path::Path,
+        child_state: SubState,
+    ) -> (crate::db::WorkspaceRow, SubSessionRow) {
+        let (_, workspace) = db
+            .create_project("local", &nest.to_string_lossy(), Some("nest"), None)
+            .unwrap();
+        let cwd = nest.to_string_lossy().into_owned();
+        db.create_session_in_workspace("lead", &workspace, &cwd)
+            .unwrap();
+        db.set_cli_provider("lead", "claude").unwrap();
+        let lead = db
+            .issue(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let Reserved::New(child) = db
+            .reserve_sub_session(
+                &crate::db::SubSessionSpec {
+                    child_session_id: "child",
+                    parent_session_id: "lead",
+                    parent_incarnation: &lead.incarnation,
+                    workspace: &workspace,
+                    cwd: &cwd,
+                    provider_id: "codex",
+                    model: None,
+                    spawn_key: "k",
+                    task: "fix the parser",
+                },
+                Some(TurnOrigin::Person),
+            )
+            .unwrap()
+        else {
+            panic!("the child should have been recorded");
+        };
+        db.set_cli_provider("child", "codex").unwrap();
+        if child_state != SubState::Starting {
+            db.move_sub_session("child", &[SubState::Starting], child_state)
+                .unwrap();
+        }
+        (workspace, child)
+    }
+
+    /// Deleting a lead (also what archiving its Nest does) ends its live children first, each
+    /// confirmed gone by perchd, and leaves them as ordinary sessions; a child that cannot be shown
+    /// stopped keeps the lead.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deleting_a_lead_stops_its_live_children_first_and_keeps_it_when_one_is_unconfirmed() {
+        let root = std::env::temp_dir().join(format!("perch-sub-delete-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let terminal = crate::agent_runtime::terminal_key(
+            &AgentKey::new(&workspace.id, "child", "codex").unwrap(),
+        );
+        let daemon = crate::daemon::client().unwrap();
+        daemon
+            .create(
+                &terminal,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+                None,
+                vec![],
+                80,
+                24,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::daemon::session_state(&terminal),
+            crate::daemon::RuntimeState::Alive
+        );
+
+        // A child still starting cannot be shown stopped: the lead stays, with its record.
+        db.move_sub_session("child", &[SubState::Running], SubState::Starting)
+            .unwrap();
+        let refused = super::super::session::delete_session(&app, "lead").unwrap_err();
+        assert!(
+            refused.to_string().contains("session retained"),
+            "{refused}"
+        );
+        assert!(db.get_session("lead").unwrap().is_some());
+        assert_eq!(
+            crate::daemon::session_state(&terminal),
+            crate::daemon::RuntimeState::Alive,
+            "nothing was stopped on a refusal that cannot name the child"
+        );
+
+        // A running child is stopped, and only then is the lead forgotten.
+        db.move_sub_session("child", &[SubState::Starting], SubState::Running)
+            .unwrap();
+        super::super::session::delete_session(&app, "lead").unwrap();
+        assert_eq!(
+            crate::daemon::session_state(&terminal),
+            crate::daemon::RuntimeState::Exited
+        );
+        // The record goes with the lead (the stop itself was recorded and confirmed before that).
+        assert!(db.sub_session("child").unwrap().is_none());
+        assert_eq!(db.parent_of("child").unwrap(), None);
+        assert!(db.get_session("lead").unwrap().is_none());
+        assert!(
+            db.get_session("child").unwrap().is_some(),
+            "a child becomes an ordinary session"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn git(directory: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(directory)
+            .env("GIT_AUTHOR_NAME", "perch test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "perch test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    /// `perch spawn --worktree`: the child gets a new checkout of the lead's repository, registered
+    /// under the lead's Nest in the same Birdhouse, and its session and record move there; a repository
+    /// that cannot make one discards the child.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spawn_worktree_places_the_child_in_a_checkout_under_the_leads_nest() {
+        let root = std::env::temp_dir().join(format!("perch-sub-worktree-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "a").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "first"]);
+        let repo = std::fs::canonicalize(&repo).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (lead_nest, child) = lead_with_child(&db, &repo, SubState::Starting);
+
+        let checkout_path = root.join("checkouts").join("fix-the-parser");
+        let cwd = place_in_worktree(
+            &app,
+            &child,
+            &lead_nest,
+            "fix the parser\nmore detail",
+            Some(checkout_path.to_string_lossy().into_owned()),
+        )
+        .await
+        .unwrap();
+
+        // The checkout exists, is a linked worktree of the lead's repository, and is where the child starts.
+        let checkout_path = std::fs::canonicalize(&checkout_path).unwrap();
+        assert_eq!(std::fs::canonicalize(&cwd).unwrap(), checkout_path);
+        assert!(checkout_path.join("a.txt").exists());
+        assert!(checkout_path.join(".git").is_file(), "a linked worktree");
+        let listing = crate::worktree::list(&repo.to_string_lossy())
+            .await
+            .unwrap();
+        assert!(listing
+            .worktrees
+            .iter()
+            .any(
+                |entry| std::fs::canonicalize(&entry.path).ok().as_deref() == Some(&checkout_path)
+            ));
+        // Registered under the lead's Nest, in the lead's Birdhouse, and the child lives in it.
+        let session = db.get_session("child").unwrap().unwrap();
+        assert_eq!(session.cwd, cwd);
+        let checkout = db
+            .resolve_workspace(session.workspace_id.as_deref().unwrap())
+            .unwrap();
+        assert_ne!(checkout.id, lead_nest.id);
+        assert_eq!(checkout.project_id, lead_nest.project_id);
+        assert_eq!(
+            checkout.parent_workspace_id.as_deref(),
+            Some(lead_nest.id.as_str())
+        );
+        assert_eq!(
+            std::fs::canonicalize(&checkout.path).unwrap(),
+            checkout_path
+        );
+        assert_eq!(
+            db.sub_session("child").unwrap().unwrap().workspace_id,
+            checkout.id
+        );
+        // The lead stays where it was.
+        assert_eq!(
+            db.get_session("lead")
+                .unwrap()
+                .unwrap()
+                .workspace_id
+                .as_deref(),
+            Some(lead_nest.id.as_str())
+        );
+
+        // A folder that is not a repository cannot make a checkout: the failure is the caller's to
+        // read, and the child that was recorded is discarded.
+        let plain = root.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let (_, plain_nest) = db
+            .create_project("local", &plain.to_string_lossy(), Some("plain"), None)
+            .unwrap();
+        let Reserved::New(second) = db
+            .reserve_sub_session(
+                &crate::db::SubSessionSpec {
+                    child_session_id: "child-two",
+                    parent_session_id: "lead",
+                    parent_incarnation: &child.parent_incarnation,
+                    workspace: &plain_nest,
+                    cwd: &plain.to_string_lossy(),
+                    provider_id: "codex",
+                    model: None,
+                    spawn_key: "k2",
+                    task: "again",
+                },
+                Some(TurnOrigin::Person),
+            )
+            .unwrap()
+        else {
+            panic!("the second child should have been recorded");
+        };
+        let (status, _) = place_in_worktree(&app, &second, &plain_nest, "again", None)
+            .await
+            .unwrap_err();
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert!(db.get_session("child-two").unwrap().is_none());
+        assert!(db.sub_session("child-two").unwrap().is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 }

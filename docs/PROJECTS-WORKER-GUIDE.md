@@ -435,14 +435,20 @@ The contract is in ARCHITECTURE ("Sub-sessions"). What later slices build on:
   a secret. Pi and OMP's `[messages...]` were checked only for option parsing, not by a live turn.
 - **`--worktree`** makes a checkout of the lead's repository (`worktree::create` plus
   `workspace::register_created`, nested under the lead's Nest) after the record exists and moves the
-  child into it; a failed checkout discards the child. **Not run live and without a Rust test** (it
-  needs a git repository); the path is `make_worktree` in `server/sub_sessions.rs`.
+  child into it; a failed checkout discards the child. Rust test with a real git repository
+  (`spawn_worktree_places_the_child_in_a_checkout_under_the_leads_nest`: checkout exists as a linked
+  worktree, the child's cwd and workspace are in it, it is nested under the lead's Nest in the same
+  Birdhouse, a non-repository discards the child); the path is `place_in_worktree` in
+  `server/sub_sessions.rs`. **No live run.**
 - **Fallback report.** Taken from the native bridge's snapshot (the transcript's last assistant
   message), not the Stop hook's `last_assistant_message`: same text, works for all four providers, and
   needs no new hook plumbing. Shown only while the bridge is up (not after a core restart).
 - **Stop.** Confirmed by perchd through `stop_confirmed`; the lead's own children only. A person's
-  terminal kill of a lead also stops its live children. *Not done:* the chat's interrupt (Esc) of a
-  lead does not stop children, and deleting a lead leaves its children running as ordinary sessions.
+  terminal kill of a lead also stops its live children, and so does deleting it (also archiving its
+  Nest): `session::delete_session` calls `stop_children_of` first and keeps the lead if a child's stop
+  is not confirmed (tested with a real process in the test daemon). The chat's interrupt (Esc) of a lead
+  does **not** stop children: it is a keystroke into the lead's own prompt, not a stop (decided by the
+  supervisor).
 - **Guide.** `perch guide` now teaches `spawn`, `list`, `stop` and the rules (person's turn only,
   depth 1, 4 / 8, stop what you no longer need, what a report or a fallback is worth). The bare `list`,
   `serve` and `connect` aliases of `perch` are gone (`perch daemon list|serve|connect`); `perchd`
