@@ -7,6 +7,17 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-07 — Family strip actions: Message, Stop, Steer, Interrupt (owner)
+
+- Each child row in the lead's family strip gets **Message**, **Stop**, **Steer** and
+  **Interrupt**. Message is the default and keeps the slice 5 rule: queued, delivered only
+  when the child is idle. Stop is the confirmed `perch stop`.
+- **Steer** sends the text into the child's running turn, and **Interrupt** stops the
+  current turn without ending the session. Both are explicit person actions from the UI (desktop
+  or phone, with the input lease rules), never an agent's: `perch send` stays idle-only, and a
+  steer never approves anything. Each uses the provider's own mechanism; a provider without
+  a confirmable one shows the action disabled with the reason, never a PTY guess.
+
 ## 2026-11-06 — Local authority, `perch list`, packaging, live pickers (owner)
 
 - **No more tokenless loopback authority**, before slice 4. Every client of the core

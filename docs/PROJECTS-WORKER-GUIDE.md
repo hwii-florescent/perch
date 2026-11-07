@@ -495,6 +495,35 @@ The contract is in ARCHITECTURE ("Messages", written before the code). What late
   lives in the browser and is not protected (ARCHITECTURE "Lease contention"). **Not verified live:**
   Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World` trait only).
 
+## Slice 7: family strip actions (owner, 2026-11-07)
+
+DECISIONS 2026-11-07. Four actions per child row in `FamilyStrip.tsx` (Orca's
+`CrewRowMenu.tsx`, MIT, for the menu shape; reuse `components/ui/`). Logic and checks in Rust;
+the web only calls capability-gated core messages and shows receipts.
+
+- **Message** (default): a small composer in the row; goes through the slice 5 queue as a
+  person-originated message (sender = the person, not the lead), idle-only, same envelope,
+  limits and receipts. A person's message does not count toward the lead's automatic wakes.
+- **Stop**: the existing confirmed child stop (`stop_child`), with a confirm step; shows
+  "Stop not confirmed" rather than "Stopped" until perchd confirms.
+- **Interrupt** (stop the current turn, keep the session): Codex `turn/interrupt` (already
+  used by the chat's Stop, `native_ui/codex.rs`); Pi/OMP abort through the bridge; Claude the
+  chat's existing Esc path under the input lease. Reuse the lead chat's Stop code path.
+- **Steer** (into the running turn): probe each first, zero or one cheap turn each.
+  Codex `turn/steer` with `expectedTurnId` (slice 0: accepted); Pi/OMP `sendUserMessage`
+  with `deliverAs: "steer"`; Claude: probe whether text submitted while a turn runs is held
+  by Claude's own queue and fed into the turn (screen + transcript evidence); if it is,
+  write it under the lease with the same verified-input rules (no draft in the prompt line,
+  2 s quiet); if not confirmable, Steer is disabled for Claude with the reason. Steer is
+  only offered while the child's turn runs; when idle the action is Message.
+- Receipts for steer and interrupt (sent, confirmed by the provider event, or not
+  confirmed), shown on the row; never retried blindly.
+- Agents cannot steer or interrupt: no `perch` verb for it; `/agent/*` refuses it.
+- Phone: same actions, same lease rules.
+- Check: Rust unit tests per provider adapter (captured events/screens); web tests for the
+  menu and disabled reasons; one live e2e with a haiku lead and haiku child covering Message,
+  Steer (or its disabled reason), Interrupt and Stop; Codex/Pi live only if no usage limit.
+
 ## Slice 6 landed (2026-11-07): family strip and notes folder
 
 The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pieces are:
