@@ -113,6 +113,7 @@ async fn ask_cli(runner: Runner, model: &str, prompt: &str, cwd: &Path) -> Resul
     match runner {
         Runner::Claude => reporter::parse_claude(&stdout),
         Runner::Codex => reporter::parse_codex(&stdout, &stderr),
+        Runner::Pi | Runner::Omp => reporter::parse_pi_json(&stdout),
     }
 }
 
@@ -284,15 +285,20 @@ fn plan(
     if sent >= crate::agent_mail::MAX_MESSAGES_PER_RUN {
         return Err(Skip::RunLimit);
     }
-    let runner = reporter::runner_for(&child.agent_id, is_installed).ok_or(Skip::NoRunner)?;
+    let model_of = |runner: Runner| match runner {
+        Runner::Claude => settings.reporter_claude_model.as_str(),
+        Runner::Codex => settings.reporter_codex_model.as_str(),
+        Runner::Pi => settings.reporter_pi_model.as_str(),
+        Runner::Omp => settings.reporter_omp_model.as_str(),
+    };
+    let runner = reporter::runner_for(&child.agent_id, |runner| {
+        !model_of(runner).is_empty() && is_installed(runner.provider())
+    })
+    .ok_or(Skip::NoRunner)?;
     let facts = snapshot
         .and_then(reporter::turn_facts)
         .ok_or(Skip::NoFacts)?;
-    let model = match runner {
-        Runner::Claude => settings.reporter_claude_model.clone(),
-        Runner::Codex => settings.reporter_codex_model.clone(),
-    };
-    Ok((runner, model, facts))
+    Ok((runner, model_of(runner).to_string(), facts))
 }
 
 #[cfg(test)]
@@ -385,6 +391,52 @@ mod tests {
     #[test]
     fn a_missing_program_is_not_installed() {
         assert!(!installed("perch-no-such-program-4f9a"));
+    }
+
+    /// Which harness answers for a child, and with which of the settings' models.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_child_is_asked_of_its_own_harness_when_it_has_a_model_else_the_first_that_does() {
+        let f = fixture(SubState::Running).await;
+        let pi_child = AgentKey::new(&f.key.workspace_id, "child", "pi").unwrap();
+        let snap = snapshot("Done.");
+        let ask = |settings: &crate::settings::Settings, child: &AgentKey, have: &[&str]| {
+            plan(&f.app, child, Some(&snap), settings, &|name: &str| {
+                have.contains(&name)
+            })
+            .map(|(runner, model, _)| (runner, model))
+        };
+        let mut settings = crate::settings::Settings::default();
+        // Pi has no default model: its child is summarised by Claude (haiku), else Codex.
+        assert_eq!(
+            ask(&settings, &pi_child, &["claude", "codex", "pi"]),
+            Ok((Runner::Claude, "haiku".to_string()))
+        );
+        assert_eq!(
+            ask(&settings, &pi_child, &["codex", "pi"]),
+            Ok((Runner::Codex, "gpt-6-luna".to_string()))
+        );
+        assert_eq!(ask(&settings, &pi_child, &["pi"]), Err(Skip::NoRunner));
+        // Once Pi has a model its own children use it, and only while it is installed.
+        settings.reporter_pi_model = "openrouter/some-model".into();
+        assert_eq!(
+            ask(&settings, &pi_child, &["claude", "pi"]),
+            Ok((Runner::Pi, "openrouter/some-model".to_string()))
+        );
+        assert_eq!(
+            ask(&settings, &pi_child, &["claude"]),
+            Ok((Runner::Claude, "haiku".to_string()))
+        );
+        // A Codex child is still asked of Codex, and Claude's model is the setting's.
+        settings.reporter_claude_model = "claude-haiku-4-5".into();
+        assert_eq!(
+            ask(&settings, &f.key, &["claude", "codex", "pi"]),
+            Ok((Runner::Codex, "gpt-6-luna".to_string()))
+        );
+        // Pi alone serves a Codex child whose own CLI is gone.
+        assert_eq!(
+            ask(&settings, &f.key, &["pi"]),
+            Ok((Runner::Pi, "openrouter/some-model".to_string()))
+        );
     }
 
     /// A finished turn is summarised, the next turn is shown that summary and only its own events,

@@ -232,29 +232,33 @@ pub fn parse_output(raw: &str) -> Result<Summary, String> {
 pub enum Runner {
     Claude,
     Codex,
+    Pi,
+    Omp,
 }
 
 impl Runner {
+    /// The harness, which is also the program that answers.
     pub fn provider(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Pi => "pi",
+            Self::Omp => "omp",
         }
     }
 }
 
-/// The CLI that summarises a child of `provider`: its own when it has a one-shot mode, else
-/// Claude, else Codex, and only one that is installed. Never a model the user has not set up.
-pub fn runner_for(provider: &str, installed: impl Fn(&str) -> bool) -> Option<Runner> {
-    let order: &[Runner] = match provider {
-        "claude" => &[Runner::Claude],
-        "codex" => &[Runner::Codex],
-        _ => &[Runner::Claude, Runner::Codex],
-    };
-    order
+/// The CLI that summarises a child of `provider`: that harness's own reporter when it has one,
+/// else the first harness that has one, in the order Claude, Codex, Pi, OMP. A harness `usable`
+/// has its CLI installed and a model set (Claude and Codex always have a default; Pi and OMP
+/// have none, so they count only once the user sets one). Never a model the user has not set up.
+pub fn runner_for(provider: &str, usable: impl Fn(Runner) -> bool) -> Option<Runner> {
+    const ORDER: [Runner; 4] = [Runner::Claude, Runner::Codex, Runner::Pi, Runner::Omp];
+    ORDER
         .iter()
         .copied()
-        .find(|runner| installed(runner.provider()))
+        .find(|runner| runner.provider() == provider && usable(*runner))
+        .or_else(|| ORDER.iter().copied().find(|runner| usable(*runner)))
 }
 
 /// A command line; the prompt goes to stdin, so it is on no argument list.
@@ -265,7 +269,8 @@ pub struct Invocation {
 }
 
 /// No tools, no saved session, no user settings, hooks, skills or MCP servers: the model only
-/// reads the prompt and answers. Probed with Claude Code 2.1.319 and Codex 0.166.
+/// reads the prompt and answers. Probed with Claude Code 2.1.319, Codex 0.166, Pi 1.5 and OMP
+/// 18.16 (Pi and OMP: `--mode json` for the usage, `--no-session` leaves no file behind).
 pub fn invocation(runner: Runner, model: &str) -> Invocation {
     let args: Vec<&str> = match runner {
         Runner::Claude => vec![
@@ -315,6 +320,44 @@ pub fn invocation(runner: Runner, model: &str) -> Invocation {
             "-c",
             "project_doc_max_bytes=0",
             "-",
+        ],
+        Runner::Pi => vec![
+            "--print",
+            "--mode",
+            "json",
+            "--model",
+            model,
+            "--thinking",
+            "off",
+            "--no-session",
+            "--no-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--no-mcp",
+            "--offline",
+            "--system-prompt",
+            INSTRUCTIONS,
+        ],
+        Runner::Omp => vec![
+            "--print",
+            "--mode",
+            "json",
+            "--model",
+            model,
+            "--thinking",
+            "off",
+            "--no-session",
+            "--no-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-rules",
+            "--no-context-files",
+            "--no-lsp",
+            "--no-title",
+            "--system-prompt",
+            INSTRUCTIONS,
         ],
     };
     Invocation {
@@ -367,6 +410,54 @@ pub fn parse_claude(stdout: &str) -> Result<Reply, String> {
             cache_write: count("cache_creation_input_tokens"),
             output: count("output_tokens"),
             cost_usd: value.get("total_cost_usd").and_then(Value::as_f64),
+        },
+    })
+}
+
+/// Pi's and OMP's `--mode json` event stream: one JSON object per line; the answer is the last
+/// finished assistant message, whose text blocks are joined and whose `usage` and `stopReason`
+/// say what it cost and how it ended. Lines that are not JSON are ignored.
+pub fn parse_pi_json(stdout: &str) -> Result<Reply, String> {
+    let message = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("message_end"))
+        .filter_map(|event| event.get("message").cloned())
+        .rfind(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+        .ok_or("no answer in the event stream")?;
+    let stop = message.get("stopReason").and_then(Value::as_str);
+    if matches!(stop, Some("error") | Some("aborted")) {
+        return Err(format!("the model stopped with {}", stop.unwrap_or("")));
+    }
+    let text: String = message
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    if text.trim().is_empty() {
+        return Err("the answer has no text".into());
+    }
+    let count = |key: &str| {
+        message
+            .pointer(&format!("/usage/{key}"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    Ok(Reply {
+        text,
+        usage: Usage {
+            input: count("input"),
+            cache_read: count("cacheRead"),
+            cache_write: count("cacheWrite"),
+            output: count("output"),
+            cost_usd: message.pointer("/usage/cost/total").and_then(Value::as_f64),
         },
     })
 }
@@ -577,18 +668,110 @@ mod tests {
     }
 
     #[test]
-    fn the_runner_is_the_childs_own_cli_or_one_that_is_installed() {
-        let both = |_: &str| true;
-        assert_eq!(runner_for("claude", both), Some(Runner::Claude));
-        assert_eq!(runner_for("codex", both), Some(Runner::Codex));
-        assert_eq!(runner_for("pi", both), Some(Runner::Claude));
+    fn the_runner_is_the_childs_own_harness_when_it_has_a_reporter_else_the_first_that_does() {
+        let all = |_: Runner| true;
+        for (provider, runner) in [
+            ("claude", Runner::Claude),
+            ("codex", Runner::Codex),
+            ("pi", Runner::Pi),
+            ("omp", Runner::Omp),
+        ] {
+            assert_eq!(runner_for(provider, all), Some(runner), "{provider}");
+        }
+        // Pi and OMP have no default model: without one they use Claude, else Codex.
+        let claude_codex = |runner: Runner| matches!(runner, Runner::Claude | Runner::Codex);
+        assert_eq!(runner_for("pi", claude_codex), Some(Runner::Claude));
         assert_eq!(
-            runner_for("omp", |name| name == "codex"),
+            runner_for("omp", |runner| runner == Runner::Codex),
             Some(Runner::Codex)
         );
+        // A Claude child whose own reporter is unavailable uses the first one that is.
+        assert_eq!(
+            runner_for("claude", |runner| runner == Runner::Codex),
+            Some(Runner::Codex)
+        );
+        // Pi and OMP serve only themselves and, last, others.
+        assert_eq!(
+            runner_for("claude", |runner| runner == Runner::Omp),
+            Some(Runner::Omp)
+        );
+        assert_eq!(
+            runner_for("omp", |runner| runner == Runner::Pi),
+            Some(Runner::Pi)
+        );
         assert_eq!(runner_for("pi", |_| false), None);
-        // A child's own CLI is the only one asked for it, even when the other is installed.
-        assert_eq!(runner_for("claude", |name| name == "codex"), None);
+        assert_eq!(runner_for("terminal", all), Some(Runner::Claude));
+    }
+
+    #[test]
+    fn the_pi_and_omp_commands_take_no_tools_session_extensions_skills_or_context_files() {
+        for (runner, program, extra) in [
+            (Runner::Pi, "pi", ["--no-prompt-templates", "--no-mcp"]),
+            (Runner::Omp, "omp", ["--no-rules", "--no-lsp"]),
+        ] {
+            let command = invocation(runner, "anthropic/claude-haiku-4-5");
+            assert_eq!(command.program, program);
+            let args = &command.args;
+            let at = |flag: &str| args.iter().position(|arg| arg == flag).unwrap();
+            assert_eq!(args[at("--model") + 1], "anthropic/claude-haiku-4-5");
+            assert_eq!(args[at("--mode") + 1], "json");
+            assert_eq!(args[at("--system-prompt") + 1], INSTRUCTIONS);
+            for flag in [
+                "--print",
+                "--no-session",
+                "--no-tools",
+                "--no-extensions",
+                "--no-skills",
+                "--no-context-files",
+                extra[0],
+                extra[1],
+            ] {
+                assert!(
+                    args.iter().any(|arg| arg == flag),
+                    "{program}: {flag} missing"
+                );
+            }
+            assert!(
+                !args.iter().any(|arg| arg.starts_with("Notes so far")),
+                "the prompt belongs on stdin"
+            );
+        }
+    }
+
+    #[test]
+    fn the_pi_event_stream_gives_the_last_assistant_message_and_its_usage() {
+        let stream = [
+            r#"{"type":"session","version":3}"#,
+            r#"{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Notes"}]}}"#,
+            r#"{"type":"message_update","usage":{"input":1}}"#,
+            "not json at all",
+            r#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"{\"status\":\"done\","},{"type":"text","text":"\"text\":\"x\"}"}],"usage":{"input":214,"output":104,"cacheRead":5,"cacheWrite":2,"cost":{"total":0.0001676}}}}"#,
+            r#"{"type":"agent_end"}"#,
+        ]
+        .join("\n");
+        let reply = parse_pi_json(&stream).unwrap();
+        assert_eq!(reply.text, "{\"status\":\"done\",\n\"text\":\"x\"}");
+        assert_eq!(parse_output(&reply.text).unwrap().text, "x");
+        assert_eq!(
+            (
+                reply.usage.input,
+                reply.usage.output,
+                reply.usage.cache_read,
+                reply.usage.cache_write
+            ),
+            (214, 104, 5, 2)
+        );
+        assert_eq!(reply.usage.cost_usd, Some(0.0001676));
+    }
+
+    #[test]
+    fn a_pi_stream_without_an_answer_or_with_a_failed_one_is_refused() {
+        assert!(parse_pi_json("").is_err());
+        assert!(parse_pi_json(r#"{"type":"session"}"#).is_err());
+        let failed = r#"{"type":"message_end","message":{"role":"assistant","stopReason":"error","content":[{"type":"text","text":"partial"}]}}"#;
+        assert!(parse_pi_json(failed).is_err());
+        let empty = r#"{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"thinking","thinking":"x"}]}}"#;
+        assert!(parse_pi_json(empty).is_err());
     }
 
     #[test]

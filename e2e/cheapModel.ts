@@ -35,6 +35,15 @@ export const CHEAP_CODEX_MODEL = "gpt-5.6-luna";
 export const CHEAP_CLAUDE_MODEL = "claude-haiku-4-5";
 
 /**
+ * Pin the reporter's own model calls (Settings, "Sub-session summaries") to the two cheap models.
+ * The product defaults are the aliases `haiku` and `gpt-6-luna`, which the suite never runs.
+ * Write before the core starts: the settings file is the fixture's `PERCH_SETTINGS`.
+ */
+export function pinReporterModels(fixture: string): void {
+  fs.writeFileSync(path.join(fixture, "settings.json"), JSON.stringify({ reporterClaudeModel: CHEAP_CLAUDE_MODEL, reporterCodexModel: CHEAP_CODEX_MODEL }));
+}
+
+/**
  * Mirror `real` into `<fixture>/<name>`: every entry is symlinked, except the
  * names in `ownDirs` (created as private empty directories) and `configName`,
  * which is written from `rewrite(originalContents, overlayHomePath)`.

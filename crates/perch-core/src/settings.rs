@@ -110,6 +110,12 @@ pub struct Settings {
     /// The model the reporter asks of the Codex CLI.
     #[serde(default = "default_reporter_codex_model")]
     pub reporter_codex_model: String,
+    /// The model the reporter asks of Pi (`provider/id`); empty means Pi has no reporter.
+    #[serde(default)]
+    pub reporter_pi_model: String,
+    /// The model the reporter asks of OMP (`provider/id`); empty means OMP has no reporter.
+    #[serde(default)]
+    pub reporter_omp_model: String,
 }
 
 impl Default for Settings {
@@ -138,6 +144,8 @@ impl Default for Settings {
             reporter_enabled: true,
             reporter_claude_model: default_reporter_claude_model(),
             reporter_codex_model: default_reporter_codex_model(),
+            reporter_pi_model: String::new(),
+            reporter_omp_model: String::new(),
         }
     }
 }
@@ -147,11 +155,11 @@ pub(crate) fn default_reporter_enabled() -> bool {
 }
 
 pub(crate) fn default_reporter_claude_model() -> String {
-    "claude-haiku-4-5".to_string()
+    "haiku".to_string()
 }
 
 pub(crate) fn default_reporter_codex_model() -> String {
-    "gpt-5.6-luna".to_string()
+    "gpt-6-luna".to_string()
 }
 
 pub(crate) fn default_usage_limit_alert() -> u8 {
@@ -238,6 +246,8 @@ pub struct SettingsPatch {
     pub reporter_enabled: Option<bool>,
     pub reporter_claude_model: Option<String>,
     pub reporter_codex_model: Option<String>,
+    pub reporter_pi_model: Option<String>,
+    pub reporter_omp_model: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -333,6 +343,14 @@ impl SettingsStore {
         {
             crate::sub_sessions::check_model(model).map_err(|message| anyhow::anyhow!(message))?;
         }
+        // Pi and OMP have no default: empty clears the model, so that harness has no reporter.
+        for model in [&patch.reporter_pi_model, &patch.reporter_omp_model]
+            .into_iter()
+            .flatten()
+            .filter(|model| !model.is_empty())
+        {
+            crate::sub_sessions::check_model(model).map_err(|message| anyhow::anyhow!(message))?;
+        }
         let mut guard = self.inner.lock().unwrap();
         match patch.default_cwd {
             None => {}                              // absent → unchanged
@@ -404,6 +422,12 @@ impl SettingsStore {
         }
         if let Some(model) = patch.reporter_codex_model {
             guard.reporter_codex_model = model;
+        }
+        if let Some(model) = patch.reporter_pi_model {
+            guard.reporter_pi_model = model;
+        }
+        if let Some(model) = patch.reporter_omp_model {
+            guard.reporter_omp_model = model;
         }
         let snapshot = guard.clone();
         drop(guard);
@@ -482,6 +506,50 @@ mod keybinding_tests {
         let loaded = SettingsStore::load(&path).get();
         assert_eq!(loaded.browser_search_engine, "google");
         assert_eq!(loaded.theme, "light");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reporter_models_default_per_harness_and_pi_and_omp_can_be_cleared() {
+        let dir =
+            std::env::temp_dir().join(format!("perch-reporter-settings-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        let store = SettingsStore::load(&path);
+        let now = store.get();
+        assert_eq!(
+            (
+                now.reporter_claude_model.as_str(),
+                now.reporter_codex_model.as_str(),
+                now.reporter_pi_model.as_str(),
+                now.reporter_omp_model.as_str(),
+            ),
+            ("haiku", "gpt-6-luna", "", "")
+        );
+        let patch =
+            |value: serde_json::Value| -> SettingsPatch { serde_json::from_value(value).unwrap() };
+        store
+            .update(patch(serde_json::json!({
+                "reporterPiModel": "anthropic/claude-haiku-4-5",
+                "reporterOmpModel": "openai-codex/gpt-5.6-luna",
+            })))
+            .unwrap();
+        let loaded = SettingsStore::load(&path).get();
+        assert_eq!(loaded.reporter_pi_model, "anthropic/claude-haiku-4-5");
+        assert_eq!(loaded.reporter_omp_model, "openai-codex/gpt-5.6-luna");
+        // Pi and OMP may be cleared; Claude and Codex always keep a model; none takes a flag.
+        store
+            .update(patch(serde_json::json!({"reporterPiModel": ""})))
+            .unwrap();
+        assert_eq!(store.get().reporter_pi_model, "");
+        assert!(store
+            .update(patch(serde_json::json!({"reporterClaudeModel": ""})))
+            .is_err());
+        assert!(store
+            .update(patch(serde_json::json!({"reporterOmpModel": "--no-tools"})))
+            .is_err());
+        assert_eq!(store.get().reporter_omp_model, "openai-codex/gpt-5.6-luna");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

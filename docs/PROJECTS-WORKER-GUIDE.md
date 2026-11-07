@@ -542,19 +542,38 @@ The contract is in ARCHITECTURE ("Family strip actions"). Where the pieces are:
   and delivered as the person's, Interrupt confirmed with the session kept, Stop confirmed after the
   confirm step. Not run: the phone layout, which is the same component.
 
-## Slice 8b: reporter per harness (owner, 2026-11-07; do before Slice 9)
+## Slice 8b landed (2026-11-07): reporter per harness
 
-- Reporter model is a setting **per harness** (Claude, Codex, Pi, OMP), run through that
-  harness's own one-shot mode so a Pi/OMP user's provider (e.g. an OpenRouter model) works.
-  Probe Pi's and OMP's print/one-shot flags first (`--help`; no tools, no session saved, no
-  extensions), like the Claude/Codex probes in Slice 8.
-- Defaults: Claude `haiku` (alias, follows the current Haiku), Codex `gpt-6-luna`; Pi/OMP no
-  default model: if unset, use Claude or Codex when installed, else the last-message fallback.
-  Verify with a zero-token check that the installed CLIs accept `haiku` and `gpt-6-luna`; if
-  not, fall back to `claude-haiku-4-5` / `gpt-5.6-luna` and say so in the setting's help text.
-- A child is summarised by its own harness's reporter when that harness has one, else by
-  the first available. Settings page: one model field per harness plus the on/off switch.
-- Tests and live runs keep `claude-haiku-4-5` / `gpt-5.6-luna` (AGENTS.md).
+The contract is in ARCHITECTURE ("Cheap-model reporter"). Where the pieces are: `reporter.rs`
+(`Runner::{Claude, Codex, Pi, Omp}`, `runner_for(provider, usable)`, `invocation`, `parse_pi_json`),
+`server/reporter.rs::plan` (the harness's model from the settings), `settings.rs` / `protocol.rs` /
+`protocol.ts` (`reporterPiModel`, `reporterOmpModel`; empty is allowed for these two only), Settings,
+Notifications (one field per harness), `usage/spend.rs` (a Pi or OMP call counts by the CLI's own reported cost).
+
+- **Behaviour.** A child's own harness answers when it has a reporter (installed and a model set), else the
+  first harness that has one in the order Claude, Codex, Pi, OMP, else the last-message fallback. Changed from
+  slice 8: a Claude child whose `claude` is missing is now summarised by Codex instead of falling back.
+- **Probed 2026-11-07 (Pi 1.5.0, OMP 18.16.0).** Both read the prompt from stdin. `pi --print --mode json
+  --model <m> --thinking off --no-session --no-tools --no-extensions --no-skills --no-prompt-templates
+  --no-context-files --no-mcp --offline` and `omp --print --mode json --model <m> --thinking off --no-session
+  --no-tools --no-extensions --no-skills --no-rules --no-context-files --no-lsp --no-title` each answered one
+  haiku (`anthropic/claude-haiku-4-5`, Pi) or luna (`openai-codex/gpt-5.6-luna`, OMP) call: 92 and 214 input
+  tokens, under $0.001, no session file in `~/.pi/agent/sessions` or `~/.omp/agent/sessions`. `--mode json` is
+  used (not plain text) because it carries the usage: the answer is the last `message_end` of role
+  `assistant` (its text blocks; OMP adds an empty one), `usage.{input,output,cacheRead,cacheWrite,cost.total}`
+  and `stopReason` (`error` / `aborted` are refused). OMP has no Anthropic login here, so it was probed on
+  luna; Pi on haiku.
+- **Defaults checked without tokens.** `codex debug models` lists `gpt-6-luna` (and `gpt-5.6-luna`). For
+  `haiku`, a local server stood in for the API (`ANTHROPIC_BASE_URL`, a dummy key): Claude Code 2.1.319 resolved
+  `--model haiku` to `claude-haiku-5-5` and sent it; nothing was spent. So the Claude default follows the
+  current Haiku (currently 5.5), not 4.5. The settings help text names the pin (`claude-haiku-4-5`) and the
+  fallback (`gpt-5.6-luna`) for a Codex that lacks `gpt-6-luna`.
+- **Existing installs** keep a stored `claude-haiku-4-5` / `gpt-5.6-luna`; only a fresh or unset setting gets
+  the new defaults.
+- **Tests and live runs keep `claude-haiku-4-5` / `gpt-5.6-luna`:** `e2e/cheapModel.ts::pinReporterModels`
+  writes them into the fixture's `settings.json` in every spec that starts children.
+- **Not run live through Perch:** a Pi or OMP child summarised by its own harness (argv and parser are
+  unit-tested and the commands were run by hand), the Codex runner with `gpt-6-luna`.
 
 ## Slice 9: suggested tasks, sender cards, `perch read`, inbound control (owner, 2026-11-07)
 
@@ -612,8 +631,8 @@ Where the pieces are:
   `perch list` prints `summary by <model> (written from what it did, not checked)`; the strip says
   `Summary by <model>` and counts it as reported. `perch guide` and a child's first message now say a report
   is optional and what the three kinds are.
-- **Settings** `reporterEnabled` (default on), `reporterClaudeModel` (`claude-haiku-4-5`),
-  `reporterCodexModel` (`gpt-5.6-luna`), validated like `--model`; Settings, Notifications. Spend: the usage
+- **Settings** `reporterEnabled` (default on), `reporterClaudeModel` (slice 8: `claude-haiku-4-5`; now `haiku`),
+  `reporterCodexModel` (slice 8: `gpt-5.6-luna`; now `gpt-6-luna`), validated like `--model`; Settings, Notifications. Spend: the usage
   popover's estimate includes the calls (`usage::spend::spend_with`), shown as the "Perch reporter" project.
 - **Probed (zero or minimal tokens).** `claude --help` / `codex exec --help` for the flags; `codex debug
   prompt-input` showed ~52 KB of model-visible input by default (skills, AGENTS.md, multi-agent text) and

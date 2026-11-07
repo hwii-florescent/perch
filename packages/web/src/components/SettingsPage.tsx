@@ -405,16 +405,16 @@ function DefaultCwdSection() {
   );
 }
 
-/** A model name saved when the field is left or Enter is pressed; an empty field restores the stored one. */
-function ModelInput({ value, onCommit, testId, label, disabled }: { value: string; onCommit: (value: string) => void; testId: string; label: string; disabled?: boolean }) {
+/** A model name saved when the field is left or Enter is pressed. An empty field restores the stored name, unless `allowEmpty` (a harness with no default model), where it clears it. */
+function ModelInput({ value, onCommit, testId, label, disabled, allowEmpty, placeholder }: { value: string; onCommit: (value: string) => void; testId: string; label: string; disabled?: boolean; allowEmpty?: boolean; placeholder?: string }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => {
     const next = draft.trim();
-    if (!next) setDraft(value);
+    if (!next && !allowEmpty) setDraft(value);
     else if (next !== value) onCommit(next);
   };
-  return <input type="text" className={INPUT_WIDE} data-testid={testId} aria-label={label} disabled={disabled} value={draft}
+  return <input type="text" className={INPUT_WIDE} data-testid={testId} aria-label={label} disabled={disabled} value={draft} placeholder={placeholder}
     onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />;
 }
 
@@ -574,11 +574,17 @@ function NotificationsSection() {
       <SettingRow title="Summarise finished turns" description="When a sub-session finishes a turn without reporting, a small model writes a short summary for the session that started it. Off keeps the start of its last message.">
         <Switch label="Summarise finished sub-session turns" testId="settings-reporter-enabled" checked={settings?.reporterEnabled ?? true} onChange={(checked) => updateSettings({ reporterEnabled: checked })} />
       </SettingRow>
-      <SettingRow title="Claude model" description="Asked of the claude command, signed in as you, with no tools.">
-        <ModelInput testId="settings-reporter-claude-model" label="Summary model for Claude" disabled={!settings} value={settings?.reporterClaudeModel ?? "claude-haiku-4-5"} onCommit={(value) => updateSettings({ reporterClaudeModel: value })} />
+      <SettingRow title="Claude model" description="Asked of the claude command, signed in as you, with no tools. The default, haiku, follows the current Haiku model; a full name such as claude-haiku-4-5 pins one.">
+        <ModelInput testId="settings-reporter-claude-model" label="Summary model for Claude" disabled={!settings} value={settings?.reporterClaudeModel ?? "haiku"} onCommit={(value) => updateSettings({ reporterClaudeModel: value })} />
       </SettingRow>
-      <SettingRow title="Codex model" description="Asked of the codex command, read-only, with no shell.">
-        <ModelInput testId="settings-reporter-codex-model" label="Summary model for Codex" disabled={!settings} value={settings?.reporterCodexModel ?? "gpt-5.6-luna"} onCommit={(value) => updateSettings({ reporterCodexModel: value })} />
+      <SettingRow title="Codex model" description="Asked of the codex command, read-only, with no shell. If your Codex does not offer gpt-6-luna, use gpt-5.6-luna.">
+        <ModelInput testId="settings-reporter-codex-model" label="Summary model for Codex" disabled={!settings} value={settings?.reporterCodexModel ?? "gpt-6-luna"} onCommit={(value) => updateSettings({ reporterCodexModel: value })} />
+      </SettingRow>
+      <SettingRow title="Pi model" description="Asked of the pi command as provider/model, with no tools, extensions or saved session, so any provider Pi is set up for works. Empty: Pi's sessions are summarised by Claude or Codex when installed, else by the start of their last message.">
+        <ModelInput testId="settings-reporter-pi-model" label="Summary model for Pi" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterPiModel ?? ""} onCommit={(value) => updateSettings({ reporterPiModel: value })} />
+      </SettingRow>
+      <SettingRow title="OMP model" description="Asked of the omp command as provider/model, with no tools, extensions or saved session. Empty: OMP's sessions are summarised by Claude or Codex when installed, else by the start of their last message.">
+        <ModelInput testId="settings-reporter-omp-model" label="Summary model for OMP" allowEmpty placeholder="provider/model" disabled={!settings} value={settings?.reporterOmpModel ?? ""} onCommit={(value) => updateSettings({ reporterOmpModel: value })} />
       </SettingRow>
     </SettingsGroup>
     </>

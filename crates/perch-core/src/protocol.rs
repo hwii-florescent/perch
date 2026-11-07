@@ -113,6 +113,12 @@ pub struct SettingsData {
     pub reporter_claude_model: String,
     #[serde(default = "crate::settings::default_reporter_codex_model")]
     pub reporter_codex_model: String,
+    /// Pi's reporter model (`provider/id`); missing or empty means Pi has none.
+    #[serde(default)]
+    pub reporter_pi_model: String,
+    /// OMP's reporter model (`provider/id`); missing or empty means OMP has none.
+    #[serde(default)]
+    pub reporter_omp_model: String,
 }
 
 fn default_theme() -> String {
@@ -198,6 +204,10 @@ pub struct SettingsPatch {
     pub reporter_claude_model: Option<String>,
     #[serde(default)]
     pub reporter_codex_model: Option<String>,
+    #[serde(default)]
+    pub reporter_pi_model: Option<String>,
+    #[serde(default)]
+    pub reporter_omp_model: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.

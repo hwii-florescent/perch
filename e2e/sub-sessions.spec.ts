@@ -16,7 +16,7 @@ import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { setChatMode } from "./chatMode";
 import { addProject, startFromPanel } from "./projects";
-import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
+import { cheapModelEnv, pinReporterModels, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 const root = path.resolve(__dirname, "..");
 
@@ -65,6 +65,7 @@ test("a lead starts a child, reads its report, and stops it with the stop confir
   try {
     fs.writeFileSync(path.join(fixture, "hosts.json"), '{"hosts":[]}');
     fs.writeFileSync(path.join(fixture, "providers.json"), '{"version":1,"providers":[]}');
+    pinReporterModels(fixture);
     log = fs.openSync(path.join(fixture, "core.log"), "a");
     core = spawn(path.join(root, "target/debug/perch-core"), ["--port", String(port), "--db-path", path.join(fixture, "history.sqlite"), "--hosts-path", path.join(fixture, "hosts.json"), "--providers-path", path.join(fixture, "providers.json")], {
       cwd: root,

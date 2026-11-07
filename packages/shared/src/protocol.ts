@@ -485,6 +485,9 @@ export interface SettingsData {
   reporterEnabled?: boolean;
   reporterClaudeModel?: string;
   reporterCodexModel?: string;
+  /** Pi's and OMP's reporter models (`provider/id`); absent or empty = that harness has none. */
+  reporterPiModel?: string;
+  reporterOmpModel?: string;
 }
 
 /**
@@ -520,6 +523,8 @@ export interface SettingsPatch {
   reporterEnabled?: boolean;
   reporterClaudeModel?: string;
   reporterCodexModel?: string;
+  reporterPiModel?: string;
+  reporterOmpModel?: string;
 }
 
 export type HostMode = "perch" | "direct";

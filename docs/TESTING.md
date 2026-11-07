@@ -135,7 +135,9 @@ Useful existing coverage (not a claim of a fresh passing run):
   not run `perch report`; the test reads `session_summaries`, `reporter_runs` and the lead's note from SQLite
   (a `summary` by `claude-haiku-4-5` that names the word the command printed, one call, `Summary by claude-haiku-4-5` in the note)
   and the strip. Three short haiku turns; the third is the summary call. Not covered live: the Codex runner
-  and Pi/OMP children.
+  and Pi/OMP children. The product defaults are the aliases `haiku` and `gpt-6-luna`; every spec that starts
+  children writes the fixture's `settings.json` through `pinReporterModels` (`cheapModel.ts`) so the reporter
+  also runs `claude-haiku-4-5` and `gpt-5.6-luna`, as the rest of the suite does.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

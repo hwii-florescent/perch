@@ -1140,7 +1140,7 @@ pub async fn spend() -> SpendSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnCall {
     pub at_ms: i64,
-    /// `claude` or `codex`: whose CLI answered.
+    /// `claude`, `codex`, `pi` or `omp`: whose CLI answered.
     pub provider: String,
     pub model: String,
     pub session: String,
@@ -1161,7 +1161,9 @@ impl OwnCall {
             reasoning: 0,
         };
         Record {
-            provider: if self.provider == "codex" {
+            // Pi and OMP route to any provider; their price is the CLI's own reported cost, and
+            // the bucket follows the model family.
+            provider: if self.provider == "codex" || self.model.to_lowercase().contains("gpt") {
                 Provider::Codex
             } else {
                 Provider::Claude

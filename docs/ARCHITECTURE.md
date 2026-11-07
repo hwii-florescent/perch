@@ -468,13 +468,20 @@ finished turn is summarised by a small model so the expensive one never writes a
   tool calls (`transcript.rs`'s run sentence), the files its landed edits changed (`turn_diffs`), any question
   it waits on and the last thing it said, at most 12,000 characters in all, never a tool's output or a file's
   contents. What one summary costs therefore stays flat however long the child runs.
-- *Which model.* The child's own CLI in one-shot mode under the user's login: `claude -p --model <m> --tools ""
+- *Which model.* One setting per harness, each run through that harness's own CLI in one-shot mode under the
+  user's login, the prompt on stdin, cwd the child's Nest, 60 s: `claude -p --model <m> --tools ""
   --no-session-persistence --disable-slash-commands --strict-mcp-config --setting-sources ""` with Perch's own
-  system prompt, and `codex exec -m <m> -s read-only --ephemeral --ignore-user-config --ignore-rules --disable
-  shell_tool …`, the prompt on stdin, cwd the child's Nest, 60 s. Pi and OMP children use Claude if installed,
-  else Codex. Defaults `claude-haiku-4-5` and `gpt-5.6-luna`; settings `reporterEnabled`,
-  `reporterClaudeModel`, `reporterCodexModel` (Settings, Notifications). Nothing runs for a CLI that is not
-  installed, and a signed-out CLI fails like any failed call. (Probed live, Claude Code 2.1.319: a haiku call
+  system prompt; `codex exec -m <m> -s read-only --ephemeral --ignore-user-config --ignore-rules --disable
+  shell_tool …`; `pi --print --mode json --model <m> --thinking off --no-session --no-tools --no-extensions
+  --no-skills --no-prompt-templates --no-context-files --no-mcp --offline`; `omp --print --mode json --model <m>
+  --thinking off --no-session --no-tools --no-extensions --no-skills --no-rules --no-context-files --no-lsp
+  --no-title` (the last two read the answer and the usage from the JSON event stream's final assistant
+  message). A child is summarised by its own harness when that harness has a reporter, else by the first that
+  has one, in the order Claude, Codex, Pi, OMP. A harness has one when its CLI is installed and its model is
+  set: defaults are `haiku` (Claude's alias for the current Haiku) and `gpt-6-luna`; **Pi and OMP have no
+  default** (`provider/model`, e.g. an OpenRouter model, empty = none). Settings `reporterEnabled`,
+  `reporterClaudeModel`, `reporterCodexModel`, `reporterPiModel`, `reporterOmpModel` (Settings,
+  Notifications). Nothing runs for a CLI that is not installed, and a signed-out CLI fails like any failed call. (Probed live, Claude Code 2.1.319: a haiku call
   with these flags is about 540 input tokens; Codex 0.166 gpt-5.6-luna about 1,900 in total, mostly its own
   prompt.)
 - *Output.* `{status, text}` with status `done`, `blocked`, `needs_you` or `failed`; the object is found in

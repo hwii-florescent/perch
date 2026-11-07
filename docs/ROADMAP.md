@@ -510,6 +510,10 @@ UI rows from step 0 continue between slices.
    else the summary, else the last message; the lead's note and the strip say `Summary by <model>`; settings
    to turn it off or change the models; counted in the spend estimate. Live: haiku lead and child, summary by
    haiku in the note and on the strip. **Not run live:** the Codex runner, Pi/OMP children.
+   **8b. Done 2026-11-07** (worker guide "Slice 8b landed"): the model is a setting per harness, each run through
+   that harness's own one-shot mode: Claude `haiku`, Codex `gpt-6-luna`, Pi and OMP `provider/model` with no
+   default (unset: their children use Claude or Codex when installed, else the last message). Probed Pi and OMP
+   with one haiku and one luna call each; the Codex and Claude defaults were checked without spending tokens.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 

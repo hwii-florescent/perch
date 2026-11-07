@@ -159,17 +159,27 @@ it("turns the sub-session summaries off and saves a model only when it changed",
     await act(async () => toggle.click());
     expect(updateSettings).toHaveBeenCalledWith({ reporterEnabled: false });
     const claude = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-claude-model"]')!;
-    expect(claude.value).toBe("claude-haiku-4-5");
-    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-codex-model"]')!.value).toBe("gpt-5.6-luna");
+    expect(claude.value).toBe("haiku");
+    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-codex-model"]')!.value).toBe("gpt-6-luna");
+    const pi = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-pi-model"]')!;
+    const omp = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-omp-model"]')!;
+    expect([pi.value, omp.value]).toEqual(["", ""]);
     const type = (input: HTMLInputElement, text: string) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
       set.call(input, text);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     };
-    await act(async () => { claude.focus(); type(claude, "claude-haiku-4-5"); claude.blur(); });
+    await act(async () => { claude.focus(); type(claude, "haiku"); claude.blur(); });
     expect(updateSettings).not.toHaveBeenCalledWith(expect.objectContaining({ reporterClaudeModel: expect.anything() }));
     await act(async () => { type(claude, "  "); claude.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
-    expect(claude.value).toBe("claude-haiku-4-5");
+    expect(claude.value).toBe("haiku");
+    // Pi and OMP have no default: a model is saved as typed and clearing the field clears the setting.
+    await act(async () => { type(pi, "anthropic/claude-haiku-4-5"); pi.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(updateSettings).toHaveBeenCalledWith({ reporterPiModel: "anthropic/claude-haiku-4-5" });
+    act(() => usePerchStore.setState({ settings: { theme: "perch", reporterPiModel: "anthropic/claude-haiku-4-5" } as never }));
+    await act(async () => { type(pi, ""); pi.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(updateSettings).toHaveBeenCalledWith({ reporterPiModel: "" });
+    expect(updateSettings).not.toHaveBeenCalledWith(expect.objectContaining({ reporterOmpModel: expect.anything() }));
     await act(async () => { type(claude, "claude-sonnet-4-5"); claude.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
     expect(updateSettings).toHaveBeenCalledWith({ reporterClaudeModel: "claude-sonnet-4-5" });
   } finally {
