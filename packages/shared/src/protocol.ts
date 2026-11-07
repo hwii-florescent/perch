@@ -680,6 +680,8 @@ export interface SessionSummary {
   /** The native-chat agent running in this terminal tab (started via Perch's
    * command shims); present only while it runs. The chat view follows it. */
   chatProviderId?: string;
+  /** The lead this session is a sub-session of (local only). The sidebar nests it under that lead. */
+  parentSessionId?: string;
   /** Where a local terminal's shell is now (follows `cd`) and that directory's
    * git branch (absent outside a repo). the Files/Git drawer follows these. */
   currentCwd?: string;
@@ -1360,6 +1362,69 @@ export interface BrowserSuggestMessage {
   type: "browser.suggest";
   requestId: string;
   query: string;
+}
+
+/** The family of a session: the other members of its run and what each is doing (capability
+ * `crew.v1`). Answered with `crew.state`; a session outside any run gets no rows. */
+export interface CrewGetMessage {
+  type: "crew.get";
+  requestId: string;
+  sessionId: string;
+}
+
+/** One member of a session's run for the family strip. What it is doing is four records, never one
+ * status word: `lifecycle` (Perch's runtime), `needsYou` (a pending approval or question),
+ * `latest.receipt` (the delivery state of the last message) and `report` (the agent's own claim). */
+export interface CrewRow {
+  sessionId: string;
+  /** `manager`, `worker` or `peer`: how it relates to the session asked about. */
+  role: string;
+  title: string;
+  provider: string;
+  /** `working`, `idle`, `done`, `blocked`, `exited`, … or `unknown` (not idle). */
+  lifecycle: string;
+  /** A child's dispatch record: `running`, `stopped`, `exited`, `start_unknown`, … */
+  dispatch?: string;
+  /** What a child was asked to do. */
+  task?: string;
+  needsYou?: CrewNeedsYou;
+  report?: CrewReport;
+  latest?: CrewLatest;
+  /** A message to it would be accepted now. */
+  canMessage: boolean;
+}
+
+export interface CrewNeedsYou {
+  preview: string;
+  at: number;
+}
+
+/** An agent's own claim, never proof. `source` is `report` (its `perch report`) or `last-message`
+ * (a fallback: the start of its last message). */
+export interface CrewReport {
+  text: string;
+  source: string;
+  at: number;
+}
+
+/** The newest message between the two, with its receipt (`queued`, `delivering`, `delivered`,
+ * `unconfirmed`, `undelivered` and, when it waits or failed, why). */
+export interface CrewLatest {
+  /** `to` when the asked-about session sent it, `from` when it received it. */
+  direction: string;
+  preview: string;
+  at: number;
+  receipt: string;
+  reason: string;
+}
+
+/** Reply to `crew.get`: the session's family, newest traffic first. */
+export interface CrewStateMessage {
+  type: "crew.state";
+  requestId: string;
+  sessionId: string;
+  rows: CrewRow[];
+  error?: string;
 }
 
 /** Read the Instructions of a Birdhouse (`scope: "project"`) or Nest (`"workspace"`) on this core
@@ -2152,6 +2217,7 @@ export type ClientMessage =
   | BrowserHistorySearchMessage
   | BrowserSuggestMessage
   | InstructionsGetMessage
+  | CrewGetMessage
   | InstructionsSetMessage
   | BrowserHistoryRemoveMessage
   | BrowserHistoryClearMessage
@@ -2942,6 +3008,7 @@ export type ServerMessage =
   | BrowserHistoryResultMessage
   | BrowserSuggestResultMessage
   | InstructionsStateMessage
+  | CrewStateMessage
   | SessionDeletedMessage
   | ServerInfoMessage
   | CommandsListResponseMessage

@@ -96,6 +96,18 @@ Each module's `//!` header names the files it follows:
   stays `stop_unknown`) and the depth refusal of `src/shared/nested-worker-depth.ts` and its test.
   Orca's tasks, gates, coordinator loop and report settlement are not ported; the limits and the
   turn rule are Perch's own.
+- `agent_mail.rs` (with `db/agent_mail.rs`, `server/agent_mail.rs`): the message banner and its tests of
+  `src/main/runtime/orchestration/formatter.ts`, the custody rule `structuredMailOwed` of
+  `structured-mail-custody.ts` and the admit-once, never-resend delivery of
+  `structured-mailbox-pointer-delivery.ts` with its test. Orca's priorities, threads, payloads and
+  terminal pointer lane are not ported; idle-only delivery, quoting and the limits are Perch's own.
+- `crew.rs` (with `server/crew.rs`): the row shape of `src/shared/orchestration-crew.ts`, the preview
+  bound, section roles and pending-question rule of `src/main/runtime/orchestration/crew/
+  crew-party-snapshot.ts` and the admitted-traffic, latest-per-peer and newest-first rules of
+  `crew-query.ts`. `packages/web/src/views/nativeChat/FamilyStrip.tsx`: layout, wording and detail fields of
+  `src/renderer/src/components/orchestration-crew/CrewRowView.tsx` and `CrewRowDetails.tsx`, on Perch's
+  own classes. Orca's parent-claim reduction, recipient availability, Mention, row menu and panel are not
+  ported.
 - Interrupted row: `native_ui/claude.rs` (`interrupted`) and `native_ui/mod.rs`
   (`INTERRUPTED_STATUS_TEXT`) follow `src/main/native-chat/transcript-line-decoders-claude.ts`,
   `transcript-turn-markers.ts` and `src/shared/native-chat/native-chat-types.ts`.

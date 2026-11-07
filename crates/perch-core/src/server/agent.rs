@@ -78,11 +78,20 @@ pub(super) async fn whoami(
         Ok(identity) => identity,
         Err((status, error)) => return refuse(status, error),
     };
+    // The run's notes folder: plain files for the members of the run, never injected anywhere.
+    let notes = state
+        .db
+        .run_of(&identity.session_id)
+        .ok()
+        .flatten()
+        .and_then(|run| crate::native_ui::notes_dir(&run).ok())
+        .map(|path| path.display().to_string());
     Json(json!({
         "session": identity.session_id,
         "workspace": identity.workspace_id,
         "provider": identity.provider_id,
         "incarnation": identity.incarnation,
+        "notes": notes,
     }))
     .into_response()
 }
@@ -179,6 +188,53 @@ pub(super) async fn stop(
         );
     };
     answer(sub_sessions::stop(&state, &identity, target).await)
+}
+
+/// `POST {base}agent/send`: queue a message for another session of the caller's run.
+pub(super) async fn send(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    answer(agent_mail::send(&state, &identity, &body))
+}
+
+/// `POST {base}agent/inbox`: what was sent to the caller and what it sent, with receipts.
+pub(super) async fn inbox(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => answer(agent_mail::inbox(&state, &identity)),
+        Err((status, error)) => refuse(status, error),
+    }
+}
+
+/// `POST {base}agent/cancel`: take back a message that is still queued.
+pub(super) async fn cancel(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let identity = match authorize(&state, &peer, &headers, &body) {
+        Ok(identity) => identity,
+        Err((status, error)) => return refuse(status, error),
+    };
+    let Some(id) = body["message"].as_str().filter(|id| !id.is_empty()) else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "say which message: perch cancel <message>",
+        );
+    };
+    answer(agent_mail::cancel(&state, &identity, id))
 }
 
 /// An agent token on a route that is not `/agent/*` is refused outright, even from loopback:

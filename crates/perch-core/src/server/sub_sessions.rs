@@ -21,11 +21,11 @@ use serde_json::{json, Value};
 /// An error for the agent: the status to answer with and the text it reads.
 pub(super) type Failure = (StatusCode, String);
 
-fn fail(status: StatusCode, text: impl Into<String>) -> Failure {
+pub(super) fn fail(status: StatusCode, text: impl Into<String>) -> Failure {
     (status, text.into())
 }
 
-fn internal(context: &str, error: impl std::fmt::Display) -> Failure {
+pub(super) fn internal(context: &str, error: impl std::fmt::Display) -> Failure {
     tracing::error!(%error, "{context}");
     fail(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -41,7 +41,11 @@ fn service_client() -> Result<ClientIdentity, Failure> {
         .map_err(|error| internal("name the launcher", error))
 }
 
-fn key_of(app: &AppState, session_id: &str, provider: &str) -> Result<AgentKey, Failure> {
+pub(super) fn key_of(
+    app: &AppState,
+    session_id: &str,
+    provider: &str,
+) -> Result<AgentKey, Failure> {
     let row = app
         .db
         .get_session(session_id)
@@ -56,7 +60,7 @@ fn key_of(app: &AppState, session_id: &str, provider: &str) -> Result<AgentKey, 
 
 /// Bring a record that says "may be running" up to what perchd confirms. Only a confirmed
 /// exit changes it; an unreachable daemon changes nothing.
-fn reconcile(app: &AppState, row: &SubSessionRow) -> SubState {
+pub(super) fn reconcile(app: &AppState, row: &SubSessionRow) -> SubState {
     if !matches!(
         row.state,
         SubState::Running | SubState::StartUnknown | SubState::StopUnknown
@@ -445,6 +449,33 @@ fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFa
     Ok(())
 }
 
+/// A member's report, always a claim: its own `perch report`, else (for a child only) the start of
+/// its last message, labelled as the fallback it is. The text and when it was written.
+pub(super) fn member_report(
+    app: &AppState,
+    session_id: &str,
+    key: Option<&AgentKey>,
+    is_child: bool,
+) -> Option<(String, ReportSource, i64)> {
+    app.db
+        .latest_session_report(session_id)
+        .ok()
+        .flatten()
+        .map(|(text, at)| (text, ReportSource::Reported, at))
+        .or_else(|| {
+            if !is_child {
+                return None;
+            }
+            let latest = app.native_ui.get(key?)?.latest()?;
+            let said =
+                latest.messages.iter().rev().find(|message| {
+                    message.role == "assistant" && !message.text.trim().is_empty()
+                })?;
+            let text = sub_sessions::fallback_report(&said.text)?;
+            Some((text, ReportSource::LastMessage, wall_clock_millis()))
+        })
+}
+
 /// What one member of the run looks like, from Perch's own records. `needsYou` is a pending
 /// approval or question, never something the agent said.
 fn member_json(
@@ -466,22 +497,7 @@ fn member_json(
         .as_ref()
         .and_then(|key| app.agent_runtime.snapshot(key).ok())
         .map(|snapshot| snapshot.state);
-    let report =
-        app.db
-            .latest_session_report(session_id)
-            .ok()
-            .flatten()
-            .map(|(text, at)| (text, ReportSource::Reported, at))
-            .or_else(|| {
-                // The fallback is for a child only: the last thing it said, cut and labelled.
-                child?;
-                let latest = app.native_ui.get(key.as_ref()?)?.latest()?;
-                let said = latest.messages.iter().rev().find(|message| {
-                    message.role == "assistant" && !message.text.trim().is_empty()
-                })?;
-                let text = sub_sessions::fallback_report(&said.text)?;
-                Some((text, ReportSource::LastMessage, wall_clock_millis()))
-            });
+    let report = member_report(app, session_id, key.as_ref(), child.is_some());
     json!({
         "session": session_id,
         "role": if child.is_some() { "child" } else { "lead" },
@@ -666,14 +682,14 @@ pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::agent::tests::request;
     use super::*;
     use crate::agent_identity::IdentityStore;
     use crate::sub_sessions::TurnOrigin;
 
     /// A core booted over HTTP with its state, on a database under `root`.
-    async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
+    pub(in crate::server) async fn boot(root: &std::path::Path) -> (SocketAddr, Arc<HistoryDb>) {
         let db_path = root.join("history.sqlite");
         let db = Arc::new(HistoryDb::open(&db_path).unwrap());
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -887,7 +903,7 @@ mod tests {
     }
 
     /// A lead and one recorded child, as the core would have left them after a spawn.
-    fn lead_with_child(
+    pub(in crate::server) fn lead_with_child(
         db: &HistoryDb,
         nest: &std::path::Path,
         child_state: SubState,

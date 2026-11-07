@@ -79,11 +79,13 @@ mod worktree_jobs;
 use workspace::effective_focus;
 mod agent;
 mod agent_history;
+mod agent_mail;
 mod agents;
 mod attention;
 mod browser_history;
 mod browser_suggest;
 mod context_bridge;
+mod crew;
 mod instructions;
 #[cfg(test)]
 mod local_authority;
@@ -321,6 +323,8 @@ struct AppState {
     /// runs a prompt pass instead of waiting up to 5s for cold/stale data —
     /// see `spawn_git_poll_task`.
     git_poll_notify: Arc<tokio::sync::Notify>,
+    /// Wakes the mail delivery loop when something is queued (`agent_mail.rs`).
+    mail_notify: Arc<tokio::sync::Notify>,
     /// Local agent-attached (CLI-mode) terminals, one PTY per session id
     /// shared across every viewing connection — see `AgentTerminalRegistry`'s
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
@@ -566,6 +570,7 @@ pub async fn run(
         hub,
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
+        mail_notify: Arc::new(tokio::sync::Notify::new()),
         devices,
         local_ui: options.local_ui.clone(),
         phone: phone.clone(),
@@ -687,6 +692,27 @@ pub async fn run(
     if let Err(error) = state.db.reconcile_review_packets_with_prompt_operations() {
         tracing::warn!("could not reconcile review packet states: {error}");
     }
+    // Mail claimed when the last core stopped may have reached its receiver: never sent again.
+    if let Err(error) = state.db.mark_delivering_mail_unconfirmed() {
+        tracing::warn!("could not recover mail delivery states: {error}");
+    }
+    // A person speaking to a lead gives it its automatic wakes back; a confirmed exit withdraws
+    // the mail still waiting for the process that ended.
+    {
+        let db = state.db.clone();
+        state
+            .agent_runtime
+            .set_person_turn_listener(Arc::new(move |key| {
+                if let Err(error) = db.reset_mail_wakes(&key.session_id) {
+                    tracing::warn!(%error, "could not reset a lead's mail wakes");
+                }
+            }))?;
+        let app = state.clone();
+        state.agent_runtime.set_exit_listener(Arc::new(move |key| {
+            agent_mail::note_child(&app, key, crate::agent_mail::ChildStatus::Exited, None);
+            app.mail_notify.notify_one();
+        }))?;
+    }
     attention::reconcile_at_boot(&state);
     // Read before recovery turns them Reconnecting with another reason.
     let open_turns = attention::turns_open_at_boot(&state);
@@ -719,6 +745,7 @@ pub async fn run(
     spawn_agent_idle_sweep_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
     spawn_agent_turn_state_task(state.clone(), open_turns);
+    tokio::spawn(agent_mail::run_deliveries(state.clone()));
     spawn_agent_hibernation_task(state.clone());
     spawn_filesystem_watch_task(state.clone());
 
@@ -771,6 +798,18 @@ pub async fn run(
         .route(
             &format!("{base_path}agent/stop"),
             post(agent::stop).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/send"),
+            post(agent::send).layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/inbox"),
+            post(agent::inbox).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            &format!("{base_path}agent/cancel"),
+            post(agent::cancel).layer(axum::extract::DefaultBodyLimit::max(64 * 1024)),
         )
         .route(&format!("{base_path}workspace-file"), get(fs::file_content))
         .with_state(state);
@@ -1430,6 +1469,27 @@ fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenT
             };
             use crate::agent_fleet::AgentState;
             attention::on_transition(&state, &key, &transition, starts_turn, &mut open_turns);
+            // A child of a lead leaving a turn, or stopping on a person, is news to the lead.
+            if transition.changed {
+                if let Some(status) =
+                    crate::agent_mail::child_status_edge(Some(transition.from), transition.to)
+                {
+                    let worker = state.clone();
+                    let child = key.clone();
+                    tokio::task::spawn_blocking(move || {
+                        // The transcript the bridge reads trails the hook that ended the turn.
+                        if status == crate::agent_mail::ChildStatus::FinishedTurn {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                        }
+                        let said = worker
+                            .native_ui
+                            .get(&child)
+                            .and_then(|bridge| bridge.latest())
+                            .and_then(|snapshot| agent_mail::last_assistant_text(&snapshot));
+                        agent_mail::note_child(&worker, &child, status, said.as_deref());
+                    });
+                }
+            }
             let running = match transition.to {
                 // Repainting a completed terminal is output, not a new turn.
                 AgentState::Working if !starts_turn => continue,
@@ -2442,6 +2502,7 @@ fn foundation_capabilities() -> Vec<String> {
         "browser.history.v1",
         "browser.suggest.v1",
         "instructions.v1",
+        "crew.v1",
         "fs.tree",
         "fs.search",
         "fs.extract",
@@ -2946,6 +3007,7 @@ mod session_viewer_filter_tests {
                 stale: false,
                 project_id: None,
                 workspace_id: None,
+                parent_session_id: None,
             },
         };
         let workspace_git = ServerMessage::WorkspaceGit {

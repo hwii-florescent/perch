@@ -244,6 +244,7 @@ pub(super) fn build_session_summary(
         stale: stale.contains(&row.id),
         project_id: row.project_id,
         workspace_id: row.workspace_id,
+        parent_session_id: row.parent_session_id,
     }
 }
 
@@ -799,6 +800,8 @@ pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result
         let _ = app.agent_persistence.delete_snapshot(key);
     }
     app.cli_active_sessions.lock().unwrap().remove(session_id);
+    // A lead's run ends with it: its notes folder is scratch for the run, so it goes too.
+    crate::native_ui::remove_notes_dir(session_id);
     // Fan out to every connection: the row a session.updated would look up
     // is gone.
     let _ = app

@@ -63,6 +63,24 @@ export function refillSlots<T>(items: T[], isSlot: (item: T) => boolean, fill: T
   return items.map((item) => (isSlot(item) ? fill[next++]! : item));
 }
 
+/** Whether `item` is a sub-session whose lead is also in `items`: only then does it nest under it. */
+export function isNestedIn(item: { id: string; parentSessionId?: string }, items: readonly { id: string }[]): boolean {
+  return !!item.parentSessionId && item.parentSessionId !== item.id && items.some((other) => other.id === item.parentSessionId);
+}
+
+/** `items` with each sub-session straight after its lead, in the order given, when both are listed. A
+ * child whose lead is not in the list (another section, another Nest) stays where it is. One level
+ * only: Perch's depth limit is 1. */
+export function nestUnderLeads<T extends { id: string; parentSessionId?: string }>(items: T[]): T[] {
+  const nested = new Map<string, T[]>();
+  for (const item of items) {
+    if (!isNestedIn(item, items)) continue;
+    nested.set(item.parentSessionId!, [...(nested.get(item.parentSessionId!) ?? []), item]);
+  }
+  if (!nested.size) return items;
+  return items.filter((item) => !isNestedIn(item, items)).flatMap((item) => [item, ...(nested.get(item.id) ?? [])]);
+}
+
 /** The tab strip's sessions in the core's order, leaving file tabs and chats the
  * core does not know yet where they are: one chat order across sidebar and strip. */
 export function applySessionOrder<T extends { id: string }>(entries: T[], isSession: (entry: T) => boolean, order: readonly string[] | undefined): T[] {

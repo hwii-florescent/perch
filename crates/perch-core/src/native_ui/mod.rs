@@ -126,7 +126,9 @@ pub struct NativePaths {
     pub socket: PathBuf,
 }
 
-pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
+/// Perch's private directory for native bridges: owned by this user, mode 0700, resolved past
+/// the `/tmp` link.
+fn private_root() -> anyhow::Result<PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
@@ -152,7 +154,53 @@ pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
         // that (a link to `/private/tmp`), so the literal path would fail
         // every native codex launch. Both spellings name the same inode, so a
         // session started before this still reconnects.
-        let root = std::fs::canonicalize(&root)?;
+        Ok(std::fs::canonicalize(&root)?)
+    }
+    #[cfg(not(unix))]
+    {
+        bail!("native CLI UI requires a Unix host")
+    }
+}
+
+/// A run's notes folder: plain files the agents of the run read on demand (a message too long
+/// for a prompt is one). Private to this user, never injected into a session. `run_id` is its
+/// lead's session id.
+pub fn notes_dir(run_id: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    ensure!(
+        !run_id.is_empty()
+            && run_id.len() <= 128
+            && run_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')),
+        "a run id is letters, digits, - and _"
+    );
+    let dir = private_root()?.join("notes").join(run_id);
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+    Ok(dir)
+}
+
+/// Remove a run's notes folder once its lead is gone. A missing folder is not an error.
+pub fn remove_notes_dir(run_id: &str) {
+    let Ok(root) = private_root() else { return };
+    // Only a plain run id names a folder here: nothing with a separator or a dot can climb out.
+    if run_id.is_empty()
+        || !run_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(root.join("notes").join(run_id));
+}
+
+pub fn paths(key: &AgentKey) -> anyhow::Result<NativePaths> {
+    #[cfg(unix)]
+    {
+        let root = private_root()?;
         let hash = terminal_key(key);
         let name = &hash[6..38];
         Ok(NativePaths {
@@ -567,6 +615,30 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::net::UnixListener;
+
+    /// A run's notes folder is private to this user, only a plain run id names one, and removing it
+    /// takes its files with it and never anything outside it.
+    #[test]
+    fn a_notes_folder_is_private_named_by_a_plain_run_id_and_removed_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let run = format!("notes-test-{}", uuid::Uuid::new_v4());
+        let dir = notes_dir(&run).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        std::fs::write(dir.join("plan.md"), "x").unwrap();
+        for bad in ["", "..", "a/b", "a.b", &"x".repeat(129)] {
+            assert!(notes_dir(bad).is_err(), "{bad:?}");
+        }
+        let sibling = notes_dir(&format!("{run}-other")).unwrap();
+        remove_notes_dir(&run);
+        remove_notes_dir("../..");
+        assert!(!dir.exists(), "the folder and its files are gone");
+        assert!(sibling.exists(), "another run's folder is untouched");
+        remove_notes_dir(&format!("{run}-other"));
+        assert!(!sibling.exists());
+    }
 
     fn shown(
         revision: u64,

@@ -1,6 +1,7 @@
 pub mod agent_catalog;
 pub mod agent_fleet;
 pub mod agent_identity;
+pub mod agent_mail;
 pub mod agent_persistence;
 pub mod agent_runtime;
 pub mod agent_title;
@@ -9,6 +10,7 @@ pub mod cli_title;
 pub mod clipboard_image;
 pub mod commands;
 pub mod context_bridge;
+pub mod crew;
 pub mod daemon;
 #[cfg(target_os = "macos")]
 pub mod daemon_host;

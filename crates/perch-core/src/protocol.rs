@@ -332,6 +332,10 @@ pub struct SessionSummary {
     /// it runs; the web chat view follows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_provider_id: Option<String>,
+    /// The lead this session is a sub-session of (`sessions.parent_session_id`, local only).
+    /// The sidebar nests it under that lead. Older peers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     /// Where a local terminal's shell is now (follows `cd`), and that
     /// directory's git branch (absent outside a repo). the Files/Git
     /// drawer follows these; other peers omit them.
@@ -339,6 +343,66 @@ pub struct SessionSummary {
     pub current_cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_branch: Option<String>,
+}
+
+/// One member of a session's run for the family strip (`crew.state`, `crew.rs`). The record of
+/// what it is doing is split in four, never one status word: `lifecycle` (Perch's runtime),
+/// `needs_you` (a pending approval or question), `latest.receipt` (the delivery state of the
+/// last message) and `report` (the agent's own claim).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewRow {
+    pub session_id: String,
+    /// `manager`, `worker` or `peer`: how it relates to the session asked about.
+    pub role: String,
+    pub title: String,
+    pub provider: String,
+    /// `working`, `idle`, `done`, `blocked`, `exited`, … or `unknown` (not idle).
+    pub lifecycle: String,
+    /// A child's dispatch record: `running`, `stopped`, `exited`, `start_unknown`, …
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<String>,
+    /// What a child was asked to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_you: Option<CrewNeedsYou>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<CrewReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<CrewLatest>,
+    /// A message to it would be accepted now.
+    pub can_message: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewNeedsYou {
+    pub preview: String,
+    pub at: i64,
+}
+
+/// An agent's own claim, never proof. `source` is `report` (its `perch report`) or
+/// `last-message` (a fallback: the start of its last message).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewReport {
+    pub text: String,
+    pub source: String,
+    pub at: i64,
+}
+
+/// The newest message between the two, with its receipt (`queued`, `delivering`, `delivered`,
+/// `unconfirmed`, `undelivered` and, when it waits or failed, why).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrewLatest {
+    /// `to` when the asked-about session sent it, `from` when it received it.
+    pub direction: String,
+    pub preview: String,
+    pub at: i64,
+    pub receipt: String,
+    pub reason: String,
 }
 
 /// One remembered page of the built-in browser (`server/browser_history.rs`).
@@ -1108,6 +1172,14 @@ pub enum ClientMessage {
         request_id: String,
         scope: String,
         id: String,
+    },
+
+    /// The family of a session: the other members of its run and what each is doing
+    /// (capability `crew.v1`). Answered with `crew.state`; a session outside any run gets no rows.
+    #[serde(rename = "crew.get", rename_all = "camelCase")]
+    CrewGet {
+        request_id: String,
+        session_id: String,
     },
 
     /// Save a Birdhouse's or Nest's Instructions (text and reference folders). New sessions
@@ -2117,6 +2189,16 @@ pub enum ServerMessage {
         folders: Vec<String>,
         revision: u64,
         max_chars: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    /// Reply to `crew.get`: the session's family, newest traffic first.
+    #[serde(rename = "crew.state", rename_all = "camelCase")]
+    CrewState {
+        request_id: String,
+        session_id: String,
+        rows: Vec<CrewRow>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

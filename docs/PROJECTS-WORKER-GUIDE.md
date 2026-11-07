@@ -461,39 +461,64 @@ The contract is in ARCHITECTURE ("Sub-sessions"). What later slices build on:
   `perch list` and stopped it, and the core confirmed the stop. **Codex as a child is therefore not
   verified end to end.**
 
-## Slice 5: messaging
+## Slice 5 landed (2026-11-07): messaging
 
-**Orca to port with changes:** sender envelope (`formatter.ts` `formatMessageBanner`);
-custody until delivered (`structured-mail-custody.ts`); one message per turn through the
-session's own queue (`structured-mailbox-pointer-delivery.ts`). Table `agent_mail`
-(`messages` already exists in `db/mod.rs`).
-**Changes from Orca:** idle-only (Orca also delivers to working agents,
-`mailbox-owner.ts`); body inline ≤2,000 chars, longer goes to a notes file with a path;
-neutralise a leading `/`; `inbox` reads without consuming; per-message idempotency key.
-**Claude-desktop behaviour (spec):** queued notes on the lead (cap 32); the lead is woken
-only when idle with no pending approval, question or working child, at most 10 times per
-human message; a one-line status roster per child, marked as status rather than
-instruction; peer text treated as data, never as the user; receipts delivered / queued /
-undelivered with reason.
-**Delivery per provider:** Pi/OMP follow-up through the bridge; Codex `turn/start` at idle;
-Claude: take the input lease and verify the empty prompt in one step (extend
-`server/context_bridge.rs` flow: `acquire_control_if_unowned`, `prepare_input`,
-`reserve_prompt_operation`), confirmed only by `UserPromptSubmit`; never retried blindly.
+The contract is in ARCHITECTURE ("Messages", written before the code). What later slices build on:
 
-Write restart, cancel, duplicate and lease-contention behaviour into ARCHITECTURE first.
-Check: restart with queued mail delivers once; busy, approval-blocked and person-typing
-prompts receive no bytes; 50-message and wake caps; `/`-leading body cannot run a command.
+- **Files.** `agent_mail.rs` (pure: the banner, quoting, caps, admission, the idle-only rule
+  `wait_reason`, Orca's "owed" rule, the note and roster wording), `db/agent_mail.rs` (tables `agent_mail`
+  and `agent_mail_wakes`; admission, the key, the limits and the row in one transaction; the atomic
+  `queued` to `delivering` claim; `unconfirmed` at boot), `server/agent_mail.rs` (routes `/agent/send|inbox|
+  cancel`, the delivery engine `pass` over a `World` trait with the real `AppWorld`, `note_child`, the loop
+  `run_deliveries` every 2 s or when something is queued), verbs `send`, `inbox`, `cancel` in
+  `perchd/agent_cli.rs`. `AgentRuntimeAdapter` gained `record_agent_turn_boundary`, a person-turn listener
+  (resets a lead's wakes) and an exit listener (a confirmed exit notes the lead).
+- **Orca** (`308b5000`, header of `agent_mail.rs`): the banner, the custody ("owed") rule and the
+  claim-once pointer delivery, with the cases of their tests. Not ported: priorities, threads, payloads,
+  the terminal pointer lane, journal parking. Changed: idle-only, quoted bodies, notes-folder files,
+  `unconfirmed`.
+- **Receipts** are the four words of the guide; `unconfirmed` (bytes may have arrived, never resent) is
+  Perch's addition to the three the owner named, because unknown is not failure.
+- **Status notes** (`note_child`): a child's finished turn, a block on a person or a confirmed exit queues
+  one note for the lead (a newer one from the same child replaces a queued one); a lead's waiting notes
+  go in one roster prompt. Found live: the bridge's snapshot can trail the hook that ends the turn, so the
+  last message is read 1.5 s later, and a finished turn is noted even with nothing to quote.
+- **Notes folder.** `native_ui::notes_dir(run)`, `/tmp/perch-native-<uid>/notes/<run>/`, 0700. Slice 6 only
+  has to name it in `perch guide`; today it holds the files of long messages.
+- **Live** (`e2e/agent-mail.spec.ts`, TESTING): a haiku lead spawned a haiku child; with the chat window
+  open on the lead, the child's message and its status note reached the lead (Claude path, confirmed by
+  `UserPromptSubmit`), then the lead's message reached the idle child and it acted on it. **Found live,
+  then decided by the owner:** an open view holds the input lease, and a first version that never wrote
+  while a view held it left mail queued forever. Delivery now rides the holder's current lease inside
+  `AgentRuntimeAdapter::dispatch_under_current_lease` (lease untouched, tested) and also needs a 2 s quiet
+  window on the PTY (`input_quiet_for`, stamped in `prepare_input`, unknown = recent); a composer draft
+  lives in the browser and is not protected (ARCHITECTURE "Lease contention"). **Not verified live:**
+  Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World` trait only).
 
-## Slice 6: family strip and notes folder
+## Slice 6 landed (2026-11-07): family strip and notes folder
 
-- Read model: Orca crew (`crew/crew-query.ts`, `crew-parent-relations.ts`,
-  `crew-party-snapshot.ts`, `src/shared/orchestration-crew.ts`), with `status` split into
-  lifecycle, needs-you, receipt and report fields. Push it through a capability-gated
-  protocol family.
-- UI: Orca `renderer/src/components/orchestration-crew/CrewRowView.tsx`, `CrewRowDetails.tsx`
-  (MIT) adapted into nested sidebar rows and a compact strip in the lead's chat; most
-  recent traffic first. No panel or tab.
-- Notes folder per run under the private native dir, path given in `perch guide`; never
-  injected.
-- Check: e2e with a lead and two children showing working / waiting on you / reported;
-  phone view shows the same and can stop and message with the input lease.
+The contract is in ARCHITECTURE ("Family strip and notes folder"). Where the pieces are:
+
+- **Read model** `crew.rs` (pure; header names Orca's `orchestration-crew.ts`, `crew-party-snapshot.ts` and
+  `crew-query.ts` at `308b5000`, with their preview bound, section roles, latest-line-per-peer and
+  newest-first rules and the cases of their tests that do not need Orca's dispatch tables), gathered by
+  `server/crew.rs` from Perch's own records (reuses `reconcile`, `key_of` and the new `member_report` of
+  `server/sub_sessions.rs`). Orca's `status` string is the four fields above. **Not ported:** Orca's
+  parent-claim reduction (`crew-parent-relations.ts`: a run here is flat, the parent is a column), its
+  recipient-availability checks, Mention and the row menu, the panel.
+- **Protocol.** `crew.get` / `crew.state`, `crew.v1`, `SessionSummary.parentSessionId` (Rust and TS
+  mirrored; the parity test passes). The hub ignores `crew.state` from a remote host.
+- **Web.** `crew.ts` (`useCrew`: asks on a family member's session update, 250 ms settle),
+  `nativeChat/FamilyStrip.tsx` (layout and fields from Orca's `CrewRowView`/`CrewRowDetails`, MIT, on
+  Perch's own classes; the pure `stateOf`, `headline`, `receiptNote` carry the wording and are tested),
+  `sidebarOrder.nestUnderLeads` / `isNestedIn` and the `WorkspaceOverview` rows.
+- **Notes folder.** `whoami` returns `notes`; `perch guide` prints it as its last line when it can reach the
+  core; the folder goes with its lead (`session::delete_session`).
+- **Live** (`e2e/agent-mail.spec.ts`, TESTING): with a real haiku lead and child the strip row shows the
+  child's state, its own report (`Reported: <marker>`) and "You wrote" for the lead's message, and the
+  sidebar dot (the default compact view; found by the first run, which looked for a row) is marked a
+  sub-session and set in beside its lead's. **Not run live:** a child waiting on a person (a unit/WebSocket test covers the
+  rows; the strip's rendering of it is tested in jsdom), the phone layout (same component, not opened at a
+  phone viewport), and a lead with two children at once.
+- **Owner decisions still open:** delivery over a held input lease (slice 5), and whether the strip should
+  offer Message and Stop buttons of its own instead of Open (today: Open, then the ordinary chat and close).

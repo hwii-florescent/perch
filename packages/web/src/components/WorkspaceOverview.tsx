@@ -3,7 +3,7 @@ import { ADD_PROJECT_EVENT } from "../appEvents";
 import { requestCloseSession } from "../closeGuard";
 import { createPortal } from "react-dom";
 import { canReorderHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "../store";
-import { orderBy, orderProjects, stepTarget, writeScope } from "../sidebarOrder";
+import { isNestedIn, nestUnderLeads, orderBy, orderProjects, stepTarget, writeScope } from "../sidebarOrder";
 import { certaintyNote, needsYou, reasonLabel, useAttention } from "../attention";
 import { groupByStatus, holdFinished, STATUS_LABELS, STATUS_SECTIONS } from "../statusView";
 import { StatusDot } from "./StatusDot";
@@ -55,6 +55,9 @@ const RESTORE = button({ size: "xs", tone: "warn", className: "mt-0 mr-[0.3rem] 
 const PROJECT_ICON = rowAction({ reveal: "project" });
 const SESSION_CLOSE = rowAction({ reveal: "session" });
 const HEADER_PLUS = PROJECT_ICON;
+
+/** A sub-session's row sits under its lead's, set in with a rule: the family reads as one group. */
+const NESTED_ROW = "ml-4 border-l border-surface-1";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -177,11 +180,12 @@ function SessionDots({ sessions, activeId, onPick, onMenu }: {
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
     >
-      {sessions.map((session) => (
+      {nestUnderLeads(sessions).map((session) => (
         <button
           key={session.id}
           type="button"
-          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", inline && "min-[701px]:h-6 min-[701px]:w-6", session.id === activeId && "workspace-entry__session--active")}
+          className={cn("group grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full bg-transparent p-0 [border:0] focus-visible:outline-none", inline && "min-[701px]:h-6 min-[701px]:w-6", isNestedIn(session, sessions) && "ml-1.5", session.id === activeId && "workspace-entry__session--active")}
+          data-sub-session={isNestedIn(session, sessions) || undefined}
           data-testid={`workspace-session-${session.id}`}
           title={`${session.title || "New session"} · ${sessionDotState(session)}`}
           aria-label={`${session.title || "New session"}, ${sessionDotState(session)}`}
@@ -532,8 +536,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
   function sessionRows(list: SessionSummary[], group: string): ReactElement {
     return (
       <div className="workspace-entry__sessions flex flex-col gap-[2px] pt-[2px]">
-        {list.map((session) => (
-          <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+        {nestUnderLeads(list).map((session) => (
+          <div {...sessionRowProps(session, list, group)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", isNestedIn(session, list) && NESTED_ROW, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={isNestedIn(session, list) || undefined} key={session.id}>
             <button
               type="button"
               className={cn(SESSION, "pl-[1.9rem]", session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -714,13 +718,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             <span className="tabular-nums" aria-label={`${section.list.length} chats`}>{section.list.length}</span>
             {section.note && <span className="min-w-0 truncate text-[0.62rem] font-normal tracking-normal normal-case">{section.note}</span>}
           </div>
-          {section.list.map((session) => {
+          {nestUnderLeads(section.list).map((session) => {
             const owner = projects.find((project) => project.id === session.projectId);
             const need = section.key === "needs" ? needsEvents.get(session.id) : undefined;
             const reason = section.key !== "needs" ? null : need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you";
             const detail = [owner && !isChatsProject(owner) ? owner.name || basename(owner.path) : null, reason].filter(Boolean).join(" · ");
             return (
-              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+              <div {...sessionRowProps(session, section.list, `status:${section.key}`)} className={cn("group/row flex min-w-0 items-stretch rounded-ui", isNestedIn(session, section.list) && NESTED_ROW, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={isNestedIn(session, section.list) || undefined} key={session.id}>
                 <button
                   type="button"
                   className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}
@@ -814,8 +818,8 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
             </div>
             {!chatsCollapsed && chats.length > 0 && (
               <div className="flex flex-col gap-[2px] pt-[2px] pr-[0.3rem] pl-[0.4rem]">
-                {shownChats.map((session) => (
-                  <div {...sessionRowProps(session, shownChats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui",session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} key={session.id}>
+                {nestUnderLeads(shownChats).map((session) => (
+                  <div {...sessionRowProps(session, shownChats, "chats")} className={cn("group/row flex min-w-0 items-stretch rounded-ui", isNestedIn(session, shownChats) && NESTED_ROW, session.id === sessionId ? "bg-surface-1" : "hover:bg-surface-1 focus-within:bg-surface-1")} data-sub-session={isNestedIn(session, shownChats) || undefined} key={session.id}>
                     <button
                       type="button"
                       className={cn(SESSION, session.id === sessionId ? "workspace-entry__session--active text-fg" : "text-subtext-0")}

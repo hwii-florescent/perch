@@ -479,12 +479,20 @@ UI rows from step 0 continue between slices.
    stopped it. **Not verified:** a luna Codex child end to end (its quota was spent after it
    started) and `--worktree` live (Rust test only). Deleting a lead stops its live children first;
    Esc in the chat does not (it is not a stop).
-5. **Messaging** (`send`, `inbox`) with the durable queue and wake cap; write restart,
-   cancellation, duplicate and lease-contention behaviour down first. Check: queue
-   recovery after restart without duplicates; busy, approval-blocked and
-   person-typing prompts never receive bytes; Claude lease plus verify is one step.
-6. **Family strip and notes folder.** Check: e2e with a lead and two children showing
-   working / waiting on you / reported.
+5. **Messaging. Done 2026-11-07** (details in the worker guide and ARCHITECTURE "Messages"):
+   `perch send|inbox|cancel`, the durable `agent_mail` queue, idle-only delivery per
+   provider, receipts (queued / delivered / unconfirmed / undelivered with a reason),
+   the 50-message and 10-wake caps, children's status notes to the lead. Live: a haiku
+   lead (chat open) and a haiku child exchanged messages both ways. Delivery rides the
+   input lease an open view holds, unchanged, after the idle, empty-prompt and 2 s PTY-quiet
+   checks (owner decision 2026-11-07; a composer draft is browser-side and not protected).
+   **Not verified live:** delivery to Codex, Pi or OMP receivers.
+6. **Family strip and notes folder. Done 2026-11-07** (details in the worker guide and ARCHITECTURE
+   "Family strip"): `crew.get`/`crew.state` (capability `crew.v1`), `parentSessionId` on sessions,
+   children nested under their lead in the sidebar, a strip above the lead's composer (state, waiting on
+   you, the last message's receipt, the agent's own report, newest traffic first), the run's notes folder
+   named in `perch guide`. Live: the strip and the nested row beside a real haiku lead and child; working
+   / waiting on you / reported are unit-tested, **"waiting on you" and the phone layout not run live**.
 
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 

@@ -164,7 +164,12 @@ pub fn prepare(
         !latest.running,
         "A turn is running. Wait for it to finish before sending a command."
     );
-    // Claude's own check (`claude::prepare_input`) finds its input box; its cursor is not a reliable guide.
+    input_ready(key)
+}
+
+/// Refuse unless nothing typed, no dialog and no overlay is on the CLI's input line. Claude is
+/// checked by `claude::prepare_input`, which finds its input box (its cursor is not a reliable guide).
+pub fn input_ready(key: &crate::agent_fleet::AgentKey) -> anyhow::Result<()> {
     if key.agent_id == "claude" {
         return Ok(());
     }
