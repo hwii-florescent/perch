@@ -485,14 +485,15 @@ The contract is in ARCHITECTURE ("Messages", written before the code). What late
   last message is read 1.5 s later, and a finished turn is noted even with nothing to quote.
 - **Notes folder.** `native_ui::notes_dir(run)`, `/tmp/perch-native-<uid>/notes/<run>/`, 0700. Slice 6 only
   has to name it in `perch guide`; today it holds the files of long messages.
-- **Live** (`e2e/agent-mail.spec.ts`, TESTING): a haiku lead spawned a haiku child; with the window
-  closed the child's message and its status note reached the lead (Claude path: lease, empty prompt,
-  `UserPromptSubmit`), then the lead's message reached the idle child and it acted on it. **Found live:
-  an open view holds the input lease**, so with the chat open mail waited forever ("another view holds
-  input control"): the contract keeps that (never take a lease over) and the e2e closes the window. Open
-  owner decision: let delivery ride the holder's current lease after the empty-prompt check. **Not
-  verified live:** Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World`
-  trait only).
+- **Live** (`e2e/agent-mail.spec.ts`, TESTING): a haiku lead spawned a haiku child; with the chat window
+  open on the lead, the child's message and its status note reached the lead (Claude path, confirmed by
+  `UserPromptSubmit`), then the lead's message reached the idle child and it acted on it. **Found live,
+  then decided by the owner:** an open view holds the input lease, and a first version that never wrote
+  while a view held it left mail queued forever. Delivery now rides the holder's current lease inside
+  `AgentRuntimeAdapter::dispatch_under_current_lease` (lease untouched, tested) and also needs a 2 s quiet
+  window on the PTY (`input_quiet_for`, stamped in `prepare_input`, unknown = recent); a composer draft
+  lives in the browser and is not protected (ARCHITECTURE "Lease contention"). **Not verified live:**
+  Codex, Pi and OMP as receivers (their bridge path is unit-tested through the `World` trait only).
 
 ## Slice 6: family strip and notes folder
 

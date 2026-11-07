@@ -483,11 +483,10 @@ UI rows from step 0 continue between slices.
    `perch send|inbox|cancel`, the durable `agent_mail` queue, idle-only delivery per
    provider, receipts (queued / delivered / unconfirmed / undelivered with a reason),
    the 50-message and 10-wake caps, children's status notes to the lead. Live: a haiku
-   lead and a haiku child exchanged messages both ways with the window closed. **Open
-   owner decision:** a view that is open holds the input lease, and mail is never
-   delivered over it, so a lead someone is watching hears nothing until they close or
-   release it (the alternative, riding the holder's lease after the empty-prompt check, is
-   not built). **Not verified live:** delivery to Codex, Pi or OMP receivers.
+   lead (chat open) and a haiku child exchanged messages both ways. Delivery rides the
+   input lease an open view holds, unchanged, after the idle, empty-prompt and 2 s PTY-quiet
+   checks (owner decision 2026-11-07; a composer draft is browser-side and not protected).
+   **Not verified live:** delivery to Codex, Pi or OMP receivers.
 6. **Family strip and notes folder.** Check: e2e with a lead and two children showing
    working / waiting on you / reported.
 

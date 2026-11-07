@@ -571,16 +571,24 @@ impl World for AppWorld<'_> {
         let Some(bridge) = app.native_ui.get(&key) else {
             return Delivery::Held(Wait::NotReported);
         };
-        deliver_native(app, &key, &bridge, delivery_id, prompt, claim)
+        let recheck = || agent_mail::wait_reason(&self.facts(session));
+        deliver_native(app, &key, &bridge, delivery_id, prompt, claim, &recheck)
     }
 }
 
-/// Take the input lease only if nobody holds it, check the receiver's input line (Claude: its real
-/// process and an empty prompt; the others: nothing typed, no dialog or overlay), claim, queue the
-/// confirmation with the bridge and, for Claude, paste, all under one authority lock. Pi, OMP and
-/// Codex take the prompt through their bridge and write nothing to the terminal; Codex would take
-/// it while busy, which is why the idle check came first. The confirmation is Claude's
-/// `UserPromptSubmit` hook or the bridge's own answer. A lease taken here is released afterwards.
+/// How long a PTY must have heard no input from any client before mail is written into it.
+const QUIET: Duration = Duration::from_secs(2);
+
+/// Deliver one prompt, everything checked and written inside one critical section under the authority
+/// lock that every PTY write and lease change also takes (`dispatch_under_current_lease`): no input
+/// reached the PTY from any client for [`QUIET`] (unknown counts as recent), the receiver is still
+/// idle with nothing open (`recheck`), its input line is empty (Claude: its real process and an empty
+/// prompt; the others: nothing typed, no dialog or overlay), then claim, queue the confirmation with
+/// the bridge and, for Claude only, paste. The input lease is the holder's current one, left exactly as
+/// it was; with no holder it is borrowed for this call and returned. Pi, OMP and Codex take the prompt
+/// through their bridge and write nothing to the terminal (Codex would take it while busy, which is
+/// why the idle check comes first). The confirmation is Claude's `UserPromptSubmit` hook or the
+/// bridge's own answer; an unconfirmed write is never repeated.
 fn deliver_native(
     app: &AppState,
     key: &AgentKey,
@@ -588,27 +596,18 @@ fn deliver_native(
     delivery_id: &str,
     prompt: &str,
     claim: &dyn Fn() -> bool,
+    recheck: &dyn Fn() -> Option<Wait>,
 ) -> Delivery {
     let client = match mail_client() {
         Ok(client) => client,
         Err(error) => return Delivery::Held(Wait::Input(error)),
     };
-    let Ok(before) = app.agent_runtime.snapshot(key) else {
-        return Delivery::Held(Wait::NotRunning);
-    };
-    let lease = match app.agent_runtime.acquire_control_if_unowned(
-        key,
-        ControlChannel::Input,
-        client.clone(),
-        now_millis(),
-    ) {
-        Ok(Some(lease)) => lease,
-        Ok(None) => return Delivery::Held(Wait::InputOwned),
-        Err(error) => return Delivery::Held(Wait::Input(error.to_string())),
-    };
     let outcome = app
         .agent_runtime
-        .dispatch_native_control(key, &lease, |write| {
+        .dispatch_under_current_lease(key, &client, QUIET, |write| {
+            if let Some(wait) = recheck() {
+                return Ok(Delivery::Held(wait));
+            }
             let input = crate::native_ui::typed::input_ready(key)
                 .and_then(|()| crate::native_ui::claude::prepare_input(key, Some(prompt)));
             let input = match input {
@@ -637,21 +636,11 @@ fn deliver_native(
                 None => Delivery::Sent(reply),
             })
         });
-    if before.input_owner.is_none() {
-        let _ = app.agent_runtime.release_control(
-            key,
-            ControlChannel::Input,
-            &client,
-            lease.generation,
-        );
-        if !before.observers.contains(&client.id) {
-            let _ = app
-                .agent_runtime
-                .lifecycle()
-                .detach_observer(key, &client.id);
-        }
+    match outcome {
+        Ok(Some(delivery)) => delivery,
+        Ok(None) => Delivery::Held(Wait::RecentInput),
+        Err(error) => Delivery::Held(Wait::Input(error.to_string())),
     }
-    outcome.unwrap_or_else(|error| Delivery::Held(Wait::Input(error.to_string())))
 }
 
 /// The delivery loop: a pass over every receiver with queued mail whenever something is queued

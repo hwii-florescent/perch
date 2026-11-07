@@ -472,8 +472,9 @@ pub enum Wait {
     NotIdle,
     /// A person's text, a dialog or an overlay is on its input line; the reason is the check's.
     Input(String),
-    /// Another view holds Claude's input lease; Perch does not take it over.
-    InputOwned,
+    /// Some client sent input to its terminal in the last moments, or none has been heard since
+    /// Perch started: unknown is recent. Retried on a later pass.
+    RecentInput,
     WorkingChildren(usize),
     WakeCap,
 }
@@ -487,7 +488,7 @@ impl Wait {
             Self::Working => "the receiver is working".into(),
             Self::NotIdle => "the receiver is not idle".into(),
             Self::Input(why) => why.clone(),
-            Self::InputOwned => "another view holds input control".into(),
+            Self::RecentInput => "someone is typing in its terminal, or did a moment ago".into(),
             Self::WorkingChildren(count) => format!(
                 "{count} sub-session{} still working",
                 if *count == 1 { " is" } else { "s are" }
@@ -871,7 +872,7 @@ mod tests {
             Wait::Working,
             Wait::NotIdle,
             Wait::Input("a person is typing".into()),
-            Wait::InputOwned,
+            Wait::RecentInput,
             Wait::WorkingChildren(1),
             Wait::WorkingChildren(3),
             Wait::WakeCap,

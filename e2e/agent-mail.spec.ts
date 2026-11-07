@@ -17,7 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fixtureRuntimeEnv, cleanupFixtureRuntime } from "./fixtureRuntime";
 import { setChatMode } from "./chatMode";
-import { addProject, startFromPanel, switchViaSidebar } from "./projects";
+import { addProject, startFromPanel } from "./projects";
 import { cheapModelEnv, CHEAP_CODEX_MODEL, CHEAP_CLAUDE_MODEL } from "./cheapModel";
 
 const root = path.resolve(__dirname, "..");
@@ -108,9 +108,8 @@ test("a child's message and status reach an idle lead, and the lead's message re
     const child = sql(fixture, `select child_session_id from sub_sessions where parent_session_id = '${lead}'`);
     expect(child, "one sub-session").toMatch(/^[0-9a-f-]{36}$/);
 
-    // Nobody is looking at the lead now: an open chat or terminal holds Claude's input lease, and Perch
-    // never takes it over (ARCHITECTURE, "Lease contention"), so the person closes the window first.
-    await page.goto("about:blank");
+    // The window stays open on the lead, so its view holds the input lease: delivery rides that lease, leaves it
+    // as it is, and waits for a quiet PTY (ARCHITECTURE, "Lease contention").
     // The child's message reaches the lead once the lead is idle, and the lead's own hook confirmed it.
     await expect.poll(() => sql(fixture, `select state from agent_mail where kind = 'message' and sender_session_id = '${child}' and target_session_id = '${lead}'`), { timeout: 240_000, intervals: [2_000] }).toBe("delivered");
     expect(sql(fixture, `select body from agent_mail where kind = 'message' and sender_session_id = '${child}'`)).toContain(upMarker);
@@ -119,9 +118,8 @@ test("a child's message and status reach an idle lead, and the lead's message re
     // The child finished its turn: the lead is told so in Perch's words, once the lead is idle and no child works.
     await expect.poll(() => sql(fixture, `select state from agent_mail where kind = 'note' and sender_session_id = '${child}' order by created_at desc limit 1`), { timeout: 240_000, intervals: [2_000] }).toBe("delivered");
     expect(sql(fixture, `select body from agent_mail where kind = 'note' and sender_session_id = '${child}' order by created_at desc limit 1`)).toContain("finished its turn");
-    // The person comes back: the lead saw both as Perch's quoted text, not as something a person typed.
-    await page.goto(url, { waitUntil: "networkidle" });
-    if (!(await ui.isVisible().catch(() => false))) await switchViaSidebar(page, lead);
+    // The lead saw both as Perch's quoted text, not as something a person typed, and its view still holds control.
+    await expect(box).toBeEnabled();
     await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Perch message from" }).first()).toBeVisible({ timeout: 60_000 });
     await expect(ui.locator('[data-native-role="user"]').filter({ hasText: "Perch status from" }).first()).toBeVisible({ timeout: 60_000 });
     await untilReady(ui, 180_000);

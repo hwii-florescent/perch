@@ -265,6 +265,10 @@ pub struct AgentRuntimeAdapter {
     /// Who opened the turn each session is in, as Perch saw it open (`sub_sessions.rs`). In
     /// memory on purpose: after a restart a turn's origin is unknown, and unknown is refused.
     turn_origins: Mutex<HashMap<String, crate::sub_sessions::TurnOrigin>>,
+    /// When each session's PTY last received input from any client, and when this core began
+    /// listening (the bound of what "quiet" can mean for a session never heard from).
+    last_input: Mutex<HashMap<String, std::time::Instant>>,
+    born: std::time::Instant,
     /// Told whenever a person opens a turn (`note_person_input`): a lead's automatic wakes start again.
     person_turn: std::sync::OnceLock<PersonTurnListener>,
     /// Told once a process's exit is confirmed (never for a lost connection or an intentional stop).
@@ -297,6 +301,8 @@ impl AgentRuntimeAdapter {
             cwds: Mutex::new(HashMap::new()),
             turn_boundary: Arc::new(std::sync::OnceLock::new()),
             turn_origins: Mutex::new(HashMap::new()),
+            last_input: Mutex::new(HashMap::new()),
+            born: std::time::Instant::now(),
             person_turn: std::sync::OnceLock::new(),
             exit_listener: std::sync::OnceLock::new(),
             instructions: std::sync::OnceLock::new(),
@@ -1596,12 +1602,100 @@ impl AgentRuntimeAdapter {
         Ok(())
     }
 
+    /// Remember that some client's bytes are reaching this session's PTY now (a person typing, a
+    /// terminal's own reports). Core-originated writes are not recorded: they are checked, not heard.
+    fn note_terminal_input(&self, session_id: &str) {
+        self.last_input
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), std::time::Instant::now());
+    }
+
+    /// Whether no client has sent input to this session's PTY for `window`. Unknown counts as recent:
+    /// with nothing heard since this core started, only a core older than the window may say quiet.
+    pub fn input_quiet_for(&self, session_id: &str, window: Duration) -> bool {
+        let since = self
+            .last_input
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .copied()
+            .unwrap_or(self.born);
+        since.elapsed() >= window
+    }
+
+    /// Core-originated delivery into a prompt (slice 5 mail), all under the authority lock that every
+    /// PTY write and lease change also takes. Needs `quiet` of silence on the PTY first, else the
+    /// closure is not called and `None` comes back. Writes under whatever input lease is current: a
+    /// view that holds it keeps it unchanged (same client, same generation, nothing taken, released
+    /// or recorded); with no holder, `own_client` borrows the lease for this call alone and gives it
+    /// back before the lock is released.
+    pub fn dispatch_under_current_lease<R>(
+        &self,
+        key: &AgentKey,
+        own_client: &ClientIdentity,
+        quiet: Duration,
+        dispatch: impl FnOnce(&dyn Fn(&str) -> anyhow::Result<()>) -> anyhow::Result<R>,
+    ) -> anyhow::Result<Option<R>> {
+        let _authority = self.authority.lock().unwrap();
+        if !self.input_quiet_for(&key.session_id, quiet) {
+            return Ok(None);
+        }
+        let before = self.lifecycle.get(key)?;
+        let terminal = terminal_key(key);
+        if let Some(holder) = before.input_owner {
+            let write = |data: &str| -> anyhow::Result<()> {
+                self.terminals
+                    .input_owned(&terminal, &holder.client, holder.generation, data)?;
+                Ok(())
+            };
+            return dispatch(&write).map(Some);
+        }
+        let lease = self.acquire_control_locked(
+            key,
+            ControlChannel::Input,
+            own_client.clone(),
+            now_millis(),
+        )?;
+        let result = (|| {
+            self.lifecycle.record_control_activity(
+                key,
+                ControlChannel::Input,
+                &lease.client,
+                lease.generation,
+                now_millis(),
+                Duration::from_secs(5),
+            )?;
+            dispatch(&|data| {
+                self.terminals
+                    .input_owned(&terminal, &lease.client, lease.generation, data)?;
+                Ok(())
+            })
+        })();
+        let _ = self.lifecycle.release_control(
+            key,
+            ControlChannel::Input,
+            &lease.client,
+            lease.generation,
+        );
+        let _ = self
+            .terminals
+            .clear_input_owner(&terminal, &lease.client, lease.generation);
+        if !before.observers.contains(&own_client.id) {
+            let _ = self.lifecycle.detach_observer(key, &own_client.id);
+        }
+        result.map(Some)
+    }
+
     fn prepare_input(
         &self,
         key: &AgentKey,
         data: &str,
         at_ms: u64,
     ) -> Result<(), RuntimeAdapterError> {
+        if !data.is_empty() {
+            self.note_terminal_input(&key.session_id);
+        }
         let native_ready = self.has_native_status(&key.session_id);
         if data.contains(['\r', '\n'])
             && (!crate::native_ui::supported(&key.agent_id) || native_ready)
@@ -2996,6 +3090,132 @@ mod tests {
         // The running→ready edge is spent: later ready snapshots capture nothing.
         adapter.observe_native_turn(&key, false).unwrap();
         assert_eq!(captures.load(Ordering::SeqCst), 1);
+    }
+
+    fn attached(adapter: &AgentRuntimeAdapter, key: &AgentKey) {
+        adapter
+            .attach_cli(
+                AgentRegistration {
+                    key: key.clone(),
+                    provider_id: "fixture".to_string(),
+                    provider_session_id: Some("provider-session".to_string()),
+                    resumable: true,
+                    now_ms: 1,
+                },
+                "/tmp",
+                client("desktop"),
+                80,
+                24,
+                Arc::new(|_, _| {}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+    }
+
+    /// Mail writes only into a quiet PTY: any client's input (a person typing, a terminal's own
+    /// reports) starts the window, a session never heard from counts as recent until the core is
+    /// older than the window, and while it is not quiet the delivery closure is never called.
+    #[test]
+    fn mail_waits_for_a_quiet_pty_and_unknown_counts_as_recent() {
+        let adapter = adapter();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        attached(&adapter, &key);
+        let mail = client("mail");
+        let window = Duration::from_millis(1500);
+        // Nothing heard, and the core is younger than the window: unknown is recent. (An hour, so a
+        // slow machine cannot age the core past it first.)
+        let hour = Duration::from_secs(3600);
+        assert!(!adapter.input_quiet_for(&key.session_id, hour));
+        let mut called = false;
+        assert!(adapter
+            .dispatch_under_current_lease(&key, &mail, hour, |_| {
+                called = true;
+                Ok(())
+            })
+            .unwrap()
+            .is_none());
+        assert!(!called, "a PTY not known to be quiet gets no write");
+        // A keystroke from any client restarts the window, however old the core is.
+        let lease = adapter
+            .acquire_control(&key, ControlChannel::Input, client("desktop"), 2)
+            .unwrap();
+        adapter
+            .input(&key, &lease, "x", 3, Duration::from_millis(100))
+            .unwrap();
+        assert!(!adapter.input_quiet_for(&key.session_id, window));
+        assert!(adapter
+            .dispatch_under_current_lease(&key, &mail, window, |_| Ok(()))
+            .unwrap()
+            .is_none());
+        std::thread::sleep(window);
+        assert!(adapter
+            .dispatch_under_current_lease(&key, &mail, window, |_| Ok(()))
+            .unwrap()
+            .is_some());
+    }
+
+    /// Delivery rides the holder's current lease and changes nothing about it: same client, same
+    /// generation, no activity recorded for the holder, no observer added, and the write reaches the
+    /// PTY under the holder's authority. With no holder the core's own client borrows the lease and
+    /// gives it back, leaving no owner and no extra observer.
+    #[test]
+    fn delivery_under_a_held_lease_leaves_the_lease_untouched() {
+        let adapter = adapter();
+        let key = key();
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![key.clone()],
+        };
+        attached(&adapter, &key);
+        let mail = client("mail");
+        let none = Duration::ZERO;
+        // No holder: borrowed for the call, returned before the lock is released.
+        let borrowed = std::cell::Cell::new(None);
+        adapter
+            .dispatch_under_current_lease(&key, &mail, none, |_| {
+                borrowed.set(adapter.snapshot(&key).unwrap().input_owner);
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(borrowed.take().unwrap().client, mail);
+        let after = adapter.snapshot(&key).unwrap();
+        assert!(after.input_owner.is_none() && !after.observers.contains(&mail.id));
+
+        // A view holds it.
+        let holder = adapter
+            .acquire_control(&key, ControlChannel::Input, client("desktop"), 2)
+            .unwrap();
+        let before = adapter.snapshot(&key).unwrap();
+        let wrote = std::cell::Cell::new(false);
+        adapter
+            .dispatch_under_current_lease(&key, &mail, none, |write| {
+                // Inside, the holder is still the owner at the same generation.
+                let owner = adapter.snapshot(&key).unwrap().input_owner.unwrap();
+                assert_eq!(
+                    (owner.client, owner.generation),
+                    (holder.client.clone(), holder.generation)
+                );
+                write("")?;
+                wrote.set(true);
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
+        assert!(wrote.get());
+        let after = adapter.snapshot(&key).unwrap();
+        let (a, b) = (before.input_owner.unwrap(), after.input_owner.unwrap());
+        assert_eq!((a.client, a.generation), (b.client, b.generation));
+        assert_eq!(before.observers, after.observers);
+        assert_eq!(before.active_typing_until_ms, after.active_typing_until_ms);
+        // The holder can still type with its own lease afterwards.
+        adapter
+            .input(&key, &holder, "y", 4, Duration::from_millis(100))
+            .unwrap();
     }
 
     /// A turn is a person's only when a person submitted it while none was running, or Perch

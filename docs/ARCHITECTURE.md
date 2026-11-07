@@ -334,19 +334,29 @@ contract the tests hold it to.
 - *Per provider.* Pi and OMP: the bridge's prompt (their own follow-up queue; the extension queues it if a
   turn started in between). Codex: `turn/start` through the bridge, only on the snapshot above, because
   Codex does not refuse a busy start (it joins the running turn; slice 0). Claude: the bridge's prompt
-  plus a paste. Every provider goes through one step under `agent_operation_lock`: take the input lease
-  **only if it is unowned**, check the input line (Claude: its real PID and empty prompt,
-  `claude::prepare_input`; the others: nothing typed, no dialog or overlay, `typed::input_ready`), claim,
-  enqueue the confirmation with the bridge and, for Claude only, paste; the borrowed lease is released
-  afterwards. Typed into a shell (`terminal` provider) cannot receive messages.
-- *Lease contention.* A view that holds the input lease is never overridden, by any provider's delivery:
-  the message stays queued with the reason "another view holds input control" and goes on the next pass
-  after that view releases or closes. **Any open chat or terminal view of a session takes and keeps its
-  input lease while attached**, so a lead (or child) a person has open is not written to until they
-  close it or release control; the live check closes the window first. Seen live, not assumed. Whether
-  delivery may instead ride the holder's current lease after the same empty-prompt check, without taking
-  or changing it, is an open owner decision (not built); the family strip (slice 6) shows what waits.
-  The core's own mail client holds the lease only for the length of one delivery.
+  plus a paste. Every provider goes through one critical section (`dispatch_under_current_lease`, under
+  `agent_operation_lock` and the runtime's authority lock, the one every PTY write and lease change takes):
+  the PTY has heard no input from any client for 2 s, the receiver is still idle with nothing open, its
+  input line is empty (Claude: its real PID and empty prompt, `claude::prepare_input`; the others: nothing
+  typed, no dialog or overlay, `typed::input_ready`), then claim, enqueue the confirmation with the bridge
+  and, for Claude only, paste. Typed into a shell (`terminal` provider) cannot receive messages.
+- *Lease contention (owner decision, 2026-11-07).* **Any open chat or terminal view of a session takes and
+  keeps its input lease while attached** (seen live: a first version that refused to write while a view
+  held it never delivered to a lead someone was watching). So delivery writes **under the holder's current
+  lease**: the same client and generation, nothing taken, released, recorded or flipped (no "Take control"
+  button appears), checked by a unit test. With no holder the core's own client borrows the lease for the
+  one call and gives it back before the lock is released. The extra guard is a quiet window: no input bytes
+  from any client reached that PTY in the last 2 s (the core stamps every client write at the one place
+  input is prepared; a terminal's own reports count; a session never heard from since the core started is
+  *recent*, not quiet, until the core is 2 s old). Any failed check leaves the message `queued` with its
+  reason ("someone is typing in its terminal, or did a moment ago") and the next pass, every 2 s while
+  mail waits, tries again; nothing loops tightly. **Chat composer drafts live in the browser, not the PTY**,
+  so a half-typed chat message is invisible to the core and is not protected: a delivery can open a turn
+  while the person is mid-sentence in the composer (their draft stays in the box and sends as the next
+  message). **Residual risk:** a keystroke typed into the terminal in the same instant between the checks
+  and the paste (the lock covers the 250 ms between paste and Enter, so a later keystroke waits behind it
+  but is not read first). Confirmation is only Claude's `UserPromptSubmit` (or the bridge's own answer);
+  an unconfirmed write is `unconfirmed` and never repeated.
 - *Duplicates and restarts.* The claim is one atomic `queued` to `delivering` update before any byte or
   bridge call, so a message is attempted at most once. A core that stops with a message `delivering` finds
   it `unconfirmed` at boot and never retries it blindly. Queued messages survive restarts; before any
