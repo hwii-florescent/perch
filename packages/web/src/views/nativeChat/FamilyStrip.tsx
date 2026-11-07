@@ -82,9 +82,16 @@ export function headline(rows: readonly CrewRow[]): string {
   const parts = [
     [workers.filter((row) => stateOf(row).tone === "working").length, "working"],
     [workers.filter((row) => stateOf(row).tone === "needs").length, "waiting on you"],
-    [workers.filter((row) => row.report?.source === "report").length, "reported"],
+    [workers.filter((row) => row.report?.source === "report" || row.report?.source === "summary").length, "reported"],
   ].filter(([count]) => Number(count) > 0).map(([count, word]) => `${count} ${word}`);
   return parts.length ? parts.join(" · ") : `${rows.length} in this run`;
+}
+
+/** What a report is called: its own words, a cheap model's summary of the turn, or the fallback. */
+function reportWords(report?: CrewRow["report"]): string {
+  if (report?.source === "report") return "Reported";
+  if (report?.source === "summary") return `Summary by ${report.model ?? "a model"}`;
+  return "Last message, not a report";
 }
 
 const DOT = { working: "bg-fg animate-pulse motion-reduce:animate-none", needs: "bg-yellow", quiet: "bg-subtext-0 opacity-60", alert: "bg-red" };
@@ -176,7 +183,7 @@ function Row({ row, now, onOpen, onAct, unavailable, onRefresh }: { row: CrewRow
   const name = row.role === "worker" && row.task ? row.task : row.title || row.provider;
   const latest = row.latest;
   const note = latest ? receiptNote(latest) : "";
-  const reportLabel = row.report?.source === "report" ? "Reported" : "Last message, not a report";
+  const reportLabel = reportWords(row.report);
   return <li className="flex min-w-0 flex-col" data-testid="native-cli-family-row" data-session={row.sessionId} data-role={row.role} data-lifecycle={row.lifecycle} data-tone={tone}>
     <div className="flex min-w-0 items-center gap-2">
       <button type="button" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} details of ${name}`} onClick={() => setOpen(!open)}
@@ -199,7 +206,7 @@ function Row({ row, now, onOpen, onAct, unavailable, onRefresh }: { row: CrewRow
       {row.task && <><dt className="text-subtext-0">Task</dt><dd className="m-0 whitespace-pre-wrap">{row.task}</dd></>}
       {row.needsYou && <><dt className="text-yellow">Asks you</dt><dd className="m-0 whitespace-pre-wrap">{row.needsYou.preview}</dd></>}
       {latest && <><dt className="text-subtext-0">{latest.direction === "to" ? "You wrote" : "It wrote"}</dt><dd className="m-0 whitespace-pre-wrap">{latest.preview}{note && <span className="text-subtext-0"> ({note})</span>}</dd></>}
-      {row.report && <><dt className="text-subtext-0">{reportLabel}</dt><dd className="m-0 whitespace-pre-wrap">{row.report.text}<span className="text-subtext-0"> (its own claim, not verified)</span></dd></>}
+      {row.report && <><dt className="text-subtext-0">{reportLabel}</dt><dd className="m-0 whitespace-pre-wrap">{row.report.text}<span className="text-subtext-0"> ({row.report.source === "summary" ? "written from what it did, not verified" : "its own claim, not verified"})</span></dd></>}
       {!row.canMessage && <><dt className="text-subtext-0">Messages</dt><dd className="m-0">It cannot receive messages now</dd></>}
     </dl>}
   </li>;

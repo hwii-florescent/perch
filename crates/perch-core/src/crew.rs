@@ -73,6 +73,8 @@ pub struct MemberReport {
     pub text: String,
     pub source: ReportSource,
     pub at: i64,
+    /// The model that wrote a `Summary`.
+    pub model: Option<String>,
 }
 
 /// One message between the viewer and a peer.
@@ -325,6 +327,7 @@ mod tests {
             text: "done, tests pass".into(),
             source: ReportSource::Reported,
             at: 3,
+            model: None,
         });
         let rows = build("lead", &[member("lead"), child], &[]);
         let row = &rows[0];

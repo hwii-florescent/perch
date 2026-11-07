@@ -303,8 +303,9 @@ the core, not the agent, decides:
   record there before launching; any failure discards the child, which never started.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
-  `perch report` (kept per run, outliving it), else the first 400 characters of its last assistant
-  message, labelled a fallback. Neither marks anything done.
+  `perch report` of its latest turn (kept per run, outliving it), else the running summary a cheap model
+  wrote ("Cheap-model reporter", below), else the first 400 characters of its last assistant message,
+  labelled a fallback. None marks anything done.
 - Local only; a lead on a remote host cannot spawn.
 
 **Messages** (`agent_mail.rs` rules, `db/agent_mail.rs` queue, `server/agent_mail.rs` routes `/agent/send`,
@@ -377,8 +378,10 @@ contract the tests hold it to.
   which would otherwise mark it a person's), so the person-turn rule refuses `perch spawn` there.
 - *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
   queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
-  the first 400 characters of its own `perch report` or else of its last message, labelled a claim (a
-  finished turn is noted even when the child said and reported nothing: "It has reported nothing"). A
+  the first 400 characters of its own `perch report`, else the cheap model's summary (`Summary by <model>`),
+  else of its last message, each labelled a claim (a finished turn is noted even when the child said and
+  reported nothing: "It has reported nothing"). The summary is kept before the note is queued, so a slow or
+  absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
   (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
 - *Wake cap.* Delivering anything to a lead spends one of 10 wakes; a person opening a turn on the lead
@@ -398,8 +401,9 @@ strip's actions are the next section.
   status word:** `lifecycle` (Perch's runtime state; unreadable is `unknown`, never idle) with the child's
   `dispatch` record, `needsYou` (a pending approval or question from Perch's own blocked state and
   request, never an agent's claim), the newest message with its delivery `receipt` and reason, and the
-  agent's `report` with its source (`report` or the fallback `last-message`). The strip's headline counts
-  working, waiting on you and reported (a fallback does not count as reported).
+  agent's `report` with its source (`report`, `summary` with the `model` that wrote it, or the fallback
+  `last-message`). The strip's headline counts working, waiting on you and reported (a report or a summary;
+  a fallback does not count).
 - *Freshness.* The strip asks again when a family member's session updates. Mail receipts change without
   one, so the mail code calls `notify_session_updated` for both ends when a message is queued, cancelled
   or settled. No polling.
@@ -452,6 +456,40 @@ strip's actions are the next section.
   steer `unconfirmed`. A lead reads the same words from `perch steer` and `perch interrupt`. Nothing here
   is ever relaunched or typed into a shell, and a provider with no confirmable mechanism has the action
   disabled with the reason.
+
+**Cheap-model reporter** (`reporter.rs` rules, `server/reporter.rs`, `db/reporter.rs`; slice 8). A child's
+finished turn is summarised by a small model so the expensive one never writes a report.
+
+- *When.* Once per turn end of a child (never a lead), from the same transition that queues the lead's note,
+  after the transcript has caught up with the hook. No timer and no model call between turns: the live
+  "working" line is `transcript.rs`'s and costs nothing.
+- *Running notes, not history.* The model is shown the child's **previous summary** (at most 400 characters,
+  `session_summaries`) and **only the turn that just ended**: the message that opened it, one line per run of
+  tool calls (`transcript.rs`'s run sentence), the files its landed edits changed (`turn_diffs`), any question
+  it waits on and the last thing it said, at most 12,000 characters in all, never a tool's output or a file's
+  contents. What one summary costs therefore stays flat however long the child runs.
+- *Which model.* The child's own CLI in one-shot mode under the user's login: `claude -p --model <m> --tools ""
+  --no-session-persistence --disable-slash-commands --strict-mcp-config --setting-sources ""` with Perch's own
+  system prompt, and `codex exec -m <m> -s read-only --ephemeral --ignore-user-config --ignore-rules --disable
+  shell_tool …`, the prompt on stdin, cwd the child's Nest, 60 s. Pi and OMP children use Claude if installed,
+  else Codex. Defaults `claude-haiku-4-5` and `gpt-5.6-luna`; settings `reporterEnabled`,
+  `reporterClaudeModel`, `reporterCodexModel` (Settings, Notifications). Nothing runs for a CLI that is not
+  installed, and a signed-out CLI fails like any failed call. (Probed live, Claude Code 2.1.319: a haiku call
+  with these flags is about 540 input tokens; Codex 0.166 gpt-5.6-luna about 1,900 in total, mostly its own
+  prompt.)
+- *Output.* `{status, text}` with status `done`, `blocked`, `needs_you` or `failed`; the object is found in
+  the answer (a code fence or a line of talk is tolerated), a bad status or an empty text is refused, a text
+  over 400 characters is cut and marked. Refused or failed: the 400-character last-message fallback, stored as
+  the notes so an older summary is never shown as the latest.
+- *Precedence.* The child's own `perch report` made since the notes were last written (that is, during this
+  turn) wins and is stored as the notes without asking a model; else the model's summary; else the last
+  message (`sub_sessions::choose_report`). `perch guide` and the first message no longer ask a child to report.
+- *Guards.* One call per child at a time (`reporter_in_flight`; a turn that ends meanwhile keeps the last
+  message), none for a child that is stopping or stopped, none once the run's agents sent 50 messages, none
+  with the setting off, none without a runnable CLI. Never blocks the child. Each call is a `reporter_runs`
+  row, counted in the usage popover's spend estimate as "Perch reporter" (`usage::spend::spend_with`; the
+  CLIs are run without a saved session, so no agent log holds them). Codex gives one total, counted as input.
+- *Not verified:* a summary is the model's reading of a transcript slice, no more than a report is.
 
 Active web content must stay outside privileged app DOM/Tauri authority.
 The existing desktop browser uses native child webviews, not an iframe;

@@ -24,6 +24,8 @@ pub use browser_history::BrowserHistoryRow;
 mod agent_mail;
 mod instructions;
 pub use agent_mail::{Cancelled, Enqueued, MailRow, NewMail};
+mod reporter;
+pub use reporter::{ReporterRun, StoredSummary};
 mod sub_sessions;
 pub use sub_sessions::{Reserved, SubSessionRow, SubSessionSpec};
 mod workspace_order;
@@ -435,6 +437,28 @@ impl HistoryDb {
                 child_session_id TEXT PRIMARY KEY,
                 lead_session_id TEXT NOT NULL,
                 interrupts INTEGER NOT NULL
+            );
+            -- A session's running notes: the summary the next turn's starts from (`reporter.rs`).
+            CREATE TABLE IF NOT EXISTS session_summaries (
+                session_id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source TEXT NOT NULL,
+                model TEXT,
+                as_of INTEGER NOT NULL
+            );
+            -- Each model call the reporter made, for the spend estimate.
+            CREATE TABLE IF NOT EXISTS reporter_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                at INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                input INTEGER NOT NULL,
+                cache_read INTEGER NOT NULL,
+                cache_write INTEGER NOT NULL,
+                output INTEGER NOT NULL,
+                cost_usd REAL
             );",
         )?;
         // The table above needs `sessions`, which an old database already has; the column

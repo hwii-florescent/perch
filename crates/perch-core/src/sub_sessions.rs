@@ -235,9 +235,10 @@ pub fn check_key(key: &str) -> Result<&str, String> {
 pub fn first_message(parent_session: &str, task: &str) -> String {
     format!(
         "Perch started you as a sub-session of session {parent_session}. This message is your \
-         task. When you finish, or if you are blocked, run `perch report <summary>`; the report \
-         goes to the session that started you. Then stop and wait. Run `perch guide` for how \
-         Perch works.\n\nTask: {task}"
+         task. When you finish, or if you are blocked, say so in your last message and then stop \
+         and wait: Perch tells the session that started you what you did. Run `perch report \
+         <text>` only to hand over something specific, such as a result or what blocks you. Run \
+         `perch guide` for how Perch works.\n\nTask: {task}"
     )
 }
 
@@ -246,6 +247,9 @@ pub fn first_message(parent_session: &str, task: &str) -> String {
 pub enum ReportSource {
     /// The child's own `perch report`.
     Reported,
+    /// What a cheap model wrote about the child's turn (`reporter.rs`), because it reported
+    /// nothing. Perch's wording of the child's work, still unverified.
+    Summary,
     /// The child's last message, kept because it reported nothing. A fallback, not a report.
     LastMessage,
 }
@@ -254,9 +258,65 @@ impl ReportSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Reported => "report",
+            Self::Summary => "summary",
             Self::LastMessage => "last-message",
         }
     }
+}
+
+/// What a member's report is, after choosing between the claims below.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub text: String,
+    pub source: ReportSource,
+    /// When it was written, in milliseconds.
+    pub at: i64,
+    /// The model that wrote a `Summary`.
+    pub model: Option<String>,
+}
+
+/// The child's own `perch report` of the turn that just ended, else the running summary, else the
+/// start of its last message. A `perch report` is of the latest turn when it is newer than the
+/// turn the stored notes cover; older, the notes already hold it. `use_summaries` is the
+/// reporter's setting: off, the stored notes (a model's summaries and the fallbacks kept beside them)
+/// are no longer shown.
+pub fn choose_report(
+    own: Option<(String, i64)>,
+    stored: Option<crate::db::StoredSummary>,
+    use_summaries: bool,
+    last_message: Option<&str>,
+    now: i64,
+) -> Option<Report> {
+    let stored = stored.filter(|_| use_summaries);
+    if let Some((text, at)) = own {
+        if stored.as_ref().is_none_or(|row| at > row.as_of) {
+            return Some(Report {
+                text,
+                source: ReportSource::Reported,
+                at,
+                model: None,
+            });
+        }
+    }
+    if let Some(row) = stored {
+        let source = match row.source.as_str() {
+            "summary" => ReportSource::Summary,
+            "report" => ReportSource::Reported,
+            _ => ReportSource::LastMessage,
+        };
+        return Some(Report {
+            text: row.text,
+            source,
+            at: row.as_of,
+            model: row.model.filter(|_| source == ReportSource::Summary),
+        });
+    }
+    fallback_report(last_message?).map(|text| Report {
+        text,
+        source: ReportSource::LastMessage,
+        at: now,
+        model: None,
+    })
 }
 
 /// The first 400 characters of the child's last message, marked when cut.
@@ -455,7 +515,9 @@ mod tests {
     fn the_first_message_names_the_parent_and_the_task_and_is_not_an_option_or_command() {
         let message = first_message("lead-1", "fix it");
         assert!(message.contains("session lead-1"));
-        assert!(message.contains("perch report"));
+        // A report is optional: Perch summarises the turn for the lead.
+        assert!(message.contains("perch report") && message.contains("only to hand over"));
+        assert!(!message.contains("run `perch report <summary>`"));
         assert!(message.ends_with("Task: fix it"));
         assert!(!message.starts_with(['-', '/']));
     }
@@ -478,5 +540,80 @@ mod tests {
     fn report_sources_are_labelled() {
         assert_eq!(ReportSource::Reported.as_str(), "report");
         assert_eq!(ReportSource::LastMessage.as_str(), "last-message");
+        assert_eq!(ReportSource::Summary.as_str(), "summary");
+    }
+
+    fn stored(source: &str, as_of: i64) -> crate::db::StoredSummary {
+        crate::db::StoredSummary {
+            text: format!("notes {source}"),
+            status: "done".into(),
+            source: source.into(),
+            model: (source == "summary").then(|| "claude-haiku-4-5".into()),
+            as_of,
+        }
+    }
+
+    #[test]
+    fn the_childs_own_report_of_this_turn_beats_the_summary_and_the_summary_beats_the_last_message()
+    {
+        let own = Some(("my report".to_string(), 200));
+        let newer = choose_report(
+            own.clone(),
+            Some(stored("summary", 100)),
+            true,
+            Some("said"),
+            9,
+        )
+        .unwrap();
+        assert_eq!(
+            (newer.text.as_str(), newer.source),
+            ("my report", ReportSource::Reported)
+        );
+        // A report the notes already cover is of an earlier turn.
+        let older = choose_report(
+            own.clone(),
+            Some(stored("summary", 300)),
+            true,
+            Some("said"),
+            9,
+        )
+        .unwrap();
+        assert_eq!(older.source, ReportSource::Summary);
+        assert_eq!(older.model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(older.at, 300);
+        let said = choose_report(None, None, true, Some("said"), 9).unwrap();
+        assert_eq!((said.source, said.at), (ReportSource::LastMessage, 9));
+        let alone = choose_report(own, None, true, None, 9).unwrap();
+        assert_eq!(alone.source, ReportSource::Reported);
+        assert_eq!(choose_report(None, None, true, Some("  "), 9), None);
+    }
+
+    #[test]
+    fn notes_kept_from_a_report_or_a_fallback_keep_their_own_label() {
+        let report = choose_report(None, Some(stored("report", 5)), true, None, 9).unwrap();
+        assert_eq!(
+            (report.source, report.model),
+            (ReportSource::Reported, None)
+        );
+        let last = choose_report(
+            None,
+            Some(stored("last-message", 5)),
+            true,
+            Some("newer"),
+            9,
+        )
+        .unwrap();
+        assert_eq!(last.source, ReportSource::LastMessage);
+        assert_eq!(
+            last.text, "notes last-message",
+            "the stored fallback is of the latest turn"
+        );
+    }
+
+    #[test]
+    fn with_the_reporter_off_an_old_model_summary_is_no_longer_shown() {
+        let off = choose_report(None, Some(stored("summary", 5)), false, Some("said"), 9).unwrap();
+        assert_eq!(off.source, ReportSource::LastMessage);
+        assert_eq!(off.text, "said");
     }
 }

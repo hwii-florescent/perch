@@ -503,6 +503,14 @@ UI rows from step 0 continue between slices.
    (probed, transcript-confirmed). Live: haiku lead and child, all four actions. **Not run live:** Codex,
    Pi, OMP, a lead's own steer or interrupt, the phone layout.
 
+8. **Cheap-model reporter. Done 2026-11-07** (worker guide "Slice 8 landed", ARCHITECTURE "Cheap-model
+   reporter"): when a child's turn ends, haiku (Claude children; Codex children use `gpt-5.6-luna`; Pi/OMP use
+   whichever is installed) writes a 400-character summary from the child's **previous summary plus only that
+   turn's events**, so cost stays flat; no periodic model call. A child's own `perch report` of the turn wins,
+   else the summary, else the last message; the lead's note and the strip say `Summary by <model>`; settings
+   to turn it off or change the models; counted in the spend estimate. Live: haiku lead and child, summary by
+   haiku in the note and on the strip. **Not run live:** the Codex runner, Pi/OMP children.
+
 Later: Claude stream-json mode (queue cards, rewind, streaming); shared memory; remote runs.
 
 **Probed live first (2026-11-06):** see slice 0 above and the evidence table; nothing

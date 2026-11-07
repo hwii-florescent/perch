@@ -87,7 +87,7 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailRow> {
 
 /// The lead of the run `session` is in: its parent if it is a child, else itself. `None` when
 /// the session does not exist.
-fn run_of(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
+pub(super) fn run_of(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
     conn.query_row(
         "SELECT COALESCE(parent_session_id, id) FROM sessions WHERE id = ?1",
         params![session_id],

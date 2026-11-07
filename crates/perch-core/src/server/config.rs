@@ -59,6 +59,9 @@ pub(super) fn handle_settings_update(
         browser_search_suggestions: patch.browser_search_suggestions,
         usage_limit_alert: patch.usage_limit_alert,
         usage_daily_budget_usd: patch.usage_daily_budget_usd,
+        reporter_enabled: patch.reporter_enabled,
+        reporter_claude_model: patch.reporter_claude_model,
+        reporter_codex_model: patch.reporter_codex_model,
     };
     let phone_access = patch.phone_access;
     let relay_url = patch.relay_url;
@@ -248,6 +251,9 @@ pub(super) fn settings_to_wire(s: &crate::settings::Settings) -> SettingsData {
         browser_search_suggestions: s.browser_search_suggestions,
         usage_limit_alert: s.usage_limit_alert,
         usage_daily_budget_usd: s.usage_daily_budget_usd,
+        reporter_enabled: s.reporter_enabled,
+        reporter_claude_model: s.reporter_claude_model.clone(),
+        reporter_codex_model: s.reporter_codex_model.clone(),
     }
 }
 

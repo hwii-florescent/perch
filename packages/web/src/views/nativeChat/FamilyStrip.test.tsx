@@ -72,6 +72,18 @@ it("shows a lead with a working child, one waiting on a person and one that repo
   expect(reported.querySelector('[data-testid="native-cli-family-details"]')!.textContent).toContain("its own claim, not verified");
 });
 
+it("names the model that wrote a summary and counts it with the reports", () => {
+  const summary = row({ lifecycle: "idle", report: { text: "Fixed the parser; tests pass.", source: "summary", model: "claude-haiku-4-5", at: NOW } });
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[summary]} />));
+  expect(host.querySelector('[data-testid="native-cli-family-report"]')!.textContent).toBe("Summary by claude-haiku-4-5: Fixed the parser; tests pass.");
+  expect(host.querySelector('[data-testid="native-cli-family-headline"]')!.textContent).toBe("1 reported");
+  act(() => (host.querySelector("li button") as HTMLButtonElement).click());
+  expect(host.querySelector('[data-testid="native-cli-family-details"]')!.textContent).toContain("written from what it did, not verified");
+  const unnamed = row({ lifecycle: "idle", report: { text: "x", source: "summary", at: NOW } });
+  act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[unnamed]} />));
+  expect(host.querySelector('[data-testid="native-cli-family-report"]')!.textContent).toBe("Summary by a model: x");
+});
+
 it("labels a fallback last message as not a report and draws nothing for an empty family", () => {
   act(() => root.render(<FamilyStrip now={NOW} onOpen={() => {}} rows={[row({ report: { text: "I changed x", source: "last-message", at: NOW } })]} />));
   expect(host.querySelector('[data-testid="native-cli-family-report"]')!.textContent).toBe("Last message, not a report: I changed x");

@@ -1133,7 +1133,55 @@ static LEDGER: OnceLock<Mutex<Ledger>> = OnceLock::new();
 /// The current spend, after bringing the in-memory ledger up to date. All file
 /// and SQLite work runs on a blocking thread; the first call scans the horizon.
 pub async fn spend() -> SpendSummary {
-    tokio::task::spawn_blocking(|| {
+    spend_with(Vec::new()).await
+}
+
+/// A model call Perch made itself (the reporter), which no agent's log holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnCall {
+    pub at_ms: i64,
+    /// `claude` or `codex`: whose CLI answered.
+    pub provider: String,
+    pub model: String,
+    pub session: String,
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub output: u64,
+    pub cost_usd: Option<f64>,
+}
+
+impl OwnCall {
+    fn record(&self) -> Record {
+        let tokens = Tokens {
+            input: self.input,
+            cache_write: self.cache_write,
+            cache_read: self.cache_read,
+            output: self.output,
+            reasoning: 0,
+        };
+        Record {
+            provider: if self.provider == "codex" {
+                Provider::Codex
+            } else {
+                Provider::Claude
+            },
+            date: self.at_ms as f64 / 1000.0,
+            model: self.model.as_str().into(),
+            project: "Perch reporter".into(),
+            session: self.session.as_str().into(),
+            billable: Billable {
+                tokens,
+                ..Default::default()
+            },
+            reported_cost: self.cost_usd,
+        }
+    }
+}
+
+/// The current spend with Perch's own model calls counted beside what the agents' logs hold.
+pub async fn spend_with(own: Vec<OwnCall>) -> SpendSummary {
+    tokio::task::spawn_blocking(move || {
         let now = super::now_secs();
         let prices = prices::current();
         let mut ledger = LEDGER
@@ -1141,8 +1189,9 @@ pub async fn spend() -> SpendSummary {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         refresh(&mut ledger, now);
+        let own: Vec<Record> = own.iter().map(OwnCall::record).collect();
         summarize(
-            ledger.records.values().map(|e| &e.record),
+            ledger.records.values().map(|e| &e.record).chain(own.iter()),
             &prices,
             now,
             local_day,
@@ -1606,6 +1655,44 @@ mod tests {
 
     fn list() -> PriceList {
         PriceList::parse(include_str!("agent-prices.json")).unwrap()
+    }
+
+    #[test]
+    fn the_reporters_own_calls_are_counted_beside_the_agents_logs() {
+        let list = list();
+        let day = 86_400.0;
+        let now = 100.0 * day + 12.0 * 3600.0;
+        let call = |provider: &str, model: &str, input| OwnCall {
+            at_ms: (now - 60.0) as i64 * 1000,
+            provider: provider.into(),
+            model: model.into(),
+            session: "child".into(),
+            input,
+            cache_read: 0,
+            cache_write: 0,
+            output: 0,
+            cost_usd: None,
+        };
+        // claude-opus-5 is $5 per million input tokens.
+        let records = [
+            call("claude", "claude-opus-5", 1_000_000).record(),
+            call("codex", "unpriced-model", 500).record(),
+        ];
+        let s = summarize(&records, &list, now, utc_day);
+        let today = s.periods.iter().find(|p| p.days == 1).unwrap();
+        assert_eq!(today.tokens, 1_000_500);
+        assert!((today.cost_usd - 5.0).abs() < 1e-9);
+        assert_eq!(today.unpriced, 1, "a call the list cannot price says so");
+        assert!(today
+            .projects
+            .iter()
+            .any(|share| share.name == "Perch reporter"));
+        let providers: Vec<_> = today
+            .providers
+            .iter()
+            .map(|share| share.name.as_str())
+            .collect();
+        assert!(providers.contains(&"claude") && providers.contains(&"codex"));
     }
 
     #[test]

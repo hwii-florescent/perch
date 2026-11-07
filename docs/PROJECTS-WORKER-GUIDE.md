@@ -573,41 +573,52 @@ per bullet group.
   runs `perch suggest`, the test clicks Start, the child messages back and the lead sees a
   sender card; `perch read` returns the child's last turn.
 
-## Slice 8: cheap-model reporter (owner, 2026-11-07)
+## Slice 8 landed (2026-11-07): cheap-model reporter
 
-DECISIONS 2026-11-07 "Cheap-model reporter". *Own* design (Claude desktop's own report is the
-child's recap or last message; do not copy its text).
+The contract is in ARCHITECTURE ("Cheap-model reporter"); DECISIONS 2026-11-07 "Cheap-model reporter".
+*Own* design (Claude desktop's own report is the child's recap or last message; nothing copied).
+Where the pieces are:
 
-- **Trigger:** a child's turn end as Perch already sees it (Claude Stop hook, Codex
-  `turn/completed`, Pi/OMP `agent_end`), once per turn; not for the lead.
-- **Running notes, not history** (same idea as Claude Code 2.1.316 moving background-subagent
-  status lines to Haiku 5.5 with short notes, reported ~99% cheaper per update): the input is
-  the child's previous summary plus only this turn's new events, so cost per summary stays flat
-  however long the child runs. Live "working" status between turns stays the free Rust live
-  line from `transcript.rs`; no periodic model call.
-- **Input:** a bounded slice of that turn from the transcript Perch already projects
-  (`native_ui/transcript.rs`): the final assistant text, one line per tool run (the run
-  sentence), changed files from `agent_change_snapshots`, and any pending question; cap the
-  input (e.g. 12k characters), never whole transcripts or file contents.
-- **Runner:** the provider's own CLI in one-shot mode under the user's login, cwd = the
-  child's Nest, no tools: Claude `claude -p --model haiku` with tools disabled and no
-  session persistence (probe the exact flags); Codex `codex exec` with `-m gpt-5.6-luna`, read-only
-  sandbox, no shell (probe flags; `codex debug prompt-input` for zero-token shape checks).
-  Pi/OMP children use Claude or Codex if installed. Model per provider in settings; a
-  setting turns the reporter off. Never runs a model the user has not installed/logged into.
-- **Output:** JSON `{status, text}` (text at most 400 characters), validated; on failure fall
-  back to the 400-character last-message report. Stored as a report with `source = "summary"`
-  and `model`; precedence: the child's own `perch report` (same turn) > summary > last message.
-- **Delivery:** the queued note to the lead and the family strip use it, labelled "Summary by
-  <model>".
-- **Guards:** one in flight per child; skipped when the run is over its message limit or the
-  child was stopped; timeouts; counted in the spend estimate (usage popover); never blocks
-  the child.
-- **`perch guide`:** stop asking children to report; `perch report` stays optional for a child
-  that wants to say something specific.
-- **Check:** Rust unit tests for slice building, caps, precedence and output validation
-  (captured outputs); one live run: a haiku lead spawns a haiku child, the child finishes
-  without `perch report`, and the lead's note carries a summary by haiku.
+- **Rules (pure)** `reporter.rs`: `turn_facts` (the last turn of a `NativeUiSnapshot` through
+  `transcript::project`: what opened it, one line per run, `turn_diffs` files, a pending request, the last
+  assistant text; each part capped, 12,000 characters in all), `prompt(previous, facts)`, `parse_output`,
+  `runner_for`, `invocation` (the argv per CLI), `parse_claude` / `parse_codex`. **Deviation from the guide's
+  wording:** changed files come from the projected landed edits of the turn (`turn_diffs`), not from
+  `agent_change_snapshots`: the same facts, and already tied to the turn.
+- **Running notes** `db/reporter.rs`: `session_summaries` (one row per session: text, status, source, model,
+  `as_of` = when the covered turn ended) and `reporter_runs` (one row per call, for spend). `store_summary`
+  refuses a row older than the one kept, so a slow call for an earlier turn cannot overwrite a later one.
+- **Flow** `server/reporter.rs::summarise_turn`, called from the turn-transition task before `note_child`:
+  own `perch report` made this turn → stored as the notes, no model; else guards (setting, stopped, run
+  limit, one in flight, a runnable CLI, something to summarise) → `claude`/`codex` one-shot with the prompt
+  on stdin → stored as `summary`; any miss or a malformed answer → the last-message fallback stored. The
+  reply is read by `sub_sessions::choose_report` everywhere a report is shown (`perch list`, the strip, the
+  note), so precedence is one function.
+- **Words.** `note_line` says `Summary by <model>, written from what the child did and not verified`;
+  `perch list` prints `summary by <model> (written from what it did, not checked)`; the strip says
+  `Summary by <model>` and counts it as reported. `perch guide` and a child's first message now say a report
+  is optional and what the three kinds are.
+- **Settings** `reporterEnabled` (default on), `reporterClaudeModel` (`claude-haiku-4-5`),
+  `reporterCodexModel` (`gpt-5.6-luna`), validated like `--model`; Settings, Notifications. Spend: the usage
+  popover's estimate includes the calls (`usage::spend::spend_with`), shown as the "Perch reporter" project.
+- **Probed (zero or minimal tokens).** `claude --help` / `codex exec --help` for the flags; `codex debug
+  prompt-input` showed ~52 KB of model-visible input by default (skills, AGENTS.md, multi-agent text) and
+  ~32 KB with `project_doc_max_bytes=0`, features disabled and a trimmed config (the rest is Codex's own
+  tool and permission text, which no flag removes). One call each: Claude 2.1.319 haiku with `--tools ""
+  --no-session-persistence --disable-slash-commands --strict-mcp-config --setting-sources ""` and a
+  one-line `--system-prompt`: 541 input tokens, $0.0009, `result` was fenced JSON (so the parser tolerates a
+  fence), no session file written. Codex 0.166 `-m gpt-5.6-luna -s read-only --ephemeral` with the
+  disabled features: stdout is only the final message, `tokens used` on stderr (1,891 for a trivial prompt).
+  `--bare` was not used: it skips the keychain, so a Claude login would not be found.
+- **Live** (`e2e/reporter.spec.ts`, TESTING): haiku lead and haiku child; the child ran `echo gardenia` and answered
+  without `perch report`; `session_summaries` held a `summary` by `claude-haiku-4-5` that names the word,
+  `reporter_runs` held the call, the lead's note carried `Summary by claude-haiku-4-5` and the strip showed it.
+  **Not run live:** the Codex runner and Pi/OMP children (argv and parsers are unit-tested; the Codex shape
+  was probed once), a summary after a second turn (the previous-notes input is covered by a fake-model test),
+  `needs_you`/`failed` statuses (stored, not yet shown anywhere).
+- **Known limits.** One call in flight per child: a turn that ends meanwhile keeps the last message. The
+  note waits for the call (up to 60 s) before it is queued. Codex's one total is counted as input in the spend
+  estimate. The status word is kept but nothing reads it yet.
 
 ## Slice 6 landed (2026-11-07): family strip and notes folder
 

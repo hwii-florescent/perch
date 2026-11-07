@@ -144,6 +144,40 @@ it("sets the usage alert thresholds from Notifications and follows the saved val
   }
 });
 
+it("turns the sub-session summaries off and saves a model only when it changed", async () => {
+  window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
+  const updateSettings = vi.fn();
+  usePerchStore.setState({ settingsOpen: true, settings: { theme: "perch" } as never, fetchSettings: vi.fn(), fetchHosts: vi.fn(), updateSettings });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<SettingsPage />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="settings-nav-notifications"]')!.click());
+    const toggle = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-enabled"]')!;
+    expect(toggle.checked).toBe(true);
+    await act(async () => toggle.click());
+    expect(updateSettings).toHaveBeenCalledWith({ reporterEnabled: false });
+    const claude = host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-claude-model"]')!;
+    expect(claude.value).toBe("claude-haiku-4-5");
+    expect(host.querySelector<HTMLInputElement>('[data-testid="settings-reporter-codex-model"]')!.value).toBe("gpt-5.6-luna");
+    const type = (input: HTMLInputElement, text: string) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    await act(async () => { claude.focus(); type(claude, "claude-haiku-4-5"); claude.blur(); });
+    expect(updateSettings).not.toHaveBeenCalledWith(expect.objectContaining({ reporterClaudeModel: expect.anything() }));
+    await act(async () => { type(claude, "  "); claude.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(claude.value).toBe("claude-haiku-4-5");
+    await act(async () => { type(claude, "claude-sonnet-4-5"); claude.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    expect(updateSettings).toHaveBeenCalledWith({ reporterClaudeModel: "claude-sonnet-4-5" });
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("offers the supported engines in General and follows the saved setting", async () => {
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
   const updateSettings = vi.fn();

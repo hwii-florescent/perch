@@ -130,6 +130,12 @@ Useful existing coverage (not a claim of a fresh passing run):
   kept) and stops it after a confirm step. Four haiku turns. Run it outside a Perch shell (as the native specs).
   Not covered live: Codex, Pi and OMP steer or interrupt, and a lead's own `perch steer`/`perch interrupt`
   (unit and HTTP tests in `crew_actions.rs`, `server/crew_actions.rs`, `native_ui`).
+- `reporter.spec.ts` (same config; needs `perch` beside the core, and a signed-in `claude` on the PATH the core
+  runs with): a haiku lead starts a haiku child whose task is one command and one sentence; the child does
+  not run `perch report`; the test reads `session_summaries`, `reporter_runs` and the lead's note from SQLite
+  (a `summary` by `claude-haiku-4-5` that names the word the command printed, one call, `Summary by claude-haiku-4-5` in the note)
+  and the strip. Three short haiku turns; the third is the summary call. Not covered live: the Codex runner
+  and Pi/OMP children.
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe.
 - `cd e2e && npx playwright test -c remote-workspace.config.ts`: isolated

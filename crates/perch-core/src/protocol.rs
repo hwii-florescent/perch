@@ -106,6 +106,13 @@ pub struct SettingsData {
     /// Daily API-equivalent spend alert in dollars; 0 or missing = off.
     #[serde(default)]
     pub usage_daily_budget_usd: f64,
+    /// A cheap model summarises a sub-session's finished turn. Missing means on.
+    #[serde(default = "crate::settings::default_reporter_enabled")]
+    pub reporter_enabled: bool,
+    #[serde(default = "crate::settings::default_reporter_claude_model")]
+    pub reporter_claude_model: String,
+    #[serde(default = "crate::settings::default_reporter_codex_model")]
+    pub reporter_codex_model: String,
 }
 
 fn default_theme() -> String {
@@ -185,6 +192,12 @@ pub struct SettingsPatch {
     pub usage_limit_alert: Option<u8>,
     #[serde(default)]
     pub usage_daily_budget_usd: Option<f64>,
+    #[serde(default)]
+    pub reporter_enabled: Option<bool>,
+    #[serde(default)]
+    pub reporter_claude_model: Option<String>,
+    #[serde(default)]
+    pub reporter_codex_model: Option<String>,
 }
 
 /// Deserialize a JSON field where absent, null, and a value are all distinct.
@@ -411,8 +424,11 @@ pub struct CrewNeedsYou {
 #[serde(rename_all = "camelCase")]
 pub struct CrewReport {
     pub text: String,
+    /// `report` (its own), `summary` (a cheap model's, named in `model`) or `last-message`.
     pub source: String,
     pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// The newest message between the two, with its receipt (`queued`, `delivering`, `delivered`,

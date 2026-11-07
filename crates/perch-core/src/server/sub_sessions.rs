@@ -15,7 +15,7 @@ use crate::agent_fleet::{
 };
 use crate::agent_identity::AgentIdentity;
 use crate::db::{Reserved, SubSessionRow, SubSessionSpec};
-use crate::sub_sessions::{self, ReportSource, SubState};
+use crate::sub_sessions::{self, Report, ReportSource, SubState};
 use serde_json::{json, Value};
 
 /// An error for the agent: the status to answer with and the text it reads.
@@ -449,31 +449,47 @@ fn launch(app: &AppState, row: &SubSessionRow, cwd: &str) -> Result<(), LaunchFa
     Ok(())
 }
 
-/// A member's report, always a claim: its own `perch report`, else (for a child only) the start of
-/// its last message, labelled as the fallback it is. The text and when it was written.
+/// A member's report, always a claim: its own `perch report` of the latest turn, else (for a child
+/// only) the running summary a cheap model wrote, else the start of its last message, labelled as
+/// the fallback it is.
 pub(super) fn member_report(
     app: &AppState,
     session_id: &str,
     key: Option<&AgentKey>,
     is_child: bool,
-) -> Option<(String, ReportSource, i64)> {
-    app.db
-        .latest_session_report(session_id)
-        .ok()
-        .flatten()
-        .map(|(text, at)| (text, ReportSource::Reported, at))
-        .or_else(|| {
-            if !is_child {
-                return None;
-            }
-            let latest = app.native_ui.get(key?)?.latest()?;
-            let said =
-                latest.messages.iter().rev().find(|message| {
-                    message.role == "assistant" && !message.text.trim().is_empty()
-                })?;
-            let text = sub_sessions::fallback_report(&said.text)?;
-            Some((text, ReportSource::LastMessage, wall_clock_millis()))
-        })
+) -> Option<Report> {
+    let own = app.db.latest_session_report(session_id).ok().flatten();
+    if !is_child {
+        return own.map(|(text, at)| Report {
+            text,
+            source: ReportSource::Reported,
+            at,
+            model: None,
+        });
+    }
+    let said = key
+        .and_then(|key| app.native_ui.get(key))
+        .and_then(|bridge| bridge.latest())
+        .and_then(|latest| agent_mail::last_assistant_text(&latest));
+    resolve_child_report(app, session_id, said.as_deref())
+}
+
+/// A child's report from what is recorded and `said`, its last message when the caller has it.
+pub(super) fn resolve_child_report(
+    app: &AppState,
+    child_session_id: &str,
+    said: Option<&str>,
+) -> Option<Report> {
+    sub_sessions::choose_report(
+        app.db
+            .latest_session_report(child_session_id)
+            .ok()
+            .flatten(),
+        app.db.session_summary(child_session_id).ok().flatten(),
+        app.settings.get().reporter_enabled,
+        said,
+        wall_clock_millis(),
+    )
 }
 
 /// What one member of the run looks like, from Perch's own records. `needsYou` is a pending
@@ -509,10 +525,11 @@ fn member_json(
         "state": lifecycle.map_or(Value::String("unknown".into()), |state| json!(state)),
         "needsYou": lifecycle == Some(AgentState::Blocked),
         "task": child.map(|(row, _)| row.task.clone()),
-        "report": report.map(|(text, source, at)| json!({
-            "text": text,
-            "source": source.as_str(),
-            "at": at,
+        "report": report.map(|report| json!({
+            "text": report.text,
+            "source": report.source.as_str(),
+            "model": report.model,
+            "at": report.at,
         })),
     })
 }

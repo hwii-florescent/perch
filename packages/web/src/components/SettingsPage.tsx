@@ -405,6 +405,19 @@ function DefaultCwdSection() {
   );
 }
 
+/** A model name saved when the field is left or Enter is pressed; an empty field restores the stored one. */
+function ModelInput({ value, onCommit, testId, label, disabled }: { value: string; onCommit: (value: string) => void; testId: string; label: string; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (!next) setDraft(value);
+    else if (next !== value) onCommit(next);
+  };
+  return <input type="text" className={INPUT_WIDE} data-testid={testId} aria-label={label} disabled={disabled} value={draft}
+    onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />;
+}
+
 // ---------------------------------------------------------------------------
 // NotificationsSection — Wave 1 items 3 & 4: sound + toast delivery
 // ---------------------------------------------------------------------------
@@ -555,6 +568,17 @@ function NotificationsSection() {
           onChange={(value) => updateSettings({ usageDailyBudgetUsd: Number(value) })}
           options={[{ value: "0", label: "Off" }, ...[5, 10, 25, 50, 100, 250].map((dollars) => ({ value: String(dollars), label: `$${dollars}` }))]}
         />
+      </SettingRow>
+    </SettingsGroup>
+    <SettingsGroup title="Sub-session summaries">
+      <SettingRow title="Summarise finished turns" description="When a sub-session finishes a turn without reporting, a small model writes a short summary for the session that started it. Off keeps the start of its last message.">
+        <Switch label="Summarise finished sub-session turns" testId="settings-reporter-enabled" checked={settings?.reporterEnabled ?? true} onChange={(checked) => updateSettings({ reporterEnabled: checked })} />
+      </SettingRow>
+      <SettingRow title="Claude model" description="Asked of the claude command, signed in as you, with no tools.">
+        <ModelInput testId="settings-reporter-claude-model" label="Summary model for Claude" disabled={!settings} value={settings?.reporterClaudeModel ?? "claude-haiku-4-5"} onCommit={(value) => updateSettings({ reporterClaudeModel: value })} />
+      </SettingRow>
+      <SettingRow title="Codex model" description="Asked of the codex command, read-only, with no shell.">
+        <ModelInput testId="settings-reporter-codex-model" label="Summary model for Codex" disabled={!settings} value={settings?.reporterCodexModel ?? "gpt-5.6-luna"} onCommit={(value) => updateSettings({ reporterCodexModel: value })} />
       </SettingRow>
     </SettingsGroup>
     </>

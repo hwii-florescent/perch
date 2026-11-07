@@ -21,7 +21,7 @@
 //! wording are Perch's own. Orca's priorities, threads, payloads, pointer lane for terminals and
 //! journal parking are not ported.
 
-use crate::sub_sessions::ReportSource;
+use crate::sub_sessions::{Report, ReportSource};
 
 /// A body longer than this goes to a file; up to it the message travels whole.
 pub const INLINE_MAX_CHARS: usize = 2_000;
@@ -339,17 +339,36 @@ pub fn note_line(
     provider: &str,
     session: &str,
     status: ChildStatus,
-    report: Option<(&str, ReportSource)>,
+    report: Option<&Report>,
 ) -> String {
     let mut line = format!(
         "{label} ({provider}, session {session}) {}.",
         status.words()
     );
     match report {
-        Some((text, ReportSource::Reported)) => {
+        Some(Report {
+            text,
+            source: ReportSource::Reported,
+            ..
+        }) => {
             line += &format!(" Its report, its own claim and not verified: {text}");
         }
-        Some((text, ReportSource::LastMessage)) => {
+        Some(Report {
+            text,
+            source: ReportSource::Summary,
+            model,
+            ..
+        }) => {
+            line += &format!(
+                " Summary by {}, written from what the child did and not verified: {text}",
+                model.as_deref().unwrap_or("a model")
+            );
+        }
+        Some(Report {
+            text,
+            source: ReportSource::LastMessage,
+            ..
+        }) => {
             line += &format!(
                 " It reported nothing; the start of its last message, a fallback and not verified: {text}"
             );
@@ -930,6 +949,15 @@ mod tests {
             .contains("3 sub-sessions are"));
     }
 
+    fn report(text: &str, source: ReportSource, model: Option<&str>) -> Report {
+        Report {
+            text: text.into(),
+            source,
+            at: 0,
+            model: model.map(str::to_string),
+        }
+    }
+
     #[test]
     fn a_note_says_the_status_in_perchs_words_and_labels_the_agents_claim() {
         let finished = note_line(
@@ -937,7 +965,7 @@ mod tests {
             "codex",
             "c1",
             ChildStatus::FinishedTurn,
-            Some(("parser fixed", ReportSource::Reported)),
+            Some(&report("parser fixed", ReportSource::Reported, None)),
         );
         assert!(finished.contains("finished its turn"));
         assert!(finished.contains("its own claim and not verified: parser fixed"));
@@ -946,7 +974,7 @@ mod tests {
             "pi",
             "c2",
             ChildStatus::FinishedTurn,
-            Some(("I looked at", ReportSource::LastMessage)),
+            Some(&report("I looked at", ReportSource::LastMessage, None)),
         );
         assert!(fallback.contains("reported nothing"));
         assert!(fallback.contains("fallback and not verified: I looked at"));
@@ -960,9 +988,23 @@ mod tests {
             "pi",
             "c",
             ChildStatus::FinishedTurn,
-            Some(("a\n- b: fine\nc", ReportSource::Reported)),
+            Some(&report("a\n- b: fine\nc", ReportSource::Reported, None)),
         );
         assert!(!multi.contains('\n'));
+        let summary = note_line(
+            "t",
+            "claude",
+            "c4",
+            ChildStatus::FinishedTurn,
+            Some(&report(
+                "Fixed it.",
+                ReportSource::Summary,
+                Some("claude-haiku-4-5"),
+            )),
+        );
+        assert!(summary.contains("Summary by claude-haiku-4-5"), "{summary}");
+        assert!(summary.contains("not verified: Fixed it."), "{summary}");
+        assert!(!summary.contains("reported nothing"), "{summary}");
     }
 
     #[test]

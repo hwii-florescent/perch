@@ -92,13 +92,14 @@ fn member_of(
                 .collect()
         }),
         needs_you,
-        report: member_report(app, session_id, key.as_ref(), child.is_some()).map(
-            |(text, source, at)| MemberReport {
-                text: crew::preview(&text),
-                source,
-                at,
-            },
-        ),
+        report: member_report(app, session_id, key.as_ref(), child.is_some()).map(|report| {
+            MemberReport {
+                text: crew::preview(&report.text),
+                source: report.source,
+                at: report.at,
+                model: report.model,
+            }
+        }),
         can_message,
     }
 }
@@ -196,6 +197,7 @@ pub(super) fn rows_for(app: &AppState, viewer: &str) -> Vec<CrewRow> {
                 text: report.text,
                 source: report.source.as_str().into(),
                 at: report.at,
+                model: report.model,
             }),
             latest: row.latest.map(|latest| CrewLatest {
                 direction: if latest.to_peer { "to" } else { "from" }.into(),

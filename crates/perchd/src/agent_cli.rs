@@ -344,10 +344,13 @@ fn render_list(answer: &Value) -> String {
         text.push('\n');
         let report = &member["report"];
         if let Some(body) = report["text"].as_str() {
-            let label = if report["source"] == "report" {
-                "report (the agent's claim)"
-            } else {
-                "last message (fallback, not a report)"
+            let label = match report["source"].as_str() {
+                Some("report") => "report (the agent's claim)".to_string(),
+                Some("summary") => format!(
+                    "summary by {} (written from what it did, not checked)",
+                    report["model"].as_str().unwrap_or("a model")
+                ),
+                _ => "last message (fallback, not a report)".to_string(),
             };
             text += &format!("       {label}: {body}\n");
         }
@@ -594,9 +597,11 @@ your terminal to a person.
 
 Commands
   perch whoami [--json]   Which session you are. Read-only.
-  perch report <text>     Leave a short report: what you finished, or what blocks you. Up to
-                          4000 characters; for more, write a file and report its path.
-                          Reading from standard input also works.
+  perch report <text>     Say something specific to the session that started you: a result to
+                          hand over, or what blocks you. Optional: Perch writes a short
+                          summary of each turn a sub-session finishes. Up to 4000
+                          characters; for more, write a file and report its path. Reading
+                          from standard input also works.
   perch spawn --agent <claude|codex|pi|omp> [--model <name>] [--worktree] --task <text>
                           Start a sub-session in this Nest: an ordinary Perch session of its
                           own, with its own agent. The task is its first message, so make it
@@ -649,13 +654,15 @@ Sub-sessions
     you no longer need; a stopped one is restarted only when a person sends it something.
   - Do not give a sub-session work you can finish faster yourself. Perch assigns, retries and
     summarises nothing: what to delegate and what to do with the results is up to you.
-  - If you are a sub-session, your first message is your task. Do it, run `perch report` with
-    a short summary, then stop and wait; the session that started you reads it with
-    `perch list`.
-  - `perch list` shows two things that look alike. A report is what the agent chose to say. A
-    last message marked as a fallback is only the start of its last reply, kept because it
-    reported nothing. Neither shows the work was finished, tested or is correct: look at the
-    changes before you rely on either.
+  - If you are a sub-session, your first message is your task. Do it, say in your last message
+    what you did or what blocks you, then stop and wait; the session that started you reads a
+    summary of your turn with `perch list`. You need not run `perch report`; run it only to
+    hand over something specific, which then stands in place of the summary for that turn.
+  - `perch list` shows three things that look alike. A report is what the agent chose to say.
+    A summary is what a small model wrote from what the agent did that turn (marked `Summary
+    by <model>`): Perch's wording of it, still not checked. A last message marked as a
+    fallback is only the start of its last reply, kept because there was neither. None shows
+    the work was finished, tested or is correct: look at the changes before you rely on any.
 
 Messages
   - A message from another session reaches you headed `Perch message from <agent> \"<title>\"`,
@@ -926,6 +933,9 @@ mod tests {
             {"role": "child", "session": "c2", "agent": "pi", "state": "idle",
              "needsYou": false, "dispatch": "stopped", "you": false,
              "report": {"text": "I looked at", "source": "last-message", "at": 2}},
+            {"role": "child", "session": "c3", "agent": "claude", "state": "idle",
+             "needsYou": false, "dispatch": "running", "you": false,
+             "report": {"text": "Fixed it.", "source": "summary", "model": "claude-haiku-4-5", "at": 3}},
         ]});
         let text = render_list(&answer);
         assert!(text.contains("lead   l  claude  working  (you)"), "{text}");
@@ -936,6 +946,12 @@ mod tests {
         assert!(text.contains("report (the agent's claim): parser fixed"));
         assert!(text.contains("last message (fallback, not a report): I looked at"));
         assert!(text.contains("[stopped]"));
+        assert!(
+            text.contains(
+                "summary by claude-haiku-4-5 (written from what it did, not checked): Fixed it."
+            ),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1057,6 +1073,8 @@ mod tests {
             "cannot start sub-sessions",
             "4 run at once and 8 in total",
             "fallback",
+            "Summary\n    by <model>",
+            "You need not run `perch report`",
             "Notes folder",
             "Perch never puts its contents into a prompt",
         ] {

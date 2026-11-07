@@ -260,8 +260,29 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         ClientMessage::UsageGet { force } => {
             let state = state.clone();
             tokio::spawn(async move {
-                let (accounts, spend) =
-                    tokio::join!(crate::usage::current(force), crate::usage::spend::spend());
+                // What the reporter's own model calls cost is in the estimate: no agent log holds it.
+                let own = state
+                    .app
+                    .db
+                    .reporter_runs_since(wall_clock_millis() - 31 * 24 * 3600 * 1000)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|run| crate::usage::spend::OwnCall {
+                        at_ms: run.at,
+                        provider: run.provider,
+                        model: run.model,
+                        session: run.session_id,
+                        input: run.input,
+                        cache_read: run.cache_read,
+                        cache_write: run.cache_write,
+                        output: run.output,
+                        cost_usd: run.cost_usd,
+                    })
+                    .collect();
+                let (accounts, spend) = tokio::join!(
+                    crate::usage::current(force),
+                    crate::usage::spend::spend_with(own)
+                );
                 // The shared alert state dedupes, so however many clients poll,
                 // each alert is announced once, to everyone.
                 let settings = state.app.settings.get();

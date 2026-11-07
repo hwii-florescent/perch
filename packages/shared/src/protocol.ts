@@ -481,6 +481,10 @@ export interface SettingsData {
   usageLimitAlert?: number;
   /** Daily API-equivalent spend alert in dollars; 0 or absent = off. */
   usageDailyBudgetUsd?: number;
+  /** A cheap model summarises a sub-session's finished turn. Absent = on. */
+  reporterEnabled?: boolean;
+  reporterClaudeModel?: string;
+  reporterCodexModel?: string;
 }
 
 /**
@@ -513,6 +517,9 @@ export interface SettingsPatch {
   browserSearchSuggestions?: boolean;
   usageLimitAlert?: number;
   usageDailyBudgetUsd?: number;
+  reporterEnabled?: boolean;
+  reporterClaudeModel?: string;
+  reporterCodexModel?: string;
 }
 
 export type HostMode = "perch" | "direct";
@@ -1420,8 +1427,10 @@ export interface CrewNeedsYou {
  * (a fallback: the start of its last message). */
 export interface CrewReport {
   text: string;
+  /** `report` (its own), `summary` (a cheap model's, named in `model`) or `last-message`. */
   source: string;
   at: number;
+  model?: string;
 }
 
 /** The newest message between the two, with its receipt (`queued`, `delivering`, `delivered`,

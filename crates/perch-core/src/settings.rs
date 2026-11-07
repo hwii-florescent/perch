@@ -100,6 +100,16 @@ pub struct Settings {
     /// Notify once a day when API-equivalent spend passes this many dollars; 0 = off.
     #[serde(default)]
     pub usage_daily_budget_usd: f64,
+    /// A cheap model writes a short summary when a sub-session finishes a turn without having
+    /// reported (`reporter.rs`). Defaults to on; off keeps the last-message fallback.
+    #[serde(default = "default_reporter_enabled")]
+    pub reporter_enabled: bool,
+    /// The model the reporter asks of the Claude CLI.
+    #[serde(default = "default_reporter_claude_model")]
+    pub reporter_claude_model: String,
+    /// The model the reporter asks of the Codex CLI.
+    #[serde(default = "default_reporter_codex_model")]
+    pub reporter_codex_model: String,
 }
 
 impl Default for Settings {
@@ -125,8 +135,23 @@ impl Default for Settings {
             browser_search_suggestions: false,
             usage_limit_alert: default_usage_limit_alert(),
             usage_daily_budget_usd: 0.0,
+            reporter_enabled: true,
+            reporter_claude_model: default_reporter_claude_model(),
+            reporter_codex_model: default_reporter_codex_model(),
         }
     }
+}
+
+pub(crate) fn default_reporter_enabled() -> bool {
+    true
+}
+
+pub(crate) fn default_reporter_claude_model() -> String {
+    "claude-haiku-4-5".to_string()
+}
+
+pub(crate) fn default_reporter_codex_model() -> String {
+    "gpt-5.6-luna".to_string()
 }
 
 pub(crate) fn default_usage_limit_alert() -> u8 {
@@ -210,6 +235,9 @@ pub struct SettingsPatch {
     pub browser_search_suggestions: Option<bool>,
     pub usage_limit_alert: Option<u8>,
     pub usage_daily_budget_usd: Option<f64>,
+    pub reporter_enabled: Option<bool>,
+    pub reporter_claude_model: Option<String>,
+    pub reporter_codex_model: Option<String>,
 }
 
 /// Deserialize a field where `absent`, `null`, and `"value"` are distinct:
@@ -299,6 +327,12 @@ impl SettingsStore {
                 "usage daily budget must be 0-100000"
             );
         }
+        for model in [&patch.reporter_claude_model, &patch.reporter_codex_model]
+            .into_iter()
+            .flatten()
+        {
+            crate::sub_sessions::check_model(model).map_err(|message| anyhow::anyhow!(message))?;
+        }
         let mut guard = self.inner.lock().unwrap();
         match patch.default_cwd {
             None => {}                              // absent → unchanged
@@ -361,6 +395,15 @@ impl SettingsStore {
         }
         if let Some(budget) = patch.usage_daily_budget_usd {
             guard.usage_daily_budget_usd = budget;
+        }
+        if let Some(enabled) = patch.reporter_enabled {
+            guard.reporter_enabled = enabled;
+        }
+        if let Some(model) = patch.reporter_claude_model {
+            guard.reporter_claude_model = model;
+        }
+        if let Some(model) = patch.reporter_codex_model {
+            guard.reporter_codex_model = model;
         }
         let snapshot = guard.clone();
         drop(guard);

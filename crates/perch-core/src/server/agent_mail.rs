@@ -16,7 +16,7 @@ use crate::agent_mail::{
     self, BodyText, ChildStatus, Live, MailKind, MailState, Owed, Sender, TargetFacts, Wait,
 };
 use crate::db::{Cancelled, Enqueued, MailRow, NewMail};
-use crate::sub_sessions::{ReportSource, SubState};
+use crate::sub_sessions::{Report, SubState};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -194,17 +194,13 @@ pub(super) fn note_child(
         return;
     };
     let lead_provider = lead_row.cli_provider_id.unwrap_or_default();
-    let report = app
-        .db
-        .latest_session_report(&child.session_id)
-        .ok()
-        .flatten()
-        .and_then(|(text, _)| {
-            crate::sub_sessions::fallback_report(&text).map(|text| (text, ReportSource::Reported))
-        })
-        .or_else(|| {
-            crate::sub_sessions::fallback_report(last_assistant?)
-                .map(|text| (text, ReportSource::LastMessage))
+    // The reporter has already written this turn's summary, when it was going to.
+    let report = super::sub_sessions::resolve_child_report(app, &child.session_id, last_assistant)
+        .and_then(|report| {
+            Some(Report {
+                text: crate::sub_sessions::fallback_report(&report.text)?,
+                ..report
+            })
         });
     // A finished turn is news even when the child said nothing: the note then says it reported
     // nothing, which the lead needs to know as much as a claim.
@@ -214,9 +210,7 @@ pub(super) fn note_child(
         &child.agent_id,
         &child.session_id,
         status,
-        report
-            .as_ref()
-            .map(|(text, source)| (text.as_str(), *source)),
+        report.as_ref(),
     );
     match app.db.enqueue_note(
         (&child.session_id, &child.agent_id, &label),

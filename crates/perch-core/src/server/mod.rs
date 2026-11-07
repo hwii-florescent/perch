@@ -92,6 +92,7 @@ mod instructions;
 mod local_authority;
 mod native_ui;
 mod recover;
+mod reporter;
 use agents::{connection_client_identity, lifecycle_status_to_wire};
 mod surfaces;
 mod terminal;
@@ -326,6 +327,8 @@ struct AppState {
     git_poll_notify: Arc<tokio::sync::Notify>,
     /// Wakes the mail delivery loop when something is queued (`agent_mail.rs`).
     mail_notify: Arc<tokio::sync::Notify>,
+    /// Children whose turn summary is being written (`reporter.rs`): one model call at a time each.
+    reporter_in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Local agent-attached (CLI-mode) terminals, one PTY per session id
     /// shared across every viewing connection — see `AgentTerminalRegistry`'s
     /// doc comment. Lives in `AppState` (not `ConnState`) on purpose: it must
@@ -572,6 +575,7 @@ pub async fn run(
         connected_clients: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         git_poll_notify: Arc::new(tokio::sync::Notify::new()),
         mail_notify: Arc::new(tokio::sync::Notify::new()),
+        reporter_in_flight: Arc::new(Mutex::new(std::collections::HashSet::new())),
         devices,
         local_ui: options.local_ui.clone(),
         phone: phone.clone(),
@@ -1485,17 +1489,27 @@ fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenT
                 {
                     let worker = state.clone();
                     let child = key.clone();
-                    tokio::task::spawn_blocking(move || {
+                    let ended_ms = wall_clock_millis();
+                    tokio::spawn(async move {
                         // The transcript the bridge reads trails the hook that ended the turn.
                         if status == crate::agent_mail::ChildStatus::FinishedTurn {
-                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                         }
-                        let said = worker
+                        let snapshot = worker
                             .native_ui
                             .get(&child)
-                            .and_then(|bridge| bridge.latest())
-                            .and_then(|snapshot| agent_mail::last_assistant_text(&snapshot));
-                        agent_mail::note_child(&worker, &child, status, said.as_deref());
+                            .and_then(|bridge| bridge.latest());
+                        // The turn's notes are kept before the lead hears of it, so the note
+                        // carries them; a model that is slow or absent only delays the note.
+                        if status == crate::agent_mail::ChildStatus::FinishedTurn {
+                            reporter::summarise_turn(&worker, &child, snapshot.as_ref(), ended_ms)
+                                .await;
+                        }
+                        let said = snapshot.as_ref().and_then(agent_mail::last_assistant_text);
+                        let _ = tokio::task::spawn_blocking(move || {
+                            agent_mail::note_child(&worker, &child, status, said.as_deref());
+                        })
+                        .await;
                     });
                 }
             }
