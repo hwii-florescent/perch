@@ -87,6 +87,29 @@ export function onTerminalInput(term: Terminal, listener: (data: string, user: b
   return { tracksUserInput: !!source, dispose: () => { source?.dispose(); data.dispose(); } };
 }
 
+/** Left button press/release in an SGR mouse report (`CSI < b ; x ; y M|m`). Motion and wheel are not. */
+export const isLeftMouseButton = (data: string) => {
+  const report = /^\x1b\[<(\d+);\d+;\d+([Mm])$/.exec(data);
+  return report !== null && (Number(report[1]) & 0b1100011) === 0;
+};
+
+/** Drops the left click that lands on a terminal link (press and its release) from what reaches the app. */
+export function linkClickFilter() {
+  let over = false;
+  let swallowing = false;
+  return {
+    enter: () => { over = true; },
+    leave: () => { over = false; },
+    swallows(data: string): boolean {
+      if (!isLeftMouseButton(data)) return false;
+      if (data.endsWith("M")) return (swallowing = over);
+      const was = swallowing;
+      swallowing = false;
+      return was;
+    },
+  };
+}
+
 export const MAX_PENDING_TERMINAL_BYTES = 16 * 1024 * 1024;
 
 /** Columns the layout is kept at by scaling the font down. 80 is what the
@@ -336,8 +359,15 @@ export function createPerchTerminal(
   // same URL is right there in the scrollback either way).
   // xterm drops an OSC 8 link whose scheme is not http(s) unless this is set; agents link local files
   // (file:// URLs, or a bare /path) and openTerminalLink decides what is safe to open.
-  term.options.linkHandler = { allowNonHttpProtocols: true, activate: (event, uri) => openTerminalLink(event, uri) };
-  term.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(event, uri)));
+  // A TUI that reports the mouse (pi's fullscreen mode, htop, …) would get the same click and open the
+  // link itself, in the OS default app. While a link is under the pointer its left click stays ours.
+  const link = linkClickFilter();
+  const hover = { hover: link.enter, leave: link.leave };
+  term.options.linkHandler = { allowNonHttpProtocols: true, activate: (event, uri) => openTerminalLink(event, uri), ...hover };
+  term.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(event, uri), hover));
+  const onData = term.onData.bind(term);
+  const filtered: Terminal["onData"] = (listener) => onData((data) => { if (!link.swallows(data)) listener(data); });
+  Object.defineProperty(term, "onData", { value: filtered });
 
   // OSC 52 clipboard write. `vim "+y`, tmux copy-mode and many TUIs emit this
   // to push a yank into the *system* clipboard rather than relying on the

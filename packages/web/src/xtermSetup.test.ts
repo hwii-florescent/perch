@@ -365,3 +365,23 @@ describe("createPerchTerminal", () => {
     }
   });
 });
+
+describe("link clicks under mouse reporting", () => {
+  it("keeps a left click on a link from reaching the app, but nothing else", async () => {
+    const { linkClickFilter, isLeftMouseButton } = await import("./xtermSetup");
+    const press = "\x1b[<0;5;7M", release = "\x1b[<0;5;7m";
+    expect([press, release, "\x1b[<2;5;7M", "\x1b[<35;5;7M", "\x1b[<64;5;7M", "a"].map(isLeftMouseButton))
+      .toEqual([true, true, false, false, false, false]);
+    const link = linkClickFilter();
+    expect(link.swallows(press), "off a link the app gets its click").toBe(false);
+    expect(link.swallows(release)).toBe(false);
+    link.enter();
+    expect(link.swallows(press)).toBe(true);
+    expect(link.swallows("\x1b[<35;6;7M"), "motion passes").toBe(false);
+    link.leave();
+    expect(link.swallows(release), "the release of a swallowed press goes too").toBe(true);
+    expect(link.swallows(release), "…once").toBe(false);
+    link.enter();
+    expect(link.swallows("\x1b[<2;5;7M"), "right click is the app's").toBe(false);
+  });
+});
