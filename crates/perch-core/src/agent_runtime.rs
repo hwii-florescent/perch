@@ -2134,6 +2134,7 @@ mod tests {
         std::fs::write(cores.join("2147483646"), b"").unwrap();
         run(&cores);
         assert!(dir.join("agent-exit/k").exists());
+                .env_remove("PERCH_SHELL") // set when the suite runs inside a Perch terminal
         std::fs::remove_file(dir.join("agent-exit/k")).unwrap();
         run(&dir.join("missing"));
         assert!(dir.join("agent-exit/k").exists());
