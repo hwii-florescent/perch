@@ -28,9 +28,9 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
 
   useEffect(() => {
     if (paused) return;
-    const timer = window.setTimeout(() => dismissToast(toast.id), blocked ? BLOCKED_DISMISS_MS : AUTO_DISMISS_MS);
+    const timer = window.setTimeout(() => dismissToast(toast.id), toast.timeout ?? (blocked ? BLOCKED_DISMISS_MS : AUTO_DISMISS_MS));
     return () => window.clearTimeout(timer);
-  }, [toast.id, blocked, paused, dismissToast]);
+  }, [toast.id, toast.timeout, blocked, paused, dismissToast]);
 
   const heading = usage ? toast.title : blocked ? LABEL.blocked : LABEL.done;
   const detail = usage ? toast.body : toast.title || "(new session)";
@@ -58,7 +58,9 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
         data-testid={`toast-${toast.sessionId}`}
         onClick={open}
       >
-        {session && !usage ? (
+        {toast.icon ? (
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-[0.95rem] leading-none" aria-hidden="true">{toast.icon}</span>
+        ) : session && !usage ? (
           <StatusDot session={session} />
         ) : (
           <span className={cn("inline-flex h-5 w-5 shrink-0 rounded-full border-[1.5px]", ring)} aria-hidden="true" />

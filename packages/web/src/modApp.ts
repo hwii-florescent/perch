@@ -2,6 +2,8 @@ import { getWorkspaceFileUrl } from "./base";
 import { newId } from "./ids";
 import type { SessionSummary } from "@perch/shared";
 import { claimSlot, type SlotRender } from "./slots";
+import { prefersDark } from "./themes";
+import { zoomFactor } from "./zoom";
 import { exec, getShared, listDir, onShared, readTextFile, setShared, statFile, watchPath, writeTextFile, type ExecResult, type FileStat, type OnHost } from "./modHost";
 import { modUi } from "./modUi";
 import type { WorkspaceProject, WorkspaceRecord } from "./store";
@@ -9,6 +11,9 @@ import { isRelayMode, relayBlobUrl } from "./relay/transport";
 import { usePerchStore } from "./store";
 import { workspaceRecord } from "./terminalScope";
 import { socket } from "./ws";
+
+/** Colors by name plus which appearance is on. */
+export type ModTheme = { [color: string]: string | boolean; dark: boolean };
 
 /** What a mod gets: the whole app, as in herdr's desktop app. A mod is trusted code that runs inside
  * Perch's own page with the person's full access (no sandbox, no approval), so `store` and `socket`
@@ -65,7 +70,18 @@ export interface ModApi {
    * it stays after the mod is gone. */
   bind(command: string, keys: string | null): void;
   /** Shows a notification toast. `level` colors it; `action` runs a command when it is clicked. */
-  notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown } }): void;
+  notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown }; icon?: string; timeout?: number }): void;
+  /** The props the layout gave this copy (`{"type":"block","content":"mod:id","props":{...}}`); `{}` when none. */
+  props(): Record<string, unknown>;
+  /** The colors in use, by name: background, canvas, surface, raised, border, dim, foreground, muted, accent, working, blocked, done, idle, unknown and the palette (green, yellow, red, blue, teal, peach, mauve); `dark` says which appearance. */
+  theme(): ModTheme;
+  /** The settings the person chose, plus `dark` (the appearance now) and `zoom` (1 = 100%). */
+  settings(): Record<string, unknown>;
+  /** Every key binding in force: the command and its keys as shown in Settings > Keyboard. */
+  keys(): { command: string; keys: string }[];
+  /** The id of the layout shown (null: Perch as shipped), and the ids of the layouts that load. */
+  layout(): string | null;
+  layouts(): string[];
   /** A modal over the app: `draw(el, close)` fills it (and may return a cleanup). Esc or clicking
    * outside closes it, as does the mod being replaced. Returns `close`. */
   overlay(draw: Draw): () => void;
@@ -75,11 +91,11 @@ export interface ModApi {
   /** A window that stays until closed, under modals and over the app: drag it by its title bar. A
    * `key` remembers where it was put and replaces an open window with the same key. */
   window(options: { key?: string; title?: string; width?: number; height?: number; at?: { x: number; y: number } }, draw: Draw): () => void;
+  /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
+  screenshot(): Promise<string>;
   /** Calls `frame(ms)` (milliseconds since the loop began) before each repaint, at most `fps` times a
    * second (default 60), and pauses while the page is hidden: for motion. Stops when the mod is
    * replaced, or call the returned function. */
-  /** A picture of the app as a PNG data URL (drawn from the page: terminal canvases are copied, web fonts fall back). */
-  screenshot(): Promise<string>;
   loop(frame: (ms: number) => void, options?: { fps?: number }): () => void;
   /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
   frames<T>(list: T[], every: number, show: (item: T, index: number) => void): () => void;
@@ -92,6 +108,7 @@ export interface CommandBridge {
   run(command: string, args?: unknown): boolean;
   register(id: string, description: string, keys: string | undefined, run: (args?: unknown) => void): () => void;
   bind(command: string, keys: string | null): void;
+  keys?(): { command: string; keys: string }[];
 }
 let bridge: CommandBridge = { list: () => [], run: () => false, register: () => () => {}, bind: () => {} };
 export const setCommandBridge = (next: CommandBridge) => {
@@ -101,6 +118,10 @@ export const setCommandBridge = (next: CommandBridge) => {
 export const runCommand = (command: string, args?: unknown) => bridge.run(command, args);
 /** Every command a key, a mod or `perch mod do` can run. */
 export const commandList = () => bridge.list();
+
+/** Which layout is shown and which load; `mods.ts` sets it as the core reports (this file cannot import it). */
+let layoutInfo: { layout: string | null; layouts: string[] } = { layout: null, layouts: [] };
+export const setLayoutInfo = (next: typeof layoutInfo) => { layoutInfo = next; };
 
 /** A mod's default export: draws into `el` and may return what to undo when it is replaced. */
 export type ModMount = (el: HTMLElement, api: ModApi) => void | (() => void) | Promise<void | (() => void)>;
@@ -117,8 +138,24 @@ async function fetchText(url: string): Promise<string> {
   }
 }
 
+/** The colors in use, by name (herdr's `theme()`): read from the page's custom properties so a layout's look,
+ * a theme file and the person's theme all show. */
+function theme(): ModTheme {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name: string) => css.getPropertyValue(name).trim();
+  const named: Record<string, string> = {
+    background: "--panel-bg", canvas: "--surface-dim", chrome: "--panel-bg", surface: "--surface-0", popover: "--surface-0", raised: "--surface-1",
+    hover: "--surface-1", selected: "--surface-1", border: "--overlay-0", input: "--overlay-1", dim: "--overlay-1", foreground: "--text", muted: "--subtext-0",
+    accent: "--accent", mauve: "--mauve", green: "--green", yellow: "--yellow", red: "--red", blue: "--blue", teal: "--teal", peach: "--peach",
+    working: "--yellow", blocked: "--red", done: "--teal", idle: "--green", unknown: "--overlay-1",
+  };
+  const out: Record<string, string> = {};
+  for (const [name, variable] of Object.entries(named)) out[name] = read(variable);
+  return { ...out, dark: css.getPropertyValue("color-scheme").includes("dark") || (!css.getPropertyValue("color-scheme") && prefersDark()) };
+}
+
 /** The API for one load of a mod, and `dispose` for what it left open (overlays). */
-export function modApi(modId: string): ModApi & { dispose(): void } {
+export function modApi(modId: string, given: Record<string, unknown> = {}): ModApi & { dispose(): void } {
   const open = new Set<() => void>();
   /** Things the mod started that its replacement must stop (watchers, subscriptions). */
   const track = (stop: () => void) => {
@@ -189,8 +226,14 @@ export function modApi(modId: string): ModApi & { dispose(): void } {
       open.add(gone);
       return gone;
     },
-    notify: ({ title, body, level, action }) =>
-      usePerchStore.setState((s) => ({ toasts: [...s.toasts, { id: newId(), sessionId: `mod:${modId}`, title, body, level, action, kind: "usage" as const }] })),
+    notify: ({ title, body, level, action, icon, timeout }) =>
+      usePerchStore.setState((s) => ({ toasts: [...s.toasts, { id: newId(), sessionId: `mod:${modId}`, title, body, level, action, icon, timeout: timeout === undefined ? undefined : Math.min(60_000, Math.max(1000, timeout)), kind: "usage" as const }] })),
+    props: () => structuredClone(given),
+    theme,
+    settings: () => ({ ...usePerchStore.getState().settings, dark: theme().dark, zoom: zoomFactor() }),
+    keys: () => bridge.keys?.() ?? [],
+    layout: () => layoutInfo.layout,
+    layouts: () => [...layoutInfo.layouts],
     modId,
     store: usePerchStore,
     socket,
@@ -224,12 +267,12 @@ export function createSwapper(host: HTMLElement, report: (error: string | null) 
   let live = true;
   return {
     /** `done` hears how this load went: `null` when it mounted, else why not. */
-    async load(src: string, modId: string, done?: (error: string | null) => void): Promise<void> {
+    async load(src: string, modId: string, done?: (error: string | null) => void, props: Record<string, unknown> = {}): Promise<void> {
       const next = document.createElement("div");
       next.style.cssText = "display:none;height:100%;width:100%";
       host.append(next);
       try {
-        const api = modApi(modId);
+        const api = modApi(modId, props);
         const mount = await importer(src);
         let cleanup: void | (() => void);
         try { cleanup = await mount(next, api); } catch (error) { api.dispose(); throw error; }

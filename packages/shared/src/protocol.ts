@@ -2870,7 +2870,7 @@ export interface LayoutSize {
  * `content` is `sidebar`, `tabs`, `canvas`, `files`, `git`, `status`, `mod:<id>` or `terminal:<session id>`. */
 export type LayoutNode =
   | (LayoutLook & LayoutChrome & { type: "row" | "column"; size?: LayoutSize | null; hidden?: boolean; gap?: number; padding?: number; divider?: { width: number; color?: string }; resizable?: boolean; children: LayoutNode[] })
-  | (LayoutLook & LayoutChrome & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string })
+  | (LayoutLook & LayoutChrome & { type: "block"; size?: LayoutSize | null; hidden?: boolean; padding?: number; content: string; props?: Record<string, unknown> })
   | (LayoutLook & LayoutChrome & { type: "stack"; size?: LayoutSize | null; hidden?: boolean; padding?: number; active?: string; header?: string; children: LayoutNode[] });
 
 /** What any node may carry besides its look. `id` names it for the `layout.toggle` and `layout.stack`

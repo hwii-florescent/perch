@@ -19,7 +19,7 @@ import { MobileHeader } from "./components/MobileHeader";
 import { MobileSwitcher } from "./components/MobileSwitcher";
 import { Toast } from "./components/Toast";
 import { useIsMobileWidth } from "./responsive";
-import { SHORTCUTS, bindableCombo, dispatchShortcut, registerCommand, useLeaderKey } from "./keybinds";
+import { SHORTCUTS, bindableCombo, dispatchShortcut, registerCommand, shortcutLabel, useLeaderKey } from "./keybinds";
 import { setCommandBridge } from "./modApp";
 import { TYPED_COMMANDS } from "./modCommands";
 import { usePerchStore } from "./store";
@@ -179,6 +179,7 @@ export default function App() {
         return dispatchShortcut(command, { openNavigator, openKeybindHelp, toggleDrawer: toggleTerminal });
       },
       register: registerCommand,
+      keys: () => SHORTCUTS.flatMap((s) => { const label = shortcutLabel(s.id); return label ? [{ command: s.id, keys: label }] : []; }),
       bind: (command, keys) => {
         if (keys && !bindableCombo(keys)) throw new Error(`"${keys}" cannot be bound: it is reserved or has no modifier.`);
         const next = { ...usePerchStore.getState().settings?.keybindings };

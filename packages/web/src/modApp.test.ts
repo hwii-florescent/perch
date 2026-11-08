@@ -186,6 +186,29 @@ describe("an app module's versions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("gives a mod its props, theme, settings, keys and layout, and a notification its icon and time", async () => {
+    document.documentElement.style.setProperty("--accent", "#ff8800");
+    document.documentElement.style.setProperty("--text", "#eeeeee");
+    let api!: ModApi;
+    const swapper = createSwapper(document.createElement("div"), vi.fn(), async () => (_el, a) => { api = a; });
+    await swapper.load("x", "m", undefined, { file: "a.md" });
+    expect(api.props()).toEqual({ file: "a.md" });
+    api.props().file = "changed"; // a copy: a mod cannot rewrite what the layout said
+    expect(api.props()).toEqual({ file: "a.md" });
+    expect(api.theme()).toMatchObject({ accent: "#ff8800", foreground: "#eeeeee", dark: expect.any(Boolean) });
+    expect(api.settings()).toMatchObject({ zoom: 1, dark: expect.any(Boolean) });
+    expect(Array.isArray(api.keys())).toBe(true);
+    expect(api.layout()).toBeNull();
+    expect(api.layouts()).toEqual([]);
+    api.notify({ title: "hi", icon: "✓", timeout: 100 });
+    api.notify({ title: "slow", timeout: 999_999 });
+    const toasts = store.state.toasts as { icon?: string; timeout?: number }[];
+    expect(toasts.slice(-2).map((t) => [t.icon, t.timeout])).toEqual([["✓", 1000], [undefined, 60000]]); // kept within 1 to 60 s
+    swapper.stop();
+    document.documentElement.style.removeProperty("--accent");
+    document.documentElement.style.removeProperty("--text");
+  });
+
   it("frames steps through a list on a schedule, calling show only when the item changes", async () => {
     let queued: ((now: number) => void) | undefined;
     vi.stubGlobal("requestAnimationFrame", (fn: (now: number) => void) => { queued = fn; return 1; });

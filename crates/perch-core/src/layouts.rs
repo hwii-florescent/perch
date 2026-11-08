@@ -252,6 +252,9 @@ pub struct Block {
     pub hidden: bool,
     pub padding: u32,
     pub content: String,
+    /// For a `mod:<id>` block: a JSON object the mod reads with `api.props()` (at most 4 KiB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -494,6 +497,11 @@ fn check(node: &Node, depth: usize, walk: &mut Walk) -> Result<(), String> {
                     b.content,
                     BUILTIN.join(", ")
                 ));
+            }
+            if let Some(props) = &b.props {
+                if !props.is_object() || props.to_string().len() > 4096 {
+                    return Err("block props are a JSON object of at most 4 KiB".into());
+                }
             }
             Ok(())
         }
@@ -969,6 +977,14 @@ mod tests {
                 r##"{"type":"block","content":"canvas","paneRadius":2,"paneBorder":1,"paneFocus":"#ff8800","movable":false,"paneGap":10,"paneLone":true,"paneBackground":"linear-gradient(#111, #222)","paneHeaderAt":"bottom","paneHeaderReveal":"hover","paneHeaderHeight":24}"##,
             ),
             (
+                "props-ok.json",
+                r#"{"type":"block","content":"mod:board","props":{"file":"a.md","n":3}}"#,
+            ),
+            (
+                "props-bad.json",
+                r#"{"type":"block","content":"mod:board","props":[1,2]}"#,
+            ),
+            (
                 "pane-gap.json",
                 r#"{"type":"block","content":"canvas","paneGap":99}"#,
             ),
@@ -1030,6 +1046,10 @@ mod tests {
         assert_eq!(stack.active.as_deref(), Some("b"));
         assert!(by("drawer").error.is_none(), "{:?}", by("drawer").error);
         assert!(by("pane-ok").error.is_none(), "{:?}", by("pane-ok").error);
+        let Some(Node::Block(with_props)) = &by("props-ok").root else {
+            panic!("a block")
+        };
+        assert_eq!(with_props.props.as_ref().unwrap()["file"], "a.md");
         let Some(Node::Block(pane)) = &by("pane-ok").root else {
             panic!("a block")
         };
@@ -1070,6 +1090,7 @@ mod tests {
             "minmax",
             "pane-bad",
             "pane-gap",
+            "props-bad",
             "pane-header",
             "pane-bg",
             "drawer-bad",

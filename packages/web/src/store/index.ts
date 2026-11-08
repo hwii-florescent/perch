@@ -123,6 +123,9 @@ export interface ToastEntry {
   /** A mod's notification: how serious it looks, and the command a click runs. */
   level?: "info" | "warning" | "error";
   action?: { command: string; args?: unknown };
+  /** A mod's notification: a short mark (an emoji or a letter) and how long it stays, ms. */
+  icon?: string;
+  timeout?: number;
 }
 
 interface PendingTerminal {

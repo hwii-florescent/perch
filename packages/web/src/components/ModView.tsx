@@ -7,7 +7,7 @@ import { GHOST_BUTTON } from "./ui/icon-button";
 /** A mod's view: its own JavaScript, run inside Perch with the person's full access. A newer version
  * replaces the old only once it has mounted, so a broken edit leaves the last good one in place and
  * says why. It reloads by itself when the mod's files change. `hidden` is a mod with no view. */
-export function ModView({ mod, hidden }: { mod: ModInfo; hidden?: boolean }) {
+export function ModView({ mod, hidden, props }: { mod: ModInfo; hidden?: boolean; props?: Record<string, unknown> }) {
   const host = useRef<HTMLDivElement>(null);
   const swapper = useRef<ReturnType<typeof createSwapper> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -15,9 +15,11 @@ export function ModView({ mod, hidden }: { mod: ModInfo; hidden?: boolean }) {
     swapper.current = createSwapper(host.current!, setError);
     return () => swapper.current?.stop();
   }, []);
+  // New props load the mod again, like a new revision does.
+  const given = JSON.stringify(props ?? {});
   useEffect(() => {
-    void swapper.current?.load(modFileUrl(mod.id), mod.id, (problem) => reportMod(mod.id, mod.revision, problem));
-  }, [mod.id, mod.revision]);
+    void swapper.current?.load(modFileUrl(mod.id), mod.id, (problem) => reportMod(mod.id, mod.revision, problem), JSON.parse(given));
+  }, [mod.id, mod.revision, given]);
   return (
     <div className={hidden ? "hidden" : "relative h-full w-full min-h-0 flex-1 overflow-auto"} data-testid={`mod-view-${mod.id}`}>
       <div ref={host} className="h-full w-full" />

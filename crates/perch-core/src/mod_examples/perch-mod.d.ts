@@ -65,7 +65,18 @@ interface ModApi {
   /** Steps through `list` every `every` ms (a spinner: ["⠋", "⠙", …], 90), calling `show(item, index)` when it changes; returns the way to stop. */
   frames<T>(list: T[], every: number, show: (item: T, index: number) => void): () => void;
   /** A toast. `action` runs a command when it is clicked. */
-  notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown } }): void;
+  notify(note: { title: string; body?: string; level?: "info" | "warning" | "error"; action?: { command: string; args?: unknown }; icon?: string; timeout?: number }): void;
+  /** The props the layout gave this copy (`{"type":"block","content":"mod:id","props":{...}}`, at most 4 KiB); `{}` when none. */
+  props(): Record<string, unknown>;
+  /** The colors in use, by name: background, canvas, chrome, surface, popover, raised, hover, selected, border, input, dim, foreground, muted, accent, working, blocked, done, idle, unknown and the palette (green, yellow, red, blue, teal, peach, mauve); `dark` says which appearance. */
+  theme(): { [color: string]: string | boolean; dark: boolean };
+  /** The settings the person chose, plus `dark` (the appearance now) and `zoom` (1 = 100%). */
+  settings(): Record<string, unknown>;
+  /** Every key binding in force: the command and its keys as shown in Settings > Keyboard. */
+  keys(): { command: string; keys: string }[];
+  /** The id of the layout shown (null: Perch as shipped), and the ids of the layouts that load. */
+  layout(): string | null;
+  layouts(): string[];
 
   // The computer
   /** Runs a program (timeout ms, default 30 s, at most 10 min; output past 1 MiB is cut). A nonzero `code` is a result; it rejects if the program cannot start or runs out of time. `host` is an id from `hosts()`: it runs there over ssh instead of on this computer. */

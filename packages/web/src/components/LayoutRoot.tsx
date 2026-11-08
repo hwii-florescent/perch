@@ -19,7 +19,7 @@ const CARD = "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--card-
 const OUTLINE: CSSProperties = { borderStyle: "solid", borderWidth: "var(--card-border, 0px)", borderColor: "var(--overlay-0)", boxShadow: "var(--card-shadow, none)" };
 
 /** One of Perch's own panes, or a mod's view, by the name a layout gives it. */
-function Block({ content, mods }: { content: string; mods: ModInfo[] }) {
+function Block({ content, mods, props }: { content: string; mods: ModInfo[]; props?: Record<string, unknown> }) {
   switch (content) {
     case "sidebar": return <Sidebar />;
     case "tabs": return <div className="flex h-11 shrink-0 items-center"><TabBar /></div>;
@@ -33,7 +33,7 @@ function Block({ content, mods }: { content: string; mods: ModInfo[] }) {
   if (content.startsWith("terminal:")) return <PersistentTerminal active sessionId={content.slice("terminal:".length)} />;
   const mod = mods.find((candidate) => `mod:${candidate.id}` === content);
   if (!mod?.enabled || mod.error) return <div className="inactive-session-pane">{`${content} is off or gone.`}</div>;
-  return <ModView mod={mod} />;
+  return <ModView mod={mod} props={props} />;
 }
 
 const EDGE_GAP = 12;
@@ -165,7 +165,7 @@ function Node({ node, mods, root, inRow, path, parentPath, index }: { node: Layo
     ...(float ? floatStyle(float) : {}),
   };
   const common = { "data-node-id": node.id, "data-tauri-drag-region": node.windowDrag ? true : undefined };
-  if (node.type === "block") return <div className={cn(CARD, "relative", float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}>{grip}<Block content={node.content} mods={mods} /></div>;
+  if (node.type === "block") return <div className={cn(CARD, "relative", float?.peek != null && "layout-drawer")} style={{ ...style, ...OUTLINE }} data-testid={`layout-${node.content}`} {...common}>{grip}<Block content={node.content} mods={mods} props={node.props} /></div>;
   if (node.type === "stack") {
     const ids = node.children.map((child, i) => child.id ?? String(i));
     const current = Math.max(0, ids.indexOf(activeOverride(node.id) ?? node.active ?? ids[0]!));

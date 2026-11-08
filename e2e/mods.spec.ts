@@ -179,3 +179,20 @@ test("api.screenshot draws the running app into a PNG", async ({ page }) => {
   const size = Number((await holder.getAttribute("data-shot"))!.split("|")[1]);
   expect(size).toBeGreaterThan(3000); // a picture with content, not a blank pixel
 });
+
+test("a block's props, theme() and layout() reach the mod in the running app", async ({ page }) => {
+  fs.mkdirSync(MOD, { recursive: true });
+  fs.writeFileSync(path.join(MOD, "main.js"), "export default (el, api) => { el.dataset.seen = JSON.stringify({ props: api.props(), accent: api.theme().accent, layout: api.layout(), layouts: api.layouts().includes('e2e-look') }); el.textContent = 'props'; }");
+  fs.mkdirSync(path.dirname(LAYOUT), { recursive: true });
+  fs.writeFileSync(LAYOUT, JSON.stringify({ name: "E2E look", type: "row", colors: { accent: "#ff8800" }, children: [
+    { type: "block", content: "canvas" },
+    { type: "block", content: "mod:e2e-hello", size: { px: 200 }, props: { file: "notes.md", n: 3 } },
+  ] }));
+  await openMods(page);
+  await expect(page.locator('[data-testid="layout-e2e-look"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-testid="layout-e2e-look"]').getByRole("button", { name: "Use" }).click();
+  await page.keyboard.press("Escape");
+  const holder = page.locator('[data-testid="layout-mod:e2e-hello"] [data-seen]');
+  await expect(holder).toHaveAttribute("data-seen", /./, { timeout: 15000 });
+  expect(JSON.parse((await holder.getAttribute("data-seen"))!)).toEqual({ props: { file: "notes.md", n: 3 }, accent: "#ff8800", layout: "e2e-look", layouts: true });
+});

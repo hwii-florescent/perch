@@ -1,7 +1,7 @@
 import type { ModsStateMessage } from "@perch/shared";
 import { getBasePath } from "./base";
 import { newId } from "./ids";
-import { commandList, runCommand } from "./modApp";
+import { commandList, runCommand, setLayoutInfo } from "./modApp";
 import { setSlotErrorReporter } from "./slots";
 import { registerThemes } from "./themes";
 import { socket } from "./ws";
@@ -45,6 +45,7 @@ socket.onMessage((message) => {
     const { type: _type, requestId, ...state } = message;
     latest = state;
     registerThemes(state.themes ?? []);
+    setLayoutInfo({ layout: state.layout || null, layouts: (state.layouts ?? []).filter((l) => l.root).map((l) => l.id) });
     loadFonts(state);
     watchers.forEach((watch) => watch());
     settle(requestId, state);
